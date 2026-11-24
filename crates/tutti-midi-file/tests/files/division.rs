@@ -6,7 +6,7 @@ use crate::common::{metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Meta, MicrosPerQuarter, OtherSmfFormat, SmfDivision, SmfFormat, SmfParseError,
+    Meta, MicrosPerQuarter, OtherSmfFormat, SmfDivision, SmfEvent, SmfFormat, SmfParseError,
     SmfReadError, SmfTicksPerFrame, SmfTicksPerQuarter, SmpteView, StandardMidiFile, Tick,
     Timebase,
 };
@@ -203,7 +203,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
     // The Set Tempo is still an event and is written back.
     assert!(matches!(
         file.tracks()[0].events()[0].1,
-        FileEvent::Meta(Meta::Tempo {
+        SmfEvent::Meta(Meta::Tempo {
             micros_per_quarter,
             ..
         }) if micros_per_quarter == MicrosPerQuarter::of(1_000_000)

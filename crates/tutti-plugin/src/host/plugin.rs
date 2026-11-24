@@ -733,6 +733,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                     params,
                     reclaimer,
                     published,
+                    settings,
                 } = tutti_graph::IntoNode::into_parts(*c);
                 tutti_graph::NodeParts {
                     node,
@@ -741,6 +742,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                     params,
                     reclaimer,
                     published,
+                    settings,
                 }
             }
             // The controls are the client's, shared with this node's cells: the
@@ -757,6 +759,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                     params,
                     reclaimer,
                     published,
+                    settings,
                     controls: _,
                 } = node.into_parts();
                 tutti_graph::NodeParts {
@@ -766,6 +769,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                     params,
                     reclaimer,
                     published,
+                    settings,
                 }
             }
         }

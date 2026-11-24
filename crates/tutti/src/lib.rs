@@ -460,13 +460,14 @@ pub mod types {
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
         Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
-        FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
-        ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
-        ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
-        Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread,
-        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
-        UnitParam, UnitParamOutOfRange, Velocity,
+        FrequencyRatioOutOfRange, Gain, HoldFactor, KeyFilterSetting, Latency, Metres,
+        MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
+        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
+        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
+        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
+        Setting, SettingKind, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, SyncSetting, Tail, TimecodeFrames, Unit, UnitAddr, UnitParam,
+        UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }
@@ -488,11 +489,12 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
-        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
-        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
-        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
-        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Inputs,
+        IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
+        ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell, PublishedKind,
+        RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell, Shape, Status,
+        Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -931,10 +933,10 @@ pub mod midi {
     };
     pub use tutti_midi_file::{
         ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipRefusal,
-        ClipSequence, ClipTimeline, ReadError, Refusal, SmfParseError, SmfReadError,
-        StandardMidiFile, ToClipError, TracksError, WriteError,
+        ClipSequence, ClipTimeline, ReadError, SmfParseError, SmfReadError, StandardMidiFile,
+        ToClipError, TracksError, WriteError,
     };
-    pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
+    pub use tutti_midi_file::{Meta, MidiFile, SmfEvent, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]

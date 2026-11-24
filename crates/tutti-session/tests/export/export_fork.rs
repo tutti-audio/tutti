@@ -1337,3 +1337,52 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     let _events = session.update();
     all_main("dropped (job dropped before it ran)", &drops);
 }
+
+/// **An export forks a node's setting at the value its key set**: a delay set synced through
+/// its key echoes a constant at the quarter note of the session's 120 bpm (24 000 frames at
+/// 48 kHz), where the same delay left free echoes at its 0.25 s (12 000), and the live word
+/// is the one the key set after the export.
+#[test]
+fn an_export_forks_a_nodes_setting_at_the_value_its_key_set() {
+    use tutti_music::NoteDuration;
+    use tutti_nodes::{
+        DelayConfig, DelayControls, DelayLayout, DelayNode, DelaySync, MaxDelay, NoteTimes,
+    };
+    use tutti_units::Feedback;
+
+    let echo = |sync: Option<DelaySync>| {
+        let mut session = self::session();
+        let g = session.graph();
+        let source = g.add(ForkByClone(Const::mono(0.5)));
+        let layout = DelayLayout::builder(
+            tutti_buffers::ChannelTopology::MONO,
+            MaxDelay::of(Seconds::new(2.0)),
+        )
+        .notes(NoteTimes::all(NoteDuration::QUARTER))
+        .build()
+        .expect("a layout");
+        let delay = g.add(DelayNode::<f32>::from(DelayConfig::new(layout).controls(
+            DelayControls {
+                time: Seconds::new(0.25),
+                feedback: Feedback::NONE,
+                ..DelayControls::DEFAULT
+            },
+        )));
+        g.set_sources(InputPort::new(delay, 0), [OutputPort::new(source, 0)])
+            .unwrap()
+            .unfaded();
+        g.set_sources(MainOutput::channel(0), [OutputPort::new(delay, 0)])
+            .unwrap()
+            .unfaded();
+        if let Some(sync) = sync {
+            session.set(delay.sync().to(sync)).unwrap();
+        }
+        let planes = render(&mut session, buffers(0.75));
+        if let Some(sync) = sync {
+            assert_eq!(session.get(delay.sync()).unwrap(), sync);
+        }
+        planes[0].iter().position(|&v| v != 0.0).expect("an echo")
+    };
+    assert_eq!(echo(None), 12_000);
+    assert_eq!(echo(Some(DelaySync::Synced)), 24_000);
+}

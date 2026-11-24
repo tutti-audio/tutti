@@ -698,6 +698,7 @@ pub use node::fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
+pub use node::setting::{ErasedSetting, HasSetting, SettingCell};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.

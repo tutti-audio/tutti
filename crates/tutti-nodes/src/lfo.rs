@@ -21,11 +21,9 @@ use tutti_dsp::{Lfo, LfoWave};
 use tutti_graph::{
     Continuity, Cx, Env, Io, Node, Offset, Prepare, Shape, Status, TransportPosition,
 };
-use tutti_rt::{AtomicCell, atomic_word};
+use tutti_rt::atomic_word;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, PhaseIncrement, SampleRate, Samples, Seconds};
-use tutti_units::{Latency, Tail};
-
-use std::sync::Arc;
+use tutti_units::{Latency, SyncSetting, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
 // tutti_nodes::LfoShape` resolves.
@@ -155,8 +153,8 @@ fn continues(
 ///
 /// # Free or synced
 ///
-/// A running LFO switches between the two: [`sync`](Self::sync) is the word it reads, once
-/// per block, so a store lands at the next block's first frame. The rate is kept while
+/// A running LFO switches between the two: the node's `sync` setting (`key.sync()`) is the
+/// word it reads, once per block, so a store lands at the next block's first frame. The rate is kept while
 /// synced and the beat span ([`beats_per_cycle`](Self::beats_per_cycle), from the config,
 /// not a param) while free. The output is continuous through a switch, and the synced
 /// clock stays the stateless beat lock (the same offline, and equal to a control lane's):
@@ -222,7 +220,7 @@ tutti_graph::declare_params!([] LfoNode,
         phase_offset: PhaseIncrement = PhaseIncrement::new(0.0)
     }
     settings {
-        sync: LfoSync = LfoSync::Free,
+        sync @ SyncSetting: LfoSync = LfoSync::Free,
     }
 });
 
@@ -264,14 +262,6 @@ impl From<LfoConfig> for LfoNode {
 }
 
 impl LfoNode {
-    /// The word that says whether the phase follows the rate or the beat, shared with the
-    /// running node and its clones: `store` lands at the node's next block. Clone the `Arc`
-    /// before the node is inserted; a fork holds a word of its own, at the value at the fork.
-    #[must_use]
-    pub fn sync(&self) -> &Arc<AtomicCell<LfoSync>> {
-        &self.cells.sync
-    }
-
     /// The beats one cycle of the synced clock takes: kept while the node is free.
     #[must_use]
     pub fn beats_per_cycle(&self) -> BeatsPerCycle {
@@ -481,7 +471,7 @@ mod tests {
     #[test]
     fn a_default_config_runs_free_at_one_hertz_and_keeps_a_one_beat_span() {
         let node = LfoNode::from(LfoConfig::new(LfoShape::Sine));
-        assert_eq!(node.sync().load(), LfoSync::Free);
+        assert_eq!(node.cells.sync().load(), LfoSync::Free);
         assert_eq!(node.cells.rate.load(), Hz::new(1.0));
         assert_eq!(node.beats_per_cycle(), BeatsPerCycle::of(1.0));
         let out = render(node, 100.0, 26);
@@ -504,7 +494,7 @@ mod tests {
                 .sync(LfoSync::Synced),
         ] {
             let lfo = LfoNode::from(config);
-            assert_eq!(lfo.sync().load(), LfoSync::Synced);
+            assert_eq!(lfo.cells.sync().load(), LfoSync::Synced);
             assert_eq!(lfo.beats_per_cycle(), BeatsPerCycle::of(4.0));
             assert_eq!(lfo.cells.rate.load(), Hz::new(2.0));
         }
@@ -513,7 +503,7 @@ mod tests {
                 .beats_per_cycle(BeatsPerCycle::of(4.0))
                 .rate(Hz::new(2.0)),
         );
-        assert_eq!(lfo.sync().load(), LfoSync::Free);
+        assert_eq!(lfo.cells.sync().load(), LfoSync::Free);
         assert_eq!(lfo.beats_per_cycle(), BeatsPerCycle::of(4.0));
         assert_eq!(lfo.cells.rate.load(), Hz::new(2.0));
     }
@@ -812,10 +802,10 @@ mod tests {
             seed: 3,
         };
         let synced = LfoNode::from(LfoConfig::from(lfo));
-        assert_eq!(synced.sync().load(), LfoSync::Synced);
+        assert_eq!(synced.cells.sync().load(), LfoSync::Synced);
         assert_eq!(synced.beats_per_cycle(), BeatsPerCycle::of(2.0));
         let free = LfoNode::from(LfoConfig::from(lfo.rate(Hz::new(187.5))));
-        assert_eq!(free.sync().load(), LfoSync::Free);
+        assert_eq!(free.cells.sync().load(), LfoSync::Free);
         assert_eq!(free.cells.rate.load(), Hz::new(187.5));
         for beat in [0.0, 1.5, 9.0, 33.75] {
             let got = render_at(LfoNode::from(LfoConfig::from(lfo)), stopped_at(beat), 1)[0];
@@ -1013,7 +1003,7 @@ mod tests {
     fn a_switch_to_synced_slews_the_free_phase_onto_the_lock_over_the_ramp() {
         let mut d = saw(LfoSync::Free);
         run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         let out = run(&mut d, 300, 600, rolling);
         let c0 = carry0(300);
         assert!((c0 - 0.40625).abs() < 1e-12);
@@ -1040,7 +1030,7 @@ mod tests {
     fn the_first_frame_after_a_switch_to_synced_continues_the_free_phase() {
         let mut d = saw(LfoSync::Free);
         let free = run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         let first = run(&mut d, 300, BLOCK, rolling)[0];
         let step = FREE_HZ / SR;
         assert!(
@@ -1064,7 +1054,7 @@ mod tests {
     fn a_switch_to_free_runs_on_from_the_phase_the_output_is_at() {
         let mut d = saw(LfoSync::Synced);
         run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Free);
+        d.node.cells.sync().store(LfoSync::Free);
         let out = run(&mut d, 300, 300, rolling);
         assert_at(
             &out,
@@ -1080,9 +1070,9 @@ mod tests {
     fn a_switch_to_free_mid_ramp_starts_from_the_offset_phase() {
         let mut d = saw(LfoSync::Free);
         run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         run(&mut d, 300, 100, rolling);
-        d.node.sync().store(LfoSync::Free);
+        d.node.cells.sync().store(LfoSync::Free);
         let out = run(&mut d, 400, 200, rolling);
         let start = locked(400) + carry0(300) * 140.0 / RAMP as f64;
         assert_at(
@@ -1101,7 +1091,7 @@ mod tests {
         for switch in [100, 500, 1_100] {
             let mut d = saw(LfoSync::Free);
             run(&mut d, 0, switch, rolling);
-            d.node.sync().store(LfoSync::Synced);
+            d.node.cells.sync().store(LfoSync::Synced);
             let out = run(&mut d, switch, RAMP + 400, rolling);
             assert_at(
                 &out[RAMP..],
@@ -1124,7 +1114,7 @@ mod tests {
         assert!(set.set(UnitParam::Rate, 9.0));
         let after = run(&mut d, 300, 300, rolling);
         assert_at(&after, 300, locked, "synced at 9 Hz");
-        d.node.sync().store(LfoSync::Free);
+        d.node.cells.sync().store(LfoSync::Free);
         let free = run(&mut d, 600, 300, rolling);
         assert_at(
             &free,
@@ -1133,7 +1123,7 @@ mod tests {
             "free at 9 Hz",
         );
         assert_eq!(d.node.beats_per_cycle(), BeatsPerCycle::of(4.0));
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         let back = run(&mut d, 900, RAMP + 300, rolling);
         assert_at(
             &back[RAMP..],
@@ -1159,7 +1149,7 @@ mod tests {
                 .rate(Hz::new(30.0));
             let mut d = Direct::new(LfoNode::from(config), SampleRate::of(SR), BLOCK);
             run(&mut d, 0, 300, |_| stopped(1.0));
-            d.node.sync().store(LfoSync::Synced);
+            d.node.cells.sync().store(LfoSync::Synced);
             d
         };
         let ramp = |k: usize| 0.25 - 0.375 * (1.0 - k as f64 / RAMP as f64);
@@ -1223,7 +1213,7 @@ mod tests {
     fn a_clone_continues_the_ramp_a_fork_owns_its_word_and_a_reset_drops_the_offset() {
         let mut d = saw(LfoSync::Free);
         run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         run(&mut d, 300, 100, rolling);
         let c0 = carry0(300);
         let (clone, fork) = ((*d.node).clone(), ParamNode::<f32>::fork_fresh(&*d.node));
@@ -1245,23 +1235,23 @@ mod tests {
             "the clone's remaining steps",
         );
         assert!(
-            Arc::ptr_eq(clone.node.sync(), d.node.sync()),
+            std::ptr::eq(clone.node.cells.sync(), d.node.cells.sync()),
             "a clone shares the word"
         );
         // The fork is the lock at once, with a word of its own at the value at the fork.
-        assert_eq!(fork.node.sync().load(), LfoSync::Synced);
-        assert!(!Arc::ptr_eq(fork.node.sync(), d.node.sync()));
-        d.node.sync().store(LfoSync::Free);
-        assert_eq!(fork.node.sync().load(), LfoSync::Synced);
-        fork.node.sync().store(LfoSync::Free);
-        fork.node.sync().store(LfoSync::Synced);
-        assert_eq!(d.node.sync().load(), LfoSync::Free);
+        assert_eq!(fork.node.cells.sync().load(), LfoSync::Synced);
+        assert!(!std::ptr::eq(fork.node.cells.sync(), d.node.cells.sync()));
+        d.node.cells.sync().store(LfoSync::Free);
+        assert_eq!(fork.node.cells.sync().load(), LfoSync::Synced);
+        fork.node.cells.sync().store(LfoSync::Free);
+        fork.node.cells.sync().store(LfoSync::Synced);
+        assert_eq!(d.node.cells.sync().load(), LfoSync::Free);
         let locked_out = run(&mut fork, 400, 300, rolling);
         assert_at(&locked_out, 400, locked, "a fork has no offset");
         // A reset drops the offset of a node 100 frames into the ramp.
         let mut d = saw(LfoSync::Free);
         run(&mut d, 0, 300, rolling);
-        d.node.sync().store(LfoSync::Synced);
+        d.node.cells.sync().store(LfoSync::Synced);
         run(&mut d, 300, 100, rolling);
         Node::<f32>::reset(&mut *d.node);
         let after = run(&mut d, 400, 300, rolling);
