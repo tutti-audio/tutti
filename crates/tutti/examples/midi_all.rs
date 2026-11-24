@@ -18,9 +18,9 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    FileEvent, Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiGroup, MidiHardwareConfig,
+    Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiGroup, MidiHardwareConfig,
     MidiRouteRule, Mpe11Zone, Mpe11Zones, MpeMode, NoteNumber, NoteVelocity, PitchBendSensitivity,
-    SmfDivision, StandardMidiFile, Tick, TicksPerQuarterNote, Track, U7, Voice1,
+    SmfDivision, SmfEvent, StandardMidiFile, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::session::{Start, TakeLatency, Trim};
@@ -78,9 +78,16 @@ fn file() -> Result<StandardMidiFile, Box<dyn std::error::Error>> {
         .flat_map(|n| {
             let at = Tick::quarters(n.into(), DIVISION).expect("four quarters fit");
             let key = NoteNumber::of(60 + 2 * n);
-            let (on, off): (FileEvent, FileEvent) = (
-                Message::midi1(MidiChannel::FIRST, Voice1::note_on(key, U7::of(100))).into(),
-                Message::midi1(MidiChannel::FIRST, Voice1::note_off(key, U7::of(64))).into(),
+            let channel = MidiChannel::FIRST;
+            let (on, off) = (
+                SmfEvent::Channel {
+                    channel,
+                    message: Voice1::note_on(key, U7::of(100)),
+                },
+                SmfEvent::Channel {
+                    channel,
+                    message: Voice1::note_off(key, U7::of(64)),
+                },
             );
             [
                 (at, on),

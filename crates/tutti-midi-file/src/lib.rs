@@ -13,7 +13,7 @@
 //! | | [`StandardMidiFile`] | [`ClipFile`] |
 //! |---|---|---|
 //! | holds | a format, a division, [`Track`]s, a copyright notice, the repairs a read made | the division (DCTPQ), a [`ClipHeader`], a [`ClipSequence`] |
-//! | an event is | a [`FileEvent`]: a message, a `SysEx` or `Escape` of any length, a [`Meta`] | a packet, as stored |
+//! | an event is | a [`SmfEvent`]: a channel message, a `SysEx` or `Escape` of any length, a [`Meta`] | a packet, as stored |
 //! | tempo and meter | Set Tempo and Time Signature meta events | Flex Data Set Tempo and Set Time Signature messages, in the header or the sequence |
 //! | built with | [`StandardMidiFile::new`] over a [`Layout`] | [`ClipFile::new`] over a header and a sequence |
 //! | read with | [`StandardMidiFile::from_bytes`] ([`SmfReadError`]) | [`ClipFile::from_bytes`] ([`ClipReadError`]) |
@@ -28,8 +28,8 @@
 //!
 //! ## A Standard MIDI File
 //!
-//! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
-//!   the first Group), a `SysEx` or `Escape` of any length, or a `Meta` (text,
+//! - **A [`SmfEvent`]** is a `Channel` message (MIDI 1.0, with no Group), a
+//!   `SysEx` or `Escape` of any length, or a `Meta` (text,
 //!   channel prefix, tempo, time and key signature, sequencer-specific, the rest
 //!   as bytes). The four metas that open a track (Sequence Number, Track Name,
 //!   SMPTE Offset, copyright notice) are the fields of its track ([`Lead`]).
@@ -254,19 +254,19 @@ mod smf;
 
 pub use clip::{ClipFile, ClipHeader, ClipSequence, ClipTimeline};
 pub use clip_file::ClipFileError;
-pub use config::{OutOfOrder, Refusal, TracksError};
+pub use config::{OutOfOrder, TracksError};
 pub use error::{
     ClipBuildError, ClipPart, ClipReadError, ClipRefusal, ReadError, SmfReadError, WriteError,
 };
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, Layout, Lead, LeadRepair, LeadTrack,
-    LyricChange, MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView,
-    MicrosPerQuarter, MicrosPerQuarterOutOfRange, Moved, OtherMetaKind, OtherMetaKindOutOfRange,
-    OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern, ReadRepair,
-    RefusedTimeSignature, SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames,
-    SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
-    StandardMidiFile, SysEx, TextKind, Tick, Timebase, TimelineDrop, ToClipError, Track,
+    Altered, Converted, DropReason, Dropped, Layout, Lead, LeadRepair, LeadTrack, LyricChange,
+    MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
+    MicrosPerQuarterOutOfRange, Moved, OtherMetaKind, OtherMetaKindOutOfRange, OtherSmfFormat,
+    OtherSmfFormatOutOfRange, PairedNote, Pattern, ReadRepair, RefusedTimeSignature, SmfEvent,
+    SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange,
+    SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, StandardMidiFile, SysEx, TextKind, Tick,
+    Timebase, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use midi_file::MidiFile;

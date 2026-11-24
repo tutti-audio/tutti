@@ -13,10 +13,10 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
-    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
-    OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
+    BusRole, Cx, ErasedSetting, HasParam, HasParams, HasSetting, InBus, IntoNode, Io, MAX_PORTS,
+    Node, NodeParts, Offset, OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Tail};
+use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -334,11 +334,6 @@ impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
 }
 
 impl<K: Kernel> KernelNode<K> {
-    /// The node's cells and the set that addresses them.
-    pub(crate) fn params(&self) -> &Params<K::Set> {
-        &self.params
-    }
-
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
     /// before the node goes live.
@@ -838,6 +833,10 @@ impl<K: Kernel> ParamNode<K::Float> for KernelNode<K> {
         self.params.bind(ParamSet::builder()).build()
     }
 
+    fn settings(&self) -> Vec<ErasedSetting> {
+        self.params.set().settings()
+    }
+
     /// A clone with every cell detached (at its value now) and silent.
     fn fork_fresh(&self) -> Self {
         let mut fork = self.clone();
@@ -857,6 +856,14 @@ where
 
 impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasControls<P> {}
 
+/// A kernel node has the settings its [`ControlSet`] declares.
+impl<K: Kernel, S: Setting> HasSetting<S> for KernelNode<K>
+where
+    K::Set: HasSetting<S>,
+{
+    type Word = <K::Set as HasSetting<S>>::Word;
+}
+
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts from the values
 /// last set through it ([`tutti_graph::param_parts`]).
 impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
@@ -873,12 +880,11 @@ mod latency_tail;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DelayConfig, DelayNode};
+    use crate::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_buffers::ChannelTopology;
-    use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
-    use tutti_units::{Frame, Seconds};
+    use tutti_units::{Frame, Hz, Q};
 
     /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
     /// unequal length are each read to their own end.
@@ -904,25 +910,25 @@ mod tests {
         assert_eq!(first_non_finite(short_first.into_iter()), Some((0, 0)));
     }
 
-    /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
+    /// A kernel whose tail is only declared is left alone: a resonant filter (tail unknown) that has
     /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and
-    /// never narrows its tail, and keeps its echoes.
+    /// never narrows its tail, and keeps ringing.
     #[test]
     fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(
-                    ChannelTopology::MONO,
-                    MaxDelay::of(Seconds::new(0.01)),
-                ))
-                .controls(DelayControls {
-                    feedback: tutti_units::Feedback::new(0.5),
-                    ..DelayControls::DEFAULT
-                }),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(8.0)),
             ),
             rate,
             64,
+        );
+        assert_eq!(
+            node.shape().tail,
+            Tail::Unknown,
+            "the example declares an unknown tail"
         );
         let mut x = vec![0.0f32; 64];
         let mut heard = false;

@@ -17,7 +17,7 @@ pub(super) struct Site {
     pub(super) rule: Rule,
 }
 
-pub(super) fn source_files(tree: &dyn Tree) -> Vec<String> {
+pub(in crate::gates) fn source_files(tree: &dyn Tree) -> Vec<String> {
     tree.files("crates", &skipped_library)
         .into_iter()
         .filter(|p| {
@@ -302,7 +302,7 @@ fn default_target(header: &str) -> Option<String> {
     (bare(&h[..f]) == "Default").then(|| bare(h[f + 3..].trim()).to_owned())
 }
 
-fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
+pub(in crate::gates) fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     let mut from = 0;
     while let Some(at) = find_word_from(code, "macro_rules", from) {

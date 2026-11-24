@@ -2,7 +2,6 @@
 //! moved and with their param ports fed per frame.
 
 use crate::harness::{Gate, bus, feeds};
-use std::sync::Arc;
 use tutti_buffers::ChannelTopology;
 use tutti_nodes::{
     DelayConfig, DelayControls, DelayLayout, DelayNode, LfoConfig, LfoNode, LfoShape, LfoSync,
@@ -55,13 +54,17 @@ fn lfo() {
         .sync(LfoSync::Synced)
         .phase_offset(PhaseIncrement::new(0.25));
     let node = LfoNode::from(beat);
-    let sync = Arc::clone(node.sync());
+    let sync = tutti_graph::ParamNode::<f32>::settings(&node)
+        .into_iter()
+        .find(|setting| setting.kind() == tutti_units::SettingKind::Sync)
+        .expect("an LFO has a sync setting");
     gate.run("lfo beat-synced, switching", node, |_, i| {
-        sync.store(if (i / 20) % 2 == 0 {
+        let stored = sync.store(if (i / 20) % 2 == 0 {
             LfoSync::Synced
         } else {
             LfoSync::Free
         });
+        assert!(stored);
     });
 }
 

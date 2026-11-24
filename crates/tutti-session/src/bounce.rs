@@ -170,8 +170,12 @@ pub enum BounceTail {
     /// ([`Io::report_tail`](tutti_graph::Io::report_tail)) spends what is left
     /// of its report when nothing upstream still owes, and its declared
     /// ceiling after an upstream that does; one that never reports spends what
-    /// it declares, and one at rest spends nothing. The figures and progress count the bound until
-    /// the programme ends and the true total after. The default, with a cap of
+    /// it declares, and one at rest spends nothing. The graph is asked at the
+    /// programme's end and after every block of the tail, and the tail is the
+    /// smallest bound any ask gave (what is spent plus what is owed): never
+    /// longer than the first ask's, shorter when an instrument goes idle and
+    /// what follows it owes its own report. The figures and progress count the
+    /// bound until the programme ends and the true total after. The default, with a cap of
     /// [`BounceTail::CAP`].
     Graph {
         /// The most it renders.
