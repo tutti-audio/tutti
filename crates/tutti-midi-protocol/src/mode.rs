@@ -4,7 +4,7 @@
 
 use tutti_ump::ExtremeValues;
 
-use crate::MpeZoneConfig;
+use crate::MpeLayout;
 
 /// What a translation does with the messages MIDI 1.0 has no equivalent for:
 /// Per-Note Controllers, Per-Note Pitch Bend and Per-Note Management (M2-104
@@ -19,15 +19,16 @@ pub enum PerNoteTranslation {
     Dropped,
     /// MIDI Polyphonic Expression: each note takes a member channel of the
     /// zone, so a channel Pitch Bend, Channel Pressure and Control Change 74 on
-    /// it act on that note alone. The zone's [specification](MpeZoneConfig::spec)
-    /// says how the mode was selected: [`MpeSpec::Profile`](crate::MpeSpec::Profile)
-    /// by the MIDI-CI MPE Profile (D.4.1), [`MpeSpec::Mpe11`](crate::MpeSpec::Mpe11)
-    /// by other means such as the MPE Configuration Message (D.4.2).
+    /// it act on that note alone. The layout is a zone's
+    /// ([`Mpe11Zone::layout`](crate::Mpe11Zone::layout) or
+    /// [`ProfileZone::layout`](crate::ProfileZone::layout)): the zone the
+    /// MIDI-CI MPE Profile enabled (D.4.1), or one set by other means such as
+    /// the MPE Configuration Message (D.4.2).
     ///
     /// A [`Message::Midi1`](tutti_ump::Message::Midi1) input passes unchanged:
     /// its channel is the sender's, and a MIDI 1.0 note on a member channel is
     /// not seen by the allocator.
-    Mpe(MpeZoneConfig),
+    Mpe(MpeLayout),
 }
 
 /// The Default Translation, or the Alternate Translation Modes a

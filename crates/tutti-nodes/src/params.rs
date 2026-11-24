@@ -69,6 +69,10 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     fn moved(&self, applied: &Self::Controls, target: &Self::Controls) -> bool {
         applied != target
     }
+
+    /// Stops sharing what the set shares besides the cells (a setting's word), keeping its
+    /// value: a fork's own. A set that shares nothing has nothing to do, the default.
+    fn detach(&mut self) {}
 }
 
 /// The [`ControlSet`] of a kernel with no controls: no cells, and the unit `()` for its
@@ -602,6 +606,12 @@ impl<S: ControlSet> Params<S> {
         for cell in &mut self.cells {
             *cell = Arc::new(AtomicF64::new(cell.load(Acquire)));
         }
+        self.set.detach();
+    }
+
+    /// The set the cells are addressed by.
+    pub(crate) fn set(&self) -> &S {
+        &self.set
     }
 
     /// Whether `target` is far enough from `applied` to design again ([`ControlSet::moved`]).

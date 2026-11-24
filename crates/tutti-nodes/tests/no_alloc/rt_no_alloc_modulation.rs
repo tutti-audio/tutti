@@ -1269,10 +1269,11 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
     ];
     let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
         .interpolation(InterpolationMode::CubicHermite)
-        .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
+        .notes(NoteTimes::try_from(&notes[..]).expect("two notes"))
         .build()
         .unwrap();
     let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+        sync: tutti_nodes::DelaySync::Synced,
         feedback: Feedback::new(0.5),
         cross_feedback: Feedback::new(0.25),
         ..DelayControls::DEFAULT
