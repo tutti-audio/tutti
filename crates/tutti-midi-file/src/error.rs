@@ -110,9 +110,16 @@ impl std::fmt::Display for ClipPart {
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ClipBuildError {
-    /// The messages break a rule of the format that a read enforces as well:
-    /// one of the header's (M2-116 sections 6 to 6.2), or a MIDI-CI Property
-    /// Exchange message in the header or the sequence (sections 6.4 and 7.2).
+    /// The messages break a rule of the format that a read enforces as well. The
+    /// [`ClipFileError`] is one of the header's rules (M2-116 sections 6 to
+    /// 6.2): [`DuplicateHeaderTempo`](ClipFileError::DuplicateHeaderTempo),
+    /// [`MisplacedHeaderTempo`](ClipFileError::MisplacedHeaderTempo),
+    /// [`DuplicateHeaderTimeSignature`](ClipFileError::DuplicateHeaderTimeSignature),
+    /// [`MisplacedHeaderTimeSignature`](ClipFileError::MisplacedHeaderTimeSignature)
+    /// or [`ProfileOn`](ClipFileError::ProfileOn); or
+    /// [`PropertyExchange`](ClipFileError::PropertyExchange), a MIDI-CI Property
+    /// Exchange message in the header or the sequence (sections 6.4 and 7.2). A
+    /// build raises no other variant: the rest are rules of the byte stream.
     #[error("the clip is not well formed")]
     Format(#[from] ClipFileError),
     /// A Flex Data message (a text of several packets) is interrupted by

@@ -31,6 +31,9 @@ use crate::{ClipFile, MidiFileKind, ReadError, StandardMidiFile, WriteError};
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// A `match` on it is exhaustive over the two kinds of MIDI file and takes no
+/// wildcard arm.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MidiFile {
     /// A Standard MIDI File, whose bytes begin with the header chunk id.

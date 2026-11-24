@@ -205,7 +205,7 @@
 //!
 //! let clip = ClipFile::new(TicksPerQuarterNote::of(96), ClipHeader::new(), ClipSequence::new())
 //!     .unwrap();
-//! let _ = clip.timebase().metrical().unwrap().to_clip();
+//! let _ = clip.to_clip();
 //! ```
 //!
 //! A Clip File has no format word to answer `None` with:

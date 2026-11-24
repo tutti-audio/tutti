@@ -9,7 +9,8 @@ use tutti_fixtures::midi;
 use tutti_midi_ci::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipSequence,
-    FileEvent, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick,
+    FileEvent, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfParseError, SmfReadError,
+    StandardMidiFile, Tick,
 };
 use tutti_music::{Meter, TimeSignature};
 use tutti_ump::ControlValue;
@@ -247,13 +248,12 @@ fn the_meter_map_is_the_set_time_signature_messages() {
         end(),
     ]))
     .unwrap();
-    let view = &file;
-    let map = view.meter_map();
+    let map = file.meter_map();
     assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(3, 4));
     assert_eq!(map.at(Beat::new(2.9)), TimeSignature::of(3, 4));
     assert_eq!(map.at(Beat::new(3.0)), TimeSignature::of(6, 8));
     assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(3.0));
-    assert!(view.refused_time_signatures().is_empty());
+    assert!(file.refused_time_signatures().is_empty());
 
     let bare = read_clip(clip(&valid())).unwrap();
     assert_eq!(bare.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
@@ -293,9 +293,8 @@ fn a_flex_time_signature_denominator_of_zero_is_refused() {
         end(),
     ]))
     .unwrap();
-    let view = &file;
-    assert_eq!(view.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
-    let refused = view.refused_time_signatures();
+    assert_eq!(file.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
+    let refused = file.refused_time_signatures();
     assert_eq!(refused.len(), 1);
     assert_eq!(
         (
@@ -440,6 +439,16 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
         Err(ClipReadError::Parse {
             word: 0,
             cause: ClipFileError::BadMagic,
+        })
+    );
+    // And the Standard MIDI File's reader names what it did not find: its header
+    // chunk.
+    assert_eq!(
+        StandardMidiFile::from_bytes(&good),
+        Err(SmfReadError::Parse {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::MissingHeader,
         })
     );
     assert_eq!(
