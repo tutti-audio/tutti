@@ -47,20 +47,18 @@ fn values_wrap_around_in_order() {
     assert_eq!(expect, next);
 }
 
-/// **`take_lost` resets and `lost` is cumulative**, per end, and a view
-/// outlives both ends.
+/// **`lost` is cumulative**, the same at each end, and a view outlives both
+/// ends.
 #[test]
-fn take_lost_resets_and_lost_accumulates() {
-    let (mut writer, mut reader) = ring::<u8>(1, Overflow::DropNewest);
+fn lost_accumulates_at_both_ends() {
+    let (mut writer, reader) = ring::<u8>(1, Overflow::DropNewest);
     let view = writer.losses();
     writer.push(0).unwrap();
     let _ = writer.push(1);
     let _ = writer.push(2);
-    assert_eq!(reader.take_lost(), 2);
-    assert_eq!(reader.take_lost(), 0);
+    assert_eq!((writer.lost(), reader.lost()), (2, 2));
     let _ = writer.push(3);
-    assert_eq!(reader.take_lost(), 1);
-    assert_eq!(writer.take_lost(), 3, "each end's reset is its own");
+    assert_eq!((writer.lost(), reader.lost()), (3, 3));
     drop((writer, reader));
     assert_eq!(view.get(), 3, "cumulative, after both ends are gone");
 }

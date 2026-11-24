@@ -403,12 +403,6 @@ impl Executor {
         self.timer().sleep_until(deadline)
     }
 
-    /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
-    /// that instant.
-    pub fn sleep(&self, duration: Duration) -> Sleep {
-        self.timer().sleep(duration)
-    }
-
     /// A [`Timer`] on this executor's deadlines, for a future that needs a deadline and
     /// must not hold the executor.
     ///

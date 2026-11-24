@@ -4,7 +4,7 @@ use tutti_units::{Db, Mix, Real, Samples};
 
 use super::*;
 use crate::TAIL_FLOOR;
-use crate::reverb::tail_probe;
+use crate::tail_probe;
 use tutti_buffers::{BlockSide, InputOutput};
 
 // The tests pin the `f32` instantiation, the session's audio

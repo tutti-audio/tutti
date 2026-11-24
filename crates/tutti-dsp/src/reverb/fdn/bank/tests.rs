@@ -8,7 +8,7 @@ use tutti_units::{
 use super::*;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{Fdn, Network, NetworkStage};
-use crate::reverb::tail_probe;
+use crate::tail_probe;
 use crate::{FreezeMode, MaxDecay};
 use tutti_buffers::InputOutput;
 

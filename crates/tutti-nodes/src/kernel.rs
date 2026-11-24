@@ -875,12 +875,11 @@ mod latency_tail;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DelayConfig, DelayNode};
+    use crate::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_buffers::ChannelTopology;
-    use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
-    use tutti_units::{Frame, Seconds};
+    use tutti_units::{Frame, Hz, Q};
 
     /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
     /// unequal length are each read to their own end.
@@ -906,25 +905,25 @@ mod tests {
         assert_eq!(first_non_finite(short_first.into_iter()), Some((0, 0)));
     }
 
-    /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
+    /// A kernel whose tail is only declared is left alone: a resonant filter (tail unknown) that has
     /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and
-    /// never narrows its tail, and keeps its echoes.
+    /// never narrows its tail, and keeps ringing.
     #[test]
     fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(
-                    ChannelTopology::MONO,
-                    MaxDelay::of(Seconds::new(0.01)),
-                ))
-                .controls(DelayControls {
-                    feedback: tutti_units::Feedback::new(0.5),
-                    ..DelayControls::DEFAULT
-                }),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(8.0)),
             ),
             rate,
             64,
+        );
+        assert_eq!(
+            node.shape().tail,
+            Tail::Unknown,
+            "the example declares an unknown tail"
         );
         let mut x = vec![0.0f32; 64];
         let mut heard = false;

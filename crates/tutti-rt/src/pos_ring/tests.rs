@@ -32,7 +32,7 @@ fn push(writer: &mut PosWriter, samples: &[f32]) -> usize {
 
 /// Position `s` through a claim of exactly its frame.
 fn frame_at(reader: &mut PosReader, s: u64) -> Vec<f32> {
-    let stride = usize::from(reader.layout().count());
+    let stride = usize::from(reader.ring.layout.count());
     let claim = reader.claim(s, [(s, s + 1), (0, 0)]);
     (0..stride).map(|c| claim.sample(s, c)).collect()
 }
@@ -235,7 +235,7 @@ fn raising_the_start_drops_what_lies_below() {
             to: 1_000
         }
     );
-    assert_eq!(writer.generation(), 1);
+    assert_eq!(writer.watch().generation(), 1);
     let _ = reader.claim(500, [(497, 569), (0, 0)]);
     // The reader jumps back below the raise; the writer moves the window.
     let _claim = reader.claim(100, [(97, 169), (0, 0)]);
