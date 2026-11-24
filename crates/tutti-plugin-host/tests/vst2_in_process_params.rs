@@ -305,6 +305,56 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     drop(handle);
 }
 
+/// **A fork starts from the host's writes no block has taken**: parameter 0 is
+/// written through the handle, no block renders, and the graph is forked. The
+/// probe plays `1000 · param0` on top of its channel tag, so the export renders
+/// 501, and live renders it too once a block takes the write.
+fn a_fork_starts_from_the_hosts_undrained_writes() {
+    let _lock = PROBE_LOCK.lock();
+    let _env = ProbeEnv::new().params(4).state_dc();
+    let (client, handle) = load();
+    let stereo = ChannelLayout::from_count(2);
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, stereo);
+    let (plugin, _controls) = g.add_with_controls(client);
+    g.pipe_output(plugin);
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
+    let mut live = g.renderer(prepare).expect("the graph compiles");
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.5))
+        .expect("a declared parameter");
+
+    let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
+        sample_rate: SampleRate::of(SAMPLE_RATE),
+        ..Default::default()
+    }));
+    let (_fork_ed, mut fork_exec) = live
+        .editor()
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
+        .expect("the plugin forks");
+    let mut out = vec![vec![0.0f32; BLOCK]; 2];
+    for _ in 0..8 {
+        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
+    }
+    assert_eq!(
+        out[0].last().copied(),
+        Some(501.0),
+        "the export renders the write no block had taken"
+    );
+    drop(handle);
+}
+
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
 /// and a fork tell the plugin at once only there.
 fn main() {
@@ -312,5 +362,6 @@ fn main() {
         a_moving_parameter_reaches_the_plugin,
         a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it,
         an_export_renders_an_edit_made_in_the_plugin_as_live_does,
+        a_fork_starts_from_the_hosts_undrained_writes,
     ]);
 }
