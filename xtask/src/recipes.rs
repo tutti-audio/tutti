@@ -59,11 +59,12 @@ pub(crate) enum Step {
     /// Without a directory it then prints each crate's `public-api` line count, reusing the
     /// texts (`gates/public_api_counts.rs`).
     UmbrellaApi(Option<String>),
-    /// `unused-public [<crate>...] [--out <path>]`: the report of `gates/unused_public.rs`;
+    /// `unused-public [--app] [<crate>...] [--out <path>]`: the report of `gates/unused_public.rs`;
     /// no crate is every crate under `crates/`.
     UnusedPublic {
         crates: Vec<String>,
         out: Option<String>,
+        app: bool,
     },
     /// `affected <base>`: print the packages the diff from `<base>` can reach as
     /// `-p` flags, or `all` (`gates/affected.rs`).
@@ -116,12 +117,17 @@ impl Step {
                     " (the texts of {d}/<package>.txt instead)"
                 ))
             ),
-            Step::UnusedPublic { crates, out } => format!(
-                "unused-public: rust-analyzer scip, cargo public-api --package tutti, then the public items of {} with no reference outside test code{}",
+            Step::UnusedPublic { crates, out, app } => format!(
+                "unused-public: rust-analyzer scip, cargo public-api --package tutti, then the public items of {} {}{}",
                 if crates.is_empty() {
                     "every crate under crates/".to_owned()
                 } else {
                     crates.join(" ")
+                },
+                if *app {
+                    "the umbrella names that nothing outside the library exercises"
+                } else {
+                    "with no reference outside test code"
                 },
                 out.as_ref()
                     .map_or(String::new(), |o| format!(" (also written to {o})"))
@@ -452,8 +458,8 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     ),
     (
         "unused-public",
-        "[<crate>...] [--out <path>]",
-        "a report, never a gate: the public items of the crates (default all) that the tutti umbrella does not name and no code outside tests refers to (needs rust-analyzer and cargo-public-api; not in `gates` or `ci`)",
+        "[--app] [<crate>...] [--out <path>]",
+        "a report, never a gate: the public items of the crates (default all) that the tutti umbrella does not name and no code outside tests refers to; with --app, the items the umbrella names that nothing outside the library exercises (needs rust-analyzer and cargo-public-api; not in `gates` or `ci`)",
     ),
     (
         "book",
@@ -859,15 +865,18 @@ impl Planner<'_> {
             "unused-public" => {
                 let mut crates = Vec::new();
                 let mut out = None;
+                let mut app = false;
                 let mut it = args.iter();
                 while let Some(a) = it.next() {
-                    if a == "--out" {
+                    if a == "--app" {
+                        app = true;
+                    } else if a == "--out" {
                         out = Some(it.next().ok_or("`unused-public`: `--out` needs a path")?.clone());
                     } else {
                         crates.push(a.clone());
                     }
                 }
-                self.out.push(Step::UnusedPublic { crates, out });
+                self.out.push(Step::UnusedPublic { crates, out, app });
             }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;

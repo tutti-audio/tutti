@@ -47,10 +47,11 @@ fn clip::ClipHeader::end
 fn clip::ClipHeader::ending_at
 fn clip::ClipHeader::messages
 fn clip::ClipHeader::new
+fn clip::ClipHeader::profile_messages
 fn clip::ClipHeader::profile_on
 fn clip::ClipHeader::profiles
 fn clip::ClipHeader::push
-fn clip::ClipHeader::unused_messages
+fn clip::ClipHeader::setup_messages
 fn clip::ClipSequence::end
 fn clip::ClipSequence::ending_at
 fn clip::ClipSequence::events

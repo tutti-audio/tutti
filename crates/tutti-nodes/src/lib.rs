@@ -509,8 +509,8 @@ pub use params::{
     At, Control, ControlRead, ControlSet, ControlValid, HasControl, NoControls, Params,
 };
 
-// Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
-// player's General MIDI setup uses.
+// Freeverb as a `KernelNode`: mono in, stereo wet out; the SoundFont player's General MIDI
+// setup uses one as its reverb send.
 mod reverb_freeverb;
 pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, FreeverbSet};
 

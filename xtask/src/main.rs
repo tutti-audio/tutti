@@ -172,7 +172,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::Fuzz { target, secs } => fuzz(target.as_deref(), *secs, ctx),
         Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
-        Step::UnusedPublic { crates, out } => unused_public(ctx, crates, out.as_deref()),
+        Step::UnusedPublic { crates, out, app } => unused_public(ctx, crates, out.as_deref(), *app),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -384,7 +384,7 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
 
 /// `unused-public`: indexes the workspace with `rust-analyzer scip`, reads `tutti`'s
 /// public API, and prints (and optionally writes) the report. Exits 0 with any finding.
-fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>) -> Result<(), u8> {
+fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>, app: bool) -> Result<(), u8> {
     let fail = |msg: String| {
         eprintln!("xtask: unused-public: {msg}");
         1
@@ -395,6 +395,7 @@ fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>) -> Result<(), 
             .flatten()
             .filter(|e| e.path().join("Cargo.toml").is_file())
             .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|c| !app || c != "tutti")
             .collect();
         all.sort();
         all
@@ -444,7 +445,24 @@ fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>) -> Result<(), 
     let tree = gates::RealTree {
         root: ctx.root.clone(),
     };
-    let text = gates::unused_public(&tree, &bytes, &crates, umbrella.as_deref()).map_err(fail)?;
+    let make = if app {
+        gates::unused_public_app
+    } else {
+        gates::unused_public
+    };
+    let git = |args: &[&str]| {
+        process::Command::new("git")
+            .args(args)
+            .current_dir(&ctx.root)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .unwrap_or_default()
+    };
+    let mut built_at = git(&["rev-parse", "--short", "HEAD"]);
+    if !git(&["status", "--porcelain"]).is_empty() {
+        built_at.push_str(", with uncommitted changes");
+    }
+    let text = make(&tree, &bytes, &crates, umbrella.as_deref(), &built_at).map_err(fail)?;
     print!("{text}");
     if let Some(path) = out {
         if let Some(dir) = Path::new(path).parent() {

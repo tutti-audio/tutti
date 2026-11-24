@@ -1,7 +1,6 @@
 //! A node's ports are its design's cells and nothing else: no port for a mix, because
 //! a node is the wet signal alone and its blend with the input is the graph's (`node_mix.rs`).
-//! The state-variable filter and a live Freeverb start their ports at the first cell; the fixed
-//! General MIDI send has none.
+//! The state-variable filter and a live Freeverb start their ports at the first cell.
 
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FreeverbControls, SvfType};
@@ -14,7 +13,7 @@ const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
 /// No `Wet` port in any of them: the filter's ports are its cutoff, Q and gain, in
-/// that order, a live Freeverb's its room and damping, and a fixed one has none.
+/// that order, a live Freeverb's its room and damping.
 #[test]
 fn a_design_nodes_ports_start_at_its_first_cell() {
     let filter = prepared(
@@ -50,12 +49,4 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
         Some(FreeverbControls::GENERAL_MIDI.room.get())
     );
     assert!(live.param_set().get(UnitParam::Wet).is_none());
-
-    let fixed = prepared(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-        SR,
-        BLOCK,
-    );
-    assert!(fixed.shape().params.as_slice().is_empty());
-    assert_eq!(fixed.param_base(0), None);
 }

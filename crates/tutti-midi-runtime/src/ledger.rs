@@ -257,6 +257,19 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         });
     }
 
+    /// How many events the port holds this block.
+    pub(crate) fn written(&self) -> usize {
+        self.out.len()
+    }
+
+    /// Counts `n` events the caller left out whole, as the port counts a
+    /// refusal ([`EventWriter::count_skipped`]).
+    pub(crate) fn count_lost(&self, n: usize) {
+        for _ in 0..n {
+            self.out.count_skipped();
+        }
+    }
+
     /// Writes `ump` at `at`. A note message is kept track of: a note-on the
     /// port took is sounding, one it refused marks its key so that note's off
     /// is skipped, an off it refused is owed. `owner` says which note a
