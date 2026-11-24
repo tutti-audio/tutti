@@ -244,8 +244,8 @@ impl Default for FdnLayout {
     }
 }
 
-/// The absorption with its band gains scaled as [`FdnBank`](crate::FdnBank) scales them (peak at
-/// most 0.9999), so the network carries the gains the bank runs.
+/// The absorption with its band gains scaled so its response peaks at the largest of them at
+/// most (`rescale_bands`); the bank reads the network's gains as they are.
 fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     let Absorption::Bands {
         low,

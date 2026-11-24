@@ -46,9 +46,10 @@
 //! network's two crossovers: `g_low` at DC, `g_high` far above the upper
 //! crossover and `g_mid` between. It is linear in the gains, so a ramp of the
 //! gains is a ramp of the filter; with every gain 1 it is the identity, and a
-//! frozen loop loses nothing. A set of gains whose response would exceed 1
-//! anywhere (a mid band that rings longer than both its neighbours, by a lot)
-//! is scaled to peak at 0.9999 at most, so the loop cannot grow.
+//! frozen loop loses nothing. A set of gains whose response peaks above the largest
+//! of them between the crossovers (a mid band that rings longer than a neighbour) is
+//! scaled by [`rescale_bands`] so no frequency decays slower than the longest band
+//! set, and the loop cannot grow.
 //!
 //! **The shimmer.** A [shimmering](FdnLayout::shimmering) layout runs one mono fixed-rate
 //! vocoder in the feedback ([`shimmer`](super::shimmer) has the loop and its gain): at each
@@ -84,7 +85,7 @@ use super::shimmer::{GAIN_BOUND, Shimmer};
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
-use crate::reverb::network::{Absorption, Band, Matrix, Network, NetworkStage};
+use crate::reverb::network::{Absorption, Band, Matrix, Network, NetworkStage, peak_bound};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{DecayTime, FftFloat, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
@@ -541,7 +542,9 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
                 line.length
                     .clamp(SampleSpan::from_samples(Samples::new(1)), max_len),
             );
-            t.gain[j] = absorption_gains(line.absorption, t.pole).map(figure::<F>);
+            t.gain[j] = [Band::Low, Band::Mid, Band::High]
+                .map(|b| line.absorption.gain(b))
+                .map(figure::<F>);
             // A diagonal network is `m = 0`; its `v` is a unit vector (line 0)
             // like the rest, so a ramp to a mixing matrix moves between unit
             // vectors and `v_len` stays 1.
@@ -815,57 +818,29 @@ fn set_poles<F: Float>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) 
     }
 }
 
-/// The gains of a line's absorption, scaled if their response would peak above 1.
-fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [Amplitude; 3] {
-    let g = [Band::Low, Band::Mid, Band::High].map(|b| a.gain(b));
-    rescale_bands(g, pole)
-}
-
-/// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are
-/// `pole` (`exp(-2 pi fc / fs)` for the two crossovers), scaled to peak at 0.9999
-/// if their response would exceed 1 anywhere; NaN, infinite or negative gains
-/// are silence. The model's design applies it too, so the gains a network
-/// carries are the ones the bank runs.
+/// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are `pole`
+/// (`exp(-2 pi fc / fs)` for the two crossovers), scaled so that no frequency decays slower
+/// than the slowest band: where the response between the crossovers peaks above the largest
+/// gain `M` (bands that rise with frequency, whose one-poles' phase adds to a bump), all three
+/// gains are multiplied by `M / peak`, `peak` an upper bound on the response's peak
+/// ([`peak_bound`]), so the true peak is at most `M` and the other bands decay a little faster
+/// than set. Gains that do not rise with frequency peak at the low band, which is `M`: they are
+/// returned as they are. The scaled peak is held under 1 (at 0.9999 at most). NaN, infinite or
+/// negative gains are silence.
+///
+/// The design runs it ([`FdnLayout::design_into`]) and the network carries the result, which
+/// the bank reads as it is: the gains a network has are the ones the bank runs.
 pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> [Amplitude; 3] {
     if !g.iter().all(|x| x.get().is_finite() && x.get() >= 0.0) {
         return [Amplitude::SILENT; 3];
     }
-    let peak = peak_response(g, pole);
-    if peak > 1.0 {
-        g.map(|x| x * (0.9999 / peak))
+    let top = g.iter().map(|x| x.get()).fold(0.0, f64::max);
+    let peak = peak_bound(g.map(Amplitude::get), pole);
+    if peak > top {
+        g.map(|x| x * (top.min(0.9999) / peak))
     } else {
         g
     }
-}
-
-/// The largest `|y(w)|` of the absorption with gains `g = [low, mid, high]`,
-/// over a grid of frequencies.
-pub(crate) fn peak_response(g: [Amplitude; 3], pole: [f64; 2]) -> f64 {
-    let (low, mid, high) = (g[0].get(), g[1].get(), g[2].get());
-    let (c2, c1) = (mid - high, low - mid);
-    // |L1|, |L2| <= 1, so the response is at most the sum of the magnitudes
-    // of its three terms: when that is under 1 (every gain falling with
-    // frequency, the usual case) there is nothing to measure.
-    let bound = high.abs() + c2.abs() + c1.abs();
-    if bound <= 1.0 {
-        return bound;
-    }
-    // |L(w)|: ((1 - p) / (1 - p e^-jw))^2.
-    let l = |p: f64, w: f64| -> (f64, f64) {
-        let (re, im) = (1.0 - p * libm::cos(w), p * libm::sin(w));
-        let den = re * re + im * im;
-        let (hr, hi) = ((1.0 - p) * re / den, -(1.0 - p) * im / den);
-        (hr * hr - hi * hi, 2.0 * hr * hi)
-    };
-    let mut peak = 0.0f64;
-    for k in 0..=96 {
-        let w = std::f64::consts::PI * (f64::from(k) / 96.0).powi(2);
-        let (a, b) = l(pole[0], w);
-        let (c, d) = l(pole[1], w);
-        let (re, im) = (high + c2 * c + c1 * a, c2 * d + c1 * b);
-        peak = peak.max(libm::hypot(re, im));
-    }
-    peak
 }
 
 #[cfg(test)]

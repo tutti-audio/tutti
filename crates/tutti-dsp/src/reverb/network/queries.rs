@@ -177,10 +177,10 @@ impl Fdn {
 
     /// [`slowest`](Self::slowest) with each line's `g_i` its absorption's largest magnitude
     /// response over every frequency ([`Absorption::sup`], which never undercuts the peak),
-    /// not its gain at the three nominal band points: where the band gains are not monotone
-    /// the response between the crossovers is above every one of them. For gains that fall
-    /// with frequency, and for a gain or a one-pole, it is the largest nominal gain and the
-    /// figure is the largest of the three bands'.
+    /// not its gain at the three nominal band points. The gains of a design are scaled
+    /// (`rescale_bands`) so the peak is the largest set gain, which the scaled gains no longer
+    /// show: the bound reads the response, exact and instant where the gains do not rise with
+    /// frequency (the largest nominal gain) and a bounded search otherwise.
     pub(super) fn slowest_peak(&self, rate: SampleRate) -> Option<(f64, f64, f64)> {
         self.per_frame(|a| Amplitude::new(a.sup(rate)))
     }
@@ -222,7 +222,9 @@ impl Fdn {
     /// leaves and `A` mapping the leaving samples onto the entering ones. (`g_i` is the
     /// peak of the absorption's magnitude response over every frequency, which a filter's
     /// memory is read as, like the group delays of the all-passes and the one-poles read at
-    /// their peaks: conservative readings, not part of this proof.) With `w = ρ²`, weigh each sample's energy by `w^u`:
+    /// their peaks: conservative readings, not part of this proof. A design's bands are
+    /// scaled by `rescale_bands` so that peak is the largest band's gain.) With `w = ρ²`,
+    /// weigh each sample's energy by `w^u`:
     /// `V = Σ x² w^u`. A step shifts every sample (`u → u+1`, so `V` is
     /// multiplied by `w`), except that the samples leaving at `u = m_i - 1` are
     /// scaled by `g_i ≤ ρ^(m_i)`, mapped by `A` (norm `≤ σ`) and enter at
@@ -515,10 +517,13 @@ impl System for Network {
     /// longest line, the longest tap, an all-pass's delay times the trips of its
     /// train, a FIR's length), plus each recirculating stage's `Fdn::rt60_bound`
     /// (its absorptions read at their peak response over every frequency) times
-    /// `(|floor| + 20 log10 n) / 60` (with the lag the bound's proof adds), `n` the lines
-    /// that can sum at one output frame (`Fdn::coincident_lines`: the bound is of the state,
-    /// and the output's peak, which the floor is under, can be a single echo while a late
-    /// one is the sum of `n`). It uses the bound, not the estimate, so it never
+    /// `(|floor| + 20 log10 min(2, n)) / 60` (with the lag the bound's proof adds), `n` the
+    /// lines that can sum at one output frame (`Fdn::coincident_lines`). The bound is of the
+    /// state and the output's peak, which the floor is under, can be a single echo while a
+    /// late one is the sum of two that coincide: a margin for two echoes (6 dB when two or
+    /// more lines can sum, none for one), checked against the floor tests of the reverbs, not
+    /// a proof. More than two lines' echoes coincide only at a common multiple of their
+    /// lengths, which the designs keep mutually prime and far past any tail. It uses the bound, not the estimate, so it never
     /// undercuts a mixing network whose lines differ or an absorption that rises between
     /// its bands.
     ///
@@ -549,7 +554,8 @@ impl System for Network {
                     if f.is_lossless() {
                         return DecayTime::Unbounded;
                     }
-                    let depth = depth + 20.0 * libm::log10(f.coincident_lines(self.width.get()));
+                    let depth =
+                        depth + 20.0 * libm::log10(f.coincident_lines(self.width.get()).min(2.0));
                     let seconds = f.rt60_bound(self.rate).get() * depth / 60.0
                         + f.lag_extra_frames(self.rate) / self.rate.get();
                     decay = decay.max(seconds);

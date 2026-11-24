@@ -8,12 +8,14 @@
 //! **What the model leaves out, on purpose.** Modulation moves a line around its
 //! centre length, and the model reads the centre. A [`NetworkStage::Fir`] holds a
 //! summary and not the response, so it has no frequency response (NaN), no
-//! finite `l1_norm` and radius 0. [`FdnBank`](crate::FdnBank) rescales a set
-//! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
-//! and [`Absorption::peak`] is what shows a design never asks for it.
+//! finite `l1_norm` and radius 0. The design of an [`FdnLayout`](crate::FdnLayout)
+//! scales a set of band gains whose response peaks above the largest of them down to that
+//! largest, and the network carries the scaled gains; a network built by hand is not
+//! scaled, and [`Absorption::peak`] is what shows where it peaks.
 
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
+use super::peak_bound;
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, NetworkStage,
     energy,
@@ -67,9 +69,8 @@ impl Absorption {
     }
 
     /// The largest `|G|` of the absorption over a grid of frequencies from DC to
-    /// Nyquist (dense toward DC, where the bands change): what
-    /// [`FdnBank`](crate::FdnBank) rescales when it exceeds 1. A design whose
-    /// absorptions peak at 1 or under is one the kernel runs as the model says.
+    /// Nyquist (dense toward DC, where the bands change): what a design of an
+    /// [`FdnLayout`](crate::FdnLayout) holds to the largest of its band gains.
     #[must_use]
     pub fn peak(&self, rate: SampleRate) -> f64 {
         (0..=PEAK_POINTS)
@@ -82,16 +83,10 @@ impl Absorption {
 
     /// A bound on the largest `|G(e^jw)|` over every frequency, which never undercuts it: the
     /// gain of a [`Gain`](Self::Gain), the exact peak of a one-pole (at DC or at Nyquist), and
-    /// for bands the exact peak where the gains do not rise with frequency (`low >= mid >=
-    /// high`: every term of `high + (mid - high) L2 + (low - mid) L1` is then a nonnegative
-    /// weight on a response of magnitude at most 1, which is 1 at DC, so the peak is `low`).
-    /// Otherwise it is read on a grid of 4096 frequencies from DC to Nyquist: between two
-    /// neighbours `w0 < w1` the response is no more than half their sum plus `K (w1 - w0) / 2`,
-    /// `K` the slope bound at `w0`, `sum_p |c_p| 2 p (1 - p)^2 / |1 - p e^-jw0|^3` over the two
-    /// poles `p` and the weights `c_p` (the slope of `((1 - p) / (1 - p e^-jw))^2`, which falls
-    /// with `w`), so the true peak is under the largest such bound. Infinity for gains that
-    /// are not loop gains. Tighter than the `majorant` at `r = 1` when the bands rise with
-    /// frequency, where the sum of the magnitudes of the three weights exceeds the peak.
+    /// for bands [`peak_bound`] (exact where the gains do not rise with frequency, a bounded
+    /// search otherwise). Infinity for gains that are not loop gains. Tighter than the
+    /// `majorant` at `r = 1` when the bands rise with frequency, where the sum of the
+    /// magnitudes of the three weights exceeds the peak.
     pub(super) fn sup(&self, rate: SampleRate) -> f64 {
         let Absorption::Bands {
             low,
@@ -102,53 +97,14 @@ impl Absorption {
         else {
             return self.majorant(1.0, rate);
         };
-        const POINTS: usize = 4096;
         let (low, mid, high) = (low.get(), mid.get(), high.get());
-        let (p1, p2) = (
-            cutoff_pole(crossover[0], rate),
-            cutoff_pole(crossover[1], rate),
-        );
+        let pole = crossover.map(|fc| cutoff_pole(fc, rate));
         if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
-            || ![p1, p2]
-                .iter()
-                .all(|p| p.is_finite() && *p > 0.0 && *p < 1.0)
+            || !pole.iter().all(|p| p.is_finite() && *p > 0.0 && *p < 1.0)
         {
             return f64::INFINITY;
         }
-        if low >= mid && mid >= high {
-            return low;
-        }
-        let (c2, c1) = ((mid - high).abs(), (low - mid).abs());
-        // `L = ((1 - p) / (1 - p z^-1))^2` at `w`, as (re, im).
-        let l = |p: f64, w: f64| {
-            let (re, im) = (1.0 - p * libm::cos(w), p * libm::sin(w));
-            let den = re * re + im * im;
-            let (hr, hi) = ((1.0 - p) * re / den, -(1.0 - p) * im / den);
-            (hr * hr - hi * hi, 2.0 * hr * hi)
-        };
-        let magnitude = |w: f64| {
-            let ((a, b), (c, d)) = (l(p1, w), l(p2, w));
-            libm::hypot(
-                high + (mid - high) * c + (low - mid) * a,
-                (mid - high) * d + (low - mid) * b,
-            )
-        };
-        // The slope bound of one term at `w`: `2 p (1 - p)^2 / |1 - p e^-jw|^3`.
-        let slope = |p: f64, w: f64| {
-            let d = 1.0 - 2.0 * p * libm::cos(w) + p * p;
-            2.0 * p * (1.0 - p) * (1.0 - p) / (d * libm::sqrt(d))
-        };
-        let step = std::f64::consts::PI / POINTS as f64;
-        let mut peak = 0.0f64;
-        let mut here = magnitude(0.0);
-        for k in 0..POINTS {
-            let w = step * k as f64;
-            let next = magnitude(step * (k + 1) as f64);
-            let k_w = c2 * slope(p2, w) + c1 * slope(p1, w);
-            peak = peak.max(0.5 * (here + next) + 0.5 * k_w * step);
-            here = next;
-        }
-        peak
+        peak_bound([low, mid, high], pole)
     }
 
     /// `sum |g_k| r^-k` over the impulse response of one trip, for `r` in

@@ -28,6 +28,7 @@
 mod capacity;
 mod gain;
 mod inline;
+mod peak;
 mod queries;
 mod response;
 
@@ -35,6 +36,7 @@ pub(crate) use capacity::NetworkCapacity;
 pub(crate) use gain::loop_gain;
 pub use gain::rt60_from_gain;
 pub use inline::{Full, Inline};
+pub(crate) use peak::peak_bound;
 
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
 

@@ -522,7 +522,7 @@ fn fine_peak(a: &Absorption, rate: SampleRate) -> f64 {
 /// The largest magnitude response of bands that fall with frequency is the low band's gain
 /// exactly (every term is a nonnegative weight on a response of magnitude at most 1, which is
 /// 1 at DC). For bands that rise somewhere it is a bound that never undercuts the peak of a
-/// fine grid of the response and stays within a hundredth over it, and where the bands are
+/// fine grid of the response and stays within a thousandth of `1 - max` over it, and where the bands are
 /// not monotone the peak is above every one of the three gains.
 #[test]
 fn the_sup_of_bands_is_their_low_gain_when_they_fall_and_a_tight_bound_when_they_do_not() {
@@ -544,7 +544,7 @@ fn the_sup_of_bands_is_their_low_gain_when_they_fall_and_a_tight_bound_when_they
             let a = bands(low, mid, high);
             let (sup, fine) = (a.sup(rate), fine_peak(&a, rate));
             assert!(sup >= fine, "{low} {mid} {high}: {sup} under {fine}");
-            assert!(sup <= fine + 1e-2, "{low} {mid} {high}: {sup} over {fine}");
+            assert!(sup <= fine + 1e-4, "{low} {mid} {high}: {sup} over {fine}");
         }
         assert!(
             bands(0.05, 0.99, 0.99).sup(rate) > 1.1,

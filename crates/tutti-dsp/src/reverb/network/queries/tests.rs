@@ -748,10 +748,11 @@ fn the_decay_bound_reads_the_peak_response_of_a_band_profile() {
 }
 
 /// The lines whose echoes can sum in one output channel deepen the floor the decay is measured
-/// to: `20 log10 (Σ|c| / max|c|)` for the widest row. Four identical lines of 1 000 frames at
-/// RT60 2 s, the row `[1, 1, 1, 1]` (4, +12.04 dB) over the row `[1, 0, 0, 0]`: the tail to
-/// -60 dB is `1000 / fs + 2 (60 + 20 log10 4) / 60` seconds, and a row of unequal gains
-/// `[1, 0.5, 0.5, 0]` is 2 lines. One line in every row is no margin.
+/// to by a margin for two coinciding echoes: `20 log10 min(2, n)`, `n = Σ|c| / max|c|` of the
+/// widest row. Four identical lines of 1 000 frames at RT60 2 s, the row `[1, 1, 1, 1]` (4
+/// lines, still 6.02 dB) over the row `[1, 0, 0, 0]`: the tail to -60 dB is
+/// `1000 / fs + 2 (60 + 20 log10 2) / 60` seconds; a row of unequal gains `[1, 0.5, 0.5, 0]` is
+/// 2 lines, the same; one line in every row is no margin.
 #[test]
 fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() {
     let g = loop_gain(SampleSpan::of(1_000.0), Seconds::new(2.0), RATE);
@@ -769,10 +770,11 @@ fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() 
         (counted, t.get())
     };
     let transit = 1_000.0 / RATE.get();
-    let at = |lines: f64| transit + 2.0 * (60.0 + 20.0 * lines.log10()) / 60.0;
+    let at = |lines: f64| transit + 2.0 * (60.0 + 20.0 * lines.min(2.0).log10()) / 60.0;
     let (n, t) = tail_with(&[&[1.0, 1.0, 1.0, 1.0], &[1.0, 0.0, 0.0, 0.0]]);
     assert_eq!(n, 4.0);
     assert!((t - at(4.0)).abs() < 1e-6, "{t}");
+    assert_eq!(at(4.0), at(2.0));
     let (n, t) = tail_with(&[&[1.0, 0.5, 0.5, 0.0]]);
     assert_eq!(n, 2.0);
     assert!((t - at(2.0)).abs() < 1e-6, "{t}");
