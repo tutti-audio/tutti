@@ -220,16 +220,6 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         }
     }
 
-    /// The bank [`new`](Self::new) makes, in place: it does nothing, the key filter is off at its
-    /// defaults, and nothing is metered. No allocation.
-    pub(super) fn clear(&mut self) {
-        self.detector = CompressorStage::NEUTRAL;
-        self.makeup = Ramp::new(F::ZERO);
-        self.reduction = Smoothed::ZERO;
-        self.deepest = F::ZERO;
-        self.key.clear();
-    }
-
     /// Back to silence: no reduction, nothing metered, and the makeup at rest on its target.
     /// No allocation.
     pub fn reset(&mut self) {
@@ -239,7 +229,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         self.key.reset();
     }
 
-    /// Lands the makeup on its target now.
+    /// Lands the makeup and the key filter's coefficients on their targets now.
     pub fn jump_to_target(&mut self) {
         self.makeup.jump_to_target();
         self.key.jump_to_target();
