@@ -421,21 +421,25 @@ pub enum Notice {
 /// again with the setting the plugin last accepted ([`State::applied`]), so a
 /// refused rate or mode never leaves a plugin that ran deactivated.
 ///
+/// A plugin that is lost is reported by its own notice ([`Notice::Lost`]), not
+/// by a `Recovery`.
+///
 /// Exhaustive: every shell matches every variant.
 #[derive(Debug, Clone)]
 pub enum Recovery {
     /// No other setting was run: the plugin had accepted none besides the one
     /// refused (a first activation, or a restart at the setting it already
-    /// runs at), a rebuild was refused, or the plugin was lost before the
-    /// rollback answered. The plugin is not active.
+    /// runs at) or a rebuild was refused: the host concludes the plugin is not
+    /// active until an activation succeeds.
     Inactive,
-    /// The plugin is active again, at `running`, the setting it last accepted.
+    /// The plugin is active again, at `running`, the setting it last accepted:
+    /// the host concludes it runs there, not at the setting it asked for.
     RolledBack {
         /// The setting the plugin runs at.
         running: Prepare,
     },
-    /// The activation at the accepted setting was refused too. The plugin is
-    /// loaded and not active.
+    /// The activation at the accepted setting was refused too: the host
+    /// concludes the plugin is not active until an activation succeeds.
     RollbackRefused {
         /// Why the accepted setting was refused.
         reason: Arc<PluginError>,

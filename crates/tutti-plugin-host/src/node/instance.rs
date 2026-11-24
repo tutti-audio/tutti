@@ -107,18 +107,22 @@ fn refusal_cause(reason: &PluginError, recovery: &Recovery) -> RateRefusalCause 
     }
 }
 
-/// A refused rate the host was told of, until a rate is taken.
+/// A rate the plugin did not take, until a rate is taken.
 #[derive(Debug, Clone, Copy)]
 struct RefusedRate {
+    /// The host was told ([`PluginInvalidation::RateRefused`]), so it is told
+    /// when a rate is taken.
+    told: bool,
     /// The rate the plugin runs at meanwhile: the one it accepted, rolled back
     /// to. `None` when it is deactivated, or once a rate was asked for again.
     running: Option<SampleRate>,
 }
 
 /// Whether the plugin runs at a rate other than the graph's, because it
-/// refused the graph's and was rolled back: set by the instance when it reports
-/// the refusal, cleared when it reports a rate taken, and readable with no
-/// lock by the nodes over the instance. A node renders silence while it holds:
+/// did not take the graph's: published by the instance with its refusal
+/// ([`Instance::refuse`]) and cleared with the rate taken
+/// ([`Instance::restored`]), and readable with no lock by the nodes over the
+/// instance. A node renders silence while it holds:
 /// a plugin at the wrong rate would sound pitch-shifted.
 #[derive(Debug, Default)]
 pub(super) struct Silenced(AtomicBool);
@@ -693,8 +697,8 @@ impl<L: Loaded> Instance<L> {
             None => {
                 // The rate was asked for again: what it settles at is the
                 // rate the graph runs at, whichever the plugin ran at.
-                if let Some(refused) = self.rate_refused.as_mut() {
-                    refused.running = None;
+                if let Some(refused) = self.rate_refused {
+                    self.refuse(None, refused.told);
                 }
                 self.settle();
                 Ok(())
@@ -741,14 +745,15 @@ impl<L: Loaded> Instance<L> {
                     RateRefusalCause::RolledBack { running, .. } => Some(*running),
                     _ => None,
                 };
-                self.rate_refused = Some(RefusedRate { running });
-                self.silenced.set(true);
+                self.refuse(running, true);
                 self.reports
                     .push(PluginInvalidation::RateRefused(RateRefusal::new(
                         rate, cause,
                     )));
             }
             Trouble::Stuck { reason } => {
+                // Running as it was, at a rate the graph has left.
+                self.refuse(Some(self.wanted().rate()), false);
                 self.reports.push(PluginInvalidation::Stuck {
                     reason: reason.to_string(),
                 });
@@ -757,12 +762,24 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// The plugin runs again after refusing a rate: reported once.
+    /// The plugin does not run at the graph's rate, and meanwhile at `running`
+    /// (`None`: deactivated): the nodes render silence. The one place a
+    /// refusal is stored and published.
+    pub(super) fn refuse(&mut self, running: Option<SampleRate>, told: bool) {
+        self.rate_refused = Some(RefusedRate { running, told });
+        self.silenced.set(true);
+    }
+
+    /// The plugin runs at the graph's rate again: the nodes render, and the
+    /// host is told once when it was told of the refusal. The one place a
+    /// refusal is cleared and published.
     fn restored(&mut self) {
-        if self.rate_refused.take().is_some() {
-            self.silenced.set(false);
+        if let Some(refused) = self.rate_refused.take()
+            && refused.told
+        {
             self.reports.push(PluginInvalidation::RateRestored);
         }
+        self.silenced.set(false);
     }
 
     /// What the control side has not yet been told about the plugin, once: a
@@ -1125,7 +1142,7 @@ mod tests {
             matches!(reports.as_slice(), [PluginInvalidation::Stuck { .. }]),
             "{reports:?}"
         );
-        assert!(instance.rate_refused.is_none());
+        assert!(instance.silenced().holds(), "the graph has left the rate");
         assert!(instance.renders(), "as it was");
     }
 

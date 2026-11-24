@@ -154,7 +154,7 @@ where
         if this.owed_lost > 0 {
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
-        if this.rate_refused || this.silenced.holds() {
+        if this.silenced.holds() {
             // The plugin was not told this node's rate (`set_rate`), or runs at
             // the rate it kept after refusing it: silence, not audio at another
             // rate. A Processor the control side recalls is still handed back.
@@ -788,7 +788,7 @@ mod owed_tests {
         let (fork, refused) = std::thread::spawn(move || {
             let mut fork = fork;
             fork.set_rate(SampleRate::SR_96K);
-            let refused = fork.rate_refused;
+            let refused = fork.silenced.holds();
             (fork, refused)
         })
         .join()
@@ -799,7 +799,7 @@ mod owed_tests {
         let mut fork = fork;
         fork.set_rate(SampleRate::SR_96K);
         assert!(
-            fork.rate_refused,
+            fork.silenced.holds(),
             "a prepare off the main thread cannot clear it"
         );
     }
