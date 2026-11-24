@@ -10,14 +10,13 @@ use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
-use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, TextKind, Tick,
-    TimelineDrop, Track, TrackPart, TracksError,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, StandardMidiFile,
+    TextKind, Tick, TimelineDrop, Track, TracksError,
 };
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus,
-    TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
+    Address, Message, MidiChannel, MidiGroup, NoteNumber, SysexStatus, TicksPerQuarterNote, U7,
+    Ump, Voice1,
 };
 use tutti_units::{Beat, Bpm};
 
@@ -36,7 +35,7 @@ fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
     )
 }
 
-fn file(tracks: Vec<Track>) -> MidiFile {
+fn file(tracks: Vec<Track>) -> StandardMidiFile {
     let [track] = tracks.as_slice() else {
         return crate::common::format1(SMF_DIVISION, tracks).unwrap();
     };
@@ -426,10 +425,9 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
 }
 
 /// A divided message with a byte of 128 or more is dropped whole, each part
-/// listed as `NotSevenBit`, and a Clip File packet no definition covers is
-/// listed as `UnknownPacket`.
+/// listed as `NotSevenBit`.
 #[test]
-fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
+fn an_eight_bit_divided_message_is_listed() {
     let part = FileEvent::SysEx(common::start(&[1]));
     let end = FileEvent::Escape(vec![0x90, 0xF7].into());
     let track = Track::new()
@@ -447,49 +445,6 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
             (beat(10.0), end, TimelineDrop::NotSevenBit),
         ]
     );
-    // Message type 0x6 is reserved: nothing decodes it.
-    let reserved = Ump([0x6001_2345, 0, 0, 0]);
-    let known = Message::Midi2(
-        MidiChannel::FIRST.into(),
-        Voice2::ChannelPressure(tutti_ump::ControlValue::MIN),
-    );
-    let clip = read_bytes(encoded(
-        &MidiFile::clip(
-            DIVISION,
-            Track::new()
-                .push(Tick(0), FileEvent::Unknown(tutti_ump::Unknown(reserved)))
-                .unwrap()
-                .push(Tick(0), known)
-                .unwrap(),
-        )
-        .unwrap(),
-    ))
-    .unwrap();
-    let timeline = metrical(&clip).timeline();
-    assert_eq!(timeline.packets.len(), 1);
-    assert_eq!(timeline.dropped.len(), 1);
-    assert_eq!(timeline.dropped[0].2, TimelineDrop::UnknownPacket);
-}
-
-/// A Clip File's packets are the timeline as they are stored (a MIDI 2.0 note
-/// stays MIDI 2.0), and its configuration header is not on it.
-#[test]
-fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
-    let note = Message::Midi2(
-        MidiChannel::FIRST.into(),
-        Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
-    );
-    let track = Track::new()
-        .profile_on(ProfileOnRequest {
-            target: ProfileTarget::Group,
-            profile: ProfileId::MPE,
-        })
-        .push(Tick(240), note)
-        .unwrap();
-    assert!(!track.header().is_empty());
-    let f = MidiFile::clip(DIVISION, track).unwrap();
-    let line: Vec<(Beat, Ump)> = metrical(&f).timeline().packets;
-    assert_eq!(line, [(Beat::new(0.5), Ump::from(note))]);
 }
 
 // ---- the tempo map ---------------------------------------------------------
@@ -518,7 +473,7 @@ fn the_tempo_map_is_one_shared_value() {
 /// tick that broke it.
 #[test]
 fn a_refused_track_list_names_the_rule_and_where() {
-    let config = |r: Result<MidiFile, TracksError>| r.expect_err("the list is refused");
+    let config = |r: Result<StandardMidiFile, TracksError>| r.expect_err("the list is refused");
     assert_eq!(
         config(crate::common::format2(SMF_DIVISION, vec![])),
         TracksError::NoTracks
@@ -533,7 +488,6 @@ fn a_refused_track_list_names_the_rule_and_where() {
         config(crate::common::format0(SMF_DIVISION, t)),
         TracksError::Refused {
             track: 0,
-            part: TrackPart::Events,
             refusal: Refusal::SmfGroup
         }
     );
@@ -559,7 +513,7 @@ fn a_file_round_trips_through_a_slice() {
     assert_eq!(read_bytes(&out).unwrap(), f);
     // Bytes of neither container are refused.
     assert!(matches!(
-        read_bytes(b"RIFF...."),
+        MidiFile::from_bytes(b"RIFF...."),
         Err(ReadError::UnknownFormat)
     ));
 }

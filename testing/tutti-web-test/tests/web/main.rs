@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use tutti::codec::{read_wave, write_wave};
 use tutti::measure::PeakConfig;
+use tutti::midi::MidiFile;
 use tutti::sampler::StreamStart;
 use tutti::session::{BackgroundWork, SamplerError};
 use tutti::{
@@ -108,8 +109,11 @@ async fn a_midi_file_loaded_from_bytes_has_its_notes() {
 
     let mut session = session();
     let loaded = session.midi().load_midi(bytes).await.expect("loads");
-    assert_eq!(loaded.file().tracks().len(), 1);
-    assert_eq!(loaded.file().tracks()[0].notes().len(), 2);
+    let MidiFile::Standard(file) = loaded.file() else {
+        panic!("a Standard MIDI File");
+    };
+    assert_eq!(file.tracks().len(), 1);
+    assert_eq!(file.tracks()[0].notes().len(), 2);
     assert_eq!(loaded.track(0).unwrap().events.len(), 4);
 }
 

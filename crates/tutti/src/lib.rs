@@ -883,7 +883,7 @@ pub mod plugin {
 }
 
 /// The names of the common MIDI path in one place:
-/// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
+/// a file (`MidiFile`, which is a `StandardMidiFile` or a `ClipFile`; `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
@@ -929,8 +929,9 @@ pub mod midi {
         SysEx, TextKind, Timebase, TimelineDrop,
     };
     pub use tutti_midi_file::{
-        ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
-        WriteError,
+        ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipRefusal,
+        ClipSequence, ClipTimeline, ReadError, Refusal, SmfParseError, SmfReadError,
+        StandardMidiFile, ToClipError, TracksError, WriteError,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -1008,10 +1009,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
-        FollowMachineControl, FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi,
-        LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink,
-        NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause,
+        AnyNode, ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl,
+        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
+        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
+        NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause, Unplayed,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

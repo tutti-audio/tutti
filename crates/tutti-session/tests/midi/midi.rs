@@ -241,7 +241,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 #[test]
 fn a_loaded_track_plays_its_events_at_their_beats() {
     use tutti_midi_file::SmfDivision;
-    use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
+    use tutti_midi_file::{Layout, LeadTrack, StandardMidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(960),
@@ -250,7 +250,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
         NoteNumber::of(62),
         U7::of(100),
     );
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         SmfDivision::per_quarter(480),
         Layout::Format0(LeadTrack::new(track)),
     )
