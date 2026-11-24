@@ -85,7 +85,7 @@ fn render(unit: &mut Hand, events: &[Ump], frames: usize) -> Vec<f32> {
 }
 
 /// RMS of the organ note after `events`, from 0.25 s to 0.5 s.
-fn held_rms(events: &[Ump]) -> f32 {
+fn held_rms(events: &[Ump]) -> f64 {
     let out = render(&mut organ(), events, 22_050);
     rms(&out[11_025..])
 }
@@ -168,7 +168,7 @@ fn control_change_7_reaches_the_synth_at_its_value() {
     ]);
     assert!(full > 0.001);
     for v in [32u8, 64, 96, 120] {
-        let want = (f32::from(v) / 127.0).powi(2);
+        let want = (f64::from(v) / 127.0).powi(2);
         // M2-115 §3: a 7-bit value is left-justified in 32 bits (shift 25).
         let wide = u32::from(v) << 25;
         let cases = [

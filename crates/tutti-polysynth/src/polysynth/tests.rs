@@ -3151,7 +3151,7 @@ fn device_control(device: u8, sub_id: u8, lsb: u8, msb: u8) -> Vec<u8> {
 /// The RMS of each output channel over the last of two blocks of 4410 frames
 /// (a tenth of a second: a whole number of cycles of a 440 Hz sine) after
 /// `events`, the note being at its sustain.
-fn rms_after(synth: &mut Hand, events: &[Ump]) -> (f32, f32) {
+fn rms_after(synth: &mut Hand, events: &[Ump]) -> (f64, f64) {
     queue_midi(synth, events);
     let (mut left, mut right) = (vec![0.0; 4410], vec![0.0; 4410]);
     for _ in 0..2 {
@@ -3175,7 +3175,7 @@ fn master_volume_scales_the_output_by_the_square_of_the_value() {
         &mut s,
         &midi::sysex_packets(0, &device_control(0x7F, 0x01, 0x00, 0x40)),
     );
-    let expected = (8192.0_f32 / 16383.0).powi(2);
+    let expected = (8192.0_f64 / 16383.0).powi(2);
     assert!(
         (after / before - expected).abs() < 0.01,
         "{} against {expected}",
@@ -3237,11 +3237,11 @@ fn a_master_volume_change_ramps_and_does_not_click() {
     heard.extend_from_slice(&left);
     let step = heard
         .windows(2)
-        .map(|w| (w[1] - w[0]).abs())
-        .fold(0.0, f32::max);
+        .map(|w| f64::from((w[1] - w[0]).abs()))
+        .fold(0.0, f64::max);
     // A 440 Hz sine of peak `before * sqrt 2` at 44.1 kHz moves at most
     // 2 pi 440 / 44100 of its peak a frame.
-    let slope = 2.0 * std::f32::consts::PI * 440.0 / 44_100.0 * before * 2.0_f32.sqrt();
+    let slope = 2.0 * std::f64::consts::PI * 440.0 / 44_100.0 * before * 2.0_f64.sqrt();
     assert!(step < slope * 1.5, "{step} against {slope}");
     assert!(
         heard.iter().take(16).any(|s| s.abs() > 0.0) && heard.last().unwrap().abs() < 1e-3,

@@ -79,14 +79,14 @@ impl Rig {
 }
 
 fn noise(seed: u32, frames: usize) -> Vec<f32> {
-    tutti_fixtures::noise(seed, frames)
+    tutti_fixtures::noise::<f32>(seed, frames)
         .into_iter()
         .map(|x| 0.5 * x)
         .collect()
 }
 
 fn impulse() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(tutti_units::Samples::new(BLOCK))
+    tutti_fixtures::signal::impulse::<f32>(tutti_units::Samples::new(BLOCK))
 }
 
 fn finite(d: &Driven) -> usize {

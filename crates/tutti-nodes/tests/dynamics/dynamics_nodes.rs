@@ -22,7 +22,7 @@ const SR: SampleRate = SampleRate::SR_48K;
 const GRID: usize = 16;
 
 fn noise(seed: u32, frames: usize, level: f32) -> Vec<f32> {
-    tutti_fixtures::noise(seed, frames)
+    tutti_fixtures::noise::<f32>(seed, frames)
         .into_iter()
         .map(|x| level * x)
         .collect()

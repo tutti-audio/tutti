@@ -1,9 +1,8 @@
 use super::*;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::Samples;
+use tutti_units::{Hz, Samples};
 
 const EPS: f64 = f64::EPSILON;
-const TAU: f64 = core::f64::consts::TAU;
 
 fn rate() -> SampleRate {
     SampleRate::new(192_000.0).expect("a rate")
@@ -45,13 +44,16 @@ fn run(s: &mut Hysteresis<f64>, x: &[f64]) -> Vec<f64> {
 
 /// `periods` periods of a unit sine of `per` samples each.
 fn sine(per: usize, periods: usize) -> Vec<f64> {
-    (0..per * periods)
-        .map(|i| (TAU * i as f64 / per as f64).sin())
-        .collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(1.0),
+        tutti_units::Amplitude::new(1.0),
+        SampleRate::of(per as f64),
+        Samples::new(per * periods),
+    )
 }
 
 fn amplitude(drive: f64) -> f64 {
-    10f64.powf(drive / 20.0)
+    Db::new(drive).to_amplitude().get()
 }
 
 // The oracle: the model's equation as written in the module's documentation, with the

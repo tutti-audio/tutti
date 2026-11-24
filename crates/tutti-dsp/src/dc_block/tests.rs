@@ -189,7 +189,7 @@ fn reset_clears_the_state() {
 /// it by far more than 2^-45.
 #[test]
 fn an_f64_blocker_is_the_difference_equation_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (fc, len) = (10.0f64, 400usize);
     let r = (-std::f64::consts::TAU * fc / RATE.get()).exp();
     assert_ne!(r, f64::from(r as f32), "the pole needs more than f32 holds");
@@ -202,7 +202,7 @@ fn an_f64_blocker_is_the_difference_equation_in_f64() {
         want[n] = y1;
     }
     let y = run(&mut at(fc, RATE), &[x]).remove(0);
-    assert_close_f64(&y, &want, 2.0f64.powi(-45));
+    assert_close(&y, &want, 2.0f64.powi(-45));
 }
 
 /// A 1 Hz corner at 192 kHz, the blocker's range extreme, run in `f32`: the gain at the corner

@@ -359,7 +359,7 @@ pub mod nodes {
             HysteresisControls, HysteresisKernel, HysteresisSet, KarplusStrongKernel,
             KarplusStrongSet, Kernel, KernelConfig, KernelNode, LadderControls, LadderKernel,
             LadderSet, LevellerControls, LevellerKernel, LevellerSet, LimiterControls,
-            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet,
+            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet, ModHost,
             ModalBankKernel, ModalBankSet, MultibandControls, NoControls, PhaserControls,
             PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet, PlateControls,
             PlateKernel, PlateSet, ReconcileError, RingModControls, RingModKernel, RingModSet,
@@ -615,9 +615,9 @@ pub mod session {
     ))]
     pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
-        AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
-        ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
-        RouteError, RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
+        AutomationTake, MixRef, ModInput, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget,
+        Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
+        RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{

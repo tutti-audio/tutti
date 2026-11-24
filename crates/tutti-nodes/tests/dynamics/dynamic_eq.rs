@@ -23,7 +23,7 @@ const RUN: usize = 24_000;
 const WINDOW: usize = 4_800;
 
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    Db::new(db).to_amplitude().get()
 }
 
 /// The amplitude of the component at `f` in the last [`WINDOW`] frames of `x`, by correlation
@@ -40,7 +40,7 @@ fn component(x: &[f32], f: f64) -> f64 {
 }
 
 fn db(ratio: f64) -> f64 {
-    20.0 * ratio.log10()
+    Amplitude::new(ratio).to_db().get()
 }
 
 /// The compressor's reduction at `level` dB, positive.

@@ -65,7 +65,7 @@ const _: () = {
 fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     let s = session();
     // 1 kHz at 48 kHz: 48 samples a cycle, a sample on every crest.
-    let samples = signal::sine(
+    let samples = signal::sine::<f32>(
         Hz::new(1000.0),
         Amplitude::new(0.5),
         RATE,
@@ -83,7 +83,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
     let s = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sine.wav");
-    let samples = signal::sine(
+    let samples = signal::sine::<f32>(
         Hz::new(1000.0),
         Amplitude::new(0.5),
         RATE,

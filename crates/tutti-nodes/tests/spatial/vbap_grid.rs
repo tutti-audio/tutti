@@ -55,10 +55,7 @@ fn render(
 }
 
 fn bits(channels: &[Vec<f32>]) -> Vec<Vec<u32>> {
-    channels
-        .iter()
-        .map(|c| c.iter().map(|s| s.to_bits()).collect())
-        .collect()
+    tutti_fixtures::signal::plane_bits(channels)
 }
 
 /// A panner of `bed`, seated by one grid segment at front-centre, then moved:

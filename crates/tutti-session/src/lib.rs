@@ -213,7 +213,6 @@ pub use error::{
 pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
-pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{

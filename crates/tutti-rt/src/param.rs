@@ -127,6 +127,13 @@ impl<U: Unit<Raw = f64>> Param<U> {
         self.inner.store(v.to_raw(), Ordering::Release);
     }
 
+    /// Whether both are handles on the same cell.
+    #[inline]
+    #[must_use]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Returns another handle on the same cell, for control-thread automation.
     ///
     /// Clones the `Arc`, so keep it off the audio path. Same as `clone`, but

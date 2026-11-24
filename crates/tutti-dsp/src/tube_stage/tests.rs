@@ -42,9 +42,12 @@ fn run(s: &mut TubeStage<f64>, x: &[f64]) -> Vec<f64> {
 }
 
 fn sine(f: f64, amplitude: f64, n: usize) -> Vec<f64> {
-    (0..n)
-        .map(|i| amplitude * (core::f64::consts::TAU * f * i as f64 / FS).sin())
-        .collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        tutti_units::Amplitude::new(amplitude),
+        rate(),
+        Samples::new(n),
+    )
 }
 
 /// Koren's plate current written from the paper with the textbook `ln(1 + e^z)` (past `z = 30`

@@ -7,7 +7,7 @@ use super::*;
 /// closed form `t - (t - y0) * (1 - c)^n` to `2^-45`, a bound an `f32` state cannot meet.
 #[test]
 fn an_f64_smoother_follows_the_closed_form_of_the_one_pole() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (y0, t) = (wide_signal(1)[0], wide_signal(40)[39]);
     let c = 0.125_f64;
     let mut y = y0;
@@ -18,7 +18,7 @@ fn an_f64_smoother_follows_the_closed_form_of_the_one_pole() {
         })
         .collect();
     let want: Vec<f64> = (1..=32).map(|n| t - (t - y0) * (1.0 - c).powi(n)).collect();
-    assert_close_f64(&got, &want, 2f64.powi(-45));
+    assert_close(&got, &want, 2f64.powi(-45));
 }
 
 /// The `f32` step is the same expression: a tenth of the way up from 0 is `0.1_f32`'s product,

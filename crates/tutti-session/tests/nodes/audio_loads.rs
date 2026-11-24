@@ -3,7 +3,6 @@
 //! `changed` reads the file's metadata, and a streamed load opens a stream.
 
 use crate::offline::offline_48k;
-use std::f64::consts::TAU;
 use std::fs::File;
 use std::future::IntoFuture;
 use std::io;
@@ -12,10 +11,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
+use tutti_buffers::Float;
 use tutti_platform::{Asset, Open, ReadSeek};
 use tutti_sampler::StreamStart;
 use tutti_session::{AudioData, LoadAudio, LoadError, LoadingAudio, Tier};
-use tutti_units::SampleRate;
+use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 /// The sine's frequency: a period is a whole 48 frames.
@@ -28,13 +28,18 @@ fn dir() -> tempfile::TempDir {
     tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temp dir")
 }
 
-/// Frame `n` of the sine, in `f64`.
-fn sine(n: usize) -> f64 {
-    AMPLITUDE * (TAU * SINE_HZ * n as f64 / RATE).sin()
+/// The file's [`FRAMES`] frames of the sine.
+fn sine<F: Float>() -> Vec<F> {
+    tutti_fixtures::signal::sine(
+        Hz::new(SINE_HZ),
+        Amplitude::new(AMPLITUDE),
+        SampleRate::of(RATE),
+        Samples::new(FRAMES),
+    )
 }
 
 fn write_sine(path: &Path) {
-    let samples: Vec<f32> = (0..FRAMES).map(|n| sine(n) as f32).collect();
+    let samples: Vec<f32> = sine();
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
 }
 
@@ -64,8 +69,9 @@ fn load_audio_is_awaited_on_any_thread() {
         panic!("a resident load");
     };
     assert_eq!(wave.len().get(), FRAMES);
-    for n in 0..FRAMES {
-        let error = (f64::from(wave.at(0, n)) - sine(n)).abs();
+    let want: Vec<f64> = sine();
+    for (n, want) in want.into_iter().enumerate() {
+        let error = (f64::from(wave.at(0, n)) - want).abs();
         assert!(error < 1e-7, "frame {n} is {error} off the sine");
     }
 }
