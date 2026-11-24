@@ -739,17 +739,12 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// Whether the plugin runs at less than the host wants: another rate, a
-    /// block ceiling above the one it was told, or (for a format that follows
-    /// it) another callback size.
+    /// Whether the plugin runs at less than the host wants
+    /// ([`State::behind`]); the callback size counts for a Processor that
+    /// retunes live.
     fn behind(&self) -> bool {
-        let (Some(wanted), Some(applied)) = (self.state.wanted(), self.state.applied()) else {
-            return false;
-        };
-        wanted.rate() != applied.rate()
-            || wanted.max_block().get() > applied.max_block().get()
-            || (<L::Processor as Processor>::FOLLOWS_QUANTUM
-                && wanted.quantum() != applied.quantum())
+        self.state
+            .behind(<L::Processor as Processor>::RETUNE.is_some())
     }
 
     /// Activates the plugin again at what the host wants, when it runs at less
@@ -1024,7 +1019,7 @@ impl<L: Loaded> Instance<L> {
         self.origin.as_ref()
     }
 
-    /// The rate a Processor that follows the graph (`Processor::retune`) took
+    /// The rate a Processor that follows the graph (`Processor::RETUNE`) took
     /// live: the activation a later reconfiguration starts from is at it, and
     /// a refusal of the rate before it is over.
     pub(super) fn retuned(&mut self) {

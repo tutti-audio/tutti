@@ -151,7 +151,9 @@ impl Prepare {
         self.max_block
     }
 
-    /// The device's callback size, when one is known.
+    /// The device's callback size, when one is known. A [`MaxBlock`], as
+    /// `tutti_graph::Prepare::quantum` is: the longest callback is the same
+    /// quantity as the longest block.
     #[must_use]
     pub const fn quantum(&self) -> Option<MaxBlock> {
         self.quantum
@@ -167,6 +169,33 @@ impl Prepare {
     #[must_use]
     pub const fn mode(&self) -> RenderMode {
         self.mode
+    }
+}
+
+/// The fields of a [`Prepare`] a live retune takes ([`Processor::RETUNE`](crate::Processor::RETUNE)):
+/// the one place they are named, for what a retune applies and for what still
+/// needs an activation.
+#[derive(Clone, Copy, PartialEq)]
+struct Live {
+    rate: SampleRate,
+    max_block: MaxBlock,
+    quantum: Option<MaxBlock>,
+}
+
+impl Prepare {
+    fn live(&self) -> Live {
+        Live {
+            rate: self.rate,
+            max_block: self.max_block,
+            quantum: self.quantum,
+        }
+    }
+
+    fn with_live(mut self, live: Live) -> Self {
+        self.rate = live.rate;
+        self.max_block = live.max_block;
+        self.quantum = live.quantum;
+        self
     }
 }
 
@@ -720,11 +749,32 @@ impl State {
         }
     }
 
-    /// Records that the Processor took what the host wants without
-    /// restarting: a later restart activates at it. For a Processor retuned
-    /// live.
+    /// Records that the Processor took live what a retune takes of what the
+    /// host wants (rate, block ceiling, callback size): a later restart
+    /// activates at it. Every other field of `applied` stays as it was, so a
+    /// difference in one remains ([`behind`](Self::behind)).
     pub fn retuned(&mut self) {
-        self.applied = self.wanted();
+        if let (Some(applied), Some(wanted)) = (self.applied, self.wanted()) {
+            self.applied = Some(applied.with_live(wanted.live()));
+        }
+    }
+
+    /// Whether the plugin runs at less than the host wants and only an
+    /// activation can give it: another rate, a block ceiling above the one it
+    /// was told, another width, or (`follows_quantum`: its Processor retunes
+    /// live) another callback size. The render mode is not compared: a mode is
+    /// asked for by its own call, and a plugin without one keeps it only as a
+    /// record.
+    #[must_use]
+    pub fn behind(&self, follows_quantum: bool) -> bool {
+        let (Some(wanted), Some(applied)) = (self.wanted(), self.applied) else {
+            return false;
+        };
+        let (w, a) = (wanted.live(), applied.live());
+        w.rate != a.rate
+            || w.max_block.get() > a.max_block.get()
+            || (follows_quantum && w.quantum != a.quantum)
+            || wanted.format != applied.format
     }
 
     /// The latency last reported.

@@ -522,10 +522,12 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     let (ipc, server) = mock();
     let received = Arc::clone(&server.received);
     let (mut processor, _controller) = activate(ipc, 48);
-    assert_eq!(
-        processor.retune(SampleRate::SR_96K, Samples::new(60), Some(Samples::new(40))),
-        IpcProcessor::FOLLOWS_QUANTUM,
-        "retune takes the quantum exactly when the Processor says it follows it"
+    let retune = IpcProcessor::RETUNE.expect("a served Processor retunes live");
+    retune(
+        &mut processor,
+        SampleRate::SR_96K,
+        Samples::new(60),
+        Some(Samples::new(40)),
     );
     assert_eq!(processor.chunk(), NonZeroUsize::new(40), "the quantum");
     assert_eq!(
@@ -533,7 +535,7 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
         Samples::new(40),
         "one chunk of latency"
     );
-    assert!(processor.retune(SampleRate::SR_96K, Samples::new(30), None));
+    retune(&mut processor, SampleRate::SR_96K, Samples::new(30), None);
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
     assert!(
         received.wait_for(|log| log.iter().any(

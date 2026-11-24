@@ -26,7 +26,7 @@
 //! a caller with no token reaches the same bridge through
 //! [`Ipc::bridge`] / [`IpcController::bridge`]. Nothing in this module hops to
 //! the main thread. A rate, a block ceiling and a quantum are taken without a
-//! restart through [`Processor::retune`](tutti_plugin_types::Processor::retune), which is what lets a graph node
+//! restart through [`Processor::RETUNE`](tutti_plugin_types::Processor::RETUNE), which is what lets a graph node
 //! prepare a served plugin off the main thread.
 //!
 //! # Reopening
@@ -689,7 +689,7 @@ impl Ipc {
     /// Watches this plugin as a fork: the returned [`OfflineWait`] holds what
     /// the pipeline latches and the latency the fork's graph is planned
     /// against. A retune settles the server's queued rate and mode changes and
-    /// records that latency (`IpcProcessor::retune`), live as offline: the
+    /// records that latency (`IpcProcessor::retune_live`), live as offline: the
     /// health reports a later move as a fault.
     ///
     /// The pipeline waits for each chunk, up to the configuration's timeout,
@@ -997,7 +997,7 @@ impl Loaded for Ipc {
 
     /// Builds the pipeline for `prepare`'s block and the Processor over it.
     /// The server is told no rate here: it was launched at one, and a node
-    /// that follows another tells it through [`Processor::retune`](tutti_plugin_types::Processor::retune).
+    /// that follows another tells it through [`Processor::RETUNE`](tutti_plugin_types::Processor::RETUNE).
     fn activate(
         self,
         _main: MainThreadMarker,

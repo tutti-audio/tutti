@@ -319,6 +319,7 @@ fn lifecycle::Prepare::with_mode
 fn lifecycle::Prepare::with_quantum
 fn lifecycle::Prepare::with_rate
 fn lifecycle::State::applied
+fn lifecycle::State::behind
 fn lifecycle::State::has_backlog
 fn lifecycle::State::is_busy
 fn lifecycle::State::is_parked

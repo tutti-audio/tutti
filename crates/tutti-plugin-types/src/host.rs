@@ -598,34 +598,25 @@ pub trait Processor: Send {
     /// [`Controller::latency`] figure): the served pipeline's chunk, which it
     /// ships to another process and plays the one before. `0`, the default,
     /// for a Processor that renders in place. Read from the node's `prepare`,
-    /// after [`retune`](Self::retune), so a graph compiled from the node's
+    /// after [`RETUNE`](Self::RETUNE), so a graph compiled from the node's
     /// shape compensates for it.
     fn latency(&self) -> Samples {
         Samples::new(0)
     }
 
-    /// Whether [`retune`](Self::retune) takes the block ceiling and the device
-    /// quantum live: the same fact, so an implementation that overrides
-    /// `retune` sets it `true` and one on the default does not. A plugin whose
-    /// Processor does not is not restarted for a change of the quantum.
-    const FOLLOWS_QUANTUM: bool = false;
-
-    /// Follows the graph's rate, block ceiling and device quantum without a
-    /// restart, for a Processor that can (the served pipeline: it tells its
-    /// server the rate by a queued command and settles its chunk from the
-    /// block and quantum). `true` when it took them, so the graph node does
-    /// not deactivate and activate the plugin for them; `false`, the default,
-    /// when only a [`Lifecycle`](crate::Lifecycle) reconfiguration can.
+    /// How this Processor follows the graph's rate, block ceiling and device
+    /// quantum without a restart: `None`, the default, when only a
+    /// [`Lifecycle`](crate::Lifecycle) reconfiguration can, and the control
+    /// side then also restarts the plugin for a change of the quantum. The
+    /// served pipeline sets it: it tells its server the rate by a queued
+    /// command and settles its chunk from the block and quantum.
     ///
     /// Called from the node's `prepare`, which runs off the audio thread with
     /// the node out of any executor, so it may allocate; it starts the
     /// Processor over (its chunk phase and any chunk in flight), as a
-    /// [`reset`](Self::reset) does. Needs no [`MainThreadMarker`],
-    /// which is why the served hosting can take it from any thread.
-    fn retune(&mut self, rate: SampleRate, max_block: Samples, quantum: Option<Samples>) -> bool {
-        let _ = (rate, max_block, quantum);
-        false
-    }
+    /// [`reset`](Self::reset) does. Needs no [`MainThreadMarker`], which is why
+    /// the served hosting can take it from any thread.
+    const RETUNE: Option<fn(&mut Self, SampleRate, Samples, Option<Samples>)> = None;
 }
 
 /// The main-thread side of a plugin that is rendering.

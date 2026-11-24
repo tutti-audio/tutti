@@ -693,23 +693,25 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     }
 
     /// Offers `p`'s rate, block ceiling and quantum to the Processor
-    /// ([`Processor::retune`]) and reads the latency it adds afterwards.
+    /// ([`Processor::RETUNE`]) and reads the latency it adds afterwards.
     /// `true` when it took them live: the plugin is told no restart, needs no
     /// main thread, and the instance is not reconciled. `false` when
     /// it has none in hand or does not follow the graph (an in-process one).
     pub(super) fn retune(&mut self, p: &tutti_graph::Prepare) -> bool {
         let rate = p.sample_rate();
         let max_block = Samples::new(p.max_block().get());
+        let Some(retune) = <L::Processor as Processor>::RETUNE else {
+            return false;
+        };
         let Some(processor) = self.rt.poll(Processor::stop) else {
             return false;
         };
-        if !processor.retune(
+        retune(
+            processor,
             rate,
             max_block,
             p.quantum().map(tutti_buffers::MaxBlock::samples),
-        ) {
-            return false;
-        }
+        );
         self.pipeline = processor.latency();
         if let Some(controls) = &self.controls {
             // What a host holding the controls reads as the declared latency

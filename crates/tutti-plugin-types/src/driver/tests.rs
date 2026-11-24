@@ -207,12 +207,6 @@ fn a_refused_rate_leaves_the_plugin_loaded_and_a_later_rate_revives_it() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert_eq!(rig.state.stage(), Stage::Active);
     rig.render(64).unwrap();
-    let processor = rig.lifecycle.processor().expect("the Processor is held");
-    assert_eq!(
-        processor.retune(SampleRate::SR_48K, Samples::new(64), None),
-        crate::fake::FakeProcessor::FOLLOWS_QUANTUM,
-        "retune takes the quantum exactly when the Processor says it follows it"
-    );
 }
 
 /// **A refusal that hands no plugin back poisons, after the host was told.**
