@@ -19,7 +19,8 @@ use tutti_modulation::{
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
 use tutti_units::{
-    Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
+    Frame, Normalized, ParamAddr, ParamId, SamplePosition, SampleSpan, Samples, Tail, UnitAddr,
+    UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -247,9 +248,10 @@ impl LaneControls {
     /// without publishing; returns how many are still held. Control thread,
     /// every tick of its owner (the [`Modulation`](crate::Modulation)
     /// reconciler's [`reclaim`](crate::Modulation::reclaim)); with nothing
-    /// retired it is a lock and a length check. A foreign lane's owner calls
+    /// retired it is a lock and a length check. Not public: a lane's owner
+    /// sweeps it through the reconciler, and a foreign lane's through
     /// [`ForeignLaneControls::reclaim`], which frees its ranges too.
-    pub fn reclaim(&self) -> usize {
+    pub(crate) fn reclaim(&self) -> usize {
         self.0.program.reclaim()
     }
 
@@ -844,6 +846,13 @@ impl<K: LaneKind> Block<'_, K> {
         p: usize,
         ramp: bool,
     ) -> Result<(), Overflow> {
+        // Distances to the next point (`d`, the wrap, a corner, an input's
+        // arrival) are fractional frame counts held as bare `f64` in this
+        // function, and leave it as `Samples` or a `Frame`. A `SampleSpan`
+        // cannot carry them through: the walk needs "no next point" (an
+        // infinite distance), the nearest whole frame and how far off it is,
+        // the ratio of two spans, and a signed difference of two positions,
+        // and `FramesPerBeat::frames_in` hands its frames back bare.
         let env = self.cx.env;
         let off = Offset::new(Samples::new(p), env.block_len).unwrap_or(Offset::ZERO);
         let t = self.cx.transport_at(off);
@@ -1033,7 +1042,7 @@ impl<K: LaneKind> Block<'_, K> {
         // the line on the frame after it, extended along the same line. Each
         // frame before the corner is on the line it was, and the next point
         // replaces the piece on the frame that ends it.
-        let len = SamplePosition::new(d).to_samples_ceil();
+        let len = SampleSpan::clamped(d).to_samples_ceil();
         let v1 = match len.get() as f64 {
             l if l > d && d > 0.0 => self.clamp(v0 + (v1 - v0) * (l / d)),
             _ => v1,

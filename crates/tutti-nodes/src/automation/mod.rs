@@ -28,7 +28,7 @@ pub use control_lane::{
     ControlLaneNode, ForeignLane, ForeignLaneConfig, ForeignLaneControls, LaneControls, LaneKind,
     PortLane, UnitLaneConfig,
 };
-pub use lane::{AutomationLaneConfig, AutomationLaneNode, LiveAutomationLane};
+pub use lane::{AutomationLaneConfig, AutomationLaneNode};
 pub use recording::{AutomationRecorder, RecordMode, RecordingConfig};
 pub use tutti_modulation::Curve;
 
