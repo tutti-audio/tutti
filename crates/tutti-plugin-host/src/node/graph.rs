@@ -154,9 +154,30 @@ where
         if this.owed_lost > 0 {
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
-        if this.rate_refused {
-            // The plugin was not told this node's rate (`set_rate`): silence,
-            // not audio at another rate.
+        if this.silenced.holds() {
+            // The plugin was not told this node's rate (`set_rate`), or runs at
+            // the rate it kept after refusing it: silence, not audio at another
+            // rate. A Processor the control side recalls is still handed back.
+            // The node returns `Silent`, never `Idle`, and has an event input,
+            // so the executor keeps calling it. A note sounding when the mute
+            // begins is cut: the refused change deactivated the plugin and
+            // activated it anew (`HostOp::Reconfigure`), and `Processor::reset`
+            // is called only by this node's `reset`, so nothing resumes it;
+            // the activation that ends the mute starts clear again.
+            let _ = this.rt.poll(Processor::stop);
+            // The MIDI the block carries is not delivered: counted, and the
+            // rest of a SysEx open in it is skipped, as for a block the
+            // plugin did not process.
+            let midi = io
+                .events(this.event_in)
+                .as_slice()
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::Midi(_)))
+                .count() as u64;
+            if midi > 0 {
+                this.lose_midi(midi);
+                io.count_lost(midi);
+            }
             return Status::Silent;
         }
         let ports = this.declared.ports;
@@ -535,8 +556,7 @@ where
             // What a Processor says it lost (none that is not chunked does).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
-                this.params.count_midi_dropped(reported);
-                this.intake.lost();
+                this.lose_midi(reported);
                 io.count_lost(reported);
             }
         }
@@ -546,9 +566,8 @@ where
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,
             // and the rest of every SysEx open in it is skipped.
-            this.params.count_midi_dropped(block_midi as u64);
+            this.lose_midi(block_midi as u64);
             io.count_lost(block_midi as u64);
-            this.intake.lost();
         }
         if let (Some(out), true) = (out, processed) {
             let out_events = &mut this.out.midi_events;
@@ -594,6 +613,7 @@ where
     /// Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
         let mut instance = self.client.inner.lock();
+        *self.client.wake.lock() = Some(wake.clone());
         if let Some(control) = instance.control() {
             control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
         }
@@ -786,7 +806,7 @@ mod owed_tests {
         let (fork, refused) = std::thread::spawn(move || {
             let mut fork = fork;
             fork.set_rate(SampleRate::SR_96K);
-            let refused = fork.rate_refused;
+            let refused = fork.silenced.holds();
             (fork, refused)
         })
         .join()
@@ -797,7 +817,7 @@ mod owed_tests {
         let mut fork = fork;
         fork.set_rate(SampleRate::SR_96K);
         assert!(
-            fork.rate_refused,
+            fork.silenced.holds(),
             "a prepare off the main thread cannot clear it"
         );
     }
