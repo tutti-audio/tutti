@@ -3,7 +3,8 @@
 
 use super::node_op::Flags;
 use super::state::Ring;
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::{AudioSlotId, EventSlotId};
+use crate::compile::plan::Plan;
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
 use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
@@ -14,7 +15,6 @@ use crate::model::gain::{self, SumLane, Weight};
 use crate::node::MAX_PORTS;
 use crate::node::param_event::ParamEvent;
 use tutti_buffers::Float;
-use tutti_units::Samples;
 
 /// An audio delay's ring.
 #[inline]
@@ -100,11 +100,12 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     events: &E,
     list: &[AudioSlotId],
     lanes: &mut [SumLane<F>],
-    gains: &[GainPortOp],
+    gains: &[GainPortOp<EventSlotId>],
     dst: AudioSlotId,
     frames: usize,
-    declick: Samples,
+    plan: &Plan,
 ) {
+    let declick = plan.prepare.declick();
     debug_assert!(!list.is_empty() && list.len() <= MAX_PORTS);
     debug_assert!(lanes.is_empty() || lanes.len() == list.len());
     // Moved on first, for every lane: a silent addend's weight moves too. A
@@ -114,7 +115,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
         let source = gains
             .iter()
             .find(|g| usize::from(g.lane) == k)
-            .map(|g| (g.from, &events.pev(EventSlotId::new(g.slot))[..]));
+            .map(|g| (g.from, &events.pev(g.slot)[..]));
         *w = SumLane::weight(lane, frames, declick, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`

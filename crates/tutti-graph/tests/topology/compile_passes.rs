@@ -235,7 +235,7 @@ fn order(plan: &tutti_graph::Plan) -> Vec<NodeKey> {
     plan.ops()
         .iter()
         .filter_map(|op| match *op {
-            Op::Node { unit, .. } => Some(plan.units()[unit as usize].key),
+            Op::Node { unit, .. } => Some(plan.units()[unit.index()].key),
             _ => None,
         })
         .collect()
@@ -601,8 +601,8 @@ fn feedback_edges_break_cycles() {
     let (plan, _) =
         compile(&valid, &gain_kinds(&[A, B]), &common::prepare(PREP), None).expect("compiles");
     plan.verify().expect("sound");
-    assert_eq!(plan.feedback(PortKind::Audio).len(), 1);
-    assert_eq!(plan.feedback(PortKind::Event).len(), 1);
+    assert_eq!(plan.audio_feedback().len(), 1);
+    assert_eq!(plan.event_feedback().len(), 1);
     let captures = plan
         .ops()
         .iter()
@@ -709,13 +709,13 @@ fn colouring_respects_the_partial_order_not_the_serial_one() {
     let plan = compiled(&t);
     assert_eq!(order(&plan), [A, B, C], "the serial order the test assumes");
     let slot_of = |key: NodeKey| {
-        let unit = plan.units().iter().position(|u| u.key == key).unwrap() as u32;
+        let unit = plan.units().iter().position(|u| u.key == key).unwrap();
         plan.ops()
             .iter()
             .find_map(|op| match *op {
                 Op::Node {
                     unit: u, audio_out, ..
-                } if u == unit => Some(plan.audio_list()[audio_out.start as usize]),
+                } if u.index() == unit => Some(plan.audio_list()[audio_out.start as usize]),
                 _ => None,
             })
             .unwrap()
@@ -831,9 +831,9 @@ fn chains_coarsen_into_one_task() {
     let plan = compiled(&diamond);
     assert!(plan.tasks().len() > 1);
     // Every op is in exactly one task.
-    let mut seen: Vec<u32> = plan.task_ops().to_vec();
+    let mut seen: Vec<usize> = plan.task_ops().iter().map(|o| o.index()).collect();
     seen.sort();
-    assert_eq!(seen, (0..plan.ops().len() as u32).collect::<Vec<_>>());
+    assert_eq!(seen, (0..plan.ops().len()).collect::<Vec<_>>());
 }
 
 /// Placement diffs keys, not shapes: a surviving key keeps its index, a

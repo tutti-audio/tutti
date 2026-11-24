@@ -33,7 +33,7 @@ use std::mem::size_of;
 
 use tutti_buffers::Float;
 
-use crate::compile::ids::{AudioSlotId, Id};
+use crate::compile::ids::{AudioSlotId, Id, Table};
 
 /// `f32` samples a line holds: 16, filling its 64 bytes.
 pub(crate) const LANES: usize = 16;
@@ -120,6 +120,8 @@ pub(crate) fn borrow_sorted<'a, T, S: Id>(
 /// The audio arena: `slots × stride` lines.
 pub(crate) struct Arena<F: Float> {
     lines: Vec<Line>,
+    /// One row per slot: the ids this arena mints.
+    slots: Table<AudioSlotId, ()>,
     /// Lines per slot.
     stride: usize,
     format: PhantomData<fn() -> F>,
@@ -134,9 +136,24 @@ impl<F: Float> Arena<F> {
             .max(1);
         Self {
             lines: vec![Line::zeroed(); slots * stride],
+            slots: Table::filled(slots, ()),
             stride,
             format: PhantomData,
         }
+    }
+
+    /// Channel `c` of an arena that holds one channel per slot (a crossfade's
+    /// scratch), its first `frames` samples.
+    #[inline]
+    pub(crate) fn channel(&self, c: usize, frames: usize) -> &[F] {
+        self.slot(self.slots.id(c).expect("a channel of the arena"), frames)
+    }
+
+    /// [`channel`](Self::channel), mutably.
+    #[inline]
+    pub(crate) fn channel_mut(&mut self, c: usize, frames: usize) -> &mut [F] {
+        let slot = self.slots.id(c).expect("a channel of the arena");
+        self.slot_mut(slot, frames)
     }
 
     /// Slot `s`'s first `frames` samples.
@@ -293,9 +310,11 @@ impl<F: Float> Arena<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Id;
+    use crate::compile::ids::Table;
     fn slot(s: u32) -> AudioSlotId {
-        AudioSlotId::new(s)
+        Table::<AudioSlotId, ()>::filled(8, ())
+            .id(s as usize)
+            .expect("a slot of the arena")
     }
     use crate::node::MAX_PORTS;
 

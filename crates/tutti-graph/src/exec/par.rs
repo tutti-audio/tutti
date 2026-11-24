@@ -88,7 +88,7 @@
 mod access;
 
 use crate::compile::ids::{
-    AudioSlotId, EventSlotId, Id, PlanUnitId, Table as IdTable, TableSlice as IdTableSlice, TaskId,
+    AudioSlotId, EventSlotId, PlanUnitId, Table as IdTable, TableSlice as IdTableSlice,
 };
 use access::{
     Audio, Claimed, ClaimedAudio, ClaimedEvents, Events, Exclusive, ExclusiveAudio, Mode, Table,
@@ -657,7 +657,7 @@ impl<F: Float> Shared<'_, '_, F> {
             };
             let r = catch_unwind(AssertUnwindSafe(|| {
                 self.graph.work(who, self.waits, |t| {
-                    let span = self.frame.plan.tasks[TaskId::new(t)];
+                    let span = self.frame.plan.tasks.as_slice()[t as usize];
                     for &op in &self.frame.plan.task_ops[span.range()] {
                         cx.run_op(&self.frame, &self.frame.plan.program.ops[op]);
                     }
@@ -703,31 +703,17 @@ where
 impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
     /// One op, on this participant's borrows.
     #[inline]
-    fn run_op(&mut self, fx: &Frame<'_, F>, op: &Op) {
+    fn run_op(&mut self, fx: &Frame<'_, F>, op: &Op<AudioSlotId, EventSlotId>) {
         let frames = fx.frames;
         match *op {
             Op::MainInput { channel, dst } => {
                 let (mut a, flags) = self.audio.parts();
-                main_input(
-                    &mut a,
-                    flags,
-                    fx.inputs,
-                    channel,
-                    AudioSlotId::new(dst),
-                    frames,
-                );
+                main_input(&mut a, flags, fx.inputs, channel, dst, frames);
             }
             Op::Delay { delay, src, dst } => {
-                let mut ring = self.rings.one(delay as usize);
+                let mut ring = self.rings.one(delay.index());
                 let (mut a, flags) = self.audio.parts();
-                delay_op(
-                    audio_ring(&mut ring),
-                    &mut a,
-                    flags,
-                    AudioSlotId::new(src),
-                    AudioSlotId::new(dst),
-                    frames,
-                );
+                delay_op(audio_ring(&mut ring), &mut a, flags, src, dst, frames);
             }
             Op::Sum { srcs, dst } => {
                 let (mut a, flags) = self.audio.parts();
@@ -739,9 +725,9 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &fx.plan.program.audio_list[srcs.range()],
                     &mut [],
                     &[],
-                    AudioSlotId::new(dst),
+                    dst,
                     frames,
-                    fx.plan.prepare.declick(),
+                    fx.plan,
                 );
             }
             Op::WeightedSum {
@@ -762,35 +748,28 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &fx.plan.program.audio_list[srcs.range()],
                     &mut lanes,
                     &fx.plan.program.gain_ports[gains.range()],
-                    AudioSlotId::new(dst),
+                    dst,
                     frames,
-                    fx.plan.prepare.declick(),
+                    fx.plan,
                 );
             }
             Op::EventDelay { delay, src, dst } => {
-                let mut ring = self.rings.one(delay as usize);
+                let mut ring = self.rings.one(delay.index());
                 let mut e = self.events.slots();
-                let lost = event_delay_op(
-                    event_ring(&mut ring),
-                    &mut e,
-                    EventSlotId::new(src),
-                    EventSlotId::new(dst),
-                    frames,
-                );
+                let lost = event_delay_op(event_ring(&mut ring), &mut e, src, dst, frames);
                 self.dropped.charge_delay(fx.plan, delay, lost);
             }
             Op::EventMerge { srcs, dst, bound } => {
                 let mut e = self.events.slots();
                 let lost = event_merge_op(
                     &fx.plan.program.event_list[srcs.range()],
-                    EventSlotId::new(dst),
+                    dst,
                     bound,
                     &mut e,
                 );
                 self.dropped.charge_merge(bound, lost);
             }
             Op::Node { unit, .. } => {
-                let unit = PlanUnitId::new(unit);
                 let rec = &fx.plan.nodes.recs[unit];
                 let mut u = self.store.one(rec.store.0 as usize);
                 let u = u
@@ -834,18 +813,18 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 delay,
             } => {
                 let mut out = self.outputs.one(channel as usize);
-                let mut ring = delay.map(|d| self.rings.one(d as usize));
+                let mut ring = delay.map(|d| self.rings.one(d.index()));
                 let (a, flags) = self.audio.parts();
                 output_op(
                     ring.as_mut().map(|r| audio_ring(r)),
                     &mut out[..frames],
                     &a,
                     flags,
-                    AudioSlotId::new(src),
+                    src,
                 );
             }
             Op::Tap { tap, srcs } => {
-                let mut tap = self.taps.one(tap as usize);
+                let mut tap = self.taps.one(tap.index());
                 if let Some(tap) = tap.as_mut() {
                     let (a, _) = self.audio.parts();
                     crate::edges::tap::tap_op::<F, _>(
@@ -858,14 +837,14 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 }
             }
             Op::EventTap { tap, src } => {
-                let mut tap = self.event_taps.one(tap as usize);
+                let mut tap = self.event_taps.one(tap.index());
                 if let Some(tap) = tap.as_mut() {
                     let e = self.events.slots();
-                    crate::edges::event_tap::event_tap_op(tap, &e, EventSlotId::new(src), fx.env);
+                    crate::edges::event_tap::event_tap_op(tap, &e, src, fx.env);
                 }
             }
             Op::Meter { meter, srcs } => {
-                let mut meter = self.meters.one(meter as usize);
+                let mut meter = self.meters.one(meter.index());
                 if let Some(meter) = meter.as_mut() {
                     let (a, flags) = self.audio.parts();
                     crate::edges::meter::meter_op::<F, _, _>(
@@ -878,16 +857,16 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 }
             }
             Op::Capture { feedback, src } => {
-                let mut ring = self.audio_fb.one(feedback as usize);
+                let mut ring = self.audio_fb.one(feedback.index());
                 let ring = ring.as_mut().expect("built by apply");
                 let (a, flags) = self.audio.parts();
-                capture_op(ring, &a, flags, AudioSlotId::new(src), frames);
+                capture_op(ring, &a, flags, src, frames);
             }
             Op::EventCapture { feedback, src } => {
-                let mut fifo = self.event_fb.one(feedback as usize);
+                let mut fifo = self.event_fb.one(feedback.index());
                 let fifo = fifo.as_mut().expect("built by apply");
                 let e = self.events.slots();
-                let lost = fifo.push(e.slot(EventSlotId::new(src)));
+                let lost = fifo.push(e.slot(src));
                 self.dropped
                     .charge_feedback(fx.plan, feedback, u64::from(lost));
             }

@@ -403,7 +403,8 @@ impl<F: Float> Executor<F> {
                 n.transfer_from(o);
             }
         }
-        for (i, from) in st.rings.iter().enumerate() {
+        for (delay, from) in plan.program.delays.ids().zip(&st.rings) {
+            let i = delay.index();
             match *from {
                 RingFrom::New | RingFrom::Copy { .. } => {}
                 RingFrom::Keep { from, rate } => {
@@ -417,7 +418,7 @@ impl<F: Float> Executor<F> {
                 RingFrom::Move { from } => {
                     let carried = old.rings.get_mut(from as usize).and_then(Option::take);
                     let lost = move_ring(new.rings[i].as_mut(), carried, &mut st.spare_rings);
-                    self.dropped.charge_delay(plan, i as u32, lost as u64);
+                    self.dropped.charge_delay(plan, delay, lost as u64);
                 }
             }
         }
@@ -426,7 +427,8 @@ impl<F: Float> Executor<F> {
                 new.audio_fb[i] = old.audio_fb.get_mut(j as usize).and_then(Option::take);
             }
         }
-        for (i, from) in st.event_fb.iter().enumerate() {
+        for (feedback, from) in plan.program.event_feedback.ids().zip(&st.event_fb) {
+            let i = feedback.index();
             match *from {
                 RingFrom::New | RingFrom::Copy { .. } => {}
                 RingFrom::Keep { from, rate } => {
@@ -451,7 +453,7 @@ impl<F: Float> Executor<F> {
                             None
                         }
                     };
-                    self.dropped.charge_feedback(plan, i as u32, lost as u64);
+                    self.dropped.charge_feedback(plan, feedback, lost as u64);
                 }
             }
         }
@@ -603,7 +605,7 @@ impl<F: Float> Executor<F> {
                     // is owed to the delay's FIFO, which pours it in behind
                     // what is in flight.
                     Route::Delay(i) => {
-                        let placed = match new.rings[i as usize].as_mut() {
+                        let placed = match new.rings[i.index()].as_mut() {
                             Some(Ring::Event(f)) => {
                                 let owed = owing.clone().all(|h| f.owe(h));
                                 // What fits goes in now, as the close of a

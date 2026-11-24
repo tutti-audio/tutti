@@ -196,7 +196,7 @@ pub(crate) fn op_work<A, E>(
         | Op::EventMerge { .. }
         | Op::EventCapture { .. }
         | Op::EventTap { .. } => EVENTS,
-        Op::Node { unit, .. } => node_work(&shapes.as_slice()[unit as usize]),
+        Op::Node { unit, .. } => node_work(&shapes[unit]),
     }
 }
 

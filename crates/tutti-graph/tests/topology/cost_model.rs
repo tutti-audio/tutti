@@ -184,10 +184,10 @@ fn packed_siblings_render_bit_identically() {
         plan.verify().expect("sound");
         // The input, the three heavy gains, the packed light ones (twelve
         // gains in fewer tasks), the sum and its output.
-        let heavy = |op: u32| {
-            matches!(plan.ops()[op as usize], tutti_graph::Op::Node { unit, .. }
-                if plan.units()[unit as usize].shape.cost == Cost::Heavy
-                    && plan.units()[unit as usize].shape.audio_in().count() == 1)
+        let heavy = |op: tutti_graph::OpId| {
+            matches!(plan.ops()[op.index()], tutti_graph::Op::Node { unit, .. }
+                if plan.units()[unit.index()].shape.cost == Cost::Heavy
+                    && plan.units()[unit.index()].shape.audio_in().count() == 1)
         };
         let mut light_tasks = 0;
         for t in plan.tasks() {

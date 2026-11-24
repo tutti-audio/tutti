@@ -266,7 +266,7 @@ impl<F: Float> State<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Id;
+    use crate::compile::ids::Table;
     use crate::event::types::Event;
     use crate::exec::held::Held;
     use crate::node::time::Offset;
@@ -282,7 +282,9 @@ mod tests {
 
     fn inject(room: usize) -> Inject {
         Inject {
-            unit: PlanUnitId::new(0),
+            unit: Table::<PlanUnitId, ()>::filled(1, ())
+                .id(0)
+                .expect("a unit"),
             port: 0,
             events: CappedVec::default(),
             merged: CappedVec::default(),

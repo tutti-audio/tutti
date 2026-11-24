@@ -5,21 +5,31 @@
 //! a slice of `u32` for free), and the one place a `u32` becomes a `usize` is
 //! [`Id::index`]. Two ids of different kinds do not convert, so an op index
 //! cannot index the values and an audio slot cannot name an event slot.
+//!
+//! **An id is minted only by the table it indexes:** [`Table::push`] returns
+//! the id of the row it appends, [`TableSlice::ids`] and
+//! [`TableSlice::iter_enumerated`] walk the ids of the rows, and
+//! [`TableSlice::id`] and [`TableSlice::search_by_key`] return the id of a row
+//! that exists, or `None`. Nothing else constructs an id (the constructor is
+//! unnameable outside this module): an id past its table cannot be written, so
+//! verify does not check it. What a plan's public structs hold as raw
+//! `u32` is read back through the table it indexes ([`TableSlice::id`], or the
+//! slice indexing of `as_slice`), never through arithmetic on a number.
 
 use bytemuck::TransparentWrapper;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
+/// The proof that a table is minting an id: only this module can build one,
+/// so no code outside it makes an id, generic or not.
+pub(crate) struct Mint(usize);
+
 /// A typed `u32` index.
 pub(crate) trait Id: bytemuck::Pod + Eq + Ord + std::fmt::Debug {
-    /// The id with this raw value.
-    fn new(raw: u32) -> Self;
-    /// The raw value.
-    fn get(self) -> u32;
+    /// The id of the row a table is minting.
+    fn mint(at: Mint) -> Self;
     /// The position this id names, for indexing a [`Table`] or a slice.
     fn index(self) -> usize;
-    /// The id at `index`; debug-asserts that it fits.
-    fn from_index(index: usize) -> Self;
 }
 
 macro_rules! ids {
@@ -30,7 +40,7 @@ macro_rules! ids {
             bytemuck::Pod, bytemuck::Zeroable,
         )]
         #[repr(transparent)]
-        pub(crate) struct $name(u32);
+        pub struct $name(u32);
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -38,21 +48,28 @@ macro_rules! ids {
             }
         }
 
-        impl Id for $name {
-            fn new(raw: u32) -> Self {
-                Self(raw)
-            }
-
-            fn get(self) -> u32 {
+        impl $name {
+            /// The raw value.
+            #[must_use]
+            #[allow(dead_code, reason = "the ids only the compiler names read no raw value")]
+            pub const fn get(self) -> u32 {
                 self.0
             }
 
-            fn index(self) -> usize {
+            /// The position this id names in its table.
+            #[must_use]
+            pub const fn index(self) -> usize {
                 self.0 as usize
             }
+        }
 
-            fn from_index(index: usize) -> Self {
-                Self(u32::try_from(index).expect("a plan table past u32"))
+        impl Id for $name {
+            fn mint(at: Mint) -> Self {
+                Self(u32::try_from(at.0).expect("a plan table past u32"))
+            }
+
+            fn index(self) -> usize {
+                Self::index(self)
             }
         }
     )*};
@@ -76,11 +93,11 @@ ids! {
     TaskId;
     /// A PDC delay: a position in [`Plan::delays`](crate::Plan::delays).
     DelayId;
-    /// An audio feedback: a position in the audio
-    /// [`Plan::feedback`](crate::Plan::feedback).
+    /// An audio feedback: a position in
+    /// [`Plan::audio_feedback`](crate::Plan::audio_feedback).
     AudioFeedbackId;
-    /// An event feedback: a position in the event
-    /// [`Plan::feedback`](crate::Plan::feedback).
+    /// An event feedback: a position in
+    /// [`Plan::event_feedback`](crate::Plan::event_feedback).
     EventFeedbackId;
     /// A tap of a plan: a position in its tap table.
     PlanTapId;
@@ -158,7 +175,7 @@ impl<I: Id, T> Table<I, T> {
 
     /// Appends a row and returns its id.
     pub(crate) fn push(&mut self, row: T) -> I {
-        let id = I::from_index(self.items.len());
+        let id = I::mint(Mint(self.items.len()));
         self.items.push(row);
         id
     }
@@ -197,15 +214,10 @@ impl<I: Id, T> TableSlice<I, T> {
         self.items.get(id.index())
     }
 
-    /// The row at `id`, mutably, if there is one.
-    pub(crate) fn get_mut(&mut self, id: I) -> Option<&mut T> {
-        self.items.get_mut(id.index())
-    }
-
     /// The id of row `index`, if there is one: the one way an arithmetic
     /// position becomes an id.
     pub(crate) fn id(&self, index: usize) -> Option<I> {
-        (index < self.items.len()).then(|| I::from_index(index))
+        (index < self.items.len()).then(|| I::mint(Mint(index)))
     }
 
     /// The id of the row whose key is `key`, in a table sorted by `by`.
@@ -213,12 +225,12 @@ impl<I: Id, T> TableSlice<I, T> {
         self.items
             .binary_search_by_key(key, by)
             .ok()
-            .map(I::from_index)
+            .map(|i| I::mint(Mint(i)))
     }
 
     /// Every id, in order.
     pub(crate) fn ids(&self) -> impl DoubleEndedIterator<Item = I> + use<I, T> {
-        (0..self.items.len()).map(I::from_index)
+        (0..self.items.len()).map(|i| I::mint(Mint(i)))
     }
 
     /// Every row with its id, in order.
@@ -226,7 +238,7 @@ impl<I: Id, T> TableSlice<I, T> {
         self.items
             .iter()
             .enumerate()
-            .map(|(i, row)| (I::from_index(i), row))
+            .map(|(i, row)| (I::mint(Mint(i)), row))
     }
 }
 
@@ -303,20 +315,12 @@ impl Generation {
 
 impl AudioSlotId {
     /// The slot every unconnected audio input reads; never written.
-    pub(crate) const ZERO: Self = Self(0);
+    pub const ZERO: Self = Self(0);
 }
 
 impl EventSlotId {
     /// The slot every unconnected event input reads; never written.
-    pub(crate) const EMPTY: Self = Self(0);
-
-    /// The feedback this slot is read from, among `feedbacks` of them: the
-    /// null slot and a slot past the feedback slots have none (feedback
-    /// `k` is read from slot `1 + k`).
-    pub(crate) fn feedback(self, feedbacks: usize) -> Option<EventFeedbackId> {
-        let id = EventFeedbackId::from_index(self.index().checked_sub(1)?);
-        (id.index() < feedbacks).then_some(id)
-    }
+    pub const EMPTY: Self = Self(0);
 }
 
 /// A slice of ids as the raw `u32`s they wrap: what a public accessor returns

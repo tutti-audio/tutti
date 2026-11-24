@@ -21,7 +21,7 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
-use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
+use crate::compile::ids::{DelayId, EventSlotId, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tutti_buffers::Float;
@@ -81,7 +81,7 @@ pub(super) enum Route {
     /// The edge goes on through the delay at this index of the plan: its FIFO
     /// was built with a table for owed closes, poured into the queue block by
     /// block, behind what is in flight.
-    Delay(u32),
+    Delay(DelayId),
     /// The edge ended: the table the source's held and owed keys merge into,
     /// drained into the sink's injection buffer as far as it takes now and
     /// block by block after.
@@ -394,7 +394,7 @@ impl Stager {
         let to_close: BTreeSet<DelayKey> = closers
             .iter()
             .filter_map(|k| match k.route {
-                Route::Delay(i) => Some(plan.program.delays[DelayId::new(i)].key),
+                Route::Delay(i) => Some(plan.program.delays[i].key),
                 _ => None,
             })
             .collect();
@@ -657,9 +657,11 @@ impl Stager {
         BTreeSet<FeedbackKey>,
     ) {
         let plan = cx.plan;
-        let keyed = |kind: &[crate::compile::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
+        fn keyed<S>(
+            kind: &[crate::compile::plan::FeedbackSpec<S>],
+        ) -> BTreeMap<FeedbackKey, usize> {
             kind.iter().enumerate().map(|(i, f)| (f.key, i)).collect()
-        };
+        }
         let old_afb = cx
             .old
             .map(|p| keyed(p.program.audio_feedback.as_slice()))
@@ -900,10 +902,11 @@ impl Stager {
             let delay = plan
                 .program
                 .delays
-                .iter()
-                .position(|d| d.key == DelayKey::Event { at, from });
+                .iter_enumerated()
+                .find(|(_, d)| d.key == DelayKey::Event { at, from })
+                .map(|(id, _)| id);
             let route = match delay {
-                Some(i) if in_plan => Route::Delay(i as u32),
+                Some(i) if in_plan => Route::Delay(i),
                 _ => Route::Sink(Held::new()),
             };
             closers.push(Closer { from, at, route });
@@ -1205,27 +1208,27 @@ fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
     let mut has = Table::filled(plan.program.sizing.events.len(), false);
     for (f, spec) in plan.program.event_feedback.iter_enumerated() {
         if let FeedbackKey::Event { from, .. } = spec.key {
-            has[plan.event_feedback_slot(f)] |= plan.event_port_params(from);
+            has[plan.program.event_feedback[f].slot] |= plan.event_port_params(from);
         }
     }
     // Ops run in topological order, so a merge comes after what feeds it.
     for op in &plan.program.ops {
         match *op {
-            Op::Node { unit, .. } if plan.units[PlanUnitId::new(unit)].shape.param_events => {
-                let rec = &plan.nodes.recs[PlanUnitId::new(unit)];
+            Op::Node { unit, .. } if plan.units[unit].shape.param_events => {
+                let rec = &plan.nodes.recs[unit];
                 for &s in rec.ports(&plan.nodes).eout {
                     has[s] = true;
                 }
             }
             Op::EventDelay { src, dst, .. } => {
-                let from = has[EventSlotId::new(src)];
-                has[EventSlotId::new(dst)] |= from;
+                let from = has[src];
+                has[dst] |= from;
             }
             Op::EventMerge { srcs, dst, .. } => {
                 let any = plan.program.event_list[srcs.range()]
                     .iter()
                     .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s]);
-                has[EventSlotId::new(dst)] |= any;
+                has[dst] |= any;
             }
             _ => {}
         }
@@ -1240,22 +1243,22 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventS
     let plan = cx.plan;
     let mut extra = Table::filled(plan.program.sizing.events.len(), 0usize);
     for (f, &x) in plan.program.event_feedback.ids().zip(efb_extra) {
-        let e = &mut extra[plan.event_feedback_slot(f)];
+        let e = &mut extra[plan.program.event_feedback[f].slot];
         *e = (*e).max(x);
     }
     // Ops run in topological order, so a merge comes after whatever feeds it.
     for op in &plan.program.ops {
         match *op {
             Op::EventDelay { delay, dst, .. } => {
-                let e = &mut extra[EventSlotId::new(dst)];
-                *e = (*e).max(ring_extra[delay as usize]);
+                let e = &mut extra[dst];
+                *e = (*e).max(ring_extra[delay.index()]);
             }
             Op::EventMerge { srcs, dst, .. } => {
                 let sum = plan.program.event_list[srcs.range()]
                     .iter()
                     .map(|&s| extra[s])
                     .sum::<usize>();
-                let e = &mut extra[EventSlotId::new(dst)];
+                let e = &mut extra[dst];
                 *e = (*e).max(sum);
             }
             _ => {}

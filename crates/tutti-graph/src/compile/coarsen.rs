@@ -411,10 +411,11 @@ mod tests {
     fn dag(n: usize, edges: &[(u32, u32)]) -> (Preds, Succ) {
         let mut preds: Preds = Table::filled(n, BTreeSet::new());
         let mut succ: Succ = Table::filled(n, Vec::new());
+        let ops: Vec<OpId> = preds.ids().collect();
         for &(a, b) in edges {
             assert!(a < b);
-            preds[OpId::new(b)].insert(OpId::new(a));
-            succ[OpId::new(a)].push(OpId::new(b));
+            preds[ops[b as usize]].insert(ops[a as usize]);
+            succ[ops[a as usize]].push(ops[b as usize]);
         }
         (preds, succ)
     }
@@ -446,7 +447,11 @@ mod tests {
     fn task_of(t: &Tasks, op: u32) -> TaskId {
         t.tasks
             .iter_enumerated()
-            .find(|(_, s)| t.task_ops[s.range()].contains(&OpId::new(op)))
+            .find(|(_, s)| {
+                t.task_ops[s.range()]
+                    .iter()
+                    .any(|o| o.index() == op as usize)
+            })
             .map(|(task, _)| task)
             .expect("every op has a task")
     }

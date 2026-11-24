@@ -207,8 +207,8 @@ fn moderate_reads_pack_and_render_bit_identically() {
         for t in plan.tasks() {
             let ops = &plan.task_ops()[t.start as usize..(t.start + t.len) as usize];
             let heavy = ops.iter().filter(|&&o| {
-                matches!(plan.ops()[o as usize], tutti_graph::Op::Node { unit, .. }
-                    if plan.units()[unit as usize].shape.cost == Cost::Heavy)
+                matches!(plan.ops()[o.index()], tutti_graph::Op::Node { unit, .. }
+                    if plan.units()[unit.index()].shape.cost == Cost::Heavy)
             });
             assert!(heavy.count() <= 1, "two stretched voices share a task");
         }

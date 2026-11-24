@@ -14,8 +14,8 @@ use crate::compile::ids::{
     PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
 };
 use crate::compile::plan::{
-    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, InputBound,
-    Op, ParamPortOp, Span, Value,
+    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, GainPortOp, InputBound, Op,
+    ParamPortOp, Span, Value,
 };
 use crate::compile::program::{ARef, ByValue, Capacities, ERef, Program};
 use crate::compile::shapes::Units;
@@ -241,14 +241,13 @@ impl<'a> Emitter<'a> {
                 .into_iter()
                 .map(|w| Value {
                     slot: (),
-                    writer: w.writer.expect("every value is written").get(),
+                    writer: w.writer.expect("every value is written"),
                     readers: Span::extend(&mut value_readers, w.readers),
                 })
                 .collect()
         };
         let audio_values = Table::from(values(self.audio.into_iter().collect()));
         let event_values = Table::from(values(self.event.into_iter().collect()));
-        let spec = |slot: u32, key: &FeedbackKey| FeedbackSpec { key: *key, slot };
         Program {
             ops: self.ops,
             audio_list: self.audio_list,
@@ -267,17 +266,8 @@ impl<'a> Emitter<'a> {
                     .collect::<Table<OpId, Vec<OpId>>>(),
             ),
             delays: self.delays,
-            // Feedback slots follow the null slot, in key order.
-            audio_feedback: self
-                .audio_feedback
-                .iter_enumerated()
-                .map(|(f, key)| spec(1 + f.get(), key))
-                .collect(),
-            event_feedback: self
-                .event_feedback
-                .iter_enumerated()
-                .map(|(f, key)| spec(1 + f.get(), key))
-                .collect(),
+            audio_feedback: self.audio_feedback,
+            event_feedback: self.event_feedback,
             taps: self.taps,
             event_taps: self.event_taps,
             meters: self.meters,
@@ -482,7 +472,7 @@ impl<'a> Emitter<'a> {
         let delay = self.delays.push(DelaySpec { key, len: by });
         let dst = self.new_audio();
         let op = self.push(Op::Delay {
-            delay: delay.get(),
+            delay,
             src: v.into(),
             dst: dst.into(),
         });
@@ -520,7 +510,7 @@ impl<'a> Emitter<'a> {
         let delay = self.delays.push(DelaySpec { key, len: by });
         let dst = self.new_event(capacity);
         let op = self.push(Op::EventDelay {
-            delay: delay.get(),
+            delay,
             src: v.into(),
             dst: dst.into(),
         });
@@ -548,7 +538,7 @@ impl<'a> Emitter<'a> {
             .map(|_| self.new_event(port).into())
             .collect();
         let node = Op::Node {
-            unit: n.get(),
+            unit: n,
             audio_in: Span::extend(&mut self.audio_list, ain.iter().copied()),
             audio_out: Span::extend(&mut self.audio_list, aout),
             event_in: Span::extend(&mut self.event_list, ein.iter().copied()),
@@ -680,10 +670,7 @@ impl<'a> Emitter<'a> {
                     .event_input_capacity
                     .filter(|_| !lone_within_bound)
                     // The public bound names its unit by raw index.
-                    .map(|capacity| InputBound {
-                        capacity,
-                        unit: n.get(),
-                    });
+                    .map(|capacity| InputBound { capacity, unit: n });
                 self.merge_tree(refs, bound)
             })
             .collect()
@@ -701,7 +688,7 @@ impl<'a> Emitter<'a> {
             .iter()
             .enumerate()
             .map(|(k, &param)| (k as u16, param));
-        let mix = std::iter::once((ParamPortOp::MIX_PORT, NodeMix::ADDR));
+        let mix = std::iter::once((ParamPortOp::<ERef>::MIX_PORT, NodeMix::ADDR));
         declared
             .chain(mix)
             .filter_map(|(port, param)| {
@@ -850,7 +837,7 @@ impl<'a> Emitter<'a> {
                         src = self.align_audio(v, d, key);
                     }
                     _ => {
-                        delay = Some(self.delays.push(DelaySpec { key, len: d }).get());
+                        delay = Some(self.delays.push(DelaySpec { key, len: d }));
                     }
                 }
             }
@@ -895,7 +882,7 @@ impl<'a> Emitter<'a> {
             let srcs_span = Span::extend(&mut self.audio_list, srcs.iter().copied());
             self.push_reading(
                 Op::Tap {
-                    tap: tap.get(),
+                    tap,
                     srcs: srcs_span,
                 },
                 &srcs,
@@ -942,10 +929,7 @@ impl<'a> Emitter<'a> {
                 )),
                 _ => carried,
             };
-            let op = self.push(Op::EventTap {
-                tap: index.get(),
-                src,
-            });
+            let op = self.push(Op::EventTap { tap: index, src });
             self.read_eref(src, op);
         }
     }
@@ -968,7 +952,7 @@ impl<'a> Emitter<'a> {
             let srcs_span = Span::extend(&mut self.audio_list, srcs.iter().copied());
             self.push_reading(
                 Op::Meter {
-                    meter: meter.get(),
+                    meter,
                     srcs: srcs_span,
                 },
                 &srcs,
@@ -992,7 +976,7 @@ impl<'a> Emitter<'a> {
                 .audio_out(from)
                 .expect("a feedback source is emitted before its capture");
             let op = self.push(Op::Capture {
-                feedback: feedback.get(),
+                feedback,
                 src: src.into(),
             });
             self.read_audio(src, op);
@@ -1008,7 +992,7 @@ impl<'a> Emitter<'a> {
         for (feedback, from) in events {
             let src = self.event_source(from);
             let op = self.push(Op::EventCapture {
-                feedback: feedback.get(),
+                feedback,
                 src: src.into(),
             });
             self.read_event(src, op);

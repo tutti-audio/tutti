@@ -12,7 +12,7 @@ use common::{Kind, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Edge, GraphSpec, InputPort, MAX_BUSES, NodeKey, NodeSpec, OutputPort,
-    PortKind, PortSource, Shape, Topology, compile,
+    PortSource, Shape, Topology, compile,
 };
 
 fn width(n: u16) -> ChannelLayout {
@@ -180,7 +180,7 @@ fn declaring_buses_changes_no_plan() {
     assert_eq!((a.tasks(), a.task_ops()), (b.tasks(), b.task_ops()));
     assert_eq!(a.delays(), b.delays());
     assert_eq!(a.compensation(), b.compensation());
-    assert_eq!(a.values(PortKind::Audio), b.values(PortKind::Audio));
+    assert_eq!(a.audio_values(), b.audio_values());
     assert_eq!(a.units().len(), b.units().len());
     let bare = |s: Shape| common::with_buses(s, Buses::NONE, Buses::NONE);
     for (x, y) in a.units().iter().zip(b.units()) {

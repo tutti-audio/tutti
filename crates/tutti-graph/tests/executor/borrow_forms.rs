@@ -395,7 +395,7 @@ fn every_borrow_form_is_reached_and_renders_alike_on_any_participant_count() {
                     event_in,
                     in_place,
                     ..
-                } if plan.units()[unit as usize].key == k => {
+                } if plan.units()[unit.index()].key == k => {
                     Some((audio_in.len, event_in.len, in_place.0))
                 }
                 _ => None,
