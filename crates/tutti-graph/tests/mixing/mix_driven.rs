@@ -153,42 +153,33 @@ impl Rig {
     }
 }
 
-/// Render `blocks` blocks of `BLOCK` frames on `workers` participants,
-/// the node's output and the input.
-fn render(rig: &Rig, workers: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let mut harness = Harness::with_workers(BLOCK, workers);
-    if let Some(base) = rig.base {
-        harness.start_mix(key(2), base);
-    }
-    if let Some(range) = rig.range {
-        harness.start_param_range(mix_of(2), range);
-    }
-    harness.switch(&rig.graph(), &rig.kinds);
-    run(&mut harness, 0, blocks)
-}
-
-/// `blocks` more blocks of `harness` from frame `from`.
+/// `blocks` more blocks of `harness` from frame `from`: the node's output
+/// and the input.
 fn run(harness: &mut Harness, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let (mut got, mut x) = (Vec::new(), Vec::new());
-    for b in 0..blocks {
-        let input = input_signal((from + b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-        x.extend(&input);
-    }
-    (got, x)
+    let got = harness
+        .run(&vec![BLOCK; blocks], from as u64)
+        .swap_remove(0);
+    (got, input_signal(from as u64, blocks * BLOCK))
 }
 
-/// One-participant and four participants, bit for bit; the one-participant render.
+/// `blocks` blocks of `BLOCK` frames on one and on four participants, the
+/// node's output bit for bit; the one-participant render, with the input.
 fn render_both(rig: &Rig, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let serial = render(rig, 1, blocks);
-    let parallel = render(rig, 4, blocks);
-    assert_eq!(
-        serial.0.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        parallel.0.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        "parallel differs from serial"
-    );
-    serial
+    common::agree_across_workers(
+        [4],
+        |workers| {
+            let mut harness = Harness::with_workers(BLOCK, workers);
+            if let Some(base) = rig.base {
+                harness.start_mix(key(2), base);
+            }
+            if let Some(range) = rig.range {
+                harness.start_param_range(mix_of(2), range);
+            }
+            harness.switch(&rig.graph(), &rig.kinds);
+            run(&mut harness, 0, blocks)
+        },
+        |r| common::bits_of(&r.0),
+    )
 }
 
 fn audio_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::AudioDelayKey) -> Option<usize> {
