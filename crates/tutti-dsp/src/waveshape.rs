@@ -250,8 +250,8 @@ pub enum Antialiasing {
     Off,
     /// The mean of the curve over the segment between two inputs.
     FirstOrder,
-    /// The second-order form over three inputs: `HardClip` and `Softsign`; the other kinds
-    /// shape at first order.
+    /// The second-order form over three inputs: `HardClip` and `Softsign` have it, and a
+    /// [`Waveshape`] of another kind refuses it.
     SecondOrder,
 }
 
@@ -296,6 +296,56 @@ pub struct AntialiasingError {
     pub max: Antialiasing,
 }
 
+/// A waveshaper's curve and the order of antialiasing it is shaped with: an order the kind
+/// has ([`ShapeKind::max_antialiasing`]), checked where it is asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Waveshape {
+    kind: ShapeKind,
+    antialiasing: Antialiasing,
+}
+
+impl Waveshape {
+    /// The curve `kind` with no antialiasing ([`Antialiasing::Off`]): the memoryless curve.
+    #[must_use]
+    pub const fn new(kind: ShapeKind) -> Self {
+        Self {
+            kind,
+            antialiasing: Antialiasing::Off,
+        }
+    }
+
+    /// The curve shaped with `order` of antialiasing.
+    ///
+    /// # Errors
+    ///
+    /// [`AntialiasingError`] when `order` is above what the kind has
+    /// ([`ShapeKind::max_antialiasing`]).
+    pub fn antialiasing(mut self, order: Antialiasing) -> Result<Self, AntialiasingError> {
+        let max = self.kind.max_antialiasing();
+        if order > max {
+            return Err(AntialiasingError {
+                kind: self.kind,
+                order,
+                max,
+            });
+        }
+        self.antialiasing = order;
+        Ok(self)
+    }
+
+    /// The curve.
+    #[must_use]
+    pub const fn kind(&self) -> ShapeKind {
+        self.kind
+    }
+
+    /// The order it is shaped with.
+    #[must_use]
+    pub const fn antialiasing_order(&self) -> Antialiasing {
+        self.antialiasing
+    }
+}
+
 /// The controls of a [`WaveshaperBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WaveshaperControls {
@@ -311,20 +361,19 @@ impl WaveshaperControls {
     };
 }
 
-/// A waveshaper of any width in the float `F`: one curve ([`ShapeKind`]) at one drive shared by
-/// every channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
-/// is on, when each channel keeps its last two inputs. At most [`MAX_CHANNELS`] channels wide.
+/// A waveshaper of any width in the float `F`: one [`Waveshape`] at one drive shared by
+/// every channel, each channel shaped alone. Memoryless unless the shape's
+/// [`Antialiasing`] is on, when each channel keeps its last two inputs. At most
+/// [`MAX_CHANNELS`] channels wide.
 ///
 /// Built on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Copy, Debug)]
 pub struct WaveshaperBank<F: Float> {
-    kind: ShapeKind,
+    shape: Waveshape,
     /// The drive, ramping over [`GAIN_RAMP`].
     drive: Ramp<F>,
     /// The steps a drive ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// The order the bank shapes with, one the kind has.
-    antialiasing: Antialiasing,
     /// Each channel's last two inputs before the drive, newest first: per-sample values in `F`.
     history: [[F; 2]; MAX_CHANNELS],
     /// The closeness at which a quotient with no conditioned form takes its limit.
@@ -332,37 +381,25 @@ pub struct WaveshaperBank<F: Float> {
 }
 
 impl<F: Float + Lerp> WaveshaperBank<F> {
-    /// A waveshaper of `kind` at `rate`, at unity drive, to be set.
+    /// A waveshaper of `shape` at `rate`, at unity drive, to be set.
     #[must_use]
-    pub fn new(kind: ShapeKind, rate: SampleRate) -> Self {
+    pub fn new(shape: Waveshape, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            kind,
+            shape,
             drive: Ramp::new(F::from_unit(WaveshaperControls::DEFAULT.drive)),
             steps,
-            antialiasing: Antialiasing::Off,
             history: [[F::ZERO; 2]; MAX_CHANNELS],
             guard: Guard::new(),
         }
     }
 
-    /// Shapes with `order` of antialiasing; the default is [`Antialiasing::Off`].
-    ///
-    /// # Errors
-    ///
-    /// [`AntialiasingError`] when `order` is above what the kind has
-    /// ([`ShapeKind::max_antialiasing`]).
-    pub fn antialiasing(mut self, order: Antialiasing) -> Result<Self, AntialiasingError> {
-        self.antialiasing = self.kind.antialiasing(order)?;
-        Ok(self)
-    }
-
-    /// The order the bank shapes with.
+    /// The curve and the order the bank shapes with.
     #[must_use]
-    pub fn antialiasing_order(&self) -> Antialiasing {
-        self.antialiasing
+    pub fn shape(&self) -> Waveshape {
+        self.shape
     }
 
     /// Back to rest: the drive jumps to its target ([`jump_to_target`](Self::jump_to_target)) and
@@ -401,10 +438,10 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let frames = block.frames().get();
         let (input, mut output) = block.split();
         debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
-        let kind = self.kind;
+        let kind = self.shape.kind;
         let blended = self.drive.blended_frames(frames);
         let taken = self.drive.steps_taken();
-        let order = self.antialiasing;
+        let order = self.shape.antialiasing;
         if order == Antialiasing::Off && signal.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {

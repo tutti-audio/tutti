@@ -260,10 +260,14 @@ impl<F: Float> Taps<'_, F> {
     /// outputs; [`TapAlign::Raw`] reads it as it leaves its node. Ramps,
     /// segments, harmony and resync are not copied.
     ///
-    /// A tap of an input hears what the node hears there: every source of the
-    /// port merged, in the order the node is handed them, after their latency
-    /// delays (and, with [`TapAlign::ToOutput`], the delay the node's input
-    /// time needs to reach the output time).
+    /// A tap of an input hears what the node is handed there this block: every
+    /// source of the port merged, in the order the node is handed them, after
+    /// their latency delays, with the commands scheduled to it and the closes
+    /// of cut edges (a bypassed node is handed only the closes it owes, and a
+    /// parked one nothing); with [`TapAlign::ToOutput`], delayed by what the
+    /// node's input time needs to reach the output time, whatever feeds the
+    /// input. A command past the delay's room for one block of them is counted
+    /// as a dropped event.
     ///
     /// The port must exist now, edits not yet committed included
     /// ([`MissingSource::Node`], [`MissingSource::EventPort`] or

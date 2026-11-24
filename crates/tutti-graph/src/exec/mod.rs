@@ -74,6 +74,15 @@
 //! event-free node of any width builds no event table. Per slot, what is
 //! known about the block (silent, constant) is one flags byte.
 //!
+//! **An event input is a view.** What a node is handed at an event input is
+//! assembled once per block, by its own op, into a slot of the plan (the
+//! input's view, [`Op::Node`](crate::Op::Node)'s `event_in`): the input's
+//! source slot, the events flushed to the node, the commands scheduled to it,
+//! cut to its declared input bound — or, for a bypassed node, only the
+//! closes it owes. The node, the held-key tables, the silence skip and the
+//! taps of the input read that slot and nothing else, so what a tap carries
+//! is what the node was handed.
+//!
 //! **It does not split blocks at a loop wrap.** The whole-block promise is
 //! what keeps an out-of-process plugin's declared latency constant, so a
 //! transport that loops inside a block is reported through
@@ -135,8 +144,9 @@
 //! executor pulls them into a preallocated pending list and resolves each
 //! against the block's [`Env`](crate::Env) — so a beat is resolved against the transport
 //! of the block it falls in. What lands this block is merged into its sink's
-//! event input as one more source after the port's own events, in a buffer
-//! sized when applying; a sink with a landing command is never skipped.
+//! event input as one more source after the port's own events, into the
+//! input's view (see [`Op::Node`](crate::Op::Node)), which holds them since it
+//! is sized when applying; a sink with a landing command is never skipped.
 //!
 //! # Flushed events
 //!
@@ -195,7 +205,6 @@ use tutti_units::PlayReading;
 use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
-use crate::compile::ids::PlanUnitId;
 use crate::compile::plan::Plan;
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
@@ -518,17 +527,6 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
     }
 }
 
-/// The per-plan state for `plan` on a pool of `participants` (0: no pool).
-fn par_for(
-    plan: &Plan,
-    participants: usize,
-    store_len: usize,
-    inject_units: impl Iterator<Item = PlanUnitId>,
-    overlay: usize,
-) -> Par {
-    Par::new(plan, participants, store_len, inject_units, overlay)
-}
-
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
 /// latency then its tail (`NodeRec::park_after`).
 fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
@@ -619,12 +617,11 @@ impl<F: Float> Executor<F> {
             }
         }
         self.state.par = self.plan.as_deref().map(|plan| {
-            par_for(
+            Par::new(
                 plan,
                 participants.unwrap_or(0),
                 self.store.len(),
                 self.state.inject.iter().map(|i| i.unit),
-                self.state.overlay,
             )
         });
         old

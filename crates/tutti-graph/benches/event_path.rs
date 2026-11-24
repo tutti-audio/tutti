@@ -5,7 +5,9 @@
 //! them (no refusal), the hot path. `at_capacity/<n>`: it writes `n` note-ons
 //! and `n` note-offs to a port of `n`, so the note-ons fill it and the
 //! note-offs go on in the room past it. `over/<n>`: it writes `4 n` note-ons
-//! to a port of `n`, the refusal path, 3 `n` of them counted.
+//! to a port of `n`, the refusal path, 3 `n` of them counted. `idle/<k>`: `k`
+//! sinks with an event input and nothing wired, skipped once idle.
+//! `dense/<k>x<n>`: `k` sources of `n` events each into one sink.
 //!
 //! ```text
 //! cargo bench -p tutti-graph --bench event_path
@@ -95,6 +97,22 @@ impl Node for Sink {
     fn reset(&mut self) {}
 }
 
+/// A sink with one event input that has nothing to do: it says `Idle`, so with
+/// nothing wired it is skipped after its first call, and the block costs what
+/// the executor does for an event input with nothing in it.
+struct IdleSink;
+
+impl Node for IdleSink {
+    fn shape(&self) -> Shape {
+        Sink::SHAPE
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+        Status::Idle
+    }
+    fn reset(&mut self) {}
+}
+
 fn rig(source: Source) -> Executor {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -145,6 +163,50 @@ fn bench(c: &mut Criterion) {
         ed.collect();
         g.throughput(Throughput::Elements(k));
         g.bench_with_input(BenchmarkId::new("nodes", k), &k, |b, _| {
+            b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
+        });
+    }
+    // The event input of a node with nothing wired: `k` idle sinks.
+    for k in [1u64, 64, 512] {
+        let (mut ed, mut exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(BLOCK)),
+        ));
+        for i in 0..k {
+            ed.insert(NodeKey(i + 1), "idle", Unforkable(IdleSink));
+        }
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        g.throughput(Throughput::Elements(k));
+        g.bench_with_input(BenchmarkId::new("idle", k), &k, |b, _| {
+            b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
+        });
+    }
+    // An event-dense input: `k` sources of `n` note-ons each fan into one sink,
+    // so the sink's input holds `k * n` events a block.
+    for (k, n) in [(8u64, 256u32)] {
+        let (mut ed, mut exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(BLOCK)),
+        ));
+        ed.insert(NodeKey(100), "sink", Unforkable(Sink::new()));
+        for i in 0..k {
+            ed.insert(
+                NodeKey(i + 1),
+                "source",
+                Unforkable(Source::new(n * 2, n, 0)),
+            );
+            ed.spec_mut().connect_events(
+                EventInputPort::new(NodeKey(100), 0),
+                EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
+            );
+        }
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        g.throughput(Throughput::Elements(k * u64::from(n)));
+        g.bench_with_input(BenchmarkId::new("dense", format!("{k}x{n}")), &n, |b, _| {
             b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
         });
     }

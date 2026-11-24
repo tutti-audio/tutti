@@ -11,7 +11,7 @@
 
 use tutti_buffers::Float;
 
-use super::{Antialiasing, AntialiasingError, ShapeKind, fold_phase, smooth9, triangle_fold};
+use super::{Antialiasing, ShapeKind, fold_phase, smooth9, triangle_fold};
 
 /// How close two inputs are before a quotient whose differences cannot be conditioned is
 /// replaced by its limit, relative to the larger of 1 and the two inputs' magnitudes (in the
@@ -133,23 +133,6 @@ fn soft_crush_f1<F: Float>(u: F) -> F {
 }
 
 impl ShapeKind {
-    /// `order`, when the kind has it.
-    ///
-    /// # Errors
-    ///
-    /// [`AntialiasingError`] when `order` is above [`max_antialiasing`](Self::max_antialiasing).
-    pub fn antialiasing(self, order: Antialiasing) -> Result<Antialiasing, AntialiasingError> {
-        let max = self.max_antialiasing();
-        if order > max {
-            return Err(AntialiasingError {
-                kind: self,
-                order,
-                max,
-            });
-        }
-        Ok(order)
-    }
-
     /// The highest order of antiderivative antialiasing the kind has: the order its
     /// antiderivatives are elementary to.
     ///
@@ -298,6 +281,10 @@ impl ShapeKind {
                 + truncated_cube_dd2(-a - one, -b - one, -c - one))
                 * third;
         }
+        debug_assert!(
+            self == Self::Softsign,
+            "a `Waveshape` holds the second order for the hard clip and softsign only"
+        );
         let two = F::lit(2.0);
         if !guard.close(a, c) {
             return two * (softsign_mean_f1(a, b) - softsign_mean_f1(b, c)) / (a - c);

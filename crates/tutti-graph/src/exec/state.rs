@@ -115,9 +115,6 @@ pub(crate) struct Inject {
     pub(crate) unit: PlanUnitId,
     pub(super) port: u16,
     pub(super) events: CappedVec<Event>,
-    /// Where `events` and the sink's own slot events are merged, sized when
-    /// applying so the merge never grows.
-    pub(super) merged: CappedVec<Event>,
     pub(super) live: bool,
     /// While a commit's flush is written: how many of `events` came before
     /// the closes of the edges it cut.
@@ -190,7 +187,6 @@ impl Inject {
     /// sink stays live while closes are owed.
     pub(super) fn consumed(&mut self) {
         self.events.clear();
-        self.merged.clear();
         self.live = self.draining();
     }
 
@@ -231,9 +227,6 @@ pub(super) struct State<F: Float = f32> {
     pub(super) has_inject: Table<PlanUnitId, bool>,
     /// Plan units with a scheduled command landing this block.
     pub(super) has_due: Table<PlanUnitId, bool>,
-    /// The room of the buffer where a node's scheduled events are merged into
-    /// its inputs, one per participant (`command::overlay_capacity`).
-    pub(super) overlay: usize,
     /// The executor's per-plan state for running a block's tasks on its
     /// participants (`par.rs`); `None` while there is no plan.
     pub(super) par: Option<Par>,
@@ -256,7 +249,6 @@ impl<F: Float> State<F> {
             inject: Vec::new(),
             has_inject: Table::default(),
             has_due: Table::default(),
-            overlay: 0,
             par: None,
         }
     }
@@ -284,7 +276,6 @@ mod tests {
             unit: id_at(0),
             port: 0,
             events: CappedVec::default(),
-            merged: CappedVec::default(),
             live: false,
             closed_from: 0,
             owed: CappedVec::with_capacity(room),
