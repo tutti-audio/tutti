@@ -26,7 +26,7 @@ use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_platform::{Asset, WeakExecutor};
 use tutti_tempo::TempoMap;
 use tutti_timeline::ProjectMeter;
-use tutti_ump::{TicksPerQuarterNote, Ump, Unknown};
+use tutti_ump::{Flex, Message, TicksPerQuarterNote, Ump, Unknown};
 use tutti_units::Beat;
 
 use crate::LoadError;
@@ -171,11 +171,13 @@ pub enum DroppedEvent {
         /// The packet.
         packet: Unknown,
     },
-    /// A message of a Clip File's configuration header (M2-116 section 6),
-    /// which a load does not deliver to the clip's target: a header is the
-    /// file's own configuration and not an event of its sequence. The header's
-    /// Set Tempo and Set Time Signature are in the loaded tempo map and meter
-    /// all the same.
+    /// A message of a Clip File's configuration header (M2-116 section 6) that
+    /// the load does nothing with: a header is the file's own configuration,
+    /// not an event of its sequence, so its messages are not delivered to the
+    /// clip's target, and only a Set Tempo the tempo map holds and a Set Time
+    /// Signature are used and so not listed. A Set Time Signature the meter
+    /// refuses (a numerator or denominator field of 0) is in
+    /// [`LoadReport::refused_time_signatures`], not here.
     Header {
         /// Where the message is, on the header's own clock.
         tick: Tick,
@@ -191,7 +193,10 @@ pub struct LoadReport {
     /// What the read repaired so that the file can be written
     /// ([`StandardMidiFile::repairs`]).
     pub repairs: Vec<ReadRepair>,
-    /// What the conversion to clips left out, in track order.
+    /// What the conversion to clips left out, in track order: a Standard MIDI
+    /// File's events that have no packet, a Clip File's packets that are no
+    /// message, and the messages of a Clip File's header that the load does
+    /// nothing with.
     pub dropped: Vec<DroppedEvent>,
     /// The Time Signature events no meter holds, so no change of meter was
     /// made for them, each with its sequence's track (format 2), or `None`
@@ -200,7 +205,8 @@ pub struct LoadReport {
 }
 
 impl LoadReport {
-    /// Whether the file was read as it is and every event is in a clip.
+    /// Whether the file was read as it is, every event is in a clip, and no
+    /// header message of a Clip File went unused.
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.repairs.is_empty()
@@ -441,6 +447,7 @@ fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, 
         file.header()
             .messages()
             .iter()
+            .filter(|&&(_, packet)| !header_message_is_used(packet))
             .map(|&(tick, packet)| DroppedEvent::Header { tick, packet }),
     );
     let timeline = file.timeline();
@@ -456,6 +463,17 @@ fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, 
         meter: Arc::clone(&meter),
     };
     (vec![track], Timeline::Common(tempo, meter))
+}
+
+/// Whether the load uses a header message: a Set Tempo with a tempo is a step of
+/// the tempo map, and a Set Time Signature is a change of the meter or a
+/// refused one listed in the report. Every other header message is not used.
+fn header_message_is_used(packet: Ump) -> bool {
+    match packet.decode() {
+        Ok(Message::Flex(_, Flex::SetTempo(tempo))) => tempo.bpm().is_some(),
+        Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => true,
+        _ => false,
+    }
 }
 
 /// `track`'s events as a clip, its dropped events added to `report`.

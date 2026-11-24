@@ -126,25 +126,23 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
     assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
 }
 
-/// A MIDI 2.0 Clip File (M2-116) loads as its notes over its Flex Data tempo: at
+/// A MIDI 2.0 Clip File (M2-116) loads as its notes over its header's tempo: at
 /// 96 ticks a quarter, a note from tick 0 to 96 is beat 0 to 1, one from tick 192
 /// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a
-/// second. Its Set Time Signature of 3/4 is the loaded meter. Its configuration
-/// header (M2-116 section 6) is the file's own configuration, not an event of the
-/// sequence: the load lists each header message as not played.
+/// second. Its header's Set Time Signature of 3/4 is the loaded meter. The header
+/// (M2-116 section 6) is the file's own configuration, not an event of the
+/// sequence: the load lists each of its messages it does nothing with, and
+/// neither the Set Tempo nor the Set Time Signature, which it uses, so a header of
+/// those two alone loads clean.
 #[test]
-fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
+fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     let division = TicksPerQuarterNote::of(96);
     let program_change: Ump = Message::Midi1(
         Address::first(MidiChannel::FIRST),
         Voice1::ProgramChange(U7::of(5)),
     )
     .into();
-    let header = ClipHeader::new()
-        .push(Tick(0), program_change)
-        .unwrap()
-        .ending_at(Tick(12));
-    let sequence = ClipSequence::new()
+    let tempo_and_meter = ClipHeader::new()
         .push(
             Tick(0),
             Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
@@ -160,6 +158,13 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
                     thirty_seconds: 8,
                 }),
             ),
+        )
+        .unwrap();
+    // The sequence restates the tempo at beat 2: a Flex Data packet plays as stored.
+    let sequence = ClipSequence::new()
+        .push(
+            Tick(192),
+            Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
         )
         .unwrap()
         .note(
@@ -177,18 +182,36 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
             U7::of(100),
         )
         .ending_at(Tick(288));
-    let mut bytes = Vec::new();
-    ClipFile::new(division, header, sequence)
-        .expect("a clip")
-        .write(&mut bytes)
-        .expect("a Vec takes the write");
-    assert!(bytes.starts_with(b"SMF2CLIP"));
+    let bytes_of = |header: ClipHeader| {
+        let mut bytes = Vec::new();
+        ClipFile::new(division, header, sequence.clone())
+            .expect("a clip")
+            .write(&mut bytes)
+            .expect("a Vec takes the write");
+        assert!(bytes.starts_with(b"SMF2CLIP"));
+        bytes
+    };
 
-    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
+    // A header of the tempo and the meter alone is all used: the load is clean.
+    let clean = tutti_fixtures::block_on(
+        session()
+            .midi()
+            .load_midi(bytes_of(tempo_and_meter.clone().ending_at(Tick(12)))),
+    )
+    .expect("loads");
+    assert!(clean.report().is_clean(), "{:?}", clean.report());
 
-    // The Set Tempo and Set Time Signature messages and two notes, a note-on and a
-    // note-off each.
-    assert_eq!(loaded.track(0).unwrap().events.len(), 6);
+    let header = tempo_and_meter
+        .push(Tick(0), program_change)
+        .unwrap()
+        .ending_at(Tick(12));
+    let loaded =
+        tutti_fixtures::block_on(session().midi().load_midi(bytes_of(header))).expect("loads");
+
+    // The Set Tempo packet and two notes, a note-on and a note-off each: the
+    // header is not in the clip.
+    assert_eq!(loaded.track(0).unwrap().events.len(), 5);
+    // The Program Change is the one header message nothing uses.
     assert_eq!(
         loaded.report().dropped,
         [DroppedEvent::Header {
