@@ -264,4 +264,49 @@ mod tests {
             ],
         );
     }
+
+    /// A decay under the layout's longest never reports more than the longest does, where
+    /// the other two bands hold the largest gain or sit just beside the driven one (the
+    /// profiles whose shape, not their largest gain, could move a bound read off the
+    /// response): every band, three sizes, two rates, the other bands and the driven one over
+    /// a grid that crowds the layout's 8 s.
+    #[test]
+    fn a_decay_under_the_layouts_longest_never_reports_more_than_the_longest() {
+        use tutti_buffers::MaxBlock;
+        use tutti_units::{Mix, Samples, Seconds};
+        let grid = [0.05, 0.3, 1.0, 2.0, 4.0, 6.0, 7.5, 7.9, 7.99, 8.0];
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
+            kernel.prepare(rate, MaxBlock::of(Samples::new(64)));
+            for size in [0.0, 0.5, 1.0] {
+                for band in 0..3 {
+                    for other in grid {
+                        for third in grid {
+                            let mut c = FdnControls {
+                                size: Mix::new(size),
+                                ..FdnControls::DEFAULT
+                            };
+                            c.decay[(band + 1) % 3] = Seconds::new(other);
+                            c.decay[(band + 2) % 3] = Seconds::new(third);
+                            c.decay[band] = Seconds::new(MaxDecay::CAP.get());
+                            let Tail::Finite(longest) = kernel.tail_of(&c) else {
+                                panic!("a finite tail with the freeze off")
+                            };
+                            for decay in grid {
+                                c.decay[band] = Seconds::new(decay);
+                                let Tail::Finite(n) = kernel.tail_of(&c) else {
+                                    panic!("a finite tail with the freeze off")
+                                };
+                                assert!(
+                                    n <= longest,
+                                    "band {band} at {decay} s, the others {other} and {third} s, \
+                                     size {size}, {rate:?}: {n:?} past {longest:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

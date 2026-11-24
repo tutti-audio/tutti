@@ -191,8 +191,10 @@ fn searched(g: [f64; 3], pole: [f64; 2], budget: u32) -> (f64, u32) {
 /// rise with frequency, whose one-poles' phase adds to a bump), all three gains are multiplied
 /// by `min(M, 0.9999) / peak`, `peak` the [`peak_bound`]: the true peak is at most
 /// `min(M, 0.9999)`, which is the bound returned, and the other bands decay a little faster
-/// than set. Gains that do not rise with frequency peak at the low band, which is `M`: they are
-/// returned as they are with `M`. NaN, infinite or negative gains are silence.
+/// than set. Gains whose response stays at or under `M` are returned as they are with `M`
+/// (gains that do not rise with frequency peak at the low band, which is `M`). The bound is
+/// so the largest gain alone, whatever the profile's shape: it does not fall as any one band's
+/// gain rises. NaN, infinite or negative gains are silence.
 ///
 /// The design runs it ([`Absorption::designed`](super::Absorption)) and the network carries the
 /// result, which the bank reads as it is: the gains a network has are the ones the bank runs.
@@ -211,7 +213,7 @@ fn rescale_within(g: [Amplitude; 3], pole: [f64; 2], budget: u32) -> ([Amplitude
         let held = top.min(0.9999);
         (g.map(|x| x * (held / peak)), held)
     } else {
-        (g, peak)
+        (g, top)
     }
 }
 
