@@ -422,10 +422,13 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
     /// Selects `preset` on a channel, bypassing MIDI: the channel plays that
     /// preset, whichever channel it is. A Program Change names the percussion
     /// bank (`wBank` 128) on the percussion channel only and a melodic bank on
-    /// the others only, so a chase (`Node::chase`) carries a selection MIDI
-    /// could have made on that channel, and no other. Call it before
-    /// inserting the unit; once in a graph, send the program change on the
-    /// event input.
+    /// the others only, so a chase (`Node::chase`, the hand-over to the unit
+    /// that replaces this one on a font swap) carries a selection MIDI could
+    /// have made on that channel, and no other: after a swap, a channel left
+    /// on the other kind of bank plays its default (percussion 128:0 on the
+    /// percussion channel, 0:0 elsewhere) until it is selected again. Call
+    /// it before inserting the unit; once in a graph, send the program change
+    /// on the event input.
     ///
     /// # Errors
     ///
