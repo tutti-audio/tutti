@@ -157,12 +157,13 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
     /// the drain; streaming is the stream's, which owns the loop-start
     /// fadein head the reader cannot reach: [`VoicePoolHandle::send`] queues
     /// the command and publishes the loop to the voice's [`StreamHandle`] on the
-    /// calling thread. A streaming voice the handle holds no stream for (added
-    /// without one) is not set: the loss is counted ([`PoolDrops`]) and the
-    /// intent is not recorded — a `Playback` claiming a loop the stream never
-    /// took would be replayed as real on the next insert. The drain records a streaming
-    /// slot's loop only when the handle named that slot's own stream
-    /// ([`PoolDrops::loops_not_forwarded`] otherwise).
+    /// calling thread. The drain records a streaming slot's loop only when the
+    /// handle named that slot's own stream. A command that reaches a slot
+    /// another stream's voice took since the handle read its table (a remove
+    /// and an add from a clone of the handle, between the two) is counted
+    /// ([`PoolDrops::loops_not_forwarded`]) and not recorded: a `Playback`
+    /// claiming a loop the stream never took would be replayed as real on the
+    /// next insert.
     UpdateLoop {
         /// The slot to set.
         id: SlotId,
@@ -774,12 +775,12 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     pub(crate) room: Arc<RetireRoom>,
     /// The stream of every streaming voice this handle (or a clone) added with
     /// [`add_streaming`](Self::add_streaming), by slot; a slot holding a memory
-    /// voice, or a streaming one added without a stream, has no entry.
+    /// voice has no entry.
     ///
     /// It decides only where `send` sets a loop or a direction, never whether
-    /// the drain records one: a voice inserted with
-    /// [`insert_voice`](super::pool::VoicePool::insert_voice) after the handle
-    /// was made is not in it, and the drain then refuses that slot's loops
+    /// the drain records one: the drain compares the stream the command names
+    /// with the slot's own, so a command read off this table before a clone of
+    /// the handle replaced the slot's voice is refused
     /// ([`PoolDrops::loops_not_forwarded`]).
     pub(crate) streams: SlotStreams<F>,
     /// The slots the handle added as free-running memory voices and has not
@@ -1055,7 +1056,8 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     ///
     /// [`SendError::DiskVoice`] for a streaming voice; otherwise as
     /// [`set_window`](Self::set_window). (A swap that reaches a streaming
-    /// slot anyway, through a pool the handle did not add it to, is counted:
+    /// slot anyway, one a clone of the handle removed and added a streaming
+    /// voice to after this call read the tier, is counted:
     /// [`PoolDrops::wave_swaps_ignored`].)
     #[must_use = "a dropped command changes nothing"]
     pub fn replace_wave(&self, id: SlotId, wave: Arc<Wave<F>>) -> Result<(), SendError> {
@@ -1324,7 +1326,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// (`publish`) to the slot's stream when the handle holds one. The queue
     /// first: a full one refuses the command with nothing changed. A slot with
     /// no stream here is an in-memory slot, which applies the command itself
-    /// (a streaming slot without a stream is counted by the drain).
+    /// (a streaming voice that took the slot since is counted by the drain).
     fn send_to_stream(
         &self,
         id: SlotId,
