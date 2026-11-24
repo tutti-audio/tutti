@@ -172,6 +172,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::Fuzz { target, secs } => fuzz(target.as_deref(), *secs, ctx),
         Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
+        Step::UnusedPublic { crates, out } => unused_public(ctx, crates, out.as_deref()),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -360,6 +361,73 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
     } else {
         Err(1)
     }
+}
+
+/// `unused-public`: indexes the workspace with `rust-analyzer scip`, reads `tutti`'s
+/// public API, and prints (and optionally writes) the report. Exits 0 with any finding.
+fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>) -> Result<(), u8> {
+    let fail = |msg: String| {
+        eprintln!("xtask: unused-public: {msg}");
+        1
+    };
+    let crates: Vec<String> = if crates.is_empty() {
+        let mut all: Vec<String> = std::fs::read_dir(ctx.root.join("crates"))
+            .map_err(|e| fail(e.to_string()))?
+            .flatten()
+            .filter(|e| e.path().join("Cargo.toml").is_file())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        all.sort();
+        all
+    } else {
+        crates.to_vec()
+    };
+    for c in &crates {
+        if !ctx.root.join("crates").join(c).join("Cargo.toml").is_file() {
+            return Err(fail(format!("`{c}` is not a crate under crates/")));
+        }
+    }
+    let index = ctx.target.join("unused-public.scip");
+    let ra = Cmd::sh("rust-analyzer scip .")
+        .arg("--output")
+        .arg(index.display().to_string());
+    eprintln!("+ {}", ra.display());
+    let status = command(&ra, ctx).status().map_err(|e| {
+        fail(format!(
+            "cannot run rust-analyzer ({e}); install it with `rustup component add rust-analyzer`"
+        ))
+    })?;
+    if !status.success() {
+        return Err(fail(format!(
+            "`{}` failed ({status}); install it with `rustup component add rust-analyzer`",
+            ra.display()
+        )));
+    }
+    let api = Cmd::sh(&recipes::public_api_cmd("tutti"));
+    eprintln!("+ {}", api.display());
+    let umbrella = match command(&api, ctx).output() {
+        Ok(o) if o.status.success() => Some(String::from_utf8_lossy(&o.stdout).into_owned()),
+        other => {
+            eprintln!(
+                "xtask: unused-public: cargo public-api did not run ({}); umbrella reachability is not checked (cargo install cargo-public-api --locked)",
+                other.map_or_else(|e| e.to_string(), |o| o.status.to_string())
+            );
+            None
+        }
+    };
+    let bytes = std::fs::read(&index).map_err(|e| fail(format!("{}: {e}", index.display())))?;
+    let tree = gates::RealTree {
+        root: ctx.root.clone(),
+    };
+    let text = gates::unused_public(&tree, &bytes, &crates, umbrella.as_deref()).map_err(fail)?;
+    print!("{text}");
+    if let Some(path) = out {
+        if let Some(dir) = Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(path, &text).map_err(|e| fail(format!("{path}: {e}")))?;
+    }
+    Ok(())
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding

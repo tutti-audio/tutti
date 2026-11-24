@@ -55,6 +55,12 @@ pub(crate) enum Step {
     /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
     /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
     UmbrellaApi(Option<String>),
+    /// `unused-public [<crate>...] [--out <path>]`: the report of `gates/unused_public.rs`;
+    /// no crate is every crate under `crates/`.
+    UnusedPublic {
+        crates: Vec<String>,
+        out: Option<String>,
+    },
     /// `affected <base>`: print the packages the diff from `<base>` can reach as
     /// `-p` flags, or `all` (`gates/affected.rs`).
     Affected(String),
@@ -104,6 +110,16 @@ impl Step {
                 dir.as_ref().map_or(String::new(), |d| format!(
                     " (the texts of {d}/<package>.txt instead)"
                 ))
+            ),
+            Step::UnusedPublic { crates, out } => format!(
+                "unused-public: rust-analyzer scip, cargo public-api --package tutti, then the public items of {} with no reference outside test code{}",
+                if crates.is_empty() {
+                    "every crate under crates/".to_owned()
+                } else {
+                    crates.join(" ")
+                },
+                out.as_ref()
+                    .map_or(String::new(), |o| format!(" (also written to {o})"))
             ),
             Step::Affected(base) => format!(
                 "affected: git diff --name-only {base}...HEAD, then the packages it reaches as -p flags (or all)"
@@ -418,6 +434,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "umbrella-api",
         "[<dir>]",
         "the types in the signatures of what tutti exports that tutti does not name (needs cargo-public-api; `doc` and `ci` run it, `gates` does not)",
+    ),
+    (
+        "unused-public",
+        "[<crate>...] [--out <path>]",
+        "a report, never a gate: the public items of the crates (default all) that the tutti umbrella does not name and no code outside tests refers to (needs rust-analyzer and cargo-public-api; not in `gates` or `ci`)",
     ),
     (
         "book",
@@ -818,6 +839,19 @@ impl Planner<'_> {
             "umbrella-api" => {
                 let [dir] = Self::params(name, args, [""])?;
                 self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
+            }
+            "unused-public" => {
+                let mut crates = Vec::new();
+                let mut out = None;
+                let mut it = args.iter();
+                while let Some(a) = it.next() {
+                    if a == "--out" {
+                        out = Some(it.next().ok_or("`unused-public`: `--out` needs a path")?.clone());
+                    } else {
+                        crates.push(a.clone());
+                    }
+                }
+                self.out.push(Step::UnusedPublic { crates, out });
             }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;
