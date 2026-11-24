@@ -156,12 +156,14 @@ fn output_plan::OutputPlan::new
 fn output_plan::OutputPlan::place
 fn output_plan::OutputPlan::terms
 fn output_plan::OutputTerms::is_complete
+fn schedule::clip_node::ClipEvents::header
 fn schedule::clip_node::ClipEvents::is_empty
 fn schedule::clip_node::ClipEvents::len
 fn schedule::clip_node::ClipEvents::notes
 fn schedule::clip_node::MidiClipControls::current
 fn schedule::clip_node::MidiClipControls::is_empty
 fn schedule::clip_node::MidiClipControls::len
+fn schedule::clip_node::MidiClipControls::receiver_changed
 fn schedule::clip_node::MidiClipControls::set
 fn schedule::clip_node::MidiClipNode::new
 fn schedule::harmony_node::HarmonyChanges::as_slice
