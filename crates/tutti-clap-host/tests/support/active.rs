@@ -10,8 +10,7 @@ use std::marker::PhantomData;
 
 use tutti_buffers::{Float, InputOutput};
 use tutti_clap_host::{
-    ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, NoteSend,
-    instance::ProcessOutputRef,
+    ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{MainThreadMarker, MaxBlock, PluginError, Prepare, SampleRate, Samples};
@@ -103,8 +102,6 @@ pub trait ActiveExt<T: Float> {
     fn is_tailing(&self) -> bool;
     /// [`ClapProcessor::is_sleeping`].
     fn is_sleeping(&self) -> bool;
-    /// [`ClapProcessor::note_send`].
-    fn note_send(&self) -> NoteSend;
     /// Deactivates and activates at `rate` and `frames`, as a rate change does.
     ///
     /// # Panics
@@ -172,10 +169,6 @@ impl<T: Float> ActiveExt<T> for Active<T> {
 
     fn is_sleeping(&self) -> bool {
         self.processor_shared().is_sleeping()
-    }
-
-    fn note_send(&self) -> NoteSend {
-        self.processor_shared().note_send()
     }
 
     fn reconfigure_at(&mut self, rate: f64, frames: u32) -> Result<(), PluginError> {

@@ -17,10 +17,12 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
+use tutti_modulation::ControlProgram;
 use tutti_modulation::{
     Declarations, Follower, Lfo, Polarity, RouteDecl, RouteKey, RouteTarget, Source, SourceKey,
     TargetDecl, TargetKey,
 };
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{Feed, ModHost, ReconcileError};
 use tutti_session::{
     MainOutput, ModInput, ModRefusal, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
@@ -624,6 +626,30 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
         let _held = block.lend();
         s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
         let _ = s.update();
+        assert_eq!(lane.retired_programs(), 1, "republished, the old held");
+    }
+    let _ = s.update();
+    assert_eq!(lane.retired_programs(), 0, "the update freed it");
+}
+
+/// **The update frees the program a block held across a republish of a lane
+/// the app added with `Graph::add`**: the reconciler sweeps only the lanes it
+/// wired, so the node's own reclaimer is what frees this one.
+#[test]
+fn an_update_frees_a_program_a_block_held_across_a_hand_added_lanes_republish() {
+    let mut s = offline_48k();
+    let node = ControlLaneNode::from(UnitLaneConfig::new(
+        UnitParam::Cutoff,
+        ControlProgram::default(),
+    ));
+    let lane = node.controls();
+    let _key = s.graph().add(node);
+    let _ = s.update();
+
+    let mut block = lane.probe_reader();
+    {
+        let _held = block.lend();
+        lane.publish(ControlProgram::default());
         assert_eq!(lane.retired_programs(), 1, "republished, the old held");
     }
     let _ = s.update();

@@ -127,16 +127,6 @@ impl ClapLoaded {
         self.plugin.note_port_count(main, is_input)
     }
 
-    /// What the first input note port is sent, as [`note_sends`](Self::note_sends)
-    /// answers for it; CLAP note events alone for a plugin with no input note
-    /// port.
-    pub fn note_send(&self, main: MainThreadMarker) -> NoteSend {
-        if self.note_port_count(main, true) == 0 {
-            return NoteSend::CLAP_ONLY;
-        }
-        self.note_send_at(main, 0)
-    }
-
     /// What input note port `index` is sent; nothing for one the plugin will
     /// not describe.
     fn note_send_at(&self, main: MainThreadMarker, index: u32) -> NoteSend {
