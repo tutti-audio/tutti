@@ -27,7 +27,7 @@
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::thread;
-use tutti_rt::seq_slots;
+use tutti_rt::{Generation, seq_slots};
 
 #[test]
 fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dropped() {
@@ -51,9 +51,18 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
                 "a stale value after the epoch: {yielded:?}"
             );
         }
+        // The writer makes two writes: a sweep that claims the second has
+        // yielded it.
+        if reader.swept().has_reached(Generation::new(2)) {
+            assert!(
+                yielded.contains(&2),
+                "swept past a write it did not yield: {yielded:?}"
+            );
+        }
         handle.join().unwrap();
 
         reader.drain(|_, value| yielded.push(value));
+        assert_eq!(reader.swept(), Generation::new(2), "a quiet drain");
         assert_eq!(
             yielded.last(),
             Some(&2),

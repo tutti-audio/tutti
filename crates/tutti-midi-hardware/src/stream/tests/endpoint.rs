@@ -355,7 +355,7 @@ fn a_new_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
     };
     assert_eq!(*g, GROUP_0);
     assert_ne!(header.source, old, "a fresh MUID");
-    assert_eq!(data.identity, other);
+    assert_eq!(data.body.identity, other);
 }
 
 /// Presenting nothing after presenting an identity ends MIDI-CI the same way:
@@ -666,4 +666,17 @@ fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
         streams(wire.poll(at + 11)).is_empty(),
         "the stream has settled"
     );
+}
+
+/// A MIDI 1.0 port is asked for its identity, not for a UMP Stream, and answers
+/// no Stream message either.
+#[test]
+fn a_midi1_port_answers_no_stream_message() {
+    let mut wire = session_over(legacy(), PortDirection::Duplex, midi2());
+    wire.session.present(Some(presented(identity())));
+    wire.open();
+    let _ = wire.poll(0);
+    let _ = received(&wire);
+    let sent = answered(&mut wire, ask_everything(), 100);
+    assert!(sent.is_empty(), "{sent:?}");
 }

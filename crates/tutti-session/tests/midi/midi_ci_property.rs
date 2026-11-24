@@ -11,10 +11,10 @@ use tutti_platform::Instant;
 
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
-    CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DiscoveryData,
+    CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DeviceBody,
     JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
     PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits,
-    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused,
+    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, ReplyData, RequestRefused,
     ResourceEntry, ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
     ResponderSettings, SimultaneousRequests, StateId, StreamLimit,
 };
@@ -136,7 +136,7 @@ impl PePeer {
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
             if let Decoded::Message(CiMessage::Discovery { header, .. }) = &decoded {
                 self.responder.accept(header.source, MaxSysexSize::of(512));
-                let data = DiscoveryData::new(
+                let data = ReplyData::new(DeviceBody::new(
                     DeviceIdentity {
                         manufacturer: ManufacturerId::of(0x41),
                         family: [U7::of(1); 2],
@@ -145,7 +145,7 @@ impl PePeer {
                     },
                     CiCategories::PROPERTY_EXCHANGE,
                     MaxSysexSize::of(1024),
-                );
+                ));
                 answers.extend(
                     CiMessage::DiscoveryReply {
                         header: CiHeader::new(self.muid),

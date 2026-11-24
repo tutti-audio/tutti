@@ -76,9 +76,9 @@ pub use deadline::Deadline;
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
-    CiCategories, DiscoveryData, MaxSysexSize, NotASysexSize, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
-    SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
-    SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+    CiCategories, DeviceBody, DiscoveryData, MaxSysexSize, NotASysexSize, ReplyData, ReplyVersion2,
+    SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY,
+    SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
 };
 pub use drawbar::{
     Drawbar, DrawbarSetting, NotADrawbarSetting, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
@@ -449,18 +449,18 @@ pub enum CiMessage {
     Discovery {
         /// Addressing preamble.
         header: CiHeader,
-        /// Advertised identity and capabilities. Its Function Block is not on
-        /// the wire of a Discovery and is ignored.
+        /// Advertised identity and capabilities, and the initiator's Output Path ID.
         data: DiscoveryData,
     },
-    /// Reply to Discovery (M2-101 §5.6): the same body, to the initiator.
+    /// Reply to Discovery (M2-101 §5.6): the same device body, to the initiator.
     DiscoveryReply {
         /// Addressing preamble.
         header: CiHeader,
         /// The initiator, whose MUID the Discovery came from.
         to: Muid,
-        /// Advertised identity and capabilities.
-        data: DiscoveryData,
+        /// Advertised identity and capabilities, the echoed Output Path ID and
+        /// the Function Block.
+        data: ReplyData,
     },
     /// Invalidate MUID: tells a device its MUID collided and it must pick a new
     /// one (M2-101 §5.9). Always to the Broadcast MUID. Carries the target MUID.
@@ -509,28 +509,33 @@ pub enum CiMessage {
     },
     /// Inquiry: Process Inquiry Capabilities (§9.2): asks which Process Inquiry
     /// features a device supports. To one device, on the Function Block: its Device
-    /// ID is `0x7F` on the wire whatever the header says.
+    /// ID is `0x7F`.
     ProcessCapabilitiesInquiry {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
         /// The device asked.
         to: Muid,
     },
     /// Reply to Process Inquiry Capabilities (§9.3), on the Function Block.
     ProcessCapabilitiesReply {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
         /// The device that asked.
         to: Muid,
         /// The features supported.
         features: ProcessFeatures,
     },
     /// Inquiry: MIDI Message Report (§9.5): asks a device to report the state of
-    /// its parameters as MIDI messages. Its Device ID on the wire is the scope's
-    /// address, whatever the header says.
+    /// its parameters as MIDI messages. Its Device ID is the scope's address.
     MessageReportInquiry {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
         /// The device asked.
         to: Muid,
         /// How much to report.
@@ -539,11 +544,13 @@ pub enum CiMessage {
         scope: ReportScope,
     },
     /// Reply to MIDI Message Report (§9.6): begins the report, declaring the kinds
-    /// of message the Responder is about to send. Its Device ID on the wire is the
-    /// scope's address, which is the Inquiry's.
+    /// of message the Responder is about to send. Its Device ID is the scope's
+    /// address, which is the Inquiry's.
     MessageReportReply {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
         /// The device that asked.
         to: Muid,
         /// What the Responder will report.
@@ -710,6 +717,32 @@ impl CiMessage {
                 ci_version: *ci_version,
                 source: *source,
             },
+            CiMessage::ProcessCapabilitiesInquiry {
+                source, ci_version, ..
+            }
+            | CiMessage::ProcessCapabilitiesReply {
+                source, ci_version, ..
+            } => CiHeader {
+                device_id: CiDeviceId::FunctionBlock,
+                ci_version: *ci_version,
+                source: *source,
+            },
+            CiMessage::MessageReportInquiry {
+                source,
+                ci_version,
+                scope,
+                ..
+            }
+            | CiMessage::MessageReportReply {
+                source,
+                ci_version,
+                scope,
+                ..
+            } => CiHeader {
+                device_id: scope.address(),
+                ci_version: *ci_version,
+                source: *source,
+            },
             CiMessage::Discovery { header, .. }
             | CiMessage::DiscoveryReply { header, .. }
             | CiMessage::InvalidateMuid { header, .. }
@@ -717,10 +750,6 @@ impl CiMessage {
             | CiMessage::EndpointReply { header, .. }
             | CiMessage::Ack { header, .. }
             | CiMessage::Nak { header, .. }
-            | CiMessage::ProcessCapabilitiesInquiry { header, .. }
-            | CiMessage::ProcessCapabilitiesReply { header, .. }
-            | CiMessage::MessageReportInquiry { header, .. }
-            | CiMessage::MessageReportReply { header, .. }
             | CiMessage::MessageReportEnd { header, .. }
             | CiMessage::ProfileInquiry { header, .. }
             | CiMessage::ProfileReply { header, .. }
@@ -813,22 +842,11 @@ impl CiMessage {
     /// Appends the CI byte payload (what [`encode`](Self::encode) returns) to
     /// `out`: a `Vec<u8>`, a `VecDeque`, any collection of bytes.
     pub fn encode_into(&self, out: &mut impl Extend<u8>) {
-        let mut header = self.header();
-        // The Device ID of a Process Inquiry message is the one the message or its
-        // scope fixes (Tables 40, 41, 43 and 45), never the header's.
+        self.header()
+            .encode(self.sub_id2(), self.destination(), out);
         match self {
-            CiMessage::ProcessCapabilitiesInquiry { .. }
-            | CiMessage::ProcessCapabilitiesReply { .. } => {
-                header.device_id = CiDeviceId::FunctionBlock;
-            }
-            CiMessage::MessageReportInquiry { scope, .. }
-            | CiMessage::MessageReportReply { scope, .. } => header.device_id = scope.address(),
-            _ => {}
-        }
-        header.encode(self.sub_id2(), self.destination(), out);
-        match self {
-            CiMessage::Discovery { data, .. } => data.encode_body(false, out),
-            CiMessage::DiscoveryReply { data, .. } => data.encode_body(true, out),
+            CiMessage::Discovery { data, .. } => data.encode_body(out),
+            CiMessage::DiscoveryReply { data, .. } => data.encode_body(out),
             CiMessage::InvalidateMuid { target, .. } => out.extend(target.to_bytes()),
             CiMessage::EndpointInquiry { status, .. } => out.extend([status.get().get()]),
             CiMessage::EndpointReply { info, .. } => info.encode_body(out),
@@ -962,12 +980,13 @@ impl CiMessage {
             Destination::Broadcast => None,
         };
         let message = match (sub_id2, unicast) {
-            (SUB_ID2_DISCOVERY, None) => DiscoveryData::decode_body(false, body)
-                .map(|data| CiMessage::Discovery { header, data }),
+            (SUB_ID2_DISCOVERY, None) => {
+                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery { header, data })
+            }
             (SUB_ID2_INVALIDATE_MUID, None) => {
                 read::target_body(body).map(|target| CiMessage::InvalidateMuid { header, target })
             }
-            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => DiscoveryData::decode_body(true, body)
+            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => ReplyData::decode_body(body)
                 .map(|data| CiMessage::DiscoveryReply { header, to, data }),
             (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
                 None => None,
@@ -992,14 +1011,19 @@ impl CiMessage {
                 if header.device_id != CiDeviceId::FunctionBlock {
                     return unread(UnreadReason::Malformed);
                 }
-                Some(CiMessage::ProcessCapabilitiesInquiry { header, to })
+                Some(CiMessage::ProcessCapabilitiesInquiry {
+                    source: header.source,
+                    ci_version: header.ci_version,
+                    to,
+                })
             }
             (SUB_ID2_PROCESS_CAPABILITIES_REPLY, Some(to)) => {
                 if header.device_id != CiDeviceId::FunctionBlock {
                     return unread(UnreadReason::Malformed);
                 }
                 read::features_body(body).map(|features| CiMessage::ProcessCapabilitiesReply {
-                    header,
+                    source: header.source,
+                    ci_version: header.ci_version,
                     to,
                     features,
                 })
@@ -1007,7 +1031,8 @@ impl CiMessage {
             (SUB_ID2_MESSAGE_REPORT_INQUIRY, Some(to)) => {
                 read::report_inquiry_body(header.device_id, body).map(|(control, scope)| {
                     CiMessage::MessageReportInquiry {
-                        header,
+                        source: header.source,
+                        ci_version: header.ci_version,
                         to,
                         control,
                         scope,
@@ -1015,8 +1040,14 @@ impl CiMessage {
                 })
             }
             (SUB_ID2_MESSAGE_REPORT_REPLY, Some(to)) => {
-                read::report_reply_body(header.device_id, body)
-                    .map(|scope| CiMessage::MessageReportReply { header, to, scope })
+                read::report_reply_body(header.device_id, body).map(|scope| {
+                    CiMessage::MessageReportReply {
+                        source: header.source,
+                        ci_version: header.ci_version,
+                        to,
+                        scope,
+                    }
+                })
             }
             (SUB_ID2_MESSAGE_REPORT_END, Some(to)) => {
                 Some(CiMessage::MessageReportEnd { header, to })

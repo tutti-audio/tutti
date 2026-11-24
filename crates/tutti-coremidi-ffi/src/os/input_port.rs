@@ -16,7 +16,7 @@ use std::ptr;
 use std::time::Duration;
 
 use super::client::SharedClient;
-use super::endpoint::Endpoint;
+use super::endpoint::{Endpoint, Source};
 use super::error::{Error, Operation, OsStatus};
 use super::receive::{Event, Receiver};
 use super::source::protocol_id;
@@ -63,11 +63,29 @@ impl InputPort {
     ///
     /// [`Error::ReservedProtocol`] for a reserved `protocol`, and [`Error::Call`]
     /// when CoreMIDI refuses the port or the connection (the source went away).
+    ///
+    /// Only a source connects; a destination is another type:
+    ///
+    /// ```compile_fail,E0308
+    /// use tutti_coremidi_ffi::{Destination, Endpoint, InputPort, SharedClient};
+    /// use tutti_ump::Protocol;
+    ///
+    /// fn connect_to_a_destination(client: SharedClient, destination: &Endpoint<Destination>) {
+    ///     let _ = InputPort::connect(
+    ///         client,
+    ///         "in",
+    ///         Protocol::Midi2,
+    ///         destination,
+    ///         || (),
+    ///         |(), _, _| {},
+    ///     );
+    /// }
+    /// ```
     pub fn connect<S, N, F>(
         client: SharedClient,
         name: &str,
         protocol: Protocol,
-        source: &Endpoint,
+        source: &Endpoint<Source>,
         mut new_list: N,
         mut on_ump: F,
     ) -> Result<Self, Error>

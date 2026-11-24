@@ -33,6 +33,7 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use super::hrir_sphere::{push_f32, push_u32};
 use approx::assert_abs_diff_eq;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::peak as peak_value;
@@ -53,13 +54,6 @@ const ITD_K: f32 = 6.0;
 const ILD: f32 = 0.5;
 /// Tap distinct from the ITD taps (`0..=6`) holding `cos(az)` so front ≠ back.
 const MARKER: usize = 16;
-
-fn push_u32(b: &mut Vec<u8>, v: u32) {
-    b.extend_from_slice(&v.to_le_bytes());
-}
-fn push_f32(b: &mut Vec<u8>, v: f32) {
-    b.extend_from_slice(&v.to_le_bytes());
-}
 
 /// Match `unit_vector` in `tutti-dsp`'s `spatial/hrtf.rs`: 0 = front/−z, +90 = left/−x.
 fn cartesian(azimuth: Azimuth, elevation: Elevation) -> [f32; 3] {

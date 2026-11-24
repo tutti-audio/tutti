@@ -42,8 +42,8 @@ use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::start::{Start, Started};
 use crate::virtual_endpoint::VirtualSpec;
 use tutti_coremidi_ffi::{
-    Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
-    UniqueId, ump_endpoints,
+    Destination, Endpoint, EndpointKind, InputPort, OutputPort, SharedClient, Source,
+    UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints,
 };
 use tutti_midi_device::{EndpointId, OsDevice, OsEndpointIdentity};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
@@ -99,7 +99,7 @@ fn open_error(error: tutti_coremidi_ffi::Error) -> MidiHardwareError {
 
 /// An endpoint's name: the display name Audio MIDI Setup shows, else its bare name,
 /// else a label from its unique id (never its list position, which shifts).
-fn endpoint_name(endpoint: &OsObject) -> String {
+fn endpoint_name<K: EndpointKind>(endpoint: &Endpoint<K>) -> String {
     endpoint
         .name()
         .unwrap_or_else(|| format!("MIDI Endpoint {}", endpoint.id()))
@@ -112,7 +112,10 @@ fn endpoint_name(endpoint: &OsObject) -> String {
 /// use and its blocks. Otherwise the endpoint's property. An absent or unreadable `kMIDIPropertyProtocolID` means "the OS did not say",
 /// which resolves to MIDI 1.0 — claiming MIDI 2.0 on no evidence would feed
 /// per-note messages to an endpoint that cannot carry them.
-fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> Described {
+fn endpoint_capability<K: EndpointKind>(
+    endpoint: &Endpoint<K>,
+    ump: Option<&UmpEndpointInfo>,
+) -> Described {
     if let Some(ump) = ump {
         return ump_capability(ump);
     }
@@ -135,7 +138,7 @@ fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> De
 /// have CoreMIDI translate what it then sends natively. A source with no UMP
 /// Endpoint record (a MIDI 1.0 device, or macOS before 15) follows
 /// `kMIDIPropertyProtocolID`.
-fn input_protocol(source: &OsObject, ump: Option<&UmpEndpointInfo>) -> Protocol {
+fn input_protocol(source: &Endpoint<Source>, ump: Option<&UmpEndpointInfo>) -> Protocol {
     let midi2 = match ump {
         Some(ump) => ump.offered.midi2,
         None => carries_midi2_only(&endpoint_capability(source, None).endpoint),
@@ -222,14 +225,14 @@ impl CoreMidiEndpoints {
     /// taken is checked to read it, so a list that shifted since the listing fails.
     /// A `FindError` is `NotFound::Endpoint` to the caller, so a list shift and a
     /// removal look alike.
-    fn find_source(id: EndpointId) -> Option<OsObject> {
+    fn find_source(id: EndpointId) -> Option<Endpoint<Source>> {
         tutti_coremidi_ffi::find_source(unique_id_of(id)?)
             .inspect_err(|error| tracing::debug!(%error, "CoreMIDI source not taken"))
             .ok()
     }
 
     /// The destination `id` names, as `find_source` takes a source.
-    fn find_destination(id: EndpointId) -> Option<OsObject> {
+    fn find_destination(id: EndpointId) -> Option<Endpoint<Destination>> {
         tutti_coremidi_ffi::find_destination(unique_id_of(id)?)
             .inspect_err(|error| tracing::debug!(%error, "CoreMIDI destination not taken"))
             .ok()
@@ -265,7 +268,10 @@ fn os_umps() -> Vec<UmpEndpointInfo> {
 }
 
 /// An endpoint the OS lists, as the endpoint it describes.
-fn os_endpoint(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> OsEndpoint {
+fn os_endpoint<K: EndpointKind>(
+    endpoint: &Endpoint<K>,
+    ump: Option<&UmpEndpointInfo>,
+) -> OsEndpoint {
     let described = endpoint_capability(endpoint, ump);
     OsEndpoint {
         id: endpoint_id(endpoint.id()),
@@ -390,7 +396,7 @@ impl InputConnection for CoreMidiInput {
 /// output drain, not from `process()`.
 struct CoreMidiOutput {
     port: OutputPort,
-    destination: OsObject,
+    destination: Endpoint<Destination>,
     /// Whether the event lists go out tagged MIDI 2.0: the Protocol the output
     /// is in now ([`DeviceOut::follow`]), which a negotiation can change after
     /// the OS reported its own at open.

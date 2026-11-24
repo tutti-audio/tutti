@@ -168,11 +168,29 @@ fn general_midi_on_returns_programs_banks_and_tuning_to_the_defaults() {
     rig.program(0, 1);
     send(&mut rig, &device_control(0x7F, 0x04, 0x00, 0x4C));
     rig.render(512);
-    near(pitch(&mut rig, 9), 441 * 2, "channel 10 melodic, tuned up");
+    // The melodic preset at its own pitch. The player exempts channel 10
+    // from master tuning by its number, whatever it plays: that is this
+    // crate's rule, and goes past GM2 section 4.2, which speaks of key-based
+    // sounds on a rhythm channel.
+    near(pitch(&mut rig, 9), 441, "channel 10 on the melodic preset");
     send(&mut rig, &GM_ON);
     rig.render(512);
     near(pitch(&mut rig, 0), 441, "program 0 of bank 0, at A440");
     near(pitch(&mut rig, 9), 882, "channel 10 is the drum bank again");
+}
+
+/// A preset selected on a channel is the preset the channel plays, whatever
+/// the channel: the melodic preset 0:0 (441 Hz) selected on the percussion
+/// channel, whose own bank holds the octave instrument (882 Hz), plays 441.
+#[test]
+fn a_melodic_preset_selected_on_the_percussion_channel_is_played() {
+    let font = font_with(true);
+    let mut rig = Rig::dry(&font);
+    near(pitch(&mut rig, 9), 882, "the drum bank is the octave one");
+    rig.hand
+        .select(MidiChannel::of(9), &font.presets()[0])
+        .unwrap();
+    near(pitch(&mut rig, 9), 441, "the selected melodic preset");
 }
 
 /// GM2 section 4.9: General MIDI On mutes every sounding note.

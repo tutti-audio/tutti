@@ -16,16 +16,6 @@ fn taps(fir: &Fir) -> Vec<f64> {
     fir.taps().collect()
 }
 
-/// `|H(ω)|` with `H(ω) = Σ h[n] e^{-jωn}`, by direct summation.
-fn magnitude(h: &[f64], omega: f64) -> f64 {
-    let (mut re, mut im) = (0.0, 0.0);
-    for (n, &tap) in h.iter().enumerate() {
-        re += tap * (omega * n as f64).cos();
-        im -= tap * (omega * n as f64).sin();
-    }
-    re.hypot(im)
-}
-
 /// The ideal gain at `f` of a response: 1 in a passband, 0 in a stopband,
 /// `None` in a transition band.
 fn ideal(response: FirResponse, transition: f64, f: f64) -> Option<f64> {
@@ -151,7 +141,7 @@ fn every_response_meets_its_ripple_and_attenuation() {
                 let Some(want) = ideal(response, transition, f) else {
                     continue;
                 };
-                let got = magnitude(&h, omega);
+                let got = tutti_fixtures::signal::dtft_magnitude(&h, omega);
                 if want == 1.0 {
                     assert!(
                         (got - 1.0).abs() <= 1.5 * delta,

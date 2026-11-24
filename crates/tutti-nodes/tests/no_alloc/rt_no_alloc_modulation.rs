@@ -365,7 +365,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
 fn lane_for(
     k: usize,
     range: tutti_graph::ParamRangeCell,
-) -> tutti_nodes::automation::ControlLaneNode {
+) -> (
+    tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::PortLane>,
+    tutti_rt::ParamCell,
+) {
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
@@ -381,11 +384,13 @@ fn lane_for(
         6 => ParamKey::<Hz>::RATE.addr(),
         _ => ParamKey::<Db>::THRESHOLD.addr(),
     };
-    L::from(
+    let knob: tutti_rt::ParamCell = Arc::new(AtomicF64::new(400.0 + k as f64)).into();
+    let lane = L::from(
         UnitLaneConfig::new(addr, lane_program(k, 0))
-            .knob(Arc::new(AtomicF64::new(400.0 + k as f64)).into())
+            .knob(knob.clone())
             .range(range),
-    )
+    );
+    (lane, knob)
 }
 
 /// 200 lanes into the params of 25 [`Probe8`]s (one lane per port: a port
@@ -395,7 +400,7 @@ fn lanes_200(
 ) -> (
     tutti_graph::Editor,
     tutti_graph::Executor,
-    Vec<tutti_nodes::automation::LaneControls>,
+    Vec<(tutti_nodes::automation::LaneControls, tutti_rt::ParamCell)>,
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOutputPort, ParamIn, ParamRange, Prepare, Unforkable};
@@ -428,9 +433,9 @@ fn lanes_200(
     ed.commit().expect("commits");
     let mut controls = Vec::new();
     for k in 0..200 {
-        let lane = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
+        let (lane, knob) = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
         let key = NodeKey(2000 + k as u64);
-        controls.push(ed.insert(key, "lane", lane).controls);
+        controls.push((ed.insert(key, "lane", lane).controls, knob));
         ed.spec_mut()
             .connect_param(at(k), EventOutputPort::new(key, 0));
     }
@@ -444,18 +449,21 @@ fn lanes_200(
 /// 9th port.
 fn lane_moves(
     ed: &mut tutti_graph::Editor,
-    controls: &[tutti_nodes::automation::LaneControls],
+    controls: &[(tutti_nodes::automation::LaneControls, tutti_rt::ParamCell)],
     block: usize,
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{ParamIn, ParamRange};
     if block % 10 == 9 {
-        for (k, c) in controls.iter().enumerate() {
+        for (k, (c, _)) in controls.iter().enumerate() {
             c.publish(lane_program(k, block as u32));
         }
     }
-    for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.store(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
+    for (k, (_, knob)) in controls.iter().enumerate().skip(block % 7).step_by(7) {
+        knob.store(
+            f64::from(300.0 + ((k + block) % 13) as f32 * 20.0),
+            std::sync::atomic::Ordering::Release,
+        );
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {

@@ -2402,7 +2402,7 @@ impl<F: Float> Graph<F> {
                 plugins
                     .get(&node)
                     .map_or(Some(None), |p| p.param_value(id))?
-                    .map(f64::from),
+                    .map(|v| tutti_units::Normalized::clamped(f64::from(v))),
             )
         };
         #[cfg(not(feature = "plugin"))]
