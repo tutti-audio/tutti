@@ -31,7 +31,7 @@ use tutti_plugin_types::{
     Loaded, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginError, PluginRef,
     ProcessContext, ProcessOutput, Processor, process_block, sanitize,
 };
-use tutti_rt::Rt;
+use tutti_rt::{Generation, Rt};
 
 use arrayvec::ArrayVec;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
@@ -216,6 +216,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// Dropped MIDI the next block reports to the executor (`Io::count_lost`):
     /// a reset has no `Io`.
     pub(super) owed_lost: u64,
+    /// How far the host's write slots were swept by the drains of the chunk in
+    /// flight: published once the chunk is handed to the plugin.
+    pub(super) swept: Option<Generation>,
     /// The chords and scales in the piece being rendered, for a plugin that
     /// takes sequencer context.
     pub(super) chords: ChordChanges,
@@ -645,6 +648,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             changes: TransportChanges::default(),
             chunk_midi: 0,
             owed_lost: 0,
+            swept: None,
             idled: false,
             chords: ChordChanges::default(),
             scales: ScaleChanges::default(),
@@ -713,15 +717,40 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
 /// Moves the host's parameter writes since the last call into the block's
 /// changes, at chunk frame `at`: each is sent though the plugin has the value
 /// from this node already, since the write says where it stands, and carries
-/// the epoch it was drained in. Allocation-free, and takes no lock.
-pub(super) fn take_edits(edits: Option<&EditPort>, params: &mut ParamDelivery, at: usize) {
-    let Some(edits) = edits else {
-        return;
-    };
+/// the epoch it was drained in. Answers how far the slots are swept, for
+/// [`InProcessClient::publish_edits`] once the changes are handed to the plugin;
+/// `None` when the reader was not free. Allocation-free, and takes no lock.
+pub(super) fn take_edits(
+    edits: Option<&EditPort>,
+    params: &mut ParamDelivery,
+    at: usize,
+) -> Option<Generation> {
     let offset = chunk_offset(at);
-    edits.drain(|id, value, epoch| {
+    edits?.drain(|id, value, epoch| {
         params.write(id, offset, value.get(), epoch);
-    });
+    })
+}
+
+/// Drains the host's writes into the chunk being filled, at chunk frame `at`,
+/// and keeps in `swept` how far the slots are swept until the chunk is handed
+/// to the plugin ([`publish_edits`]).
+pub(super) fn drain_edits(
+    edits: Option<&EditPort>,
+    params: &mut ParamDelivery,
+    swept: &mut Option<Generation>,
+    at: usize,
+) {
+    if let Some(reached) = take_edits(edits, params, at) {
+        *swept = Some(reached);
+    }
+}
+
+/// The chunk reached the plugin: tells the control side every write up to the
+/// sweep `swept` holds is now the plugin's.
+pub(super) fn publish_edits(edits: Option<&EditPort>, swept: &mut Option<Generation>) {
+    if let (Some(edits), Some(reached)) = (edits, swept.take()) {
+        edits.publish(reached);
+    }
 }
 
 /// Drops the host writes a state or preset load made stale since they were

@@ -9,17 +9,22 @@
 //! are different writers.
 //!
 //! **One reader, claimed.** The slots have one reader, in one cell shared by
-//! every node of the plugin, so a rebind's successor drains the same slots. Two
-//! takers consume them, and each write goes to exactly one:
+//! every node of the plugin, so a rebind's successor drains the same slots. It
+//! is taken by:
 //!
-//! - the node, at the head of each block: [`EditPort::drain`] claims the cell
-//!   without waiting, and a refused claim (the control side holds it) drains on
-//!   the next block, losing nothing;
-//! - the control side, before a read, a save or a fork: [`EditPost::flush`]
-//!   claims the cell, waiting, and applies what no block has taken through the
-//!   plugin's own `Control`, so what it observes holds every write made before
-//!   it. A format's Processor applies what its own slots hold ahead of a
-//!   block's parameter changes, so a write made after a flush wins over it.
+//! - the node, at the head of each block and in each parked poll:
+//!   [`EditPort::drain`] claims the cell without waiting, and a refused claim
+//!   drains on the next one, losing nothing. After the writes it drained are
+//!   handed to the plugin, the node [publishes](EditPort::publish) how far the
+//!   slots were swept;
+//! - the control side, only when a [`Settle`] finds the node idle (a whole window
+//!   with no drain): [`EditPost::apply_idle`] claims the cell, no wait, and
+//!   applies what no block took through the plugin's own `Control`, out of band.
+//!
+//! A read or a save made after a write waits, as a polled value, until the node
+//! has published a sweep that reaches the write ([`EditPost::poll`]). Each write
+//! takes the next generation of the slots, and the sweep counts the latest value
+//! of each slot, not every write.
 //!
 //! **An epoch is stamped on what a drain keeps.** A state or preset load makes
 //! every write before it stale ([`EditPost::reset`]); a write already drained
@@ -32,6 +37,9 @@
 //! ([`Control::inform_controller`]): one value per parameter, the newest.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use tutti_platform::Instant;
+use tutti_rt::Generation;
 
 #[cfg(test)]
 use tutti_plugin_types::fake::at_frame;
@@ -42,6 +50,8 @@ use tutti_rt::AudioThreadCell;
 use tutti_rt::Mutex;
 use tutti_units::{Normalized, ParamId};
 
+use super::settle::{Settle, Shown, Verdict};
+
 /// The slots for `ids`: the backend's post and the first node's port.
 pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, EditPort) {
     let (writer, reader) = edit_slots(ids);
@@ -50,7 +60,10 @@ pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, E
             writer,
             to_inform: Vec::new(),
             scheduled: false,
+            through: Generation::new(0),
         }),
+        applied: AtomicU32::new(0),
+        pulse: AtomicU64::new(0),
         epoch: reader.epoch_watch(),
         reader: AudioThreadCell::new(reader),
     });
@@ -60,6 +73,12 @@ pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, E
 /// What the post and the ports of one plugin share.
 struct Shared {
     state: Mutex<PostState>,
+    /// The sweep the node last published, after handing what it drained to the
+    /// plugin ([`Generation::get`]).
+    applied: AtomicU32,
+    /// How many times the audio side visited the slots (a block, a parked
+    /// poll): the control side's sign that the node is running.
+    pulse: AtomicU64,
     /// The one reader of the slots: claimed by whoever drains.
     reader: AudioThreadCell<EditReader>,
     /// The slots' epoch, read without the reader: a node whose claim is refused
@@ -73,6 +92,9 @@ struct PostState {
     to_inform: Vec<(ParamId, Normalized)>,
     /// A main-thread job to tell the controller is queued.
     scheduled: bool,
+    /// The sweep of the last out-of-band apply: what the control side itself
+    /// handed to the plugin.
+    through: Generation,
 }
 
 /// The control side: any thread posts, one at a time. It is not for the audio
@@ -145,29 +167,56 @@ impl EditPost {
         std::mem::take(&mut state.to_inform)
     }
 
-    /// Takes what no block has taken, claiming the reader (waiting for a node
-    /// that holds it for the length of a drain).
-    fn take_undrained(&self) -> Vec<(ParamId, Normalized)> {
-        let mut taken = Vec::new();
-        loop {
-            if let Some(mut reader) = self.0.reader.try_borrow_mut() {
-                reader.drain(|id, value| taken.push((id, value)));
-                return taken;
-            }
-            std::thread::yield_now();
-        }
+    /// The wait for every write made so far, begun at `now`.
+    pub(super) fn settle(&self, now: Instant) -> Settle {
+        let target = self.0.state.lock().writer.written();
+        Settle::new(target, self.0.pulse.load(Ordering::Relaxed), now)
     }
 
-    /// Applies the writes no block has taken through the plugin's own
-    /// `Control` ([`Control::set_parameter`]), so a read or a save made now sees
-    /// them. Each is consumed here or by a block, never both. Control thread,
-    /// main thread.
-    pub(super) fn flush(&self, main: MainThreadMarker, control: &mut dyn Control) {
-        for (id, value) in self.take_undrained() {
+    /// The verdict of `settle` at `now`.
+    pub(super) fn poll(&self, settle: &mut Settle, now: Instant) -> Verdict {
+        let shown = Shown {
+            covered: self.covered(settle.target()),
+            pulse: self.0.pulse.load(Ordering::Relaxed),
+        };
+        settle.poll(shown, now)
+    }
+
+    /// Whether every write made so far has been handed to the plugin: what a
+    /// call that cannot wait asks.
+    pub(super) fn is_settled(&self) -> bool {
+        let target = self.0.state.lock().writer.written();
+        self.covered(target)
+    }
+
+    fn covered(&self, target: Generation) -> bool {
+        let applied = Generation::new(self.0.applied.load(Ordering::Acquire));
+        applied.has_reached(target) || self.0.state.lock().through.has_reached(target)
+    }
+
+    /// Applies the writes no block has taken through the plugin's own `Control`,
+    /// out of band ([`Control::set_parameter_out_of_band`]), for a node that
+    /// drains nothing. Control thread, main thread.
+    ///
+    /// `false` when the node holds the reader (it is draining now, so it is not
+    /// idle): nothing is taken. The reader is held across the applies, so a
+    /// block that starts meanwhile drains nothing and takes the values after.
+    pub(super) fn apply_idle(&self, main: MainThreadMarker, control: &mut dyn Control) -> bool {
+        let Some(mut reader) = self.0.reader.try_borrow_mut() else {
+            return false;
+        };
+        reader.drain(|id, value| {
             // A write the plugin refuses (read-only) is refused here as a block
             // would refuse it.
-            let _ = control.set_parameter(main, id, value);
+            let _ = control.set_parameter_out_of_band(main, id, value);
+        });
+        let swept = reader.swept();
+        drop(reader);
+        let mut state = self.0.state.lock();
+        if swept.has_reached(state.through) {
+            state.through = swept;
         }
+        true
     }
 }
 
@@ -177,13 +226,22 @@ pub(super) struct EditPort(Arc<Shared>);
 
 impl EditPort {
     /// Hands `apply` each parameter written since the last drain, with its
-    /// latest value and the epoch the drain observed. A refused claim (the
-    /// control side flushes) hands nothing: the slots keep what they hold for
-    /// the next block.
-    pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) {
-        if let Some(mut reader) = self.0.reader.try_borrow_mut() {
-            reader.drain_in_epoch(apply);
-        }
+    /// latest value and the epoch the drain observed, and answers how far the
+    /// slots are swept: every write up to it was handed over or made stale. A
+    /// refused claim (the control side applies an idle node's writes) hands
+    /// nothing and answers `None`: the slots keep what they hold for the next
+    /// visit. Counts the visit either way.
+    pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) -> Option<Generation> {
+        self.0.pulse.fetch_add(1, Ordering::Relaxed);
+        let mut reader = self.0.reader.try_borrow_mut()?;
+        reader.drain_in_epoch(apply);
+        Some(reader.swept())
+    }
+
+    /// Tells the control side the plugin has what the slots held up to `swept`.
+    /// Call it after the drained values were handed to the plugin, not before.
+    pub(super) fn publish(&self, swept: Generation) {
+        self.0.applied.store(swept.get(), Ordering::Release);
     }
 
     /// The slots' epoch now, whoever holds the reader: what a write drained
@@ -217,7 +275,7 @@ mod tests {
 
     fn drained(port: &EditPort) -> Vec<(ParamId, f64)> {
         let mut out = Vec::new();
-        port.drain(|id, value, _| out.push((id, value.get())));
+        let _ = port.drain(|id, value, _| out.push((id, value.get())));
         out
     }
 
@@ -247,10 +305,11 @@ mod tests {
         assert_eq!(drained(&port), [(id(1), 0.75)]);
     }
 
-    /// **A flush applies what no block has taken, through the plugin's own
-    /// `Control`, and a block does not take it again.**
+    /// **A write is settled once the node publishes a sweep that reaches it**,
+    /// not when a drain only took it; and an idle apply takes what no block
+    /// took, once, through the plugin's own `Control`, out of band.
     #[test]
-    fn a_flush_consumes_what_a_block_would_have() {
+    fn a_write_is_settled_by_a_published_sweep_and_an_idle_apply_takes_the_rest() {
         let (fake, loaded) = FakePlugin::new();
         fake.declare(&[(id(1), false), (id(2), false)]);
         let prepare = Prepare::new(
@@ -263,10 +322,18 @@ mod tests {
             panic!("the fake activates");
         };
         let (post, port) = host_edits([id(1), id(2)]);
+        assert!(post.is_settled(), "no write is settled");
         post.write(id(1), Normalized::of(0.25)).unwrap();
-        assert_eq!(drained(&port), [(id(1), 0.25)], "a block took the first");
+        assert!(!post.is_settled());
+        let swept = port.drain(|_, _, _| {}).expect("the claim is free");
+        assert!(!post.is_settled(), "drained is not handed to the plugin");
+        port.publish(swept);
+        assert!(post.is_settled(), "a published sweep reaches the write");
+
         post.write(id(2), Normalized::of(0.5)).unwrap();
-        post.flush(tutti_fixtures::main_thread(), &mut controller);
+        assert!(!post.is_settled());
+        assert!(post.apply_idle(tutti_fixtures::main_thread(), &mut controller));
+        assert!(post.is_settled(), "the idle apply covers what it took");
         let set: Vec<_> = fake
             .calls()
             .into_iter()
@@ -277,7 +344,30 @@ mod tests {
             [Call::SetParameter(id(2))],
             "only the one no block took"
         );
-        assert_eq!(drained(&port), [], "the flush consumed it");
+        assert_eq!(drained(&port), [], "the apply consumed it");
+    }
+
+    /// **An idle apply leaves a running node's reader alone**: while the node
+    /// holds the claim it takes nothing and says so.
+    #[test]
+    fn an_idle_apply_refused_the_claim_takes_nothing() {
+        let (fake, loaded) = FakePlugin::new();
+        fake.declare(&[(id(1), false)]);
+        let prepare = Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::new(Samples::new(64)).expect("a block"),
+        );
+        let Ok((_processor, mut controller)) =
+            loaded.activate(tutti_fixtures::main_thread(), prepare)
+        else {
+            panic!("the fake activates");
+        };
+        let (post, port) = host_edits([id(1)]);
+        post.write(id(1), Normalized::of(0.25)).unwrap();
+        let held = post.0.reader.try_borrow_mut().expect("free");
+        assert!(!post.apply_idle(tutti_fixtures::main_thread(), &mut controller));
+        drop(held);
+        assert_eq!(drained(&port), [(id(1), 0.25)], "still the node's");
     }
 
     /// **A node whose claim is refused still voids a stale write**: the epoch is
@@ -292,7 +382,7 @@ mod tests {
         params.prepare(64);
         params.begin();
         post.write(id(1), Normalized::of(0.75)).unwrap();
-        port.drain(|param, value, epoch| {
+        let _ = port.drain(|param, value, epoch| {
             params.write(param, at_frame(0), value.get(), epoch);
         });
         post.reset();
@@ -312,7 +402,7 @@ mod tests {
         let (post, port) = host_edits([id(1)]);
         post.write(id(1), Normalized::of(0.25)).unwrap();
         let mut observed = None;
-        port.drain(|_, _, epoch| observed = Some(epoch));
+        let _ = port.drain(|_, _, epoch| observed = Some(epoch));
         let observed = observed.expect("drained");
         post.reset();
         assert!(tutti_plugin_types::epoch_before(observed, port.epoch()));

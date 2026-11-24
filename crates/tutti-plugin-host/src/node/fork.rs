@@ -192,9 +192,6 @@ where
             let control = instance
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
-            if let Some(edits) = &self.edits {
-                edits.flush(main, control);
-            }
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
             let preset = if self.features.contains(Features::PRESET_LOAD) {

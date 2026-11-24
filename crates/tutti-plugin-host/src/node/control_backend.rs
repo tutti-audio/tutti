@@ -40,6 +40,7 @@ use tutti_rt::Mutex;
 
 use super::instance::{Changes, Instance, Lost};
 use super::off_main_wait::{OffMainWait, await_answer};
+use super::settle::{Settle, Verdict};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
@@ -134,22 +135,52 @@ where
     /// Runs `work` on the plugin on the main thread, under the instance lock,
     /// from whichever thread asks. `None` when it cannot be answered: the
     /// collector has never run, or the main thread did not run the work within
-    /// [`OFF_MAIN_DEADLINE`].
+    /// [`OFF_MAIN_DEADLINE`]. The host's writes are not waited for.
     fn on_main<R: Send + 'static>(
         &self,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
     ) -> Option<R> {
         if let Some(main) = MainThreadMarker::new() {
-            return Some(self.flushed(main, work));
+            return Some(work(main, &mut self.inner.lock()));
         }
+        self.off_main(false, work)
+    }
+
+    /// [`on_main`](Self::on_main) for a call whose answer holds the host's
+    /// writes: on the main thread it runs only when every write is already
+    /// handed to the plugin ([`Settled::Busy`] otherwise, for the caller to
+    /// ask again or to use the async form); off it the main thread's job waits
+    /// for them, polled, within the deadline.
+    fn on_main_settled<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
+    ) -> Settled<R> {
+        if let Some(main) = MainThreadMarker::new() {
+            return if self.edits.is_settled() {
+                Settled::Ran(work(main, &mut self.inner.lock()))
+            } else {
+                Settled::Busy
+            };
+        }
+        self.off_main(true, work)
+            .map_or(Settled::Unavailable, Settled::Ran)
+    }
+
+    /// `work` posted to the main thread's next tick, waited for within
+    /// [`OFF_MAIN_DEADLINE`]; after the host's writes when `settled`.
+    fn off_main<R: Send + 'static>(
+        &self,
+        settled: bool,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
+    ) -> Option<R> {
         if !self.work.is_pumped() {
             return None;
         }
         let (answer, wait) = sync_channel(1);
-        let inner = Arc::clone(&self.inner);
-        let post = self.edits.clone();
-        self.work.defer(move |main| {
-            let _ = answer.send(flushed(&post, main, &mut inner.lock(), work));
+        self.submit(settled, work, move |ran| {
+            if let Some(ran) = ran {
+                let _ = answer.send(ran);
+            }
         });
         await_answer(
             &wait,
@@ -165,23 +196,42 @@ where
     /// thread to hop to); a job dropped unrun cancels the answer.
     fn on_main_answer<R: Send + 'static>(
         &self,
+        settled: bool,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> Option<R> + Send + 'static,
     ) -> Answer<Option<R>> {
         let (tx, answer) = Answer::channel();
-        if let Some(main) = MainThreadMarker::new() {
-            // The receiver is held here: the send cannot fail.
-            drop(tx.send(self.flushed(main, work)));
-        } else if self.work.is_pumped() {
-            let inner = Arc::clone(&self.inner);
-            let post = self.edits.clone();
-            self.work.defer(move |main| {
-                // A dropped receiver has no one to tell.
-                drop(tx.send(flushed(&post, main, &mut inner.lock(), work)));
-            });
-        } else {
-            drop(tx.send(None));
-        }
+        // A dropped receiver has no one to tell.
+        self.submit(settled, work, move |ran| drop(tx.send(ran.flatten())));
         answer
+    }
+
+    /// Runs `work` on the main thread, under the instance lock, and hands what
+    /// it returns to `done` (`None` when there is no main thread to run it).
+    /// With `settled`, `work` runs after every write made before this call is
+    /// handed to the plugin, by the node's blocks or its parked polls: a wait
+    /// that is polled, once per main-thread tick, never slept. A node idle for
+    /// a whole window has its writes applied out of band first.
+    fn submit<R: Send + 'static>(
+        &self,
+        settled: bool,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
+        done: impl FnOnce(Option<R>) + Send + 'static,
+    ) {
+        let wait = settled.then(|| self.edits.settle(Instant::now()));
+        let host = Host {
+            inner: Arc::clone(&self.inner),
+            post: self.edits.clone(),
+            work: self.work.clone(),
+        };
+        let (work, done) = (Box::new(work), Box::new(done));
+        if let Some(main) = MainThreadMarker::new() {
+            step(main, host, wait, work, done);
+        } else if self.work.is_pumped() {
+            self.work
+                .defer(move |main| step(main, host, wait, work, done));
+        } else {
+            done(None);
+        }
     }
 
     /// Queues the main-thread job that tells the plugin's edit controller of
@@ -215,23 +265,78 @@ where
         );
     }
 
-    /// `work` on the plugin under the instance's lock, after the host's
-    /// pending parameter writes are applied.
-    fn flushed<R>(
-        &self,
-        main: MainThreadMarker,
-        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
-    ) -> R {
-        flushed(&self.edits, main, &mut self.inner.lock(), work)
-    }
-
     /// `work` on the plugin now, when this is the main thread and the instance is
     /// not locked; `None` otherwise. Never waits.
     fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R) -> Option<R> {
         let main = MainThreadMarker::new()?;
         let mut instance = self.inner.try_lock()?;
-        Some(flushed(&self.edits, main, &mut instance, work))
+        Some(work(main, &mut instance))
     }
+}
+
+/// How a call that holds the host's writes in its answer ran.
+enum Settled<R> {
+    /// It ran, with every write handed to the plugin.
+    Ran(R),
+    /// It did not run: a write has not reached the plugin, and this call cannot
+    /// wait for it.
+    Busy,
+    /// It did not run: the main thread did not answer.
+    Unavailable,
+}
+
+/// What a deferred job holds of the backend: everything but the plugin's
+/// callbacks, owned, so the job outlives a borrow of the backend.
+struct Host<L: InProcess> {
+    inner: Arc<Mutex<Instance<L>>>,
+    post: super::host_edits::EditPost,
+    work: MainWorkHandle,
+}
+
+/// One poll of a job that waits for the host's writes, on the main thread. A
+/// covered wait, or none, runs `work` and hands its result to `done`. A wait
+/// still open queues the job again for the next tick. A node idle for a whole
+/// window has its writes applied out of band, then `work` runs; a node that
+/// turns out to be running (it holds the slots) is waited for again. With no
+/// collector to queue on, `work` runs at once, and the writes are not waited
+/// for.
+fn step<L: InProcess, R>(
+    main: MainThreadMarker,
+    host: Host<L>,
+    mut wait: Option<Settle>,
+    work: Box<dyn FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send>,
+    done: Box<dyn FnOnce(Option<R>) + Send>,
+) where
+    L: 'static,
+    L::Processor: 'static,
+    R: Send + 'static,
+{
+    let verdict = wait.as_mut().map_or(Verdict::Covered, |wait| {
+        host.post.poll(wait, Instant::now())
+    });
+    let queue = host.work.is_pumped();
+    if verdict == Verdict::Waiting && queue {
+        host.work
+            .clone()
+            .defer(move |main| step(main, host, wait, work, done));
+        return;
+    }
+    let mut instance = host.inner.lock();
+    if verdict == Verdict::Idle {
+        let applied = instance
+            .control()
+            .is_none_or(|control| host.post.apply_idle(main, control));
+        if !applied && queue {
+            drop(instance);
+            host.work
+                .clone()
+                .defer(move |main| step(main, host, wait, work, done));
+            return;
+        }
+    }
+    let ran = work(main, &mut instance);
+    drop(instance);
+    done(Some(ran));
 }
 
 /// Tells the plugin's edit controller of the host's writes on the main thread's
@@ -260,21 +365,6 @@ pub(super) fn queue_inform(
     });
 }
 
-/// `work` on `instance`, after the writes no block has taken are applied to the
-/// plugin: a read or a save made through the backend sees every write made
-/// before it.
-fn flushed<L: InProcess, R>(
-    post: &super::host_edits::EditPost,
-    main: MainThreadMarker,
-    instance: &mut Instance<L>,
-    work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
-) -> R {
-    if let Some(control) = instance.control() {
-        post.flush(main, control);
-    }
-    work(main, instance)
-}
-
 impl<L> AnyThread for ControlBackend<L>
 where
     L: InProcess + 'static,
@@ -283,15 +373,19 @@ where
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
-        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
+        self.on_main_answer(true, move |main, instance| {
+            instance.control()?.parameter(main, id)
+        })
     }
 
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-        self.on_main_answer(|main, instance| Some(instance.control()?.parameters(main)))
+        self.on_main_answer(false, |main, instance| {
+            Some(instance.control()?.parameters(main))
+        })
     }
 
     fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
-        self.on_main_answer(move |main, instance| {
+        self.on_main_answer(false, move |main, instance| {
             instance.control()?.parameter_normalized(main, id, plain)
         })
     }
@@ -337,6 +431,10 @@ where
     /// `None` when it is locked or this is not the main thread, so a control
     /// tick skips a busy plugin instead of waiting on it.
     fn bypassed(&self, site: OwnBypass) -> Option<bool> {
+        // A parameter bypass is read after the host's writes reached the plugin.
+        if matches!(site, OwnBypass::Parameter(_)) && !self.edits.is_settled() {
+            return None;
+        }
         self.try_main(|main, instance| {
             let control = instance.control()?;
             match site {
@@ -356,7 +454,12 @@ where
     /// [`Control::parameter_text`]
     /// answers it (VST2's only for the value it currently holds).
     fn parameter_text(&self, id: ParamId, value: Normalized) -> Option<String> {
-        self.on_main(move |main, instance| instance.control()?.parameter_text(main, id, value))?
+        match self.on_main_settled(move |main, instance| {
+            instance.control()?.parameter_text(main, id, value)
+        }) {
+            Settled::Ran(text) => text,
+            Settled::Busy | Settled::Unavailable => None,
+        }
     }
 
     /// Parse through the plugin's own parser
@@ -364,11 +467,14 @@ where
     /// **On VST2 this writes**, since its opcode parses by applying.
     fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized> {
         let text = text.to_owned();
-        self.on_main(move |main, instance| {
+        match self.on_main_settled(move |main, instance| {
             instance
                 .control()?
                 .parameter_value_from_text(main, id, &text)
-        })?
+        }) {
+            Settled::Ran(value) => value,
+            Settled::Busy | Settled::Unavailable => None,
+        }
     }
 
     /// The plugin's own failure, forwarded rather than dropped, so the caller
@@ -376,19 +482,23 @@ where
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
     /// runs this on the session's executor: off the main thread it
-    /// is run by the main thread's next tick (`on_main`), and
-    /// [`StateError::Unavailable`] if that does not come within the deadline.
+    /// is run by the main thread's next tick, after the host's writes reached
+    /// the plugin, and [`StateError::Unavailable`] if that does not come within
+    /// the deadline. On the main thread, which cannot wait for a node to drain,
+    /// it is [`StateError::Busy`] while a write has not reached the plugin: ask
+    /// again, or ask off the main thread.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-        match self.on_main(move |main, instance| {
+        match self.on_main_settled(move |main, instance| {
             instance.control().map(|control| {
                 control
                     .save_state(main, state_use)
                     .map_err(StateError::from)
             })
         }) {
-            Some(Some(state)) => state,
-            Some(None) => Err(StateError::PluginCrashed),
-            None => Err(StateError::Unavailable),
+            Settled::Ran(Some(state)) => state,
+            Settled::Ran(None) => Err(StateError::PluginCrashed),
+            Settled::Busy => Err(StateError::Busy),
+            Settled::Unavailable => Err(StateError::Unavailable),
         }
     }
 
@@ -821,10 +931,11 @@ mod off_main_tests {
         );
     }
 
-    /// **A write made after a flush wins over it**, through the whole path: a
-    /// write, a read (which flushes it into the plugin), a later write, a block.
-    /// The plugin ends on the later write; a flush that landed after the block
-    /// would leave it on the first.
+    /// **A write made after an idle apply wins over it**, through the whole
+    /// path: a write, a read (no block runs, so after the idle window the control
+    /// side applies the write out of band), a later write, a block. The plugin
+    /// ends on the later write; an apply that landed after the block would leave
+    /// it on the first.
     #[test]
     fn a_write_after_a_flush_is_the_plugins_last_word() {
         let (mut unit, handle, _pump) = loaded();
@@ -838,7 +949,7 @@ mod off_main_tests {
                 .flatten()
                 .map(Normalized::get),
             Some(0.25),
-            "the read flushes the first write into the plugin"
+            "the read applies the first write to the plugin, a node being idle"
         );
         handle
             .any_thread()

@@ -505,8 +505,8 @@ mod tests {
         );
     }
 
-    /// **A write made after a flush is the plugin's last word**, through a node:
-    /// the first write is applied by a flush (the plugin's own `Control`), the
+    /// **A write made after an idle apply is the plugin's last word**, through a
+    /// node: the first write is applied out of band (the plugin's own `Control`), the
     /// second rides the next block, and nothing the plugin is told after the
     /// block undoes it.
     #[test]
@@ -515,7 +515,7 @@ mod tests {
         let id = ParamId::new(1);
         post.write(id, tutti_units::Normalized::of(0.25))
             .expect("a declared parameter");
-        post.flush(main_thread(), inner.lock().control().expect("alive"));
+        assert!(post.apply_idle(main_thread(), inner.lock().control().expect("alive")));
         post.write(id, tutti_units::Normalized::of(0.75))
             .expect("a declared parameter");
         unit.block();

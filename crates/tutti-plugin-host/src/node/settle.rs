@@ -1,0 +1,146 @@
+//! The wait for the host's parameter writes to reach the plugin, as a polled
+//! rule.
+//!
+//! A read or a save made after a write is answered once the audio side has
+//! handed the write to the plugin ([`Verdict::Covered`]). The rule reads no
+//! clock and blocks nothing: the caller passes the instant it sampled and what
+//! the audio side shows, and acts on the verdict, polling again while it is [`Waiting`](Verdict::Waiting).
+
+use std::time::Duration;
+use tutti_platform::Instant;
+use tutti_rt::Generation;
+
+/// How long the wait gives the audio side, without a sign of it, before it
+/// calls the node idle: several blocks of the longest period a device runs at.
+pub(super) const WINDOW: Duration = Duration::from_millis(100);
+
+/// What the wait makes of its state at an instant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// The audio side has handed the writes to the plugin.
+    Covered,
+    /// The audio side is running, or the window is open: poll again.
+    Waiting,
+    /// A whole window passed with no sign of the audio side: nothing will
+    /// drain the writes, and the control side applies them itself.
+    Idle,
+}
+
+/// What the audio side shows now.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Shown {
+    /// Whether it has handed the writes up to the target to the plugin.
+    pub(super) covered: bool,
+    /// Its count of drain visits (a block or a parked poll).
+    pub(super) pulse: u64,
+}
+
+/// One wait, for the writes made before it began.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Settle {
+    target: Generation,
+    due: Instant,
+    pulse: u64,
+}
+
+impl Settle {
+    /// A wait for the writes up to `target`, begun at `began` with the audio
+    /// side's `pulse` as it showed.
+    pub(super) fn new(target: Generation, pulse: u64, began: Instant) -> Self {
+        Self {
+            target,
+            due: began + WINDOW,
+            pulse,
+        }
+    }
+
+    /// The writes the wait is for: those up to this generation.
+    pub(super) fn target(&self) -> Generation {
+        self.target
+    }
+
+    /// The verdict at `now`. A window that ends while the pulse has moved
+    /// since it opened opens again: the audio side is running and will drain.
+    pub(super) fn poll(&mut self, shown: Shown, now: Instant) -> Verdict {
+        if shown.covered {
+            return Verdict::Covered;
+        }
+        if now < self.due {
+            return Verdict::Waiting;
+        }
+        if shown.pulse == self.pulse {
+            return Verdict::Idle;
+        }
+        self.pulse = shown.pulse;
+        self.due = now + WINDOW;
+        Verdict::Waiting
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    fn shown(covered: bool, pulse: u64) -> Shown {
+        Shown { covered, pulse }
+    }
+
+    fn settle(began: Instant) -> Settle {
+        Settle::new(Generation::new(3), 7, began)
+    }
+
+    /// **A wait whose writes are covered ends at once, window or not.**
+    #[test]
+    fn covered_writes_end_the_wait_at_any_instant() {
+        let began = Instant::now();
+        let mut wait = settle(began);
+        assert_eq!(wait.poll(shown(true, 7), began), Verdict::Covered);
+        assert_eq!(
+            wait.poll(shown(true, 7), began + ms(5000)),
+            Verdict::Covered
+        );
+    }
+
+    /// **The window is the deadline, to the instant**: until it the wait
+    /// waits, whatever the pulse shows; at it, with the pulse where it
+    /// began, the node is idle.
+    #[test]
+    fn an_unmoved_pulse_is_idle_exactly_at_the_deadline() {
+        let began = Instant::now();
+        let mut wait = settle(began);
+        assert_eq!(wait.poll(shown(false, 7), began), Verdict::Waiting);
+        assert_eq!(
+            wait.poll(shown(false, 7), began + WINDOW - ms(1)),
+            Verdict::Waiting
+        );
+        assert_eq!(wait.poll(shown(false, 7), began + WINDOW), Verdict::Idle);
+        assert_eq!(wait.poll(shown(false, 7), began + ms(9000)), Verdict::Idle);
+    }
+
+    /// **A moving pulse is never idle**: each window that ends with the pulse
+    /// moved opens another from that instant, and the node is idle only after
+    /// a whole window with the pulse where the last one left it.
+    #[test]
+    fn a_moving_pulse_reopens_the_window() {
+        let began = Instant::now();
+        let mut wait = settle(began);
+        let first_end = began + WINDOW;
+        assert_eq!(wait.poll(shown(false, 8), first_end), Verdict::Waiting);
+        assert_eq!(
+            wait.poll(shown(false, 9), first_end + WINDOW),
+            Verdict::Waiting
+        );
+        assert_eq!(
+            wait.poll(shown(false, 9), first_end + WINDOW + WINDOW - ms(1)),
+            Verdict::Waiting
+        );
+        assert_eq!(
+            wait.poll(shown(false, 9), first_end + WINDOW + WINDOW),
+            Verdict::Idle
+        );
+    }
+}

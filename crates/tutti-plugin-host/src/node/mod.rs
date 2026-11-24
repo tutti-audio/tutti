@@ -26,6 +26,7 @@ mod loader;
 mod midi_map_tests;
 mod off_main_wait;
 mod rebind;
+mod settle;
 mod width_error;
 
 pub use client::{InProcessClient, PluginNode};

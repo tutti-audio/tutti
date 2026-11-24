@@ -26,7 +26,7 @@
 
 use std::sync::Arc;
 
-use tutti_rt::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
+use tutti_rt::{Generation, SeqSlotsReader, SeqSlotsWriter, seq_slots};
 use tutti_units::{Normalized, ParamId};
 
 /// A write to a parameter the activation did not declare.
@@ -76,6 +76,13 @@ impl EditWriter {
         Ok(())
     }
 
+    /// The writes made so far, as a wrapping count: what the reader's
+    /// [`swept`](EditReader::swept) reaches once a drain has seen them.
+    #[must_use]
+    pub fn written(&self) -> Generation {
+        self.slots.written()
+    }
+
     /// Makes every write made so far stale: a state or a preset load replaced
     /// the values they were written against.
     ///
@@ -119,6 +126,17 @@ impl EditReader {
             // must not panic.
             apply(ids[slot], Normalized::clamped(value), epoch);
         });
+    }
+
+    /// The write count of the last drain that no write overlapped. After a
+    /// drain, the latest value of each slot written up to it was handed to
+    /// `apply`, or skipped as stale: **latest value per slot, not every write**,
+    /// and a write a [`reset`](EditWriter::reset) made stale is counted as swept
+    /// though it was never applied. A drain a write overlapped does not advance
+    /// it. Wait-free.
+    #[must_use]
+    pub fn swept(&self) -> Generation {
+        self.slots.swept()
     }
 
     /// The epoch now: it moves with each [`EditWriter::reset`].

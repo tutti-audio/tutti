@@ -36,7 +36,8 @@ use tutti_graph::{
 use tutti_units::{Latency, Samples, Tail};
 
 use super::client::{
-    InProcessClient, Inputs, PluginNode, Rendered, render_with, take_edits, void_stale_edits,
+    InProcessClient, Inputs, PluginNode, Rendered, drain_edits, publish_edits, render_with,
+    void_stale_edits,
 };
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
@@ -154,12 +155,16 @@ where
             return;
         }
         this.params.begin();
-        take_edits(this.edits.as_ref(), &mut this.params, 0);
+        drain_edits(this.edits.as_ref(), &mut this.params, &mut this.swept, 0);
         void_stale_edits(this.edits.as_ref(), &mut this.params);
         if !this.params.chunk().is_empty() {
             let flushed = processor.flush_parameters(this.params.chunk()).is_ok();
             this.params.handed_off(flushed);
+            if !flushed {
+                return;
+            }
         }
+        publish_edits(this.edits.as_ref(), &mut this.swept);
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -240,7 +245,12 @@ where
                 // first frame; a node with no Processor leaves them in their
                 // slots.
                 if processor.is_some() {
-                    take_edits(this.edits.as_ref(), &mut this.params, phase);
+                    drain_edits(
+                        this.edits.as_ref(),
+                        &mut this.params,
+                        &mut this.swept,
+                        phase,
+                    );
                 }
                 this.midi.clear();
                 this.chords.changes.clear();
@@ -382,7 +392,11 @@ where
                         lost += reported;
                     }
                     if completes {
-                        this.params.handed_off(!this.out.params_unsent());
+                        let delivered = !this.out.params_unsent();
+                        this.params.handed_off(delivered);
+                        if delivered {
+                            publish_edits(this.edits.as_ref(), &mut this.swept);
+                        }
                     }
                     if sends {
                         let out_events = &mut this.out.midi_events;
@@ -452,7 +466,7 @@ where
         this.scales.changes.clear();
         this.params.begin();
         if processor.is_some() {
-            take_edits(this.edits.as_ref(), &mut this.params, 0);
+            drain_edits(this.edits.as_ref(), &mut this.params, &mut this.swept, 0);
         }
         let midi = &mut this.midi;
         let intake = &mut this.intake;
@@ -559,8 +573,11 @@ where
             }
         }
         // Set on the plugin with the block, or owed to the next one.
-        this.params
-            .handed_off(processed && !this.out.params_unsent());
+        let delivered = processed && !this.out.params_unsent();
+        this.params.handed_off(delivered);
+        if delivered {
+            publish_edits(this.edits.as_ref(), &mut this.swept);
+        }
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,
             // and the rest of every SysEx open in it is skipped.
