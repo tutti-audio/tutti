@@ -10,7 +10,6 @@
 //! nothing here waits on time: the threads take turns with the drain.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
-use std::time::{Duration, Instant};
 
 use tutti_sampler::testing::{MockTransport, loop_frames, wait_for_open};
 use tutti_sampler::{
@@ -28,8 +27,6 @@ const LEN: usize = 4_096;
 const ROUNDS: usize = 200;
 /// Calls B makes between two drains: with A's two commands, far below the ring.
 const PER_DRAIN: usize = 8;
-/// Longest the test waits on anything before it calls the run hung.
-const HANG: Duration = Duration::from_secs(120);
 
 const SLOT: SlotId = SlotId(7);
 
@@ -69,10 +66,20 @@ fn direction_of(n: usize) -> PlayDirection {
     }
 }
 
-/// Spins until `blocks` passes `seen`: the pool has drained since.
-fn next_drain(blocks: &AtomicU64, seen: u64, since: Instant) {
+/// Sets its flag when dropped, whether its thread returned or panicked.
+struct SetOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for SetOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, SeqCst);
+    }
+}
+
+/// Spins until `blocks` passes `seen` (the pool has drained since), or the
+/// drain is gone (`over`: its thread panicked).
+fn next_drain(blocks: &AtomicU64, seen: u64, over: &AtomicBool) {
     while blocks.load(SeqCst) == seen {
-        assert!(since.elapsed() < HANG, "the drain never ran");
+        assert!(!over.load(SeqCst), "the drain is gone");
         std::thread::yield_now();
     }
 }
@@ -135,15 +142,16 @@ fn a_command_reaches_the_voice_holding_the_slot_when_it_is_queued() {
     let clock = AtomicU64::new(1);
     let blocks = AtomicU64::new(0);
     let a_done = AtomicBool::new(false);
-    let b_done = AtomicBool::new(false);
-    let since = Instant::now();
+    let drain_gone = AtomicBool::new(false);
     let wave = std::sync::Arc::new(tutti_buffers::Wave::new(1, RATE));
 
     let (rounds, calls, rests) = std::thread::scope(|scope| {
         let a = scope.spawn({
             let handle: VoicePoolHandle<f32> = handle.clone();
-            let (clock, blocks, a_done, cells) = (&clock, &blocks, &a_done, &cells);
+            let (clock, blocks, a_done, drain_gone, cells) =
+                (&clock, &blocks, &a_done, &drain_gone, &cells);
             move || {
+                let _done = SetOnDrop(a_done);
                 let mut rounds = Vec::new();
                 let mut rests = Vec::new();
                 for (k, (voice, stream)) in voices.into_iter().enumerate() {
@@ -165,15 +173,14 @@ fn a_command_reaches_the_voice_holding_the_slot_when_it_is_queued() {
                         adding,
                         added,
                     });
-                    next_drain(blocks, seen, since);
+                    next_drain(blocks, seen, drain_gone);
                 }
-                a_done.store(true, SeqCst);
                 (rounds, rests)
             }
         });
         let b = scope.spawn({
             let handle: VoicePoolHandle<f32> = handle.clone();
-            let (clock, blocks, a_done, b_done) = (&clock, &blocks, &a_done, &b_done);
+            let (clock, blocks, a_done, drain_gone) = (&clock, &blocks, &a_done, &drain_gone);
             let wave = &wave;
             move || {
                 let mut calls = Vec::new();
@@ -204,17 +211,16 @@ fn a_command_reaches_the_voice_holding_the_slot_when_it_is_queued() {
                             handle.replace_wave(SLOT, wave.clone())
                         });
                     }
-                    next_drain(blocks, seen, since);
+                    next_drain(blocks, seen, drain_gone);
                 }
-                b_done.store(true, SeqCst);
                 calls
             }
         });
 
         // The audio side: drains every block, and tends the streamer.
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-        while !(a_done.load(SeqCst) && b_done.load(SeqCst)) {
-            assert!(since.elapsed() < HANG, "the threads never finished");
+        let _gone = SetOnDrop(&drain_gone);
+        while !(a.is_finished() && b.is_finished()) {
             tutti_sampler::testing::block(&mut pool, &transport, RATE, BLOCK);
             handle.collect_retired();
             let _ = streamer.step_until_idle(1_000);

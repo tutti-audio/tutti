@@ -713,7 +713,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 ///
 /// Held by the host (an ECS system, typically) and cloned freely: its several
 /// control threads share one record of the pool's slots and the one command
-/// writer, behind one lock ([`Inner`]). It mirrors the reader's width, and
+/// writer, behind one lock. It mirrors the reader's width, and
 /// shares the rate the reader was last prepared at, so a command that needs a
 /// vocoder gets one built, on the calling thread, at the right width. For a
 /// streaming voice added through [`add_streaming`](Self::add_streaming) it holds

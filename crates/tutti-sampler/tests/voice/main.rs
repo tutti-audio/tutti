@@ -1,4 +1,8 @@
 //! A sampler voice: gain, loops, seeks, commands and the two tiers.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 mod block_length_invariance;
 mod disk_placement;
