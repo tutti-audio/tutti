@@ -27,7 +27,7 @@ use tutti_modulation::{
     compile,
 };
 use tutti_rt::ParamCell;
-use tutti_units::{At, ParamAddr, ParamId};
+use tutti_units::{At, Normalized, ParamAddr, ParamId};
 
 use crate::automation::{
     ControlLaneNode, ForeignLaneConfig, ForeignLaneControls, LaneControls, UnitLaneConfig,
@@ -85,7 +85,7 @@ enum Drive {
     Gain(EdgeId),
     /// A hosted plugin's parameter: the event input of its node the lane
     /// feeds. The lane's own cell starts at the plugin's value; later writes
-    /// go through the lane's [`LaneControls::store`] ([`Modulation::lane`]).
+    /// go through its [`ForeignLaneControls::store`] ([`Modulation::plugin_lanes`]).
     Plugin {
         /// The event input of the node hosting the parameter.
         input: EventInputPort,
@@ -208,17 +208,21 @@ struct Bound {
     /// edge's gain cell. `None`: no knob, the base is automation alone.
     knob: Option<ParamCell>,
     /// A plugin lane's first value.
-    seed: Option<f64>,
+    seed: Option<Normalized>,
 }
 
 impl Bound {
     /// Whether a lane built for `self` still serves `other`.
     fn same(&self, other: &Self) -> bool {
-        // An edge's or a mix's entry makes its knob cell and range cell
-        // together, so the knob's identity names both.
-        self.drive == other.drive
-            && self.generation == other.generation
-            && match (&self.knob, &other.knob) {
+        self.drive == other.drive && self.cells_same(other.generation, other.knob.as_ref())
+    }
+
+    /// Whether `self`'s cells are those of unit generation `generation` with
+    /// knob `knob`. An edge's or a mix's entry makes its knob cell and range
+    /// cell together, so the knob's identity names both.
+    fn cells_same(&self, generation: u32, knob: Option<&ParamCell>) -> bool {
+        self.generation == generation
+            && match (&self.knob, knob) {
                 (Some(a), Some(b)) => a.ptr_eq(b),
                 (None, None) => true,
                 _ => false,
@@ -226,18 +230,41 @@ impl Bound {
     }
 }
 
-/// A lane's controls: a plugin lane's also set the range it owns.
+/// A lane as wired: what it drives, with the controls of the lane built for
+/// it. A plugin lane's also hold the knob and the range it owns.
 #[derive(Debug)]
-enum Controls {
-    Unit(LaneControls),
-    Foreign(ForeignLaneControls),
+enum Wired {
+    Port(ParamIn, LaneControls),
+    Gain(EdgeId, LaneControls),
+    Plugin {
+        input: EventInputPort,
+        id: ParamId,
+        controls: ForeignLaneControls,
+    },
 }
 
-impl Controls {
+impl Wired {
+    fn drive(&self) -> Drive {
+        match *self {
+            Self::Port(at, _) => Drive::Port(at),
+            Self::Gain(id, _) => Drive::Gain(id),
+            Self::Plugin { input, id, .. } => Drive::Plugin { input, id },
+        }
+    }
+
     fn lane(&self) -> &LaneControls {
         match self {
-            Self::Unit(c) => c,
-            Self::Foreign(c) => c.lane(),
+            Self::Port(_, c) | Self::Gain(_, c) => c,
+            Self::Plugin { controls, .. } => controls.lane(),
+        }
+    }
+
+    /// Frees what the lane's cells hold retired: its programs, and a plugin
+    /// lane's ranges.
+    fn reclaim(&self) -> usize {
+        match self {
+            Self::Port(_, c) | Self::Gain(_, c) => c.reclaim(),
+            Self::Plugin { controls, .. } => controls.reclaim(),
         }
     }
 }
@@ -249,8 +276,10 @@ struct Lane {
     /// The lane node's generation at its insert: another means a host
     /// replaced (or removed) it at its key.
     generation: u32,
-    controls: Controls,
-    bound: Bound,
+    wired: Wired,
+    /// The target's unit generation and knob cell it was built on.
+    unit: u32,
+    knob: Option<ParamCell>,
     /// The program last published to it.
     program: ControlProgram,
     /// The range last stored, as bits.
@@ -511,7 +540,7 @@ impl Memo {
         editor: &Editor<F>,
         host: &dyn ModHost,
         cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
-        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
+        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
     ) -> bool {
         self.revision == editor.revision()
             && self.epoch == editor.play_reading().epoch
@@ -543,37 +572,39 @@ impl Modulation {
         Self::default()
     }
 
-    /// `target`'s lane: its node key and its controls (a plugin lane's knob,
-    /// the counters). `None` while it has none.
+    /// `target`'s lane: its node key and its controls (its program and
+    /// counters). `None` while it has none.
     pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
-        self.lanes.get(&target).map(|l| (l.key, l.controls.lane()))
+        self.lanes.get(&target).map(|l| (l.key, l.wired.lane()))
     }
 
     /// The lanes with a knob that drive the plugin parameters of `node`, by
     /// parameter id.
-    pub fn plugin_lanes(&self, node: NodeKey) -> impl Iterator<Item = (ParamId, &LaneControls)> {
+    pub fn plugin_lanes(
+        &self,
+        node: NodeKey,
+    ) -> impl Iterator<Item = (ParamId, &ForeignLaneControls)> {
         self.lanes
             .values()
-            .filter_map(move |lane| match lane.bound.drive {
-                Drive::Plugin { input, id } if input.node() == node => {
-                    let controls = lane.controls.lane();
-                    controls.value().is_some().then_some((id, controls))
-                }
+            .filter_map(move |lane| match &lane.wired {
+                Wired::Plugin {
+                    input,
+                    id,
+                    controls,
+                } if input.node() == node => controls.value().is_some().then_some((*id, controls)),
                 _ => None,
             })
     }
 
-    /// Frees, on this thread, the programs every lane has let go of since
-    /// its last publish ([`LaneControls::reclaim`]), without publishing;
-    /// returns how many are still held. A lane republished once and then
+    /// Frees, on this thread, the programs (and a plugin lane's ranges)
+    /// every lane has let go of since its last publish
+    /// ([`ForeignLaneControls::reclaim`] for a plugin lane), without
+    /// publishing; returns how many are still held. A lane republished once and then
     /// left alone would otherwise keep a program a block held across that
     /// publish until the lane is published again. Control thread, once per
     /// tick of the host's loop (a session's `Reclaim` phase).
     pub fn reclaim(&self) -> usize {
-        self.lanes
-            .values()
-            .map(|lane| lane.controls.lane().reclaim())
-            .sum()
+        self.lanes.values().map(|lane| lane.wired.reclaim()).sum()
     }
 
     /// Signal source `source`'s node, `None` while it has none.
@@ -627,7 +658,7 @@ impl Modulation {
         editor: &mut Editor<F>,
         host: &dyn ModHost,
         cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
-        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
+        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
     ) -> Result<Applied, ReconcileError> {
         if self
             .memo
@@ -677,17 +708,17 @@ impl Modulation {
         let own: BTreeSet<(ParamIn, NodeKey)> = self
             .lanes
             .values()
-            .filter_map(|l| match l.bound.drive {
-                Drive::Port(at) => Some((at, l.key)),
-                Drive::Plugin { .. } | Drive::Gain(_) => None,
+            .filter_map(|l| match l.wired {
+                Wired::Port(at, _) => Some((at, l.key)),
+                Wired::Plugin { .. } | Wired::Gain(..) => None,
             })
             .collect();
         // The same for the lanes wired into an edge's gain.
         let own_edges: BTreeSet<(EdgeId, NodeKey)> = self
             .lanes
             .values()
-            .filter_map(|l| match l.bound.drive {
-                Drive::Gain(id) => Some((id, l.key)),
+            .filter_map(|l| match l.wired {
+                Wired::Gain(id, _) => Some((id, l.key)),
                 _ => None,
             })
             .collect();
@@ -798,14 +829,14 @@ impl Modulation {
         for t in &taken_lanes {
             let lane = self.lanes.remove(t).expect("listed");
             let out = EventOutputPort::new(lane.key, 0);
-            match lane.bound.drive {
-                Drive::Port(at) => {
+            match lane.wired {
+                Wired::Port(at, _) => {
                     // Only the source it wired: a port another source has
                     // taken since is left alone.
                     editor.spec_mut().disconnect_param(at, out);
                 }
-                Drive::Plugin { input, .. } => remove_event_edge(editor, input, out),
-                Drive::Gain(id) => {
+                Wired::Plugin { input, .. } => remove_event_edge(editor, input, out),
+                Wired::Gain(id, _) => {
                     editor.spec_mut().disconnect_edge_gain(id, out);
                 }
             }
@@ -826,7 +857,11 @@ impl Modulation {
         let gone: Vec<TargetKey> = self
             .lanes
             .iter()
-            .filter(|(t, lane)| bounds.get(t).is_none_or(|b| !lane.bound.same(b)))
+            .filter(|(t, lane)| {
+                bounds.get(t).is_none_or(|b| {
+                    lane.wired.drive() != b.drive || !b.cells_same(lane.unit, lane.knob.as_ref())
+                })
+            })
             .map(|(&t, _)| t)
             .collect();
         for t in gone {
@@ -932,19 +967,19 @@ impl Modulation {
                 // them), so a note envelope among them owes a resync.
                 owe_resyncs(&mut self.resync, &compiled, Some(&lane.program), program);
                 if lane.program != *program {
-                    lane.controls.lane().publish(program.clone());
+                    lane.wired.lane().publish(program.clone());
                     lane.program = program.clone();
                     applied.republished.push(target);
                 }
                 if lane.range != range {
-                    store_range(editor, &lane.bound, &lane.controls, range_bounds);
+                    store_range(editor, &lane.wired, range_bounds);
                     lane.range = range;
                 }
                 continue;
             }
             owe_resyncs(&mut self.resync, &compiled, None, program);
             let key = unused_key(editor);
-            let lane = match bound.drive {
+            let wired = match bound.drive {
                 Drive::Port(at) => {
                     editor
                         .set_param_range(at, range_bounds)
@@ -960,7 +995,7 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_param(at, EventOutputPort::new(key, 0));
-                    Controls::Unit(controls)
+                    Wired::Port(at, controls)
                 }
                 Drive::Gain(id) => {
                     editor
@@ -979,7 +1014,7 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_edge_gain(id, EventOutputPort::new(key, 0));
-                    Controls::Unit(controls)
+                    Wired::Gain(id, controls)
                 }
                 Drive::Plugin { input, id } => {
                     let mut config = ForeignLaneConfig::new(id, program.clone(), range_bounds);
@@ -991,7 +1026,11 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
-                    Controls::Foreign(controls)
+                    Wired::Plugin {
+                        input,
+                        id,
+                        controls,
+                    }
                 }
             };
             self.lanes.insert(
@@ -999,8 +1038,9 @@ impl Modulation {
                 Lane {
                     key,
                     generation: editor.spec().generation(key),
-                    controls: lane,
-                    bound,
+                    wired,
+                    unit: bound.generation,
+                    knob: bound.knob,
                     program: program.clone(),
                     range,
                 },
@@ -1344,7 +1384,7 @@ fn ask(
     target: TargetKey,
     host: &dyn ModHost,
     cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
-    mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
+    mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
 ) -> Option<Bound> {
     let (drive, knob, seed) = match target {
         TargetKey::Param { node, param } => {
@@ -1409,32 +1449,21 @@ fn declared_range(min: f64, max: f64) -> ParamRange {
         .expect("a compiled target has no NaN bound: compile refuses it (NanRange)")
 }
 
-/// Stores a range edit: the port's cell for a native lane (a store, no
-/// commit), the lane's own for a plugin lane.
-fn store_range<F: Float>(
-    editor: &mut Editor<F>,
-    bound: &Bound,
-    controls: &Controls,
-    range: ParamRange,
-) {
-    if let Controls::Foreign(c) = controls {
-        c.publish_range(range);
-        return;
-    }
-    match bound.drive {
-        Drive::Port(at) => {
+/// Stores a range edit: the port's cell for a port lane or an edge's gain
+/// (a store, no commit), the lane's own for a plugin lane.
+fn store_range<F: Float>(editor: &mut Editor<F>, wired: &Wired, range: ParamRange) {
+    match wired {
+        Wired::Port(at, _) => {
             editor
-                .set_param_range(at, range)
+                .set_param_range(*at, range)
                 .expect("checked: a node, and compile refuses a crossed arc");
         }
-        Drive::Gain(id) => {
+        Wired::Gain(id, _) => {
             editor
-                .set_edge_gain_range(id, range)
+                .set_edge_gain_range(*id, range)
                 .expect("checked: the edge");
         }
-        Drive::Plugin { .. } => {
-            unreachable!("a plugin target's lane is built with ForeignLaneControls")
-        }
+        Wired::Plugin { controls, .. } => controls.publish_range(range),
     }
 }
 

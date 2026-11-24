@@ -6,8 +6,7 @@ use tutti_rt::SplitMix64;
 use tutti_units::Hz;
 
 fn noise(len: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..len).map(|_| uniform(&mut rng, -1.0, 1.0)).collect()
+    tutti_fixtures::uniform_noise(seed, len)
 }
 
 /// `x` delayed by `delay` samples (negative: advanced), same length.
