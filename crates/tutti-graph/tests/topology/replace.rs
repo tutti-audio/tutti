@@ -307,7 +307,7 @@ fn a_shape_mismatch_is_refused() {
     );
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(usize::from(channel) + 1);
+        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(
             channel,
             PortSource::Node(OutputPort::new(lagged, 0)),

@@ -250,6 +250,15 @@ pub enum MissingSource {
         /// The graph's input width.
         width: usize,
     },
+    /// The node declares no such modulatable param
+    /// ([`Shape::params`](crate::Shape::params)).
+    #[error("node {} does not declare {param:?} modulatable", .node.0)]
+    Param {
+        /// The node.
+        node: NodeKey,
+        /// The param asked for.
+        param: tutti_units::UnitAddr,
+    },
     /// The node has no such event input port.
     #[error("node {} has no event input {port} (it has {width})", .node.0)]
     EventInputPort {

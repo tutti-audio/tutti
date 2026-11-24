@@ -646,7 +646,10 @@ impl<F: Float> Graph<F> {
         #[cfg(feature = "plugin")] tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
-        editor.resize_outputs(outputs);
+        // `outputs` is a `ChannelLayout`'s count where the session is built.
+        editor.resize_outputs(
+            ChannelLayout::try_from(outputs).expect("a channel count: it was a ChannelLayout's"),
+        );
         // Declared and on from the start: a host reads the main output level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
@@ -3498,7 +3501,9 @@ impl<F: Float> Graph<F> {
         };
         self.widen_refusal = refused;
         if refused.is_none() && self.editor.spec().topology.outputs.len() < channels {
-            self.editor.resize_outputs(channels);
+            // `channels` is within MAX_CHANNELS: the refusal above takes the rest.
+            self.editor
+                .resize_outputs(ChannelLayout::try_from(channels).expect("within MAX_CHANNELS"));
             self.edited = true;
         }
         self.publish_output_facts();
@@ -3775,7 +3780,10 @@ impl<F: Float> Graph<F> {
         self.editor.declare_main_output(main_output, id);
         self.main_output = main_output;
         self.widen_refusal = None;
-        let resized = self.editor.resize_outputs(width);
+        // The width a declaration places is at most MAX_CHANNELS (`check_declaration`).
+        let resized = self.editor.resize_outputs(
+            ChannelLayout::try_from(width).expect("a placed width is within MAX_CHANNELS"),
+        );
         if resized {
             // The channels cut took their gain entries with them.
             self.sweep_gain_targets();

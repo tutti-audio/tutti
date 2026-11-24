@@ -1099,7 +1099,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     );
 
     // A wiring edit sends.
-    ed.resize_outputs(ed.spec().topology.outputs.len() + 1);
+    ed.resize_outputs(ChannelLayout::clamped(ed.spec().topology.outputs.len() + 1));
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 1, "a spec edit sends");
 

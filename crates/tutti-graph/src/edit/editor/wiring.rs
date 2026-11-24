@@ -4,6 +4,8 @@
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
 
 use super::{Editor, MissingSource, WireError};
+use crate::Shape;
+use crate::model::mode::NodeMix;
 use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
 use crate::node::param::ParamIn;
 use crate::{Edge, EdgeId, InputPort, MainOutputId, PortSink, PortSource, Resolution};
@@ -91,12 +93,16 @@ impl<F: Float> Editor<F> {
     /// ([`GraphInvalid::DuplicateEventSource`](crate::GraphInvalid::DuplicateEventSource)),
     /// not here: an edit may pass through it, wiring a node's new edge before
     /// the old one from the same source is removed.
-    pub fn connect_events(&mut self, at: EventInputPort, edge: EventEdge) -> Result<(), WireError> {
+    pub fn connect_events(
+        &mut self,
+        at: EventInputPort,
+        edge: EventEdge,
+    ) -> Result<bool, WireError> {
         self.check_event_in(at)?;
         self.check_event_out(edge.from())?;
         self.touch();
         self.spec.connect_events(at, edge);
-        Ok(())
+        Ok(true)
     }
 
     /// Removes exactly the event edge `edge` from `at` (a direct edge and a
@@ -129,16 +135,29 @@ impl<F: Float> Editor<F> {
     /// # Errors
     ///
     /// Refused, changing nothing: [`WireError::Missing`] for `at`'s node or
-    /// `from`'s not existing ([`MissingSource::Node`]) or `from` past its
-    /// node's event outputs ([`MissingSource::EventPort`]). A param the node
-    /// does not declare is `compile`'s to refuse, as the shape is.
-    pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> Result<(), WireError> {
-        self.check_node(at.node)?;
+    /// `from`'s not existing ([`MissingSource::Node`]), a param the node does
+    /// not declare ([`MissingSource::Param`]; a node's mix is declared by
+    /// every node) or `from` past its node's event outputs
+    /// ([`MissingSource::EventPort`]).
+    ///
+    /// Returns whether the port's source changed: wiring the source it
+    /// already has changes nothing.
+    pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> Result<bool, WireError> {
+        let shape = self.shape_of(at.node)?;
+        // The declaration `compile` checks (`UnknownParam`).
+        if at.param != NodeMix::ADDR && shape.params.index_of(at.param).is_none() {
+            return Err(MissingSource::Param {
+                node: at.node,
+                param: at.param,
+            }
+            .into());
+        }
         self.check_event_out(from)?;
-        if self.spec.connect_param(at, from) != Some(from) {
+        let changed = self.spec.connect_param(at, from) != Some(from);
+        if changed {
             self.touch();
         }
-        Ok(())
+        Ok(changed)
     }
 
     /// Stops driving param port `at` from `from`: the port reads its base
@@ -163,19 +182,22 @@ impl<F: Float> Editor<F> {
     /// ([`check_gain_edge`](Self::check_gain_edge)), and
     /// [`WireError::Missing`] for `from` naming a node that does not exist or
     /// a port past its event outputs.
+    ///
+    /// Returns whether the lane's entry or source changed.
     pub fn connect_edge_gain(
         &mut self,
         id: EdgeId,
         from: EventOutputPort,
-    ) -> Result<(), WireError> {
+    ) -> Result<bool, WireError> {
         self.check_gain_edge(id)?;
         self.check_event_out(from)?;
         let had = self.spec.gains.contains_key(&id);
         self.declare_lane(id);
-        if self.spec.connect_edge_gain(id, from) != Some(from) || !had {
+        let changed = self.spec.connect_edge_gain(id, from) != Some(from) || !had;
+        if changed {
             self.touch();
         }
-        Ok(())
+        Ok(changed)
     }
 
     /// Stops driving edge `id`'s gain from `from`; the edge keeps its entry,
@@ -201,7 +223,8 @@ impl<F: Float> Editor<F> {
     /// Makes the graph's main output `width` channels wide. A new channel is
     /// silent; a channel cut takes its sources and their gain entries with
     /// it. Returns whether the width changed.
-    pub fn resize_outputs(&mut self, width: usize) -> bool {
+    pub fn resize_outputs(&mut self, width: ChannelLayout) -> bool {
+        let width = usize::from(width.count());
         let outputs = &mut self.spec.topology.outputs;
         if outputs.len() == width {
             return false;
@@ -289,14 +312,18 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// [`WireError::NoSuchEventEdge`] when no edge from `from` into `at`
-    /// exists; nothing changes.
+    /// Refused, changing nothing: [`WireError::Missing`] for a node or port
+    /// that does not exist (as [`connect_events`](Self::connect_events)
+    /// names them), and [`WireError::NoSuchEventEdge`] when both ports exist
+    /// but no edge from `from` into `at` does.
     pub fn require_resolution(
         &mut self,
         at: EventInputPort,
         from: EventOutputPort,
         resolution: Resolution,
     ) -> Result<(), WireError> {
+        self.check_event_in(at)?;
+        self.check_event_out(from)?;
         if !self
             .spec
             .events
@@ -342,14 +369,6 @@ impl<F: Float> Editor<F> {
         true
     }
 
-    fn check_node(&self, node: crate::NodeKey) -> Result<(), MissingSource> {
-        if self.spec.topology.nodes.contains_key(&node) {
-            Ok(())
-        } else {
-            Err(MissingSource::Node { node })
-        }
-    }
-
     fn check_input(&self, at: InputPort) -> Result<(), WireError> {
         let node = self
             .spec
@@ -375,9 +394,16 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
+    /// The shape of `node`, which every node of the spec has: `insert` writes
+    /// the node's spec and its shape together, `remove` takes both out, and a
+    /// fork or a builder places its nodes through `insert`. A node the editor
+    /// knows no shape for is refused as missing.
+    fn shape_of(&self, node: crate::NodeKey) -> Result<&Shape, MissingSource> {
+        self.shapes.get(&node).ok_or(MissingSource::Node { node })
+    }
+
     fn check_event_in(&self, at: EventInputPort) -> Result<(), MissingSource> {
-        self.check_node(at.node())?;
-        let width = self.shapes.get(&at.node()).map_or(0, |s| s.event_in);
+        let width = self.shape_of(at.node())?.event_in;
         if at.port() >= width {
             return Err(MissingSource::EventInputPort {
                 node: at.node(),
@@ -389,8 +415,7 @@ impl<F: Float> Editor<F> {
     }
 
     fn check_event_out(&self, from: EventOutputPort) -> Result<(), MissingSource> {
-        self.check_node(from.node())?;
-        let width = self.shapes.get(&from.node()).map_or(0, |s| s.event_out);
+        let width = self.shape_of(from.node())?.event_out;
         if from.port() >= width {
             return Err(MissingSource::EventPort {
                 node: from.node(),

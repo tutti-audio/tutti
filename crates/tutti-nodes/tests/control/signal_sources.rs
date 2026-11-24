@@ -354,7 +354,7 @@ fn lane_to_probe(
     ed.insert(NodeKey(probe), "probe", ForkByClone(Probe));
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(usize::from(channel) + 1);
+        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(channel, out(probe, 0)))
             .unwrap()
     };

@@ -377,6 +377,9 @@ fn a_feedback_self_loop_on_a_lost_port_is_listed_once() {
 #[test]
 fn param_drivers_on_lost_ports_are_released_and_listed() {
     let (mut ed, _exec) = rig();
+    // `X` declares a param the narrow shape will not.
+    let declares = Ported(ported(3, 3).0.params(&[UnitParam::Volume]));
+    ed.insert(X, "ported", Unforkable(declares));
     let undeclared = tutti_graph::ParamIn {
         node: X,
         param: UnitAddr::first(UnitParam::Volume),

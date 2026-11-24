@@ -173,7 +173,7 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
         ed.insert(NodeKey(p), "probe", ForkByClone(Probe));
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-            ed.resize_outputs(usize::from(channel) + 1);
+            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
             ed.connect_edge(EdgeId::into_output(channel, out(p, 0)))
                 .unwrap()
         };

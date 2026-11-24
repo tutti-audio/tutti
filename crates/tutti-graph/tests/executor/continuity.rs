@@ -515,9 +515,11 @@ fn apply(harness: &mut Harness, op: Op) {
     match op {
         Op::EventLatency(l) => ed.set_latency(EL, latency(l)).expect("sets"),
         Op::AudioLatency(l) => ed.set_latency(LAG, latency(l)).expect("sets"),
-        Op::Direct(true) => ed.connect_events(sink, EventEdge::Direct(src(EA))).unwrap(),
+        Op::Direct(true) => {
+            ed.connect_events(sink, EventEdge::Direct(src(EA))).unwrap();
+        }
         Op::Direct(false) => {
-            ed.disconnect_events(sink, tutti_graph::EventEdge::Direct(src(EA)));
+            ed.disconnect_events(sink, EventEdge::Direct(src(EA)));
         }
         Op::Emitter(true) => {
             let (key, unit) = node(EA, emitter(1));

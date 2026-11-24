@@ -64,7 +64,7 @@ pub fn feed_output<F: Float>(
     sources: impl IntoIterator<Item = crate::PortSource>,
 ) {
     if ed.spec().topology.outputs.len() <= usize::from(channel) {
-        ed.resize_outputs(usize::from(channel) + 1);
+        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
     }
     let held = ed.spec().topology.outputs[usize::from(channel)].clone();
     for from in held {
@@ -80,7 +80,8 @@ pub fn feed_output<F: Float>(
 /// audio edge, every main output source and every event edge, and nothing
 /// else. It goes through the editor's typed calls, so it panics on a spec
 /// that names a node or port the editor lacks and cannot build an invalid
-/// graph.
+/// graph. A test that builds a `GraphSpec` only to copy it into an editor
+/// should build through the editor instead.
 pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
     ed.resize_inputs(spec.topology.inputs);
     let ports: Vec<_> = ed.spec().topology.edges.keys().copied().collect();
@@ -106,7 +107,9 @@ pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
     for (channel, sources) in spec.topology.outputs.iter().enumerate() {
         feed_output(ed, channel as u16, sources.iter().copied());
     }
-    ed.resize_outputs(spec.topology.outputs.len());
+    ed.resize_outputs(tutti_buffers::ChannelLayout::clamped(
+        spec.topology.outputs.len(),
+    ));
     for (at, edges) in &spec.events {
         for edge in edges {
             ed.connect_events(*at, *edge).unwrap();

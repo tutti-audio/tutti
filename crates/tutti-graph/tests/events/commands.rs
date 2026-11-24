@@ -343,7 +343,7 @@ fn a_command_needs_a_port_and_an_orphan_is_counted() {
         .schedule(At::Frame(Frame::new(2000)), to(), tag(9))
         .expect_err("and the editor knows it");
     rig.ed.remove(PROBE);
-    rig.ed.resize_outputs(0);
+    rig.ed.resize_outputs(ChannelLayout::from_count(0));
     rig.ed.commit().expect("commits");
     for _ in 0..40 {
         rig.exec.process(64, &t, &[], &mut []);
@@ -1330,7 +1330,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
         .schedule(At::Frame(Frame::new(100)), to(), ramp(4.0))
         .expect("the probe declares param events");
     rig.ed.insert(PROBE, "plain", Unforkable(Plain));
-    rig.ed.resize_outputs(0);
+    rig.ed.resize_outputs(ChannelLayout::from_count(0));
     rig.ed.commit().expect("commits");
     let t = TransportPosition::default();
     for _ in 0..4 {

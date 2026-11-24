@@ -17,7 +17,7 @@ struct Level(f32);
 
 impl Node for Level {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Volume])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -103,7 +103,7 @@ fn connect_and_disconnect_edge_are_heard_at_the_outputs() {
     let (mut ed, mut exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "times", Unforkable(Times(4.0)));
-    assert!(ed.resize_outputs(2));
+    assert!(ed.resize_outputs(ChannelLayout::from_count(2)));
     assert_eq!(ed.connect_edge(into_output(0, out(1))), Ok(true));
     assert_eq!(ed.connect_edge(into_output(0, out(1))), Ok(false));
     assert_eq!(ed.connect_edge(into_port(2, out(1))), Ok(true));
@@ -132,7 +132,7 @@ fn connect_edge_refuses_what_does_not_exist() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "times", Unforkable(Times(4.0)));
-    ed.resize_outputs(1);
+    ed.resize_outputs(ChannelLayout::from_count(1));
     let before = ed.spec().clone();
 
     assert_eq!(
@@ -194,15 +194,15 @@ fn connect_edge_refuses_what_does_not_exist() {
 fn resize_outputs_cuts_a_channel_with_its_sources_and_gain() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
-    assert!(ed.resize_outputs(2));
-    assert!(!ed.resize_outputs(2));
+    assert!(ed.resize_outputs(ChannelLayout::from_count(2)));
+    assert!(!ed.resize_outputs(ChannelLayout::from_count(2)));
     let second = into_output(1, out(1));
     ed.connect_edge(second).expect("wires");
     ed.set_edge_gain(second, tutti_units::Gain::new(0.5))
         .expect("an edge of the spec");
     assert!(ed.spec().gains.contains_key(&second));
 
-    assert!(ed.resize_outputs(1));
+    assert!(ed.resize_outputs(ChannelLayout::from_count(1)));
     assert_eq!(ed.spec().topology.outputs.len(), 1);
     assert!(
         ed.spec().gains.is_empty(),
@@ -284,7 +284,7 @@ fn param_and_edge_gain_sources_are_written_and_taken_out() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "events", Unforkable(Events));
-    ed.resize_outputs(1);
+    ed.resize_outputs(ChannelLayout::from_count(1));
     let wire = into_output(0, out(1));
     ed.connect_edge(wire).expect("wires");
     let driver = EventOutputPort::new(key(2), 0);
@@ -297,6 +297,18 @@ fn param_and_edge_gain_sources_are_written_and_taken_out() {
     assert_eq!(ed.spec().params[&at], driver);
     assert!(!ed.disconnect_param(at, EventOutputPort::new(key(2), 5)));
     assert!(ed.disconnect_param(at, driver));
+    assert!(ed.spec().params.is_empty());
+    let undeclared = ParamIn {
+        node: key(1),
+        param: UnitParam::Drive.into(),
+    };
+    assert_eq!(
+        ed.connect_param(undeclared, driver),
+        Err(WireError::Missing(MissingSource::Param {
+            node: key(1),
+            param: UnitParam::Drive.into(),
+        })),
+    );
     assert!(ed.spec().params.is_empty());
     assert_eq!(
         ed.connect_param(ParamIn { node: key(9), ..at }, driver),
@@ -363,7 +375,7 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
         (
             "resize_outputs",
             Box::new(|e| {
-                let _ = e.resize_outputs(1);
+                let _ = e.resize_outputs(ChannelLayout::from_count(1));
             }),
         ),
         (

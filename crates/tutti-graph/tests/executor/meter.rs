@@ -281,7 +281,7 @@ fn the_main_output_follows_the_outputs() {
     feed_output(&mut r.ed, 0, []);
     {
         let channel = u16::try_from(r.ed.spec().topology.outputs.len()).expect("a width");
-        r.ed.resize_outputs(usize::from(channel) + 1);
+        r.ed.resize_outputs(ChannelLayout::from_count(channel + 1));
         r.ed.connect_edge(EdgeId::into_output(channel, out(1)))
             .unwrap()
     };

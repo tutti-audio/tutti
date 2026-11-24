@@ -1518,7 +1518,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                         .unwrap();
                 } else {
-                    ed.resize_outputs(1);
+                    ed.resize_outputs(ChannelLayout::from_count(1));
                     feed_output(
                         &mut ed,
                         0,
@@ -1608,7 +1608,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                     .unwrap();
             } else {
-                ed.resize_outputs(1);
+                ed.resize_outputs(ChannelLayout::from_count(1));
                 feed_output(
                     &mut ed,
                     0,
@@ -2078,7 +2078,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         sink: PortSink::Output(0),
         from: from(k, 0),
     };
-    ed.resize_outputs(1);
+    ed.resize_outputs(ChannelLayout::from_count(1));
     feed_output(
         &mut ed,
         0,

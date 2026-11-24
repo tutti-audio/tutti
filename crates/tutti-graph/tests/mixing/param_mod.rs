@@ -634,17 +634,24 @@ fn a_node_without_a_base_is_never_modulated() {
 }
 
 /// A param the node does not declare, or a source port the node does not
-/// have, is refused at compile, naming it.
+/// have, is refused at the call, naming it.
 #[test]
 fn undeclared_params_and_missing_sources_are_refused() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, _exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 1 }));
-    ed.connect_param(param(PROBE, UnitParam::Drive), ev(1))
-        .unwrap();
-    let err = ed.commit().expect_err("Drive is not declared");
-    assert!(format!("{err}").contains("Drive"), "{err}");
-    ed.disconnect_param(param(PROBE, UnitParam::Drive), ev(1));
+    // An undeclared param is refused at the call (the compile-level
+    // `UnknownParam` is pinned over a hand-built spec in
+    // `mix_driven::the_mix_port_is_refused_as_a_param_is`).
+    assert_eq!(
+        ed.connect_param(param(PROBE, UnitParam::Drive), ev(1)),
+        Err(tutti_graph::WireError::Missing(
+            tutti_graph::MissingSource::Param {
+                node: PROBE,
+                param: UnitParam::Drive.into(),
+            }
+        )),
+    );
     // A source port the node does not have is refused at the call.
     assert_eq!(
         ed.connect_param(

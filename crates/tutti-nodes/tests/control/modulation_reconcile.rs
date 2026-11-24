@@ -416,7 +416,7 @@ fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     ed.insert(key(id), "probe", ForkByClone(p));
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(usize::from(channel) + 1);
+        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(
             channel,
             PortSource::Node(OutputPort::new(key(id), 0)),
@@ -920,7 +920,7 @@ fn a_host_key_is_never_taken() {
     ed.insert(NodeKey(1), "probe", ForkByClone(p));
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(usize::from(channel) + 1);
+        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(
             channel,
             PortSource::Node(OutputPort::new(NodeKey(1), 0)),
