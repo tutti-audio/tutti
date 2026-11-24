@@ -346,24 +346,41 @@ pub struct NotePortInfo {
 }
 
 impl NotePortInfo {
-    /// The dialect to encode note events in for this port.
+    /// What this host sends the port.
     ///
-    /// Prefers the plugin's stated choice when this host can speak it, and
-    /// otherwise falls back to a dialect the port supports — CLAP first, then
-    /// MIDI 1.0. Returns `None` when the port supports neither, which is the
-    /// case a caller must not paper over: it can accept only MPE or MIDI 2.0,
-    /// and `host_note_ports_supported_dialects` tells the plugin this host
-    /// sends neither, so there is no encoding both sides agree on.
-    pub fn dialect_to_send(&self) -> Option<NoteDialect> {
+    /// The plugin's stated preference when this host can speak it and the
+    /// port lists it as supported; otherwise a dialect the port supports,
+    /// CLAP first, then MIDI 1.0. [`NoteSend::Nothing`] when the port supports
+    /// neither, which is the case a caller must not paper over: it can accept
+    /// only MPE or MIDI 2.0, and `host_note_ports_supported_dialects` tells
+    /// the plugin this host sends neither, so there is no encoding both sides
+    /// agree on.
+    pub fn dialect_to_send(&self) -> NoteSend {
+        let supports = |dialect| self.supported_dialects.contains(dialect);
         match self.preferred_dialect {
-            Some(d @ (NoteDialect::Clap | NoteDialect::Midi)) => Some(d),
-            // A preference this host cannot send is no more usable than an
-            // absent one, so both take the supported-dialect fallback.
-            _ if self.supported_dialects.contains(NoteDialects::CLAP) => Some(NoteDialect::Clap),
-            _ if self.supported_dialects.contains(NoteDialects::MIDI) => Some(NoteDialect::Midi),
-            _ => None,
+            Some(NoteDialect::Clap) if supports(NoteDialects::CLAP) => NoteSend::Clap,
+            Some(NoteDialect::Midi) if supports(NoteDialects::MIDI) => NoteSend::Midi,
+            // A preference this host cannot send, or the port does not list,
+            // is no more usable than an absent one, so all take the
+            // supported-dialect fallback.
+            _ if supports(NoteDialects::CLAP) => NoteSend::Clap,
+            _ if supports(NoteDialects::MIDI) => NoteSend::Midi,
+            _ => NoteSend::Nothing,
         }
     }
+}
+
+/// What this host sends an input note port: one of the two dialects it can
+/// encode, or nothing when the port accepts neither
+/// ([`NotePortInfo::dialect_to_send`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NoteSend {
+    /// CLAP note events.
+    Clap,
+    /// MIDI 1.0 as `clap_event_midi`.
+    Midi,
+    /// The port supports neither dialect above: notes to it are not sent.
+    Nothing,
 }
 
 bitflags! {
@@ -385,7 +402,7 @@ bitflags! {
 ///
 /// This host can encode only [`Clap`](Self::Clap) and [`Midi`](Self::Midi);
 /// the other two are recognised when a plugin names them but never sent. See
-/// [`NotePortInfo::dialect_to_send`].
+/// [`NoteSend`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NoteDialect {
     /// CLAP native note events.

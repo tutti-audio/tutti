@@ -197,7 +197,7 @@ impl ClapLoaded {
         reserve_output_queues(&mut scratch, &table, max_frames);
         // A UMP Group is an input note port: each port's own dialect.
         let ports = self
-            .midi_note_ports(main)
+            .note_sends(main)
             .and_then(|ports| Ok((ports, self.midi_capable_ports(main)?)));
         let (ports, capable) = match ports {
             Ok(both) => both,

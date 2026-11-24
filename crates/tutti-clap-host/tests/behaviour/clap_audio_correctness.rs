@@ -708,7 +708,7 @@ fn host_reports_per_note_port_dialects_and_ids() {
 #[test]
 fn host_does_not_invent_a_preferred_note_dialect() {
     use clap_sys::ext::note_ports::CLAP_NOTE_DIALECT_MIDI2;
-    use tutti_clap_host::NoteDialect;
+    use tutti_clap_host::{NoteDialect, NoteSend};
 
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
 
@@ -724,7 +724,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     );
     assert_eq!(
         in0.dialect_to_send(),
-        Some(NoteDialect::Clap),
+        NoteSend::Clap,
         "port 0 supports CLAP, so that is what an absent preference falls back to"
     );
 
@@ -754,7 +754,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     );
     assert_eq!(
         in0.dialect_to_send(),
-        Some(NoteDialect::Clap),
+        NoteSend::Clap,
         "but the dialect actually sent is one the host advertised"
     );
 
@@ -769,7 +769,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     assert_eq!(in1.preferred_dialect, None);
     assert_eq!(
         in1.dialect_to_send(),
-        Some(NoteDialect::Midi),
+        NoteSend::Midi,
         "port 1 supports MIDI only, so the fallback cannot be CLAP"
     );
 
@@ -791,31 +791,37 @@ fn host_does_not_invent_a_preferred_note_dialect() {
 #[test]
 fn notes_follow_the_input_note_ports_dialect() {
     use clap_sys::ext::note_ports::CLAP_NOTE_DIALECT_MIDI;
+    use tutti_clap_host::NoteSend;
 
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
-    assert!(
-        !session.load().sends_midi_notes(main_thread()),
+    assert_eq!(
+        session.load().note_send(main_thread()),
+        NoteSend::Clap,
         "port 0 prefers CLAP"
     );
 
     session
         .controls
         .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
-    assert!(session.load().sends_midi_notes(main_thread()));
+    assert_eq!(session.load().note_send(main_thread()), NoteSend::Midi);
     let mut active = session.activate();
-    assert!(active.sends_midi_notes(), "read at activation");
+    assert_eq!(active.note_send(), NoteSend::Midi, "read at activation");
 
     session
         .controls
         .set_preferred_dialect(PREFERRED_DIALECT_DEFAULT);
     active.reactivate().expect("reactivates");
-    assert!(!active.sends_midi_notes(), "re-read at re-activation");
+    assert_eq!(
+        active.note_send(),
+        NoteSend::Clap,
+        "re-read at re-activation"
+    );
 
     session
         .controls
         .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
     active.reactivate().expect("reactivates");
-    assert!(active.sends_midi_notes());
+    assert_eq!(active.note_send(), NoteSend::Midi);
 }
 
 /// `note-ports.h`: `clap_event_midi` goes only to a note port that declares
@@ -837,6 +843,41 @@ fn midi_goes_only_to_note_ports_that_declare_the_midi_dialect() {
         session.load().midi_capable_ports(main_thread()),
         Ok(vec![false, true]),
         "port 0 declared no MIDI dialect"
+    );
+}
+
+/// `note-ports.h`: a host sends only a dialect the port supports. A port that
+/// lists only MPE or MIDI 2.0 takes neither dialect this host sends, so it is
+/// sent nothing, read at activation; a preference the port does not list is
+/// not sent either.
+#[test]
+fn notes_are_sent_only_a_dialect_the_note_port_supports() {
+    use clap_sys::ext::note_ports::{
+        CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
+        CLAP_NOTE_DIALECT_MIDI2,
+    };
+    use tutti_clap_host::NoteSend;
+
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    for only in [CLAP_NOTE_DIALECT_MIDI_MPE, CLAP_NOTE_DIALECT_MIDI2] {
+        session.controls.set_port0_dialects(only);
+        session.controls.set_preferred_dialect(only);
+        assert_eq!(session.load().note_send(main_thread()), NoteSend::Nothing);
+        assert_eq!(
+            session.activate().note_send(),
+            NoteSend::Nothing,
+            "read at activation"
+        );
+    }
+
+    session.controls.set_port0_dialects(CLAP_NOTE_DIALECT_CLAP);
+    session
+        .controls
+        .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
+    assert_eq!(
+        session.load().note_send(main_thread()),
+        NoteSend::Clap,
+        "MIDI is preferred but not supported"
     );
 }
 

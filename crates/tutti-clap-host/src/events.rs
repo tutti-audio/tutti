@@ -16,7 +16,9 @@
 //! function-wide allow silently re-permits the very wrap it should prevent.
 #![deny(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 
-use crate::types::{ClapNoteExpression, NoteExpressionType, ParameterChanges, ParameterPoint};
+use crate::types::{
+    ClapNoteExpression, NoteExpressionType, NoteSend, ParameterChanges, ParameterPoint,
+};
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_MIDI, CLAP_EVENT_MIDI_SYSEX,
     CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF,
@@ -938,8 +940,9 @@ pub struct InputEventList {
     midi1_translator: Midi1Translator,
     /// The input note ports the plugin has: a Group is note port `group`.
     ports: usize,
-    /// Bit `n` is set when note port `n` takes the MIDI dialect only.
-    midi_ports: u16,
+    /// What each input note port is sent: [`NoteSend::Clap`] for a port past
+    /// the plugin's last.
+    sends: [NoteSend; MidiGroup::COUNT as usize],
     /// Bit `n` is set when note port `n` declares the MIDI dialect at all
     /// (`supported_dialects & CLAP_NOTE_DIALECT_MIDI`), so it may be sent
     /// `clap_event_midi`: every port until
@@ -979,7 +982,7 @@ impl InputEventList {
             notes: Self::per_note_state(tutti_ump::GroupSpan::of(1)),
             midi1_translator: Midi1Translator::new(),
             ports: 1,
-            midi_ports: 0,
+            sends: [NoteSend::Clap; MidiGroup::COUNT as usize],
             midi_capable: u16::MAX,
             groups_dropped: 0,
             sysex: sysex_assembler(),
@@ -995,15 +998,19 @@ impl InputEventList {
 
     /// Sets the plugin's input note ports, one entry each (at most 16, the
     /// Groups of MIDI 2.0; a longer list is refused with [`TooManyNotePorts`]
-    /// and nothing changes), `true` for a port that takes the MIDI dialect only: notes go out as `clap_event_midi`, a MIDI event's per-note
-    /// expression is sent as its MIDI 1.0 bytes where it has them (poly
-    /// pressure), and `add_note_expressions`
-    /// adds nothing for it. A UMP Group is
+    /// and nothing changes): what each is sent.
+    ///
+    /// [`NoteSend::Midi`]: notes go out as `clap_event_midi`, a MIDI event's
+    /// per-note expression is sent as its MIDI 1.0 bytes where it has them
+    /// (poly pressure), and `add_note_expressions` adds nothing for it.
+    /// [`NoteSend::Nothing`]: the port accepts no dialect this host sends, so
+    /// every message to it is dropped and counted
+    /// ([`groups_dropped`](Self::groups_dropped)). A UMP Group is
     /// the note port of its number: Group 0 reaches port 0, Group 1 port 1,
-    /// and a Group past the last port is dropped and counted
-    /// ([`groups_dropped`](Self::groups_dropped)), never folded onto another
-    /// Group's channels (M2-104 section 2.1.2). An empty list is one port
-    /// that takes CLAP note events, as a plugin with no note port is sent.
+    /// and a Group past the last port is dropped and counted the same way,
+    /// never folded onto another Group's channels (M2-104 section 2.1.2). An
+    /// empty list is one port that takes CLAP note events, as a plugin with
+    /// no note port is sent.
     ///
     /// Forgets the per-note state and every MIDI 1.0 selection, and allocates
     /// it (about 270 KiB for each port): off the audio thread, at activation.
@@ -1014,17 +1021,15 @@ impl InputEventList {
     ///
     /// # Errors
     ///
-    /// [`TooManyNotePorts`] when `midi` lists more than 16 ports.
-    pub fn set_note_ports(&mut self, midi: &[bool]) -> Result<(), TooManyNotePorts> {
-        let span = u8::try_from(midi.len().max(1))
+    /// [`TooManyNotePorts`] when `ports` lists more than 16 ports.
+    pub fn set_note_ports(&mut self, ports: &[NoteSend]) -> Result<(), TooManyNotePorts> {
+        let span = u8::try_from(ports.len().max(1))
             .ok()
             .and_then(tutti_ump::GroupSpan::new)
-            .ok_or(TooManyNotePorts(midi.len()))?;
+            .ok_or(TooManyNotePorts(ports.len()))?;
         self.ports = usize::from(span.get());
-        self.midi_ports = midi
-            .iter()
-            .enumerate()
-            .fold(0, |mask, (port, &midi)| mask | (u16::from(midi) << port));
+        self.sends = [NoteSend::Clap; MidiGroup::COUNT as usize];
+        self.sends[..ports.len()].copy_from_slice(ports);
         self.notes = Self::per_note_state(span);
         self.midi1_translator.reset();
         Ok(())
@@ -1045,13 +1050,24 @@ impl InputEventList {
             .fold(0, |mask, (port, &yes)| mask | (u16::from(yes) << port));
     }
 
-    /// Whether notes to the first input note port go out as `clap_event_midi`:
+    /// What notes to the first input note port are sent:
     /// see [`set_note_ports`](Self::set_note_ports).
-    pub(crate) fn supports_midi_notes(&self) -> bool {
-        self.midi_ports & 1 != 0
+    pub(crate) fn note_send(&self) -> NoteSend {
+        self.sends[0]
     }
 
-    /// MIDI messages of a Group the plugin has no input note port for, since
+    /// What notes to input note port `port` are sent: MIDI only where the
+    /// port also declares the MIDI dialect
+    /// ([`set_midi_capable_ports`](Self::set_midi_capable_ports)).
+    fn send_to(&self, port: u16) -> NoteSend {
+        match self.sends[usize::from(port)] {
+            NoteSend::Midi if self.midi_capable >> port & 1 == 0 => NoteSend::Nothing,
+            send => send,
+        }
+    }
+
+    /// MIDI messages of a Group the plugin has no input note port for, or whose
+    /// port accepts no dialect this host sends ([`NoteSend::Nothing`]), since
     /// the list was built: each is dropped whole (a Note On, a controller, a
     /// per-note message alike), never heard on another Group's channels. Zero
     /// while the plugin has a port for every Group the host sends.
@@ -1211,11 +1227,10 @@ impl InputEventList {
             SysexStep::Complete(message) => {
                 // The SysEx goes to its Group's note port, as every channel
                 // message does, and only if that port declares the MIDI dialect.
-                let port = ump.group().map_or(0, |g| u16::from(g.get()));
-                if usize::from(port) >= self.ports {
-                    self.groups_dropped += 1;
+                let Some(port) = self.accepting_port(ump.group().map_or(0, |g| u16::from(g.get())))
+                else {
                     return self;
-                }
+                };
                 if self.midi_capable >> port & 1 == 0 {
                     return self;
                 }
@@ -1287,8 +1302,13 @@ impl InputEventList {
     /// The note port of `address`'s Group, or `None` (counted) when the plugin
     /// has none.
     fn port_of(&mut self, address: Address) -> Option<u16> {
-        let port = u16::from(address.group.get());
-        if usize::from(port) < self.ports {
+        self.accepting_port(u16::from(address.group.get()))
+    }
+
+    /// `port`, or `None` (counted) when the plugin has no input note port of
+    /// that number or the port accepts no dialect this host sends.
+    fn accepting_port(&mut self, port: u16) -> Option<u16> {
+        if usize::from(port) < self.ports && self.send_to(port) != NoteSend::Nothing {
             Some(port)
         } else {
             self.groups_dropped += 1;
@@ -1327,7 +1347,7 @@ impl InputEventList {
                     velocity.velocity().get(),
                 )
                 .addressed(port, -1);
-                let off = if self.midi_ports >> port & 1 != 0 {
+                let off = if self.send_to(port) == NoteSend::Midi {
                     off.into_midi_dialect(port, None)
                 } else {
                     Some(off)
@@ -1416,7 +1436,7 @@ impl InputEventList {
             | Voice2::PolyPressure { note, .. } => (Some(note), None),
             _ => (None, None),
         };
-        if self.midi_ports >> port & 1 != 0 {
+        if self.send_to(port) == NoteSend::Midi {
             // A port that takes the MIDI dialect has no per-note expression
             // but poly pressure; the state still follows the stream.
             let _ = self.notes.step(address, voice);
@@ -1642,7 +1662,7 @@ impl InputEventList {
     /// A `Custom` dimension is skipped — CLAP has no id for one, and
     /// [`ClapEvent::note_expression`] says why substituting would be worse.
     pub(crate) fn add_note_expressions(&mut self, expressions: &[ClapNoteExpression]) -> &mut Self {
-        if self.supports_midi_notes() {
+        if self.note_send() == NoteSend::Midi {
             return self;
         }
         for expr in expressions {
@@ -2663,7 +2683,7 @@ mod tests {
     /// counted as dropped for want of room.
     #[test]
     fn an_unknown_packet_yields_no_clap_event() {
-        for midi_notes in [false, true] {
+        for midi_notes in [NoteSend::Clap, NoteSend::Midi] {
             let mut list = InputEventList::new(InputRooms::new(8));
             list.set_note_ports(&[midi_notes]).unwrap();
             for words in [
@@ -2764,7 +2784,7 @@ mod tests {
             assert_eq!(kind, *claimed, "{words:08x?}");
         }
         let packets: Vec<UmpAt> = table.iter().map(|(_, words)| packet(2, words)).collect();
-        for midi_notes in [false, true] {
+        for midi_notes in [NoteSend::Clap, NoteSend::Midi] {
             let mut list = InputEventList::new(InputRooms::new(128));
             list.set_note_ports(&[midi_notes]).unwrap();
             list.add_midi_events(&packets);
@@ -2891,7 +2911,7 @@ mod tests {
 
     /// The `clap_event_midi` bytes `add_midi` stages for `words`, as
     /// `(time, bytes)`.
-    fn staged_midi(words: &[u32], midi_notes: bool) -> Vec<(u32, [u8; 3])> {
+    fn staged_midi(words: &[u32], midi_notes: NoteSend) -> Vec<(u32, [u8; 3])> {
         let mut list = InputEventList::new(InputRooms::new(8));
         list.set_note_ports(&[midi_notes]).unwrap();
         list.add_midi(&packet(11, words));
@@ -2911,32 +2931,56 @@ mod tests {
     fn spec_packets_stage_exact_midi_bytes() {
         let at = |bytes| vec![(11, bytes)];
         // System: time code, song position (LSB 0x2A, MSB 0x05), song select.
-        assert_eq!(staged_midi(&[0x10F1_3500], false), at([0xF1, 0x35, 0]));
-        assert_eq!(staged_midi(&[0x10F2_2A05], false), at([0xF2, 0x2A, 0x05]));
-        assert_eq!(staged_midi(&[0x10F3_2A00], false), at([0xF3, 0x2A, 0]));
-        assert_eq!(staged_midi(&[0x10F8_0000], false), at([0xF8, 0, 0]));
+        assert_eq!(
+            staged_midi(&[0x10F1_3500], NoteSend::Clap),
+            at([0xF1, 0x35, 0])
+        );
+        assert_eq!(
+            staged_midi(&[0x10F2_2A05], NoteSend::Clap),
+            at([0xF2, 0x2A, 0x05])
+        );
+        assert_eq!(
+            staged_midi(&[0x10F3_2A00], NoteSend::Clap),
+            at([0xF3, 0x2A, 0])
+        );
+        assert_eq!(
+            staged_midi(&[0x10F8_0000], NoteSend::Clap),
+            at([0xF8, 0, 0])
+        );
         // MIDI 1.0 on channel 3: pitch bend LSB 0x2A MSB 0x05, program,
         // channel pressure, control change 7 = 0x2A.
-        assert_eq!(staged_midi(&[0x20E3_2A05], false), at([0xE3, 0x2A, 0x05]));
-        assert_eq!(staged_midi(&[0x20C3_2A00], false), at([0xC3, 0x2A, 0]));
-        assert_eq!(staged_midi(&[0x20D3_2A00], false), at([0xD3, 0x2A, 0]));
-        assert_eq!(staged_midi(&[0x20B3_072A], false), at([0xB3, 7, 0x2A]));
-        // MIDI 2.0 on channel 3, downscaled to 7 and 14 bits: bend 14-bit
-        // (0x05 << 7 | 0x2A) in the top bits, the rest low-bit noise.
         assert_eq!(
-            staged_midi(&[0x40E3_0000, 0x0AAB_FFFF], false),
+            staged_midi(&[0x20E3_2A05], NoteSend::Clap),
             at([0xE3, 0x2A, 0x05])
         );
         assert_eq!(
-            staged_midi(&[0x40D3_0000, 0x5400_0000], false),
+            staged_midi(&[0x20C3_2A00], NoteSend::Clap),
+            at([0xC3, 0x2A, 0])
+        );
+        assert_eq!(
+            staged_midi(&[0x20D3_2A00], NoteSend::Clap),
             at([0xD3, 0x2A, 0])
         );
         assert_eq!(
-            staged_midi(&[0x40B3_0700, 0x5400_0000], false),
+            staged_midi(&[0x20B3_072A], NoteSend::Clap),
+            at([0xB3, 7, 0x2A])
+        );
+        // MIDI 2.0 on channel 3, downscaled to 7 and 14 bits: bend 14-bit
+        // (0x05 << 7 | 0x2A) in the top bits, the rest low-bit noise.
+        assert_eq!(
+            staged_midi(&[0x40E3_0000, 0x0AAB_FFFF], NoteSend::Clap),
+            at([0xE3, 0x2A, 0x05])
+        );
+        assert_eq!(
+            staged_midi(&[0x40D3_0000, 0x5400_0000], NoteSend::Clap),
+            at([0xD3, 0x2A, 0])
+        );
+        assert_eq!(
+            staged_midi(&[0x40B3_0700, 0x5400_0000], NoteSend::Clap),
             at([0xB3, 7, 0x2A])
         );
         assert_eq!(
-            staged_midi(&[0x40C3_0000, 9 << 24], false),
+            staged_midi(&[0x40C3_0000, 9 << 24], NoteSend::Clap),
             at([0xC3, 9, 0])
         );
     }
@@ -2946,11 +2990,11 @@ mod tests {
     #[test]
     fn poly_pressure_on_a_midi_dialect_port_stages_exact_bytes() {
         assert_eq!(
-            staged_midi(&[0x20A3_3C2A], true),
+            staged_midi(&[0x20A3_3C2A], NoteSend::Midi),
             vec![(11, [0xA3, 0x3C, 0x2A])]
         );
         assert_eq!(
-            staged_midi(&[0x40A3_3C00, 0x5400_0000], true),
+            staged_midi(&[0x40A3_3C00, 0x5400_0000], NoteSend::Midi),
             vec![(11, [0xA3, 0x3C, 0x2A])]
         );
     }
@@ -2962,7 +3006,7 @@ mod tests {
     /// Note Off's own velocity kept.
     #[test]
     fn notes_on_a_midi_dialect_port_stage_exact_bytes() {
-        let staged = |words: &[u32]| staged_midi(words, true);
+        let staged = |words: &[u32]| staged_midi(words, NoteSend::Midi);
         // Note On, channel 3, key 60, velocity 0x8000: 63.5 rounds to 64.
         assert_eq!(
             staged(&[0x4093_3C00, 0x8000_0000]),
@@ -3145,7 +3189,7 @@ mod tests {
     /// transport changes.
     fn reserved_list() -> InputEventList {
         let mut list = InputEventList::new(InputRooms::new(8).param_points(4).sources(3, 3, 2));
-        list.set_note_ports(&[false]).unwrap();
+        list.set_note_ports(&[NoteSend::Clap]).unwrap();
         list
     }
 
@@ -3258,7 +3302,7 @@ mod tests {
     #[test]
     fn sysex_cannot_take_the_edit_room() {
         let mut list = InputEventList::new(InputRooms::new(3).sources(3, 0, 0));
-        list.set_note_ports(&[true]).unwrap();
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
         for k in 0..5 {
             list.add_midi_events(&sysex_packets(&[1, 2, 3], k));
         }
@@ -3506,7 +3550,8 @@ mod tests {
     #[test]
     fn a_controller_is_not_sent_to_a_port_without_the_midi_dialect() {
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[false, false]).unwrap();
+        list.set_note_ports(&[NoteSend::Clap, NoteSend::Clap])
+            .unwrap();
         list.set_midi_capable_ports(&[false, true]);
 
         list.add_midi(&cc_message(0));
@@ -3518,6 +3563,54 @@ mod tests {
             &list.events()[0],
             ClapEvent::Midi(m) if m.port_index == 1
         ));
+    }
+
+    /// `note-ports.h`: a host sends a port only a dialect it supports. A port
+    /// that accepts neither CLAP note events nor MIDI 1.0 ([`NoteSend::Nothing`])
+    /// is sent no note and every note to it is counted as lost; the other
+    /// ports still get theirs.
+    #[test]
+    fn notes_to_a_port_that_accepts_no_dialect_are_counted_and_not_sent() {
+        let note_on = |group: u8| packet(0, &[0x4090_3C00 | (u32::from(group) << 24), 0xFFFF_0000]);
+        let note_off =
+            |group: u8| packet(0, &[0x4080_3C00 | (u32::from(group) << 24), 0xFFFF_0000]);
+        let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[
+            NoteSend::Clap,
+            NoteSend::Nothing,
+            NoteSend::Midi,
+            NoteSend::Nothing,
+        ])
+        .unwrap();
+        for group in [1, 3] {
+            list.add_midi(&note_on(group));
+            list.add_midi(&note_off(group));
+        }
+        assert!(list.events().is_empty());
+        assert_eq!(list.groups_dropped(), 4);
+
+        list.add_midi(&note_on(0));
+        list.add_midi(&note_on(2));
+        assert_eq!(
+            list.events().len(),
+            2,
+            "the accepting ports still get notes"
+        );
+        assert_eq!(list.groups_dropped(), 4);
+    }
+
+    /// A port sent MIDI takes `clap_event_midi` only if it declares the MIDI
+    /// dialect, for a note as for a controller or SysEx: with none declared a
+    /// note to it is dropped and counted.
+    #[test]
+    fn a_midi_note_is_not_sent_to_a_port_without_the_midi_dialect() {
+        let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
+        list.set_midi_capable_ports(&[false]);
+        list.add_midi(&packet(0, &[0x4090_3C00, 0xFFFF_0000]));
+        list.add_midi(&packet(0, &[0x4080_3C00, 0xFFFF_0000]));
+        assert!(list.events().is_empty());
+        assert_eq!(list.groups_dropped(), 2);
     }
 
     /// `events.h`: a SysEx event names its `port_index`. It goes to the note
@@ -3534,7 +3627,8 @@ mod tests {
             (Offset::of(Samples::new(0), Samples::new(64)), ump)
         };
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[false, false]).unwrap();
+        list.set_note_ports(&[NoteSend::Clap, NoteSend::Clap])
+            .unwrap();
         list.set_midi_capable_ports(&[false, true]);
 
         list.add_midi(&sysex(1));
@@ -4284,7 +4378,7 @@ mod tests {
         let off = (at(0), midi::note_off(ch, 60, 0));
 
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]).unwrap();
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
         list.add_midi(&on)
             .add_midi(&mid)
             .add_midi(&quiet)
@@ -4322,7 +4416,7 @@ mod tests {
             value: 0.5,
         }];
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]).unwrap();
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
         list.add_note_expressions(&expr);
         assert!(list.events().is_empty());
     }
@@ -4335,7 +4429,7 @@ mod tests {
     fn midi_dialect_velocity_is_the_m2_115_shift() {
         let ch = MidiChannel::of(0);
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]).unwrap();
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
         list.add_midi(&(at(0), midi::note_on(ch, 60, 0xE665)));
         list.add_midi(&(at(0), midi::note_off(ch, 60, 0xE665)));
         let sent: Vec<[u8; 3]> = list
@@ -4532,7 +4626,7 @@ mod tests {
         let event = midi1_event(&[0xA3, 60, 90]);
 
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]).unwrap();
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
         list.add_midi(&event);
         assert_eq!(list.events().len(), 1);
         let ClapEvent::Midi(m) = &list.events()[0] else {

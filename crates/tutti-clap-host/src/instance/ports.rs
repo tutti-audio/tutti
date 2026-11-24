@@ -4,7 +4,8 @@
 use super::ClapLoaded;
 use super::load::layout_of_port;
 use crate::types::{
-    AudioPortInfo, NoteDialect, NoteDialects, NoteName, NotePortInfo, SurroundChannel, VoiceInfo,
+    AudioPortInfo, NoteDialect, NoteDialects, NoteName, NotePortInfo, NoteSend, SurroundChannel,
+    VoiceInfo,
 };
 use clap_sys::ext::ambisonic::{
     CLAP_AMBISONIC_NORMALIZATION_MAXN, CLAP_AMBISONIC_NORMALIZATION_N2D,
@@ -126,36 +127,31 @@ impl ClapLoaded {
         self.plugin.note_port_count(main, is_input)
     }
 
-    /// Whether notes to the first input note port go out as `clap_event_midi`:
-    /// the port takes the MIDI dialect and not CLAP's own note events (or
-    /// prefers MIDI, see [`NotePortInfo::dialect_to_send`]). Only input note
-    /// port 0 decides. A plugin with no
-    /// note port gets CLAP note events, as before.
-    pub fn sends_midi_notes(&self, main: MainThreadMarker) -> bool {
+    /// What notes to the first input note port are sent: see
+    /// [`NotePortInfo::dialect_to_send`]. A plugin with no note port gets CLAP
+    /// note events.
+    pub fn note_send(&self, main: MainThreadMarker) -> NoteSend {
         self.note_port_info(main, 0, true)
-            .and_then(|port| port.dialect_to_send())
-            == Some(NoteDialect::Midi)
+            .map_or(NoteSend::Clap, |port| port.dialect_to_send())
     }
 
-    /// For each input note port, whether notes to it go out as
-    /// `clap_event_midi`: the same question as
-    /// [`sends_midi_notes`](Self::sends_midi_notes), asked of every port.
-    /// Empty for a plugin with no input note port.
+    /// What notes to each input note port are sent: the same question as
+    /// [`note_send`](Self::note_send), asked of every port. Empty for a plugin
+    /// with no input note port.
     ///
     /// # Errors
     ///
     /// [`TooManyNotePorts`] when the plugin declares more than 16, before any
     /// port is read.
-    pub(crate) fn midi_note_ports(
+    pub(crate) fn note_sends(
         &self,
         main: MainThreadMarker,
-    ) -> Result<Vec<bool>, TooManyNotePorts> {
+    ) -> Result<Vec<NoteSend>, TooManyNotePorts> {
         let count = input_note_ports(self.note_port_count(main, true))?;
         Ok((0..count)
             .map(|index| {
                 self.note_port_info(main, index, true)
-                    .and_then(|port| port.dialect_to_send())
-                    == Some(NoteDialect::Midi)
+                    .map_or(NoteSend::Nothing, |port| port.dialect_to_send())
             })
             .collect())
     }
