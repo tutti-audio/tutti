@@ -295,27 +295,21 @@ fn route_id(key: RouteKey) -> ModRouteId {
 #[error("no modulation source {0:?}")]
 pub struct NoSuchModSource(pub ModSourceId);
 
-/// Why [`Mods::source`] or [`Mods::set_source`] refused a source; nothing
-/// changes.
+/// Why [`Mods::set_source`] refused a source; nothing changes.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SourceError {
-    /// `set_source` named a source this session does not declare.
+    /// The id names a source this session does not declare.
     #[error(transparent)]
     NoSuchSource(NoSuchModSource),
-    /// The source follows a node, and `Mods::source` has none to give it.
-    #[error("a {kind} follows a node: declare it with `Mods::follower` or `Mods::note_envelope`")]
-    NeedsFeed {
-        /// What the call named (a follower, a note envelope).
-        kind: &'static str,
-    },
     /// The source is of another kind than the one declared, whose feed it
     /// would keep or lack.
     #[error("source {id:?} is a {from}; a {to} is another kind: remove it and declare a new one")]
     ChangesKind {
         /// The source.
         id: ModSourceId,
-        /// What it is (an LFO, a macro, a follower, a note envelope).
+        /// What it is (an LFO, a macro, a follower, a note envelope). The
+        /// names are for the message: match on the variant, not the text.
         from: &'static str,
         /// What the call named.
         to: &'static str,
@@ -323,14 +317,6 @@ pub enum SourceError {
 }
 
 /// Whether a source follows a node, so it is declared with one.
-const fn needs_feed(source: &Source) -> bool {
-    match source {
-        Source::Follower { .. } | Source::NoteEnvelope { .. } => true,
-        Source::Lfo { .. } | Source::Macro { .. } => false,
-    }
-}
-
-/// What a source is called in an error.
 const fn kind_name(source: &Source) -> &'static str {
     match source {
         Source::Lfo { .. } => "LFO",
@@ -1555,23 +1541,6 @@ impl Mods<'_> {
         self.own.provide_source(id, &source);
         self.own.sources.insert(key, OwnSource { source, feed });
         id
-    }
-
-    /// A source of a kind with no node to feed (an LFO, a macro).
-    ///
-    /// # Errors
-    ///
-    /// [`SourceError::NeedsFeed`] for a follower or a note envelope, which
-    /// [`follower`](Self::follower) and [`note_envelope`](Self::note_envelope)
-    /// declare with their node. Nothing is added.
-    pub fn source(&mut self, source: impl Into<Source>) -> Result<ModSourceId, SourceError> {
-        let source = source.into();
-        if needs_feed(&source) {
-            return Err(SourceError::NeedsFeed {
-                kind: kind_name(&source),
-            });
-        }
-        Ok(self.add_source(source, None))
     }
 
     /// An LFO.
