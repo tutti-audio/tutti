@@ -151,15 +151,126 @@ enum Filter<F> {
 /// The narrowest pulse the oscillator renders, as a fraction of the cycle.
 const MIN_PULSE_WIDTH: f64 = 0.01;
 
-const OSC_SINE: u8 = 0;
-const OSC_SAW: u8 = 1;
-const OSC_PULSE: u8 = 2;
-const OSC_TRIANGLE: u8 = 3;
-const OSC_NOISE: u8 = 4;
-const FILTER_NONE: u8 = 0;
-const FILTER_SVF: u8 = 1;
-const FILTER_LADDER_PER_STAGE: u8 = 2;
-const FILTER_LADDER_INPUT: u8 = 3;
+/// The oscillator a group's loop is compiled for: one sample across the lanes at `phase`,
+/// `dt` of a cycle a sample. `width` is the pulse's, and `rng` the noise's.
+trait OscKind {
+    fn sample<F: SynthFloat>(phase: V<F>, width: V<F>, dt: V<F>, rng: &mut Rng<F>) -> V<F>;
+}
+
+struct SineOsc;
+struct SawOsc;
+struct PulseOsc;
+struct TriangleOsc;
+struct NoiseOsc;
+
+impl OscKind for SineOsc {
+    #[inline(always)]
+    fn sample<F: SynthFloat>(phase: V<F>, _: V<F>, _: V<F>, _: &mut Rng<F>) -> V<F> {
+        kernel::sine(phase)
+    }
+}
+
+impl OscKind for SawOsc {
+    #[inline(always)]
+    fn sample<F: SynthFloat>(phase: V<F>, _: V<F>, dt: V<F>, _: &mut Rng<F>) -> V<F> {
+        kernel::saw(phase, dt, V::<F>::ONE / dt)
+    }
+}
+
+impl OscKind for PulseOsc {
+    #[inline(always)]
+    fn sample<F: SynthFloat>(phase: V<F>, width: V<F>, dt: V<F>, _: &mut Rng<F>) -> V<F> {
+        kernel::pulse(phase, width, dt, V::<F>::ONE / dt)
+    }
+}
+
+impl OscKind for TriangleOsc {
+    #[inline(always)]
+    fn sample<F: SynthFloat>(phase: V<F>, _: V<F>, dt: V<F>, _: &mut Rng<F>) -> V<F> {
+        kernel::triangle(phase, dt, V::<F>::ONE / dt)
+    }
+}
+
+impl OscKind for NoiseOsc {
+    #[inline(always)]
+    fn sample<F: SynthFloat>(_: V<F>, _: V<F>, _: V<F>, rng: &mut Rng<F>) -> V<F> {
+        V::<F>::noise(rng)
+    }
+}
+
+/// The filter a group's loop is compiled for: one sample of `x` across the lanes. `c` is the
+/// coefficients in flight, moved one `step` toward their target here by the filters that read
+/// them, `m` the SVF's output mix and `z` the integrators.
+trait FilterKind {
+    fn step<F: SynthFloat>(
+        c: &mut [V<F>; 3],
+        step: &[V<F>; 3],
+        m: &[V<F>; 3],
+        z: &mut [V<F>; 4],
+        x: V<F>,
+    ) -> V<F>;
+}
+
+struct NoFilter;
+struct SvfFilter;
+/// The ladder, in the per-stage saturation model when `PER_STAGE` and the input model otherwise.
+struct LadderFilter<const PER_STAGE: bool>;
+
+impl FilterKind for NoFilter {
+    #[inline(always)]
+    fn step<F: SynthFloat>(
+        _: &mut [V<F>; 3],
+        _: &[V<F>; 3],
+        _: &[V<F>; 3],
+        _: &mut [V<F>; 4],
+        x: V<F>,
+    ) -> V<F> {
+        x
+    }
+}
+
+impl FilterKind for SvfFilter {
+    #[inline(always)]
+    fn step<F: SynthFloat>(
+        c: &mut [V<F>; 3],
+        step: &[V<F>; 3],
+        m: &[V<F>; 3],
+        z: &mut [V<F>; 4],
+        x: V<F>,
+    ) -> V<F> {
+        c[0] += step[0];
+        c[1] += step[1];
+        c[2] += step[2];
+        let coefficients = SvfCoefficients {
+            d: c[0],
+            a2: c[1],
+            a3: c[2],
+            m0: m[0],
+            m1: m[1],
+            m2: m[2],
+        };
+        let mut s = [z[0], z[1]];
+        let y = svf_step(&coefficients, &mut s, x);
+        [z[0], z[1]] = s;
+        y
+    }
+}
+
+impl<const PER_STAGE: bool> FilterKind for LadderFilter<PER_STAGE> {
+    #[inline(always)]
+    fn step<F: SynthFloat>(
+        c: &mut [V<F>; 3],
+        step: &[V<F>; 3],
+        _: &[V<F>; 3],
+        z: &mut [V<F>; 4],
+        x: V<F>,
+    ) -> V<F> {
+        c[0] += step[0];
+        c[1] += step[1];
+        let coefficients = LadderCoefficients { g1: c[0], k: c[1] };
+        ladder_lanes(PER_STAGE, &coefficients, z, x)
+    }
+}
 
 /// Every sub-voice's DSP state, in groups of [`SynthFloat::Lanes`].
 #[derive(Clone)]
@@ -632,19 +743,6 @@ impl<F: SynthFloat> VoiceBank<F> {
     pub(crate) fn render(&mut self, n: usize) -> (&[F], &[F]) {
         debug_assert!(n <= CONTROL_BLOCK);
         let mut acc = [[V::<F>::ZERO; 2]; CONTROL_BLOCK];
-        let osc = match self.osc {
-            Osc::Sine => OSC_SINE,
-            Osc::Saw => OSC_SAW,
-            Osc::Pulse { .. } => OSC_PULSE,
-            Osc::Triangle => OSC_TRIANGLE,
-            Osc::Noise => OSC_NOISE,
-        };
-        let filter = match self.filter {
-            Filter::None => FILTER_NONE,
-            Filter::Svf { .. } => FILTER_SVF,
-            Filter::Ladder(LadderSaturation::PerStage) => FILTER_LADDER_PER_STAGE,
-            Filter::Ladder(LadderSaturation::Input) => FILTER_LADDER_INPUT,
-        };
         for g in 0..self.live.len() {
             if !self.live[g] {
                 continue;
@@ -652,25 +750,27 @@ impl<F: SynthFloat> VoiceBank<F> {
             self.live[g] = false;
             // One monomorphized loop per (oscillator, filter) pair: the match
             // runs once per group per step, never per sample.
-            macro_rules! dispatch {
-                ($($o:ident),*; $($f:ident),*) => {
-                    dispatch!(@o [$($o),*] [$($f),*])
-                };
-                (@o [$($o:ident),*] $fs:tt) => {
-                    match osc {
-                        $($o => dispatch!(@f $o $fs),)*
-                        _ => unreachable!(),
-                    }
-                };
-                (@f $o:ident [$($f:ident),*]) => {
-                    match filter {
-                        $($f => self.render_group::<$o, $f>(g, n, &mut acc),)*
-                        _ => unreachable!(),
+            macro_rules! with_filter {
+                ($osc:ty) => {
+                    match self.filter {
+                        Filter::None => self.render_group::<$osc, NoFilter>(g, n, &mut acc),
+                        Filter::Svf { .. } => self.render_group::<$osc, SvfFilter>(g, n, &mut acc),
+                        Filter::Ladder(LadderSaturation::PerStage) => {
+                            self.render_group::<$osc, LadderFilter<true>>(g, n, &mut acc)
+                        }
+                        Filter::Ladder(LadderSaturation::Input) => {
+                            self.render_group::<$osc, LadderFilter<false>>(g, n, &mut acc)
+                        }
                     }
                 };
             }
-            dispatch!(OSC_SINE, OSC_SAW, OSC_PULSE, OSC_TRIANGLE, OSC_NOISE;
-                      FILTER_NONE, FILTER_SVF, FILTER_LADDER_PER_STAGE, FILTER_LADDER_INPUT);
+            match self.osc {
+                Osc::Sine => with_filter!(SineOsc),
+                Osc::Saw => with_filter!(SawOsc),
+                Osc::Pulse { .. } => with_filter!(PulseOsc),
+                Osc::Triangle => with_filter!(TriangleOsc),
+                Osc::Noise => with_filter!(NoiseOsc),
+            }
         }
         for (i, frame) in acc.iter().enumerate().take(n) {
             self.out[0][i] = frame[0].sum();
@@ -680,7 +780,7 @@ impl<F: SynthFloat> VoiceBank<F> {
     }
 
     #[inline(always)]
-    fn render_group<const OSC: u8, const FILTER: u8>(
+    fn render_group<O: OscKind, L: FilterKind>(
         &mut self,
         g: usize,
         n: usize,
@@ -724,13 +824,7 @@ impl<F: SynthFloat> VoiceBank<F> {
             // `max` keeps an idle lane's zero increment from dividing by zero;
             // the corrections it feeds are masked to zero there anyway.
             let dt = inc.max(V::<F>::lit(1e-9));
-            let x = match OSC {
-                OSC_SINE => kernel::sine(phase),
-                OSC_SAW => kernel::saw(phase, dt, V::<F>::ONE / dt),
-                OSC_PULSE => kernel::pulse(phase, width, dt, V::<F>::ONE / dt),
-                OSC_TRIANGLE => kernel::triangle(phase, dt, V::<F>::ONE / dt),
-                _ => V::<F>::noise(&mut rng),
-            };
+            let x = O::sample::<F>(phase, width, dt, &mut rng);
             // The phase adds its increment compensated: the error of each sum is
             // taken back by the next, so the pitch is the increment's however
             // small it is beside the phase.
@@ -739,32 +833,7 @@ impl<F: SynthFloat> VoiceBank<F> {
             phase_err = (sum - phase) - step;
             phase = kernel::wrap_once(sum);
 
-            let y = match FILTER {
-                FILTER_SVF => {
-                    c[0] += c_step[0];
-                    c[1] += c_step[1];
-                    c[2] += c_step[2];
-                    let coefficients = SvfCoefficients {
-                        d: c[0],
-                        a2: c[1],
-                        a3: c[2],
-                        m0: m[0],
-                        m1: m[1],
-                        m2: m[2],
-                    };
-                    let mut s = [z[0], z[1]];
-                    let y = svf_step(&coefficients, &mut s, x);
-                    [z[0], z[1]] = s;
-                    y
-                }
-                FILTER_LADDER_PER_STAGE | FILTER_LADDER_INPUT => {
-                    c[0] += c_step[0];
-                    c[1] += c_step[1];
-                    let coefficients = LadderCoefficients { g1: c[0], k: c[1] };
-                    ladder_lanes(FILTER == FILTER_LADDER_PER_STAGE, &coefficients, &mut z, x)
-                }
-                _ => x,
-            };
+            let y = L::step::<F>(&mut c, &c_step, &m, &mut z, x);
 
             // The level scales by its gain and adds its slope compensated, as the phase does.
             let scaled = env.level * env.gain;
