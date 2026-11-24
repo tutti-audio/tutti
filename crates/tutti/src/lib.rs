@@ -618,7 +618,7 @@ pub mod session {
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget,
         Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
-        RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
+        RouteInfo, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{
