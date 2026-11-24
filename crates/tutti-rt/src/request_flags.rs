@@ -60,19 +60,6 @@ impl RequestFlags {
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
-
-    /// The set flags, lowest first.
-    pub fn iter(self) -> impl Iterator<Item = RequestFlag> {
-        let mut rest = self.0;
-        std::iter::from_fn(move || {
-            if rest == 0 {
-                return None;
-            }
-            let index = rest.trailing_zeros() as u8;
-            rest &= rest - 1;
-            Some(RequestFlag(index))
-        })
-    }
 }
 
 /// Up to 32 kinds of request, raised on any thread and taken on one.

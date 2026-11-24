@@ -122,12 +122,6 @@ impl<S: Sample> FileOut<S> {
         })
     }
 
-    /// What the file was created as.
-    #[must_use]
-    pub fn spec(&self) -> &Spec {
-        &self.spec
-    }
-
     /// The sample rate the header declares.
     ///
     /// Compare it with the source's before pumping: 48 kHz frames fed to a

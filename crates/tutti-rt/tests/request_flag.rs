@@ -24,7 +24,7 @@ fn the_refusal_carries_the_raw() {
 }
 
 /// A set holds every one of its 32 flags apart: raising each in turn and
-/// taking returns exactly that flag, lowest first when all are raised.
+/// taking returns exactly that flag, and all of them when all are raised.
 #[test]
 fn every_bit_is_taken_alone_and_together() {
     let flags = AtomicRequestFlags::new();
@@ -32,12 +32,14 @@ fn every_bit_is_taken_alone_and_together() {
         let flag = RequestFlag::of(index);
         flags.raise(flag);
         let taken = flags.take();
-        assert_eq!(taken.iter().collect::<Vec<_>>(), [flag]);
+        for other in 0..32 {
+            assert_eq!(taken.contains(RequestFlag::of(other)), other == index);
+        }
     }
     for index in 0..32 {
         flags.raise(RequestFlag::of(index));
     }
-    let all: Vec<u8> = flags.take().iter().map(RequestFlag::get).collect();
-    assert_eq!(all, (0..32).collect::<Vec<_>>());
+    let all = flags.take();
+    assert!((0..32).all(|index| all.contains(RequestFlag::of(index))));
     assert_eq!(flags.take(), RequestFlags::NONE);
 }

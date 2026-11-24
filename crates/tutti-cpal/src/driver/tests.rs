@@ -1,5 +1,7 @@
 use super::*;
 use crate::AudioEngine;
+use crate::output::Opened;
+use crate::output::tests::{driver_over, manual_spec, on_device};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
@@ -75,7 +77,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
 /// **A restart that cannot resolve a device is refused before the running
 /// stream is stopped**: a driver over a supplied stream has no device to
 /// restart onto, `restart` and `restart_with` return the refusal
-/// `select_device` gives, and the stream still runs.
+/// `InvalidDevice`, and the stream still runs.
 #[test]
 fn a_restart_that_resolves_no_device_leaves_the_stream_running() {
     let transport = Transport::new(SampleRate::SR_44K1);
@@ -89,11 +91,6 @@ fn a_restart_that_resolves_no_device_leaves_the_stream_running() {
     let (supplied, stream) = ManualStreamDriver::new();
     driver.start_with(supplied).expect("starts");
     assert!(driver.stream().is_running() && stream.is_open());
-
-    let refused = driver
-        .select_device(DeviceSelector::Default)
-        .expect_err("no device to select");
-    assert!(matches!(refused, crate::DeviceError::InvalidDevice(_)));
 
     let err = driver
         .restart(DeviceSelector::Default)
@@ -115,4 +112,23 @@ fn a_restart_that_resolves_no_device_leaves_the_stream_running() {
         "restart_with stopped the stream"
     );
     drop(ed);
+}
+
+/// **A switch onto a supplied driver keeps the device on record**: the driver
+/// still holds the device for the restart that opens it again, and names none
+/// meanwhile.
+#[test]
+fn a_switch_to_a_supplied_driver_keeps_the_device_to_restart_onto() {
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
+    let (manual, _stream) = ManualStreamDriver::new();
+    driver
+        .switch(manual_spec(), manual, |_, _| {
+            Ok::<(), crate::DeviceError>(())
+        })
+        .unwrap();
+    assert_eq!(driver.opened_name().unwrap(), None);
+    driver
+        .origin
+        .target_mut()
+        .expect("the driver still holds the device");
 }

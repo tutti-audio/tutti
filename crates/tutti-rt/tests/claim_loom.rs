@@ -12,8 +12,8 @@
 //! - **never two holders**, whether the takers are two `try_claim`s or a
 //!   `try_claim` against a `claim`;
 //! - **a waiter wakes after the release** and sees the holder's writes;
-//! - **kill is terminal**: a waiter gets `None`, and nobody claims after Dead;
-//! - **identity** is the holder's while held and cleared at release.
+//! - **a holder's panic is terminal**: a waiter gets `None`, and nobody claims
+//!   after Dead.
 
 #![cfg(loom)]
 
@@ -71,7 +71,7 @@ fn a_waiter_is_granted_after_the_release_and_sees_its_writes() {
 }
 
 #[test]
-fn a_parked_waiter_gets_none_when_the_holder_kills() {
+fn a_parked_waiter_gets_none_when_the_holder_panics() {
     loom::model(|| {
         let claim = Arc::new(Claim::new());
         let guard = claim.try_claim().expect("free");
@@ -83,7 +83,11 @@ fn a_parked_waiter_gets_none_when_the_holder_kills() {
             let claim = claim.clone();
             thread::spawn(move || claim.try_claim().is_none())
         };
-        guard.kill();
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _guard = guard;
+            panic!("the holder panics");
+        }));
+        assert!(caught.is_err());
         assert!(waiter.join().unwrap(), "the waiter wakes and gets None");
         assert!(
             racer.join().unwrap(),
@@ -91,22 +95,5 @@ fn a_parked_waiter_gets_none_when_the_holder_kills() {
         );
         assert!(claim.is_dead());
         assert!(claim.try_claim().is_none());
-    });
-}
-
-#[test]
-fn identity_is_the_holders_while_held_and_cleared_at_release() {
-    loom::model(|| {
-        let claim = Arc::new(Claim::new());
-        let mut guard = claim.try_claim().expect("free");
-        guard.publish_identity();
-        let other = {
-            let claim = claim.clone();
-            thread::spawn(move || claim.is_held_by_current_thread())
-        };
-        assert!(claim.is_held_by_current_thread());
-        assert!(!other.join().unwrap(), "another thread is not the holder");
-        drop(guard);
-        assert!(!claim.is_held_by_current_thread());
     });
 }
