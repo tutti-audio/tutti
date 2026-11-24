@@ -109,7 +109,7 @@ impl<F: SamplerFloat> DiskSource<F> {
 // (`LiveRead`).
 // ---------------------------------------------------------------------------
 
-/// Wiring for [`DiskVoice::new`]: the window plus the file sample rate.
+/// Wiring for `DiskVoice::new`: the window plus the file sample rate.
 /// The stream's `Cells` stay a separate wiring arg. The transport is not
 /// wiring: a voice reads it from each block's `Env`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -141,7 +141,7 @@ pub struct DiskVoiceConfig {
 /// A fork for an offline render (an export) cannot read the ring: its reads
 /// would move the live voice's window. So the fork (`fork_copy`,
 /// a graph fork's source for this node and for a `VoiceNode` or pool holding
-/// it) is built without the ring: its [`Reader`] is the file arm, handed the
+/// it) is built without the ring: its `Reader` is the file arm, handed the
 /// stream's file, as the streamer records it (path, rate, loop), to read on
 /// demand on the render's thread. It plays the same window of the file on the render's transport
 /// (it reads its render's `Env`), read as the memory tier reads it; see
@@ -357,7 +357,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         Self::over(inner, shared_state, config, None)
     }
 
-    /// [`new`](Self::new) over a stream whose file a fork reads (`origin`).
+    /// `new` over a stream whose file a fork reads (`origin`).
     fn over(
         inner: DiskSource<F>,
         shared_state: Arc<Cells>,
