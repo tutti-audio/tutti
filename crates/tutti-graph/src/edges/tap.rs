@@ -117,7 +117,8 @@ impl Drop for RingOnDrop {
 }
 
 /// How a tap ends: the latch the editor raises when every node the tap read was
-/// removed (an event tap's too), and the bell it rings so a reader that awaits frames sees the end.
+/// removed (an event tap's too), and the bell it rings so a reader that
+/// awaits frames sees the end.
 pub(crate) struct TapEnd {
     latch: FaultLatch,
     bell: Option<Bell>,

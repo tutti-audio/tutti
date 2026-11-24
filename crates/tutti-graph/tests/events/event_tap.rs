@@ -575,6 +575,29 @@ fn an_event_tap_reads_source_gone_once_its_node_is_removed() {
     assert!(again.source_gone());
 }
 
+/// A tap closed by its id ends the reader still held, once the commit that
+/// leaves it out has been applied.
+#[test]
+fn a_closed_event_tap_ends_its_reader() {
+    let mut r = rig(1, false, 0);
+    script(&mut r, 1, Script::new(vec![(10, on(1))]));
+    let options = EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw);
+    let reader =
+        r.ed.open_event_tap(EventTapId::of(1), port(1, 0), options)
+            .unwrap();
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    r.ed.close_event_tap(EventTapId::of(1)).unwrap();
+    render(&mut r, &[100], 100);
+    assert!(
+        !reader.source_gone(),
+        "not before the commit that leaves it out"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(reader.source_gone());
+}
+
 /// A source behind a node of declared latency L = 15, beside an output path of
 /// latency M = 40: the raw tap reads the script's own frames, the aligned one
 /// the script's plus the compiler's gap (M - L = 25, an analytic figure); a
