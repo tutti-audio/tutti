@@ -757,6 +757,10 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
     let total: usize = (0..ports)
         .map(|p| sources(p).iter().map(|s| s.len()).sum::<usize>())
         .sum();
+    debug_assert!(
+        views[..ports].iter().all(Option::is_some),
+        "every input has a view"
+    );
     let mut lost = 0u32;
     match bound.filter(|b| total > b.get() as usize) {
         Some(bound) => {

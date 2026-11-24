@@ -271,7 +271,8 @@ impl<F: Float> Editor<F> {
     /// carries nothing. An aligned tap of an input is delayed whatever feeds
     /// it, a feedback edge included; its delay holds one block of scheduled
     /// commands beyond what the input's sources can write, and what does not
-    /// fit is counted with the other dropped events
+    /// fit is counted where an aligned tap's delay already counts it, with
+    /// the other dropped events
     /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).
     ///
     /// What the reader gets is the MIDI events the port carries, each with the

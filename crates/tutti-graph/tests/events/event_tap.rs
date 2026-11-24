@@ -1759,3 +1759,57 @@ fn a_bypassed_node_is_sent_a_blocks_worth_of_closes() {
     assert_eq!(tapped.len(), 2000, "1000 note-ons, then 1000 note-offs");
     assert_eq!(tapped[1000..], closes[..]);
 }
+
+/// **A lone source is handed over whole and in order, and a command beside it
+/// is merged in.** A source writes 32 note-ons a block, one on each even
+/// frame, into a probe (nothing else reaches the input, so the view is a copy
+/// of the source); in the second block a command lands on a frame between two
+/// of them, and the merged block is what the node heard and the taps carry,
+/// followed by a block that is a copy again.
+#[test]
+fn a_lone_source_is_copied_whole_and_a_command_is_merged_beside_it() {
+    let mut r = rig(1, false, 40);
+    let events: Vec<(u64, Ump)> = (0..96u32).map(|i| (u64::from(i) * 2, on(i + 10))).collect();
+    let mut s = Script::new(events);
+    s.cap = 32;
+    r.ed.insert(NodeKey(1), "script", Unforkable(s));
+    let heard = tutti_fixtures::Record::new();
+    r.ed.insert(
+        NodeKey(3),
+        "probe",
+        Unforkable(Probe {
+            heard: heard.clone(),
+            ports: 1,
+            capacity: 0,
+            audible: false,
+        }),
+    );
+    let input = EventInputPort::new(NodeKey(3), 0);
+    r.ed.spec_mut()
+        .connect_events(input, EventEdge::Direct(port(1, 0)));
+    let mut raw =
+        r.ed.open_event_tap(
+            EventTapId::of(1),
+            input,
+            EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
+        )
+        .expect("the input exists");
+    commit(&mut r);
+    render(&mut r, &[64], 64);
+    r.ed.schedule(
+        At::Frame(Frame::new(65)),
+        input,
+        Scheduled::Event(EventKind::Midi(on(127))),
+    )
+    .expect("room");
+    render(&mut r, &[64], 128);
+    // 32 events a block (frames 0..64 step 2), the command at 65 between the
+    // events at 64 and 66; the source's keys are 10 + the event's index.
+    let mut want: Vec<TapEvent> = (0..96u32)
+        .map(|i| at(u64::from(i) * 2, on_port(on(i + 10), 0)))
+        .collect();
+    want.insert(33, at(65, on(127)));
+    assert_eq!(heard.lock().unwrap().to_vec(), want, "what the node heard");
+    assert_eq!(drain(&mut raw), want, "what the tap carried");
+    assert_eq!(r.exec.dropped_event_count(), 0);
+}

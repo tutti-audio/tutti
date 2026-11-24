@@ -21,6 +21,16 @@ use crate::node::time::Offset;
 /// count.
 pub(crate) fn merge_into(sources: &[&[Event]], out: &mut CappedVec<Event>) -> u32 {
     let room = out.remaining();
+    // One source holding anything is its own merge: a bulk copy. Only when it
+    // fits whole: past the room the note-offs keep theirs (below), which the
+    // walk decides.
+    let mut held = sources.iter().filter(|s| !s.is_empty());
+    if let (Some(only), None) = (held.next(), held.next())
+        && only.len() <= room
+    {
+        out.extend_from_slice(only);
+        return 0;
+    }
     merge_walk(sources, room, |_, e| {
         out.push(e);
     })
@@ -32,6 +42,14 @@ pub(crate) fn merge_into(sources: &[&[Event]], out: &mut CappedVec<Event>) -> u3
 /// later ones first.
 pub(crate) fn merge_params(sources: &[&[ParamEvent]], out: &mut CappedVec<ParamEvent>) -> u32 {
     let room = out.remaining();
+    // One source holding anything is its own merge: the first `room` of it
+    // land, as the walk below keeps them, and the rest are counted.
+    let mut held = sources.iter().filter(|s| !s.is_empty());
+    if let (Some(only), None) = (held.next(), held.next()) {
+        let kept = only.len().min(room);
+        out.extend_from_slice(&only[..kept]);
+        return u32::try_from(only.len() - kept).unwrap_or(u32::MAX);
+    }
     let mut heads = [0usize; 2 * crate::MAX_PORTS];
     let heads = &mut heads[..sources.len()];
     let (mut kept, mut dropped) = (0usize, 0u32);

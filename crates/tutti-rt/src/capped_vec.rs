@@ -221,6 +221,38 @@ impl<T> CappedVec<T> {
         written
     }
 
+    /// Appends a copy of `src`, as much as fits, with one bulk copy.
+    ///
+    /// Returns how many items were written; a short return means the rest
+    /// were dropped, and [`refused`](Self::refused) counts them, as
+    /// [`extend`](Self::extend) does for a slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_rt::CappedVec;
+    ///
+    /// let mut v: CappedVec<u32> = CappedVec::with_capacity(3);
+    /// assert_eq!(v.extend_from_slice(&[1, 2]), 2);
+    /// assert_eq!(v.extend_from_slice(&[3, 4]), 1);
+    /// assert_eq!(v.as_slice(), &[1, 2, 3]);
+    /// assert_eq!(v.refused(), 1);
+    /// ```
+    #[inline]
+    pub fn extend_from_slice(&mut self, src: &[T]) -> usize
+    where
+        T: Copy,
+    {
+        let take = src.len().min(self.cap - self.buf.len());
+        // Cut to the room, so the storage reserved at construction is enough
+        // and this never reallocates.
+        self.buf.extend_from_slice(&src[..take]);
+        if take < src.len() {
+            self.refused = self.refused.saturating_add(src.len() - take);
+        }
+        take
+    }
+
     /// The filled run.
     #[inline]
     #[must_use]
