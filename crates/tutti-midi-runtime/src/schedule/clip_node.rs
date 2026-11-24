@@ -578,6 +578,11 @@ impl MidiClipControls {
     /// are not the new clip's). Playback that is stopped sends both at its
     /// next start anyway, so this adds nothing then. Several calls before a
     /// block make one send.
+    ///
+    /// The header and the chase leave the node's one event output, so every
+    /// receiver of that output hears them again, not only the new one: they
+    /// restate the state those receivers already hold, and the cost is a device
+    /// that cuts its voices on a Program Change.
     /// Control thread; the node reads it without a lock.
     pub fn receiver_changed(&self) {
         self.receiver.raise(RECEIVER_CHANGED);
