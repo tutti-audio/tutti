@@ -50,11 +50,6 @@ impl ClapLoaded {
             .open_embedded(main, &parent, scale)
             .map_err(gui_error)?;
 
-        // Only an editor that was `create`d needs `destroy` later.
-        if outcome.did_create {
-            self.flags.gui_created = true;
-        }
-
         Ok(outcome.size)
     }
 
@@ -92,14 +87,9 @@ impl ClapLoaded {
             .closed
             .store(false, std::sync::atomic::Ordering::Release);
 
-        let did_create = self
-            .plugin
+        self.plugin
             .open_floating(main, transient.as_ref(), title)
             .map_err(gui_error)?;
-
-        if did_create {
-            self.flags.gui_created = true;
-        }
 
         Ok(())
     }
@@ -151,9 +141,6 @@ impl ClapLoaded {
     /// nothing is claimed. A caller wanting real hints must create the editor first,
     /// which is the same order the spec requires of it.
     pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
-        if !self.flags.gui_created {
-            return EditorCapabilities::default();
-        }
         self.plugin.gui_hints(main).unwrap_or_default()
     }
 
@@ -199,7 +186,7 @@ impl ClapLoaded {
     /// that gives the plugin a main-thread handle makes this unreachable off the
     /// main thread.
     pub(crate) fn destroy_editor(&mut self, main: MainThreadMarker) {
-        if !self.flags.gui_created {
+        if self.plugin.editor_kind(main).is_none() {
             return;
         }
         // The plugin may have reported its window already gone (`gui.closed`
@@ -211,7 +198,6 @@ impl ClapLoaded {
             .window_destroyed
             .swap(false, std::sync::atomic::Ordering::AcqRel);
         self.plugin.close_gui(main, window_destroyed);
-        self.flags.gui_created = false;
     }
 
     /// Direct access to the shared [`HostState`] — useful if you need to
