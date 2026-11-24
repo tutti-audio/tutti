@@ -78,13 +78,6 @@ pub(crate) const DEFAULT_DEVICE_WIDTHS: usize = 16;
 /// [`OutputControl::publish_main_output`] refuses with [`MainOutputError::TooManyPending`].
 pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 
-/// What a device's channels are, and whether that was stated or guessed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DeviceEntry {
-    channels: ChannelSet,
-    placement: Placement,
-}
-
 /// One main output generation's folds.
 #[derive(Debug, Clone)]
 struct MainOutputFolds<F: Float> {
@@ -104,7 +97,7 @@ impl<F: Float> MainOutputFolds<F> {
     fn build(
         &self,
         width: usize,
-        device: &DeviceEntry,
+        device: &OutputPlacement,
         routing: &Routing,
     ) -> Result<Option<Fold<F>>, RoutingError> {
         let default;
@@ -129,7 +122,7 @@ impl<F: Float> MainOutputFolds<F> {
     /// routing cannot place has no fold, and renders a silent, counted block
     /// into the device; [`OutputControl::set_routing`] refuses before that for
     /// the pair in use.
-    fn column(&self, device: &DeviceEntry, routing: &Routing) -> Box<[Option<Fold<F>>]> {
+    fn column(&self, device: &OutputPlacement, routing: &Routing) -> Box<[Option<Fold<F>>]> {
         (1..=MAX_CHANNELS)
             .map(|w| self.build(w, device, routing).unwrap_or_default())
             .collect()
@@ -150,7 +143,7 @@ impl<F: Float> MainOutputFolds<F> {
 pub(crate) struct OutputFolds<F: Float> {
     /// Index `d - 1` is the device of `d` channels, `None` for a width not
     /// supported.
-    devices: Vec<Option<DeviceEntry>>,
+    devices: Vec<Option<OutputPlacement>>,
     /// Every main output still published, by ascending id.
     main_outputs: Vec<MainOutputFolds<F>>,
     /// Where the mix lands: composed into every main output's folds.
@@ -204,20 +197,14 @@ impl<F: Float> OutputFolds<F> {
         if self.devices.get(slot).is_some_and(Option::is_some) {
             return Ok(());
         }
-        self.set_device(
-            DeviceEntry {
-                channels: ChannelSet::default_for(device),
-                placement: Placement::Default,
-            },
-            slot,
-        );
+        self.set_device(OutputPlacement::default_for(device), slot);
         Ok(())
     }
 
     /// Sets what the device of `slot + 1` channels is, and rebuilds its folds
     /// from every main output published. A pair that cannot be placed has no fold:
     /// that main output width renders a silent, counted block into this device.
-    fn set_device(&mut self, device: DeviceEntry, slot: usize) {
+    fn set_device(&mut self, device: OutputPlacement, slot: usize) {
         if self.devices.len() <= slot {
             self.devices.resize(slot + 1, None);
         }
@@ -492,22 +479,18 @@ impl<F: Float> OutputControl<F> {
         let Some(slot) = usize::from(device.channels.width().count()).checked_sub(1) else {
             return Err(BufferError::ZeroWidth.into());
         };
-        let entry = DeviceEntry {
-            channels: device.channels,
-            placement: device.placement,
-        };
         if self.in_use().is_some_and(|(_, d)| d != slot + 1) {
             self.forget_in_use();
         }
         self.update(|folds| {
-            if folds.devices.get(slot).and_then(Option::as_ref) == Some(&entry) {
+            if folds.devices.get(slot).and_then(Option::as_ref) == Some(&device) {
                 return Ok(false);
             }
             if folds.has_device(slot + 1) {
                 let in_flight = self.fade_in_flight(folds);
                 folds.begin_fade(in_flight);
             }
-            folds.set_device(entry, slot);
+            folds.set_device(device.clone(), slot);
             Ok(true)
         })
     }
@@ -518,11 +501,7 @@ impl<F: Float> OutputControl<F> {
     pub fn device(&self, device: ChannelLayout) -> Option<OutputPlacement> {
         let slot = usize::from(device.count()).checked_sub(1)?;
         let folds = self.cell.current();
-        let entry = folds.devices.get(slot)?.as_ref()?;
-        Some(OutputPlacement {
-            channels: entry.channels,
-            placement: entry.placement,
-        })
+        folds.devices.get(slot)?.clone()
     }
 
     /// Publishes the main output generation `id`, declared as `main_output` (`None` is the
