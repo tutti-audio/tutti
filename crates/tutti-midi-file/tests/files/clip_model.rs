@@ -276,6 +276,57 @@ fn the_meter_map_is_the_set_time_signature_messages() {
     );
 }
 
+/// **A header Set Time Signature is the meter from beat 0** (M2-116 section
+/// 6.1.2), as the header's Set Tempo is the tempo from tick 0; one the sequence
+/// states at tick 0 replaces it.
+/// Spec: m2-116/6.1.2#1
+#[test]
+fn a_header_set_time_signature_is_the_meter_from_beat_zero() {
+    let header = [dcs(0), set_tempo(100.0), dcs(0), time_signature()];
+    let held = read_bytes(clip(&with_header(&header))).unwrap();
+    assert_eq!(
+        metrical(&held).meter_map().at(Beat::new(0.0)),
+        TimeSignature::of(3, 4)
+    );
+
+    let mut parts = vec![dcs(0), dctpq(TPQ)];
+    parts.extend(header);
+    parts.extend([dcs(0), start(), dcs(0), signature(6, 3), dcs(0), end()]);
+    let replaced = read_bytes(clip(&parts)).unwrap();
+    let map = metrical(&replaced).meter_map();
+    assert_eq!(map.changes().len(), 1);
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(6, 8));
+}
+
+/// A Flex denominator field of 0 is non-standard (M2-104 section 7.5.4): the
+/// message makes no meter change and is listed as the wire states it.
+#[test]
+fn a_flex_time_signature_denominator_of_zero_is_refused() {
+    let file = read_bytes(clip(&[
+        dcs(0),
+        dctpq(TPQ),
+        dcs(0),
+        start(),
+        dcs(0),
+        signature(3, 0),
+        dcs(0),
+        end(),
+    ]))
+    .unwrap();
+    let view = metrical(&file);
+    assert_eq!(view.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
+    let refused = view.refused_time_signatures();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(
+        (
+            refused[0].beat,
+            refused[0].numerator,
+            refused[0].denominator_power
+        ),
+        (Beat::new(0.0), 3, 0)
+    );
+}
+
 // ---- structure (M2-116 sections 6 and 7): one error variant per rule ------
 
 /// Spec: m2-116/3.2.1#1, m2-116/6#5
@@ -619,6 +670,7 @@ fn signature(numerator: u8, denominator: u8) -> Ump {
     .into()
 }
 
+/// 3/4 as a Flex Data Set Time Signature.
 fn time_signature() -> Ump {
     signature(3, 2)
 }

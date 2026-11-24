@@ -1985,7 +1985,10 @@ impl<'a> MetricalView<'a> {
     /// Signature event (an SMF's meta event, a Clip File's Flex Data Set Time
     /// Signature message) lands on (a change that falls mid-bar makes the bar
     /// before it short), 4/4 from beat 0 where the file declares none there.
-    /// A Time Signature no [`TimeSignature`] holds is not a change:
+    /// A Clip File's header Set Time Signature counts from beat 0, and a
+    /// sequence message at the start replaces it (as for
+    /// [`tempo_map`](Self::tempo_map)). A Time Signature no [`TimeSignature`]
+    /// holds is not a change:
     /// [`refused_time_signatures`](Self::refused_time_signatures) lists it.
     #[must_use]
     pub fn meter_map(self) -> MeterMap {
@@ -2084,8 +2087,10 @@ impl<'a> MetricalView<'a> {
 }
 
 /// A Time Signature event that no [`TimeSignature`] holds
-/// ([`MetricalView::refused_time_signatures`]): a numerator of 0, or a
-/// denominator power of two past 32 bits.
+/// ([`MetricalView::refused_time_signatures`]): a numerator of 0, a
+/// denominator power of two past 32 bits, or a Clip File's Flex Data Set Time
+/// Signature with a denominator field of 0, which M2-104 section 7.5.4 reads as
+/// non-standard (an SMF's power 0 is a whole note and is held).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct RefusedTimeSignature {
@@ -2097,38 +2102,54 @@ pub struct RefusedTimeSignature {
     pub denominator_power: u8,
 }
 
-/// What an event states as a time signature: the numerator and the denominator
-/// as a power of two (an SMF's Time Signature meta event, SMF 1.0 section 3.3;
-/// a Clip File's Flex Data Set Time Signature, M2-104 section 7.5.4, whose
-/// denominator field is the same power of two).
-fn stated_time_signature(event: &FileEvent) -> Option<(u8, u8)> {
-    match event {
+/// A time signature as an event states it: the numerator and the denominator
+/// power of two as the wire has them, and the denominator they name where the
+/// form allows it.
+struct Stated {
+    numerator: u8,
+    denominator_power: u8,
+    denominator: Option<u32>,
+}
+
+/// What an event states as a time signature. An SMF's Time Signature meta event
+/// (SMF 1.0 section 3.3) names the denominator `2^power`, a whole note at power
+/// 0. A Clip File's Flex Data Set Time Signature (M2-104 section 7.5.4) has the
+/// same power in its denominator field, but reads 0 as non-standard, so it names
+/// no denominator there (as `to_clip` refuses a whole-note denominator).
+fn stated_time_signature(event: &FileEvent) -> Option<Stated> {
+    let (numerator, denominator_power, whole_note) = match event {
         FileEvent::Meta(Meta::TimeSignature {
             numerator,
             denominator_power,
             ..
-        }) => Some((*numerator, *denominator_power)),
+        }) => (*numerator, *denominator_power, true),
         FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(field))) => {
-            Some((field.numerator, field.denominator))
+            (field.numerator, field.denominator, false)
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(Stated {
+        numerator,
+        denominator_power,
+        denominator: (whole_note || denominator_power != 0)
+            .then(|| 1u32.checked_shl(u32::from(denominator_power)))
+            .flatten(),
+    })
 }
 
 /// The meter change a time signature stated at `beat` makes, or the refusal
 /// when no [`TimeSignature`] holds it.
-fn meter_change_at(
-    beat: Beat,
-    numerator: u8,
-    denominator_power: u8,
-) -> Result<MeterChange, RefusedTimeSignature> {
-    1u32.checked_shl(u32::from(denominator_power))
-        .and_then(|denominator| TimeSignature::from_numbers(u32::from(numerator), denominator))
+fn meter_change_at(beat: Beat, stated: Stated) -> Result<MeterChange, RefusedTimeSignature> {
+    stated
+        .denominator
+        .and_then(|denominator| {
+            TimeSignature::from_numbers(u32::from(stated.numerator), denominator)
+        })
         .map(|signature| MeterChange::new(beat, signature))
         .ok_or(RefusedTimeSignature {
             beat,
-            numerator,
-            denominator_power,
+            numerator: stated.numerator,
+            denominator_power: stated.denominator_power,
         })
 }
 
@@ -2139,10 +2160,10 @@ fn meter_of<'a>(
 ) -> (MeterMap, Vec<RefusedTimeSignature>) {
     let (mut changes, mut refused) = (Vec::new(), Vec::new());
     for (beat, event) in events {
-        let Some((numerator, denominator_power)) = stated_time_signature(event) else {
+        let Some(stated) = stated_time_signature(event) else {
             continue;
         };
-        match meter_change_at(beat, numerator, denominator_power) {
+        match meter_change_at(beat, stated) {
             Ok(change) => changes.push(change),
             Err(refusal) => refused.push(refusal),
         }
