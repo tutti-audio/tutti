@@ -992,9 +992,9 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
         let delay = ed
             .base()
             .expect("a plan")
-            .delays()
+            .event_delays()
             .iter()
-            .find(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. }))
+            .find(|d| matches!(d.key, tutti_graph::EventDelayKey::ParamEvent { .. }))
             .map(|d| d.len);
         assert_eq!(
             delay,
@@ -1062,9 +1062,9 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
     );
     assert!(
         !plan
-            .delays()
+            .event_delays()
             .iter()
-            .any(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. })),
+            .any(|d| matches!(d.key, tutti_graph::EventDelayKey::ParamEvent { .. })),
         "the target waits for the source; the source is not delayed"
     );
     let out = render(&mut exec, &mut ed, 128, 64);
