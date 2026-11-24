@@ -436,7 +436,7 @@ pub(super) fn run_params<
     let (rec, frames, plan) = (h.rec, h.frames, h.plan);
     let Unit { node, params, .. } = u;
     params.begin();
-    let ports = &plan.param_ports[rec.params.range()];
+    let ports = &plan.program.param_ports[rec.params.range()];
     let mut next = ports.iter().peekable();
     let declared = rec.declared;
     let declick = plan.prepare.declick();
