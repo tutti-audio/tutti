@@ -446,7 +446,7 @@ fn each_node_declares_its_shape() {
         ("distortion", || {
             check(
                 DistortionNode::<f32>::from(
-                    DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                         .drive(Drive::new(1.5)),
                 ),
                 Facts::default()

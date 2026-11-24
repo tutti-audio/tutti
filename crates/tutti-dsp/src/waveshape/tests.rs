@@ -312,19 +312,36 @@ fn the_drive_floors_hold_on_the_signal_and_the_ramp() {
 
 // Antiderivative antialiasing.
 
-/// The antialiasing orders `kind` has, first order up.
+/// The antialiasing orders `kind` has, first order up: the second is the elementary second
+/// antiderivative of `HardClip` and `Softsign`.
 fn orders_of(kind: ShapeKind) -> impl Iterator<Item = Antialiasing> {
-    [Antialiasing::FirstOrder, Antialiasing::SecondOrder]
-        .into_iter()
-        .filter(move |&order| order <= kind.max_antialiasing())
+    let orders: &'static [Antialiasing] = match kind {
+        ShapeKind::HardClip | ShapeKind::Softsign => {
+            &[Antialiasing::FirstOrder, Antialiasing::SecondOrder]
+        }
+        _ => &[Antialiasing::FirstOrder],
+    };
+    orders.iter().copied()
+}
+
+/// The shape of `kind` at `order`, one of the pairs [`orders_of`] lists or `Off`.
+fn shape_at(kind: ShapeKind, order: Antialiasing) -> Waveshape {
+    match (order, kind) {
+        (Antialiasing::Off, _) => Waveshape::new(kind),
+        (Antialiasing::FirstOrder, _) => Waveshape::new(kind).first_order(),
+        (Antialiasing::SecondOrder, ShapeKind::HardClip) => {
+            Waveshape::second_order(SecondOrderShape::HardClip)
+        }
+        (Antialiasing::SecondOrder, ShapeKind::Softsign) => {
+            Waveshape::second_order(SecondOrderShape::Softsign)
+        }
+        _ => panic!("{kind:?} has no {order:?}"),
+    }
 }
 
 /// A bank of `kind` at rest on `drive`, antialiased to `order`.
 fn antialiased(kind: ShapeKind, drive: f64, order: Antialiasing) -> WaveshaperBank<f32> {
-    let shape = Waveshape::new(kind)
-        .antialiasing(order)
-        .expect("an order the kind has");
-    let mut bank = WaveshaperBank::<f32>::new(shape, RATE);
+    let mut bank = WaveshaperBank::<f32>::new(shape_at(kind, order), RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
@@ -958,36 +975,30 @@ fn the_delay_is_the_centroid_of_the_impulse_response() {
     );
 }
 
-/// The kinds with a second antiderivative are `Softsign` and `HardClip`; an order past a kind's
-/// highest is refused with the kind, the order and the highest named, `Off` and the highest are
-/// taken, and a bank shapes with the shape it is built from.
+/// Each constructor yields the curve and the order it names: `new` is `Off`, `first_order` is
+/// `FirstOrder` for every curve, and `second_order` is `SecondOrder` of the curve of its
+/// [`SecondOrderShape`]; a bank shapes with the shape it is built from.
 #[test]
-fn an_order_past_the_kinds_highest_is_refused() {
+fn each_constructor_yields_the_kind_and_order_it_names() {
     for kind in KINDS {
-        let highest = match kind {
-            ShapeKind::Softsign | ShapeKind::HardClip => Antialiasing::SecondOrder,
-            _ => Antialiasing::FirstOrder,
-        };
-        assert_eq!(kind.max_antialiasing(), highest, "{kind:?}");
-        let shape = |order| Waveshape::new(kind).antialiasing(order);
-        for order in [Antialiasing::Off, Antialiasing::FirstOrder, highest] {
-            let shape = shape(order).unwrap();
+        let off = Waveshape::new(kind);
+        let first = off.first_order();
+        for (shape, order) in [(off, Antialiasing::Off), (first, Antialiasing::FirstOrder)] {
+            assert_eq!(shape.kind(), kind, "{kind:?}");
             assert_eq!(shape.antialiasing_order(), order, "{kind:?}");
             let bank = WaveshaperBank::<f32>::new(shape, RATE);
             assert_eq!(bank.shape(), shape, "{kind:?}");
         }
-        if highest == Antialiasing::FirstOrder {
-            assert_eq!(
-                shape(Antialiasing::SecondOrder).unwrap_err(),
-                AntialiasingError {
-                    kind,
-                    order: Antialiasing::SecondOrder,
-                    max: Antialiasing::FirstOrder,
-                }
-            );
-        } else {
-            assert!(shape(Antialiasing::SecondOrder).is_ok());
-        }
+    }
+    for (second, kind) in [
+        (SecondOrderShape::HardClip, ShapeKind::HardClip),
+        (SecondOrderShape::Softsign, ShapeKind::Softsign),
+    ] {
+        let shape = Waveshape::second_order(second);
+        assert_eq!(second.kind(), kind);
+        assert_eq!(shape.kind(), kind);
+        assert_eq!(shape.antialiasing_order(), Antialiasing::SecondOrder);
+        assert_eq!(WaveshaperBank::<f32>::new(shape, RATE).shape(), shape);
     }
 }
 
@@ -1028,10 +1039,7 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
 
 /// One block of `x` through an `f64` bank of `kind` at rest on `drive`, at `order`.
 fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> Vec<f64> {
-    let shape = Waveshape::new(kind)
-        .antialiasing(order)
-        .expect("an order the kind has");
-    let mut bank = WaveshaperBank::<f64>::new(shape, RATE);
+    let mut bank = WaveshaperBank::<f64>::new(shape_at(kind, order), RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });

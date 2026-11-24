@@ -11,7 +11,7 @@
 
 use tutti_buffers::Float;
 
-use super::{Antialiasing, ShapeKind, fold_phase, smooth9, triangle_fold};
+use super::{SecondOrderShape, ShapeKind, fold_phase, smooth9, triangle_fold};
 
 /// How close two inputs are before a quotient whose differences cannot be conditioned is
 /// replaced by its limit, relative to the larger of 1 and the two inputs' magnitudes (in the
@@ -133,19 +133,6 @@ fn soft_crush_f1<F: Float>(u: F) -> F {
 }
 
 impl ShapeKind {
-    /// The highest order of antiderivative antialiasing the kind has: the order its
-    /// antiderivatives are elementary to.
-    ///
-    /// `Softsign` and `HardClip` have an elementary second antiderivative; the others stop at
-    /// the first: `Tanh` (`ln cosh`), `Atan`, `Crush` and `SoftCrush` (a polynomial per step).
-    #[must_use]
-    pub fn max_antialiasing(self) -> Antialiasing {
-        match self {
-            Self::Softsign | Self::HardClip => Antialiasing::SecondOrder,
-            _ => Antialiasing::FirstOrder,
-        }
-    }
-
     /// The factor from `x * hardness` to the argument of the unit curve.
     #[inline(always)]
     fn pre<F: Float>(self) -> F {
@@ -263,73 +250,25 @@ impl ShapeKind {
         }
     }
 
-    /// Second-order ADAA over the samples `a`, `b`, `c` (newest first): twice the second divided
-    /// difference of the curve's second antiderivative `F2`, `2 (D(a, b) - D(b, c)) / (a - c)`
-    /// with `D` the mean of `F1`.
-    ///
-    /// The hard clip's `F2` is `(u^3 - (u - 1)+^3 + (-u - 1)+^3) / 6`, so its quotient is
-    /// `(a + b + c) / 3` less and plus the truncated cube's divided differences, exact. For
-    /// `Softsign`, where `a` and `c` are within the guard, with `m = (a + c) / 2` it is the limit
-    /// `2 (F1(m) - D(m, b)) / (m - b)`, and where `m` and `b` are too, the curve at the mean of
-    /// the three, the Taylor form to `O(d^2)`.
+    /// The three arguments of the unit curve for the input `x` and the two before it
+    /// (`history`, newest first), at `hardness`: the drive scales all three, so the history
+    /// stays undriven. The argument is held to `±sqrt(MAX) / 4` so a square of it is finite.
     #[inline(always)]
-    fn second<F: Float>(self, guard: Guard<F>, a: F, b: F, c: F) -> F {
-        let one = F::ONE;
-        if self == Self::HardClip {
-            let third = F::ONE / F::lit(3.0);
-            return (a + b + c - truncated_cube_dd2(a - one, b - one, c - one)
-                + truncated_cube_dd2(-a - one, -b - one, -c - one))
-                * third;
-        }
-        debug_assert!(
-            self == Self::Softsign,
-            "a `Waveshape` holds the second order for the hard clip and softsign only"
-        );
-        let two = F::lit(2.0);
-        if !guard.close(a, c) {
-            return two * (softsign_mean_f1(a, b) - softsign_mean_f1(b, c)) / (a - c);
-        }
-        let m = F::lit(0.5) * (a + c);
-        if guard.close(m, b) {
-            self.g((a + b + c) / F::lit(3.0))
-        } else {
-            let d = m - b;
-            two * (softsign_f1(m) - softsign_mean_f1(m, b)) / d
-        }
-    }
-
-    /// The antialiased output at one frame: `x` the undriven input, `history` the two before
-    /// it (newest first), at `hardness`. The drive scales all three, so the history stays
-    /// undriven. The argument is held to `±sqrt(MAX) / 4` so a square of it is finite.
-    #[inline(always)]
-    fn step<F: Float>(
-        self,
-        order: Antialiasing,
-        guard: Guard<F>,
-        hardness: F,
-        x: F,
-        history: [F; 2],
-    ) -> F {
+    fn arguments<F: Float>(self, hardness: F, x: F, history: [F; 2]) -> [F; 3] {
         let k = hardness * self.pre::<F>();
         let reach = F::MAX.sqrt() / F::lit(4.0);
         let arg = |v: F| (v * k).clamp(-reach, reach);
-        let [a, b, c] = [arg(x), arg(history[0]), arg(history[1])];
-        let y = match order {
-            Antialiasing::SecondOrder => self.second(guard, a, b, c),
-            _ => self.first(guard, a, b),
-        };
-        y * self.post(hardness)
+        [arg(x), arg(history[0]), arg(history[1])]
     }
 
-    /// `input` through the antialiased curve of `order` at a hardness per frame, into `output`;
-    /// `history` is the channel's two previous inputs, newest first, and holds the last two
-    /// of this block's after. A non-finite sample is shaped as it is and enters the history
-    /// as 0: it is heard at its own frame only, and the next frame (the next two at second
-    /// order) reads its segment from 0.
+    /// `input` through the first-order antialiased curve at a hardness per frame, into
+    /// `output`; `history` is the channel's two previous inputs, newest first, and holds the
+    /// last two of this block's after. A non-finite sample is shaped as it is and enters the
+    /// history as 0: it is heard at its own frame only, and the next frame reads its segment
+    /// from 0.
     #[inline(always)]
-    pub(super) fn adaa_each<F: Float>(
+    pub(super) fn first_each<F: Float>(
         self,
-        order: Antialiasing,
         guard: Guard<F>,
         hardness: &[F],
         input: &[F],
@@ -337,11 +276,92 @@ impl ShapeKind {
         history: &mut [F; 2],
     ) {
         with_kind!(self, |K| {
-            for ((o, &x), &h) in output.iter_mut().zip(input).zip(hardness) {
-                *o = K.step(order, guard, h, x, *history);
-                *history = [if x.is_finite() { x } else { F::ZERO }, history[0]];
-            }
+            each_frame(hardness, input, output, history, |h, x, history| {
+                let [a, b, _] = K.arguments(h, x, history);
+                K.first(guard, a, b) * K.post(h)
+            });
         })
+    }
+}
+
+impl SecondOrderShape {
+    /// `input` through the second-order antialiased curve at a hardness per frame, into
+    /// `output`, with the contract of [`ShapeKind::first_each`]: the history is the two previous
+    /// inputs, and a non-finite sample is 0 in it for the next two frames. The curve is a constant in each arm, so the loop is compiled for it.
+    #[inline(always)]
+    pub(super) fn second_each<F: Float>(
+        self,
+        guard: Guard<F>,
+        hardness: &[F],
+        input: &[F],
+        output: &mut [F],
+        history: &mut [F; 2],
+    ) {
+        match self {
+            Self::HardClip => {
+                const K: ShapeKind = ShapeKind::HardClip;
+                each_frame(hardness, input, output, history, |h, x, history| {
+                    let [a, b, c] = K.arguments(h, x, history);
+                    hard_clip_second(a, b, c) * K.post(h)
+                });
+            }
+            Self::Softsign => {
+                const K: ShapeKind = ShapeKind::Softsign;
+                each_frame(hardness, input, output, history, |h, x, history| {
+                    let [a, b, c] = K.arguments(h, x, history);
+                    softsign_second(guard, a, b, c) * K.post(h)
+                });
+            }
+        }
+    }
+}
+
+/// Runs `frame` over each input with its hardness and the two inputs before it, newest first,
+/// into `output`, and leaves the last two inputs in `history` (a non-finite one as 0).
+#[inline(always)]
+fn each_frame<F: Float>(
+    hardness: &[F],
+    input: &[F],
+    output: &mut [F],
+    history: &mut [F; 2],
+    frame: impl Fn(F, F, [F; 2]) -> F,
+) {
+    for ((o, &x), &h) in output.iter_mut().zip(input).zip(hardness) {
+        *o = frame(h, x, *history);
+        *history = [if x.is_finite() { x } else { F::ZERO }, history[0]];
+    }
+}
+
+/// Second-order ADAA of the hard clip over the samples `a`, `b`, `c` (newest first): twice the
+/// second divided difference of the curve's second antiderivative `F2`,
+/// `2 (D(a, b) - D(b, c)) / (a - c)` with `D` the mean of `F1`.
+///
+/// The hard clip's `F2` is `(u^3 - (u - 1)+^3 + (-u - 1)+^3) / 6`, so its quotient is
+/// `(a + b + c) / 3` less and plus the truncated cube's divided differences, exact.
+#[inline(always)]
+fn hard_clip_second<F: Float>(a: F, b: F, c: F) -> F {
+    let (one, third) = (F::ONE, F::ONE / F::lit(3.0));
+    (a + b + c - truncated_cube_dd2(a - one, b - one, c - one)
+        + truncated_cube_dd2(-a - one, -b - one, -c - one))
+        * third
+}
+
+/// Second-order ADAA of `Softsign` over the samples `a`, `b`, `c` (newest first), the quotient
+/// of [`hard_clip_second`] with `F2` of `Softsign`. Where `a` and `c` are within the guard, with
+/// `m = (a + c) / 2` it is the limit `2 (F1(m) - D(m, b)) / (m - b)`, and where `m` and `b` are
+/// too, the curve at the mean of the three, the Taylor form to `O(d^2)`.
+#[inline(always)]
+fn softsign_second<F: Float>(guard: Guard<F>, a: F, b: F, c: F) -> F {
+    let two = F::lit(2.0);
+    if !guard.close(a, c) {
+        return two * (softsign_mean_f1(a, b) - softsign_mean_f1(b, c)) / (a - c);
+    }
+    let m = F::lit(0.5) * (a + c);
+    if guard.close(m, b) {
+        ShapeKind::Softsign.g((a + b + c) / F::lit(3.0))
+    } else {
+        let d = m - b;
+        two * (softsign_f1(m) - softsign_mean_f1(m, b)) / d
     }
 }
 

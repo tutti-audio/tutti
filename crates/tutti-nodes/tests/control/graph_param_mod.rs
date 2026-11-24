@@ -41,7 +41,7 @@ use tutti_nodes::{
     DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, KeySource,
     LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls, LimiterNode,
     MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages,
-    SvfFilterConfig, SvfFilterNode, SvfType,
+    SvfFilterConfig, SvfFilterNode, SvfType, Waveshape,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -442,7 +442,7 @@ fn cases() -> Vec<Case> {
                 let n = DistortionNode::<f32>::from(
                     DistortionConfig::new(
                         ChannelLayout::try_from(w).expect("a test width is small"),
-                        ShapeKind::Tanh,
+                        Waveshape::new(ShapeKind::Tanh),
                     )
                     .drive(Drive::new(1.0)),
                 );
@@ -1040,7 +1040,7 @@ fn each_fed_mix_is_the_one_the_graph_blends() {
 fn plain_distortion(d: f64) -> Vec<f32> {
     render(
         parts_of(DistortionNode::<f32>::from(
-            DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(d)),
+            DistortionConfig::new(1u16, Waveshape::new(ShapeKind::Tanh)).drive(Drive::new(d)),
         )),
         None,
         noise,
@@ -1055,7 +1055,7 @@ fn plain_distortion(d: f64) -> Vec<f32> {
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
     let node = DistortionNode::<f32>::from(
-        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+        DistortionConfig::new(1u16, Waveshape::new(ShapeKind::Tanh)).drive(Drive::new(1.0)),
     );
     let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
@@ -1108,7 +1108,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
 #[test]
 fn a_crossed_range_is_survivable() {
     let node = DistortionNode::<f32>::from(
-        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+        DistortionConfig::new(1u16, Waveshape::new(ShapeKind::Tanh)).drive(Drive::new(1.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
@@ -1139,7 +1139,7 @@ fn a_crossed_range_is_survivable() {
 #[test]
 fn an_unmodulated_param_adds_nothing_to_the_plan() {
     let node = DistortionNode::<f32>::from(
-        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+        DistortionConfig::new(1u16, Waveshape::new(ShapeKind::Tanh)).drive(Drive::new(1.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
@@ -1212,7 +1212,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
 #[test]
 fn a_fork_modulates_as_the_live_graph_does() {
     let node = DistortionNode::<f32>::from(
-        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+        DistortionConfig::new(1u16, Waveshape::new(ShapeKind::Tanh)).drive(Drive::new(1.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
