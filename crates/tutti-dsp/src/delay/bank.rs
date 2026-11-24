@@ -272,8 +272,8 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// A [`Synced`](DelaySync::Synced) delay is the longest the line holds. The tempo is not
     /// an argument: it moves between blocks without a control moving, so a figure taken at one
     /// would be stale at the next. The figure rises with the time and with each feedback,
-    /// neither of which is negative. A time or feedback a control signal drives is not asked
-    /// here: its later values are unknown, and the node reports [`tail`](Self::tail).
+    /// neither of which is negative, so a time or feedback a control signal drives is asked at
+    /// its longest: the line's length and the stable bound.
     ///
     /// The figure is for the times as they settle: a time still moving is covered in length,
     /// not in level.
