@@ -24,25 +24,20 @@ impl Ports {
     /// Where the first output port's stamp stream stands: the open output's, or
     /// the parked one's while the device is away.
     fn stream_origin(&self) -> Frame {
-        let port = &self.outputs[0];
-        port.out
-            .as_ref()
-            .map(UmpOut::origin)
-            .or_else(|| port.parked.as_ref().map(JrStream::origin))
-            .expect("an output holds its stream open or parked")
+        match &self.outputs[0].link {
+            OutLink::Open(open) => open.out.stream.origin(),
+            OutLink::Away { stream, .. } => stream.origin(),
+        }
     }
 
     /// The first output port's open device output with its stream.
     fn open_output(&mut self) -> &mut UmpOut<OpenOutput> {
-        self.outputs[0].out.as_mut().expect("open")
+        self.outputs[0].link.open_mut().expect("open")
     }
 
     /// What the first output port's open device has counted of its own.
     fn device_losses(&self) -> Option<Losses> {
-        self.outputs[0]
-            .out
-            .as_ref()
-            .map(|out| out.destination().losses())
+        self.outputs[0].link.device().map(OpenOutput::losses)
     }
 
     /// What the first output port counted, cumulative.
@@ -69,11 +64,11 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
     let _out = s.apply(opened).expect("opens");
     let _ = s.update();
     // The device receives JR Timestamps, so the output stamps and its stream moves.
-    s.midi.state.ports.outputs[0]
-        .out
-        .as_mut()
-        .map(UmpOut::destination_mut)
-        .expect("the device's output")
+    s.midi
+        .state
+        .ports
+        .open_output()
+        .destination_mut()
         .set_config(tutti_ump::StreamConfig {
             protocol: tutti_ump::Protocol::Midi2,
             rx_jr: true,
@@ -222,7 +217,7 @@ fn an_output_stamps_iff_its_configuration_receives_jr_timestamps() {
         let opened = ready(s.open_midi_output(synth).expect("begins"));
         let _out = s.apply(opened).expect("opens");
         let _ = s.update();
-        let out = s.midi.state.ports.outputs[0].out.as_mut().expect("open");
+        let out = s.midi.state.ports.open_output();
         out.destination_mut().set_config(tutti_ump::StreamConfig {
             protocol: tutti_ump::Protocol::Midi2,
             rx_jr,
