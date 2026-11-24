@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use common::{Harness, Kind, TestNode, bits, input_signal, prepare, shapes_of};
 use tutti_buffers::{BufferError, Float, FoldError};
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses, CommitError,
@@ -48,7 +48,7 @@ fn lane(sink: u64, port: u16, from: PortSource) -> EdgeId {
     }
 }
 
-fn main_bus(topology: BusTopology) -> Bus {
+fn main_bus(topology: ChannelTopology) -> Bus {
     Bus::new(topology, BusRole::Main)
 }
 
@@ -58,7 +58,7 @@ fn smpte(n: usize) -> Bus {
 }
 
 fn unassigned(n: usize) -> Bus {
-    main_bus(BusTopology::unassigned(ch(n)).expect("fits a bus"))
+    main_bus(ChannelTopology::unassigned(ch(n)).expect("fits a bus"))
 }
 
 fn buses(list: &[Bus]) -> Buses {

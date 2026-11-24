@@ -9,7 +9,7 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 
 use common::{Kind, prepare};
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Edge, GraphSpec, InputPort, MAX_BUSES, NodeKey, NodeSpec, OutputPort,
     PortKind, PortSource, Shape, Topology, compile,
@@ -19,7 +19,7 @@ fn width(n: u16) -> ChannelLayout {
     ChannelLayout::from(n)
 }
 
-fn bus(topology: BusTopology, role: BusRole) -> Bus {
+fn bus(topology: ChannelTopology, role: BusRole) -> Bus {
     Bus::new(topology, role)
 }
 
@@ -60,7 +60,7 @@ fn a_unassigned_shape_is_one_unassigned_main_bus_of_the_width() {
 #[test]
 fn declared_buses_sit_in_port_order() {
     use Speaker::*;
-    let five_one = BusTopology::new([
+    let five_one = ChannelTopology::new([
         FrontLeft,
         FrontRight,
         FrontCenter,
@@ -69,8 +69,8 @@ fn declared_buses_sit_in_port_order() {
         SideRight,
     ])
     .unwrap();
-    let key = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
-    let stereo = BusTopology::new([FrontLeft, FrontRight]).unwrap();
+    let key = ChannelTopology::unassigned(ChannelLayout::MONO).unwrap();
+    let stereo = ChannelTopology::new([FrontLeft, FrontRight]).unwrap();
     let buses = Buses::new(&[
         bus(five_one, BusRole::Main),
         bus(key, BusRole::Sidechain),
@@ -106,7 +106,7 @@ fn declared_buses_sit_in_port_order() {
 #[test]
 #[should_panic(expected = "ports narrower than the buses")]
 fn ports_narrower_than_the_buses_are_refused() {
-    let _ = Shape::through(BusTopology::STEREO).ports(width(1), width(2));
+    let _ = Shape::through(ChannelTopology::STEREO).ports(width(1), width(2));
 }
 
 /// Declaring buses changes nothing the compiler makes: the same topology,
@@ -116,7 +116,7 @@ fn ports_narrower_than_the_buses_are_refused() {
 #[test]
 fn declaring_buses_changes_no_plan() {
     use Speaker::*;
-    let five_one = BusTopology::new([
+    let five_one = ChannelTopology::new([
         FrontLeft,
         FrontRight,
         FrontCenter,

@@ -867,14 +867,13 @@ mod latency_tail;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{DelayConfig, DelayNode};
     use tutti_buffers::ChannelTopology;
     use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
     use tutti_units::{Frame, Seconds};
-
-    use super::*;
-    use crate::{DelayConfig, DelayNode};
 
     /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
     /// unequal length are each read to their own end.

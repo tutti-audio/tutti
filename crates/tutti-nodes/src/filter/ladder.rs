@@ -257,9 +257,7 @@ mod tests {
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE_44K, prepared_at, render_f64, tick, tick_fed};
     use tutti_dsp::Complex64;
-
     use tutti_graph::{Node, ParamNode};
-
     use tutti_units::UnitParam;
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected

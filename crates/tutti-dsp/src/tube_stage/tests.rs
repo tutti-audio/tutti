@@ -1,6 +1,8 @@
 use super::*;
-use crate::testing::{amplitude_at, lock_in};
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::{amplitude_at, lock_in};
+use tutti_units::Hz;
+use tutti_units::SampleRate;
 
 /// The rate the stage runs at under the default oversampling: 4 times 48 kHz.
 const FS: f64 = 192_000.0;
@@ -150,7 +152,7 @@ fn a_minus_80_dbfs_sine_has_the_small_signal_gain_of_the_model() {
     let settle = 420 * PERIOD;
     let mut s = stage(0.0);
     let y = run(&mut s, &sine(f, 1e-4, settle + 16 * PERIOD));
-    let gain = amplitude_at(&y[settle..], f, FS) / 1e-4;
+    let gain = amplitude_at(&y[settle..], Hz::new(f), SampleRate::of(FS)) / 1e-4;
     let bound = 1e-7 * highpass;
     assert!(
         (gain - highpass).abs() <= bound,
@@ -184,7 +186,7 @@ fn a_moderate_sine_has_a_second_harmonic_of_the_models_curvature() {
     let settle = 420 * PERIOD;
     let mut s = stage(20.0 * amplitude.log10());
     let y = run(&mut s, &sine(f, 1.0, settle + 16 * PERIOD));
-    let (cos2, sin2) = lock_in(&y[settle..], 2.0 * f, FS);
+    let (cos2, sin2) = lock_in(&y[settle..], Hz::new(2.0 * f), SampleRate::of(FS));
     // The coupling high-pass `H = (1 - e^(-jw)) / (1 - R e^(-jw))` at 2f turns the `cos 2wt`
     // coefficient into `(Re H, Im H)` times itself.
     let w = core::f64::consts::TAU * 2.0 * f / FS;

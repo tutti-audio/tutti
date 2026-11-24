@@ -11,14 +11,19 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
-use tutti_graph::InletNode;
 use tutti_graph::contract::Direct;
+use tutti_graph::{InletNode, InletRing};
 use tutti_units::{SampleRate, Samples};
 
 /// Blocks with the ring full, then running dry (both branches of the pop).
 #[test]
 fn inlet_process_is_allocation_free() {
-    let (node, mut prod) = InletNode::pair(ChannelLayout::STEREO, Samples::new(4096));
+    let (ring, mut prod) = InletRing::pair(
+        ChannelLayout::STEREO,
+        Samples::new(4096),
+        SampleRate::SR_48K,
+    );
+    let node = InletNode::new(ring);
     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
 
     for _ in 0..2048 {

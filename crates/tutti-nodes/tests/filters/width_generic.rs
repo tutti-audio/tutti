@@ -12,7 +12,7 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
 use tutti_nodes::{
@@ -158,7 +158,7 @@ fn delay(layout: ChannelLayout) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(
             DelayLayout::new(
-                BusTopology::default_for(layout).expect("a test width is one bus"),
+                ChannelTopology::default_for(layout).expect("a test width is one bus"),
                 MaxDelay::of(Seconds::new(0.5)),
             )
             .interpolation(InterpolationMode::CubicHermite),
@@ -182,7 +182,7 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
     ModDelayNode::<f32>::from(
         ModDelayConfig::new(
             ModDelayLayout::builder(
-                BusTopology::default_for(layout).expect("a test width is one bus"),
+                ChannelTopology::default_for(layout).expect("a test width is one bus"),
                 Sweep::CHORUS,
             )
             .stagger(Stagger::try_from(&zeros[..]).expect("zero offsets"))
@@ -196,7 +196,7 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
 fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
     PhaserNode::<f32>::try_from(
         PhaserConfig::new(
-            BusTopology::default_for(layout).expect("a test width is one bus"),
+            ChannelTopology::default_for(layout).expect("a test width is one bus"),
             Stages::of(6),
         )
         .controls(PhaserControls {

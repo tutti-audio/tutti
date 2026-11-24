@@ -44,7 +44,7 @@
 //! Baselines are per-machine and do not travel; see `cargo xtask bench-save`.
 
 use std::hint::black_box;
-use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_engine::Engine;
@@ -96,7 +96,7 @@ fn chain_engine(outputs: usize) -> Engine {
     ed.insert(
         strip,
         "strip",
-        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)),
+        BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO)),
     );
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);

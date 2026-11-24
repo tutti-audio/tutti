@@ -1,7 +1,7 @@
 use super::super::CrossoverBlend;
 use super::super::blend::Tpt;
 use super::*;
-use crate::testing::{amplitude_at, lock_in};
+use tutti_fixtures::signal::{amplitude_at, lock_in};
 use tutti_units::{Hz, SampleRate};
 
 /// One sample through `state` at `c`.
@@ -56,8 +56,11 @@ fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
         }
     }
     (
-        bands.iter().map(|b| lock_in(b, hz, RATE)).collect(),
-        amplitude_at(&sum, hz, RATE),
+        bands
+            .iter()
+            .map(|b| lock_in(b, Hz::new(hz), SampleRate::of(RATE)))
+            .collect(),
+        amplitude_at(&sum, Hz::new(hz), SampleRate::of(RATE)),
     )
 }
 

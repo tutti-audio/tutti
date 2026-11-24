@@ -1,8 +1,8 @@
 use tutti_buffers::MonoMut;
+use tutti_fixtures::signal::lock_in;
 use tutti_units::{Amplitude, FrequencyRatio, Hz, SampleRate};
 
 use super::*;
-use crate::testing::lock_in;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// Whole periods of every multiple of 10 Hz at 48 kHz.
@@ -40,12 +40,12 @@ fn each_partial_appears_at_its_frequency_and_amplitude() {
     let partials = [partial(1.0, 0.5), partial(2.5, 0.25), partial(7.0, 0.125)];
     let out = render(&partials, &controls(480.0, 0.5));
     for (hz, amplitude) in [(480.0, 0.25), (1_200.0, 0.125), (3_360.0, 0.0625)] {
-        let (re, im) = lock_in(&out, hz, RATE.get());
+        let (re, im) = lock_in(&out, Hz::new(hz), RATE);
         assert!(re.abs() <= ROUND_OFF, "{hz} Hz: re {re}");
         assert!((im + amplitude).abs() <= ROUND_OFF, "{hz} Hz: im {im}");
     }
     for hz in [100.0, 960.0, 1_000.0, 2_000.0, 5_000.0] {
-        let (re, im) = lock_in(&out, hz, RATE.get());
+        let (re, im) = lock_in(&out, Hz::new(hz), RATE);
         assert!(re.hypot(im) <= ROUND_OFF, "{hz} Hz");
     }
 }
@@ -58,13 +58,13 @@ fn each_partial_appears_at_its_frequency_and_amplitude() {
 fn a_partial_above_the_nyquist_is_absent_and_the_one_below_is_heard() {
     let partials = [partial(1.0, 0.5), partial(49.0, 0.25), partial(52.5, 0.75)];
     let out = render(&partials, &controls(480.0, 1.0));
-    let (_, below) = lock_in(&out, 23_520.0, RATE.get());
+    let (_, below) = lock_in(&out, Hz::new(23_520.0), RATE);
     assert!((below + 0.25).abs() <= ROUND_OFF);
     for hz in [25_200.0, 22_800.0] {
-        let (re, im) = lock_in(&out, hz, RATE.get());
+        let (re, im) = lock_in(&out, Hz::new(hz), RATE);
         assert!(re.hypot(im) <= ROUND_OFF, "{hz} Hz");
     }
-    let (_, first) = lock_in(&out, 480.0, RATE.get());
+    let (_, first) = lock_in(&out, Hz::new(480.0), RATE);
     assert!((first + 0.5).abs() <= ROUND_OFF);
 }
 
@@ -74,11 +74,11 @@ fn a_partial_above_the_nyquist_is_absent_and_the_one_below_is_heard() {
 fn a_frequency_that_pushes_a_partial_past_the_nyquist_drops_it() {
     let partials = [partial(1.0, 1.0), partial(3.0, 1.0)];
     let low = render(&partials, &controls(5_000.0, 1.0));
-    let (_, im) = lock_in(&low, 15_000.0, RATE.get());
+    let (_, im) = lock_in(&low, Hz::new(15_000.0), RATE);
     assert!((im + 1.0).abs() <= ROUND_OFF);
     let high = render(&partials, &controls(9_000.0, 1.0));
     for hz in [27_000.0, 21_000.0] {
-        let (re, im) = lock_in(&high, hz, RATE.get());
+        let (re, im) = lock_in(&high, Hz::new(hz), RATE);
         assert!(re.hypot(im) <= ROUND_OFF, "{hz} Hz");
     }
 }
@@ -93,7 +93,7 @@ fn the_phase_runs_on_across_blocks() {
     for half in out.chunks_mut(WINDOW / 2) {
         bank.process(MonoMut::new(half));
     }
-    let (re, im) = lock_in(&out, 480.0, RATE.get());
+    let (re, im) = lock_in(&out, Hz::new(480.0), RATE);
     assert!(re.abs() <= ROUND_OFF && (im + 1.0).abs() <= ROUND_OFF);
 }
 

@@ -1,6 +1,9 @@
 use super::*;
 use core::f64::consts::{PI, TAU};
+use tutti_fixtures::signal::amplitude_at;
+use tutti_units::Hz;
 use tutti_units::PhaseStep;
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -11,18 +14,6 @@ fn render(wave: OscillatorWave, hz: f64, len: usize) -> Vec<f32> {
     let mut osc = Oscillator::new(wave);
     let step = OscillatorStep::new(Hz::new(hz), RATE);
     (0..len).map(|_| osc.step(step)).collect()
-}
-
-/// The amplitude of the `hz` component of `x` over a whole number of its
-/// periods.
-fn amplitude_at(x: &[f32], hz: f64) -> f64 {
-    let w = TAU * hz / RATE.get();
-    let (mut re, mut im) = (0.0, 0.0);
-    for (n, &v) in x.iter().enumerate() {
-        re += f64::from(v) * libm::cos(w * n as f64);
-        im += f64::from(v) * libm::sin(w * n as f64);
-    }
-    2.0 * re.hypot(im) / x.len() as f64
 }
 
 #[test]
@@ -120,9 +111,9 @@ fn a_triangle_corner_on_a_sample_is_rounded_by_the_blamp_figure() {
 #[test]
 fn the_band_limited_saw_leaves_the_aliased_lines_quiet() {
     let out = render(OscillatorWave::Saw, 5_000.0, 48 * 100);
-    let fundamental = amplitude_at(&out, 5_000.0);
+    let fundamental = amplitude_at(&out, Hz::new(5_000.0), RATE);
     assert!((fundamental - 2.0 / PI).abs() < 0.05, "{fundamental}");
-    let at_13k = amplitude_at(&out, 13_000.0);
+    let at_13k = amplitude_at(&out, Hz::new(13_000.0), RATE);
     assert!(at_13k < 0.15 * 2.0 / (7.0 * PI), "13 kHz holds {at_13k}");
     let harmonics = [5_000.0, 10_000.0, 15_000.0, 20_000.0];
     for khz in 1..24 {
@@ -135,7 +126,7 @@ fn the_band_limited_saw_leaves_the_aliased_lines_quiet() {
         } else {
             0.012
         };
-        let a = amplitude_at(&out, hz);
+        let a = amplitude_at(&out, Hz::new(hz), RATE);
         assert!(a < bound, "{hz} Hz holds {a}");
     }
 }

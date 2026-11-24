@@ -43,9 +43,9 @@
 //! 7. **Colour** (`colour`) — slot sharing that is correct under any parallel
 //!    schedule, with in-place aliasing where legal, and the lowering of the
 //!    program from values to slots.
-//! 8. **Verify** ([`verify`]) in debug builds.
-//! 9. **Place** units: `NodeKey` → dense [`UnitIdx`], diffed against `prev`
-//!    into a [`Delta`].
+//! 8. **Place** (`place`) units: `NodeKey` → dense [`UnitIdx`](plan::UnitIdx), diffed against `prev`
+//!    into a [`Delta`]; the plan is then built once from the program, and
+//!    **verified** ([`verify`]) in debug builds.
 
 mod coarsen;
 mod colour;
@@ -54,6 +54,7 @@ pub(crate) mod ids;
 pub(crate) mod latency;
 pub(crate) mod main_output;
 pub(crate) mod order;
+mod place;
 pub(crate) mod plan;
 pub(crate) mod preroll;
 pub(crate) mod program;
@@ -63,19 +64,19 @@ pub(crate) mod tail;
 mod timing;
 pub(crate) mod verify;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::NodeKey;
-use crate::{Edge, InputPort, OutputPort, PortSink, PortSource};
+use crate::{InputPort, PortSink};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
-use crate::compile::ids::{PlanUnitId, Table};
-use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, UnitIdx};
+use crate::compile::place::Placed;
+use crate::compile::plan::{Delta, Plan};
 use crate::model::spec::{EventInputPort, EventOutputPort, ValidGraph};
 use crate::node::param::ParamIn;
 use crate::node::shape::Shape;
-use crate::node::{MAX_PORTS, Prepare, Resolution, Wired};
+use crate::node::{MAX_PORTS, Prepare, Resolution};
 
 pub use verify::VerifyError;
 
@@ -294,143 +295,27 @@ pub fn compile(
     prepare: &Prepare,
     prev: Option<&Plan>,
 ) -> Result<(Plan, Delta), CompileError> {
-    let topology = graph.topology();
     let checked = shapes::check(graph, shapes, prepare)?;
     let order = schedule::order(&schedule::acyclic(graph, &checked)?);
     let timing = timing::solve(graph, &checked, prepare, prev);
     let program = emit::emit(graph, &checked, &order, &timing, prepare);
     let tasks = coarsen::group(&program, &checked, prepare.max_block().samples());
     let program = colour::colour(program, &checked);
+    let Placed { delta, units } = place::place(graph, &checked, &timing, prev);
+    let plan = Plan::new(
+        prepare,
+        program,
+        tasks,
+        units,
+        delta.store_len,
+        graph,
+        timing,
+    );
 
-    // ---- 9. place ---------------------------------------------------------
-    let prev_units: BTreeMap<NodeKey, PlanUnit> = prev
-        .map(|p| p.units.iter().map(|u| (u.key, *u)).collect())
-        .unwrap_or_default();
-    let mut delta = Delta::default();
-    let mut idx_of: BTreeMap<NodeKey, UnitIdx> = BTreeMap::new();
-    let mut taken: BTreeSet<UnitIdx> = BTreeSet::new();
-    for &key in &checked.keys {
-        let generation = graph.generation(key);
-        if let Some(old) = prev_units.get(&key) {
-            idx_of.insert(key, old.idx);
-            taken.insert(old.idx);
-            if old.generation != generation {
-                delta.replace.push((
-                    Placement {
-                        key,
-                        generation: old.generation,
-                        idx: old.idx,
-                    },
-                    Placement {
-                        key,
-                        generation,
-                        idx: old.idx,
-                    },
-                ));
-            }
-        }
-    }
-    let mut next_free = UnitIdx(0);
-    for &key in &checked.keys {
-        if idx_of.contains_key(&key) {
-            continue;
-        }
-        while taken.contains(&next_free) {
-            next_free = UnitIdx(next_free.0 + 1);
-        }
-        taken.insert(next_free);
-        idx_of.insert(key, next_free);
-        delta.insert.push(Placement {
-            key,
-            generation: graph.generation(key),
-            idx: next_free,
-        });
-    }
-    for (key, old) in &prev_units {
-        if !topology.nodes.contains_key(key) {
-            delta.retire.push(Placement {
-                key: *key,
-                generation: old.generation,
-                idx: old.idx,
-            });
-        }
-    }
-    let store_len = taken.last().map_or(0, |m| m.0 + 1);
-    delta.store_len = store_len;
-
-    let consumed = consumed_outputs(topology);
-    let units: Table<PlanUnitId, PlanUnit> = checked
-        .keys
-        .iter_enumerated()
-        .map(|(n, &key)| PlanUnit {
-            key,
-            generation: graph.generation(key),
-            idx: idx_of[&key],
-            shape: checked.shapes[n],
-            arrival: timing.arrival[n],
-            wired: wired_ports(topology, key, &checked.shapes[n], &consumed),
-        })
-        .collect();
-
-    let plan = Plan::new(prepare, program, tasks, units, store_len, graph, timing);
-
-    // ---- 8. verify --------------------------------------------------------
     #[cfg(debug_assertions)]
     if let Err(e) = verify::verify(&plan) {
         panic!("tutti-graph produced an unsound plan: {e}");
     }
 
     Ok((plan, delta))
-}
-
-/// The output ports something reads: an edge (direct or feedback), a main
-/// output, a tap lane or a meter lane.
-fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutputPort> {
-    let edges = topology.edges.values().flatten().filter_map(|e| match *e {
-        Edge::Direct(PortSource::Node(p)) => Some(p),
-        Edge::Feedback(f) => Some(f.from),
-        Edge::Direct(_) => None,
-    });
-    let lanes = topology
-        .taps
-        .values()
-        .filter_map(|t| match t {
-            crate::TapSpec::Ports { sources, .. } => Some(sources),
-            crate::TapSpec::Outputs { .. } => None,
-        })
-        .chain(topology.meters.values().filter_map(|m| match m {
-            crate::MeterSpec::Ports { sources, .. } => Some(sources),
-            crate::MeterSpec::Outputs => None,
-        }))
-        .chain(&topology.outputs)
-        .flatten()
-        .filter_map(|s| match *s {
-            PortSource::Node(p) => Some(p),
-            _ => None,
-        });
-    edges.chain(lanes).collect()
-}
-
-/// The audio ports of `key` with a source (an edge, direct or feedback) or a
-/// consumer among `consumed`. A validated graph stores no silence edge.
-fn wired_ports(
-    topology: &crate::Topology,
-    key: NodeKey,
-    shape: &Shape,
-    consumed: &BTreeSet<OutputPort>,
-) -> Wired {
-    let mut wired = Wired::default();
-    for port in 0..shape.audio_in().count() {
-        let at = InputPort::new(key, port);
-        let fed = topology.edges.get(&at).is_some_and(|e| !e.is_empty());
-        if fed {
-            wired.inputs = wired.inputs.with(usize::from(port));
-        }
-    }
-    for port in 0..shape.audio_out().count() {
-        if consumed.contains(&OutputPort::new(key, port)) {
-            wired.outputs = wired.outputs.with(usize::from(port));
-        }
-    }
-    wired
 }

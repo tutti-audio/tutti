@@ -34,7 +34,7 @@
 //! thread), stamped with a [`Stamp`](tutti_graph::Stamp), and a gain is a store into the strip's
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_graph::{EventInletNode, InstrumentNode};
 use tutti_graph::{IntoNode, NodeKey};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
@@ -342,7 +342,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         // `contains` above found the node, so it is in the graph.
         let fed = graph.set_feed(node, Feeder::Instrument, vec![queue.event_output(0)]);
         debug_assert!(fed.is_ok(), "the instrument is in the graph");
-        let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+        let strip = graph.add(BusStripNode::from(BusStripConfig::new(
+            ChannelTopology::STEREO,
+        )));
         graph.connect(OutputPort::new(node, usize::from(main[0])), strip.input(0))?;
         graph.connect(OutputPort::new(node, usize::from(main[1])), strip.input(1))?;
         Ok(InstrumentHandle {

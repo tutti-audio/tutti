@@ -25,8 +25,6 @@
 //! op into its value's slot, sizes the event slots from the capacities `emit`
 //! priced, and records which node channels came out in place.
 
-use std::collections::BTreeMap;
-
 use super::ids::{
     AudioFeedbackId, AudioSlotId, AudioValueId, EventFeedbackId, EventSlotId, Id, OpId, Table,
     TableSlice,
@@ -88,12 +86,12 @@ fn finished_before(u: &Life, w: OpId, reach: &Reach) -> bool {
     reach.before(u.writer, w) && u.readers.iter().all(|&r| reach.before(r, w))
 }
 
-/// Greedy colouring in writer order ([`colour`] lowers a whole program). `in_place[v] = u` offers `v` the slot of
-/// `u`, taken when legal.
+/// Greedy colouring in writer order ([`colour`] lowers a whole program).
+/// `in_place[v] = Some(u)` offers `v` the slot of `u`, taken when legal.
 pub(crate) fn assign<V: Id>(
     lives: &TableSlice<V, Life>,
     reach: &Reach,
-    in_place: &BTreeMap<V, V>,
+    in_place: &TableSlice<V, Option<V>>,
 ) -> Colouring<V> {
     let mut slot: Table<V, usize> = Table::filled(lives.len(), usize::MAX);
     // Last occupant of each slot. Values are visited in writer order, and a
@@ -109,7 +107,7 @@ pub(crate) fn assign<V: Id>(
         );
         let w = life.writer;
 
-        if let Some(&u) = in_place.get(&v) {
+        if let Some(u) = in_place[v] {
             let src = &lives[u];
             let s = slot[u];
             let legal = last[s] == u
@@ -220,12 +218,13 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
     let reach = Reach::new(&deps);
 
     // In-place candidates: (value written, value it may overwrite).
-    let mut in_place: BTreeMap<AudioValueId, AudioValueId> = BTreeMap::new();
+    let mut in_place: Table<AudioValueId, Option<AudioValueId>> =
+        Table::filled(audio_values.len(), None);
     for op in &ops {
         match *op {
             Op::Delay { src, dst, .. } => {
                 if let (Some(dst), Some(src)) = (dst.value(), src.value()) {
-                    in_place.insert(dst, src);
+                    in_place[dst] = Some(src);
                 }
             }
             // The sum accumulates into its first addend's slot when that
@@ -234,7 +233,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
                 if let (Some(dst), Some(&ARef::Val(u))) =
                     (dst.value(), audio_list[srcs.range()].first())
                 {
-                    in_place.insert(dst, u);
+                    in_place[dst] = Some(u);
                 }
             }
             Op::Node {
@@ -254,7 +253,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
                     if ain.iter().filter(|&&x| x == r).count() != 1 {
                         continue;
                     }
-                    in_place.insert(out, u);
+                    in_place[out] = Some(u);
                 }
             }
             _ => {}
@@ -269,7 +268,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
     let event_colour = assign(
         &lives_of(&event_values, &ops, &value_readers),
         &reach,
-        &BTreeMap::new(),
+        &Table::filled(event_values.len(), None),
     );
 
     // Slot 0 of each arena is the null slot, then one slot per feedback.
@@ -437,12 +436,12 @@ mod tests {
         }
     }
 
-    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<usize, usize>) -> usize {
+    /// The slots a `reads` graph needs, `in_place[v] = Some(u)` offering value
+    /// `v` the slot of value `u` (both by position).
+    fn slots(reads: &[Vec<u32>], in_place: &[Option<usize>]) -> usize {
         let dag = Dag::new(reads);
-        let offers = in_place
-            .iter()
-            .map(|(&v, &u)| (dag.values[v], dag.values[u]))
-            .collect();
+        let offers: Table<AudioValueId, Option<AudioValueId>> =
+            in_place.iter().map(|u| u.map(|u| dag.values[u])).collect();
         assign(&dag.lives(), &dag.reach, &offers).count
     }
 
@@ -452,7 +451,7 @@ mod tests {
     #[test]
     fn a_chain_needs_two_slots() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 2);
+        assert_eq!(slots(&reads, &vec![None; reads.len()]), 2);
     }
 
     /// A diamond `0 → {1, 2} → 3`: the two arms are unordered, so three
@@ -460,7 +459,7 @@ mod tests {
     #[test]
     fn a_diamond_needs_three_slots() {
         let reads = vec![vec![], vec![0], vec![0], vec![1, 2]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 3);
+        assert_eq!(slots(&reads, &vec![None; reads.len()]), 3);
     }
 
     /// A source fanning out to four unordered ops that fan in: the source and
@@ -469,14 +468,14 @@ mod tests {
     #[test]
     fn a_fan_out_fan_in_needs_width_plus_one_slots() {
         let reads = vec![vec![], vec![0], vec![0], vec![0], vec![0], vec![1, 2, 3, 4]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 5);
+        assert_eq!(slots(&reads, &vec![None; reads.len()]), 5);
     }
 
     /// A chain whose every op overwrites its input in place lives in one slot.
     #[test]
     fn an_in_place_chain_needs_one_slot() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        let in_place: BTreeMap<usize, usize> = (1..5).map(|v| (v, v - 1)).collect();
+        let in_place: Vec<Option<usize>> = (0..5).map(|v: usize| v.checked_sub(1)).collect();
         assert_eq!(slots(&reads, &in_place), 1);
     }
 
@@ -536,12 +535,11 @@ mod tests {
             let dag = Dag::new(&reads);
             let lives = dag.lives();
             let before = closure(&reads);
-            let mut in_place = BTreeMap::new();
-            for (v, rs) in reads.iter().enumerate() {
-                if offer[v] && let Some(&u) = rs.first() {
-                    in_place.insert(dag.values[v], dag.values[u as usize]);
-                }
-            }
+            let in_place: Table<AudioValueId, Option<AudioValueId>> = reads
+                .iter()
+                .enumerate()
+                .map(|(v, rs)| rs.first().filter(|_| offer[v]).map(|&u| dag.values[u as usize]))
+                .collect();
             let c = assign(&lives, &dag.reach, &in_place);
             let again = assign(&lives, &dag.reach, &in_place);
             prop_assert_eq!(&c.slot, &again.slot);
@@ -556,7 +554,7 @@ mod tests {
                     let src = &lives[u];
                     let precedes = |op: OpId| before[op.index()][w.index()];
                     let clear = precedes(src.writer) && src.readers.iter().all(|&r| precedes(r));
-                    let hand_over = in_place.get(&v) == Some(&u)
+                    let hand_over = in_place[v] == Some(u)
                         && src.readers.contains(&w)
                         && precedes(src.writer)
                         && src.readers.iter().all(|&r| r == w || precedes(r));

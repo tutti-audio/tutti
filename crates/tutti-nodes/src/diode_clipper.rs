@@ -221,8 +221,8 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-
+    use crate::test_support::{drive_block, prepared, render_chunked, sine};
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -282,7 +282,7 @@ mod tests {
         let f = 2_000.0;
         let x: Vec<f32> = sine(f, RATE, 9_600).iter().map(|v| v * 1e-4).collect();
         let y = render_chunked(&mut n, &[x], 256).remove(0);
-        let gain = amplitude_at(&y[4_800..], f, RATE) / 1e-4;
+        let gain = amplitude_at(&y[4_800..], Hz::new(f), SampleRate::of(RATE)) / 1e-4;
         let analog = 1.0 / (1.0 + (f / 500.0f64).powi(2)).sqrt();
         assert!((gain - analog).abs() <= 1e-3, "{gain} vs {analog}");
         assert!(!n.param_set().set(UnitParam::Drive, 2.0));
@@ -299,8 +299,8 @@ mod tests {
         let _ = drive_block(&mut n, &[&x[..64]]);
         let after = render_chunked(&mut n, &[x], 256).remove(0);
         let (a, b) = (
-            amplitude_at(&before[2_400..], 1_000.0, RATE),
-            amplitude_at(&after[2_400..], 1_000.0, RATE),
+            amplitude_at(&before[2_400..], Hz::new(1_000.0), SampleRate::of(RATE)),
+            amplitude_at(&after[2_400..], Hz::new(1_000.0), SampleRate::of(RATE)),
         );
         assert!(b > a && b < 2.0 * a, "{a} -> {b}");
     }

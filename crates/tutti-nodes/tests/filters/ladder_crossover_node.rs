@@ -5,8 +5,8 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
@@ -55,7 +55,7 @@ impl Cutoff for CrossoverNode<f32> {
     const NAME: &'static str = "crossover";
     fn build() -> Self {
         CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
         ))
         .unwrap()
@@ -283,7 +283,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let bands = splits.len() + 1;
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::default_for(ChannelLayout::from(channels)).unwrap(),
+            ChannelTopology::default_for(ChannelLayout::from(channels)).unwrap(),
             CrossoverControls::try_from(&hz[..]).unwrap(),
         ))
         .unwrap();

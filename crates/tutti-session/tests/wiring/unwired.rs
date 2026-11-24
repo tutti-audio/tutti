@@ -8,7 +8,7 @@
 //! a known gain.
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Fade, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
     Status,
@@ -291,7 +291,7 @@ struct Bused {
 
 impl Node for Bused {
     fn shape(&self) -> Shape {
-        let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
+        let stereo = ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
         let side = |role| {
             let main = Buses::NONE.with(Bus::main(stereo)).unwrap();
             if self.aux {

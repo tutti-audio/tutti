@@ -26,7 +26,7 @@ use core::ops::Range;
 
 use crate::BlockMismatch;
 use crate::block::expect_widths;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
@@ -196,7 +196,7 @@ impl BankShape {
 
     /// A shape of `bands` bands, each as wide as the bus `input`.
     #[must_use]
-    pub fn new(input: BusTopology, bands: MultibandBands) -> Self {
+    pub fn new(input: ChannelTopology, bands: MultibandBands) -> Self {
         Self {
             width: input.width(),
             bands,

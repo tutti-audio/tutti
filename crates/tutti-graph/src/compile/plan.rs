@@ -454,7 +454,7 @@ pub enum Op<A = u32, E = A> {
     },
     /// Sum several audio slots into one: the fan-in of a port or an output
     /// channel. The value is the left fold
-    /// `((+0.0 + a_0) + a_1) + ..` in `f32`, one rounding per add, over the
+    /// `((+0.0 + a_0) + a_1) + ..` in the graph's float `F`, one rounding per add, over the
     /// addends in source order; an addend flagged silent adds nothing and is
     /// skipped. `dst` may be the first addend's own slot (the in-place form,
     /// when the colouring allows it), and no other addend's.
@@ -467,7 +467,7 @@ pub enum Op<A = u32, E = A> {
         dst: A,
     },
     /// A [`Sum`](Self::Sum) with at least one **weighted lane**: the value is
-    /// the left fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `f32`, a
+    /// the left fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in the graph's float `F`, a
     /// multiply and an add per lane, never fused. A lane whose weight is
     /// exactly `1.0` runs the plain add. Silent addends are skipped whatever
     /// their weight, and a weight of `0.0` is not skipped by value. Unlike

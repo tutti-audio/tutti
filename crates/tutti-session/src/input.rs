@@ -216,10 +216,10 @@ struct Capture {
 
 impl<F: Float> InputOpener<F> for Capture {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>> {
-        let (mic, ring) = MicIn::<F>::open_with_monitor(&self.executor, config, rate)?;
+        let (stream, ring) = MicIn::<F>::open_with_monitor(&self.executor, config, rate)?;
         Ok(OpenedInput {
             ring,
-            keep: Box::new(mic),
+            keep: Box::new(stream),
             // The monitor ring starts empty.
             lead: Samples::ZERO,
         })
@@ -350,7 +350,10 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, crate::DeviceClock<F>>
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire
-    /// [`Input::node`] to monitor it.
+    /// [`Input::node`] to monitor it. To record it, open a raw tap
+    /// ([`TapAlign::Raw`](tutti_graph::TapAlign::Raw)) on that node's outputs
+    /// with [`Taps::open_ports`](crate::Taps::open_ports): it reads the frames
+    /// the capture pushed, in order, and silence for the frames it had not.
     ///
     /// The session keeps the input's config and **reopens it after every
     /// restart** ([`Session::restart`](crate::Session::restart)), at

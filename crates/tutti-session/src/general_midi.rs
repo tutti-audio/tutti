@@ -15,7 +15,7 @@
 //! that wants a different reverb, two units into one chorus or no chorus wires
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
-use tutti_buffers::{BusTopology, Float};
+use tutti_buffers::{ChannelTopology, Float};
 use tutti_dsp::{Lerp, SimdLanes};
 use tutti_nodes::{
     BusStripConfig, BusStripNode, FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayNode,
@@ -144,12 +144,14 @@ where
         let unit = instrument.node().erase();
         let graph = self.graph();
         let chorus = graph.add(ModDelayNode::<C::Float>::from(
-            ModDelayConfig::general_midi_chorus(BusTopology::STEREO),
+            ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO),
         ));
         let reverb = graph.add(FreeverbNode::<C::Float>::from(
             FreeverbConfig::general_midi(),
         ));
-        let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+        let strip = graph.add(BusStripNode::from(BusStripConfig::new(
+            ChannelTopology::STEREO,
+        )));
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutputPort::new(unit, 2), chorus.input(0))?;
         graph.connect(OutputPort::new(unit, 3), chorus.input(1))?;
