@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
+use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind, Waveshape};
 use tutti_rt::ParamCell;
 use tutti_session::{MainOutput, OutputPort, ParamRef, Replacement, RouteSpec, Session};
 use tutti_units::{Bipolar, Drive, UnitParam};
@@ -85,7 +85,8 @@ fn add_addresses_a_hosts_param_node() {
 fn add_addresses_an_engine_node() {
     let mut s = session();
     let node = DistortionNode::<f32>::from(
-        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(BASE)),
+        DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
+            .drive(Drive::new(BASE)),
     );
     let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)

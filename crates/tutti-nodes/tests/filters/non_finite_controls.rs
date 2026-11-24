@@ -334,7 +334,7 @@ fn the_convolver_holds_off_non_finite_controls() {
 /// built an infinitely hard shaper and NaN output (0 * inf) before.
 #[test]
 fn the_distortion_holds_off_non_finite_controls() {
-    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind, Waveshape};
     for kind in [
         ShapeKind::Tanh,
         ShapeKind::Atan,
@@ -348,7 +348,8 @@ fn the_distortion_holds_off_non_finite_controls() {
             "distortion",
             || {
                 DistortionNode::<f32>::from(
-                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                    DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(kind))
+                        .drive(Drive::new(2.0)),
                 )
             },
             |n| vec![("drive", n.param_set().cell(UnitParam::Drive).unwrap(), 5.0)],
@@ -362,10 +363,10 @@ fn the_distortion_holds_off_non_finite_controls() {
 /// shaper from 0 whatever the constructor built, so this pins the behaviour.
 #[test]
 fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
-    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind, Waveshape};
     for bad in BAD {
         let mut node = DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+            DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                 .drive(Drive::new(f64::from(bad))),
         );
         node.prepare(&Prepare::new(

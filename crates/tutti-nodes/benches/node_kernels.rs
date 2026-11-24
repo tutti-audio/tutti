@@ -31,7 +31,7 @@ use tutti_nodes::{
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
     GateControls, GateNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
     LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
-    TubeStageNode,
+    TubeStageNode, Waveshape,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -151,7 +151,7 @@ fn distortion(c: &mut Criterion) {
         "tanh_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -163,7 +163,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -180,7 +180,8 @@ fn distortion(c: &mut Criterion) {
             case,
             || {
                 DistortionNode::<f32>::from(
-                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                    DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(kind))
+                        .drive(Drive::new(2.0)),
                 )
             },
             None,
@@ -192,7 +193,8 @@ fn distortion(c: &mut Criterion) {
         "hardclip_6",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(6u16, ShapeKind::HardClip).drive(Drive::new(2.0)),
+                DistortionConfig::new(6u16, Waveshape::new(ShapeKind::HardClip))
+                    .drive(Drive::new(2.0)),
             )
         },
         None,
@@ -203,7 +205,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2_fed",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
