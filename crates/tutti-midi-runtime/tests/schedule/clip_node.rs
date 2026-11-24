@@ -1286,3 +1286,56 @@ fn a_header_is_not_an_event_of_the_clip_and_makes_clips_differ() {
     );
     assert_ne!(headed, plain);
 }
+
+/// A System Exclusive packet of status `status` on the first group.
+fn sysex7(status: tutti_ump::SysexStatus) -> Ump {
+    Ump::from(Message::Sysex7(
+        MidiGroup::FIRST,
+        tutti_ump::Sysex7Packet::new(status, &[1, 2]).unwrap(),
+    ))
+}
+
+/// **A header's System Exclusive goes out whole or not at all, and the
+/// header stops at the first message that does not fit.** 254 controllers
+/// leave room for 2 of the 256 events of a 64-frame block; a Start, Continue,
+/// End run of 3 packets does not fit: none of its packets reaches the port, so
+/// no Start is left without its End, and the controller after it (which would
+/// fit) is not sent either, so the receiver has a prefix of the header. The 3
+/// packets and the 1 controller are counted lost.
+#[test]
+fn a_header_sysex_that_does_not_fit_is_dropped_whole_and_ends_the_header() {
+    use tutti_ump::SysexStatus::{Continue, End, Start};
+    let mut header: Vec<Ump> = (0..254u32).map(|n| volume(n << 20)).collect();
+    header.extend([
+        sysex7(Start),
+        sysex7(Continue),
+        sysex7(End),
+        volume(0x7000_0000),
+    ]);
+    let (mut ed, mut exec, _c, seen) = rig_headed(headed([], &header), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    let got: Vec<Ump> = heard(&seen).iter().map(|&(_, u)| u).collect();
+    assert_eq!(got, header[..254]);
+    let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
+    assert_eq!(refused, 4);
+}
+
+/// **A header's System Exclusive that fits is sent whole**, and a run with no
+/// End is one message to its last packet: a Start and Continue with no End,
+/// at a room of 1, are dropped together.
+#[test]
+fn a_header_sysex_run_without_an_end_is_one_message() {
+    use tutti_ump::SysexStatus::{Continue, End, Start};
+    let whole = [sysex7(Start), sysex7(End)];
+    let (_ed, mut exec, _c, seen) = rig_headed(headed([], &whole), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    assert_eq!(heard(&seen).len(), 2);
+
+    let mut header: Vec<Ump> = (0..255u32).map(|n| volume(n << 20)).collect();
+    header.extend([sysex7(Start), sysex7(Continue)]);
+    let (mut ed, mut exec, _c, seen) = rig_headed(headed([], &header), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    assert_eq!(heard(&seen).len(), 255);
+    let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
+    assert_eq!(refused, 2);
+}
