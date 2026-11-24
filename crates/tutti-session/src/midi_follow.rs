@@ -101,6 +101,27 @@ use crate::MidiEvent;
 use crate::graph::Graph;
 use crate::value::{Bases, Steps};
 
+/// Which of the session's followers an event is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FollowKind {
+    /// The Flex tempo follower ([`Midi::follow_tempo`](crate::Midi::follow_tempo)).
+    Tempo,
+    /// The MIDI clock follower ([`Midi::follow_clock`](crate::Midi::follow_clock)).
+    Clock(ClockKind),
+    /// The Machine Control follower
+    /// ([`Midi::follow_machine_control`](crate::Midi::follow_machine_control)).
+    MachineControl,
+}
+
+/// Why a follower ended without an `unfollow_*` call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnfollowCause {
+    /// The input node it read was removed from the graph.
+    InputGone,
+}
+
 /// How many events the follower's tap holds between two polls. Set Tempo and
 /// Set Time Signature are rare; a source that floods them loses the oldest
 /// beyond this, counted and logged.

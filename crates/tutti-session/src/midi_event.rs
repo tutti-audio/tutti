@@ -150,6 +150,18 @@ pub enum MidiEvent {
     /// The session stopped following MIDI Machine Control
     /// ([`Midi::unfollow_machine_control`](crate::Midi::unfollow_machine_control)).
     MachineControlUnfollowed,
+    /// A follower the session had ended without being asked: the input node it
+    /// read was removed from the graph, so its tap can never speak again. The
+    /// follower is dropped as the matching `unfollow_*` would drop it (the maps
+    /// it stepped are published as the base again) and the next
+    /// `follow_tempo`, `follow_clock` or `follow_machine_control` is accepted.
+    /// An explicit `unfollow_*` reports its own event instead.
+    Unfollowed {
+        /// The follower that ended.
+        follower: crate::FollowKind,
+        /// Why it ended.
+        cause: crate::UnfollowCause,
+    },
     /// A network endpoint's peer was invited, joined, left or failed to
     /// authenticate ([`Midi::open_network_client`](crate::Midi::open_network_client) and
     /// [`open_network_host`](crate::Midi::open_network_host)). There is none
