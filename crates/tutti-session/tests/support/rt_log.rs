@@ -12,12 +12,12 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Io, Node, Prepare, RtLevel, RtValue, Shape, Status};
 use tutti_units::Tail;
 
-pub static SITE: &str = "non-finite sample";
+pub(super) static SITE: &str = "non-finite sample";
 
 /// A silent source that logs a warning at frame 7 of every block, three
 /// times (one record, two repeats), and a debug line.
 #[derive(Clone)]
-pub struct Noisy;
+pub(super) struct Noisy;
 
 impl Node for Noisy {
     fn shape(&self) -> Shape {
@@ -42,7 +42,7 @@ impl Node for Noisy {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct Logged {
+pub(super) struct Logged {
     pub level: Option<Level>,
     pub target: String,
     pub message: String,
@@ -88,7 +88,7 @@ impl<S: Subscriber> Layer<S> for Collect {
 }
 
 #[allow(dead_code, reason = "a binary uses one of the two collectors")]
-pub fn rt_events(f: impl FnOnce()) -> Vec<Logged> {
+pub(super) fn rt_events(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::with_default(subscriber, f);
@@ -102,7 +102,7 @@ pub fn rt_events(f: impl FnOnce()) -> Vec<Logged> {
 /// a task of the session's executor): the collector is the process's default subscriber, so
 /// one test of a process may call it, and a test's own filter picks its records out.
 #[allow(dead_code, reason = "a binary uses one of the two collectors")]
-pub fn rt_events_on_any_thread(f: impl FnOnce()) -> Vec<Logged> {
+pub(super) fn rt_events_on_any_thread(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::set_global_default(subscriber)

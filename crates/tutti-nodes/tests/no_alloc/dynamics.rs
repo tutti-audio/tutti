@@ -11,7 +11,7 @@ use tutti_nodes::{
 use tutti_units::{CompressionRatio, Db, Seconds};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[compressors, limiters, brickwall_limiters, gates];
+pub(crate) const ROWS: &[fn()] = &[compressors, limiters, brickwall_limiters, gates];
 
 /// 2 000 blocks after 16 warm-up blocks, the sidechain wired.
 fn keyed(amplitude: f32) -> Gate {

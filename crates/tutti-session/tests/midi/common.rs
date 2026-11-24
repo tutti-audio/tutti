@@ -13,13 +13,13 @@ use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, BeatDuration};
 
 /// The mezzo-forte default: MIDI 2.0's center velocity.
-pub const MF: u16 = 0x8000;
+pub(crate) const MF: u16 = 0x8000;
 
 /// `(absolute frame, event)` of every MIDI event a [`Tap`] received.
-pub type Seen = tutti_fixtures::Record<(u64, Ump)>;
+pub(crate) type Seen = tutti_fixtures::Record<(u64, Ump)>;
 
 /// A stand-in synth: one MIDI event input, logged with each event's absolute frame.
-pub struct Tap(pub Seen);
+pub(crate) struct Tap(pub Seen);
 
 impl Tap {
     const SHAPE: Shape = Shape::EMPTY.events(1, 0);
@@ -53,13 +53,13 @@ impl IntoNode for Tap {
 }
 
 /// An offline session at 48 kHz, stereo: the builder's MIDI nodes in.
-pub fn offline() -> Session {
+pub(crate) fn offline() -> Session {
     Session::builder().build().expect("builds")
 }
 
 /// A [`MidiOut`] that keeps every batch it is handed, in order.
 #[derive(Clone, Default)]
-pub struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
+pub(crate) struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 
 impl MidiOut for Wire {
     fn queue_timed(&self, batch: &[Outgoing]) -> Taken {
@@ -72,25 +72,25 @@ impl MidiOut for Wire {
 
 impl Wire {
     /// The batches handed since the last call.
-    pub fn batches(&self) -> Vec<Vec<UmpAt>> {
+    pub(crate) fn batches(&self) -> Vec<Vec<UmpAt>> {
         std::mem::take(&mut *self.0.lock())
     }
 
     /// Every event handed so far, in order: it keeps them.
-    pub fn events(&self) -> Vec<UmpAt> {
+    pub(crate) fn events(&self) -> Vec<UmpAt> {
         self.0.lock().iter().flatten().copied().collect()
     }
 }
 
 /// A tap in `s`'s graph, and what it hears.
-pub fn tap(s: &mut Session) -> (NodeKey, Seen) {
+pub(crate) fn tap(s: &mut Session) -> (NodeKey, Seen) {
     let seen = tutti_fixtures::Record::new();
     let node = s.graph().add(Tap(seen.clone()));
     (node.erase(), seen)
 }
 
 /// Renders `n` 512-frame blocks.
-pub fn blocks(s: &mut Session, n: usize) {
+pub(crate) fn blocks(s: &mut Session, n: usize) {
     let mut buf = vec![0.0f32; 512 * 2];
     for _ in 0..n {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -98,7 +98,12 @@ pub fn blocks(s: &mut Session, n: usize) {
 }
 
 /// A Note On at `velocity` on `start` and its Note Off `duration` later, as timed events.
-pub fn note(number: u8, velocity: u16, start: Beat, duration: BeatDuration) -> [TimedMidiEvent; 2] {
+pub(crate) fn note(
+    number: u8,
+    velocity: u16,
+    start: Beat,
+    duration: BeatDuration,
+) -> [TimedMidiEvent; 2] {
     [
         TimedMidiEvent::new(
             start,
@@ -120,14 +125,14 @@ pub fn note(number: u8, velocity: u16, start: Beat, duration: BeatDuration) -> [
 }
 
 /// Starts the transport.
-pub fn play(s: &Session) {
+pub(crate) fn play(s: &Session) {
     s.play().expect("room");
 }
 
 /// A session and the handle of its one input port, which keeps the port open
 /// for as long as the session is used.
 #[cfg(feature = "midi-hardware")]
-pub struct Keyed {
+pub(crate) struct Keyed {
     session: Session,
     keys: tutti_session::MidiInput,
 }
@@ -135,12 +140,12 @@ pub struct Keyed {
 #[cfg(feature = "midi-hardware")]
 impl Keyed {
     /// A session over `session` whose input port is `keys`.
-    pub fn new(session: Session, keys: tutti_session::MidiInput) -> Self {
+    pub(crate) fn new(session: Session, keys: tutti_session::MidiInput) -> Self {
         Self { session, keys }
     }
 
     /// The port's input node: what a route rule or a follower reads.
-    pub fn input(&self) -> NodeKey {
+    pub(crate) fn input(&self) -> NodeKey {
         self.keys.node()
     }
 }
@@ -163,7 +168,7 @@ impl std::ops::DerefMut for Keyed {
 /// The ports of `layout`'s input `input` that carry `channels` of `group`, and
 /// the Group's channelless port.
 #[cfg(feature = "midi-hardware")]
-pub fn input_ports(
+pub(crate) fn input_ports(
     layout: tutti_midi_runtime::MidiInputPorts,
     input: NodeKey,
     group: u8,
@@ -180,7 +185,7 @@ pub fn input_ports(
 
 /// Every port of `layout`'s input `input`.
 #[cfg(feature = "midi-hardware")]
-pub fn every_input_port(
+pub(crate) fn every_input_port(
     layout: tutti_midi_runtime::MidiInputPorts,
     input: NodeKey,
 ) -> std::collections::BTreeSet<tutti_graph::EventOutputPort> {
@@ -191,7 +196,7 @@ pub fn every_input_port(
 /// (hearing Groups up to `groups`, the first alone with `None`): the port's
 /// input node, which route rules wire from.
 #[cfg(feature = "midi-hardware")]
-pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
+pub(crate) fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
     let (backend, _fake) =
         FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
@@ -211,7 +216,7 @@ pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
 /// Opening a port the way an app does, over a fake OS whose start is ready at
 /// once: begin the open, poll its wait, apply what it resolved to.
 #[cfg(feature = "midi-hardware")]
-pub trait OpenPorts {
+pub(crate) trait OpenPorts {
     /// The input port of `saved`.
     fn open_input(
         &mut self,
@@ -234,7 +239,7 @@ pub trait OpenPorts {
 
 /// What `future` resolved to when polled once, or `None` while it is pending.
 #[cfg(feature = "midi-hardware")]
-pub fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
+pub(crate) fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
     use std::task::{Context, Poll, Waker};
     match std::pin::pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
         Poll::Ready(out) => Some(out),
@@ -245,7 +250,9 @@ pub fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
 /// What `wait` resolved to on its first poll: a fake backend has nothing to
 /// start.
 #[cfg(feature = "midi-hardware")]
-pub fn ready<T, E: std::fmt::Debug>(wait: impl std::future::Future<Output = Result<T, E>>) -> T {
+pub(crate) fn ready<T, E: std::fmt::Debug>(
+    wait: impl std::future::Future<Output = Result<T, E>>,
+) -> T {
     polled(wait)
         .expect("a fake backend's start is ready on the first poll")
         .expect("a fake backend starts at once")

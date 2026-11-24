@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 /// The reference CLAP cdylib, published under a `.clap` name: the server
 /// picks the loader by extension, and reads a bare `.so` as VST2.
-pub fn clap_probe() -> PathBuf {
+pub(crate) fn clap_probe() -> PathBuf {
     let real = tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin");
     tutti_fixtures::publish_with_extension(&real, "clap")
 }

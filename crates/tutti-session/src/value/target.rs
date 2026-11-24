@@ -262,7 +262,7 @@ impl<T: Target> fmt::Debug for Info<T> {
 pub struct AnyAssign(pub(crate) Arc<dyn Erased>);
 
 /// An [`Assign`] behind a pointer.
-pub trait Erased: Send + Sync {
+pub(crate) trait Erased: Send + Sync {
     fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Failure>;
 
     /// The target's identity.
@@ -312,7 +312,7 @@ impl<T: sealed::Store> Assign<T> {
 }
 
 /// A target's value in a batch: the slot a landing reads.
-pub trait Staged {
+pub(super) trait Staged {
     /// The target's identity.
     fn id(&self) -> TargetId;
     /// The value the call has built so far.

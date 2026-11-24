@@ -119,7 +119,7 @@ pub(crate) struct TransportFsm {
 }
 
 impl TransportFsm {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             motion: MotionState::Stopped,
             prev_motion: MotionState::Stopped,
@@ -128,21 +128,21 @@ impl TransportFsm {
     }
 
     /// The motion the machine is in.
-    pub fn motion(&self) -> MotionState {
+    pub(crate) fn motion(&self) -> MotionState {
         self.motion
     }
 
     /// Takes the outcome of a completed fade without settling the motion.
     /// One-shot: a second call after the same fade yields `None`.
     #[cfg(test)]
-    pub fn take_declick_outcome(&mut self) -> Option<DeclickOutcome> {
+    pub(crate) fn take_declick_outcome(&mut self) -> Option<DeclickOutcome> {
         self.pending.take()
     }
 
     /// The fade reached zero: settle into the motion it was heading for,
     /// and return its outcome. One-shot: a second call after the same fade
     /// yields `None`.
-    pub fn complete_declick(&mut self) -> Option<DeclickOutcome> {
+    pub(crate) fn complete_declick(&mut self) -> Option<DeclickOutcome> {
         let outcome = self.pending.take()?;
         self.motion = match outcome {
             DeclickOutcome::Stop => MotionState::Stopped,
@@ -152,7 +152,7 @@ impl TransportFsm {
     }
 
     /// The outcome the fade in flight completes into, without taking it.
-    pub fn declick_outcome(&self) -> Option<DeclickOutcome> {
+    pub(crate) fn declick_outcome(&self) -> Option<DeclickOutcome> {
         self.pending
     }
 
@@ -242,7 +242,7 @@ impl TransportFsm {
     /// what keeps the published mirror and the machine from diverging, and it
     /// is why all the arms route through `settle` / `locate_now` /
     /// `start_declick` / `retarget_declick` rather than assigning inline.
-    pub fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
+    pub(crate) fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
         use MotionState as S;
 
         match command {

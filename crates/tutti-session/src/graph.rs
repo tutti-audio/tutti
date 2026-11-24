@@ -559,12 +559,12 @@ pub(crate) struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
 
 impl RenderWorkerStart {
     /// Wrap `hook`.
-    pub fn new(hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
         Self(Arc::new(hook))
     }
 
     /// Run the hook for helper `index`.
-    pub fn call(&self, index: usize) {
+    pub(crate) fn call(&self, index: usize) {
         (self.0)(index);
     }
 }
