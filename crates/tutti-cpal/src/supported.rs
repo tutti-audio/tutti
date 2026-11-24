@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use tutti_buffers::{ChannelLayout, SampleFormat};
 use tutti_units::SampleRate;
 
-use crate::driver_seam::spec_format;
+use crate::driver_seam::DeviceFormat;
 
 /// One configuration a device offers for a direction: a width, a range of
 /// rates and a sample format.
@@ -33,7 +33,7 @@ impl SupportedConfig {
         let mut rows: Vec<Self> = Vec::new();
         for range in ranges {
             let (Ok(format), Some(min), Some(max)) = (
-                spec_format(range.sample_format()),
+                DeviceFormat::try_from(range.sample_format()).map(DeviceFormat::spec),
                 SampleRate::from_hz(range.min_sample_rate()),
                 SampleRate::from_hz(range.max_sample_rate()),
             ) else {
