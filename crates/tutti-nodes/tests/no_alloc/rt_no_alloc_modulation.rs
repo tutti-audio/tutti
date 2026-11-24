@@ -6,7 +6,7 @@
 use crate::harness::bus;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_fixtures::midi;
+use tutti_fixtures::{cycle_blocks, midi};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, ParamSet, TransportPosition};
 use tutti_music::{NoteDuration, NoteValue};
@@ -126,15 +126,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
 
 /// The block schedule the lane rigs render: ragged, up to 128 frames.
 fn lane_blocks(total: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, 128, 7, 64, 127, 33, 2, 100][i % 8].min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
+    cycle_blocks(&[1, 128, 7, 64, 127, 33, 2, 100], total)
 }
 
 /// One block of the lane graph at the host's clock `clock` (113 BPM,
