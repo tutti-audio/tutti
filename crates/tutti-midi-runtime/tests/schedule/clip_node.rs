@@ -1048,3 +1048,241 @@ fn setting_the_same_events_cuts_nothing() {
     exec.process(64, &rolling(128), &[], &mut []);
     assert_eq!(heard(&seen), vec![(10, on(60)), (128, off(60))]);
 }
+
+/// A program change on the first group and channel.
+fn program(n: u8) -> Ump {
+    midi::program_change(Address::new(MidiGroup::FIRST, MidiChannel::FIRST), n, None)
+}
+
+/// Controller `n` set to `value` on the first group and channel.
+fn volume(value: u32) -> Ump {
+    midi::cc(
+        Address::new(MidiGroup::FIRST, MidiChannel::FIRST),
+        CCNumber::VOLUME,
+        value,
+    )
+}
+
+/// `events` as a clip carrying `header`, which sits at beats before the
+/// clip's beat 0 on the header's own clock (the node ignores them).
+fn headed(events: impl IntoIterator<Item = TimedMidiEvent>, header: &[Ump]) -> ClipEvents {
+    let events: ClipEvents = events.into_iter().collect();
+    events.header(
+        header
+            .iter()
+            .enumerate()
+            .map(|(i, &u)| TimedMidiEvent::new(Beat::new(i as f64 * 0.25), u).unwrap()),
+    )
+}
+
+/// A clip node over an empty clip, with `clip` set before the first block.
+fn rig_headed(clip: ClipEvents, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
+    let (ed, exec, controls, seen) = rig(MidiClipNode::new([]), max);
+    controls.set(clip);
+    (ed, exec, controls, seen)
+}
+
+fn stopped(frame: u64) -> TransportPosition {
+    TransportPosition::new(false, Bpm::of(120.0), beat_of(frame), None)
+}
+
+fn times(seen: &Seen, ump: Ump) -> usize {
+    heard(seen).iter().filter(|&&(_, u)| u == ump).count()
+}
+
+/// **A clip's header goes out once on the block the clip starts, in file
+/// order, before beat 0's events.** Three header messages and a note on beat
+/// 0: the first block has the three on its first frame in the order given,
+/// then the note; the following blocks repeat none.
+/// Spec: m2-116/6.3#1
+#[test]
+fn a_header_is_sent_once_at_the_start_in_file_order_before_beat_0() {
+    let header = [program(3), volume(0x4000_0000), program(9)];
+    let clip = headed([at(0, on(60)), at(20, off(60))], &header);
+    let (_ed, mut exec, _c, seen) = rig_headed(clip, 64);
+    roll(&mut exec, 192, 64);
+    assert_eq!(
+        heard(&seen),
+        vec![
+            (0, header[0]),
+            (0, header[1]),
+            (0, header[2]),
+            (0, on(60)),
+            (20, off(60)),
+        ]
+    );
+}
+
+/// **A loop wrap does not send the header again**, inside a block or on a
+/// block's edge: the receiver was configured when the run started.
+#[test]
+fn a_loop_wrap_does_not_send_the_header_again() {
+    let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
+    let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
+    for (len, wraps) in [(128usize, "inside a block"), (64, "on a block's edge")] {
+        let clip = headed([at(10, program(5))], &[program(1)]);
+        let (_ed, mut exec, _c, seen) = rig_headed(clip, 128);
+        exec.process(len, &looping(0), &[], &mut []);
+        exec.process(len, &looping(24_000 - 64), &[], &mut []);
+        exec.process(len, &looping(0), &[], &mut []);
+        assert_eq!(times(&seen, program(1)), 1, "{wraps}");
+        assert!(times(&seen, program(5)) > 1, "the loop did wrap {wraps}");
+    }
+}
+
+/// **A seek while playing does not send the header again**, only the chase
+/// to the new beat.
+#[test]
+fn a_seek_while_playing_does_not_send_the_header_again() {
+    let clip = headed([at(10, program(5)), at(48_010, on(60))], &[program(1)]);
+    let (_ed, mut exec, _c, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    exec.process(64, &rolling(48_000), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![
+            (0, program(1)),
+            (10, program(5)),
+            (64, program(5)),
+            (74, on(60))
+        ]
+    );
+}
+
+/// **A start mid-clip sends the header, then the state the clip held there,
+/// then the events**: the header's Program Change 1, the clip's Program Change
+/// 5 before the start beat, the note after it. The receiver's last program is
+/// the clip's.
+#[test]
+fn a_start_mid_clip_sends_the_header_then_the_chase_then_the_events() {
+    let clip = headed([at(10, program(5)), at(48_010, on(60))], &[program(1)]);
+    let (_ed, mut exec, _c, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(48_000), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![(0, program(1)), (0, program(5)), (10, on(60))]
+    );
+}
+
+/// **A start after a stop sends the header again**: once per start, not per
+/// block of the run.
+#[test]
+fn each_start_from_stopped_sends_the_header_once() {
+    let clip = headed([at(1_000, on(60))], &[program(1)]);
+    let (_ed, mut exec, _c, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(times(&seen, program(1)), 1);
+    exec.process(64, &stopped(128), &[], &mut []);
+    exec.process(64, &stopped(128), &[], &mut []);
+    exec.process(64, &rolling(128), &[], &mut []);
+    exec.process(64, &rolling(192), &[], &mut []);
+    assert_eq!(times(&seen, program(1)), 2);
+}
+
+/// **Replacing the clip while it plays sends the new clip's header once**
+/// (then the state the new clip holds at the playhead), and not the old one's
+/// again.
+#[test]
+fn replacing_the_clip_while_playing_sends_the_new_header_once() {
+    let first = headed([at(10_000, on(60))], &[program(1)]);
+    let (_ed, mut exec, controls, seen) = rig_headed(first, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    // The new clip sets program 5 before the playhead, and has another header.
+    controls.set(headed(
+        [at(5, program(5)), at(10_000, on(62))],
+        &[program(2)],
+    ));
+    exec.process(64, &rolling(64), &[], &mut []);
+    exec.process(64, &rolling(128), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![(0, program(1)), (64, program(2)), (64, program(5))]
+    );
+}
+
+/// **A clip replaced while stopped sends its header at the next start, once**:
+/// the replacement does not send it into a stopped receiver.
+#[test]
+fn replacing_the_clip_while_stopped_sends_the_header_at_the_start_once() {
+    let (_ed, mut exec, controls, seen) = rig_headed(headed([], &[program(1)]), 64);
+    exec.process(64, &stopped(0), &[], &mut []);
+    controls.set(headed([], &[program(2)]));
+    exec.process(64, &stopped(0), &[], &mut []);
+    assert_eq!(heard(&seen), vec![]);
+    exec.process(64, &rolling(0), &[], &mut []);
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(heard(&seen), vec![(128, program(2))]);
+}
+
+/// **A changed receiver gets the header and then the chase, once, while the
+/// clip plays**; two calls before a block are one send, and the events go on.
+#[test]
+fn a_changed_receiver_while_playing_gets_the_header_then_the_chase_once() {
+    let clip = headed([at(10, program(5)), at(10_000, on(60))], &[program(1)]);
+    let (_ed, mut exec, controls, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.receiver_changed();
+    controls.receiver_changed();
+    exec.process(64, &rolling(64), &[], &mut []);
+    exec.process(64, &rolling(128), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![
+            (0, program(1)),
+            (10, program(5)),
+            (64, program(1)),
+            (64, program(5)),
+        ]
+    );
+}
+
+/// **A changed receiver while stopped gets its header at the next start, once**
+/// (not also when it changed).
+#[test]
+fn a_changed_receiver_while_stopped_gets_the_header_at_the_next_start_once() {
+    let clip = headed([at(10_000, on(60))], &[program(1)]);
+    let (_ed, mut exec, controls, seen) = rig_headed(clip, 64);
+    exec.process(64, &stopped(0), &[], &mut []);
+    controls.receiver_changed();
+    exec.process(64, &stopped(0), &[], &mut []);
+    assert_eq!(heard(&seen), vec![]);
+    exec.process(64, &rolling(0), &[], &mut []);
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(heard(&seen), vec![(128, program(1))]);
+}
+
+/// **A header larger than the port's room lands in part, counted**: 300
+/// header messages in a 64-frame block, whose port holds 256, put the first
+/// 256 on the first frame in file order; the 44 past them are refused and
+/// counted with the graph's other event losses, and none is sent later.
+#[test]
+fn a_header_larger_than_the_port_is_cut_short_and_counted() {
+    let header: Vec<Ump> = (0..300u32).map(|n| volume(n << 20)).collect();
+    let (mut ed, mut exec, _c, seen) = rig_headed(headed([], &header), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    exec.process(64, &rolling(64), &[], &mut []);
+    let got = heard(&seen);
+    assert_eq!(got.len(), 256);
+    assert!(got.iter().all(|&(f, _)| f == 0));
+    assert_eq!(
+        got.iter().map(|&(_, u)| u).collect::<Vec<_>>(),
+        header[..256]
+    );
+    let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
+    assert_eq!(refused, 300 - 256);
+}
+
+/// **A header is not part of the clip**: its messages are no events, notes or
+/// chased states, and a clip differing only in its header is a different clip.
+#[test]
+fn a_header_is_not_an_event_of_the_clip_and_makes_clips_differ() {
+    let plain: ClipEvents = [at(0, on(60)), at(5, off(60))].into_iter().collect();
+    let headed = headed([at(0, on(60)), at(5, off(60))], &[program(1)]);
+    assert_eq!(headed.len(), plain.len());
+    assert_eq!(
+        headed.notes().collect::<Vec<_>>(),
+        plain.notes().collect::<Vec<_>>()
+    );
+    assert_ne!(headed, plain);
+}

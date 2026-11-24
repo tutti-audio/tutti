@@ -15,6 +15,7 @@ fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     let controls = MidiClipControls {
         cell: node.cell.clone(),
         serial: Arc::default(),
+        receiver: Arc::default(),
     };
     let gone = Arc::downgrade(&node.cell.current());
     {

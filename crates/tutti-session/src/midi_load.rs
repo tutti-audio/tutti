@@ -171,13 +171,13 @@ pub enum Unplayed {
         /// The packet.
         packet: Unknown,
     },
-    /// A message of a Clip File's configuration header (M2-116 section 6) that
-    /// the load does nothing with: it is in neither the clip nor the tempo map
-    /// nor the meter. These are the file's configuration for its target (a
-    /// Program Change and a Bank Select are common), not a defect in the file;
-    /// the load delivers none of them. What the file states of its tempo and
-    /// meter is not here:
-    /// [`ClipHeader::unused_messages`](tutti_midi_file::ClipHeader::unused_messages)
+    /// A Set Profile On message of a Clip File's configuration header (M2-116
+    /// sections 6.2 and 6.2.1.1): the load does not run the MIDI-CI
+    /// transaction that configures the receiver for it. The rest of the
+    /// header's configuration is the clip's own [`ClipEvents::header`]: the
+    /// clip player sends it where the clip starts, and what the file states of
+    /// its tempo and meter is not here:
+    /// [`ClipHeader::setup_messages`](tutti_midi_file::ClipHeader::setup_messages)
     /// names the rule, and a Set Time Signature the meter refuses is in
     /// [`LoadReport::refused_time_signatures`].
     Header {
@@ -196,9 +196,9 @@ pub struct LoadReport {
     /// ([`StandardMidiFile::repairs`]).
     pub repairs: Vec<ReadRepair>,
     /// What the load does not play. For a Standard MIDI File, its events that
-    /// have no packet, in track order. For a Clip File, the messages of its
-    /// header that the load does nothing with, in header order, then the packets
-    /// of its sequence that are no message, in sequence order.
+    /// have no packet, in track order. For a Clip File, the Set Profile On
+    /// messages of its header, in header order, then the packets of its
+    /// sequence that are no message, in sequence order.
     pub unplayed: Vec<Unplayed>,
     /// The Time Signature events no meter holds, so no change of meter was
     /// made for them, each with its sequence's track (format 2), or `None`
@@ -434,9 +434,10 @@ fn convert_smf(
     (tracks, timeline)
 }
 
-/// The one clip and the timeline of a Clip File: its sequence is the clip,
-/// and each message of its header, which a load does not deliver, is listed in
-/// `report`, ahead of the packets no definition covers.
+/// The one clip and the timeline of a Clip File: its sequence is the clip and
+/// its header's setup messages the clip's header; each Set Profile On message,
+/// which a load does not deliver, is listed in `report`, ahead of the packets
+/// no definition covers.
 fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, Timeline) {
     let tempo = Arc::clone(file.tempo_map());
     let meter = Arc::new(ProjectMeter::new(file.meter_map()));
@@ -447,8 +448,9 @@ fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, 
     );
     report.unplayed.extend(
         file.header()
-            .unused_messages()
-            .map(|(tick, packet)| Unplayed::Header { tick, packet }),
+            .profile_messages()
+            .iter()
+            .map(|&(tick, packet)| Unplayed::Header { tick, packet }),
     );
     let timeline = file.timeline();
     report.unplayed.extend(
@@ -457,8 +459,13 @@ fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, 
             .into_iter()
             .map(|(beat, packet)| Unplayed::Clip { beat, packet }),
     );
+    let ticks_per_quarter = file.ticks_per_quarter();
+    let setup = file
+        .header()
+        .setup_messages()
+        .filter_map(|(tick, packet)| TimedMidiEvent::new(tick.beats(ticks_per_quarter), packet));
     let track = LoadedTrack {
-        events: clip_events(timeline.packets),
+        events: Arc::new(clip_events(timeline.packets).header(setup)),
         tempo: Arc::clone(&tempo),
         meter: Arc::clone(&meter),
     };
@@ -488,16 +495,14 @@ fn clip_from(report: &mut LoadReport, index: usize, timeline: SmfTimeline) -> Ar
                 why,
             }),
     );
-    clip_events(timeline.packets)
+    Arc::new(clip_events(timeline.packets))
 }
 
 /// `packets` as a clip. A timeline's beats are finite, which is all a clip
 /// event asks.
-fn clip_events(packets: Vec<(Beat, Ump)>) -> Arc<ClipEvents> {
-    Arc::new(
-        packets
-            .into_iter()
-            .filter_map(|(beat, packet)| TimedMidiEvent::new(beat, packet))
-            .collect(),
-    )
+fn clip_events(packets: Vec<(Beat, Ump)>) -> ClipEvents {
+    packets
+        .into_iter()
+        .filter_map(|(beat, packet)| TimedMidiEvent::new(beat, packet))
+        .collect()
 }

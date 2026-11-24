@@ -104,9 +104,7 @@ impl ClipHeader {
     /// [`profile_on`](Self::profile_on) writes only whole ones.
     #[must_use]
     pub fn profiles(&self) -> Vec<ProfileOnRequest> {
-        let packets = self.run.events();
-        let leading = clip_file::leading_profile_len(packets);
-        clip_file::profiles(packets[..leading].iter().map(|&(_, ump)| ump))
+        clip_file::profiles(self.profile_messages().iter().map(|&(_, ump)| ump))
             .inspect(|request| {
                 // A header holds only Set Profile On messages that read: a
                 // read file's are checked by `check_header` when it is built,
@@ -117,20 +115,30 @@ impl ClipHeader {
             .collect()
     }
 
+    /// The packets of the Set Profile On messages at the head of the header
+    /// ([`profiles`](Self::profiles) reads them), each at its tick.
+    #[must_use]
+    pub fn profile_messages(&self) -> &[(Tick, Ump)] {
+        let packets = self.run.events();
+        &packets[..clip_file::leading_profile_len(packets)]
+    }
+
     /// The messages, in order, each at its tick on the header's own clock.
     #[must_use]
     pub fn messages(&self) -> &[(Tick, Ump)] {
         self.run.events()
     }
 
-    /// The messages nothing of the file's timeline is built from, in order: all
-    /// but a Set Tempo with a tempo, which is a step of
-    /// [`ClipFile::tempo_map`], and a Set Time Signature, which is a change of
-    /// [`ClipFile::meter_map`] or is listed in
-    /// [`ClipFile::refused_time_signatures`]. A Set Tempo of 0 names no tempo
-    /// and is one of them, as a Program Change and a Set Metronome are.
-    pub fn unused_messages(&self) -> impl Iterator<Item = (Tick, Ump)> + '_ {
-        self.messages()
+    /// The messages that configure the receiver, in order: all but the Set
+    /// Profile On messages ([`profile_messages`](Self::profile_messages)) and
+    /// the ones the file's timeline is built from, a Set Tempo with a tempo
+    /// (a step of [`ClipFile::tempo_map`]) and a Set Time Signature (a change
+    /// of [`ClipFile::meter_map`], or listed in
+    /// [`ClipFile::refused_time_signatures`]). A Set Tempo of 0 names no
+    /// tempo and is one of them, as a Program Change and a Set Metronome are.
+    pub fn setup_messages(&self) -> impl Iterator<Item = (Tick, Ump)> + '_ {
+        let leading = self.profile_messages().len();
+        self.messages()[leading..]
             .iter()
             .copied()
             .filter(|&(_, ump)| matches!(Statement::of(ump), Statement::Unused))

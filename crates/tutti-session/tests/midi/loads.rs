@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::common::{offline, tap};
 use crate::midi::{note_ons, roll};
 
+use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     ClipFile, ClipHeader, ClipSequence, MidiFile, ReadRepair, StandardMidiFile, Tick, TimelineDrop,
 };
@@ -21,7 +22,7 @@ use tutti_session::{
 use tutti_tempo::TempoMap;
 use tutti_ump::{
     Address, Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, TicksPerQuarterNote, U7, Ump, Voice1,
+    NoteVelocity, TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
 };
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
@@ -130,9 +131,10 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
 /// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a
 /// second. Its header's Set Time Signature of 3/4 is the loaded meter. The header
 /// (M2-116 section 6) is the file's own configuration, not an event of the
-/// sequence: the load lists each of its messages it does nothing with, and
-/// neither the Set Tempo nor the Set Time Signature, which it uses, so a header of
-/// those two alone loads clean.
+/// sequence: the clip player sends its other messages (a Program Change) before
+/// the first note, and nothing of a header of a Program Change, a Set Tempo and a
+/// Set Time Signature is left unplayed.
+/// Spec: m2-116/6#7, m2-116/6.3#1
 #[test]
 fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     let division = TicksPerQuarterNote::of(96);
@@ -200,6 +202,23 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     .expect("loads");
     assert!(clean.report().is_clean(), "{:?}", clean.report());
 
+    // A Set Profile On is not played (the MIDI-CI transaction it asks for is
+    // not run): each of its packets is listed.
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
+    let profiled = ClipHeader::new().profile_on(on);
+    let listed: Vec<_> = profiled
+        .profile_messages()
+        .iter()
+        .map(|&(tick, packet)| Unplayed::Header { tick, packet })
+        .collect();
+    assert!(!listed.is_empty());
+    let profiled =
+        tutti_fixtures::block_on(session().midi().load_midi(bytes_of(profiled))).expect("loads");
+    assert_eq!(profiled.report().unplayed, listed);
+
     let header = tempo_and_meter
         .push(Tick(0), program_change)
         .unwrap()
@@ -212,14 +231,8 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     // The Set Tempo packet and two notes, a note-on and a note-off each: the
     // header is not in the clip.
     assert_eq!(loaded.track(0).unwrap().events.len(), 5);
-    // The Program Change is the one header message nothing uses.
-    assert_eq!(
-        loaded.report().unplayed,
-        [Unplayed::Header {
-            tick: Tick(0),
-            packet: program_change
-        }]
-    );
+    // The Program Change is delivered by the clip player, so nothing is left.
+    assert!(loaded.report().is_clean(), "{:?}", loaded.report());
     let notes: Vec<_> = loaded
         .track(0)
         .unwrap()
@@ -253,6 +266,22 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     let _ = played.update();
     roll(&mut played, 49_000);
     assert_eq!(note_ons(&seen), [(0, 60), (48_000, 64)]);
+    // The header's Program Change is the first thing the receiver hears, on
+    // the clip's first frame, in MIDI 2.0 as the clip's own events are.
+    let heard: Vec<(u64, Ump)> = seen.lock().unwrap().iter().copied().collect();
+    assert_eq!(
+        heard.first().map(|&(frame, ump)| (frame, ump.decode())),
+        Some((
+            0,
+            Ok(Message::Midi2(
+                Address::first(MidiChannel::FIRST),
+                Voice2::ProgramChange {
+                    program: U7::of(5),
+                    bank: None
+                }
+            ))
+        ))
+    );
     let seconds = loaded.tempo().unwrap().seconds_at(Beat::new(2.0));
     assert!((seconds.get() - 1.0).abs() < 1e-9, "{seconds:?}");
     let meter = loaded.meter().expect("one timeline").current();

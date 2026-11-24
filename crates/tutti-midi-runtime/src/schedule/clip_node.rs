@@ -31,6 +31,21 @@
 //! playhead lands inside is not struck), nor per-note or relative
 //! controllers.
 //!
+//! A clip may carry a **header** ([`ClipEvents::header`]): messages that
+//! configure what the node feeds (a Program Change, a volume, System
+//! Exclusive), which are not events of the clip. The node sends them, in
+//! their order, all in the one block, on the frame, where the clip starts:
+//! each time playback starts from stopped, and when the clip is replaced
+//! while playing (the new clip's header), and again when the host says the
+//! receiver changed ([`MidiClipControls::receiver_changed`]). The header
+//! goes before the chase and the chase before the events, so a receiver ends
+//! on the clip's own state. A loop wrap or a seek does not send it: the
+//! receiver was configured when the run started. A header message the port
+//! has no room for is refused and counted with every other refused event
+//! (`Editor::take_event_losses`), the way a chase is cut: the messages that
+//! fit land, in order, and each one past them is lost whole; a message of
+//! several packets can lose its tail. Nothing waits for room.
+//!
 //! A key (group, channel, note number) is held or not (the MIDI convention),
 //! by one note at a time, as a DAW plays notes of one key that overlap (M2-104
 //! Appendix C.2 would allow several, told apart by a Detach, which a clip does
@@ -70,7 +85,7 @@ use tutti_graph::{
     RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
-use tutti_rt::{Publisher, Reader};
+use tutti_rt::{AtomicRequestFlags, Publisher, Reader, RequestFlag};
 use tutti_ump::{
     Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, NoteNumber, NoteVelocity, U7, Ump,
     Voice1, Voice2,
@@ -119,8 +134,10 @@ pub const CLIP_EVENT_DENSITY: EventDensity = EventDensity::per_frame(1);
 ///
 /// Collect a clip from [`TimedMidiEvent`]s in any order; the sorting, the
 /// translation of MIDI 1.0 events to MIDI 2.0 and the pairing are done there,
-/// so the thread that publishes it does none of it. Two clips are equal when
-/// their events and pairing are.
+/// so the thread that publishes it does none of it. A clip with a
+/// [`header`](Self::header) is collected, then given it. Two clips are equal
+/// when their events, pairing and header are: a clip that differs only in its
+/// header is a new clip, which [`MidiClipControls::set`] publishes.
 #[derive(Debug, Default)]
 pub struct ClipEvents {
     events: Box<[ClipEvent]>,
@@ -133,6 +150,10 @@ pub struct ClipEvents {
     /// that ends it. Built on the control side with the clip; only
     /// [`notes`](Self::notes) reads it.
     ends: Box<[Option<u32>]>,
+    /// The header: the messages the node sends where the clip starts, in file
+    /// order, each at its own beat on the header's clock (the beats before the
+    /// clip's own beat 0; the node ignores them and sends all at once).
+    header: Box<[TimedMidiEvent]>,
 }
 
 /// A note of a clip: a note-on and the note-off that ends it, if one does
@@ -165,7 +186,19 @@ impl ClipEvents {
             events,
             chase,
             ends,
+            header: Box::default(),
         }
+    }
+
+    /// The clip with `messages` as its header: sent where the clip starts (see
+    /// the module docs), not events of the clip, so [`len`](Self::len),
+    /// [`notes`](Self::notes) and the chase do not read them. The messages
+    /// keep the order given, each at its own beat on the header's clock, and
+    /// are translated to MIDI 2.0 as the clip's events are. Control thread.
+    #[must_use]
+    pub fn header(mut self, messages: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
+        self.header = translated(messages).into();
+        self
     }
 
     /// The clip's notes in the order of their note-ons in the clip, each with
@@ -215,10 +248,11 @@ impl FromIterator<TimedMidiEvent> for ClipEvents {
     }
 }
 
-/// Equal by events and pairing: the chase table is a function of them.
+/// Equal by events, pairing and header: the chase table is a function of the
+/// events.
 impl PartialEq for ClipEvents {
     fn eq(&self, other: &Self) -> bool {
-        self.events == other.events
+        self.events == other.events && self.header == other.header
     }
 }
 
@@ -490,7 +524,13 @@ pub struct MidiClipControls {
     /// compare-and-publish), so two control threads cannot each publish
     /// against a stale read. The node never takes it.
     serial: Arc<Mutex<()>>,
+    /// Raised by [`receiver_changed`](Self::receiver_changed), taken by the
+    /// node once a block.
+    receiver: Arc<AtomicRequestFlags>,
 }
+
+/// The one request a clip node takes: its receiver changed.
+const RECEIVER_CHANGED: RequestFlag = RequestFlag::of(0);
 
 impl std::fmt::Debug for MidiClipControls {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -511,6 +551,16 @@ impl MidiClipControls {
             return;
         }
         self.cell.publish(events);
+    }
+
+    /// The receiver the node feeds changed (it gained a sink, or its sink was
+    /// replaced): the node sends the clip's header again, then the state the
+    /// clip holds at the playhead, from its next block, and goes on with the
+    /// events. Playback that is stopped sends both at its next start anyway,
+    /// so this adds nothing then. Several calls before a block make one send.
+    /// Control thread; the node reads it without a lock.
+    pub fn receiver_changed(&self) {
+        self.receiver.raise(RECEIVER_CHANGED);
     }
 
     /// The clip in force: the one the node plays from its next block.
@@ -562,6 +612,8 @@ pub struct MidiClipNode {
     /// seen one block late, never missed and never seen twice.
     last_seq: u64,
     play: Play,
+    /// What [`MidiClipControls::receiver_changed`] raised.
+    receiver: Arc<AtomicRequestFlags>,
     /// The declared event capacity, from the block the node was prepared for.
     capacity: NonZeroU32,
 }
@@ -613,6 +665,7 @@ impl MidiClipNode {
                 walk: Walk::default(),
                 held: NoteLedger::new(LEDGER_CAPACITY),
             },
+            receiver: Arc::default(),
             capacity: MIN_EVENT_PORT_CAPACITY,
         }
     }
@@ -626,10 +679,32 @@ impl Beated for ClipEvent {
 
 /// The clip's side of the walk: send each event, and end what is held
 /// wherever playback stops or jumps (a seek, a loop wrap), then chase the
-/// channel state the clip set before the jump's beat.
+/// channel state the clip set before the jump's beat; where it starts (or its
+/// receiver changed), send the header first.
 struct Playing<'a, 'w, 'c> {
     sending: Sending<'a, 'w, NoteId>,
     chase: &'c [Box<[Setter]>],
+    header: &'c [TimedMidiEvent],
+}
+
+impl Playing<'_, '_, '_> {
+    /// Sends the header, in order, at `at`.
+    fn send_header(&mut self, at: Offset) {
+        for message in self.header {
+            self.sending.send(at, message.event(), None);
+        }
+    }
+
+    /// Sends, for each state the clip set before `beat`, the last message that
+    /// set it, at `at`.
+    fn send_chase(&mut self, at: Offset, beat: Beat) {
+        for setters in self.chase {
+            let before = setters.partition_point(|s| s.beat < beat);
+            if let Some(last) = before.checked_sub(1).and_then(|k| setters.get(k)) {
+                self.sending.send(at, last.ump, None);
+            }
+        }
+    }
 }
 
 impl Visit<ClipEvent> for Playing<'_, '_, '_> {
@@ -655,11 +730,23 @@ impl Visit<ClipEvent> for Playing<'_, '_, '_> {
     fn jump(&mut self, at: Option<Offset>, beat: Beat, _fpb: FramesPerBeat, _events: &[ClipEvent]) {
         let Some(o) = at else { return };
         self.sending.release_all(o);
-        for setters in self.chase {
-            let before = setters.partition_point(|s| s.beat < beat);
-            if let Some(last) = before.checked_sub(1).and_then(|k| setters.get(k)) {
-                self.sending.send(o, last.ump, None);
-            }
+        self.send_chase(o, beat);
+    }
+
+    /// The header, then what [`jump`](Self::jump) sends.
+    fn start(&mut self, at: Option<Offset>, beat: Beat, fpb: FramesPerBeat, events: &[ClipEvent]) {
+        if let Some(o) = at {
+            self.send_header(o);
+        }
+        self.jump(at, beat, fpb, events);
+    }
+
+    /// The header, then the chase, with what is held left sounding: the notes
+    /// are the same clip's, only the receiver is new.
+    fn resend(&mut self, at: Option<Offset>, beat: Beat, _: FramesPerBeat, _: &[ClipEvent]) {
+        if let Some(o) = at {
+            self.send_header(o);
+            self.send_chase(o, beat);
         }
     }
 
@@ -690,9 +777,14 @@ impl<F: Float> Node<F> for MidiClipNode {
         let mut playing = Playing {
             sending: held.block(io.event_out(Self::OUT), first),
             chase: &clip.chase,
+            header: &clip.header,
         };
         if replaced {
             playing.sending.release_all(first);
+        }
+        let changed = !self.receiver.take().is_empty();
+        if replaced || changed {
+            walk.resend();
         }
         for (start, seg) in cx.env.segments() {
             walk.segment(&clip.events, cx.env, start, &seg, &mut playing);
@@ -715,6 +807,7 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
         let controls = MidiClipControls {
             cell: self.cell.clone(),
             serial: Arc::default(),
+            receiver: Arc::clone(&self.receiver),
         };
         let fork = ClipFork {
             cell: self.cell.clone(),
