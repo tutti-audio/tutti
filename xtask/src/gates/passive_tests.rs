@@ -68,6 +68,10 @@ pub(super) const HELPERS: &[(&str, &str)] = &[
         "verify_*",
         "a `verify_*` helper fails the test on a value it does not accept",
     ),
+    (
+        "agree_across_workers",
+        "`tutti_graph::testing::agree_across_workers` fails the test when a worker count's render differs from the serial one",
+    ),
 ];
 
 fn helper(name: &str) -> bool {

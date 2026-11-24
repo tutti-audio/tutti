@@ -163,11 +163,16 @@ impl PartialUpdate {
     /// the pointers.
     #[must_use]
     pub fn to_json(&self) -> PeJson {
+        PeJson::Object(self.object())
+    }
+
+    /// The object of [`to_json`](Self::to_json).
+    pub(super) fn object(&self) -> PeObject {
         let mut object = PeObject::new();
         for (pointer, value) in &self.0 {
             object.insert(pointer.as_str(), value.clone().into());
         }
-        PeJson::Object(object)
+        object
     }
 
     /// The Property Data with the changes made, or an error and nothing changed.
