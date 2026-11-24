@@ -48,7 +48,8 @@ pub(super) fn use_of(path: &str, own: &str, test: bool) -> Use {
 pub(super) enum Group {
     Nothing,
     Documented,
-    OwnCrate,
+    OnlyTests,
+    OwnProduction,
     Sibling,
 }
 
@@ -57,7 +58,8 @@ impl Group {
         match self {
             Group::Nothing => "exercised-by-nothing",
             Group::Documented => "documented-and-otherwise-unexercised",
-            Group::OwnCrate => "own-crate-only",
+            Group::OnlyTests => "exercised-only-by-tests",
+            Group::OwnProduction => "used-only-inside-its-crate",
             Group::Sibling => "public-for-a-sibling",
         }
     }
@@ -113,8 +115,10 @@ pub(super) fn classify(
             Group::Documented
         } else if unused {
             Group::Nothing
+        } else if c.own_production > 0 {
+            Group::OwnProduction
         } else {
-            Group::OwnCrate
+            Group::OnlyTests
         };
         rows.push(Row {
             krate: it.krate.clone(),
@@ -133,9 +137,27 @@ pub(super) fn classify(
     rows
 }
 
-/// The heading of a type: `Type  (N public methods, k listed)`.
-pub(super) fn heading(owner: &str, methods: usize, listed: usize) -> String {
-    format!("{owner}  ({methods} public methods, {listed} listed)")
+/// The groups, in report order.
+const GROUPS: [Group; 5] = [
+    Group::Nothing,
+    Group::Documented,
+    Group::OnlyTests,
+    Group::OwnProduction,
+    Group::Sibling,
+];
+
+/// The heading of a type: `Type  (N public methods, k listed: a / b / c / d / e)`, the
+/// five figures being the listed methods in each group, in report order.
+pub(super) fn heading(owner: &str, methods: usize, listed: &[Group]) -> String {
+    let per: Vec<String> = GROUPS
+        .iter()
+        .map(|g| listed.iter().filter(|x| *x == g).count().to_string())
+        .collect();
+    format!(
+        "{owner}  ({methods} public methods, {} listed: {})",
+        listed.len(),
+        per.join(" / ")
+    )
 }
 
 fn row_line(r: &Row, typed: bool) -> String {
@@ -187,7 +209,11 @@ pub(super) fn section(
             .get(&(krate.to_owned(), (*t).to_owned()))
             .copied()
             .unwrap_or(0);
-        let _ = writeln!(out, "{}", heading(t, n, rs.len()));
+        let _ = writeln!(
+            out,
+            "{}",
+            heading(t, n, &rs.iter().map(|r| r.group).collect::<Vec<_>>())
+        );
         for r in rs {
             let _ = writeln!(out, "  {}", row_line(r, true));
         }
@@ -201,11 +227,12 @@ pub(super) fn section(
     let count = |g: Group| rows.iter().filter(|r| r.group == g).count();
     let _ = writeln!(
         out,
-        "{krate}: {} listed ({} exercised by nothing, {} documented and otherwise unexercised, {} own-crate-only, {} public for a sibling)\n",
+        "{krate}: {} listed ({} exercised by nothing, {} documented and otherwise unexercised, {} exercised only by tests, {} used only inside its crate, {} public for a sibling)\n",
         rows.len(),
         count(Group::Nothing),
         count(Group::Documented),
-        count(Group::OwnCrate),
+        count(Group::OnlyTests),
+        count(Group::OwnProduction),
         count(Group::Sibling)
     );
     out
@@ -235,7 +262,7 @@ pub(crate) fn app_report(
     let is_reexport = |f: &str, l: usize| sources.is_reexport(f, l);
     let mut out = String::from(HEADER);
     out.push('\n');
-    let mut totals = [0usize; 4];
+    let mut totals = [0usize; 5];
     for krate in crates {
         let mine: Vec<Item> = population
             .iter()
@@ -250,12 +277,13 @@ pub(crate) fn app_report(
     }
     let _ = writeln!(
         out,
-        "total: {} listed ({} exercised by nothing, {} documented and otherwise unexercised, {} own-crate-only, {} public for a sibling)",
+        "total: {} listed ({} exercised by nothing, {} documented and otherwise unexercised, {} exercised only by tests, {} used only inside its crate, {} public for a sibling)",
         totals.iter().sum::<usize>(),
         totals[0],
         totals[1],
         totals[2],
-        totals[3]
+        totals[3],
+        totals[4]
     );
     Ok(out)
 }
@@ -268,12 +296,15 @@ definition, an `impl` header's mention of its type and a `pub use` statement. An
 from crates/tutti/, testing/tutti-book/ or any examples/ directory is not listed.\n\
 Group exercised-by-nothing: no reference of any other kind (a row may carry `named in a macro`, see below).\n\
 Group documented-and-otherwise-unexercised: no reference, but a doc example names it (by name).\n\
-Group own-crate-only: references only from tests (its own crate's or another's) or its own crate's\n\
-  production code, none from a sibling crate's production code.\n\
+Group exercised-only-by-tests: at least one test reference (its own crate's or another's), no production\n\
+  reference from its own crate or a sibling: public items only tests call.\n\
+Group used-only-inside-its-crate: its own crate's production code references it (tests or not), no sibling\n\
+  crate's production code does: works for the library, but no app-side code, example or book example calls it.\n\
 Group public-for-a-sibling: referenced by another crate's production code and by no app-side code\n\
   (a candidate for a narrower door, not for deletion).\n\
 Types sort by listed methods, descending; `N public methods` is the scan's count of the type's pub methods,\n\
-merged by type name within a crate.\n\
+merged by type name within a crate; `k listed: a / b / c / d / e` is its listed methods in each group, in the\n\
+order above (nothing / documented / only tests / inside its crate / sibling).\n\
 Doc examples (``` blocks in /// and //! comments) and the book's Markdown chapters are not in the index; they\n\
 are searched by name: `.name(` or `Type::name`, `name(`, the bare name; it can over-label. A `macro_rules!`\n\
 body naming an unreferenced item labels it `named in a macro`. A row is not safe to delete until\n\
@@ -311,11 +342,17 @@ mod tests {
     #[test]
     fn each_group_is_decided_by_where_the_references_sit() {
         let nothing = item("a", None, &[]);
-        let own = item("b", None, &["crates/c/tests/t.rs", "crates/c/src/x.rs"]);
+        let tests = item("b", None, &["crates/c/tests/t.rs", "crates/d/tests/t.rs"]);
+        let own = item("e", None, &["crates/c/tests/t.rs", "crates/c/src/x.rs"]);
         let sibling = item("c", None, &["crates/d/src/x.rs", "crates/c/tests/t.rs"]);
         assert_eq!(
-            run(&[nothing, own, sibling]),
-            [Group::Nothing, Group::OwnCrate, Group::Sibling]
+            run(&[nothing, tests, own, sibling]),
+            [
+                Group::Nothing,
+                Group::OnlyTests,
+                Group::OwnProduction,
+                Group::Sibling
+            ]
         );
     }
 
@@ -356,15 +393,19 @@ mod tests {
             &|f, _| f.ends_with("lib.rs"),
             &Corpus::default(),
         );
-        assert_eq!(rows[0].group, Group::OwnCrate);
+        assert_eq!(rows[0].group, Group::OnlyTests);
         assert_eq!(rows[0].counts.other_tests, 1);
     }
 
     #[test]
     fn a_type_heading_counts_its_methods_and_its_listed_ones_and_sorts_by_listed() {
         assert_eq!(
-            heading("Editor", 40, 3),
-            "Editor  (40 public methods, 3 listed)"
+            heading(
+                "Editor",
+                40,
+                &[Group::Nothing, Group::OnlyTests, Group::OnlyTests]
+            ),
+            "Editor  (40 public methods, 3 listed: 1 / 0 / 2 / 0 / 0)"
         );
         let rows = classify(
             &[
@@ -378,8 +419,12 @@ mod tests {
         );
         let methods = BTreeMap::from([(("c".to_owned(), "Big".to_owned()), 40)]);
         let text = section("c", &rows, &methods);
-        let big = text.find("Big  (40 public methods, 2 listed)").unwrap();
-        let small = text.find("Small  (0 public methods, 1 listed)").unwrap();
+        let big = text
+            .find("Big  (40 public methods, 2 listed: 2 / 0 / 0 / 0 / 0)")
+            .unwrap();
+        let small = text
+            .find("Small  (0 public methods, 1 listed: 1 / 0 / 0 / 0 / 0)")
+            .unwrap();
         assert!(big < small);
     }
 
