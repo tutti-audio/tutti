@@ -530,10 +530,10 @@ pub mod session {
         SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
-        OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec, OutputStrip,
-        QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault, StreamFaultKind,
-        StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OpenedOutput,
+        OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec,
+        OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
+        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{

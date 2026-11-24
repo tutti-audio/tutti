@@ -458,7 +458,7 @@ impl tutti_engine::StreamDriver for OpensAfter {
         spec: &OutputSpec,
         block: tutti_engine::OutputBlock,
         faults: Arc<tutti_engine::StreamFaults>,
-    ) -> Result<Self::Running, Infallible> {
+    ) -> Result<tutti_engine::OpenedOutput<Self::Running>, Infallible> {
         self.earlier_open_at_open
             .store(usize::from(self.earlier.is_open()), Ordering::SeqCst);
         self.inner.open(spec, block, faults)
@@ -524,4 +524,77 @@ fn a_fault_after_stop_is_not_recorded() {
 
     assert_eq!(faults.count(), 0);
     assert!(!faults.is_disconnected());
+}
+
+/// A manual driver that answers `opened` as the callback size its stream runs at.
+struct OpensAt {
+    inner: ManualStreamDriver,
+    opened: Option<tutti_engine::OutputQuantum>,
+}
+
+impl tutti_engine::StreamDriver for OpensAt {
+    type Running = <ManualStreamDriver as tutti_engine::StreamDriver>::Running;
+    type Error = Infallible;
+
+    fn open(
+        self,
+        spec: &OutputSpec,
+        block: tutti_engine::OutputBlock,
+        faults: Arc<tutti_engine::StreamFaults>,
+    ) -> Result<tutti_engine::OpenedOutput<Self::Running>, Infallible> {
+        let opened = self.inner.open(spec, block, faults)?;
+        Ok(tutti_engine::OpenedOutput {
+            quantum: self.opened,
+            ..opened
+        })
+    }
+}
+
+/// **The spec's quantum is the request until a stream opens, then what the
+/// stream reports, then the request again.**
+///
+/// A driver that opens at another size than asked is believed; one that cannot
+/// say leaves the spec without a size; a stop returns the request, so the next
+/// start asks for the same size again.
+#[test]
+fn the_spec_reports_the_quantum_the_stream_opened_at() {
+    use tutti_engine::OutputQuantum;
+    let (mut engine, state) = engine_and_state();
+    let asked = OutputQuantum::of(512);
+    let opened = OutputQuantum::of(480);
+    let spec = engine.spec().clone().with_quantum(asked);
+    engine = OutputStream::new(spec);
+    assert_eq!(
+        engine.spec().quantum,
+        Some(asked),
+        "the request before a start"
+    );
+
+    let (driver, _handle) = ManualStreamDriver::new();
+    let driver = OpensAt {
+        inner: driver,
+        opened: Some(opened),
+    };
+    engine.start_with(Arc::clone(&state), driver).unwrap();
+    assert_eq!(
+        engine.spec().quantum,
+        Some(opened),
+        "what the stream reports"
+    );
+    engine.stop();
+    assert_eq!(
+        engine.spec().quantum,
+        Some(asked),
+        "the request after a stop"
+    );
+
+    let (driver, _handle) = ManualStreamDriver::new();
+    let driver = OpensAt {
+        inner: driver,
+        opened: None,
+    };
+    engine.start_with(Arc::clone(&state), driver).unwrap();
+    assert_eq!(engine.spec().quantum, None, "a stream that cannot say");
+    engine.stop();
+    assert_eq!(engine.spec().quantum, Some(asked));
 }

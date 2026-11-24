@@ -160,7 +160,7 @@ pub use routing::{
     OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,
 };
 pub use stream::{
-    OutputQuantum, OutputSpec, OutputStream, QuantumOutOfRange, RunningStream, StartError,
-    StreamDriver,
+    OpenedOutput, OutputQuantum, OutputSpec, OutputStream, QuantumOutOfRange, RunningStream,
+    StartError, StreamDriver,
 };
 pub use timer::{DEFAULT_BLOCK, TimerDriver, TimerError, TimerRunning};

@@ -68,12 +68,21 @@ pub struct OutputSpec {
     /// engine renders `f32`. A backend's offset-binary unsigned type reports its
     /// signed twin of the same width.
     pub sample_format: SampleFormat,
-    /// The frames every callback carries, when the stream is opened with a
-    /// fixed buffer size (`None`: the backend's default, whose size is not
-    /// known until it calls back). A graph is prepared with it
-    /// (`tutti_graph::Prepare::with_quantum`), so a node that keeps work in
-    /// step with the device (a hosted out-of-process plugin, which ships one
-    /// callback's worth to its server per callback) can.
+    /// The frames every callback carries (`None`: not known).
+    ///
+    /// Before a stream is open it is the size asked for: `Some` opens the
+    /// stream with that fixed buffer, `None` with the backend's default. Once
+    /// [`OutputStream::start_with`] has opened a stream it is what the driver
+    /// reports the stream opened at ([`OpenedOutput::quantum`]), which can
+    /// differ from the request or be `None`; a stop returns the request. A
+    /// graph is prepared with it (`tutti_graph::Prepare::with_quantum`), so a
+    /// node that keeps work in step with the device (a hosted out-of-process
+    /// plugin, which ships one callback's worth to its server per callback)
+    /// can.
+    ///
+    /// What a driver's report means is the driver's: a fixed buffer size is a
+    /// request a backend may round or ignore, and the size a backend reports
+    /// is an estimate that is not enforced per callback.
     pub quantum: Option<OutputQuantum>,
 }
 
@@ -116,7 +125,9 @@ pub trait StreamDriver<F: Float = f32> {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Opens and starts a stream at `spec`, running `block` once per callback
-    /// and recording backend errors into `faults`.
+    /// and recording backend errors into `faults`. Answers the stream and the
+    /// callback size it runs at, which is `spec.quantum` when the driver runs
+    /// at the size it was asked for.
     ///
     /// # Errors
     /// Whatever the driver cannot open.
@@ -125,7 +136,21 @@ pub trait StreamDriver<F: Float = f32> {
         spec: &OutputSpec,
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<Self::Running, Self::Error>;
+    ) -> Result<OpenedOutput<Self::Running>, Self::Error>;
+}
+
+/// What a [`StreamDriver`] answers when it opens: the running stream and the
+/// callback size it runs at.
+///
+/// A plain record with no invariant between its fields, so both are public.
+#[derive(Debug)]
+pub struct OpenedOutput<R> {
+    /// The handle of the started stream.
+    pub stream: R,
+    /// The frames the stream's callbacks carry, as the driver reports them
+    /// (`None`: the backend cannot say). It becomes
+    /// [`OutputSpec::quantum`] while the stream is open.
+    pub quantum: Option<OutputQuantum>,
 }
 
 /// The handle a [`StreamDriver`] hands back. Dropping it stops the stream.
@@ -166,6 +191,9 @@ pub struct OutputStream {
     /// The output callback's reported delay, shared with each run's block.
     latency: Arc<StreamLatency>,
     running: Option<Box<dyn RunningStream>>,
+    /// The spec's quantum as it was asked, held while a stream is open (the
+    /// spec then carries the opened one) and restored by [`stop`](Self::stop).
+    requested: Option<Option<OutputQuantum>>,
 }
 
 // Hand-rolled: the running stream is not `Debug`. Reports the configuration a
@@ -189,11 +217,13 @@ impl OutputStream {
             faults: Arc::new(StreamFaults::new()),
             latency: Arc::new(StreamLatency::new()),
             running: None,
+            requested: None,
         }
     }
 
     /// Returns the configuration of the stream that is playing, or that the
-    /// next start would use.
+    /// next start would use. Its [`quantum`](OutputSpec::quantum) is the one
+    /// the open stream reports, and the request when none is open.
     pub fn spec(&self) -> &OutputSpec {
         &self.spec
     }
@@ -244,10 +274,12 @@ impl OutputStream {
         let block = OutputBlock::new(state, self.spec.channels)
             .with_latency(Arc::clone(&self.latency))
             .with_faults(Arc::clone(&self.faults));
-        let running = driver
+        let opened = driver
             .open(&self.spec, block, Arc::clone(&self.faults))
             .map_err(StartError::Driver)?;
-        self.running = Some(Box::new(running));
+        self.requested = Some(self.spec.quantum);
+        self.spec.quantum = opened.quantum;
+        self.running = Some(Box::new(opened.stream));
         Ok(())
     }
 
@@ -275,6 +307,9 @@ impl OutputStream {
     pub fn stop(&mut self) {
         if let Some(running) = self.running.take() {
             running.stop();
+        }
+        if let Some(requested) = self.requested.take() {
+            self.spec.quantum = requested;
         }
     }
 
