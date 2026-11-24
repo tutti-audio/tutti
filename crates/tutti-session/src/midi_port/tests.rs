@@ -31,6 +31,24 @@ impl Ports {
             .or_else(|| port.parked.as_ref().map(JrStream::origin))
             .expect("an output holds its stream open or parked")
     }
+
+    /// The first output port's open device output with its stream.
+    fn open_output(&mut self) -> &mut UmpOut<OpenOutput> {
+        self.outputs[0].out.as_mut().expect("open")
+    }
+
+    /// What the first output port's open device has counted of its own.
+    fn device_losses(&self) -> Option<Losses> {
+        self.outputs[0]
+            .out
+            .as_ref()
+            .map(|out| out.destination().losses())
+    }
+
+    /// What the first output port counted, cumulative.
+    fn port_losses(&self) -> Losses {
+        self.outputs[0].shared.losses.get()
+    }
 }
 
 /// **The stamp stream is carried across a closed output**: an output that sent
@@ -88,6 +106,101 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         s.midi.state.ports.stream_origin(),
         before,
         "carried on by the reopened output, not started over"
+    );
+}
+
+/// **An output opened with its device absent stamps from zero when the device
+/// appears**: its first stamp is 0 ticks (M2-104-UM §7.2.3.1: the first message of
+/// a stream has no earlier message to be spaced from), the next the 625 ticks of
+/// 20 ms, as an output that was opened with its device.
+#[test]
+fn a_never_opened_output_stamps_from_zero() {
+    let (backend, fake) =
+        FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], usize::MAX);
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+        .build()
+        .expect("builds");
+    let _ = s.update();
+    let synth = s.midi().devices().remove(0);
+    fake.unplug(EndpointId::from_raw(10));
+    let _ = s.update();
+    let opened = ready(s.open_midi_output(synth).expect("begins"));
+    let _out = s.apply(opened).expect("opens with no device");
+    let _ = s.update();
+    fake.plug(persistent_endpoint(10, "Synth"), PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(s.midi.state.ports.stream_origin(), Frame::ZERO);
+    let out = s.midi.state.ports.open_output();
+    out.destination_mut().set_config(tutti_ump::StreamConfig {
+        protocol: tutti_ump::Protocol::Midi2,
+        rx_jr: true,
+        tx_jr: false,
+    });
+    let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0x8000);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    out.send_frames(&[(Frame::new(0), note), (Frame::new(960), note)], None);
+    let stamps: Vec<u32> = fake
+        .take_sent(EndpointId::from_raw(10))
+        .iter()
+        .map(|ump| ump.0[0])
+        .filter(|word| word >> 20 == 0x002)
+        .collect();
+    assert_eq!(stamps, vec![0x0020_0000, 0x0020_0271]);
+}
+
+/// **A replugged device's losses count from zero, and the port's are the sum**:
+/// a device that refuses everything is unplugged and plugged again; the port
+/// holds what the first device refused, the new device's own count starts at
+/// zero, and what it refuses after is added once to the port's.
+#[test]
+fn device_losses_count_from_zero_after_a_replug() {
+    let (backend, fake) =
+        FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], 0);
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+        .build()
+        .expect("builds");
+    let _ = s.update();
+    let synth = s.midi().devices().remove(0);
+    let opened = ready(s.open_midi_output(synth).expect("begins"));
+    let _out = s.apply(opened).expect("opens");
+    let _ = s.update();
+    s.midi_nodes()
+        .unwrap()
+        .sync_controls
+        .messages()
+        .store(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
+        });
+    s.play().expect("room");
+    render(&mut s, 8);
+    let _ = s.update();
+    let first = s.midi.state.ports.device_losses().expect("open");
+    assert!(first.refused > 0, "the device refused what it was sent");
+    assert_eq!(s.midi.state.ports.port_losses(), first);
+
+    fake.unplug(EndpointId::from_raw(10));
+    let _ = s.update();
+    assert_eq!(s.midi.state.ports.port_losses(), first, "folded once");
+    fake.plug(persistent_endpoint(10, "Synth"), PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(
+        s.midi.state.ports.device_losses(),
+        Some(Losses::NONE),
+        "the new device counts from zero"
+    );
+    assert_eq!(s.midi.state.ports.port_losses(), first, "nothing added");
+
+    render(&mut s, 8);
+    let _ = s.update();
+    let second = s.midi.state.ports.device_losses().expect("open");
+    assert!(second.refused > 0);
+    assert_eq!(
+        s.midi.state.ports.port_losses(),
+        first + second,
+        "the port's losses are the sum of its devices'"
     );
 }
 
