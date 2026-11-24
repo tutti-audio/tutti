@@ -86,7 +86,11 @@ impl<F: Float> Editor<F> {
     /// [`MissingSource::Node`] for a node that does not exist,
     /// [`MissingSource::EventInputPort`] for `at` past its node's event
     /// inputs, and [`MissingSource::EventPort`] for the source past its
-    /// node's event outputs.
+    /// node's event outputs. A source the port already lists is added again
+    /// and refused by the commit
+    /// ([`GraphInvalid::DuplicateEventSource`](crate::GraphInvalid::DuplicateEventSource)),
+    /// not here: an edit may pass through it, wiring a node's new edge before
+    /// the old one from the same source is removed.
     pub fn connect_events(&mut self, at: EventInputPort, edge: EventEdge) -> Result<(), WireError> {
         self.check_event_in(at)?;
         self.check_event_out(edge.from())?;
