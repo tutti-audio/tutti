@@ -222,9 +222,9 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   "doc 013", "design 0NN §5", "as built (T2)", plan item numbers or lane
   names, which rustdoc cannot render and a reader cannot follow. A design
   decision a user must know (why a type refuses something, what a guarantee
-  costs) is written where the item is, in a sentence. `docs/design/` is being
-  retired: its current-state content moves into the crates' rustdoc and the
-  files are deleted (git history keeps them).
+  costs) is written where the item is, in a sentence. The design docs are
+  retired: their current-state content is in the crates' rustdoc and the
+  files are in `docs/archive/`, kept as written.
 - **D10. Rust's own doc style** (the standard library's and RFC 1574's): the
   summary line is a third-person present-tense sentence ending in a period
   ("Returns the number of frames in the wave."), followed by a blank line and
