@@ -571,7 +571,8 @@ fn each_node_declares_its_shape() {
             check(
                 LfoNode::from(
                     LfoConfig::new(LfoShape::Sine)
-                        .beat_sync(BeatsPerCycle::of(4.0))
+                        .beats_per_cycle(BeatsPerCycle::of(4.0))
+                        .sync(LfoSync::Synced)
                         .depth(Bipolar::of(0.5)),
                 ),
                 Facts::default()

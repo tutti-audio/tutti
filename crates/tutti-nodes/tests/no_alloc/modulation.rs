@@ -51,7 +51,8 @@ fn lfo() {
     let random = LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64));
     gate.run("lfo random", LfoNode::from(random), |_, _| {});
     let beat = LfoConfig::new(LfoShape::Sine)
-        .beat_sync(BeatsPerCycle::of(4.0))
+        .beats_per_cycle(BeatsPerCycle::of(4.0))
+        .sync(LfoSync::Synced)
         .phase_offset(PhaseIncrement::new(0.25));
     let node = LfoNode::from(beat);
     let sync = Arc::clone(node.sync());

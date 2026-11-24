@@ -226,15 +226,6 @@ tutti_graph::declare_params!([] LfoNode,
     }
 });
 
-impl LfoConfig {
-    /// A node that starts synced to the transport beat at `span`: the span and
-    /// [`LfoSync::Synced`] in one call. The rate is kept.
-    #[must_use]
-    pub fn beat_sync(self, span: BeatsPerCycle) -> Self {
-        self.beats_per_cycle(span).sync(LfoSync::Synced)
-    }
-}
-
 /// The config for a control-rate LFO's declaration: the same shape, seed,
 /// rate and phase. Beat-synced, it produces the values a control lane
 /// evaluates from that [`tutti_modulation::Lfo`], at audio rate. Free-running
@@ -244,7 +235,9 @@ impl From<tutti_modulation::Lfo> for LfoConfig {
     fn from(lfo: tutti_modulation::Lfo) -> Self {
         let config = Self::new(lfo.shape).seed(lfo.seed).phase_offset(lfo.phase);
         match lfo.rate {
-            tutti_modulation::LfoRate::Beats(per_cycle) => config.beat_sync(per_cycle),
+            tutti_modulation::LfoRate::Beats(per_cycle) => {
+                config.beats_per_cycle(per_cycle).sync(LfoSync::Synced)
+            }
             tutti_modulation::LfoRate::Hz(rate) => config.rate(rate),
         }
     }
@@ -497,17 +490,18 @@ mod tests {
     }
 
     /// The span and the rate are independent options: a config holds both whichever order
-    /// they are written in, and the sync is the one thing that says which the node starts on
-    /// (`beat_sync` is the span and the word in one call).
+    /// they are written in, and the sync is the one thing that says which the node starts on.
     #[test]
     fn a_config_keeps_the_span_and_the_rate_and_the_sync_says_which_it_starts_on() {
         for config in [
             LfoConfig::new(LfoShape::Sine)
-                .beat_sync(BeatsPerCycle::of(4.0))
+                .beats_per_cycle(BeatsPerCycle::of(4.0))
+                .sync(LfoSync::Synced)
                 .rate(Hz::new(2.0)),
             LfoConfig::new(LfoShape::Sine)
                 .rate(Hz::new(2.0))
-                .beat_sync(BeatsPerCycle::of(4.0)),
+                .beats_per_cycle(BeatsPerCycle::of(4.0))
+                .sync(LfoSync::Synced),
         ] {
             let lfo = LfoNode::from(config);
             assert_eq!(lfo.sync().load(), LfoSync::Synced);
@@ -531,8 +525,11 @@ mod tests {
     #[test]
     fn the_declared_params_are_depth_and_rate_whatever_the_sync() {
         let free = LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0)));
-        let synced =
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+        let synced = LfoNode::from(
+            LfoConfig::new(LfoShape::Sine)
+                .beats_per_cycle(BeatsPerCycle::of(4.0))
+                .sync(LfoSync::Synced),
+        );
         for node in [free, synced] {
             assert_eq!(
                 ParamNode::<f32>::param_set(&node)
@@ -550,7 +547,11 @@ mod tests {
     fn a_source_has_no_ring_out() {
         for lfo in [
             LfoNode::from(LfoConfig::new(LfoShape::Sine)),
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(1.0))),
+            LfoNode::from(
+                LfoConfig::new(LfoShape::Sine)
+                    .beats_per_cycle(BeatsPerCycle::of(1.0))
+                    .sync(LfoSync::Synced),
+            ),
         ] {
             let shape = Node::<f32>::shape(&lfo);
             assert_eq!(shape.audio_in().count(), 0);
@@ -561,8 +562,13 @@ mod tests {
 
     #[test]
     fn a_stopped_beat_reads_the_sine_of_its_phase_in_the_span() {
-        let lfo =
-            || LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+        let lfo = || {
+            LfoNode::from(
+                LfoConfig::new(LfoShape::Sine)
+                    .beats_per_cycle(BeatsPerCycle::of(4.0))
+                    .sync(LfoSync::Synced),
+            )
+        };
         // Beat 1.0 of a 4-beat cycle = quarter phase = sine peak.
         let out = render_at(lfo(), stopped_at(1.0), 1);
         assert!((out[0] - 1.0).abs() < 0.01, "Expected 1.0, got {}", out[0]);
@@ -578,7 +584,11 @@ mod tests {
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         // 120 BPM at 48 kHz: 24 000 frames a beat, 96 000 a cycle.
         let out = render_at(
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0))),
+            LfoNode::from(
+                LfoConfig::new(LfoShape::Sine)
+                    .beats_per_cycle(BeatsPerCycle::of(4.0))
+                    .sync(LfoSync::Synced),
+            ),
             rolling,
             3_000,
         );
@@ -593,8 +603,13 @@ mod tests {
     /// keeps its sub-beat detail.
     #[test]
     fn beat_synced_lfo_keeps_sub_beat_precision_at_high_beats() {
-        let lfo =
-            || LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+        let lfo = || {
+            LfoNode::from(
+                LfoConfig::new(LfoShape::Sine)
+                    .beats_per_cycle(BeatsPerCycle::of(4.0))
+                    .sync(LfoSync::Synced),
+            )
+        };
         // Same fractional offset (0.5 beat) at beat 0 and at beat 20000.
         let at_edge = render_at(lfo(), stopped_at(0.5), 1)[0];
         let past_edge = render_at(lfo(), stopped_at(20_000.5), 1)[0];
@@ -677,7 +692,8 @@ mod tests {
             LfoNode::from(
                 LfoConfig::new(LfoShape::Random)
                     .seed(seed)
-                    .beat_sync(BeatsPerCycle::of(1.0)),
+                    .beats_per_cycle(BeatsPerCycle::of(1.0))
+                    .sync(LfoSync::Synced),
             )
         };
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
@@ -750,7 +766,11 @@ mod tests {
         }
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let synced = render_at(
-            LfoNode::from(LfoConfig::new(LfoShape::Random).beat_sync(BeatsPerCycle::of(0.5))),
+            LfoNode::from(
+                LfoConfig::new(LfoShape::Random)
+                    .beats_per_cycle(BeatsPerCycle::of(0.5))
+                    .sync(LfoSync::Synced),
+            ),
             rolling,
             60_000,
         );
