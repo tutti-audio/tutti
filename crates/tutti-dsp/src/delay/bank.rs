@@ -287,15 +287,12 @@ impl<F: Float + Lerp> DelayBank<F> {
                 c.finite_or(Feedback::NONE).get()
             }
         };
-        let loop_gain = gain(ramps.feedback.now().into(), ramps.cross.now().into())
-            .max(gain(
-                ramps.feedback.target().into(),
-                ramps.cross.target().into(),
-            ))
-            .max(gain(
-                controls.feedback.finite_or(Feedback::NONE).get(),
-                cross(controls.cross_feedback),
-            ));
+        // The two ramps are bounded each by its own ends, whatever their spans.
+        let feedback = f64::max(ramps.feedback.now().into(), ramps.feedback.target().into())
+            .max(controls.feedback.finite_or(Feedback::NONE).get());
+        let crossed = f64::max(ramps.cross.now().into(), ramps.cross.target().into())
+            .max(cross(controls.cross_feedback));
+        let loop_gain = gain(feedback, crossed);
         let longest = match controls.sync {
             DelaySync::Synced => self.position(self.max),
             DelaySync::Free => (0..width)
