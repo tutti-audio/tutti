@@ -9,9 +9,9 @@ use super::routing::MAX_WIDTH;
 ///
 /// The time of a channel is its note's beats at the session's tempo, so it follows the tempo
 /// by the delay's own time ramp. A construction constant, like [`ChannelTimes`](crate::ChannelTimes):
-/// a delay of the layout built with these ([`DelayLayoutBuilder::synced`](crate::DelayLayoutBuilder::synced))
-/// has its times from the notes alone, and its time control is inert. That the notes fit the
-/// delay's width is the layout's to check.
+/// a delay of the layout built with these ([`DelayLayoutBuilder::notes`](crate::DelayLayoutBuilder::notes))
+/// has its times from them while it is [`Synced`](crate::DelaySync::Synced). That the notes
+/// fit the delay's width is the layout's to check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteTimes {
     count: usize,
