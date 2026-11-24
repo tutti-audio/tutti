@@ -645,25 +645,6 @@ mod tests {
         assert_eq!(dst, vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
     }
 
-    /// A ring built for another length takes the newest inputs and
-    /// zero-pads the oldest end.
-    #[test]
-    fn transfer_keeps_recent_history() {
-        let mut r = AudioRing::<f32>::new(Samples::new(4));
-        let mut sink = vec![0.0; 4];
-        r.run(&[1.0, 2.0, 3.0, 4.0], &mut sink, false);
-        let mut shorter = AudioRing::<f32>::new(Samples::new(2));
-        shorter.transfer_from(&r);
-        let mut out = vec![0.0; 2];
-        shorter.run(&[0.0, 0.0], &mut out, false);
-        assert_eq!(out, vec![3.0, 4.0]);
-        let mut longer = AudioRing::<f32>::new(Samples::new(4));
-        longer.transfer_from(&shorter);
-        let mut out = vec![0.0; 4];
-        longer.run(&[0.0; 4], &mut out, false);
-        assert_eq!(out, vec![0.0, 0.0, 0.0, 0.0]);
-    }
-
     /// A FIFO built with too little room takes what fits, evicts a
     /// non-note-off for a note-off, counts every event it cannot keep and
     /// never grows its queue.

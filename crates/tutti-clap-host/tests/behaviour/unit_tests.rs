@@ -12,7 +12,7 @@ use clap_sys::events::{
 };
 use tutti_clap_host::{
     ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
-    NoteExpressionType, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
+    NoteExpressionType, NoteSend, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
     ParameterQueue,
 };
 use tutti_graph::Offset;
@@ -34,6 +34,7 @@ fn at(k: usize) -> Offset {
 /// A fresh list `event` was added to: its first event is what it converts to.
 fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     list.add_midi(event);
     list
 }
@@ -1111,7 +1112,7 @@ fn a_flush_list_is_sent_in_time_order() {
 /// described.
 #[test]
 fn test_note_port_dialect_to_send() {
-    use tutti_clap_host::{NoteDialect, NoteDialects, NotePortInfo};
+    use tutti_clap_host::{NoteDialect, NoteDialects, NotePortInfo, NoteSend};
 
     let port = |supported: NoteDialects, preferred: Option<NoteDialect>| NotePortInfo {
         id: 0,
@@ -1127,18 +1128,18 @@ fn test_note_port_dialect_to_send() {
             Some(NoteDialect::Midi)
         )
         .dialect_to_send(),
-        Some(NoteDialect::Midi),
+        NoteSend::Midi,
     );
 
     // No preference stated: fall back to a supported dialect rather than
     // inventing one (for example, reporting Midi2).
     assert_eq!(
         port(NoteDialects::CLAP | NoteDialects::MIDI, None).dialect_to_send(),
-        Some(NoteDialect::Clap),
+        NoteSend::CLAP_AND_MIDI,
     );
     assert_eq!(
         port(NoteDialects::MIDI, None).dialect_to_send(),
-        Some(NoteDialect::Midi),
+        NoteSend::Midi,
     );
 
     // A preference this host cannot send falls back to what the port also
@@ -1149,15 +1150,32 @@ fn test_note_port_dialect_to_send() {
             Some(NoteDialect::Midi2)
         )
         .dialect_to_send(),
-        Some(NoteDialect::Midi),
+        NoteSend::Midi,
     );
 
     // Nothing in common: the caller must see that, not a fabricated dialect.
     assert_eq!(
         port(NoteDialects::MIDI2, Some(NoteDialect::Midi2)).dialect_to_send(),
-        None,
+        NoteSend::Nothing,
     );
-    assert_eq!(port(NoteDialects::MIDI_MPE, None).dialect_to_send(), None,);
+    assert_eq!(
+        port(NoteDialects::MIDI_MPE, None).dialect_to_send(),
+        NoteSend::Nothing,
+    );
+
+    // A preference the port does not list is not sent: a supported dialect is.
+    assert_eq!(
+        port(NoteDialects::CLAP, Some(NoteDialect::Midi)).dialect_to_send(),
+        NoteSend::CLAP_ONLY,
+    );
+    assert_eq!(
+        port(NoteDialects::MIDI, Some(NoteDialect::Clap)).dialect_to_send(),
+        NoteSend::Midi,
+    );
+    assert_eq!(
+        port(NoteDialects::MIDI_MPE, Some(NoteDialect::Midi)).dialect_to_send(),
+        NoteSend::Nothing,
+    );
 }
 
 // ── Remaining plan items: voice info, note name, sysex, timer ──

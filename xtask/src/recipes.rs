@@ -33,6 +33,8 @@ pub(crate) enum Step {
     ConformanceInventory(String),
     /// `prune-building`: delete the building baseline's stale rows.
     PruneBuilding,
+    /// `write-public-items`: rewrite `xtask/public-items/` from the tree.
+    WritePublicItems,
     /// `conformance`: the dashboard and badges from per-OS JUnit files
     /// (`gates/conformance_site.rs`).
     Conformance {
@@ -54,7 +56,15 @@ pub(crate) enum Step {
     Release(Version),
     /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
     /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
+    /// Without a directory it then prints each crate's `public-api` line count, reusing the
+    /// texts (`gates/public_api_counts.rs`).
     UmbrellaApi(Option<String>),
+    /// `unused-public [<crate>...] [--out <path>]`: the report of `gates/unused_public.rs`;
+    /// no crate is every crate under `crates/`.
+    UnusedPublic {
+        crates: Vec<String>,
+        out: Option<String>,
+    },
     /// `affected <base>`: print the packages the diff from `<base>` can reach as
     /// `-p` flags, or `all` (`gates/affected.rs`).
     Affected(String),
@@ -81,6 +91,7 @@ impl Step {
             Step::Gate(g) => g.display(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
             Step::PruneBuilding => "prune-building".to_owned(),
+            Step::WritePublicItems => "write-public-items".to_owned(),
             Step::Conformance { results, out } => format!(
                 "conformance: join {}/<os>.xml to the inventories, write {}/index.html, ../index.html and ../badges/*.json",
                 results.display(),
@@ -100,10 +111,20 @@ impl Step {
                     .to_owned()
             }
             Step::UmbrellaApi(dir) => format!(
-                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in",
+                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in; without a directory, then a table of each crate's public-api line count",
                 dir.as_ref().map_or(String::new(), |d| format!(
                     " (the texts of {d}/<package>.txt instead)"
                 ))
+            ),
+            Step::UnusedPublic { crates, out } => format!(
+                "unused-public: rust-analyzer scip, cargo public-api --package tutti, then the public items of {} with no reference outside test code{}",
+                if crates.is_empty() {
+                    "every crate under crates/".to_owned()
+                } else {
+                    crates.join(" ")
+                },
+                out.as_ref()
+                    .map_or(String::new(), |o| format!(" (also written to {o})"))
             ),
             Step::Affected(base) => format!(
                 "affected: git diff --name-only {base}...HEAD, then the packages it reaches as -p flags (or all)"
@@ -354,6 +375,16 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "delete the rows of xtask/building-baseline.txt that name no violation; never adds one",
     ),
     (
+        "check-public-items",
+        "",
+        "a crate's public items are the rows of xtask/public-items/<crate>.txt: a new one needs its row, a row with no item is deleted",
+    ),
+    (
+        "write-public-items",
+        "",
+        "rewrite xtask/public-items/<crate>.txt for every crate from the tree",
+    ),
+    (
         "check-range-types",
         "",
         "no plain derived Deserialize on a private tuple field",
@@ -388,7 +419,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "doc",
         "",
-        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, and umbrella-api (needs cargo-public-api)",
+        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, umbrella-api and a table of each crate's public-api count (needs cargo-public-api)",
     ),
     ("check-loom", "", "clippy under --cfg loom"),
     (
@@ -418,6 +449,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "umbrella-api",
         "[<dir>]",
         "the types in the signatures of what tutti exports that tutti does not name (needs cargo-public-api; `doc` and `ci` run it, `gates` does not)",
+    ),
+    (
+        "unused-public",
+        "[<crate>...] [--out <path>]",
+        "a report, never a gate: the public items of the crates (default all) that the tutti umbrella does not name and no code outside tests refers to (needs rust-analyzer and cargo-public-api; not in `gates` or `ci`)",
     ),
     (
         "book",
@@ -756,6 +792,7 @@ impl Planner<'_> {
                 self.out.push(Step::ConformanceInventory(f));
             }
             "prune-building" => self.out.push(Step::PruneBuilding),
+            "write-public-items" => self.out.push(Step::WritePublicItems),
             "fmt" => self.lines(&["cargo fmt --all --check"]),
             "lint" => {
                 self.dep("fmt")?;
@@ -818,6 +855,19 @@ impl Planner<'_> {
             "umbrella-api" => {
                 let [dir] = Self::params(name, args, [""])?;
                 self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
+            }
+            "unused-public" => {
+                let mut crates = Vec::new();
+                let mut out = None;
+                let mut it = args.iter();
+                while let Some(a) = it.next() {
+                    if a == "--out" {
+                        out = Some(it.next().ok_or("`unused-public`: `--out` needs a path")?.clone());
+                    } else {
+                        crates.push(a.clone());
+                    }
+                }
+                self.out.push(Step::UnusedPublic { crates, out });
             }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;

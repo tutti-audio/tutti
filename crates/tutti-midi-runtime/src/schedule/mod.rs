@@ -11,7 +11,7 @@ pub mod timed;
 mod walk;
 
 pub use clip_node::{
-    CLIP_EVENT_DENSITY, ClipEvents, ClipEventsKind, MidiClipControls, MidiClipNode,
+    CLIP_EVENT_DENSITY, ClipEvents, ClipEventsKind, ClipNote, MidiClipControls, MidiClipNode,
 };
 pub use harmony_node::{
     HARMONY_EVENT_DENSITY, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
