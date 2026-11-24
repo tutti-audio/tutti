@@ -42,7 +42,7 @@ use crate::{Engine, OutputQuantum};
 /// callback is written silent, and counted in
 /// [`BlockCounts::truncated`](crate::BlockCounts::truncated), rather than
 /// reallocating on the audio thread. A stream is opened at an
-/// [`OutputQuantum`](crate::OutputQuantum), which is never longer.
+/// [`OutputQuantum`], which is never longer.
 pub const MAX_FRAMES: usize = 8192;
 
 /// Everything the output callback reads: the [`Engine`].

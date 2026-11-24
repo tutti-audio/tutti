@@ -13,7 +13,8 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_engine::{
-    AudioCallbackState, OutputSpec, OutputStream, StartError, Stopped, StreamDriver, StreamHost,
+    AudioCallbackState, OutputQuantum, OutputSpec, OutputStream, StartError, Stopped, StreamDriver,
+    StreamHost,
 };
 
 use crate::Result;
@@ -129,6 +130,42 @@ where
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E> {
         self.origin.target_mut()?.1.select(device.into());
+        self.restart_selected(rerate)
+    }
+
+    /// [`restart_with`](Self::restart_with) opening the device with callbacks
+    /// of exactly `quantum` frames. The request stays `quantum` from then on,
+    /// so a later restart asks for it too; a restart that fails puts back what
+    /// was requested before.
+    ///
+    /// # Errors
+    ///
+    /// As [`restart_with`](Self::restart_with), and
+    /// [`DeviceError::QuantumUnavailable`](crate::DeviceError::QuantumUnavailable)
+    /// when the device does not offer `quantum`.
+    pub fn restart_with_quantum<E: From<crate::DeviceError>>(
+        &mut self,
+        device: impl Into<DeviceSelector>,
+        quantum: OutputQuantum,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), E> {
+        let (_, config, _) = self.origin.target_mut()?;
+        config.select(device.into());
+        let requested = config.quantum.replace(quantum);
+        let restarted = self.restart_selected(rerate);
+        if restarted.is_err()
+            && let Ok((_, config, _)) = self.origin.target_mut()
+        {
+            config.quantum = requested;
+        }
+        restarted
+    }
+
+    /// The stop, resolve and start of a restart onto the target as it is now.
+    fn restart_selected<E: From<crate::DeviceError>>(
+        &mut self,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), E> {
         self.host.stop();
         let mut opened = None;
         self.host

@@ -326,11 +326,17 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
             self.with_device(|session, device| {
-                device
-                    .driver
-                    .restart_with_quantum(request.device, quantum, |spec, stopped| {
-                        session.rerate(spec, stopped, max_block, topology)
-                    })
+                let hook = |spec: &OutputSpec, stopped: &Stopped<'_, F>| {
+                    session.rerate(spec, stopped, max_block, topology)
+                };
+                match quantum {
+                    Some(quantum) => {
+                        device
+                            .driver
+                            .restart_with_quantum(request.device, quantum, hook)
+                    }
+                    None => device.driver.restart_with(request.device, hook),
+                }
             })
             .map(|()| previous)
         });
