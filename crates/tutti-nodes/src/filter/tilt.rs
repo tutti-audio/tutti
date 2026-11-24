@@ -99,15 +99,13 @@ impl Sealed for TiltFilterControls {
 #[cfg(test)]
 mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
-    use core::f64::consts::PI;
-
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_ramps};
+    use core::f64::consts::PI;
     use tutti_buffers::MaxBlock;
     use tutti_dsp::Tilt;
-
     use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};

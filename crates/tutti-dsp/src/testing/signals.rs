@@ -8,29 +8,6 @@ pub(crate) fn uniform<F: Float>(rng: &mut SplitMix64, lo: F, hi: F) -> F {
     lo + (hi - lo) * F::from_fraction_bits(rng.next_u64())
 }
 
-/// The complex amplitude of the `hz` component of `x`, as `(re, im)` of
-/// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
-///
-/// Exact (no leakage) when `x` spans a whole number of periods of `hz`.
-pub(crate) fn lock_in<S: Copy + Into<f64>>(x: &[S], hz: f64, rate: f64) -> (f64, f64) {
-    let w = 2.0 * core::f64::consts::PI * hz / rate;
-    let (mut re, mut im) = (0.0, 0.0);
-    for (n, &v) in x.iter().enumerate() {
-        let a = w * n as f64;
-        let v: f64 = v.into();
-        re += v * libm::cos(a);
-        im -= v * libm::sin(a);
-    }
-    let k = 2.0 / x.len() as f64;
-    (re * k, im * k)
-}
-
-/// The amplitude of [`lock_in`].
-pub(crate) fn amplitude_at<S: Copy + Into<f64>>(x: &[S], hz: f64, rate: f64) -> f64 {
-    let (re, im) = lock_in(x, hz, rate);
-    re.hypot(im)
-}
-
 /// `frames` of seeded uniform noise in `-level..=level`.
 pub(crate) fn noise(seed: u64, frames: usize, level: f32) -> Vec<f32> {
     let mut rng = SplitMix64::new(seed);

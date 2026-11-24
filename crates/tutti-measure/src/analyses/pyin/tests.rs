@@ -2,7 +2,9 @@ use super::*;
 use crate::AboveNyquist;
 use crate::analyses::yin::{PitchEstimate, yin_track};
 use crate::test_rng::uniform;
+use tutti_fixtures::signal::sine;
 use tutti_rt::SplitMix64;
+use tutti_units::{Amplitude, Hz, Samples};
 
 const RATE: SampleRate = SampleRate::of(16_000.0);
 /// A 10 ms hop at 16 kHz.
@@ -40,11 +42,9 @@ fn two_harmonics(f0: f64, a1: impl Fn(usize) -> f64, len: usize) -> Vec<f32> {
         .collect()
 }
 
+/// `len` samples of a 0.5-amplitude sine at `freq` hertz, from phase 0.
 fn tone(freq: f64, len: usize) -> Vec<f32> {
-    let w = core::f64::consts::TAU * freq / RATE.get();
-    (0..len)
-        .map(|n| (0.5 * libm::sin(n as f64 * w)) as f32)
-        .collect()
+    sine(Hz::new(freq), Amplitude::new(0.5), RATE, Samples::new(len))
 }
 
 /// A steady sine is voiced at its frequency on every frame. The bound is the

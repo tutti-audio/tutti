@@ -1,4 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::impulse;
 use tutti_units::{
     Bipolar, Cents, Db, Feedback, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth,
     Tail,
@@ -65,13 +66,6 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
             (s >> 8) as f32 / (1u32 << 24) as f32 - 0.5
         })
         .collect()
-}
-
-/// A unit impulse followed by silence, `frames` long.
-fn impulse(frames: usize) -> Vec<f32> {
-    let mut x = vec![0.0; frames];
-    x[0] = 1.0;
-    x
 }
 
 /// `x` through the bank in calls of `block` frames; the two output channels.
@@ -149,7 +143,7 @@ fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
             });
             let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
             let frames = (2.0 * rt60 * RATE.get()) as usize;
-            let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
+            let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 64);
             // The two channels' energy, summed frame for frame.
             let h: Vec<f64> = left
                 .iter()
@@ -216,7 +210,7 @@ fn each_band_decays_at_its_designed_rt60() {
     assert_eq!(length.fract(), 0.0, "a whole number of frames");
     let trip = length as usize;
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
-    let [left, _] = run(&mut bank, &mut ramps, &impulse(8 * trip), 64);
+    let [left, _] = run(&mut bank, &mut ramps, &impulse(Samples::new(8 * trip)), 64);
 
     let g = [3.0, 1.5, 0.6].map(|t| trip_gain(length, t, RATE));
     // The crossovers (300 Hz and 4 kHz) are the design's, restated here: the test's own copy
@@ -335,7 +329,12 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
         .sum::<f64>()
         * net.wet.to_amplitude().get();
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
-    let [left, _] = run(&mut bank, &mut ramps, &impulse(10 * 48_000), 64);
+    let [left, _] = run(
+        &mut bank,
+        &mut ramps,
+        &impulse(Samples::new(10 * 48_000)),
+        64,
+    );
     let sum: f64 = left.iter().map(|&v| f64::from(v)).sum();
     assert!(
         (sum - expected).abs() < 0.01 * expected.abs(),
@@ -366,7 +365,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
             .unwrap();
         let at = 4_800 + first;
         let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
-        let [left, right] = run(&mut bank, &mut ramps, &impulse(at + 64), 64);
+        let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(at + 64)), 64);
         assert!(
             left[..at].iter().chain(&right[..at]).all(|&x| x == 0.0),
             "silent until the pre-delay and the shortest line have gone round"
@@ -439,7 +438,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
     used.reset();
     used_ramps.jump_to_target();
     let (mut fresh, mut fresh_ramps) = at_rest(&l, RATE, &c);
-    let x = impulse(12_000);
+    let x = impulse(Samples::new(12_000));
     let after = run(&mut used, &mut used_ramps, &x, 64);
     assert!(after[0].iter().any(|&s| s != 0.0));
     assert_eq!(after, run(&mut fresh, &mut fresh_ramps, &x, 64));
@@ -728,7 +727,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let c = still(|c| c.pre_delay = Seconds::new(0.0));
     let (mut bank, mut ramps) = at_rest(&layout(8, FreezeMode::Decaying), RATE, &c);
-    run(&mut bank, &mut ramps, &impulse(1), 1);
+    run(&mut bank, &mut ramps, &impulse(Samples::new(1)), 1);
     let held = bank.state.lines[7].back(1);
     assert_ne!(held, 0.0, "the impulse reached the last line");
 
@@ -846,7 +845,7 @@ fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_
     let [left, _] = run(
         &mut bank,
         &mut ramps,
-        &impulse((trips + 2) * frames_per_line),
+        &impulse(Samples::new((trips + 2) * frames_per_line)),
         4096,
     );
 
@@ -920,7 +919,7 @@ fn at_zero_cents_the_echoes_are_the_feedback_and_its_delayed_copy() {
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let d = bank.shimmer_delay().get();
     let frames = 16_000;
-    let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
+    let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 64);
     let (t0, t1) = (first_sound(&left), first_sound(&right));
     assert_eq!(
         t0 as f64,
@@ -1009,7 +1008,7 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
 
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
     let frames = shimmered.get() + 48_000;
-    let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
+    let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 64);
     let peak = left
         .iter()
         .chain(&right)
@@ -1046,7 +1045,7 @@ fn the_tail_keeps_the_shifters_delay_until_the_send_ramp_reaches_zero() {
         })
     };
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
-    let mut x = impulse(4_000);
+    let mut x = impulse(Samples::new(4_000));
     x.fill(0.0);
     x[0] = 1.0;
     let [left, right] = run(&mut bank, &mut ramps, &x, 64);

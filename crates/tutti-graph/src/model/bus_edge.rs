@@ -33,7 +33,7 @@
 
 use std::collections::BTreeMap;
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Fold, FoldError};
 use tutti_units::Gain;
 
@@ -85,7 +85,7 @@ impl NodeBus {
 
     /// The topology of one band of this bus in `buses`, and its first port:
     /// `None` when the bus or the band is not there.
-    pub(crate) fn resolve(self, buses: &crate::Buses) -> Option<(BusTopology, usize)> {
+    pub(crate) fn resolve(self, buses: &crate::Buses) -> Option<(ChannelTopology, usize)> {
         let index = usize::from(self.bus);
         let bus = buses.get(index)?;
         let band = usize::from(self.band);
@@ -410,7 +410,7 @@ impl GraphSpec {
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, Gain)>, BusError> {
         // The engine's main outputs are at most `MAX_CHANNELS` wide, a bus's width, so
-        // a main output with no `BusTopology` is one never declared.
+        // a main output with no `ChannelTopology` is one never declared.
         let main_output = self.main_output.ok_or(BusError::MainOutputUndeclared)?;
         self.fold_lanes(shapes, from, main_output, fold, |c| {
             PortSink::Output(c as u16)
@@ -427,7 +427,7 @@ impl GraphSpec {
         &self,
         shapes: &Shapes,
         from: BusOutputPort,
-        sink: BusTopology,
+        sink: ChannelTopology,
         by: BusFold,
         at: impl Fn(usize) -> PortSink,
     ) -> Result<Vec<(EdgeId, Gain)>, LaneError> {
@@ -446,7 +446,7 @@ impl GraphSpec {
             BusOutputPort::MainInput => {
                 let width = self.topology.inputs;
                 let topology =
-                    BusTopology::unassigned(width).ok_or(BusError::MainInputTooWide {
+                    ChannelTopology::unassigned(width).ok_or(BusError::MainInputTooWide {
                         width: usize::from(width.count()),
                     })?;
                 (topology, 0, None)

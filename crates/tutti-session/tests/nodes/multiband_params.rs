@@ -14,7 +14,7 @@ use std::f64::consts::{PI, TAU};
 use tutti_buffers::PlanesMut;
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
@@ -66,7 +66,7 @@ fn rig() -> (Session, Key<MultibandCompressorNode<f32>>) {
         Osc::sine(Hz::new(HIGH)).with_amplitude(Amplitude::new(A)),
     ));
     let mb = g.add(MultibandCompressorNode::<f32>::from(
-        MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
+        MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(2)),
     ));
     g.set_sources(InputPort::new(mb, 0), [OutputPort::new(low, 0)])
         .unwrap();

@@ -192,11 +192,10 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
-    use core::f64::consts::PI;
-
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
+    use core::f64::consts::PI;
     use tutti_dsp::{
         ButterworthOrder, Elliptic, EllipticTolerances, PassbandRipple, StopbandAttenuation,
     };

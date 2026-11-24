@@ -8,7 +8,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_platform::Instant;
 use tutti_rt::Mutex;
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceDirection, DeviceId, DeviceSelector, Snapshot, SnapshotSource};
 use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
@@ -112,7 +112,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .expect("builds with no device");
     let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     let lim = s.graph().add(LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(0.0),
             ceiling: Db::new(0.0),
             ..LimiterControls::DEFAULT

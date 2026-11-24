@@ -275,7 +275,7 @@ pub enum At {
     /// another rate moves it to the same wall-clock time at the new one. It is
     /// not a count of frames rendered: a sender that counts those lands early
     /// or late after a rate change by what the rescale dropped. Read the clock
-    /// where it is published (`InstrumentHandle::clock`).
+    /// where it is published (`EventInletWriter::clock` in `tutti-graph`).
     Frame(Frame),
     /// A musical position, resolved against the transport snapshot of the
     /// block it falls in — so a tempo change before it moves it.

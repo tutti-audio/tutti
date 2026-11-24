@@ -49,7 +49,6 @@ fn session() -> DetachedSession {
 
 fn session_with_outputs(outputs: usize) -> DetachedSession {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

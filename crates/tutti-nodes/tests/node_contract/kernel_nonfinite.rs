@@ -3,7 +3,7 @@
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, MaxBlock,
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, MaxBlock,
 };
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
@@ -81,7 +81,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "crossover",
             Box::new(
                 CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::STEREO,
+                    ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
                 ))
                 .unwrap(),
@@ -93,7 +93,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "delay",
             Box::new(DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(0.05)),
                 ))
                 .controls(DelayControls {
@@ -151,7 +151,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "compressor",
             Box::new(CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::MONO).controls(CompressorControls::DEFAULT),
+                CompressorConfig::new(ChannelTopology::MONO).controls(CompressorControls::DEFAULT),
             )),
         ),
         (
@@ -191,7 +191,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "graphic eq",
             Box::new(GraphicEqNode::from(GraphicEqConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 GraphicBands::ThirdOctave,
             ))),
         ),
@@ -228,25 +228,26 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "leveller",
             Box::new(
-                LevellerNode::<f32>::try_from(LevellerConfig::new(BusTopology::STEREO)).unwrap(),
+                LevellerNode::<f32>::try_from(LevellerConfig::new(ChannelTopology::STEREO))
+                    .unwrap(),
             ),
         ),
         (
             "gate",
             Box::new(GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO).controls(GateControls::DEFAULT),
+                GateConfig::new(ChannelTopology::MONO).controls(GateControls::DEFAULT),
             )),
         ),
         (
             "limiter",
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::MONO).controls(LimiterControls::DEFAULT),
+                LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls::DEFAULT),
             )),
         ),
         (
             "true-peak limiter",
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::MONO)
+                LimiterConfig::new(ChannelTopology::MONO)
                     .detection(PeakDetection::TruePeak)
                     .controls(LimiterControls::DEFAULT),
             )),
@@ -254,26 +255,29 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "brickwall",
             Box::new(BrickwallLimiterNode::<f32>::from(
-                BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-1.0)),
+                BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(-1.0)),
             )),
         ),
         (
             "chorus",
             Box::new(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
             ))),
         ),
         (
             "flanger",
             Box::new(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
             ))),
         ),
         (
             "phaser",
             Box::new(
-                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
-                    .unwrap(),
+                PhaserNode::<f32>::try_from(PhaserConfig::new(
+                    ChannelTopology::MONO,
+                    Stages::of(4),
+                ))
+                .unwrap(),
             ),
         ),
         (
@@ -431,7 +435,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "multiband",
             Box::new(MultibandCompressorNode::<f32>::from(
-                MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(3)),
+                MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(3)),
             )),
         ),
     ]
@@ -509,7 +513,7 @@ mod logged {
     //! per reset, at the earliest non-finite frame, naming its channel (the lowest on a tie).
 
     use super::{BLOCK, POISONED, SR};
-    use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+    use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InputPort, IntoNode, Io, LogFilter, Node, NodeKey, OutputPort,
         PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
@@ -628,7 +632,7 @@ mod logged {
     fn a_finite_input_logs_nothing() {
         assert!(records(dc_blocker(), 0.0, None, 8).is_empty());
         let compressor = CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::STEREO).controls(CompressorControls::DEFAULT),
+            CompressorConfig::new(ChannelTopology::STEREO).controls(CompressorControls::DEFAULT),
         );
         assert!(records(compressor, 0.0, None, 8).is_empty());
     }
@@ -636,7 +640,7 @@ mod logged {
     #[test]
     fn the_multiband_compressor_logs_its_reset_once() {
         let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             MultibandBands::of(3),
         ));
         let records = records(node, f32::NAN, Some(1), 8);
@@ -645,6 +649,6 @@ mod logged {
 }
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
     ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

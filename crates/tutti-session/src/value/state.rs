@@ -530,13 +530,19 @@ impl ValueTable {
 
     /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
-        drop(self.retire_keeping(node));
+        drop(self.take(node, SlotId::node));
     }
 
     /// [`retire`](Self::retire), handing back the params the node had, for
     /// the node that replaces it to be seeded from
-    /// ([`address`](Self::address)). Control thread.
+    /// ([`address`](Self::address)). The slots that outlive the instance
+    /// ([`SlotId::instance_node`]) stay. Control thread.
     pub(crate) fn retire_keeping(&self, node: NodeKey) -> Outgoing {
+        self.take(node, SlotId::instance_node)
+    }
+
+    /// Removes `node`'s params and the slots `owner` names it for.
+    fn take(&self, node: NodeKey, owner: fn(SlotId) -> Option<NodeKey>) -> Outgoing {
         let (gone, slots, plugin) = {
             let mut params = self.params.lock();
             #[cfg(feature = "plugin")]
@@ -546,7 +552,7 @@ impl ValueTable {
             let gone = params.nodes.remove(&node);
             let slots: Vec<_> = params
                 .slots
-                .extract_if(.., |id, _| id.node() == Some(node))
+                .extract_if(.., |id, _| owner(*id) == Some(node))
                 .collect();
             (gone, slots, plugin)
         };

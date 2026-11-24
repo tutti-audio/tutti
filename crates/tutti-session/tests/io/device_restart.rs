@@ -8,7 +8,7 @@
 //! The plugin half is `plugin_latency.rs`'s, the MIDI clock's is
 //! `device_midi_clock.rs`'s.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
@@ -44,7 +44,7 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         .expect("builds with no device");
     let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     let lim = s.graph().add(LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(0.0),
             ceiling: Db::new(0.0),
             ..LimiterControls::DEFAULT

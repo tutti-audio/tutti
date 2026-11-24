@@ -116,7 +116,6 @@ fn session_with<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send +
     unit: N,
 ) -> (DetachedSession, NodeKey) {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -267,7 +266,6 @@ fn an_exported_polysynth_plays_its_clip() {
 fn a_param_on_a_synth_reaches_it_and_its_fork() {
     let peak = |volume: Option<f64>| {
         let mut session = Session::builder()
-            .inputs(ChannelLayout::EMPTY)
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");

@@ -12,7 +12,7 @@
 //! [`ParamNode`], inserted through [`tutti_graph::param_parts`], so a fork
 //! starts from the values last set through the set (see `src/fork.rs`).
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_graph::{
     Chase, Cx, InEvents, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
@@ -47,7 +47,7 @@ pub(super) const MODERATE_LANES: usize = 16;
 
 impl<F: SynthFloat> PolySynth<F> {
     /// The ports every shape declares: stereo out and the MIDI event input.
-    const PORTS: Shape = Shape::source(BusTopology::STEREO).events(1, 0);
+    const PORTS: Shape = Shape::source(ChannelTopology::STEREO).events(1, 0);
     const EVENTS: InEvents = Self::PORTS
         .event_input(0)
         .expect("declared one event input");

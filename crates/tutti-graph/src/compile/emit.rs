@@ -711,8 +711,13 @@ impl<'a> Emitter<'a> {
 
     // ---- the graph's edges to the outside -------------------------------------
 
-    /// The main output channels: what each carries, after its alignment and
-    /// sum.
+    /// The main output channels: each channel's sources through the delays
+    /// that align them, summed when there are several. A main output meter or
+    /// an outputs tap reads each channel as it leaves the alignment delay, so
+    /// with one declared the delay is its own op writing a slot that the
+    /// `Output` op and the reader both read (one ring, the same key).
+    ///
+    /// Returns what each rendered channel carries.
     fn outputs(&mut self) -> Vec<ARef> {
         let (graph, timing) = (self.graph, self.timing);
         let topology = graph.topology();
@@ -832,7 +837,12 @@ impl<'a> Emitter<'a> {
         output_refs
     }
 
-    /// Taps.
+    /// Taps: one lane per source, any ports. A lane whose port does not exist
+    /// reads silence rather than failing the commit, as a meter's does; it
+    /// gets no delay ring, and the other lanes' rings are keyed by their own
+    /// lane and source. A closed tap is not in the topology, so nothing is
+    /// emitted for it. One op a tap, after every lane's delay: it writes the
+    /// lanes together.
     fn taps(&mut self, output_refs: &[ARef]) {
         let graph = self.graph;
         for (&tap, spec) in &graph.topology().taps {
@@ -868,7 +878,15 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// Event taps.
+    /// Event taps: one event output each. An aligned tap is delayed to the
+    /// graph's output time (the compensation an event edge into an output-time
+    /// sink would get); a raw one reads the port as it leaves its node. A
+    /// closed tap is not in the topology, so nothing is emitted for it. A tap
+    /// whose port does not exist (a node replaced by one with fewer event
+    /// outputs, a removed node) keeps its place in the table, so its writer is
+    /// carried and resumes if the port returns, but it gets no op and no delay
+    /// ring: it reads nothing and the commit succeeds. One op a tap, after its
+    /// delay.
     fn event_taps(&mut self) {
         let (graph, timing) = (self.graph, self.timing);
         for (&tap, spec) in &graph.topology().event_taps {
@@ -912,7 +930,12 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// Meters.
+    /// Meters: one lane per source. `Outputs` reads what each output channel
+    /// carries (after its alignment delay); `Ports` reads each source as it
+    /// leaves its node, or, aligned, delayed to the output time by a ring of
+    /// its own like a tap's. A lane whose port does not exist reads silence
+    /// rather than failing the commit. One op a meter, so its lanes are folded
+    /// together. A closed meter is not in the topology.
     fn meters(&mut self, output_refs: &[ARef]) {
         let (graph, timing) = (self.graph, self.timing);
         for (&meter, spec) in &graph.topology().meters {
@@ -938,8 +961,11 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// Captures: one per feedback delay, last, so every feedback is read
-    /// before the block and written after it.
+    /// Captures run last, one per feedback delay. They feed the feedback
+    /// delays, which the executor reads from *before* the block (into the
+    /// feedback slots), so a capture needs no ordering against the feedback's
+    /// readers: with a delay of a whole `MaxBlock`, nothing it queues is due
+    /// this block.
     fn captures(&mut self) {
         let audio: Vec<(AudioFeedbackId, OutputPort)> = self
             .program

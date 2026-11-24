@@ -1,4 +1,4 @@
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{
     Feedback, Hz, PhaseIncrement, ReadPosition, Real, SampleRate, SampleSpan, Seconds,
@@ -18,8 +18,8 @@ fn frames(x: f64) -> ReadPosition {
     ReadPosition::from_span(SampleSpan::of(x))
 }
 
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(width.into()).expect("a test width is one bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {

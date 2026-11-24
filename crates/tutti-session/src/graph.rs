@@ -81,12 +81,12 @@ pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{
-    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet,
-    Removal, SetSources, Wire,
+    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, Outlet, Removal,
+    SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
-    ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key, MainInput,
+    ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key,
     MainOutput, NoSuchNode, OutputPort, RemoveError, SetRateError,
 };
 
@@ -632,11 +632,10 @@ fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
 }
 
 impl<F: Float> Graph<F> {
-    /// An empty graph with `inputs` main inputs and `outputs` main
+    /// An empty graph with no main input and `outputs` main
     /// outputs, prepared for `rate`, `max_block` and the device's callback
     /// `quantum` (when known), its executor local.
     pub(crate) fn new(
-        inputs: ChannelLayout,
         outputs: usize,
         rate: SampleRate,
         max_block: MaxBlock,
@@ -645,7 +644,6 @@ impl<F: Float> Graph<F> {
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
-        topology.inputs = inputs;
         topology.set_outputs(vec![PortSource::Zero; outputs]);
         // Declared and on from the start: a host reads the main output level
         // without asking for it.
@@ -1021,7 +1019,8 @@ impl<F: Float> Graph<F> {
     /// and its writer refuses whole frames, counting them; one behind leaves
     /// the ring empty and the node writes silence for the frames it lacks.
     /// Neither side blocks. A ring of a few blocks keeps both rare, at that
-    /// much latency. A re-prepare to another rate later is not checked.
+    /// much latency. A later [`Graph::set_sample_rate`] to another rate is
+    /// refused, naming the inlet, as for any node whose rates leave it out.
     ///
     /// The node is unforkable: an export of a graph that holds it is refused,
     /// naming its key.
@@ -1045,7 +1044,7 @@ impl<F: Float> Graph<F> {
                 graph,
             });
         }
-        Ok(InletNode::new(ring.into_reader()))
+        Ok(InletNode::new(ring))
     }
 }
 
@@ -2434,13 +2433,10 @@ impl<F: Float> Graph<F> {
 
     /// The graph's raw source for an [`OutputPort`].
     fn raw_source(port: OutputPort) -> Option<PortSource> {
-        match port.end() {
-            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut::new(
-                node,
-                u16::try_from(index).ok()?,
-            ))),
-            OutEnd::Input(index) => Some(PortSource::MainInput(u16::try_from(index).ok()?)),
-        }
+        Some(PortSource::Node(RawOut::new(
+            port.node(),
+            u16::try_from(port.index()).ok()?,
+        )))
     }
 
     /// The graph's raw sources for `ports`: a port whose index no `u16` holds is
@@ -2449,18 +2445,12 @@ impl<F: Float> Graph<F> {
         ports
             .iter()
             .map(|&port| {
-                Self::raw_source(port).ok_or_else(|| match port.end() {
-                    OutEnd::Node(node, _) => MissingSource::Port {
-                        node,
-                        port: u16::MAX,
-                        width: self
-                            .shape(node)
-                            .map_or(0, |s| s.audio_out().count() as usize),
-                    },
-                    OutEnd::Input(_) => MissingSource::MainInput {
-                        channel: u16::MAX,
-                        width: self.inputs(),
-                    },
+                Self::raw_source(port).ok_or_else(|| MissingSource::Port {
+                    node: port.node(),
+                    port: u16::MAX,
+                    width: self
+                        .shape(port.node())
+                        .map_or(0, |s| s.audio_out().count() as usize),
                 })
             })
             .collect()
@@ -2496,22 +2486,18 @@ impl<F: Float> Graph<F> {
                 .nodes
                 .contains_key(&p.node())
                 .then(|| OutputPort::new(p.node(), usize::from(p.port()))),
-            PortSource::MainInput(port) => Some(MainInput::channel(usize::from(port))),
-            PortSource::Zero => None,
+            PortSource::MainInput(_) | PortSource::Zero => None,
         }
     }
 
     pub(crate) fn check_out(&self, port: OutputPort) -> Result<(), ConnectError> {
-        let fits = match port.end() {
-            OutEnd::Node(node, index) => {
-                if !self.contains(node) {
-                    return Err(ConnectError::NoSuchNode(node));
-                }
-                index < self.node_outputs(node)?
-            }
-            OutEnd::Input(index) => index < self.inputs(),
-        };
-        fits.then_some(()).ok_or(ConnectError::NoSuchOutPort(port))
+        let node = port.node();
+        if !self.contains(node) {
+            return Err(ConnectError::NoSuchNode(node));
+        }
+        (port.index() < self.node_outputs(node)?)
+            .then_some(())
+            .ok_or(ConnectError::NoSuchOutPort(port))
     }
 
     pub(crate) fn check_in(&self, port: InputPort) -> Result<(), ConnectError> {
@@ -2533,7 +2519,7 @@ impl<F: Float> Graph<F> {
         self.check_out(from)?;
         self.check_in(to)?;
         match (from.node(), to.node()) {
-            (Some(a), Some(b)) if a == b => Err(ConnectError::Itself(a)),
+            (a, Some(b)) if a == b => Err(ConnectError::Itself(a)),
             _ => Ok(()),
         }
     }
@@ -2798,8 +2784,7 @@ impl<F: Float> Graph<F> {
     /// What the two ends are says what is connected:
     ///
     /// - an [`OutputPort`] into an [`InputPort`]: **one channel**
-    ///   ([`MainOutput::channel`] is the main output's channel, [`MainInput::channel`] a main
-    ///   input);
+    ///   ([`MainOutput::channel`] is the main output's channel);
     /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`MainOutput`]: **a main
     ///   bus**, channel `c` of the source into channel `c` of the sink. The two
     ///   must be the same width. A bus into the main output may be narrower than it:
@@ -3112,7 +3097,7 @@ impl<F: Float> Graph<F> {
     /// Whether `edge` still has the gain lane its target was made for: it is
     /// in the graph, not fading out, and holds an entry.
     fn has_gain_lane(&self, edge: ChannelEdge) -> bool {
-        let ends = [edge.source().node(), edge.sink().node()];
+        let ends = [Some(edge.source().node()), edge.sink().node()];
         ends.into_iter()
             .flatten()
             .all(|node| self.nodes.contains_key(&node))
@@ -3401,11 +3386,6 @@ impl<F: Float> Graph<F> {
     }
 
     // --- Shape ---
-
-    /// The graph's main input count.
-    pub fn inputs(&self) -> usize {
-        self.editor.spec().topology.inputs.count() as usize
-    }
 
     /// The graph's main output count.
     pub fn outputs(&self) -> usize {
@@ -4203,14 +4183,7 @@ mod tail_tests {
     }
 
     fn graph_at(rate: SampleRate) -> Graph {
-        Graph::new(
-            ChannelLayout::STEREO,
-            2,
-            rate,
-            MaxBlock::of(Samples::new(64)),
-            None,
-            test_tempo(),
-        )
+        Graph::new(2, rate, MaxBlock::of(Samples::new(64)), None, test_tempo())
     }
 
     /// **The tail and latency limits are the graph's rate's**: sixty and ten
@@ -4342,7 +4315,6 @@ mod main_output_fade_tests {
 
     fn graph() -> (Graph, NodeKey) {
         let mut g = Graph::new(
-            ChannelLayout::STEREO,
             2,
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),

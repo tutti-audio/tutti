@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{Harness, Kind, RingingNode, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind,
     EventOutputPort, Executor, FadeLaw, ForkByClone, ForkTarget, GraphSpec, InputPort, Io,
@@ -466,7 +466,7 @@ fn a_bypass_with_no_pass_is_refused() {
     };
     let named = |s: &[Speaker]| {
         Bus::new(
-            BusTopology::new(s.iter().copied()).expect("a bus"),
+            ChannelTopology::new(s.iter().copied()).expect("a bus"),
             BusRole::Main,
         )
     };

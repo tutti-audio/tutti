@@ -4,7 +4,9 @@ use crate::test_rng::uniform;
 use crate::{AboveNyquist, FramingError};
 use std::f64::consts::TAU;
 use tutti_dsp::{HopSize, WindowLength};
+use tutti_fixtures::signal::sine;
 use tutti_rt::SplitMix64;
+use tutti_units::Hz;
 use tutti_units::Samples;
 use tutti_units::{Amplitude, SampleRate};
 
@@ -46,12 +48,6 @@ fn push_frames(state: &mut SpectrumMeter<f32>, block: &[f32]) -> bool {
     !frames.is_empty()
 }
 
-fn tone(len: usize, freq: f64, amp: f64) -> Vec<f32> {
-    (0..len)
-        .map(|i| (amp * (TAU * freq * i as f64 / RATE).sin()) as f32)
-        .collect()
-}
-
 /// Feeds `signal` a hop at a time (so at most one frame completes per
 /// call), returning the state and the levels after each frame.
 fn run(cfg: &SpectrumConfig, signal: &[f32]) -> (SpectrumMeter<f32>, Vec<Vec<Db>>) {
@@ -69,6 +65,16 @@ fn argmax(levels: &[Db]) -> usize {
     (0..levels.len())
         .max_by(|&a, &b| levels[a].get().total_cmp(&levels[b].get()))
         .unwrap()
+}
+
+/// `len` samples of an `amp` sine at `freq` hertz, from phase 0.
+fn tone(len: usize, freq: f64, amp: f64) -> Vec<f32> {
+    sine(
+        Hz::new(freq),
+        Amplitude::new(amp),
+        SampleRate::of(RATE),
+        Samples::new(len),
+    )
 }
 
 /// A sine centred on a bin reads `20 log10(a)` there. The periodic Hann's

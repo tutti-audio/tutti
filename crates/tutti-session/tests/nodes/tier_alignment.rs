@@ -22,7 +22,7 @@ use std::path::Path;
 use tutti_buffers::Interleaved;
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
@@ -82,7 +82,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     // The latent path, on output 2.
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     let eff = s.graph().add(LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(-0.3),
             ..LimiterControls::DEFAULT

@@ -4,7 +4,7 @@
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::assert_declared_tail;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
@@ -38,7 +38,7 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
 }
 
 fn chorus() -> ModDelayNode<f32> {
-    ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO))
+    ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO))
 }
 
 fn last_nonzero(channel: &[f32]) -> Option<usize> {
@@ -122,8 +122,8 @@ fn the_general_midi_chorus_declares_its_delay_as_its_tail() {
 #[test]
 fn a_recirculating_chorus_keeps_an_unknown_tail() {
     for node in [
-        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
-        ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::flanger(ChannelTopology::STEREO)),
     ] {
         assert_eq!(prepared(node, SR, BLOCK).shape().tail, Tail::Unknown);
     }

@@ -302,12 +302,13 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{
-        RATE, amplitude_at, assert_cell_ramps, drive_block, prepared, render_change,
-        render_chunked, sine,
+        RATE, assert_cell_ramps, drive_block, prepared, render_change, render_chunked, sine,
     };
     use tutti_buffers::Planes;
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::Hz;
     use tutti_units::UnitParam;
 
     const KINDS: [ShapeKind; 7] = [
@@ -507,10 +508,10 @@ mod tests {
         let mut node = prepared(node);
         let y = render_chunked(&mut node, &[x], 256).remove(0);
         let window = &y[600..];
-        let fundamental = amplitude_at(window, HZ, rate);
+        let fundamental = amplitude_at(window, Hz::new(HZ), SampleRate::of(rate));
         let alias = [3_000.0, 15_000.0, 21_000.0]
             .into_iter()
-            .map(|hz| amplitude_at(window, hz, rate))
+            .map(|hz| amplitude_at(window, Hz::new(hz), SampleRate::of(rate)))
             .fold(0.0, f64::max);
         20.0 * (alias / fundamental).log10()
     }

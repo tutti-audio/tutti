@@ -94,7 +94,7 @@ fn every_bed_builds_a_panner_of_its_width_and_mono_is_refused() {
 fn a_bus_that_is_not_a_bed_is_refused_by_name() {
     let foa = tutti_buffers::AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
     let unassigned =
-        tutti_buffers::BusTopology::unassigned(tutti_buffers::ChannelLayout::from(6u16))
+        tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::from(6u16))
             .expect("six channels fit a bus");
     for bus in [unassigned, tutti_buffers::ChannelTopology::Ambisonic(foa)] {
         let error = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bus)).unwrap_err();

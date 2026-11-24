@@ -8,7 +8,7 @@
 //! the block the toggle lands on; each render below is longer, and only the
 //! frames after it are compared.
 
-use tutti_buffers::{BusTopology, MaxBlock, Planes};
+use tutti_buffers::{ChannelTopology, MaxBlock, Planes};
 use tutti_fixtures::signal::bits;
 use tutti_graph::{IntoNode, NodeKey, NodeMode, Prepare, Renderer, declick_frames};
 use tutti_nodes::{BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, SvfType};
@@ -60,7 +60,9 @@ fn a_bypassed_band_is_its_input_bit_for_bit() {
 /// fader again, exactly: the mute never touched the fader's cell.
 #[test]
 fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
-    let (mut s, key, controls) = solo(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let (mut s, key, controls) = solo(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::STEREO,
+    )));
     assert!(controls.set(UnitParam::Volume, 0.75));
     // No denormal: the node multiplies under flush-to-zero, this test does not.
     let mut x = input();
