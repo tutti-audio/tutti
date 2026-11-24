@@ -88,7 +88,8 @@ pub(crate) struct Driven {
 }
 
 /// The lanes with a knob, by the parameter they drive.
-pub(crate) type Knobs = std::collections::BTreeMap<ParamId, tutti_nodes::automation::LaneControls>;
+pub(crate) type Knobs =
+    std::collections::BTreeMap<ParamId, tutti_nodes::automation::ForeignLaneControls>;
 
 impl Driven {
     /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
@@ -97,7 +98,7 @@ impl Driven {
         self.knobs
             .lock()
             .get(&id)
-            .is_some_and(|lane| lane.store(value.get()))
+            .is_some_and(|lane| lane.store(value))
     }
 
     /// Replaces the driven parameters with `knobs`; nothing is touched while
@@ -116,7 +117,7 @@ impl Driven {
     pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         for (&id, lane) in self.knobs.lock().iter() {
             if let Some(knob) = lane.value() {
-                mirror.report(id, Normalized::clamped(knob));
+                mirror.report(id, knob);
             }
         }
     }

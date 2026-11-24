@@ -106,7 +106,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         .build()
         .expect("a valid program");
     let lfo = ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::of(0.0, 1.0))
-        .knob(0.5)
+        .knob(tutti_units::Normalized::of(0.5))
         .build()
         .0;
     let prepare = tutti_graph::Prepare::new(

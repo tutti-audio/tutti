@@ -26,7 +26,10 @@ use tutti_modulation::{
     LayerId, LfoShape, PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
 };
 use tutti_music::FrameClock;
-use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
+use tutti_nodes::automation::{
+    ControlLaneNode, ForeignLaneConfig, LaneControls, LaneKind, PortLane, UnitLaneConfig,
+};
+use tutti_rt::ParamCell;
 use tutti_units::{
     Beat, BeatsPerCycle, Bipolar, Bpm, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
@@ -177,17 +180,37 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
 
 /// A native lane for `probe`'s cutoff: knob `knob` (its own cell, as a
 /// node's `Param` cell would be), the port's own range cell.
-fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f64>) -> ControlLaneNode {
+fn native(
+    ed: &Editor,
+    probe: u64,
+    program: ControlProgram,
+    knob: Option<f64>,
+) -> ControlLaneNode<PortLane> {
+    native_on(ed, probe, program, knob.map(knob_cell))
+}
+
+/// A knob cell at `value`, as a node's `Param` cell would be.
+fn knob_cell(value: f64) -> ParamCell {
+    Arc::new(AtomicF64::new(value)).into()
+}
+
+/// [`native`] over the knob cell `knob`, which the caller keeps to write.
+fn native_on(
+    ed: &Editor,
+    probe: u64,
+    program: ControlProgram,
+    knob: Option<ParamCell>,
+) -> ControlLaneNode<PortLane> {
     let mut config = UnitLaneConfig::new(ParamKey::<Hz>::CUTOFF.addr(), program)
         .range(ed.param_range_cell(cutoff(probe)).expect("committed"));
     if let Some(k) = knob {
-        config = config.knob(Arc::new(AtomicF64::new(k)).into());
+        config = config.knob(k);
     }
     ControlLaneNode::from(config)
 }
 
 /// Inserts `lane` at `key`, wired to `probe`'s cutoff; returns its controls.
-fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneControls {
+fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode<PortLane>, probe: u64) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.spec_mut()
         .connect_param(cutoff(probe), EventOutputPort::new(NodeKey(key), 0));
@@ -196,7 +219,12 @@ fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneCon
 
 /// Inserts a `SegSink` at `sink` fed by `lane` at `key`, its two outputs
 /// appended to the graph's.
-fn wire_sink(ed: &mut Editor, key: u64, lane: ControlLaneNode, sink: u64) -> LaneControls {
+fn wire_sink<K: LaneKind>(
+    ed: &mut Editor,
+    key: u64,
+    lane: ControlLaneNode<K>,
+    sink: u64,
+) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
     let s = ed.spec_mut();
@@ -349,8 +377,8 @@ fn triangle(cycles: f64) -> f64 {
 /// frame:
 ///
 /// - knob 1000 under a constant 500 automation reads 500.0 on every frame,
-///   on a native port (exact mode) and on a plugin lane (the program's own
-///   evaluation: a plugin lane never takes exact mode);
+///   on a native port (exact mode) and, over knob 1, on a plugin lane (the
+///   program's own evaluation: a plugin lane never takes exact mode);
 /// - a ±100 bar-locked square (depth 0.125 of a 100..900 range) on knob 500
 ///   reads 600.0 for the first two beats and 400.0 for the next two, its
 ///   edge on its own frame (48 000) inside a block;
@@ -375,7 +403,7 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
         program(Some(flat), vec![]),
         ParamRange::of(0.0, 2000.0),
     )
-    .knob(1000.0)
+    .knob(Normalized::of(1.0))
     .build()
     .0;
     wire_sink(&mut ed, 3, plugin, 4);
@@ -557,7 +585,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
         &mut ed,
         300,
         ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::of(0.0, 1.0))
-            .knob(0.5)
+            .knob(Normalized::of(0.5))
             .build()
             .0,
         301,
@@ -1258,7 +1286,7 @@ fn an_unread_source_is_no_point() {
         .build()
         .expect("valid");
     let lane = ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0))
-        .knob(0.25)
+        .knob(Normalized::of(0.25))
         .build()
         .0;
     wire_sink(&mut ed, 1, lane, 2);
@@ -1337,7 +1365,8 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
 #[test]
 fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     let (mut ed, mut exec) = probes(64, &[2], (0.0, 1000.0));
-    let lane = native(&ed, 2, program(None, vec![]), Some(300.0));
+    let knob = knob_cell(300.0);
+    let lane = native_on(&ed, 2, program(None, vec![]), Some(knob.clone()));
     let controls = wire(&mut ed, 1, lane, 2);
     ed.commit().expect("commits");
     let (mut host, mut live) = (Host::new(), Vec::new());
@@ -1353,7 +1382,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
                 .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
-    assert!(controls.store(700.0));
+    knob.store(700.0, std::sync::atomic::Ordering::Release);
     let flat: Arc<dyn Curve> = Arc::new(trajectory(&[(0.0, 50.0)]));
     controls.publish(program(Some(flat), vec![]));
 
@@ -1374,32 +1403,24 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     );
 }
 
-/// `LaneControls`' cells: a plugin lane's knob and range are its own, a
-/// native lane's range is its port's (set through the editor), and a lane
-/// built without a knob refuses one.
+/// A foreign lane's knob is its own cell, written and read through its
+/// controls; one built without a knob refuses a write.
 #[test]
-fn lane_controls_reach_their_own_cells() {
-    let plugin = ForeignLaneConfig::new(
-        ParamId::new(1),
-        ControlProgram::default(),
-        ParamRange::of(0.0, 1.0),
-    )
-    .knob(0.25)
-    .build()
-    .0;
-    let c = plugin.controls();
-    assert_eq!(c.value(), Some(0.25));
-    assert!(c.store(0.75));
-    assert_eq!(c.value(), Some(0.75));
-    let (mut ed, _exec) = probes(64, &[2], (5.0, 50.0));
-    let n = native(&ed, 2, ControlProgram::default(), None);
-    let c = n.controls();
-    assert!(!c.store(1.0), "no knob");
+fn foreign_controls_reach_the_lanes_own_knob() {
+    let config = || {
+        ForeignLaneConfig::new(
+            ParamId::new(1),
+            ControlProgram::default(),
+            ParamRange::of(0.0, 1.0),
+        )
+    };
+    let (_lane, c) = config().knob(Normalized::of(0.25)).build();
+    assert_eq!(c.value(), Some(Normalized::of(0.25)));
+    assert!(c.store(Normalized::of(0.75)));
+    assert_eq!(c.value(), Some(Normalized::of(0.75)));
+    let (_lane, c) = config().build();
+    assert!(!c.store(Normalized::of(1.0)), "no knob");
     assert_eq!(c.value(), None);
-    assert_eq!(c.range(), (5.0, 50.0));
-    ed.set_param_range(cutoff(2), ParamRange::of(6.0, 60.0))
-        .expect("a probe");
-    assert_eq!(c.range(), (6.0, 60.0), "the port's own cell");
 }
 
 /// **A constant layer (a macro) does not move.** A plugin lane whose one
@@ -1433,7 +1454,7 @@ fn a_constant_layer_is_one_held_value() {
         let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
         let p = program(None, layers);
         let lane = ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0))
-            .knob(0.25)
+            .knob(Normalized::of(0.25))
             .build()
             .0;
         wire_sink(&mut ed, 1, lane, 2);

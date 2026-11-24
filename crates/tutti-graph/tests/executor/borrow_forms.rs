@@ -334,13 +334,13 @@ fn every_borrow_form_is_reached_and_renders_alike_on_any_participant_count() {
             ..
         } = *op
         {
-            let events = event_in.len + event_out.len > 0;
-            let wide = audio_in.len.max(audio_out.len);
-            let ewide = event_in.len.max(event_out.len);
+            let events = event_in.len() + event_out.len() > 0;
+            let wide = audio_in.len().max(audio_out.len());
+            let ewide = event_in.len().max(event_out.len());
             if events && in_place.0 != 0 {
                 forms.insert("general, in place");
             }
-            forms.insert(match (audio_in.len, audio_out.len, events) {
+            forms.insert(match (audio_in.len(), audio_out.len(), events) {
                 (_, _, true) if wide <= 4 && ewide <= 4 => "general 4/4",
                 (_, _, true) if wide <= 16 && ewide <= 4 => "general 16/4",
                 (_, _, true) => "general wide",
@@ -395,8 +395,8 @@ fn every_borrow_form_is_reached_and_renders_alike_on_any_participant_count() {
                     event_in,
                     in_place,
                     ..
-                } if plan.units()[unit as usize].key == k => {
-                    Some((audio_in.len, event_in.len, in_place.0))
+                } if plan.units()[unit.index()].key == k => {
+                    Some((audio_in.len(), event_in.len(), in_place.0))
                 }
                 _ => None,
             })

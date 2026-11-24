@@ -280,7 +280,9 @@ impl Host {
         decl: &Declarations<'_>,
         ed: &mut Editor,
     ) -> Result<Applied, ReconcileError> {
-        m.apply(decl, ed, self, &|at| self.cell(at), &|_, _| Some(Some(0.5)))
+        m.apply(decl, ed, self, &|at| self.cell(at), &|_, _| {
+            Some(Some(tutti_units::Normalized::of(0.5)))
+        })
     }
 }
 
