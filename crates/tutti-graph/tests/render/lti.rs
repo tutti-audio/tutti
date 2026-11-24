@@ -688,7 +688,8 @@ fn the_grammar_builds_compensation_loops_fan_in_weights_and_modes() {
             None,
         )
         .expect("compiles");
-        compensated += usize::from(!plan.delays().is_empty());
+        compensated +=
+            usize::from(!(plan.audio_delays().is_empty() && plan.event_delays().is_empty()));
     }
     assert!(loops > 50, "only {loops} graphs hold a loop");
     assert!(fan_in > 100, "only {fan_in} graphs fan in at a port");

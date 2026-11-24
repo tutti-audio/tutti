@@ -193,7 +193,8 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         event_values,
         value_readers,
         deps,
-        delays,
+        audio_delays,
+        event_delays,
         audio_feedback,
         event_feedback,
         taps,
@@ -359,7 +360,8 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         event_values,
         value_readers,
         deps,
-        delays,
+        audio_delays,
+        event_delays,
         audio_feedback: audio_feedback
             .into_iter()
             .zip(&audio_feedback_at)

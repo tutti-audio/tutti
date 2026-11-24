@@ -300,7 +300,10 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         &[Samples::new(0); 3],
         "no output pre-rolls"
     );
-    assert!(plan.delays().is_empty(), "the compiler spliced a delay");
+    assert!(
+        plan.audio_delays().is_empty() && plan.event_delays().is_empty(),
+        "the compiler spliced a delay"
+    );
 }
 
 /// A summing bus does not hide the latency of what feeds it.

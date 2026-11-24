@@ -178,8 +178,6 @@ impl MidiHardwareConfig {
 /// it reads its answers from goes after.
 struct Held {
     stream: Negotiation,
-    /// Where the input's event times come from.
-    timing: InputTiming,
     /// Whether the port's input edge is copying SysEx7 packets to the stream
     /// ring, for the Identity Request or MIDI-CI.
     hearing: bool,
@@ -417,12 +415,11 @@ impl MidiSession {
         let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
         let held = Held {
             stream,
-            timing,
             hearing: false,
             lost_seen: 0,
             input,
         };
-        follow_timing(&self.ports, &held);
+        follow_timing(&self.ports, &held, timing);
         self.inputs.insert(id, held);
         // The negotiation starts at the next poll.
         self.ports.ring();
@@ -578,6 +575,7 @@ impl MidiSession {
         });
         let ci = presented.is_some();
         let ports = &*self.ports;
+        let timing = self.config.input_timing;
         for (id, held) in &mut self.inputs {
             let slot = held.input.port();
             // The copy of the SysEx7 packets is on before a request goes out
@@ -601,7 +599,7 @@ impl MidiSession {
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {
-                follow_timing(ports, held);
+                follow_timing(ports, held, timing);
                 polled.push(Polled::Stream(id.clone(), Box::new(stream)));
             }
             polled.extend(
@@ -905,7 +903,7 @@ impl MidiSession {
             .map_or_else(Learned::new, |stream| stream.said());
         for peer in held.stream.ci_peers().iter() {
             let peer = peer.peer();
-            let mut said = Learned::new().identified(peer.discovery().identity);
+            let mut said = Learned::new().identified(peer.discovery().body.identity);
             if let Some(instance) = peer.product_instance_id() {
                 said = said.instanced(*instance);
             }
@@ -929,13 +927,14 @@ impl MidiSession {
 
 /// Points the port's event times at what the device's configuration says: its
 /// JR Timestamps where it sends them and the input was opened to use them.
-/// Arrival until the device has settled.
-fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
+/// Arrival until the device has settled. `timing` is what the input was opened
+/// with ([`MidiHardwareConfig::input_timing`]).
+fn follow_timing(ports: &HardwareMidiInputs, held: &Held, timing: InputTiming) {
     let source = held
         .stream
         .settled()
         .map_or(InputTiming::Arrival, |stream| {
-            held.timing.applied(stream.config())
+            timing.applied(stream.config())
         });
     // The port is the held input's own, so it is open while `held` is.
     let set = ports.set_input_timing(held.input.port(), source);
