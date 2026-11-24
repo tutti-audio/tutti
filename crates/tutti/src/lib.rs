@@ -903,12 +903,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl, NotADeviceId, NotASysexSize,
-        NotProfileChannels, NoteData, ProcessError, ProcessFeatures, ProfileChange,
-        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
-        SystemMessages,
+        DetailsData, DeviceBody, DiscoveryData, EnabledMpeZones, InquiryTarget,
+        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
+        ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
+        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
+        ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
@@ -950,10 +950,10 @@ pub mod midi {
         SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClipEventsKind, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError,
-        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
-        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
-        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
+        HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts,
+        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages,
+        SyncOut, SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{
         MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
@@ -1010,10 +1010,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId,
-        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
-        TrackError,
+        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowMachineControl,
+        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
+        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
+        NotInstrument, OpenMidiSink, Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
