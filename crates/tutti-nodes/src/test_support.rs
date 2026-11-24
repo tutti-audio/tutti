@@ -304,7 +304,7 @@ fn tail_rank(tail: tutti_units::Tail) -> u64 {
 /// kernel's `tail_of` does not fall as that control moves to the stated value: sweeping it over
 /// its raw `range` (the ends and nine interior points) never gives more than the figure at the
 /// stated value, with the other controls at their defaults and with each other control the
-/// tail reads at either end of its range. `ranges[k]` is row `k`'s raw range; rows the tail
+/// tail reads at either end of its range. Each stated value is one its own control accepts. `ranges[k]` is row `k`'s raw range; rows the tail
 /// never reads are not swept. The kernel is prepared.
 pub(crate) fn assert_tail_longest_at_stated<K: Kernel>(
     kernel: &mut K,
@@ -323,6 +323,10 @@ pub(crate) fn assert_tail_longest_at_stated<K: Kernel>(
             continue;
         };
         stated += 1;
+        assert!(
+            set.control(k).accepts(longest),
+            "row {k} states {longest}, which its own control refuses"
+        );
         let mut others = vec![base.clone()];
         for j in (0..n).filter(|&j| j != k && set.control(j).ring != Ring::Never) {
             for end in [ranges[j].0, ranges[j].1] {

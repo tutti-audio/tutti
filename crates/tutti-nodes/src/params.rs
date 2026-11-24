@@ -536,7 +536,8 @@ impl<S: ControlSet> Params<S> {
     /// The controls the tail is longest at, given which ports drive a control in the block:
     /// each driven control with a [`Ring::LongestAt`] at that value, every other as its cell
     /// holds it. `None` when a driven control the tail reads has no value stated. It depends
-    /// on which ports are driven, not on the values they carry.
+    /// on which ports are driven, not on the values they carry. A cell written during the
+    /// block is read as written.
     pub(crate) fn longest<G: Float>(&mut self, io: &Io<'_, G>) -> Option<S::Controls> {
         let n = self.cells.len();
         let mut value = [0.0f64; MAX_CONTROLS];
