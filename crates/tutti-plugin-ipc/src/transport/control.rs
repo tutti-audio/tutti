@@ -17,8 +17,8 @@
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
 use crate::transport::PendingLane;
 use crate::{
-    BlobWire, ControlRequest, Framed, Lane, LaneWire, LoadState, Message, OpenLane, ReqId, Request,
-    SetupSharedMemory, SlabHandle, SlabLayout, SlabWire, StageState,
+    ControlRequest, Framed, Lane, LoadState, Message, OpenLane, ReqId, Request, SetupSharedMemory,
+    SlabHandle, SlabLayout, StageState,
 };
 use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
 use tutti_plugin_types::StateUse;
@@ -78,14 +78,9 @@ fn send_failed(io: std::io::Error) -> IpcError {
 /// An object that follows the frame announcing it: the second half of
 /// [`send_attached`].
 pub(crate) trait Attached {
-    /// What the frame carries of the object.
-    type Wire;
     /// What the sender holds until the server has answered: a [`Lease`] for a blob
     /// read by name, the object itself where the server maps it by name, or `()`.
     type Held;
-
-    /// What the frame that announces this object carries.
-    fn wire(&self) -> Self::Wire;
 
     /// Writes the object to the connection, right after its frame.
     fn send(self, conn: Connection<'_>) -> std::io::Result<Self::Held>;
@@ -93,10 +88,7 @@ pub(crate) trait Attached {
 
 /// No object: the frame stands alone.
 impl Attached for () {
-    type Wire = ();
     type Held = ();
-
-    fn wire(&self) {}
 
     fn send(self, _: Connection<'_>) -> std::io::Result<()> {
         Ok(())
@@ -104,12 +96,7 @@ impl Attached for () {
 }
 
 impl Attached for Blob {
-    type Wire = BlobWire;
     type Held = Lease;
-
-    fn wire(&self) -> BlobWire {
-        Blob::wire(self)
-    }
 
     fn send(self, conn: Connection<'_>) -> std::io::Result<Lease> {
         Blob::send(self, conn)
@@ -117,12 +104,7 @@ impl Attached for Blob {
 }
 
 impl Attached for SlabHandle {
-    type Wire = SlabWire;
     type Held = Self;
-
-    fn wire(&self) -> SlabWire {
-        SlabHandle::wire(self)
-    }
 
     fn send(self, conn: Connection<'_>) -> std::io::Result<Self> {
         SlabHandle::send(&self, conn)?;
@@ -131,12 +113,7 @@ impl Attached for SlabHandle {
 }
 
 impl Attached for PendingLane {
-    type Wire = LaneWire;
     type Held = Self;
-
-    fn wire(&self) -> LaneWire {
-        PendingLane::wire(self)
-    }
 
     fn send(self, conn: Connection<'_>) -> std::io::Result<Self> {
         self.send_end(conn)?;
@@ -151,8 +128,10 @@ pub(crate) trait Announces: Message {
     /// What the request carries beside the object's wire.
     type Rest;
 
-    /// The request that announces an object by `wire`, with `rest` of its fields.
-    fn announce(wire: <Self::Object as Attached>::Wire, rest: Self::Rest) -> Self;
+    /// The request that announces `object`, with `rest` of its fields: what the
+    /// frame carries of the object (its wire, and its length where it has one)
+    /// is the object's own.
+    fn announce(object: &Self::Object, rest: Self::Rest) -> Self;
 }
 
 impl Announces for SetupSharedMemory {
@@ -160,8 +139,11 @@ impl Announces for SetupSharedMemory {
     /// The slab's layout.
     type Rest = SlabLayout;
 
-    fn announce(slab: SlabWire, layout: SlabLayout) -> Self {
-        Self { slab, layout }
+    fn announce(slab: &SlabHandle, layout: SlabLayout) -> Self {
+        Self {
+            slab: slab.wire(),
+            layout,
+        }
     }
 }
 
@@ -169,37 +151,43 @@ impl Announces for OpenLane {
     type Object = PendingLane;
     type Rest = Lane;
 
-    fn announce(wire: LaneWire, lane: Lane) -> Self {
-        Self { lane, wire }
+    fn announce(object: &PendingLane, lane: Lane) -> Self {
+        Self {
+            lane,
+            wire: object.wire(),
+        }
     }
 }
 
 impl Announces for LoadState {
     type Object = Blob;
-    /// What the state is restored for, and its length.
-    type Rest = (StateUse, u64);
+    /// What the state is restored for.
+    type Rest = StateUse;
 
-    fn announce(blob: BlobWire, (state_use, len): (StateUse, u64)) -> Self {
+    fn announce(blob: &Blob, state_use: StateUse) -> Self {
         Self {
             state_use,
-            len,
-            blob,
+            len: blob.byte_len(),
+            blob: blob.wire(),
         }
     }
 }
 
 impl Announces for StageState {
     type Object = Blob;
-    /// The state's length.
-    type Rest = u64;
+    /// Nothing: the state's length is the blob's.
+    type Rest = ();
 
-    fn announce(blob: BlobWire, len: u64) -> Self {
-        Self { len, blob }
+    fn announce(blob: &Blob, (): ()) -> Self {
+        Self {
+            len: blob.byte_len(),
+            blob: blob.wire(),
+        }
     }
 }
 
 /// A request that announces an object, with that object. The request is made by
-/// [`Announces::announce`] from the object's own wire, so the frame names this
+/// [`Announces::announce`] from the object itself, so the frame names this
 /// object and no other: a caller supplies the object and the request's other
 /// fields, and never a wire.
 pub(crate) struct Announced<M: Announces> {
@@ -211,14 +199,39 @@ impl<M: Announces> Announced<M> {
     /// `object`, with the request that announces it and carries `rest`.
     pub(crate) fn new(object: M::Object, rest: M::Rest) -> Self {
         Self {
-            msg: M::announce(object.wire(), rest),
+            msg: M::announce(&object, rest),
             object,
         }
     }
 
-    /// The request and the object it announces.
-    pub(crate) fn into_parts(self) -> (M, M::Object) {
-        (self.msg, self.object)
+    /// The request and the object it announces, the object's kind erased for a
+    /// queue that holds either.
+    pub(crate) fn detach(self) -> (M, Detached)
+    where
+        M::Object: Into<Detached>,
+    {
+        (self.msg, self.object.into())
+    }
+}
+
+/// The object of a queued [`Announced`], its kind erased so one queue holds
+/// either: sent only by [`send_detached`].
+pub(crate) enum Detached {
+    /// A state's blob.
+    Blob(Blob),
+    /// A slab.
+    Slab(SlabHandle),
+}
+
+impl From<Blob> for Detached {
+    fn from(blob: Blob) -> Self {
+        Self::Blob(blob)
+    }
+}
+
+impl From<SlabHandle> for Detached {
+    fn from(slab: SlabHandle) -> Self {
+        Self::Slab(slab)
     }
 }
 
@@ -237,17 +250,32 @@ pub(crate) fn send_attached<M: Announces>(
     id: ReqId,
     announced: Announced<M>,
 ) -> IpcResult<<M::Object as Attached>::Held> {
-    let (msg, object) = announced.into_parts();
+    let Announced { msg, object } = announced;
     send_object(stream, id, msg, object)
 }
 
-/// Writes the request `msg` and then `object`, which `msg` announces: for a
-/// request whose object travels apart from it (a queued command).
+/// Writes the request `msg` and then the object `detached`, which `msg`
+/// announces: for a request that travels apart from its object (a queued
+/// command). What the sender holds is a [`Lease`] for a blob.
 ///
 /// # Errors
 ///
 /// As [`send_attached`].
-pub(crate) fn send_object<A: Attached>(
+pub(crate) fn send_detached(
+    stream: &mut ControlStream,
+    id: ReqId,
+    msg: impl Into<ControlRequest>,
+    detached: Option<Detached>,
+) -> IpcResult<Option<Lease>> {
+    match detached {
+        Some(Detached::Blob(blob)) => send_object(stream, id, msg, blob).map(Some),
+        Some(Detached::Slab(slab)) => send_object(stream, id, msg, slab).map(|_| None),
+        None => send_object(stream, id, msg, ()).map(|()| None),
+    }
+}
+
+/// Writes the request `msg` and then `object`, which `msg` announces.
+fn send_object<A: Attached>(
     stream: &mut ControlStream,
     id: ReqId,
     msg: impl Into<ControlRequest>,
