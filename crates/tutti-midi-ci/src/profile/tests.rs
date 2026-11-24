@@ -178,12 +178,11 @@ fn a_list_of_more_than_14_bits_is_refused_and_the_most_is_written() {
 fn set_on_is_table_24_with_the_channels_requested_lsb_first() {
     let message = CiMessage::SetProfileOn {
         source: Muid::of(SRC),
-        ci_version: CI_VERSION,
-        to: Muid::of(DST),
-        target: ProfileTarget::Channel {
+        format: ProfileFormat::current(ProfileTarget::Channel {
             channel: MidiChannel::of(0),
             channels: ProfileChannels::of(130),
-        },
+        }),
+        to: Muid::of(DST),
         profile: piano(),
     };
     let mut want = preamble(0x00, 0x22, to_dst());
@@ -202,9 +201,8 @@ fn a_set_on_to_the_group_or_function_block_is_table_24_with_zero_channels() {
     ] {
         let message = CiMessage::SetProfileOn {
             source: Muid::of(SRC),
-            ci_version: CI_VERSION,
+            format: ProfileFormat::current(target),
             to: Muid::of(DST),
-            target,
             profile: piano(),
         };
         let mut want = preamble(device, 0x22, to_dst());
@@ -223,19 +221,18 @@ fn enabled_and_disabled_reports_at_the_group_or_function_block_are_zero_count_by
             (0x7Eu8, ProfileTarget::Group),
             (0x7F, ProfileTarget::FunctionBlock),
         ] {
-            let (source, ci_version, profile) = (Muid::of(SRC), CI_VERSION, piano());
+            let (source, format, profile) =
+                (Muid::of(SRC), ProfileFormat::current(target), piano());
             let message = if enabled {
                 CiMessage::ProfileEnabled {
                     source,
-                    ci_version,
-                    target,
+                    format,
                     profile,
                 }
             } else {
                 CiMessage::ProfileDisabled {
                     source,
-                    ci_version,
-                    target,
+                    format,
                     profile,
                 }
             };
@@ -261,9 +258,10 @@ fn a_version_1_set_on_to_the_group_has_no_count_bytes() {
         decoded(&bytes),
         CiMessage::SetProfileOn {
             source: Muid::of(SRC),
-            ci_version: CiVersion::of(1),
+            format: ProfileFormat::Version1 {
+                address: CiDeviceId::Group,
+            },
             to: Muid::of(DST),
-            target: ProfileTarget::Group,
             profile: piano(),
         }
     );
@@ -300,11 +298,16 @@ fn a_version_1_set_on_has_no_channels_field_and_reads_as_zero() {
     let mut bytes = preamble(0x7F, 0x22, to_dst());
     bytes[4] = 0x01;
     bytes.extend([0x7E, 1, 2, 3, 4]);
-    let CiMessage::SetProfileOn { target, .. } = decoded(&bytes) else {
+    let CiMessage::SetProfileOn { format, .. } = decoded(&bytes) else {
         panic!("a Set On")
     };
-    assert_eq!(target, ProfileTarget::FunctionBlock);
-    assert_eq!(target.channels(), ProfileChannels::BY_ADDRESS);
+    assert_eq!(
+        format,
+        ProfileFormat::Version1 {
+            address: CiDeviceId::FunctionBlock
+        }
+    );
+    assert_eq!(format.channels(), None);
     // One byte of the two is malformed, not absent.
     bytes.push(0x05);
     assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
@@ -339,15 +342,13 @@ fn enabled_and_disabled_reports_are_tables_26_and_27_to_the_broadcast_muid() {
         let message = if enabled {
             CiMessage::ProfileEnabled {
                 source,
-                ci_version: CI_VERSION,
-                target,
+                format: ProfileFormat::current(target),
                 profile,
             }
         } else {
             CiMessage::ProfileDisabled {
                 source,
-                ci_version: CI_VERSION,
-                target,
+                format: ProfileFormat::current(target),
                 profile,
             }
         };
@@ -368,14 +369,11 @@ fn a_version_1_report_has_no_channel_count_and_reads_as_zero() {
     let mut bytes = preamble(0x7F, 0x24, BROADCAST);
     bytes[4] = 0x01;
     bytes.extend([0x7E, 1, 2, 3, 4]);
-    let CiMessage::ProfileEnabled {
-        ci_version, target, ..
-    } = decoded(&bytes)
-    else {
+    let CiMessage::ProfileEnabled { format, .. } = decoded(&bytes) else {
         panic!("a report")
     };
-    assert_eq!(ci_version.get(), 1);
-    assert_eq!(target.channels(), ProfileChannels::BY_ADDRESS);
+    assert_eq!(format.ci_version().get(), 1);
+    assert_eq!(format.channels(), None);
 }
 
 /// Spec: m2-101/7.4#2, m2-101/7.5#2, m2-102/2.4#15, m2-102/2.4#18
@@ -711,9 +709,8 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
         (any_target(), to(), any_profile()).prop_map(|(target, to, profile)| {
             CiMessage::SetProfileOn {
                 source: Muid::of(SRC),
-                ci_version: CI_VERSION,
+                format: ProfileFormat::current(target),
                 to,
-                target,
                 profile,
             }
         }),
@@ -726,14 +723,12 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
         }),
         (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileEnabled {
             source: Muid::of(SRC),
-            ci_version: CI_VERSION,
-            target,
+            format: ProfileFormat::current(target),
             profile,
         }),
         (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileDisabled {
             source: Muid::of(SRC),
-            ci_version: CI_VERSION,
-            target,
+            format: ProfileFormat::current(target),
             profile,
         }),
         (head(), any_profile())
@@ -856,9 +851,8 @@ fn a_profile_on_request_has_the_body_of_the_message_on_a_link() {
     };
     let message = CiMessage::SetProfileOn {
         source: Muid::of(0x0102_0304),
-        ci_version: CI_VERSION,
+        format: ProfileFormat::current(on.target),
         to: Muid::of(0x0506_0708),
-        target: on.target,
         profile: on.profile,
     };
     assert_eq!(on.encode()[13..], message.encode()[13..]);
@@ -978,40 +972,73 @@ fn a_link_still_refuses_a_set_profile_on_from_the_broadcast_muid() {
 /// Spec: m2-101/5.4#11
 #[test]
 fn a_version_1_report_or_set_on_is_written_without_the_channel_count() {
-    let target = ProfileTarget::Channel {
-        channel: MidiChannel::of(0),
-        channels: ProfileChannels::of(5),
-    };
     let (source, to, profile) = (Muid::of(SRC), Muid::of(DST), piano());
-    let ci_version = CiVersion::of(1);
+    let format = ProfileFormat::Version1 {
+        address: CiDeviceId::Channel(MidiChannel::of(0)),
+    };
     for message in [
         CiMessage::SetProfileOn {
             source,
-            ci_version,
+            format,
             to,
-            target,
             profile,
         },
         CiMessage::ProfileEnabled {
             source,
-            ci_version,
-            target,
+            format,
             profile,
         },
         CiMessage::ProfileDisabled {
             source,
-            ci_version,
-            target,
+            format,
             profile,
         },
     ] {
         let bytes = message.encode();
         assert_eq!(bytes[4], 0x01);
-        assert_eq!(bytes[bytes.len() - 5..], [0x7E, 1, 2, 3, 4]);
-        assert_eq!(
-            bytes.len(),
-            preamble(0x00, 0x24, BROADCAST).len() + 5,
-            "{message:?}"
-        );
+        assert_eq!(bytes[13..], [0x7E, 1, 2, 3, 4], "{message:?}");
+        assert_eq!(decoded(&bytes), message);
     }
+}
+
+/// Spec: m2-101/5.3#6, m2-101/5.4#7
+#[test]
+fn a_version_1_header_over_a_body_with_a_count_reads_without_the_count() {
+    let mut bytes = preamble(0x00, 0x24, BROADCAST);
+    bytes[4] = 0x01;
+    bytes.extend([0x7E, 1, 2, 3, 4, 5, 0]);
+    let CiMessage::ProfileEnabled { format, .. } = decoded(&bytes) else {
+        panic!("a report")
+    };
+    assert_eq!(
+        format,
+        ProfileFormat::Version1 {
+            address: CiDeviceId::Channel(MidiChannel::of(0))
+        }
+    );
+}
+
+/// Spec: m2-101/5.3#4
+#[test]
+fn a_later_version_report_keeps_the_version_it_carries_with_its_count() {
+    let mut bytes = preamble(0x00, 0x24, BROADCAST);
+    bytes[4] = 0x03;
+    bytes.extend([0x7E, 1, 2, 3, 4, 5, 0]);
+    let CiMessage::ProfileEnabled { format, .. } = decoded(&bytes) else {
+        panic!("a report")
+    };
+    assert_eq!(format.ci_version(), CiVersion::of(3));
+    assert_eq!(format.channels(), Some(ProfileChannels::of(5)));
+}
+
+#[test]
+fn a_counted_version_is_a_version_with_a_count_field() {
+    use tutti_fixtures::{RangeContract, check_range_contract};
+    check_range_contract(&RangeContract {
+        new: CountedVersion::new,
+        get: CountedVersion::get,
+        of: Some(CountedVersion::of),
+        valid: &[2, 3, 0x1F],
+        invalid: &[0, 1, 0x20, 0xFF],
+    });
 }

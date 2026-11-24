@@ -973,8 +973,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher};
 use tutti_midi_ci::Whole;
 use tutti_midi_ci::{
-    PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList, ProfileLists,
-    ProfileOutcome, ProfileRequest, ProfileState, ProfileTarget, StandardProfile,
+    PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileFormat, ProfileId, ProfileList,
+    ProfileLists, ProfileOutcome, ProfileRequest, ProfileState, ProfileTarget, StandardProfile,
 };
 use tutti_ump::MidiChannel;
 
@@ -1217,8 +1217,7 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
         GROUP_0,
         &CiMessage::ProfileEnabled {
             source: peer(),
-            ci_version: CI_VERSION,
-            target: on_channel(0, ProfileChannels::of(3)),
+            format: ProfileFormat::current(on_channel(0, ProfileChannels::of(3))),
             profile: profile(2),
         },
         120,
@@ -1285,8 +1284,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
             GROUP_0,
             &CiMessage::ProfileEnabled {
                 source: peer(),
-                ci_version: CI_VERSION,
-                target: on_channel(0, ProfileChannels::of(channels)),
+                format: ProfileFormat::current(on_channel(0, ProfileChannels::of(channels))),
                 profile: ProfileId::MPE,
             },
             120,
@@ -1303,8 +1301,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         GROUP_0,
         &CiMessage::ProfileDisabled {
             source: peer(),
-            ci_version: CI_VERSION,
-            target: on_channel(0, ProfileChannels::of(16)),
+            format: ProfileFormat::current(on_channel(0, ProfileChannels::of(16))),
             profile: ProfileId::MPE,
         },
         140,
@@ -1326,8 +1323,10 @@ fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
             GROUP_0,
             &CiMessage::ProfileEnabled {
                 source: peer(),
-                ci_version: CI_VERSION,
-                target: on_channel(manager, ProfileChannels::of(channels.into())),
+                format: ProfileFormat::current(on_channel(
+                    manager,
+                    ProfileChannels::of(channels.into()),
+                )),
                 profile: ProfileId::MPE,
             },
             ms,
@@ -1438,8 +1437,7 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
         GROUP_0,
         &CiMessage::ProfileEnabled {
             source: peer(),
-            ci_version: CI_VERSION,
-            target: ProfileTarget::Group,
+            format: ProfileFormat::current(ProfileTarget::Group),
             profile: profile(3),
         },
         120,
@@ -1461,8 +1459,7 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
         GROUP_0,
         &CiMessage::ProfileDisabled {
             source: peer(),
-            ci_version: CI_VERSION,
-            target: ProfileTarget::Group,
+            format: ProfileFormat::current(ProfileTarget::Group),
             profile: profile(3),
         },
         150,

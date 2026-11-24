@@ -12,8 +12,9 @@
 //! since §7.12 allows the Broadcast MUID only where the Profile defines it. A
 //! message of the wrong kind decodes to an [`Unread`](super::Unread) with
 //! [`WrongDestination`](super::UnreadReason::WrongDestination). A Message Format
-//! Version 1 sender has no Number of Channels field; it reads as 0, which §5.3's rule to
-//! read only the fields of the received version asks for.
+//! Version 1 sender has no Number of Channels field, which §5.3's rule to read
+//! only the fields of the received version asks for: [`ProfileFormat`] has no
+//! count in its Version 1 arm.
 //!
 //! [`ProfileId::from_bytes`] refuses what [`ProfileId::to_bytes`] could not give
 //! back, a one-byte id followed by a non-zero byte (§7.3.1 fills the rest
@@ -654,6 +655,111 @@ impl ProfileTarget {
         match self {
             Self::Channel { channels, .. } => channels,
             Self::Group | Self::FunctionBlock => ProfileChannels::BY_ADDRESS,
+        }
+    }
+}
+
+tutti_units::ranged! {
+    /// A Message Format Version that has the Number of Channels field of Set
+    /// Profile On, Profile Enabled and Profile Disabled (§7.8, §7.10, §7.11):
+    /// `0x02` to `0x1F`.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    CountedVersion(u8), NotCountedVersion, "a Message Format Version with a Number of Channels (0x02 to 0x1F)",
+    |raw| raw >= 2 && raw & 0xE0 == 0
+}
+
+impl From<CountedVersion> for CiVersion {
+    fn from(version: CountedVersion) -> Self {
+        Self::of(version.get())
+    }
+}
+
+/// What a Set Profile On, Profile Enabled or Profile Disabled message names
+/// and in which Message Format Version, so that the version and the Number of
+/// Channels field cannot disagree (§5.3, §7.8, §7.10, §7.11).
+///
+/// A Version 1 message is the Profile Id alone and names only an address; a
+/// later version also carries the Number of Channels, which a
+/// [`ProfileTarget`] holds with the address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProfileFormat {
+    /// Message Format Version 1: no Number of Channels field.
+    Version1 {
+        /// The Device ID of the Profile Destination.
+        address: CiDeviceId,
+    },
+    /// Message Format Version 2 or later: the Number of Channels follows the
+    /// Profile Id.
+    Counted {
+        /// The version the message carries.
+        ci_version: CountedVersion,
+        /// The address and the Channels named there.
+        target: ProfileTarget,
+    },
+}
+
+impl ProfileFormat {
+    /// A message at this codec's [`CI_VERSION`] naming `target`.
+    #[must_use]
+    pub const fn current(target: ProfileTarget) -> Self {
+        Self::Counted {
+            ci_version: CountedVersion::of(CI_VERSION.get()),
+            target,
+        }
+    }
+
+    /// The Device ID the message goes to.
+    #[must_use]
+    pub const fn address(self) -> CiDeviceId {
+        match self {
+            Self::Version1 { address } => address,
+            Self::Counted { target, .. } => target.address(),
+        }
+    }
+
+    /// The Message Format Version byte.
+    #[must_use]
+    pub fn ci_version(self) -> CiVersion {
+        match self {
+            Self::Version1 { .. } => CiVersion::of(1),
+            Self::Counted { ci_version, .. } => ci_version.into(),
+        }
+    }
+
+    /// The Number of Channels field, none for Version 1, which has no such field.
+    #[must_use]
+    pub const fn channels(self) -> Option<ProfileChannels> {
+        match self {
+            Self::Version1 { .. } => None,
+            Self::Counted { target, .. } => Some(target.channels()),
+        }
+    }
+
+    /// The format a header of `ci_version` at `address` carries, with the
+    /// Number of Channels as the body read it. A Version 1 header has no such
+    /// field: a count its body carries is not read (§5.3).
+    ///
+    /// # Errors
+    ///
+    /// The count, for a Group or Function Block address that carries one other
+    /// than 0.
+    pub(crate) fn from_wire(
+        ci_version: CiVersion,
+        address: CiDeviceId,
+        channels: ProfileChannels,
+    ) -> Result<Self, u16> {
+        let target = ProfileTarget::from_wire(address, channels)?;
+        Ok(match CountedVersion::new(ci_version.get()) {
+            Some(ci_version) => Self::Counted { ci_version, target },
+            None => Self::Version1 { address },
+        })
+    }
+
+    /// Appends the body: the Profile Id, and the count when the version has one.
+    pub(super) fn encode_body(self, profile: ProfileId, out: &mut impl Extend<u8>) {
+        out.extend(profile.to_bytes());
+        if let Some(channels) = self.channels() {
+            out.extend(channels.to_le7());
         }
     }
 }

@@ -77,9 +77,9 @@ use crate::deadline::Deadline;
 use tutti_ump::{MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, U7};
 
 use super::{
-    Ack, CiDeviceId, CiHeader, CiMessage, CiVersion, Decoded, Destination, DetailsData,
-    InquiryTarget, Muid, Nak, PEER_REPLY_TIMEOUT, ProfileChannels, ProfileId, ProfileLists,
-    ProfileState, ProfileTarget, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY,
+    Ack, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DetailsData, InquiryTarget, Muid,
+    Nak, PEER_REPLY_TIMEOUT, ProfileChannels, ProfileFormat, ProfileId, ProfileLists, ProfileState,
+    ProfileTarget, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY,
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
 };
 
@@ -473,9 +473,8 @@ impl ProfileInitiator {
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOn {
                 source: header.source,
-                ci_version: header.ci_version,
+                format: ProfileFormat::current(target),
                 to,
-                target,
                 profile,
             }
         })])
@@ -557,16 +556,14 @@ impl ProfileInitiator {
         &mut self,
         profile: ProfileId,
         state: ProfileState,
-        target: ProfileTarget,
-        ci_version: CiVersion,
+        format: ProfileFormat,
         actions: &mut Vec<ProfileAction>,
     ) {
-        let address = target.address();
-        let channels = target.channels();
+        let address = format.address();
         let entry = ProfileEntry {
             state,
             // A Version 1 sender has no count to report.
-            channels: (ci_version.get() >= 2).then_some(channels),
+            channels: format.channels(),
         };
         if self.table.set(address, profile, entry) {
             actions.push(ProfileAction::Changed {
@@ -585,7 +582,10 @@ impl ProfileInitiator {
             let pending = self.pending.remove(at);
             actions.push(ProfileAction::Resolved {
                 request: pending.request,
-                outcome: ProfileOutcome::Reported { state, channels },
+                outcome: ProfileOutcome::Reported {
+                    state,
+                    channels: format.channels().unwrap_or(ProfileChannels::BY_ADDRESS),
+                },
             });
         }
     }
@@ -689,29 +689,13 @@ impl Initiator for ProfileInitiator {
                 self.on_reply(address, profiles, &mut actions);
             }
             CiMessage::ProfileEnabled {
-                ci_version,
-                target,
-                profile,
-                ..
-            } if from_peer => self.on_state(
-                *profile,
-                ProfileState::Enabled,
-                *target,
-                *ci_version,
-                &mut actions,
-            ),
+                format, profile, ..
+            } if from_peer => self.on_state(*profile, ProfileState::Enabled, *format, &mut actions),
             CiMessage::ProfileDisabled {
-                ci_version,
-                target,
-                profile,
-                ..
-            } if from_peer => self.on_state(
-                *profile,
-                ProfileState::Disabled,
-                *target,
-                *ci_version,
-                &mut actions,
-            ),
+                format, profile, ..
+            } if from_peer => {
+                self.on_state(*profile, ProfileState::Disabled, *format, &mut actions)
+            }
             CiMessage::ProfileAdded { profile, .. } if from_peer => {
                 let entry = ProfileEntry {
                     state: ProfileState::Disabled,

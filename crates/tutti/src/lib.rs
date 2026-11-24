@@ -909,11 +909,12 @@ pub mod midi {
         ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
         ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
+    pub use tutti_midi_ci::{
+        CountedVersion, NotCountedVersion, NotSetProfileOn, ProfileChannels, ProfileFormat,
+        ProfileId, ProfileOnRequest, ProfileTarget,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
-    pub use tutti_midi_ci::{
-        NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
-    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
     #[cfg(feature = "midi-hardware")]
