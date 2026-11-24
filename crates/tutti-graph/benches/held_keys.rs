@@ -92,7 +92,7 @@ fn rig(k: u32, sinks: u64) -> Executor {
             EventInputPort::new(n, 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

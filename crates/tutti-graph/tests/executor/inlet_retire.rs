@@ -28,7 +28,7 @@ fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
 
 fn outputs(ed: &mut Editor) {
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))))
-        .expect("the sources exist");
+        .unwrap();
 }
 
 /// Replacing an inlet through a cut and through a crossfade, then removing
@@ -61,8 +61,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     }
 
     ed.remove(KEY);
-    ed.wire_outputs(vec![PortSource::Zero; 2])
-        .expect("the sources exist");
+    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+        .unwrap();
     ed.commit().expect("compiles");
     exec.apply_pending();
     render(&mut exec, 2);

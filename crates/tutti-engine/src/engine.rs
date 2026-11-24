@@ -2050,7 +2050,7 @@ mod tests {
         use tutti_graph::{OutputPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
         ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-            .expect("the sources exist");
+            .unwrap();
         ed.commit().expect("commits");
     }
 
@@ -3021,7 +3021,7 @@ mod tests {
         ));
         ed.insert(NodeKey(1), "probe", tutti_graph::Unforkable(TempoProbe));
         ed.wire_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))))
-            .expect("the sources exist");
+            .unwrap();
         ed.commit().expect("commits");
         let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
         transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
@@ -3040,7 +3040,7 @@ mod tests {
         use tutti_graph::{NodeKey, OutputPort, PortSource};
         let dc = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         ed.wire_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }))
-            .expect("the sources exist");
+            .unwrap();
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -3483,7 +3483,7 @@ mod tests {
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc =
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(tutti_graph::NodeKey(1), 0));
-        ed.wire_outputs([dc, dc]).expect("the sources exist");
+        ed.wire_outputs([dc, dc]).unwrap();
         ed.commit().expect("commits");
         heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
@@ -3564,7 +3564,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.wire_outputs([count, late]).expect("the sources exist");
+        ed.wire_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3579,7 +3579,7 @@ mod tests {
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.declare_main_output(ed.spec().main_output, id);
-        ed.wire_outputs([late, count]).expect("the sources exist");
+        ed.wire_outputs([late, count]).unwrap();
         ed.commit().expect("commits");
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         // The counter's value at absolute frame `t` is `t + 1`; delayed by 16
@@ -3620,7 +3620,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.wire_outputs([count, late]).expect("the sources exist");
+        ed.wire_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3638,8 +3638,7 @@ mod tests {
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.declare_main_output(ed.spec().main_output, id);
-        ed.wire_outputs([count, PortSource::Zero])
-            .expect("the sources exist");
+        ed.wire_outputs([count, PortSource::Zero]).unwrap();
         ed.commit().expect("commits");
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),

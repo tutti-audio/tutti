@@ -734,9 +734,9 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
     );
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
     ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..4 {
@@ -786,11 +786,11 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     ed.insert(NodeKey(2), "burst", burst_unit(16, &plan, &refused));
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LEN }));
     ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(at(1, 1), EventEdge::feedback(out(2, 0), Samples::new(LEN)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..LEN / 16 {
@@ -874,11 +874,11 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
     ed.insert(NodeKey(4), "b", burst_unit(4, &b_plan, &refused));
     ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(at(1, 0), EventEdge::Direct(out(4, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..4 {

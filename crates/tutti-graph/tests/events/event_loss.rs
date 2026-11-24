@@ -131,7 +131,7 @@ fn rig(
                 EventInputPort::new(NodeKey(100), next),
                 EventEdge::Direct(EventOutputPort::new(key, p as u16)),
             )
-            .expect("the edge wires");
+            .unwrap();
             next += 1;
         }
     }
@@ -323,7 +323,7 @@ impl Bounded {
         let input = self.input();
         self.ed
             .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)))
-            .expect("the edge wires");
+            .unwrap();
     }
 
     fn input(&self) -> EventInputPort {
@@ -549,7 +549,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
                 input,
                 EventEdge::Direct(EventOutputPort::new(NodeKey(node), 0)),
             )
-            .expect("the edge wires");
+            .unwrap();
         }
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -619,7 +619,7 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         let plan = exec.plan().expect("applied");
@@ -750,7 +750,7 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -882,7 +882,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             input,
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

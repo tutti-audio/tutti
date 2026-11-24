@@ -118,9 +118,9 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         EventInputPort::new(SYNTH, 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);
     if let Some(d) = drive {
@@ -139,8 +139,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         }
         let lane = ControlLaneNode::from(config);
         ed.insert(LANE, "lane", lane);
-        ed.connect_param(at, EventOutputPort::new(LANE, 0))
-            .expect("the param wires");
+        ed.connect_param(at, EventOutputPort::new(LANE, 0)).unwrap();
         ed.commit().expect("the lane commits");
     }
     let mut r = Renderer::new(ed, exec);

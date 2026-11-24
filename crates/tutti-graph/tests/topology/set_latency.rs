@@ -1,6 +1,7 @@
 //! `Editor::set_latency`: a runtime latency change — a plugin whose latency
 //! atomic moved — recompiles and moves PDC, without touching the unit.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -93,17 +94,17 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
         })),
     );
     for k in [PLUGIN, DRY] {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(k, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(k, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
     }
     ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(PLUGIN, 0)),
         PortSource::Node(OutputPort::new(DRY, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     (ed, exec)
 }
 

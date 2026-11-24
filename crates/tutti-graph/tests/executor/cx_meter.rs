@@ -66,7 +66,7 @@ fn render(
         ed.insert(NodeKey(k), "probe", Unforkable(Probe(read)));
     }
     ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

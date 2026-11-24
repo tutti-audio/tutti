@@ -41,7 +41,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])
-    .expect("the sources exist");
+    .unwrap();
     let tap = tap_open.then(|| {
         let sources: Vec<_> = ed
             .spec()

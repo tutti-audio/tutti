@@ -43,7 +43,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));

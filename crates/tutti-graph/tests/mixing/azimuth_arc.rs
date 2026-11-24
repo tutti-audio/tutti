@@ -102,10 +102,10 @@ fn graph(
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     ed.wire_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))))
-        .expect("the sources exist");
+        .unwrap();
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
         ed.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0))
-            .expect("the param wires");
+            .unwrap();
     }
     for &(p, r) in ranges {
         ed.set_param_range(at(p), r).expect("a range");
@@ -308,7 +308,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         Unforkable(Sender(vec![(64, step)])),
     );
     ed.wire_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
         let chans = common::block(exec, frames, WIDTH as usize);
@@ -328,7 +328,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
             },
             EventOutputPort::new(NodeKey(SENDER), 0),
         )
-        .expect("the param wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

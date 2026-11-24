@@ -27,6 +27,7 @@
 
 use std::hint::black_box;
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::ChannelLayout;
@@ -214,11 +215,11 @@ fn executor_for(shape: &Topo) -> Executor {
     };
     let lowpass = |i: usize| -> Box<dyn Node> { Box::new(Lowpass::new(cutoff(i), 0.7)) };
     let wire = |ed: &mut Editor, sink: NodeKey, port: u16, from: PortSource| {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(sink, port)),
-            from: Edge::Direct(from),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(sink, port),
+            Edge::Direct(from),
+        ))
+        .unwrap();
     };
     let node = |k: NodeKey| PortSource::Node(OutputPort::new(k, 0));
     let last = match *shape {
@@ -263,8 +264,7 @@ fn executor_for(shape: &Topo) -> Executor {
             last
         }
     };
-    ed.wire_outputs(vec![node(last)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![node(last)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -387,18 +387,15 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             } else {
                 PortSource::Node(OutputPort::new(NodeKey(i as u64 - 1), c))
             };
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(InputPort::new(k, c)),
-                from: Edge::Direct(from),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(InputPort::new(k, c), Edge::Direct(from)))
+                .unwrap();
         }
     }
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(
         NodeKey(n as u64 - 1),
         0,
     ))])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

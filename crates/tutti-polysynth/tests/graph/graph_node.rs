@@ -54,9 +54,9 @@ fn graph(frame: u64) -> (Editor, Executor) {
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

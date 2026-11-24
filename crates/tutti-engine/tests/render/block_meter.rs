@@ -83,7 +83,7 @@ fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
         ClickNode::from(ClickNodeConfig::new(settings)),
     );
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

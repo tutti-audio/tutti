@@ -148,7 +148,7 @@ impl EventRig {
         if output == Output::Mono {
             editor
                 .wire_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
-                .expect("the sources exist");
+                .unwrap();
         }
         Self {
             editor,
@@ -169,7 +169,7 @@ impl EventRig {
                 EventInputPort::new(Self::SINK, to),
                 EventEdge::Direct(EventOutputPort::new(from, from_port)),
             )
-            .expect("the edge wires");
+            .unwrap();
     }
 
     /// Applies what the editor holds.

@@ -18,6 +18,7 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_engine::Engine;
+use tutti_graph::EdgeId;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
@@ -70,11 +71,11 @@ fn build_engine_with_chain() -> Engine {
         )),
     );
     let mut wire = |node: NodeKey, port: u16, from: NodeKey, out: u16| {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(node, port)),
-            from: Edge::Direct(PortSource::Node(OutputPort::new(from, out))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(node, port),
+            Edge::Direct(PortSource::Node(OutputPort::new(from, out))),
+        ))
+        .unwrap();
     };
     wire(eq, 0, osc, 0);
     // The mono EQ's one output on both of the strip's inputs: mono to
@@ -84,7 +85,7 @@ fn build_engine_with_chain() -> Engine {
     wire(limiter, 0, strip, 0);
     wire(limiter, 1, strip, 1);
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(limiter, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // Every commit is sent; the editor only had to outlive the setup.

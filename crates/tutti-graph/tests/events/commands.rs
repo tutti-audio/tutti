@@ -3,6 +3,7 @@
 //! across a block boundary; late is
 //! counted and never dropped; the queue back-pressures instead of growing.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -128,7 +129,7 @@ fn rig() -> Rig {
         }),
     );
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -418,26 +419,26 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     ed.insert(A, "n", Unforkable(Impulse(exec_log.clone())));
     ed.insert(B, "n", Unforkable(Impulse(exec_log.clone())));
     ed.resize_inputs(ChannelLayout::MONO);
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(LAT, 0)),
-        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(A, 0)),
-        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(LAT, 0))),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(B, 0)),
-        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        tutti_graph::InputPort::new(LAT, 0),
+        tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        tutti_graph::InputPort::new(A, 0),
+        tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(LAT, 0))),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        tutti_graph::InputPort::new(B, 0),
+        tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
     ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(A, 0)),
         PortSource::Node(OutputPort::new(B, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -892,16 +893,16 @@ fn beat_resolution_matches_a_hand_computed_table() {
         };
         build(&mut ed, &log);
         ed.resize_inputs(ChannelLayout::MONO);
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(lat, 0)),
-            from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(sink, 0)),
-            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            tutti_graph::InputPort::new(lat, 0),
+            tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(
+            tutti_graph::InputPort::new(sink, 0),
+            tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
+        ))
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -937,16 +938,16 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     );
     ed.insert(sink, "impulse", Unforkable(Impulse(log.clone())));
     ed.resize_inputs(ChannelLayout::MONO);
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(lat, 0)),
-        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(sink, 0)),
-        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        tutti_graph::InputPort::new(lat, 0),
+        tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        tutti_graph::InputPort::new(sink, 0),
+        tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
+    ))
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -2671,10 +2671,7 @@ impl<F: Float> Graph<F> {
                     .get(&at)
                     .into_iter()
                     .flatten()
-                    .map(|&from| EdgeId {
-                        sink: PortSink::Port(at),
-                        from,
-                    })
+                    .map(|&from| EdgeId::into_port(at, from))
                     .collect()
             }
             InEnd::Output(channel) => spec
@@ -4194,7 +4191,7 @@ mod main_output_fade_tests {
         let node = NodeKey::from(node);
         g.editor
             .wire_outputs([PortSource::Node(OutputPort::new(node, 0)), PortSource::Zero])
-            .expect("the sources exist");
+            .unwrap();
         g.commit();
         (g, node)
     }

@@ -6,6 +6,7 @@
 //! Against closed forms written here, never another render.
 
 use std::sync::Arc;
+use tutti_graph::EdgeId;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -73,14 +74,11 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
             ed.resize_outputs(usize::from(channel) + 1);
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Output(channel),
-                from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(
-                    NodeKey(PROBE),
-                    c,
-                ))),
-            })
-            .expect("the edge wires")
+            ed.connect_edge(EdgeId::into_output(
+                channel,
+                PortSource::Node(OutputPort::new(NodeKey(PROBE), c)),
+            ))
+            .unwrap()
         };
     }
     ed.set_param_range(at(UnitParam::Azimuth), azimuth)
@@ -101,7 +99,7 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
     );
     ed.insert(NodeKey(key), "lane", node);
     ed.connect_param(at(param), EventOutputPort::new(NodeKey(key), 0))
-        .expect("the param wires");
+        .unwrap();
 }
 
 /// Rolls `blocks` blocks of `n` frames from `start`; each output's frames.

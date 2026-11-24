@@ -80,7 +80,7 @@ impl Listener {
                 EventInputPort::new(self.entry, 0),
                 EventEdge::Direct(EventOutputPort::new(key, 0)),
             )
-            .expect("the edge wires");
+            .unwrap();
         self.rig.commit();
     }
 

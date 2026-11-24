@@ -36,7 +36,7 @@ fn main_output(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor
             PortSource::Zero
         }
     }))
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

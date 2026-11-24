@@ -124,7 +124,7 @@ fn rig(source: Source) -> Executor {
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.commit().expect("commits");
     let mut exec = exec;
     exec.apply_pending();
@@ -202,7 +202,7 @@ fn bench(c: &mut Criterion) {
                 EventInputPort::new(NodeKey(100), 0),
                 EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
             )
-            .expect("the edge wires");
+            .unwrap();
         }
         ed.commit().expect("commits");
         exec.apply_pending();

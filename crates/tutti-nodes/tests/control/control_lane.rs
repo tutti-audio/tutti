@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
 use tutti_fixtures::cycle_blocks;
+use tutti_graph::EdgeId;
+use tutti_graph::testing::feed_output;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
@@ -172,11 +174,8 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
             ed.resize_outputs(usize::from(channel) + 1);
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Output(channel),
-                from: tutti_graph::Edge::Direct(out(p, 0)),
-            })
-            .expect("the edge wires")
+            ed.connect_edge(EdgeId::into_output(channel, out(p, 0)))
+                .unwrap()
         };
     }
     for &p in probes {
@@ -222,7 +221,7 @@ fn native_on(
 fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode<PortLane>, probe: u64) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.connect_param(cutoff(probe), EventOutputPort::new(NodeKey(key), 0))
-        .expect("the param wires");
+        .unwrap();
     controls
 }
 
@@ -240,10 +239,10 @@ fn wire_sink<K: LaneKind>(
         EventInputPort::new(NodeKey(sink), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(key), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     for port in 0..2 {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        tutti_graph::testing::feed_output(ed, channel, [out(sink, port)]);
+        feed_output(ed, channel, [out(sink, port)]);
     }
     controls
 }
@@ -1171,7 +1170,7 @@ fn feed_into(ed: &mut Editor, feed: u64, lane: u64) {
         EventInputPort::new(NodeKey(lane), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(feed), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
 }
 
 /// **A republish that reads a new source frees a slot for it.** A program
@@ -1334,7 +1333,7 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
     assert!(got[0].iter().all(|&v| v == 250.0), "probe 2 has it");
     let from = EventOutputPort::new(NodeKey(1), 0);
     assert!(ed.disconnect_param(cutoff(2), from));
-    ed.connect_param(cutoff(3), from).expect("the param wires");
+    ed.connect_param(cutoff(3), from).unwrap();
     ed.commit().expect("commits");
     for _ in 0..3 {
         let got = run(&mut ed, &mut exec);

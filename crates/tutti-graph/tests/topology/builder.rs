@@ -5,6 +5,7 @@
 
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -315,31 +316,31 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     ed.resize_inputs(ChannelLayout::MONO);
     let at = |node: u64, port: u16| InputPort::new(NodeKey(node), port);
     let from = |node: u64, port: u16| OutputPort::new(NodeKey(node), port);
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(0, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(0, 1)),
-        from: Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(1, 0)),
-        from: Edge::Direct(PortSource::Node(from(0, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        at(0, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(0, 1),
+        Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::Node(from(0, 0))),
+    ))
+    .unwrap();
     ed.wire_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.connect_events(
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.commit().expect("commits");
     let mut by_hand = Renderer::new(ed, exec);
     by_hand.render(1); // installs the plan the builder installed eagerly
@@ -651,7 +652,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
     ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);
 }

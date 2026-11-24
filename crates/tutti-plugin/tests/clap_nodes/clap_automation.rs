@@ -92,9 +92,9 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         EventInputPort::new(key, 0),
         EventEdge::Direct(EventOutputPort::new(auto_key, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
-        .expect("the sources exist");
+        .unwrap();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -162,10 +162,10 @@ fn render_gain(
             EventInputPort::new(PLUGIN, 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     live.wire_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))])
-        .expect("the sources exist");
+        .unwrap();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()

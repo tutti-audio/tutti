@@ -77,17 +77,11 @@ fn out(node: u64) -> PortSource {
 }
 
 fn into_output(channel: u16, from: PortSource) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Output(channel),
-        from: Edge::Direct(from),
-    }
+    EdgeId::into_output(channel, from)
 }
 
 fn into_port(node: u64, from: PortSource) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(InputPort::new(key(node), 0)),
-        from: Edge::Direct(from),
-    }
+    EdgeId::into_port(InputPort::new(key(node), 0), Edge::Direct(from))
 }
 
 /// Commits, installs and renders one block of the two main output channels.
@@ -171,10 +165,7 @@ fn connect_edge_refuses_what_does_not_exist() {
         ed.connect_edge(into_port(9, out(1))),
         Err(WireError::Missing(MissingSource::Node { node: key(9) })),
     );
-    let past = EdgeId {
-        sink: PortSink::Port(InputPort::new(key(2), 1)),
-        from: Edge::Direct(out(1)),
-    };
+    let past = EdgeId::into_port(InputPort::new(key(2), 1), Edge::Direct(out(1)));
     assert_eq!(
         ed.connect_edge(past),
         Err(WireError::NoInputPort {
@@ -234,8 +225,7 @@ fn event_edges_are_exact_and_the_last_takes_its_mark() {
     ed.connect_events(at, direct).expect("wires");
     ed.connect_events(at, feedback).expect("wires");
     assert_eq!(ed.spec().events[&at].len(), 2);
-    ed.require_resolution(at, from, Resolution::Sample)
-        .expect("the edge exists");
+    ed.require_resolution(at, from, Resolution::Sample).unwrap();
 
     assert!(ed.disconnect_events(at, direct));
     assert_eq!(ed.spec().events[&at], vec![feedback]);
@@ -499,8 +489,7 @@ fn resolution_marks_need_their_edge() {
     );
     ed.connect_events(at, EventEdge::Direct(from))
         .expect("wires");
-    ed.require_resolution(at, from, Resolution::Sample)
-        .expect("the edge exists");
+    ed.require_resolution(at, from, Resolution::Sample).unwrap();
     assert_eq!(
         ed.spec().required_resolution[&(at, from)],
         Resolution::Sample

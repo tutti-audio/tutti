@@ -110,7 +110,7 @@ fn build(
         );
         outputs.push(PortSource::Node(OutputPort::new(key, 0)));
     }
-    ed.wire_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

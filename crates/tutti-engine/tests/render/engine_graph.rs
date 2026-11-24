@@ -58,7 +58,7 @@ fn prepare(max_block: usize) -> Prepare {
 /// Wire main outputs `0..width` to `node`'s outputs.
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
     ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))))
-        .expect("the sources exist");
+        .unwrap();
 }
 
 /// Render `blocks` (frame counts) through `engine` into one interleaved
@@ -1015,7 +1015,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     // graph, wider than the scratch.
     let wide = MAX_CHANNELS + 1;
     ed.wire_outputs((0..wide as u16).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("no limits yet");
     assert!(matches!(
         Engine::new(&transport, &mut ed, exec),
@@ -1028,7 +1028,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     ed.wire_outputs(
         (0..MAX_CHANNELS as u16 + 1).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
     )
-    .expect("the sources exist");
+    .unwrap();
     assert!(matches!(
         ed.commit(),
         Err(CommitError::TooManyOutputs { outputs, limit })

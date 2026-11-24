@@ -38,7 +38,7 @@ fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
         EventInputPort::new(NodeKey(1), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(inlet), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     writer
 }
 

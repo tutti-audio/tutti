@@ -31,7 +31,7 @@ pub fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // The editor outlives nothing here: a test process is the whole lifetime,

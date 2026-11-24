@@ -21,6 +21,7 @@
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, MaxBlock};
 use tutti_dsp::LadderSaturation;
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::Node;
@@ -101,14 +102,14 @@ fn channel_sum(c: &mut Criterion) {
                 Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
             ed.resize_inputs(ChannelLayout::from(sources * width));
             ed.wire_outputs(vec![PortSource::Zero; width as usize])
-                .expect("the sources exist");
+                .unwrap();
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.connect_edge(tutti_graph::EdgeId {
-                        sink: tutti_graph::PortSink::Output((channel as usize) as u16),
-                        from: tutti_graph::Edge::Direct(PortSource::MainInput(k * width + channel)),
-                    })
-                    .expect("the edge wires");
+                    ed.connect_edge(EdgeId::into_output(
+                        (channel as usize) as u16,
+                        PortSource::MainInput(k * width + channel),
+                    ))
+                    .unwrap();
                 }
             }
             ed.commit().expect("commits");

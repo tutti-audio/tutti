@@ -8,6 +8,7 @@
 //! The counts are checked frame for frame; epochs are checked against the
 //! restarts they must mark.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::prepare;
@@ -94,13 +95,13 @@ fn rig(lat: usize, forkable: bool) -> Rig {
         ed.insert(LATENT, "latent", Unforkable(Latent(lat)));
         ed.insert(PROBE, "probe", Unforkable(Probe));
     }
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(PROBE, 0)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(PROBE, 0),
+        Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
+    ))
+    .unwrap();
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     Rig { ed, exec }
 }

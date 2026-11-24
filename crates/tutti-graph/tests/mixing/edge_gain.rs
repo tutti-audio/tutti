@@ -51,10 +51,7 @@ fn amp(v: f32) -> Gain {
 
 /// Edge `node → (sink, 0)` of a pass-through sink.
 fn port_edge(sink: u64, from: u64) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(at(sink, 0)),
-        from: direct(from),
-    }
+    EdgeId::into_port(at(sink, 0), direct(from))
 }
 
 /// Edge `node → output 0`.
@@ -570,18 +567,8 @@ impl Rig {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
         ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
-        ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
-            .expect("the sources exist");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Output(0),
-            from: tutti_graph::Edge::Direct(out(1)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Output(0),
-            from: tutti_graph::Edge::Direct(out(2)),
-        })
-        .expect("the edge wires");
+        ed.wire_outputs([out(1)]).unwrap();
+        ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
         ed.set_edge_gain(output_edge(1), amp(base))
             .expect("the edge exists");
         ed.commit().expect("commits");
@@ -670,7 +657,7 @@ fn a_gain_set_before_a_recompile_keeps_its_base() {
 
     rig.ed
         .insert(key(3), "three", Unforkable(TestNode::new(dc(4.0))));
-    rig.ed.connect_edge(output_edge(3)).expect("the edge wires");
+    rig.ed.connect_edge(output_edge(3)).unwrap();
     rig.ed.commit().expect("commits");
     rig.exec.apply_pending();
     assert!(!Arc::ptr_eq(&plan, &rig.plan()), "a recompile");
@@ -898,16 +885,12 @@ impl Mixer {
             }),
         );
         for k in 1..=n {
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(at(n + 1, 0)),
-                from: direct(k),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+                .unwrap();
             ed.set_edge_gain(port_edge(n + 1, k), amp(weights[k as usize - 1]))
                 .expect("the edge exists");
         }
-        ed.wire_outputs(vec![out(n + 1)])
-            .expect("the sources exist");
+        ed.wire_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1077,18 +1060,8 @@ fn a_fork_carries_the_edge_gains() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.insert(key(2), "b", ForkByClone(Level(2.0)));
-    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
-        .expect("the sources exist");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(out(1)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(out(2)),
-    })
-    .expect("the edge wires");
+    ed.wire_outputs([out(1)]).unwrap();
+    ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.set_edge_gain(output_edge(2), amp(-2.0))
         .expect("an edge");
@@ -1126,13 +1099,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
-    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
-        .expect("the sources exist");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(out(1)),
-    })
-    .expect("the edge wires");
+    ed.wire_outputs([out(1)]).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.commit().expect("commits");
     let knob = ed.edge_gain_cell(output_edge(1)).expect("a cell once sent");

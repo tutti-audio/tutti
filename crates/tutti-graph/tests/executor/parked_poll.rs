@@ -77,7 +77,7 @@ fn rig() -> Rig {
         }),
     );
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -188,7 +188,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
         outputs.push(PortSource::Node(OutputPort::new(NodeKey(k), 0)));
         counts.push((processed, parked));
     }
-    ed.wire_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

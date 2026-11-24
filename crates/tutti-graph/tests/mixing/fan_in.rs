@@ -10,6 +10,7 @@
 //! one-participant one.
 
 use common::spec_of;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -538,14 +539,10 @@ fn flags(n: u64) -> Flags {
         }),
     );
     for k in 1..=n {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(n + 1, 0)),
-            from: direct(k),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+            .unwrap();
     }
-    ed.wire_outputs(vec![out(n + 1)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![out(n + 1)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -612,14 +609,10 @@ fn a_sum_is_constant_when_its_live_addends_are() {
             }),
         );
         for k in 1..=n {
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(at(n + 1, 0)),
-                from: direct(k),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+                .unwrap();
         }
-        ed.wire_outputs(vec![out(n + 1)])
-            .expect("the sources exist");
+        ed.wire_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

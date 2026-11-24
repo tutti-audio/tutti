@@ -129,7 +129,7 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             common::connect(&mut ed, source.0, sink.0);
         }
     }
-    ed.wire_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -371,7 +371,7 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         editor.insert(key, "lane", lane);
         editor
             .connect_param(at, tutti_graph::EventOutputPort::new(key, 0))
-            .expect("the param wires");
+            .unwrap();
         editor.commit().expect("the lane commits");
         let frames = 96_000;
         let mut x = noise(8, 4_800);

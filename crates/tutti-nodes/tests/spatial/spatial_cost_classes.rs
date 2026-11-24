@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::signal::plane_bits as bits;
+use tutti_graph::EdgeId;
 
 use tutti_graph::NodeKey;
 use tutti_graph::ParamNode;
@@ -55,11 +56,11 @@ fn panner(k: u64) -> VbapPannerNode<f32> {
 }
 
 fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: PortSource) {
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(to, port)),
-        from: Edge::Direct(from),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(to, port),
+        Edge::Direct(from),
+    ))
+    .unwrap();
 }
 
 /// [`PANNERS`] declared panners and [`HEAVY`] undeclared ones, each off the
@@ -82,8 +83,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.resize_inputs(ChannelLayout::STEREO);
     let sources = PANNERS + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.wire_outputs([PortSource::Zero; 2])
-        .expect("the sources exist");
+    ed.wire_outputs([PortSource::Zero; 2]).unwrap();
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < PANNERS {
@@ -95,11 +95,11 @@ fn graph(workers: usize, declared: bool) -> Executor {
             wire(&mut ed, key, c, PortSource::MainInput(c));
             // The graph's fan-in: output channel `c` holds every panner's
             // port `c`, and the graph sums them.
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Output((c as usize) as u16),
-                from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(key, c))),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_output(
+                (c as usize) as u16,
+                PortSource::Node(OutputPort::new(key, c)),
+            ))
+            .unwrap();
         }
     }
     ed.commit().expect("commits");

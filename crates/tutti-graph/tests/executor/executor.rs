@@ -2,6 +2,7 @@
 //! audio-thread mark, the block bound, and the editor's control-side
 //! protocol (typed controls, generations, the commit queue and its back-pressure).
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -26,11 +27,11 @@ const SRC: NodeKey = NodeKey(1);
 const FX: NodeKey = NodeKey(2);
 
 fn wire(ed: &mut Editor, sink: NodeKey, from: NodeKey) {
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(sink, 0)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(sink, 0),
+        Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
+    ))
+    .unwrap();
 }
 
 fn render(exec: &mut Executor, frames: usize, outs: usize) -> Vec<Vec<f32>> {
@@ -69,7 +70,7 @@ fn counted_after_silence_with(
     );
     wire(&mut ed, FX, SRC);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(FX, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -202,7 +203,7 @@ fn status_silent_zeroes_and_flags() {
         PortSource::Node(OutputPort::new(SRC, 0)),
         PortSource::Node(OutputPort::new(FX, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -259,14 +260,14 @@ fn masked_status_reaches_the_next_nodes_mask() {
     ed.insert(SRC, "half", Unforkable(HalfSilent));
     ed.insert(FX, "observer", Unforkable(Observer(Arc::clone(&seen))));
     for port in 0..2 {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(FX, port)),
-            from: Edge::Direct(PortSource::Node(OutputPort::new(SRC, port))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(FX, port),
+            Edge::Direct(PortSource::Node(OutputPort::new(SRC, port))),
+        ))
+        .unwrap();
     }
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(FX, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -309,7 +310,7 @@ fn freeing_a_control_freed_value_inside_process_panics_in_debug() {
         Unforkable(Freer(Some(ControlFreed(vec![0.0; 8])))),
     );
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -337,7 +338,7 @@ fn queue_two_outputs(ed: &mut Editor) {
         PortSource::Node(OutputPort::new(SRC, 0)),
         PortSource::Node(OutputPort::new(FX, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
 }
 
@@ -429,7 +430,7 @@ fn insert_returns_typed_controls() {
     let gain = ed.insert(FX, "gain", GainBuilder).controls;
     wire(&mut ed, FX, SRC);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(FX, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -451,7 +452,7 @@ fn commits_queue_up_to_capacity_then_backpressure_without_advancing() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
     ed.insert(SRC, "c", Unforkable(const_node(0.0)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     for i in 0..QUEUE_CAPACITY {
         ed.insert(SRC, "c", Unforkable(const_node(i as f32 + 1.0)));
         ed.commit().expect("room in the queue");
@@ -489,7 +490,7 @@ fn queued_commits_apply_in_fifo_order() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     // Second: a gain after it. Third: the gain changed. Each is compiled on
     // the one before, none of which has run.
@@ -503,7 +504,7 @@ fn queued_commits_apply_in_fifo_order() {
     );
     wire(&mut ed, FX, SRC);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(FX, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     ed.insert(
         FX,
@@ -528,7 +529,7 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
     ed.insert(a, "a", Unforkable(const_node(1.0)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(a, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap(); // c1
     render(&mut exec, 8, 1); // applied
     ed.insert(b, "b", Unforkable(const_node(2.0)));
@@ -540,7 +541,7 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
         PortSource::Node(OutputPort::new(b, 0)),
         PortSource::Node(OutputPort::new(c, 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit()
         .expect("the next commit compiles against c3 and needs no lost unit");
     let out = render(&mut exec, 8, 3);
@@ -560,7 +561,7 @@ fn applying_frees_nothing_on_the_audio_thread() {
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     ed.insert(FX, "f", Unforkable(const_node(0.0)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     let mut back = Vec::new();
     for v in 2..6 {
@@ -600,7 +601,7 @@ fn reinserting_a_key_replaces_its_unit() {
         })),
     );
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     exec.apply_pending();
     assert!(ed.collect().is_empty());
@@ -629,7 +630,7 @@ fn reinserting_a_key_replaces_its_unit() {
         })),
     );
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     exec.apply_pending();
     assert_eq!(ed.collect(), vec![SRC]);
@@ -806,10 +807,10 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
             tutti_graph::EventInputPort::new(key, 0),
             tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(from, 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -910,7 +911,7 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
             tutti_graph::EventInputPort::new(NodeKey(3), 0),
             tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(NodeKey(from), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -997,7 +998,7 @@ fn out_of_band_graph(node: OutOfBand) -> Executor {
     let _ = inputs;
     if outputs > 0 {
         ed.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
-            .expect("the sources exist");
+            .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1078,7 +1079,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SRC, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 1);
     let base = Arc::clone(ed.base().expect("sent"));
@@ -1125,8 +1126,7 @@ fn too_few_input_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.resize_inputs(tutti_buffers::ChannelLayout::MONO);
-    ed.wire_outputs(vec![PortSource::MainInput(0)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![PortSource::MainInput(0)]).unwrap();
     ed.commit().expect("commits");
     render(&mut exec, 16, 1);
 }
@@ -1137,8 +1137,7 @@ fn too_few_input_slices_render_silence_in_release() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.resize_inputs(tutti_buffers::ChannelLayout::MONO);
-    ed.wire_outputs(vec![PortSource::MainInput(0)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![PortSource::MainInput(0)]).unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, 16, 1);
     assert!(out[0].iter().all(|&x| x == 0.0));
@@ -1165,14 +1164,14 @@ fn ringer_after_silence(
     );
     ed.insert(FX, "ringer", Unforkable(ringer));
     for port in 0..width as u16 {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(FX, port)),
-            from: Edge::Direct(PortSource::Node(OutputPort::new(SRC, port))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(FX, port),
+            Edge::Direct(PortSource::Node(OutputPort::new(SRC, port))),
+        ))
+        .unwrap();
     }
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(FX, 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -46,7 +46,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
     ));
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let mut exec = exec;
     let readers = RtLogReaders::new(&mut exec);

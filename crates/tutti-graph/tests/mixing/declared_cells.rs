@@ -172,7 +172,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
     )
-    .expect("the sources exist");
+    .unwrap();
     for &(addr, _) in to {
         ed.connect_param(
             ParamIn {
@@ -181,7 +181,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
             },
             EventOutputPort::new(SRC, 0),
         )
-        .expect("the param wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -308,7 +308,7 @@ fn a_fork_starts_from_each_indexs_value() {
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
     )
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let band1 = UnitAddr::new(UnitParam::Threshold, 1);
@@ -352,7 +352,7 @@ fn an_old_form_node_and_a_new_form_node_share_a_graph() {
         PortSource::Node(OutputPort::new(NODE, 2)),
         PortSource::Node(OutputPort::new(NODE, 1)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     // `Cutoff` drives the old node only; band 1 drives the bank only.
     ed.connect_param(
         ParamIn {
@@ -361,7 +361,7 @@ fn an_old_form_node_and_a_new_form_node_share_a_graph() {
         },
         EventOutputPort::new(SRC, 0),
     )
-    .expect("the param wires");
+    .unwrap();
     ed.connect_param(
         ParamIn {
             node: NODE,
@@ -369,7 +369,7 @@ fn an_old_form_node_and_a_new_form_node_share_a_graph() {
         },
         EventOutputPort::new(SRC, 0),
     )
-    .expect("the param wires");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let [old_cutoff, bank_cutoff, band1, q]: [Vec<f32>; 4] =

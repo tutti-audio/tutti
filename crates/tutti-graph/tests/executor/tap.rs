@@ -4,6 +4,7 @@
 //! tap compiles to no op, and a render is the same with a tap open or closed.
 
 use tutti_buffers::{Interleaved, PlanesMut};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -73,19 +74,19 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
                 width: 1,
             }),
         );
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(lag), 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(gain), 0)),
-            from: Edge::Direct(out(lag)),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(lag), 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(gain), 0),
+            Edge::Direct(out(lag)),
+        ))
+        .unwrap();
         gains.push(out(gain));
     }
-    ed.wire_outputs(gains.clone()).expect("the sources exist");
+    ed.wire_outputs(gains.clone()).unwrap();
     gains
 }
 

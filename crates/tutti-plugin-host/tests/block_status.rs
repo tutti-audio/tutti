@@ -156,9 +156,9 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
         EventInputPort::new(plugin, 0),
         EventEdge::Direct(EventOutputPort::new(inlet_key, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(plugin, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

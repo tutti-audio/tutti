@@ -72,7 +72,7 @@ impl Rig {
                     EventInputPort::new(input_node, 0),
                     EventEdge::Direct(EventOutputPort::new(key, 0)),
                 )
-                .expect("the edge wires");
+                .unwrap();
         }
         let out = editor
             .open_event_tap(

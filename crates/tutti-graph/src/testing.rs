@@ -49,17 +49,10 @@ pub fn feed_input<F: Float>(
         .cloned()
         .unwrap_or_default();
     for from in held {
-        ed.disconnect_edge(crate::EdgeId {
-            sink: crate::PortSink::Port(at),
-            from,
-        });
+        ed.disconnect_edge(crate::EdgeId::into_port(at, from));
     }
     for from in edges {
-        ed.connect_edge(crate::EdgeId {
-            sink: crate::PortSink::Port(at),
-            from,
-        })
-        .expect("the edge wires");
+        ed.connect_edge(crate::EdgeId::into_port(at, from)).unwrap();
     }
 }
 
@@ -75,23 +68,19 @@ pub fn feed_output<F: Float>(
     }
     let held = ed.spec().topology.outputs[usize::from(channel)].clone();
     for from in held {
-        ed.disconnect_edge(crate::EdgeId {
-            sink: crate::PortSink::Output(channel),
-            from: crate::Edge::Direct(from),
-        });
+        ed.disconnect_edge(crate::EdgeId::into_output(channel, from));
     }
     for from in sources {
-        ed.connect_edge(crate::EdgeId {
-            sink: crate::PortSink::Output(channel),
-            from: crate::Edge::Direct(from),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(crate::EdgeId::into_output(channel, from))
+            .unwrap();
     }
 }
 
 /// Wires `ed`'s nodes as `spec` wires its own: the main input width, every
 /// audio edge, every main output source and every event edge, and nothing
-/// else.
+/// else. It goes through the editor's typed calls, so it panics on a spec
+/// that names a node or port the editor lacks and cannot build an invalid
+/// graph.
 pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
     ed.resize_inputs(spec.topology.inputs);
     let ports: Vec<_> = ed.spec().topology.edges.keys().copied().collect();
@@ -120,7 +109,7 @@ pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
     ed.resize_outputs(spec.topology.outputs.len());
     for (at, edges) in &spec.events {
         for edge in edges {
-            ed.connect_events(*at, *edge).expect("the edge wires");
+            ed.connect_events(*at, *edge).unwrap();
         }
     }
 }

@@ -15,6 +15,7 @@
 //! and mute) is not in the graph yet, so a bypassed source's silence is
 //! M1's to test.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -168,12 +169,12 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
         }),
     );
     ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(91), 0)),
-        from: Edge::Direct(out(90)),
-    })
-    .expect("the edge wires");
-    ed.wire_outputs([out(91)]).expect("the sources exist");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(91), 0),
+        Edge::Direct(out(90)),
+    ))
+    .unwrap();
+    ed.wire_outputs([out(91)]).unwrap();
     Rig {
         ed,
         exec,
@@ -763,7 +764,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
             EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     heard
 }
@@ -876,7 +877,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
             EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     let mut tap =
         r.ed.open_event_tap(
@@ -1049,7 +1050,7 @@ fn cut_edges(workers: usize, pairs: u64) -> Vec<Cut> {
         );
         let input = EventInputPort::new(NodeKey(20 + i), 0);
         r.ed.connect_events(input, EventEdge::Direct(port(10 + i, 0)))
-            .expect("the edge wires");
+            .unwrap();
         let open = |r: &mut Rig, id, align| {
             r.ed.open_event_tap(
                 EventTapId::of(id),
@@ -1132,7 +1133,7 @@ fn an_input_tap_carries_a_scheduled_event() {
         );
         let input = EventInputPort::new(NodeKey(3), 0);
         r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-            .expect("the edge wires");
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1185,7 +1186,7 @@ fn a_bypassed_nodes_input_tap_carries_its_closes() {
         );
         let input = EventInputPort::new(NodeKey(3), 0);
         r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-            .expect("the edge wires");
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1260,7 +1261,7 @@ fn bounded(workers: usize, pairs: u64) -> Vec<Cut> {
         );
         let input = EventInputPort::new(NodeKey(20 + i), 0);
         r.ed.connect_events(input, EventEdge::Direct(port(10 + i, 0)))
-            .expect("the edge wires");
+            .unwrap();
         let open = |r: &mut Rig, id, align| {
             r.ed.open_event_tap(
                 EventTapId::of(id),
@@ -1461,7 +1462,7 @@ fn a_parked_nodes_input_tap_carries_nothing() {
         );
         let input = EventInputPort::new(NodeKey(3), 0);
         r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-            .expect("the edge wires");
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1531,7 +1532,7 @@ fn a_skipped_nodes_input_tap_carries_nothing_after_its_events() {
     );
     let input = EventInputPort::new(NodeKey(3), 0);
     r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1570,7 +1571,7 @@ fn an_aligned_tap_of_a_feedback_fed_input_is_delayed() {
     );
     let input = EventInputPort::new(NodeKey(3), 0);
     r.ed.connect_events(input, EventEdge::feedback(port(1, 0), Samples::new(512)))
-        .expect("the edge wires");
+        .unwrap();
     let open = |r: &mut Rig, id, align| {
         r.ed.open_event_tap(
             EventTapId::of(id),
@@ -1614,7 +1615,7 @@ fn an_input_tap_carries_the_events_a_removed_delay_flushes() {
     let input = EventInputPort::new(NodeKey(3), 0);
     for from in [1, 2] {
         r.ed.connect_events(input, EventEdge::Direct(port(from, 0)))
-            .expect("the edge wires");
+            .unwrap();
     }
     let mut raw =
         r.ed.open_event_tap(
@@ -1661,7 +1662,7 @@ fn a_full_width_event_node_holds_its_claims_on_the_pool() {
             EventInputPort::new(NodeKey(3), p),
             EventEdge::Direct(port(1, p)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
     let mut tap =
         r.ed.open_event_tap(
@@ -1708,7 +1709,7 @@ fn a_bypassed_node_is_sent_a_blocks_worth_of_closes() {
     );
     let input = EventInputPort::new(NodeKey(3), 0);
     r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1761,7 +1762,7 @@ fn a_lone_source_is_copied_whole_and_a_command_is_merged_beside_it() {
     );
     let input = EventInputPort::new(NodeKey(3), 0);
     r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     let mut raw =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1861,7 +1862,7 @@ fn two_bounded(workers: usize) -> (Vec<Vec<TapEvent>>, Vec<Vec<TapEvent>>, u64) 
         EventInputPort::new(NodeKey(31), 0),
         EventEdge::Direct(port(30, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     let heard = [tutti_fixtures::Record::new(), tutti_fixtures::Record::new()];
     r.ed.insert(
         NodeKey(20),
@@ -1875,7 +1876,7 @@ fn two_bounded(workers: usize) -> (Vec<Vec<TapEvent>>, Vec<Vec<TapEvent>>, u64) 
     for p in 0..2u16 {
         let input = EventInputPort::new(NodeKey(20), p);
         r.ed.connect_events(input, EventEdge::Direct(port(10 + u64::from(p), 0)))
-            .expect("the edge wires");
+            .unwrap();
         taps.push(
             r.ed.open_event_tap(
                 EventTapId::of(u64::from(p) + 1),

@@ -78,7 +78,7 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
     );
     connect(&mut ed, 1, 2);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec, controls, seen)
 }

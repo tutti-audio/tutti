@@ -100,7 +100,7 @@ fn input(
             EventInputPort::new(NodeKey(1), 0),
             EventEdge::Direct(EventOutputPort::new(key, 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     })
 }
 
@@ -408,7 +408,7 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
                     EventInputPort::new(NodeKey(1), 0),
                     EventEdge::Direct(EventOutputPort::new(key, 0)),
                 )
-                .expect("the edge wires");
+                .unwrap();
             }
         });
     block(&mut exec, 512);
@@ -518,7 +518,7 @@ fn retiring_lanes(
                 EventInputPort::new(NodeKey(100 + u64::from(lane)), 0),
                 EventEdge::Direct(EventOutputPort::new(NodeKey(10 + u64::from(lane)), 0)),
             )
-            .expect("the edge wires");
+            .unwrap();
         rig.feed(NodeKey(100 + u64::from(lane)), 0, lane);
         writers.push((writer, generation_writer));
         generations.push(generation);
@@ -1727,7 +1727,7 @@ fn transform_over<N: tutti_graph::IntoNode>(
             EventInputPort::new(NodeKey(1), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(3), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     })
 }
 

@@ -47,7 +47,7 @@ pub fn connect(ed: &mut Editor, from: u64, to: u64) {
         EventInputPort::new(NodeKey(to), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
 }
 
 /// The ring's capacity the deleted node had, in events.

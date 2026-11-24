@@ -1483,10 +1483,10 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
                 .map_or(0, |s| s.audio_out().count());
             for port in 0..width {
                 editor
-                    .connect_edge(EdgeId {
-                        sink: PortSink::Port(InputPort::new(key, port)),
-                        from: Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
-                    })
+                    .connect_edge(EdgeId::into_port(
+                        InputPort::new(key, port),
+                        Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
+                    ))
                     .expect("checked: the feed's node, and the follower's inputs");
             }
         }
@@ -1511,10 +1511,10 @@ fn unwire_feed<F: Float>(
             // Only the edges it wired: a host that took the key may have
             // wired the port itself since.
             for port in 0..width.count() {
-                editor.disconnect_edge(EdgeId {
-                    sink: PortSink::Port(InputPort::new(key, port)),
-                    from: Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
-                });
+                editor.disconnect_edge(EdgeId::into_port(
+                    InputPort::new(key, port),
+                    Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
+                ));
             }
         }
         Some(Feed::Events(from)) => {

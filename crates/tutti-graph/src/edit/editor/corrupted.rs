@@ -9,8 +9,8 @@ use tutti_units::{SampleRate, Samples};
 use super::{CommitError, Editor};
 use crate::testing::{Kind, TestNode};
 use crate::{
-    Edge, EdgeGain, EdgeId, ForkByClone, ForkError, ForkTarget, MeterId, MeterSpec, NodeKey,
-    OutputPort, PortSink, PortSource, Prepare, TapAlign, TapId, TapOptions, TapSpec, Unforkable,
+    EdgeGain, EdgeId, ForkByClone, ForkError, ForkTarget, MeterId, MeterSpec, NodeKey, OutputPort,
+    PortSource, Prepare, TapAlign, TapId, TapOptions, TapSpec, Unforkable,
 };
 
 /// A mono source of 0.5 a fork can clone.
@@ -120,7 +120,7 @@ fn a_fork_source_from_an_older_generation_is_refused() {
     let pre = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "const", ForkByClone(Dc));
-    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.spec_mut().generations.insert(NodeKey(1), 7);
     assert_eq!(
@@ -143,11 +143,8 @@ fn an_entry_without_a_cell_commits_as_a_unity_lane() {
             width: 1,
         })),
     );
-    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
-    let id = EdgeId {
-        sink: PortSink::Output(0),
-        from: Edge::Direct(out(1, 0)),
-    };
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    let id = EdgeId::into_output(0, out(1, 0));
     ed.spec_mut().set_edge_gain(id, EdgeGain::default());
     assert!(ed.edge_gain_cell(id).is_none(), "no cell yet");
     ed.commit().expect("commits");

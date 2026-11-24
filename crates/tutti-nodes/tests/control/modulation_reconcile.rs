@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_fixtures::{Record, cycle_blocks};
+use tutti_graph::EdgeId;
 use tutti_rt::{Param, ParamCell};
 
 use tutti_buffers::MaxBlock;
@@ -416,11 +417,11 @@ fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
         ed.resize_outputs(usize::from(channel) + 1);
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Output(channel),
-            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(key(id), 0))),
-        })
-        .expect("the edge wires")
+        ed.connect_edge(EdgeId::into_output(
+            channel,
+            PortSource::Node(OutputPort::new(key(id), 0)),
+        ))
+        .unwrap()
     };
     ed.commit().expect("commits");
 }
@@ -920,11 +921,11 @@ fn a_host_key_is_never_taken() {
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
         ed.resize_outputs(usize::from(channel) + 1);
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Output(channel),
-            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(1), 0))),
-        })
-        .expect("the edge wires")
+        ed.connect_edge(EdgeId::into_output(
+            channel,
+            PortSource::Node(OutputPort::new(NodeKey(1), 0)),
+        ))
+        .unwrap()
     };
     ed.insert(
         NodeKey(2),
@@ -1096,7 +1097,7 @@ fn a_port_with_another_event_source_is_refused() {
         },
         EventOutputPort::new(key(30), 0),
     )
-    .expect("the param wires");
+    .unwrap();
     r.ed.commit().expect("commits");
     render(&mut r.ed, &mut r.exec, 128, 128);
     let targets = [cutoff_of(1), cutoff_of(2), cutoff_of(3)];
@@ -1303,7 +1304,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
         from: EventOutputPort::new(lane, 0),
         delay: Samples::new(128),
     };
-    ed.connect_events(to, feedback).expect("the edge wires");
+    ed.connect_events(to, feedback).unwrap();
     host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     let edges = &ed.spec().events[&to];
     assert!(
@@ -1345,11 +1346,11 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
         "bus",
         ForkByClone(Through::new(ChannelLayout::MONO)),
     );
-    r.ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(key(20), 0)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(key(1), 0))),
-    })
-    .expect("the edge wires");
+    r.ed.connect_edge(EdgeId::into_port(
+        InputPort::new(key(20), 0),
+        Edge::Direct(PortSource::Node(OutputPort::new(key(1), 0))),
+    ))
+    .unwrap();
     r.ed.commit().expect("commits");
     render(&mut r.ed, &mut r.exec, 128, 128);
     let targets = [cutoff_of(1), cutoff_of(2)];

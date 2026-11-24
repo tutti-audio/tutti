@@ -135,7 +135,7 @@ fn graph_with(
     ed.insert(NodeKey(1), "voice", pool);
     ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

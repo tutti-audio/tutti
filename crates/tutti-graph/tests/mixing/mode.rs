@@ -15,7 +15,9 @@ use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
 use tutti_fixtures::{Record, Shared};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::wire_like;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -913,7 +915,7 @@ impl Solo {
     fn wire(&mut self, f: impl FnOnce(&mut Topology)) {
         let mut topology = self.ed.spec().topology.clone();
         f(&mut topology);
-        tutti_graph::testing::wire_like(&mut self.ed, &tutti_graph::GraphSpec::new(topology));
+        wire_like(&mut self.ed, &tutti_graph::GraphSpec::new(topology));
     }
 
     fn commit(&mut self) {
@@ -1156,7 +1158,7 @@ fn a_held_input_note_is_closed_on_bypass() {
         t.set_outputs(vec![out(2, 0)]);
     });
     s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
-        .expect("the edge wires");
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1198,7 +1200,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
         t.set_outputs(vec![out(3, 0)]);
     });
     s.ed.connect_events(ev_in(3), EventEdge::Direct(ev_out(1)))
-        .expect("the edge wires");
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(5, BLOCK, &|_| 0.0);
@@ -1236,7 +1238,7 @@ fn a_bypassed_source_closes_its_notes() {
         t.set_outputs(vec![out(2, 0)]);
     });
     s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
-        .expect("the edge wires");
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1285,12 +1287,9 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                 width: 1,
             })),
         );
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(2, 0)),
-            from: direct(1),
-        })
-        .expect("the edge wires");
-        ed.wire_outputs(vec![out(2, 0)]).expect("the sources exist");
+        ed.connect_edge(EdgeId::into_port(at(2, 0), direct(1)))
+            .unwrap();
+        ed.wire_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1377,12 +1376,12 @@ fn a_fork_copies_the_mode_and_starts_steady() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(1, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

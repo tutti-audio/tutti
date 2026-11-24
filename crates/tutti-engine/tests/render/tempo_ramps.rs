@@ -89,7 +89,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

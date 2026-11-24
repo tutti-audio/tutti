@@ -81,7 +81,7 @@ fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.connect_param(
         ParamIn {
             node: NodeKey(2),
@@ -89,7 +89,7 @@ fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
         },
         EventOutputPort::new(NodeKey(1), 0),
     )
-    .expect("the param wires");
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

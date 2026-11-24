@@ -7,6 +7,7 @@
 //! The renders are not compared: the figures are `bus_edges.rs`'s and
 //! `mode.rs`'s. This pins the cost.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -97,11 +98,11 @@ fn rig(workers: usize) -> (Editor, Executor) {
     ed.insert(key(4), "down", Unforkable(Downmixer { latency: 0 }));
     for n in [1, 3, 4] {
         for c in 0..6 {
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(InputPort::new(key(n), c)),
-                from: Edge::Direct(PortSource::MainInput(c)),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(
+                InputPort::new(key(n), c),
+                Edge::Direct(PortSource::MainInput(c)),
+            ))
+            .unwrap();
         }
     }
     ed.connect_bus(
@@ -120,7 +121,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
         out(4, 0),
         out(4, 1),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("compiles");
     exec.apply_pending();
     (ed, exec)

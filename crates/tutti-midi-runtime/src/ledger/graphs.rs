@@ -10,6 +10,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
 use tutti_rt::Mutex;
 
 use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
@@ -76,7 +77,7 @@ mod common {
             EventInputPort::new(NodeKey(to), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     }
 }
 
@@ -692,11 +693,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     );
     sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(2), 0)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(4), 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(2), 0),
+        Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(4), 0))),
+    ))
+    .unwrap();
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
     assert_eq!(a.lock().held.len(), 1, "the note reached A");
@@ -747,7 +748,7 @@ fn forkable_rig() -> (
     );
     connect(&mut ed, 1, 2);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)
 }

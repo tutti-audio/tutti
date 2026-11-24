@@ -474,13 +474,13 @@ fn a_clip_into_a_synth_is_allocation_free() {
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.wire_outputs(
         (0..2).map(|port| {
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),
     )
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     let at = |frame: usize, playing: bool| {
         TransportPosition::new(

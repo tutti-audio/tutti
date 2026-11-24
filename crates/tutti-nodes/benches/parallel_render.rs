@@ -38,6 +38,7 @@
 use std::hint::black_box;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::ChannelLayout;
@@ -55,19 +56,19 @@ const WORKERS: [usize; 4] = [1, 2, 4, 8];
 
 /// Adds `from`'s port 0 to the sources of main output 0: the graph sums them.
 fn out(ed: &mut Editor, from: NodeKey) {
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_output(
+        0,
+        PortSource::Node(OutputPort::new(from, 0)),
+    ))
+    .unwrap();
 }
 
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(node, port)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(node, port),
+        Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
+    ))
+    .unwrap();
 }
 
 /// `lanes` chains of `depth` filters (depth 0: a lone oscillator per lane),
@@ -87,8 +88,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero])
-        .expect("the sources exist");
+    ed.wire_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
@@ -178,16 +178,15 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
     ed.resize_inputs(ChannelLayout::MONO);
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero])
-        .expect("the sources exist");
+    ed.wire_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let k = NodeKey(lane as u64 + 1);
         gain(&mut ed, k, lane, light);
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(k, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(k, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
         out(&mut ed, k);
     }
     ed.commit().expect("commits");
@@ -218,8 +217,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero])
-        .expect("the sources exist");
+    ed.wire_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);

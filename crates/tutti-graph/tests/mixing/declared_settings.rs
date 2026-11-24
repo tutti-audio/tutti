@@ -80,7 +80,7 @@ impl Rig {
             }),
         );
         ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
-            .expect("the sources exist");
+            .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         Self { ed, exec }

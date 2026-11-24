@@ -125,7 +125,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     let probe = NodeKey(1);
     ed.insert(probe, "probe", Unforkable(Probe));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
-        .expect("the sources exist");
+        .unwrap();
     let at = ParamIn {
         node: probe,
         param: UnitParam::Cutoff.into(),
@@ -168,7 +168,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     );
     ed.insert(NodeKey(2), "lane", lane);
     ed.connect_param(at, EventOutputPort::new(NodeKey(2), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("the lane commits");
 
     let mut r = Renderer::new(ed, exec);
@@ -252,7 +252,7 @@ fn render_chorus(
         );
         ed.insert(NodeKey(9_000), "lane", lane);
         ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
-            .expect("the param wires");
+            .unwrap();
         ed.commit().expect("the lane commits");
     }
     (
@@ -425,7 +425,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     );
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("the lane commits");
     let out = r.render(60_000).swap_remove(0);
     (out, knob.load(Ordering::Acquire))
@@ -527,7 +527,7 @@ where
     let lane = ControlLaneNode::from(UnitLaneConfig::new(param, program).knob(knob).range(range));
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("the lane commits");
     r.render_input(Planes::new(&[input]).unwrap())
         .swap_remove(0)
@@ -792,7 +792,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
     );
     let lane_out = EventOutputPort::new(NodeKey(9_000), 0);
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.connect_param(at, lane_out).expect("the param wires");
+    ed.connect_param(at, lane_out).unwrap();
     ed.commit().expect("the lane commits");
     let dc = vec![1.0; 512];
     let mut out = r.render_input(Planes::new(&[&dc]).unwrap()).swap_remove(0);

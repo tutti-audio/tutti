@@ -90,7 +90,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
     ed.wire_outputs(routes(n).into_iter().map(|(unit, port)| {
         PortSource::Node(OutputPort::new(NodeKey(unit as u64 + 1), port as u16))
     }))
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed)

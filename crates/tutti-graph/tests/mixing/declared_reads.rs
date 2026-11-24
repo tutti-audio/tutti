@@ -145,7 +145,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
     )
-    .expect("the sources exist");
+    .unwrap();
     for &(addr, _) in to {
         ed.connect_param(
             ParamIn {
@@ -154,7 +154,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
             },
             EventOutputPort::new(SRC, 0),
         )
-        .expect("the param wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

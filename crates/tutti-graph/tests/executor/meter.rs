@@ -6,7 +6,9 @@
 //! A meter reads the signal and changes nothing: the properties here are
 //! analytic figures and the one-participant render against the parallel one.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::feed_output;
 
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
@@ -83,7 +85,7 @@ fn constants(r: &mut Rig, values: &[f32]) {
         );
         outputs.push(out(key));
     }
-    r.ed.wire_outputs(outputs).expect("the sources exist");
+    r.ed.wire_outputs(outputs).unwrap();
 }
 
 fn commit(r: &mut Rig) {
@@ -208,7 +210,7 @@ fn a_spike_is_held_until_read_and_read_once() {
             done: false,
         }),
     );
-    r.ed.wire_outputs(vec![out(1)]).expect("the sources exist");
+    r.ed.wire_outputs(vec![out(1)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -276,15 +278,12 @@ fn the_main_output_follows_the_outputs() {
     block(&mut r, 32);
     assert_eq!(level(&mut m), vec![(0.5, 0.5, 32), (0.25, 0.25, 32)]);
 
-    tutti_graph::testing::feed_output(&mut r.ed, 0, []);
+    feed_output(&mut r.ed, 0, []);
     {
         let channel = u16::try_from(r.ed.spec().topology.outputs.len()).expect("a width");
         r.ed.resize_outputs(usize::from(channel) + 1);
-        r.ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Output(channel),
-            from: tutti_graph::Edge::Direct(out(1)),
-        })
-        .expect("the edge wires")
+        r.ed.connect_edge(EdgeId::into_output(channel, out(1)))
+            .unwrap()
     };
     commit(&mut r);
     assert_eq!(m.channels(), 3);
@@ -459,20 +458,19 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
                 width: 1,
             }),
         );
-        r.ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(lag), 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        r.ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(gain), 0)),
-            from: Edge::Direct(out(lag)),
-        })
-        .expect("the edge wires");
+        r.ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(lag), 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        r.ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(gain), 0),
+            Edge::Direct(out(lag)),
+        ))
+        .unwrap();
         outputs.push(out(gain));
     }
-    r.ed.wire_outputs(outputs.clone())
-        .expect("the sources exist");
+    r.ed.wire_outputs(outputs.clone()).unwrap();
     let mut readers = Vec::new();
     if main_output {
         readers.push(
@@ -553,7 +551,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| PortSource::Node(OutputPort::new(NodeKey(1), p));
-    r.ed.wire_outputs(vec![port(0)]).expect("the sources exist");
+    r.ed.wire_outputs(vec![port(0)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
             .expect("the sources exist");
@@ -614,14 +612,13 @@ fn the_main_output_reads_at_the_outputs_time() {
     r.ed.insert(NodeKey(1), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
-    r.ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(3), 0)),
-        from: Edge::Direct(out(2)),
-    })
-    .expect("the edge wires");
+    r.ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(3), 0),
+        Edge::Direct(out(2)),
+    ))
+    .unwrap();
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
-    r.ed.wire_outputs(vec![out(3), out(1)])
-        .expect("the sources exist");
+    r.ed.wire_outputs(vec![out(3), out(1)]).unwrap();
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -714,7 +711,7 @@ fn a_main_output_meter_cannot_outgrow_its_cells() {
         r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
     r.ed.wire_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
-        .expect("the sources exist");
+        .unwrap();
     assert!(matches!(
         r.ed.commit(),
         Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)
@@ -777,12 +774,12 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
     r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
-    r.ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(20), 0)),
-        from: Edge::Direct(out(1)),
-    })
-    .expect("the edge wires");
-    tutti_graph::testing::feed_output(&mut r.ed, 5, [out(20)]);
+    r.ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(20), 0),
+        Edge::Direct(out(1)),
+    ))
+    .unwrap();
+    feed_output(&mut r.ed, 5, [out(20)]);
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");

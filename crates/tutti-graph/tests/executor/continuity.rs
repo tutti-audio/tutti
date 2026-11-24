@@ -31,8 +31,8 @@ use tutti_graph::testing::{self as common, Harness, Kind, TestNode, input_signal
 use tutti_graph::{
     Cx, Edge, EdgeId, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
     Fade, FadeLaw, FeedbackFrom, InEvents, InputPort, Io, MeterId, MeterSpec, Node, NodeKey,
-    OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions,
-    TransportPosition, Unforkable,
+    OutputPort, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TransportPosition,
+    Unforkable,
 };
 use tutti_ump::Ump;
 use tutti_units::{Frame, Gain, Latency, SampleRate, Samples, Tail};
@@ -476,17 +476,14 @@ fn rig(workers: usize, inbox: &Inbox) -> Harness {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.wire_outputs(vec![audio(SUM)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![audio(SUM)]).unwrap();
     ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
-        .expect("the edge wires");
+        .unwrap();
     let at = EventInputPort::new(REC, 0);
-    ed.connect_events(at, EventEdge::Direct(src(EA)))
-        .expect("the edge wires");
-    ed.connect_events(at, EventEdge::Direct(src(EL)))
-        .expect("the edge wires");
+    ed.connect_events(at, EventEdge::Direct(src(EA))).unwrap();
+    ed.connect_events(at, EventEdge::Direct(src(EL))).unwrap();
     ed.connect_events(at, EventEdge::feedback(src(EB), Samples::new(MAX_BLOCK)))
-        .expect("the edge wires");
+        .unwrap();
     land(&mut harness);
     harness.outputs = 1;
     harness.inputs = 1;
@@ -501,9 +498,7 @@ fn apply(harness: &mut Harness, op: Op) {
     match op {
         Op::EventLatency(l) => ed.set_latency(EL, latency(l)).expect("sets"),
         Op::AudioLatency(l) => ed.set_latency(LAG, latency(l)).expect("sets"),
-        Op::Direct(true) => ed
-            .connect_events(sink, EventEdge::Direct(src(EA)))
-            .expect("the edge wires"),
+        Op::Direct(true) => ed.connect_events(sink, EventEdge::Direct(src(EA))).unwrap(),
         Op::Direct(false) => {
             ed.disconnect_events(sink, tutti_graph::EventEdge::Direct(src(EA)));
         }
@@ -535,7 +530,7 @@ fn apply(harness: &mut Harness, op: Op) {
             }
             if let Some(d) = d {
                 ed.connect_events(sink, EventEdge::feedback(src(EB), d))
-                    .expect("the edge wires");
+                    .unwrap();
             }
         }
         Op::AudioFeedback(d) => {
@@ -679,11 +674,10 @@ fn flush_order(workers: usize) {
     }
     ed.insert(REC, "recorder", Unforkable(Recorder(inbox.clone())));
     ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
-        .expect("the edge wires");
+        .unwrap();
     let at = EventInputPort::new(REC, 0);
     for from in [SECOND, FIRST, EL] {
-        ed.connect_events(at, EventEdge::Direct(src(from)))
-            .expect("the edge wires");
+        ed.connect_events(at, EventEdge::Direct(src(from))).unwrap();
     }
     land(&mut harness);
     let run = |harness: &mut Harness| {
@@ -781,13 +775,13 @@ fn bank_continues_the_old_history(workers: usize) {
         Unforkable(TestNode::new(Kind::Lag { latency: LATENCY })),
     );
     ed.resize_inputs(ChannelLayout::MONO);
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(LAG_NODE, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(LAG_NODE, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
     ed.wire_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     // Impulses at 162 (in the ring when the commit lands at 192), 197 and 282.
     let impulses = [(162usize, 1.0f32), (197, 0.5), (282, 0.25)];
@@ -828,8 +822,7 @@ fn bank_continues_the_old_history(workers: usize) {
     ));
     let id = ed.spec().main_output_id.next();
     ed.declare_main_output(ed.spec().main_output, id);
-    ed.wire_outputs(vec![audio(NEW)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![audio(NEW)]).unwrap();
     ed.commit().expect("declares the new main output");
     for b in 3..5 {
         let bufs = step(&mut ed, &mut exec, b * BLOCK);
@@ -934,22 +927,18 @@ fn a_rate_change(workers: usize) {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.wire_outputs(vec![audio(SUM_NODE)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![audio(SUM_NODE)]).unwrap();
     let sink = EventInputPort::new(SINK, 0);
     ed.connect_events(sink, EventEdge::Direct(src(EMIT)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink, EventEdge::Direct(src(EVENT_LAG)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(
         EventInputPort::new(EVENT_LAG, 0),
         EventEdge::Direct(src(EMIT)),
     )
-    .expect("the edge wires");
-    let lane = EdgeId {
-        sink: PortSink::Port(weighted),
-        from: Edge::Direct(audio(LAG_NODE)),
-    };
+    .unwrap();
+    let lane = EdgeId::into_port(weighted, Edge::Direct(audio(LAG_NODE)));
     ed.set_edge_gain(lane, Gain::new(0.5))
         .expect("the edge exists");
     let mut tap = harness

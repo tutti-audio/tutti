@@ -57,10 +57,7 @@ fn direct(node: NodeKey, port: u16) -> Edge {
 }
 
 fn id(sink: InputPort, from: Edge) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(sink),
-        from,
-    }
+    EdgeId::into_port(sink, from)
 }
 
 fn eout(node: NodeKey, port: u16) -> EventOutputPort {
@@ -99,27 +96,23 @@ fn rig() -> (Editor, Executor) {
             Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
         ),
     ] {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at),
-            from,
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(at, from)).unwrap();
     }
     ed.wire_outputs(vec![
         PortSource::Node(out(X, 0)),
         PortSource::Node(out(X, 1)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.connect_events(ein(X, 0), EventEdge::Direct(eout(A, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(ein(X, 2), EventEdge::Direct(eout(A, 2)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(ein(B, 0), EventEdge::Direct(eout(X, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(ein(B, 2), EventEdge::Direct(eout(X, 2)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(ein(A, 1), EventEdge::feedback(eout(X, 2), DELAY))
-        .expect("the edge wires");
+        .unwrap();
     // Weighted lanes: one the shape keeps, one it loses.
     ed.set_edge_fade(id(inp(X, 0), direct(A, 0)), EdgeFade::In)
         .expect("the edge exists");
@@ -274,8 +267,7 @@ fn an_edge_already_fading_out_is_not_reported() {
 fn a_driver_on_a_missing_event_output_is_released() {
     let (mut ed, _exec) = rig();
     let lane = id(inp(X, 0), direct(A, 0));
-    ed.connect_edge_gain(lane, eout(X, 2))
-        .expect("the lane wires");
+    ed.connect_edge_gain(lane, eout(X, 2)).unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(placed.unwired.gains, vec![(lane, eout(X, 2))]);
     assert_eq!(ed.spec().gains[&lane].source, None);
@@ -363,11 +355,8 @@ fn a_feedback_self_loop_on_a_lost_port_is_listed_once() {
         inp(X, 2),
         Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
     );
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(inp(X, 2)),
-        from: looped.from,
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(inp(X, 2), looped.from))
+        .unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(
         placed
@@ -396,9 +385,8 @@ fn param_drivers_on_lost_ports_are_released_and_listed() {
         node: B,
         param: tutti_graph::NodeMix::ADDR,
     };
-    ed.connect_param(undeclared, eout(A, 0))
-        .expect("the param wires");
-    ed.connect_param(mix, eout(X, 2)).expect("the param wires");
+    ed.connect_param(undeclared, eout(A, 0)).unwrap();
+    ed.connect_param(mix, eout(X, 2)).unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let mut listed = placed.unwired.params.clone();
     listed.sort();
@@ -479,8 +467,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
     ed.insert(X, "const", konst(2));
-    ed.wire_outputs(vec![PortSource::Node(out(X, 0))])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![PortSource::Node(out(X, 0))]).unwrap();
     let mut tap = ed
         .open_tap(
             TapId::of(1),

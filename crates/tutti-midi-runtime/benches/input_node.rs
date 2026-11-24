@@ -68,7 +68,7 @@ fn rig() -> (Executor, DeviceInput) {
             EventInputPort::new(NodeKey(1), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     editor.commit().expect("commits");
     (exec, device)
 }

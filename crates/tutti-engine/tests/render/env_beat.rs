@@ -24,6 +24,7 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::Record;
+use tutti_graph::EdgeId;
 
 use crate::support;
 
@@ -128,14 +129,14 @@ fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     ed.insert(CLOCK, "clock", Unforkable(BeatPorts));
     ed.insert(SINK, "sink", sink);
     for port in 0..2 {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(SINK, port)),
-            from: Edge::Direct(PortSource::Node(OutputPort::new(CLOCK, port))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(SINK, port),
+            Edge::Direct(PortSource::Node(OutputPort::new(CLOCK, port))),
+        ))
+        .unwrap();
     }
     ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(SINK, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
 }
 
@@ -344,7 +345,7 @@ fn click_clicks_on_the_model_beats() {
     const CLICK: NodeKey = NodeKey(1);
     ed.insert(CLICK, "click", click);
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let m = &transport.motion();
@@ -423,7 +424,7 @@ pub(crate) fn env_graph(max_block: usize, log: &Record<Env>) -> (Editor, Executo
     ));
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(log.clone())));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

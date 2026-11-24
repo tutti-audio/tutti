@@ -208,13 +208,7 @@ impl Builder {
             let mut aligned = s.series.shifted(arrival - s.departure);
             if self.rng.chance(30) {
                 let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
-                weights.push((
-                    EdgeId {
-                        sink: PortSink::Port(at),
-                        from: edge,
-                    },
-                    w,
-                ));
+                weights.push((EdgeId::into_port(at, edge), w));
                 aligned = aligned.scaled(w);
             }
             sum = sum.plus(&aligned);
@@ -377,13 +371,8 @@ impl Builder {
                 let mut aligned = s.series.shifted(time - s.departure);
                 if self.rng.chance(30) {
                     let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
-                    self.weights.push((
-                        EdgeId {
-                            sink: PortSink::Output(ch as u16),
-                            from: Edge::Direct(source),
-                        },
-                        w,
-                    ));
+                    self.weights
+                        .push((EdgeId::into_output(ch as u16, source), w));
                     aligned = aligned.scaled(w);
                 }
                 sum = sum.plus(&aligned);
@@ -549,11 +538,11 @@ fn edit<F: Word>(harness: &mut Harness<F>, decoy: NodeKey, edit: Edit) {
     match edit {
         Edit::Insert(latency) | Edit::Replace(latency) => {
             ed.insert(decoy, "decoy", lag(latency));
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(InputPort::new(decoy, 0)),
-                from: Edge::Direct(PortSource::MainInput(0)),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(
+                InputPort::new(decoy, 0),
+                Edge::Direct(PortSource::MainInput(0)),
+            ))
+            .unwrap();
             ed.commit().expect("the decoy commits");
         }
         Edit::Remove => {

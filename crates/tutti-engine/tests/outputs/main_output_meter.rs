@@ -57,7 +57,7 @@ fn engine(
             PortSource::Zero
         }
     }))
-    .expect("the sources exist");
+    .unwrap();
     let meter = ed
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
@@ -190,7 +190,7 @@ fn the_main_output_reads_before_the_declick() {
     ));
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     let mut meter = ed
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
@@ -269,7 +269,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
             PortSource::Zero
         }
     }))
-    .expect("the sources exist");
+    .unwrap();
     let mut meter = ed
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");

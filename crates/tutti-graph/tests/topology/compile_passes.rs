@@ -1190,10 +1190,9 @@ fn removing_a_node_removes_its_resolution_marks() {
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
     let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
-    ed.connect_events(at, EventEdge::Direct(from))
-        .expect("the edge wires");
+    ed.connect_events(at, EventEdge::Direct(from)).unwrap();
     ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
-        .expect("the edge exists");
+        .unwrap();
     ed.commit().expect("the consumer honours samples");
     ed.remove(A);
     ed.commit().expect("commits");
@@ -1220,10 +1219,9 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
     let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
-    ed.connect_events(at, EventEdge::Direct(from))
-        .expect("the edge wires");
+    ed.connect_events(at, EventEdge::Direct(from)).unwrap();
     ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
-        .expect("the edge exists");
+        .unwrap();
     ed.commit().expect("commits");
     assert!(ed.disconnect_events(at, tutti_graph::EventEdge::Direct(from)));
     assert!(

@@ -408,7 +408,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
                     );
                     width
                 ])
-                .expect("the node exists");
+                .unwrap();
         },
     ));
     let planes = render(&mut session, request);
@@ -560,7 +560,7 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
                 );
                 width
             ])
-            .expect("the node exists");
+            .unwrap();
     }));
     let planes = render(&mut session, request);
     let peak = planes[0].iter().fold(0.0f32, |acc, s| acc.max(s.abs()));

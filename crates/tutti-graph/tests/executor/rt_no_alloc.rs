@@ -17,7 +17,9 @@
 //! stated rather than implied: a node that allocates is the node's bug,
 //! which this test catches only for the nodes it runs.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::{feed_input, feed_output};
 use tutti_graph::{Curvature, EventTapOptions, Exponent};
 
 use std::sync::Arc;
@@ -129,66 +131,51 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(ev(1, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     // Fan-in, a PDC-delayed source (3 is 11 frames late), and feedback.
     ed.connect_events(
         EventInputPort::new(NodeKey(4), 0),
         EventEdge::Direct(ev(3, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.connect_events(
         EventInputPort::new(NodeKey(4), 0),
         EventEdge::Direct(ev(2, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.connect_events(
         EventInputPort::new(NodeKey(4), 1),
         EventEdge::feedback(ev(3, 0), Samples::new(256)),
     )
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(5, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(6, 0)),
-        from: from(4, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(7, 0)),
-        from: from(5, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(7, 1)),
-        from: from(6, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(7, 2)),
-        from: Edge::Feedback(FeedbackFrom::one_block(
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(5, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(6, 0), from(4, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(7, 0), from(5, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(7, 1), from(6, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(7, 2),
+        Edge::Feedback(FeedbackFrom::one_block(
             OutputPort::new(NodeKey(9), 0),
             Samples::new(256),
         )),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(8, 0)),
-        from: from(7, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(9, 0)),
-        from: from(8, 0),
-    })
-    .expect("the edge wires");
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 0), from(7, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(9, 0), from(8, 0)))
+        .unwrap();
     ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(9), 0)),
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -294,12 +281,12 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
             EventInputPort::new(NodeKey(4), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
         )
-        .expect("the edge wires");
+        .unwrap();
     };
     wire(&mut ed, 1);
     wire(&mut ed, 2);
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -356,22 +343,22 @@ fn crossfades_are_allocation_free_on(workers: usize) {
         consumer,
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     )
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(1, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(1, 1)),
-        from: Edge::Direct(PortSource::MainInput(1)),
-    })
-    .expect("the edge wires");
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 1),
+        Edge::Direct(PortSource::MainInput(1)),
+    ))
+    .unwrap();
     ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
         PortSource::Node(OutputPort::new(NodeKey(3), 0)),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
 
     let input = vec![0.25f32; 256];
@@ -482,7 +469,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         );
     }
     ed.wire_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let mut out = vec![vec![0.0f32; 64]; KEYS as usize];
     let transport = TransportPosition::default();
@@ -558,7 +545,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
     );
     ed.insert(NodeKey(1), "chaser", Unforkable(HeldChaser(Arc::clone(&a))));
     ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let mut out = vec![0.0f32; 64];
     let transport = TransportPosition::default();
@@ -703,10 +690,10 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
     let tally = |port| EventInputPort::new(NodeKey(4), port);
     for from in [1, 2, 3] {
         ed.connect_events(tally(0), EventEdge::Direct(ev(from)))
-            .expect("the edge wires");
+            .unwrap();
     }
     ed.connect_events(tally(1), EventEdge::feedback(ev(1), Samples::new(300)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -897,18 +884,15 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     );
     ed.insert(NodeKey(4), "ramps", Unforkable(RampEvery));
     {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(2, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(1, 0)),
-            from: from(2, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            at(2, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
+            .unwrap();
         ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-            .expect("the sources exist");
+            .unwrap();
     }
     let cut = ParamIn {
         node: NodeKey(1),
@@ -921,7 +905,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     // The ramps are the early path: the sink sits behind the lag's PDC, so
     // the plan delays its event source.
     let ramps = EventOutputPort::new(NodeKey(4), 0);
-    ed.connect_param(cut, ramps).expect("the param wires");
+    ed.connect_param(cut, ramps).unwrap();
     ed.commit().expect("commits");
 
     let input: Vec<f32> = (0..256).map(|i| (i % 13) as f32 / 13.0).collect();
@@ -945,7 +929,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     // A connection made (Q, behind the lag's PDC: the ramps are the early
     // path) and one broken: both declick inside the gate.
     ed.collect();
-    ed.connect_param(q, ramps).expect("the param wires");
+    ed.connect_param(q, ramps).unwrap();
     ed.disconnect_param(cut, ramps);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1031,25 +1015,22 @@ fn param_events_are_allocation_free_on(workers: usize) {
         ed.insert(NodeKey(k), "ramps", Unforkable(RampEvery));
     }
     {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(2, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(1, 0)),
-            from: from(2, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            at(2, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
+            .unwrap();
         ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
-            .expect("the sources exist");
+            .unwrap();
     }
     let port = |p| EventInputPort::new(NodeKey(1), p);
     let out = |k| EventOutputPort::new(NodeKey(k), 0);
     ed.connect_events(port(0), EventEdge::Direct(out(4)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(port(0), EventEdge::Direct(out(5)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(
         port(1),
         EventEdge::Feedback {
@@ -1057,7 +1038,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
             delay: Samples::new(256),
         },
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.commit().expect("commits");
 
     let input: Vec<f32> = (0..256).map(|i| (i % 13) as f32 / 13.0).collect();
@@ -1113,18 +1094,15 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
         ed.insert(NodeKey(k), "ramps", Unforkable(RampEvery));
     }
     {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(2, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(1, 0)),
-            from: from(2, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            at(2, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
+            .unwrap();
         ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
-            .expect("the sources exist");
+            .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1266,13 +1244,13 @@ fn an_azimuth_param_port_is_allocation_free() {
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
     };
     ed.connect_param(azimuth, EventOutputPort::new(NodeKey(4), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let transport = TransportPosition::default();
@@ -1310,13 +1288,13 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
     };
     ed.connect_param(azimuth, EventOutputPort::new(NodeKey(4), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let transport = TransportPosition::default();
@@ -1361,13 +1339,13 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
     };
     ed.connect_param(azimuth, EventOutputPort::new(NodeKey(4), 0))
-        .expect("the param wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let transport = TransportPosition::default();
@@ -1382,7 +1360,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     }
     ed.remove(NodeKey(1));
     ed.remove(NodeKey(4));
-    ed.wire_outputs(Vec::new()).expect("the sources exist");
+    ed.wire_outputs(Vec::new()).unwrap();
     ed.commit().expect("commits");
     for _ in 0..8 {
         exec.process(64, &transport, &[], &mut [&mut out[..64]]);
@@ -1459,14 +1437,11 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
                 200,
             )),
         );
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(fx.0, 0)),
-            from: from(src.0, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(at(fx.0, 0), from(src.0, 0)))
+            .unwrap();
         outputs.push(PortSource::Node(OutputPort::new(fx, 0)));
     }
-    ed.wire_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1537,17 +1512,14 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                         Unforkable(TestNode::new(Kind::Thru { width: 1 })),
                     );
                     for k in 1..=n {
-                        ed.connect_edge(tutti_graph::EdgeId {
-                            sink: tutti_graph::PortSink::Port(at(sink.0, 0)),
-                            from: from(k, 0),
-                        })
-                        .expect("the edge wires");
+                        ed.connect_edge(EdgeId::into_port(at(sink.0, 0), from(k, 0)))
+                            .unwrap();
                     }
                     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
-                        .expect("the sources exist");
+                        .unwrap();
                 } else {
                     ed.resize_outputs(1);
-                    tutti_graph::testing::feed_output(
+                    feed_output(
                         &mut ed,
                         0,
                         (1..=n).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
@@ -1630,17 +1602,14 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     Unforkable(TestNode::new(Kind::Thru { width: 1 })),
                 );
                 for k in 1..=n {
-                    ed.connect_edge(tutti_graph::EdgeId {
-                        sink: tutti_graph::PortSink::Port(at(sink.0, 0)),
-                        from: from(k, 0),
-                    })
-                    .expect("the edge wires");
+                    ed.connect_edge(EdgeId::into_port(at(sink.0, 0), from(k, 0)))
+                        .unwrap();
                 }
                 ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
-                    .expect("the sources exist");
+                    .unwrap();
             } else {
                 ed.resize_outputs(1);
-                tutti_graph::testing::feed_output(
+                feed_output(
                     &mut ed,
                     0,
                     (1..=n).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
@@ -1666,7 +1635,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                         edge_of(k),
                         EventOutputPort::new(NodeKey(5000 + k % 4), 0),
                     )
-                    .expect("the lane wires");
+                    .unwrap();
                 }
             }
             ed.commit().expect("commits");
@@ -1825,49 +1794,34 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(ev(1, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.connect_events(
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(ev(2, 0)),
     )
-    .expect("the edge wires");
+    .unwrap();
     ed.connect_events(
         EventInputPort::new(NodeKey(4), 0),
         EventEdge::Direct(ev(3, 0)),
     )
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(5, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(6, 0)),
-        from: from(5, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(7, 0)),
-        from: from(6, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(8, 0)),
-        from: from(4, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(8, 1)),
-        from: from(7, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(9, 0)),
-        from: from(8, 0),
-    })
-    .expect("the edge wires");
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(5, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(6, 0), from(5, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(7, 0), from(6, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 0), from(4, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 1), from(7, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(9, 0), from(8, 0)))
+        .unwrap();
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1937,13 +1891,13 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
         Unforkable(TestNode::counted(kind, Arc::clone(&calls))),
     );
     ed.resize_inputs(ChannelLayout::from_count(1));
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(1, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -2045,7 +1999,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
     };
     let lane = |k: u64| EventOutputPort::new(NodeKey(5000 + k % 4), 0);
     for k in 5..=9u64 {
-        ed.connect_param(port(k), lane(k)).expect("the param wires");
+        ed.connect_param(port(k), lane(k)).unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -2125,7 +2079,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         from: from(k, 0),
     };
     ed.resize_outputs(1);
-    tutti_graph::testing::feed_output(
+    feed_output(
         &mut ed,
         0,
         (1..=8u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
@@ -2232,7 +2186,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
         );
     }
     ed.wire_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     let mut outs: [Vec<f32>; NODES as usize] = std::array::from_fn(|_| vec![0.0f32; 256]);
@@ -2283,7 +2237,7 @@ on_workers! {
 /// on every block, across commits (which allocate, outside the gate).
 #[test]
 fn edge_fades_are_allocation_free() {
-    use tutti_graph::{EdgeFade, EdgeId, PortSink};
+    use tutti_graph::{EdgeFade, EdgeId};
     use tutti_units::Gain;
     const BLOCK: usize = 64;
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
@@ -2295,22 +2249,9 @@ fn edge_fades_are_allocation_free() {
         ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
     }
     let src = |n: u64| PortSource::Node(OutputPort::new(NodeKey(n), 0));
-    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
-        .expect("the sources exist");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(src(1)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output(0),
-        from: tutti_graph::Edge::Direct(src(2)),
-    })
-    .expect("the edge wires");
-    let id = |n: u64| EdgeId {
-        sink: PortSink::Output(0),
-        from: Edge::Direct(src(n)),
-    };
+    ed.wire_outputs([src(1)]).unwrap();
+    ed.connect_edge(EdgeId::into_output(0, src(2))).unwrap();
+    let id = |n: u64| EdgeId::into_output(0, src(n));
     ed.set_edge_gain(id(1), Gain::new(0.5))
         .expect("the edge exists");
     ed.set_edge_gain(id(2), Gain::new(0.25))
@@ -2352,26 +2293,20 @@ fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
     );
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(base, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(base + 1, 0)),
-        from: Edge::Direct(PortSource::MainInput(0)),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(base + 2, 0)),
-        from: from(base, 0),
-    })
-    .expect("the edge wires");
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(at(base + 2, 1)),
-        from: from(base + 1, 0),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        at(base, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(base + 1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(base + 2, 0), from(base, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(base + 2, 1), from(base + 1, 0)))
+        .unwrap();
     sum
 }
 
@@ -2486,15 +2421,15 @@ fn event_pdc(ed: &mut Editor, base: u64) {
         ed.insert(NodeKey(base + i), "holder", Unforkable(Holder::new(30)));
     }
     ed.connect_events(sink(base + 2, 0), EventEdge::Direct(ev(base + 1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink(base + 3, 0), EventEdge::Direct(ev(base + 2, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink(base + 3, 1), EventEdge::Direct(ev(base, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink(base + 3, 2), EventEdge::Direct(ev(base + 4, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink(base + 3, 3), EventEdge::Direct(ev(base + 5, 0)))
-        .expect("the edge wires");
+        .unwrap();
 }
 
 /// **Applying a commit allocates and frees nothing**: the new arena, every
@@ -2529,8 +2464,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.resize_inputs(ChannelLayout::MONO);
     let first = pdc_pair(&mut ed, 1, 40);
     let out_of = |node: NodeKey| PortSource::Node(OutputPort::new(node, 0));
-    ed.wire_outputs(vec![out_of(first)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![out_of(first)]).unwrap();
     let cap = Samples::new(1 << 16);
     let mut tap = ed
         .open_tap(TapId::of(1), vec![out_of(first)], TapOptions::new(cap))
@@ -2575,7 +2509,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     let second = pdc_pair(&mut ed, 10, 25);
     event_pdc(&mut ed, 20);
     ed.wire_outputs(vec![out_of(first), out_of(second)])
-        .expect("the sources exist");
+        .unwrap();
     let events = ed
         .open_event_tap(
             EventTapId::of(1),
@@ -2606,14 +2540,11 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
     );
     for (i, sum) in sums.iter().enumerate() {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(200, i as u16)),
-            from: from(sum.0, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(at(200, i as u16), from(sum.0, 0)))
+            .unwrap();
     }
     ed.wire_outputs(vec![out_of(first), out_of(second), out_of(wide)])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
     assert!(slots(&exec) > before, "the arena grew");
@@ -2664,22 +2595,16 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         ))]
     };
     {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(300, 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(302, 0)),
-            from: from(300, 0),
-        })
-        .expect("the edge wires");
-        tutti_graph::testing::feed_input(&mut ed, at(302, 1), feedback(128));
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(301, 0)),
-            from: from(302, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            at(300, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(at(302, 0), from(300, 0)))
+            .unwrap();
+        feed_input(&mut ed, at(302, 1), feedback(128));
+        ed.connect_edge(EdgeId::into_port(at(301, 0), from(302, 0)))
+            .unwrap();
     }
     for (k, kind) in [
         Kind::Emitter {
@@ -2700,27 +2625,25 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     }
     let efb = |delay: usize| EventEdge::feedback(ev(311, 0), Samples::new(delay));
     ed.connect_events(sink(311, 0), EventEdge::Direct(ev(310, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.connect_events(sink(312, 0), EventEdge::Direct(ev(311, 0)))
-        .expect("the edge wires");
-    ed.connect_events(sink(312, 1), efb(128))
-        .expect("the edge wires");
+        .unwrap();
+    ed.connect_events(sink(312, 1), efb(128)).unwrap();
     ed.wire_outputs(vec![
         out_of(first),
         out_of(second),
         out_of(wide),
         out_of(gain),
     ])
-    .expect("the sources exist");
+    .unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
     // The feedback delays change: new keys, and the old FIFOs flush.
-    tutti_graph::testing::feed_input(&mut ed, at(302, 1), feedback(192));
+    feed_input(&mut ed, at(302, 1), feedback(192));
     ed.disconnect_events(sink(312, 1), efb(128));
-    ed.connect_events(sink(312, 1), efb(192))
-        .expect("the edge wires");
+    ed.connect_events(sink(312, 1), efb(192)).unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
@@ -2745,8 +2668,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             latency: 0,
         })),
     );
-    ed.connect_edge_gain(edge(first), ev(400, 0))
-        .expect("the lane wires");
+    ed.connect_edge_gain(edge(first), ev(400, 0)).unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
@@ -2787,7 +2709,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
     );
     ed.connect_events(sink(601, 0), EventEdge::Direct(ev(600, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 6, 64);
@@ -2832,11 +2754,11 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     );
     {
         ed.connect_events(sink(702, 0), EventEdge::Direct(ev(703, 0)))
-            .expect("the edge wires");
+            .unwrap();
         ed.connect_events(sink(701, 0), EventEdge::Direct(ev(700, 0)))
-            .expect("the edge wires");
+            .unwrap();
         ed.connect_events(sink(701, 1), EventEdge::Direct(ev(702, 0)))
-            .expect("the edge wires");
+            .unwrap();
     }
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -2877,7 +2799,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.insert(NodeKey(712), "tally", Unforkable(tally(&both, 1)));
     for k in [710, 711] {
         ed.connect_events(sink(712, 0), EventEdge::Direct(ev(k, 0)))
-            .expect("the edge wires");
+            .unwrap();
     }
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -3051,7 +2973,7 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     ed.insert(NodeKey(1), "latch", Unforkable(Latch { sent: false }));
     ed.insert(NodeKey(2), "closed", Unforkable(closed()));
     ed.connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -3071,7 +2993,7 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     // Promote: a second replace waits behind the first's fade and takes over;
     // the unit it displaces owes the keys it held.
     ed.connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     blocks(&mut exec, 4);
@@ -3133,7 +3055,7 @@ fn retiring_and_re_preparing_a_key_holding_unit_allocates_nothing_on(workers: us
     });
     ed.insert(NodeKey(1), "latch", Unforkable(Latch { sent: false }));
     ed.connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)))
-        .expect("the edge wires");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -3188,14 +3110,11 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
         Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
     );
     for (i, sum) in sums.iter().enumerate() {
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(at(200, i as u16)),
-            from: from(sum.0, 0),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(at(200, i as u16), from(sum.0, 0)))
+            .unwrap();
     }
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, 4);
     exec.apply_pending();
@@ -3234,8 +3153,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         })),
     );
     let port = |p| PortSource::Node(OutputPort::new(node, p));
-    ed.wire_outputs(vec![port(0), port(1), port(2)])
-        .expect("the sources exist");
+    ed.wire_outputs(vec![port(0), port(1), port(2)]).unwrap();
     let mut wide = ed
         .open_heard_tap(TapId::of(1), 3, Samples::new(1024))
         .expect("the outputs exist");
@@ -3256,7 +3174,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     run(&mut exec, 4);
 
     // The main output narrows to one channel and its tap is opened again.
-    ed.wire_outputs(vec![port(0)]).expect("the sources exist");
+    ed.wire_outputs(vec![port(0)]).unwrap();
     let mut narrow = ed
         .open_heard_tap(TapId::of(1), 1, Samples::new(1024))
         .expect("the outputs exist");

@@ -17,6 +17,7 @@
 
 #![cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::hint::black_box;
@@ -79,14 +80,14 @@ fn render_probes(workers: usize, entry: Entry) {
     ed.resize_inputs(ChannelLayout::MONO);
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(k), 0)),
-            from: Edge::Direct(PortSource::MainInput(0)),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(k), 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
     }
     ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

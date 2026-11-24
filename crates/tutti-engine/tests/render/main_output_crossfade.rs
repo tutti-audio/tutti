@@ -3,6 +3,7 @@
 //! the main output's own, claimed and written by the same tasks.
 
 use crate::support;
+use tutti_graph::EdgeId;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -37,7 +38,7 @@ fn wire(ed: &mut Editor, pair: [u64; 2]) {
         pair.map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
     )
-    .expect("the sources exist");
+    .unwrap();
 }
 
 /// 64-frame stereo blocks of a graph whose main output moves from channels (11, 12)
@@ -66,11 +67,11 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
             "gain",
             ForkByClone(support::Gain(0.1 * (k + 1) as f32)),
         );
-        ed.connect_edge(tutti_graph::EdgeId {
-            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(k + 11), 0)),
-            from: Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(k + 1), 0))),
-        })
-        .expect("the edge wires");
+        ed.connect_edge(EdgeId::into_port(
+            InputPort::new(NodeKey(k + 11), 0),
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(k + 1), 0))),
+        ))
+        .unwrap();
     }
     wire(&mut ed, [11, 12]);
     ed.commit().expect("commits");

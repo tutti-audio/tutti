@@ -116,7 +116,7 @@ fn render_with(
         }
     }
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let map = TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {

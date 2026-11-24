@@ -5,6 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, process_audio};
+use tutti_graph::EdgeId;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
@@ -41,14 +42,14 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
                 .q(Q::new(0.7)),
         ),
     );
-    ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Port(InputPort::new(filter, 0)),
-        from: Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
-    })
-    .expect("the edge wires");
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(filter, 0),
+        Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+    ))
+    .unwrap();
     // The filter's single output on both device channels.
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let state = AudioCallbackState::new(engine);

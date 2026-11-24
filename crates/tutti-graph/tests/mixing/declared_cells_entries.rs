@@ -120,7 +120,7 @@ fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
     )
-    .expect("the sources exist");
+    .unwrap();
     for &(addr, _) in to {
         ed.connect_param(
             ParamIn {
@@ -129,7 +129,7 @@ fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
             },
             EventOutputPort::new(SRC, 0),
         )
-        .expect("the param wires");
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -282,7 +282,7 @@ impl Rig {
         let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
         ed.insert(NODE, "node", node);
         ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
-            .expect("the sources exist");
+            .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         Self { ed, exec }

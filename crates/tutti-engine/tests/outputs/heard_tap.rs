@@ -49,7 +49,7 @@ fn rig(width: u16) -> (Engine, HeardTaps) {
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
     ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     let mut engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
     Box::leak(Box::new((ed, transport)));

@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
+use tutti_graph::EdgeId;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
@@ -110,15 +111,12 @@ fn graph(workers: usize, declared: bool) -> Executor {
         for c in 0..2u16 {
             let port = InputPort::new(SUM, k as u16 * 2 + c);
             let from = PortSource::Node(OutputPort::new(key, c));
-            ed.connect_edge(tutti_graph::EdgeId {
-                sink: tutti_graph::PortSink::Port(port),
-                from: Edge::Direct(from),
-            })
-            .expect("the edge wires");
+            ed.connect_edge(EdgeId::into_port(port, Edge::Direct(from)))
+                .unwrap();
         }
     }
     ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SUM, port))))
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

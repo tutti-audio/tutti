@@ -80,7 +80,7 @@ fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNo
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
-        .expect("the sources exist");
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
