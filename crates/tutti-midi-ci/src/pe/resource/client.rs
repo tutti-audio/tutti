@@ -10,8 +10,8 @@ use super::super::chunk::PeRequestId;
 use super::super::header::PeSetScope;
 use super::super::header::{PeEncoding, PePage, PeReply, PeStatus};
 use super::super::initiator::{
-    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeKind,
-    PeNotification, PeOutcome, PeResponse, PeSet, PeSettings,
+    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeNotification,
+    PeOutcome, PeResponse, PeSet, PeSettings,
 };
 use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
@@ -335,6 +335,8 @@ pub struct ResourceInitiator {
     pe: PeInitiator,
     list: Option<PeResourceList>,
     ops: Vec<(PeRequestId, Op)>,
+    /// The typed target and the data of each Subscription the transaction layer
+    /// answers for: opened and ended at the same events as its table of Ids.
     subs: Vec<Sub>,
     cache: GetCache,
     next_call: u32,
@@ -635,9 +637,8 @@ impl ResourceInitiator {
                 }
                 PeAction::Finished {
                     request_id,
-                    kind,
                     outcome,
-                } => self.finished(request_id, kind, outcome, now, &mut out),
+                } => self.finished(request_id, outcome, now, &mut out),
                 PeAction::Notification(notification) => self.notified(notification, now, &mut out),
             }
         }
@@ -659,7 +660,6 @@ impl ResourceInitiator {
     fn finished(
         &mut self,
         id: PeRequestId,
-        _kind: PeKind,
         outcome: PeOutcome,
         now: Instant,
         out: &mut Vec<ResourceAction>,
