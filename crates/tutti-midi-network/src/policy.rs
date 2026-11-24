@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use crate::challenge::Challenge;
 use crate::{AuthMethods, Username};
 
 /// The secrets a Client answers a challenge with.
@@ -77,12 +78,12 @@ pub enum Admission {
 }
 
 impl Admission {
-    /// The method a Client needs to be admitted, if one is.
-    pub(crate) fn required(&self) -> AuthMethods {
+    /// What a Client must answer to be admitted, when it must answer.
+    pub(crate) fn challenge(&self) -> Option<Challenge<'_>> {
         match self {
-            Self::Open | Self::Confirm => AuthMethods::NONE,
-            Self::SharedSecret(_) => AuthMethods::SHARED_SECRET,
-            Self::Users(_) => AuthMethods::USER,
+            Self::Open | Self::Confirm => None,
+            Self::SharedSecret(secret) => Some(Challenge::SharedSecret(secret)),
+            Self::Users(users) => Some(Challenge::Users(users)),
         }
     }
 }

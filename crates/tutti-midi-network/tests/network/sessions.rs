@@ -12,7 +12,8 @@ use tutti_midi_network::{
     Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, IdleInterval,
     Invitation, MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
     RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SendError, SequenceNumber,
-    SessionConfig, SessionState, Timer, UmpData, UserAuthChallenge, UserAuthState, Username,
+    SessionConfig, SessionState, Timer, UmpData, UserAuthChallenge, UserAuthState,
+    UserAuthentication, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -1862,6 +1863,42 @@ fn a_host_naks_a_pending_or_a_challenge_as_not_expected() {
         assert_eq!(nak.reason, NakReason::NotExpected);
         assert_eq!(nak.refused, command.header());
         assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+    }
+}
+
+/// A Host is never the one an Accepted is meant for, and a Client never the
+/// one an Invitation with Authentication is meant for: each refuses it as not
+/// expected, quoting the header, and no Session is harmed.
+#[test]
+fn a_host_naks_an_accepted_and_a_client_naks_an_authenticated_invitation_as_not_expected() {
+    let mut sim = established();
+    let accepted = Command::Accepted(identity("Laptop", "CLIENT-1"));
+    sim.host
+        .on_message(client_addr(), &datagram(&accepted), sim.now);
+    sim.flush();
+    let [Command::Nak(nak)] = &sim.commands(Direction::HostToClient)[..] else {
+        panic!("expected one NAK for the Accepted")
+    };
+    assert_eq!(nak.reason, NakReason::NotExpected);
+    assert_eq!(nak.refused, accepted.header());
+    assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+
+    for command in [
+        Command::InvitationWithAuth(Digest::new([0; 32])),
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
+            digest: Digest::new([0; 32]),
+            username: Username::new("Rosa").unwrap(),
+        })),
+    ] {
+        sim.log.clear();
+        sim.client
+            .on_message(host_addr(), &datagram(&command), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, command.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::Established);
     }
 }
 
