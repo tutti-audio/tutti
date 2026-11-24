@@ -292,3 +292,66 @@ fn a_restored_session_keeps_the_setting_it_saved() {
     s.set(&saved).unwrap();
     assert_eq!(s.get(delay.sync()).unwrap(), DelaySync::Synced);
 }
+
+/// A setting enum of the test's own, which the session does not know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Pace {
+    Slow,
+    Fast,
+    Frantic,
+}
+tutti_rt::atomic_word!(Pace {
+    Slow,
+    Fast,
+    Frantic
+});
+
+/// A node with a `Sync` setting in the test's own enum.
+struct Metronome {
+    pace: std::sync::Arc<tutti_rt::AtomicCell<Pace>>,
+}
+
+const SYNC: u16 = tutti_units::SettingKind::Sync as u16;
+
+impl tutti_graph::HasSetting<SYNC> for Metronome {
+    type Word = Pace;
+}
+
+impl tutti_graph::Node for Metronome {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
+    fn process(&mut self, _: &tutti_graph::Cx<'_>, _: tutti_graph::Io<'_>) -> tutti_graph::Status {
+        tutti_graph::Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+impl tutti_graph::IntoNode for Metronome {
+    type Controls = ();
+
+    fn into_parts(self) -> tutti_graph::NodeParts<()> {
+        let setting =
+            tutti_graph::ErasedSetting::new::<Self, SYNC>(std::sync::Arc::clone(&self.pace));
+        tutti_graph::NodeParts::new(Box::new(self), (), None, None).settings(vec![setting])
+    }
+}
+
+/// **A node's setting in an enum the session has never heard of is set and read through
+/// `key.sync()`**, and the node's own cell holds what was set: the session addresses the word,
+/// never the node's enum.
+#[test]
+fn a_setting_in_the_nodes_own_enum_is_set_and_read_through_its_key() {
+    let pace = std::sync::Arc::new(tutti_rt::AtomicCell::new(Pace::Slow));
+    let mut s = session();
+    let node = s.graph().add(Metronome {
+        pace: std::sync::Arc::clone(&pace),
+    });
+    for word in [Pace::Frantic, Pace::Fast, Pace::Slow] {
+        s.set(node.sync().to(word)).unwrap();
+        assert_eq!(s.get(node.sync()).unwrap(), word);
+        assert_eq!(pace.load(), word);
+    }
+}

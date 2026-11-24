@@ -16,9 +16,8 @@ use tutti_units::{Amplitude, Samples};
 use tutti_buffers::ChannelTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
-use tutti_graph::{Node, ParamNode};
+use tutti_graph::{Node, ParamNode, SettingCell};
 use tutti_nodes::{CompressorConfig, CompressorNode, GateConfig, GateNode, KeySource};
-use tutti_rt::AtomicCell;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -454,10 +453,11 @@ fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
 }
 
 /// The cell of the node's key filter setting, as the session's key reaches it.
-fn key_filter_word<N: ParamNode>(node: &N) -> Arc<AtomicCell<KeyFilter>> {
+fn key_filter_word<N: ParamNode>(node: &N) -> Arc<dyn SettingCell> {
     node.settings()
         .into_iter()
-        .find_map(|setting| setting.cell::<KeyFilter>())
+        .map(|setting| Arc::clone(setting.cell()))
+        .next()
         .expect("the node has a key filter setting")
 }
 
@@ -500,11 +500,11 @@ fn a_fork_holds_its_own_key_filter_word_and_a_clone_shares_it() {
     let node = compressor(KeyFilter::BandPass, 100.0, BUTTERWORTH);
     let (fork, clone) = (node.fork_fresh(), node.clone());
     key_filter_word(&node).store(KeyFilter::Off);
-    assert_eq!(key_filter_word(&fork).load(), KeyFilter::BandPass);
-    assert_eq!(key_filter_word(&clone).load(), KeyFilter::Off);
+    assert_eq!(key_filter_word(&fork).load(), Some(KeyFilter::BandPass));
+    assert_eq!(key_filter_word(&clone).load(), Some(KeyFilter::Off));
     let node = gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
     let (fork, clone) = (node.fork_fresh(), node.clone());
     key_filter_word(&node).store(KeyFilter::Off);
-    assert_eq!(key_filter_word(&fork).load(), KeyFilter::HighPass);
-    assert_eq!(key_filter_word(&clone).load(), KeyFilter::Off);
+    assert_eq!(key_filter_word(&fork).load(), Some(KeyFilter::HighPass));
+    assert_eq!(key_filter_word(&clone).load(), Some(KeyFilter::Off));
 }

@@ -204,14 +204,20 @@ pub enum SettingKind {
     KeyFilter = 1,
 }
 
-impl SettingKind {
-    /// The kind a `u16` discriminant stands for, `None` for an unknown one.
-    #[must_use]
-    pub const fn from_u16(id: u16) -> Option<Self> {
+/// The error converting a `u16` that is not a [`SettingKind`] discriminant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("unknown SettingKind id: {0}")]
+pub struct SettingKindOutOfRange(pub u16);
+
+impl TryFrom<u16> for SettingKind {
+    type Error = SettingKindOutOfRange;
+
+    /// The kind a discriminant stands for; `Err` for an unknown id.
+    fn try_from(id: u16) -> Result<Self, Self::Error> {
         match id {
-            0 => Some(Self::Sync),
-            1 => Some(Self::KeyFilter),
-            _ => None,
+            0 => Ok(Self::Sync),
+            1 => Ok(Self::KeyFilter),
+            _ => Err(SettingKindOutOfRange(id)),
         }
     }
 }

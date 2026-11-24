@@ -464,8 +464,8 @@ pub mod types {
         ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
         ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
         Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SettingKind, Speed,
-        SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SettingKind, SettingKindOutOfRange,
+        Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
         TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
@@ -492,8 +492,8 @@ pub mod graph {
         ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Inputs,
         IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
         ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell, PublishedKind,
-        RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, Shape, Status, Unforkable,
-        declare_params, param_parts,
+        RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell, Shape, Status,
+        Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

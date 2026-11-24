@@ -3,14 +3,14 @@
 //! in the value table when the session is built, and is written and read with
 //! the session's verbs like a node's param.
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey};
+use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey, SettingCell};
 use tutti_music::MeterMap;
-use tutti_nodes::{ClickLevel, ClickSettings, DelaySync, KeyFilter, LfoSync, MetronomeMode};
+use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
@@ -753,20 +753,24 @@ impl<T: AtomicWord + PartialEq + Send + Sync + 'static> Target for SettingTarget
     type Value = T;
 }
 impl<T: AtomicWord + PartialEq + Send + Sync + 'static> sealed::Store for SettingTarget<T> {
-    type Cell = SlotCell<T>;
+    type Cell = SlotCell<SettingWord>;
 
+    /// A slot whose word is another enum's is no target of `T`'s.
     fn resolve(self, params: &Params) -> Option<(Self::Cell, T)> {
-        let cell = params.slot::<T>(self.id)?;
-        let base = cell.load();
-        Some((cell, base))
+        let cell = params.slot::<SettingWord>(self.id)?;
+        let word = cell.load();
+        if word.of != TypeId::of::<T>() {
+            return None;
+        }
+        Some((cell, T::from_word(word.word)?))
     }
 
     fn check(cell: &Self::Cell, value: &T) -> Result<(), SetRefusal> {
-        cell.check(value)
+        cell.check(&SettingWord::of(*value))
     }
 
     fn store(cell: &Self::Cell, value: &T) {
-        cell.store(value);
+        cell.store(&SettingWord::of(*value));
     }
 }
 target_builders!([T: AtomicWord + PartialEq + Send + Sync + 'static] SettingTarget<T>);
@@ -903,29 +907,16 @@ pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId,
     None
 }
 
-/// The slot a node's setting cell is registered as under `node`: each kind has the
-/// words the nodes that declare it hold, and a node whose cell holds another word has
-/// nothing that can address it, and is left out.
-pub(crate) fn setting_of(node: NodeKey, entry: &ErasedSetting) -> Option<(SlotId, Erased)> {
-    let erased = match entry.kind() {
-        SettingKind::Sync => word::<DelaySync>(entry).or_else(|| word::<LfoSync>(entry)),
-        SettingKind::KeyFilter => word::<KeyFilter>(entry),
+/// The slot a node's setting cell is registered as under `node`.
+pub(crate) fn setting_of(node: NodeKey, entry: &ErasedSetting) -> (SlotId, Erased) {
+    let slot = WordSlot {
+        cell: Arc::clone(entry.cell()),
+        of: entry.word(),
     };
-    Some((SlotId::Setting(node, entry.kind()), erased?))
-}
-
-/// `entry`'s cell as the slot of its word, when it holds a `W`.
-fn word<W: AtomicWord + PartialEq + Send + Sync + 'static>(
-    entry: &ErasedSetting,
-) -> Option<Erased> {
-    fn itself<T>(cell: &AtomicCell<T>) -> &AtomicCell<T> {
-        cell
-    }
-    let slot = SettingSlot {
-        owner: entry.cell::<W>()?,
-        project: itself::<W>,
-    };
-    Some(erase(Arc::new(slot) as SlotCell<W>))
+    (
+        SlotId::Setting(node, entry.kind()),
+        erase(Arc::new(slot) as SlotCell<SettingWord>),
+    )
 }
 
 /// The tempo map, in the transport's settings.
@@ -1048,25 +1039,73 @@ impl Slot<Amplitude> for ClickVolumeSlot {
     }
 }
 
-/// A [`AtomicCell`] inside a shared owner, found by `project`.
+/// A setting's word as a slot's value: the word and the enum it encodes, which
+/// a [`SettingTarget`] of another enum does not address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SettingWord {
+    word: u64,
+    of: TypeId,
+}
+
+impl SettingWord {
+    fn of<T: AtomicWord + 'static>(value: T) -> Self {
+        Self {
+            word: value.to_word(),
+            of: TypeId::of::<T>(),
+        }
+    }
+}
+
+/// A [`SettingCell`] as the slot of its word: the one slot every setting is.
+pub(crate) struct WordSlot {
+    pub cell: Arc<dyn SettingCell>,
+    /// The enum the cell holds.
+    pub of: TypeId,
+}
+
+impl WordSlot {
+    /// The slot of `cell`, a cell of `T`.
+    pub(crate) fn new<T: AtomicWord + 'static>(cell: Arc<dyn SettingCell>) -> Arc<Self> {
+        Arc::new(Self {
+            cell,
+            of: TypeId::of::<T>(),
+        })
+    }
+}
+
+impl Slot<SettingWord> for WordSlot {
+    fn load(&self) -> SettingWord {
+        SettingWord {
+            word: self.cell.load_word(),
+            of: self.of,
+        }
+    }
+
+    fn check(&self, _: &SettingWord) -> Result<(), SetRefusal> {
+        Ok(())
+    }
+
+    fn store(&self, value: &SettingWord) {
+        // The word is one `SettingTarget::store` encoded from the cell's enum.
+        let _ = self.cell.store_word(value.word);
+    }
+}
+
+/// An [`AtomicCell`] inside a shared owner, found by `project`.
 pub(crate) struct SettingSlot<O, T> {
     pub owner: Arc<O>,
     pub project: fn(&O) -> &AtomicCell<T>,
 }
 
-impl<O: Send + Sync + 'static, T: AtomicWord + Send + Sync + 'static> Slot<T>
+impl<O: Send + Sync + 'static, T: AtomicWord + Send + Sync + 'static> SettingCell
     for SettingSlot<O, T>
 {
-    fn load(&self) -> T {
-        (self.project)(&self.owner).load()
+    fn load_word(&self) -> u64 {
+        (self.project)(&self.owner).load_word()
     }
 
-    fn check(&self, _: &T) -> Result<(), SetRefusal> {
-        Ok(())
-    }
-
-    fn store(&self, value: &T) {
-        (self.project)(&self.owner).store(*value);
+    fn store_word(&self, word: u64) -> bool {
+        (self.project)(&self.owner).store_word(word)
     }
 }
 

@@ -367,11 +367,9 @@ impl ValueTable {
                 .iter()
                 .filter_map(|entry| slot::slot_of(node, entry)),
         );
-        params.slots.extend(
-            settings
-                .iter()
-                .filter_map(|entry| slot::setting_of(node, entry)),
-        );
+        params
+            .slots
+            .extend(settings.iter().map(|entry| slot::setting_of(node, entry)));
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the

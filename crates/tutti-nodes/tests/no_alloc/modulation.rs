@@ -56,7 +56,8 @@ fn lfo() {
     let node = LfoNode::from(beat);
     let sync = tutti_graph::ParamNode::<f32>::settings(&node)
         .into_iter()
-        .find_map(|setting| setting.cell::<LfoSync>())
+        .map(|setting| std::sync::Arc::clone(setting.cell()))
+        .next()
         .expect("an LFO has a sync setting");
     gate.run("lfo beat-synced, switching", node, |_, i| {
         sync.store(if (i / 20) % 2 == 0 {

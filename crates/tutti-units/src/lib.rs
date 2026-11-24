@@ -127,7 +127,8 @@ pub use samples::Samples;
 pub use tail::Tail;
 pub use text::{Text, TextError};
 pub use unit_param::{
-    ParamAddr, ParamId, ParamKey, SettingKind, UnitAddr, UnitParam, UnitParamOutOfRange,
+    ParamAddr, ParamId, ParamKey, SettingKind, SettingKindOutOfRange, UnitAddr, UnitParam,
+    UnitParamOutOfRange,
 };
 pub use units::Quantity;
 pub use units::{

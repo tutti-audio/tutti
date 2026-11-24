@@ -1,6 +1,6 @@
 //! A node's settings: the cells a session sets and reads through the node's key.
 
-use std::any::Any;
+use std::any::TypeId;
 use std::sync::Arc;
 
 use tutti_rt::{AtomicCell, AtomicWord};
@@ -20,11 +20,47 @@ impl<N: HasSetting<K>, const K: u16> HasSetting<K> for crate::Params<N> {
     type Word = N::Word;
 }
 
-/// One setting cell of a node as `NodeParts` carries it: its kind and the cell,
-/// the `Arc<AtomicCell<Word>>` the node reads once per block, behind `Any`.
+/// A setting's cell as one atomic word, whatever the enum it holds.
+pub trait SettingCell: Send + Sync {
+    /// The word the cell holds now.
+    fn load_word(&self) -> u64;
+
+    /// Stores `word`; whether it decodes as a value of the cell's enum (a word
+    /// that does not leaves the cell as it was).
+    fn store_word(&self, word: u64) -> bool;
+}
+
+impl<W: AtomicWord> SettingCell for AtomicCell<W> {
+    fn load_word(&self) -> u64 {
+        self.load().to_word()
+    }
+
+    fn store_word(&self, word: u64) -> bool {
+        W::from_word(word)
+            .inspect(|&value| self.store(value))
+            .is_some()
+    }
+}
+
+impl dyn SettingCell {
+    /// The value of the enum `W` the cell holds, `None` when `W` is not its enum.
+    #[must_use]
+    pub fn load<W: AtomicWord>(&self) -> Option<W> {
+        W::from_word(self.load_word())
+    }
+
+    /// Stores `value`; whether `W` is the cell's enum.
+    pub fn store<W: AtomicWord>(&self, value: W) -> bool {
+        self.store_word(value.to_word())
+    }
+}
+
+/// One setting cell of a node as `NodeParts` carries it: its kind, the
+/// [`TypeId`] of the enum it holds, and the cell as a [`SettingCell`].
 pub struct ErasedSetting {
     kind: SettingKind,
-    cell: Arc<dyn Any + Send + Sync>,
+    word: TypeId,
+    cell: Arc<dyn SettingCell>,
 }
 
 impl ErasedSetting {
@@ -37,8 +73,9 @@ impl ErasedSetting {
     #[must_use]
     pub fn new<N: HasSetting<K> + ?Sized, const K: u16>(cell: Arc<AtomicCell<N::Word>>) -> Self {
         Self {
-            kind: SettingKind::from_u16(K)
+            kind: SettingKind::try_from(K)
                 .expect("`HasSetting<K>` is declared only for a `SettingKind`"),
+            word: TypeId::of::<N::Word>(),
             cell,
         }
     }
@@ -49,10 +86,16 @@ impl ErasedSetting {
         self.kind
     }
 
-    /// The cell, when it holds the word `W`.
+    /// The [`TypeId`] of the enum the cell holds.
     #[must_use]
-    pub fn cell<W: AtomicWord + 'static>(&self) -> Option<Arc<AtomicCell<W>>> {
-        Arc::clone(&self.cell).downcast().ok()
+    pub const fn word(&self) -> TypeId {
+        self.word
+    }
+
+    /// The cell.
+    #[must_use]
+    pub fn cell(&self) -> &Arc<dyn SettingCell> {
+        &self.cell
     }
 }
 

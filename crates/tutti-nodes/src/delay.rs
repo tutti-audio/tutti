@@ -895,10 +895,11 @@ mod tests {
     }
 
     /// The cell of the node's sync setting, as the session's key reaches it.
-    fn sync_word(node: &DelayNode<f32>) -> Arc<AtomicCell<DelaySync>> {
+    fn sync_word(node: &DelayNode<f32>) -> Arc<dyn tutti_graph::SettingCell> {
         tutti_graph::ParamNode::<f32>::settings(node)
             .into_iter()
-            .find_map(|setting| setting.cell::<DelaySync>())
+            .map(|setting| Arc::clone(setting.cell()))
+            .next()
             .expect("a delay has a sync setting")
     }
 
@@ -940,7 +941,7 @@ mod tests {
         }));
         let (fork, clone) = (node.fork_fresh(), node.clone());
         sync_word(&node).store(DelaySync::Free);
-        assert_eq!(sync_word(&fork).load(), DelaySync::Synced);
-        assert_eq!(sync_word(&clone).load(), DelaySync::Free);
+        assert_eq!(sync_word(&fork).load(), Some(DelaySync::Synced));
+        assert_eq!(sync_word(&clone).load(), Some(DelaySync::Free));
     }
 }
