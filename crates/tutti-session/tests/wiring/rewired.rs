@@ -3,7 +3,7 @@
 //! last. A commit that moves nothing reports nothing, and a node it leaves
 //! alone is not listed.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status, Wired,
     WiredMask,
@@ -19,8 +19,8 @@ struct Bused;
 impl Node for Bused {
     fn shape(&self) -> Shape {
         let side = |role| {
-            let stereo = BusTopology::unassigned(ChannelLayout::STEREO).unwrap();
-            let mono = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
+            let stereo = ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap();
+            let mono = ChannelTopology::unassigned(ChannelLayout::MONO).unwrap();
             Buses::NONE
                 .with(Bus::main(stereo))
                 .and_then(|b| b.with(Bus::new(mono, role)))

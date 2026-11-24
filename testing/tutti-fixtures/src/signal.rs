@@ -1,8 +1,9 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
-//! an impulse, the level readings [`peak`], [`peak_planes`], [`rms`] and
-//! [`rms_f64`], the bit patterns of a render ([`bits`]), the impulse responses
-//! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
-//! [`read_wav_f32`]), and the narrowing check [`wide_signal`] with [`assert_close_f64`].
+//! an impulse, the tone readings [`lock_in`] and [`amplitude_at`], the level
+//! readings [`peak`], [`peak_planes`], [`rms`] and [`rms_f64`], the bit patterns
+//! of a render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`],
+//! and a float WAV on disk ([`write_wav_f32`], [`read_wav_f32`]), and the
+//! narrowing check [`wide_signal`] with [`assert_close_f64`].
 //!
 //! A stretched step edge's smear is [`stretched_edge_spread`].
 //!
@@ -15,6 +16,7 @@
 //! another render.
 
 use std::path::Path;
+use tutti_buffers::Sample;
 use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds, StretchFactor};
 
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
@@ -28,6 +30,29 @@ pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec
     (0..len.get())
         .map(|i| (amp * (step * i as f64).sin()) as f32)
         .collect()
+}
+
+/// The complex amplitude of the `hz` component of `x`, as `(re, im)` of
+/// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
+///
+/// Exact (no leakage) when `x` spans a whole number of periods of `hz`. `x`
+/// is not empty: an empty `x` reads NaN.
+pub fn lock_in<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> (f64, f64) {
+    let w = std::f64::consts::TAU * hz.get() / rate.get();
+    let (mut re, mut im) = (0.0, 0.0);
+    for (n, &v) in x.iter().enumerate() {
+        let a = w * n as f64;
+        re += v.to_f64() * libm::cos(a);
+        im -= v.to_f64() * libm::sin(a);
+    }
+    let k = 2.0 / x.len() as f64;
+    (re * k, im * k)
+}
+
+/// The amplitude of [`lock_in`].
+pub fn amplitude_at<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> f64 {
+    let (re, im) = lock_in(x, hz, rate);
+    re.hypot(im)
 }
 
 /// `len` samples of silence but for a single `1.0` at sample 0.

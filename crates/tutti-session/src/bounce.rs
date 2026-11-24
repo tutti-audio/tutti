@@ -2561,7 +2561,7 @@ mod tests {
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
         let lim = session.graph().add(tutti_nodes::LimiterNode::<f32>::from(
-            tutti_nodes::LimiterConfig::new(tutti_buffers::BusTopology::MONO).controls(
+            tutti_nodes::LimiterConfig::new(tutti_buffers::ChannelTopology::MONO).controls(
                 tutti_nodes::LimiterControls {
                     threshold: Db::new(-6.0),
                     ceiling: Db::new(-1.0),

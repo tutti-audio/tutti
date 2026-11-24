@@ -80,7 +80,6 @@ fn render_stem(
 /// A detached stereo session whose graph is at the export's rate.
 fn session() -> DetachedSession {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

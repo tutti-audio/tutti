@@ -35,7 +35,7 @@
 //! its own order (no fused multiply-add), so the three render the same.
 
 use std::hint::black_box;
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::NodeKey;
@@ -368,7 +368,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                         ed.insert(k, "strip", ForkByClone(StripNode(Ramp::member(m))));
                     }
                     Kind::BusStrip => {
-                        let s = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
+                        let s = BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO));
                         s.volume().store(Amplitude::new(0.5 + m as f64 * 1e-3));
                         ed.insert(k, "bus strip", s);
                     }

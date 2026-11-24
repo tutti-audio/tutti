@@ -1,4 +1,5 @@
 use core::f64::consts::TAU;
+use tutti_units::Amplitude;
 
 use tutti_units::{Cents, Hz, SampleRate, Samples};
 
@@ -34,18 +35,22 @@ fn f32_transform_error() -> f64 {
     2.0 * 2048.0f64.log2() * f64::from(f32::EPSILON)
 }
 
-fn sine(f: f64, amplitude: f64, len: usize) -> Vec<f32> {
-    (0..len)
-        .map(|n| (amplitude * (TAU * f * n as f64 / RATE.get()).sin()) as f32)
-        .collect()
-}
-
 /// The amplitude of the sine at `f` in `x`: the Hann-windowed DFT at exactly `f` over its
 /// window sum.
 fn amplitude(x: &[f32], f: f64) -> f64 {
     let x: Vec<f64> = x.iter().map(|&v| v.into()).collect();
     let (re, im) = tutti_fixtures::signal::hann_dft(&x, Hz::new(f), RATE);
     4.0 * re.hypot(im) / x.len() as f64
+}
+
+/// `len` samples of an `amplitude` sine at `f` hertz, from phase 0.
+fn sine(f: f64, amplitude: f64, len: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        Amplitude::new(amplitude),
+        RATE,
+        Samples::new(len),
+    )
 }
 
 /// The shifter's gain over `l2` is at most 1 (the overlap-add's bound) whatever the signal and

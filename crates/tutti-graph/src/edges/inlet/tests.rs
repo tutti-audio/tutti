@@ -12,8 +12,15 @@ use tutti_units::{Frame, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
+/// An inlet of `width` channels over a new ring of `capacity` frames at [`RATE`],
+/// and the writer that fills it.
+fn pair(width: ChannelLayout, capacity: Samples) -> (InletNode, TapWriter) {
+    let (ring, writer) = InletRing::pair(width, capacity, RATE);
+    (InletNode::new(ring), writer)
+}
+
 fn ring_with(frames: &[[f32; 2]]) -> (InletNode, TapWriter) {
-    let (node, mut writer) = InletNode::pair(ChannelLayout::STEREO, Samples::new(64));
+    let (node, mut writer) = pair(ChannelLayout::STEREO, Samples::new(64));
     writer.push_interleaved(Interleaved::new(frames.as_flattened(), writer.layout()).unwrap());
     (node, writer)
 }
@@ -88,7 +95,7 @@ fn reset_does_not_consume_the_ring() {
 /// past them.
 #[test]
 fn a_block_reads_across_the_ring_wrap() {
-    let (node, mut prod) = InletNode::pair(ChannelLayout::STEREO, Samples::new(4));
+    let (node, mut prod) = pair(ChannelLayout::STEREO, Samples::new(4));
     let mut node = prepared_node(node);
     prod.push_interleaved(
         Interleaved::new(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0], prod.layout()).unwrap(),
@@ -151,7 +158,7 @@ fn the_inlet_refuses_to_fork() {
 /// its own output in the order the producer pushed it, and the shape says so.
 #[test]
 fn a_ring_of_six_is_six_outputs_in_the_order_pushed() {
-    let (node, mut writer) = InletNode::pair(ChannelLayout::from(6u16), Samples::new(64));
+    let (node, mut writer) = pair(ChannelLayout::from(6u16), Samples::new(64));
     writer.push_interleaved(
         Interleaved::new(
             &[
@@ -177,7 +184,7 @@ fn a_ring_of_six_is_six_outputs_in_the_order_pushed() {
 /// lanes level, never a third frame on some channels.
 #[test]
 fn a_full_ring_refuses_whole_frames() {
-    let (node, mut writer) = InletNode::pair(ChannelLayout::from(3u16), Samples::new(2));
+    let (node, mut writer) = pair(ChannelLayout::from(3u16), Samples::new(2));
     writer.push_interleaved(
         Interleaved::new(
             &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],

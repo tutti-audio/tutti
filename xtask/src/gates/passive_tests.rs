@@ -61,6 +61,10 @@ pub(super) const HELPERS: &[(&str, &str)] = &[
         "a `.check()` builder runs the assertions of the row it was built for",
     ),
     (
+        "for_each_row",
+        "`tutti_fixtures::for_each_row` runs every row and fails the test naming each row that panicked",
+    ),
+    (
         "verify_*",
         "a `verify_*` helper fails the test on a value it does not accept",
     ),

@@ -7,14 +7,16 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, Fade, InletNode, Prepare, TapReader, TransportPosition};
+use tutti_graph::{Editor, Fade, InletNode, InletRing, Prepare, TapReader, TransportPosition};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const KEY: NodeKey = NodeKey(7);
 
 fn inlet() -> (InletNode, tutti_graph::TapWriter) {
-    InletNode::pair(ChannelLayout::STEREO, Samples::new(256))
+    let (ring, writer) =
+        InletRing::pair(ChannelLayout::STEREO, Samples::new(256), SampleRate::SR_48K);
+    (InletNode::new(ring), writer)
 }
 
 fn render(exec: &mut tutti_graph::Executor, blocks: usize) {

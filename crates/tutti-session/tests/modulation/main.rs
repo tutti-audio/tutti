@@ -38,6 +38,8 @@ mod ranges;
 mod routes;
 // One place to ask why nothing modulates (doc 030, T5).
 mod problems;
+// A node's automation outlives a replace of the node.
+mod automation_replace;
 // A route's polarity and curve, an LFO's rate and a macro's value are values:
 // staged at `set`, republished at the update.
 mod program_targets;

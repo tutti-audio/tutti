@@ -156,7 +156,6 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 mod tests {
     use super::*;
     use tutti_dsp::Mode;
-
     use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::Gain;
 

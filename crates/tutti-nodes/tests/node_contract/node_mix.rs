@@ -17,7 +17,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
@@ -205,10 +205,11 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (stereo, cross-fed)",
         &|| {
-            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
-                .times(ChannelTimes::try_from(&[Seconds::new(0.021)][..]).unwrap())
-                .build()
-                .unwrap();
+            let layout =
+                DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
+                    .times(ChannelTimes::try_from(&[Seconds::new(0.021)][..]).unwrap())
+                    .build()
+                    .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 time: Seconds::new(0.013),
                 feedback: Feedback::new(0.5),
@@ -223,7 +224,7 @@ fn the_delay_is_blended_by_the_graph() {
         &|| {
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(0.1)),
                 ))
                 .controls(DelayControls {
@@ -242,20 +243,20 @@ fn the_delay_is_blended_by_the_graph() {
 fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
     check(
         "chorus (stereo)",
-        &|| ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
+        &|| ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO)),
         2,
         0,
     );
     check(
         "flanger (mono)",
-        &|| ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::MONO)),
+        &|| ModDelayNode::<f32>::from(ModDelayConfig::flanger(ChannelTopology::MONO)),
         1,
         0,
     );
     check(
         "phaser (stereo, 4 stages)",
         &|| {
-            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::STEREO, Stages::of(4)))
+            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4)))
                 .unwrap()
         },
         2,
@@ -317,7 +318,7 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
         DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::default_for(ChannelLayout::from(6u16))
+                ChannelTopology::default_for(ChannelLayout::from(6u16))
                     .expect("six channels are one bus"),
                 MaxDelay::of(Seconds::new(0.1)),
             ))
@@ -371,7 +372,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
         "gate (stereo, keyed)",
         &|| {
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(GateControls {
                         threshold: Db::new(-20.0),
@@ -391,7 +392,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
         "compressor (stereo, keyed)",
         &|| {
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         threshold: Db::new(-20.0),
@@ -410,7 +411,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
         "crossover (stereo, two bands)",
         &|| {
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
             ))
             .expect("one split")
@@ -424,7 +425,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     let dry = rendered(
         &|| {
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
                 CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
             ))
             .expect("one split")
@@ -439,8 +440,10 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     );
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// `width` unassigned channels sharing the response `ir`.
@@ -472,7 +475,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()
@@ -489,9 +492,12 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
-            .true_stereo()
-            .block_size(block_size),
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            &[ll, lr, rl, rr],
+        )
+        .true_stereo()
+        .block_size(block_size),
     )
     .expect("four responses on a stereo pair")
 }

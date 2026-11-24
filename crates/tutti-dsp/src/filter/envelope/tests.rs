@@ -1,24 +1,16 @@
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_units::{Amplitude, Samples};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
-use crate::testing::amplitude_at;
 use tutti_buffers::InputOutput;
+use tutti_fixtures::signal::amplitude_at;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const TONE: f64 = 1_000.0;
-
-/// A sine of `hz` and `amplitude`, `frames` long, from phase 0.
-fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|n| {
-            (amplitude * (2.0 * core::f64::consts::PI * hz * n as f64 / RATE.get()).sin()) as f32
-        })
-        .collect()
-}
 
 /// A bank of `ty` at `RATE` set to `controls`.
 fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank<f32> {
@@ -63,7 +55,7 @@ fn magnitude(ty: SvfType, cutoff: f64, q: Q, hz: f64) -> f64 {
 fn measured_gain(x: &[f32], y: &[f32]) -> f64 {
     let tail = 4_800; // 100 periods of 1 kHz at 48 kHz
     let from = x.len() - tail;
-    amplitude_at(&y[from..], TONE, RATE.get()) / amplitude_at(&x[from..], TONE, RATE.get())
+    amplitude_at(&y[from..], Hz::new(TONE), RATE) / amplitude_at(&x[from..], Hz::new(TONE), RATE)
 }
 
 fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
@@ -74,6 +66,16 @@ fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
         attack: Seconds::new(0.05),
         release: Seconds::new(0.05),
     }
+}
+
+/// `frames` samples of an `amplitude` sine at `hz`, from phase 0.
+fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(hz),
+        Amplitude::new(amplitude),
+        RATE,
+        Samples::new(frames),
+    )
 }
 
 /// A steady sine of amplitude `A` has the mean magnitude `2A/pi`, so the cutoff settles at
@@ -248,8 +250,8 @@ fn the_attack_and_the_release_are_told_apart() {
         let y = run(&mut b, &x, 480);
         let cutoff = |env: f64| base * (depth / 12.0 * env).exp2();
         let gain = |from: usize| {
-            amplitude_at(&y[from..from + 480], TONE, RATE.get())
-                / amplitude_at(&x[from..from + 480], TONE, RATE.get())
+            amplitude_at(&y[from..from + 480], Hz::new(TONE), RATE)
+                / amplitude_at(&x[from..from + 480], Hz::new(TONE), RATE)
         };
         // Up: the window centred 65 ms after the step.
         let up = 2_880;

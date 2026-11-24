@@ -4,8 +4,8 @@
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
 //! - [`OutputPort`] and [`InputPort`] name one channel: a node's output or input
-//!   port (`key.output(0)`, `key.input(1)`), a main input channel
-//!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
+//!   port (`key.output(0)`, `key.input(1)`) or a main output channel
+//!   ([`MainOutput::channel`]).
 //! - [`EventOutputPort`] and [`EventInputPort`] name one event port
 //!   (`key.event_output(0)`, `key.event_input(1)`); **event input 0 is the
 //!   node's main event input**, where the chase (`Node::chase`) delivers.
@@ -56,7 +56,10 @@ impl<N: ?Sized> Key<N> {
     /// Output port `index` of the node.
     #[must_use]
     pub const fn output(self, index: usize) -> OutputPort {
-        OutputPort(OutEnd::Node(self.node, index))
+        OutputPort {
+            node: self.node,
+            index,
+        }
     }
 
     /// Input port `index` of the node.
@@ -133,55 +136,44 @@ impl<N: ?Sized> From<Key<N>> for NodeKey {
     }
 }
 
-/// One channel a signal leaves from: an output port of a node, or a channel
-/// of the graph's main input. Made by [`Key::out`], [`OutputPort::new`]
-/// and [`MainInput::channel`].
+/// One channel a signal leaves from: an output port of a node. Made by
+/// [`Key::out`] and [`OutputPort::new`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OutputPort(OutEnd);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum OutEnd {
-    Node(NodeKey, usize),
-    Input(usize),
+pub struct OutputPort {
+    node: NodeKey,
+    index: usize,
 }
 
 impl OutputPort {
     /// Output port `index` of `node`.
     #[must_use]
     pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
-        Self(OutEnd::Node(node.into(), index))
-    }
-
-    /// The node it leaves, `None` for a main input channel.
-    #[must_use]
-    pub const fn node(self) -> Option<NodeKey> {
-        match self.0 {
-            OutEnd::Node(node, _) => Some(node),
-            OutEnd::Input(_) => None,
+        Self {
+            node: node.into(),
+            index,
         }
     }
 
-    /// The port's index on its node, or the main input channel.
+    /// The node it leaves.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// The port's index on its node.
     #[must_use]
     pub const fn index(self) -> usize {
-        match self.0 {
-            OutEnd::Node(_, index) | OutEnd::Input(index) => index,
-        }
-    }
-
-    pub(crate) const fn end(self) -> OutEnd {
-        self.0
+        self.index
     }
 
     /// The port the graph's `source` names, `None` for explicit silence.
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
             tutti_graph::PortSource::Node(p) => Some(Self::new(p.node(), usize::from(p.port()))),
-            tutti_graph::PortSource::MainInput(c) => Some(MainInput::channel(usize::from(c))),
-            tutti_graph::PortSource::Zero => None,
+            tutti_graph::PortSource::MainInput(_) | tutti_graph::PortSource::Zero => None,
         }
     }
 }
@@ -256,21 +248,6 @@ impl MainOutput {
     }
 }
 
-/// The graph's main input: the hardware or host input channels.
-///
-/// A value of its own, like [`MainOutput`], so naming a channel borrows
-/// nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MainInput;
-
-impl MainInput {
-    /// Main input channel `index` (a hardware or host input), as a source.
-    #[must_use]
-    pub const fn channel(index: usize) -> OutputPort {
-        OutputPort(OutEnd::Input(index))
-    }
-}
-
 /// One event edge, named: what feeds which event input. What
 /// [`Graph::connect`] adds between an [`EventOutputPort`] and an
 /// [`EventInputPort`], and what [`SessionEvent::Unwired`](crate::SessionEvent::Unwired)
@@ -334,7 +311,7 @@ impl ChannelEdge {
 
     /// Whether the edge touches `node` (as its sink or its source).
     pub(crate) fn touches(self, node: NodeKey) -> bool {
-        self.from.node() == Some(node) || self.to.node() == Some(node)
+        self.from.node() == node || self.to.node() == Some(node)
     }
 
     /// Makes the edge plain again: no gain, aliased when it is its sink's only

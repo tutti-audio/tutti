@@ -294,10 +294,11 @@ control_set! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{amplitude_at, sine};
+    use crate::test_support::sine;
     use crate::test_support::{prepared, render_chunked};
     use tutti_buffers::ChannelLayout;
     use tutti_buffers::Planes;
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::{Cost, Node, ParamNode};
     use tutti_units::Tail;
 
@@ -343,8 +344,8 @@ mod tests {
         let out = render(&mut node, &[left, vec![0.0; SETTLE + WINDOW]]);
         let warp = |f: f64| libm::tan(core::f64::consts::PI * f / RATE);
         let x4 = (warp(100.0) / warp(1_000.0)).powi(4);
-        let low = amplitude_at(&out[0][SETTLE..], 100.0, RATE);
-        let high = amplitude_at(&out[2][SETTLE..], 100.0, RATE);
+        let low = amplitude_at(&out[0][SETTLE..], Hz::new(100.0), SampleRate::of(RATE));
+        let high = amplitude_at(&out[2][SETTLE..], Hz::new(100.0), SampleRate::of(RATE));
         assert!((low - 1.0 / (1.0 + x4)).abs() < TOL, "{low}");
         assert!((high - x4 / (1.0 + x4)).abs() < TOL, "{high}");
         assert!(out[1].iter().chain(&out[3]).all(|&s| s == 0.0));
@@ -365,7 +366,7 @@ mod tests {
         assert!(set.set(Splits::addr(0), 2_000.0));
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
         let out = render(&mut node, &[x]);
-        let low = amplitude_at(&out[0][SETTLE..], 2_000.0, RATE);
+        let low = amplitude_at(&out[0][SETTLE..], Hz::new(2_000.0), SampleRate::of(RATE));
         assert!((low - 0.5).abs() < TOL, "{low}");
     }
 
@@ -417,7 +418,7 @@ mod tests {
             );
             low.extend_from_slice(&out[0]);
         }
-        let amp = amplitude_at(&low[SETTLE..], 2_000.0, RATE);
+        let amp = amplitude_at(&low[SETTLE..], Hz::new(2_000.0), SampleRate::of(RATE));
         assert!((amp - 0.5).abs() < TOL, "{amp}");
     }
 
@@ -493,7 +494,7 @@ mod tests {
         let len = 9_555 + 12_000;
         let out = render(&mut node, &[sine(300.0, rate, len)]);
         // The split moved: the low band is half amplitude at 300 Hz.
-        let low = amplitude_at(&out[0][12_000..], 300.0, rate);
+        let low = amplitude_at(&out[0][12_000..], Hz::new(300.0), SampleRate::of(rate));
         assert!((low - 0.5).abs() < TOL, "{low}");
         // The top crossover is under Nyquist, so the top band exists and is finite.
         assert!(out[2].iter().all(|s| s.is_finite()));
@@ -523,8 +524,8 @@ mod tests {
         node.param_set().set(Splits::addr(0), 2_000.0);
         let mut node = prepared(node);
         let out = render(&mut node, &[sine(200.0, RATE, 480)]);
-        let low = amplitude_at(&out[0], 200.0, RATE);
-        let high = amplitude_at(&out[1], 200.0, RATE);
+        let low = amplitude_at(&out[0], Hz::new(200.0), SampleRate::of(RATE));
+        let high = amplitude_at(&out[1], Hz::new(200.0), SampleRate::of(RATE));
         assert!((low - 1.0).abs() < 2e-2, "{low}");
         assert!(high < 2e-3, "{high}");
     }
