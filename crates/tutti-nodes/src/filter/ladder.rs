@@ -549,7 +549,7 @@ mod tests {
         amplitude: f32,
     ) -> (f64, Vec<f64>) {
         use crate::test_support::{assert_cell_ramps, drive_block, prepared, render_change, sine};
-        let x: Vec<f32> = sine(hz, 48_000.0, 256 + 512)
+        let x: Vec<f32> = sine::<f32>(hz, 48_000.0, 256 + 512)
             .into_iter()
             .map(|s| amplitude * s)
             .collect();

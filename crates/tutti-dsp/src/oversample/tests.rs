@@ -1,5 +1,5 @@
 use core::f64::consts::TAU;
-use tutti_fixtures::signal::{amplitude_at, sine};
+use tutti_fixtures::signal::amplitude_at;
 use tutti_units::Hz;
 
 use tutti_buffers::MaxBlock;
@@ -31,6 +31,16 @@ const MARGIN_DB: f64 = 3.0;
 
 fn plan(factor: OversamplingFactor) -> OversamplingPlan {
     Oversampling::new(factor).plan(RATE).unwrap()
+}
+
+/// `frames` samples of a unit sine with `bin` whole cycles in every [`WINDOW`] samples.
+fn sine(bin: usize, frames: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(bin as f64),
+        Amplitude::new(1.0),
+        SampleRate::of(WINDOW as f64),
+        Samples::new(frames),
+    )
 }
 
 /// `x` up and down in blocks of `block`, `process` between at the high rate (the oversampled
@@ -132,12 +142,7 @@ fn a_passband_sine_round_trips_delayed_within_the_ripple() {
         let plan = plan(factor);
         let latency = plan.latency().get();
         for bin in [60, TONE_BIN, 1800] {
-            let x: Vec<f32> = sine(
-                Hz::new(bin as f64),
-                Amplitude::new(1.0),
-                SampleRate::of(WINDOW as f64),
-                Samples::new(SETTLE + WINDOW),
-            );
+            let x = sine(bin, SETTLE + WINDOW);
             let mut os = plan.state::<f32>(MaxBlock::of(Samples::new(128)));
             let y = pass_through(&mut os, &x, 100);
             let worst = (SETTLE..x.len())
@@ -164,12 +169,7 @@ fn the_up_sampler_rejects_its_images() {
     for factor in FACTORS {
         let f = TONE_BIN as f64 / WINDOW as f64 * BASE;
         let f_hi = BASE * factor.get() as f64;
-        let x: Vec<f32> = sine(
-            Hz::new(TONE_BIN as f64),
-            Amplitude::new(1.0),
-            SampleRate::of(WINDOW as f64),
-            Samples::new(SETTLE + WINDOW),
-        );
+        let x = sine(TONE_BIN, SETTLE + WINDOW);
         let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(256)));
         let mut high = Vec::new();
         through(&mut os, &x, 256, |h, out| {

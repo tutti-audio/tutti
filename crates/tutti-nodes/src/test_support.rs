@@ -187,18 +187,8 @@ pub(crate) fn tick_fed(
     }
 }
 
-/// `len` samples of a unit sine at `hz` in `f64`, starting at phase 0.
-pub(crate) fn wide_sine(hz: f64, rate: f64, len: usize) -> Vec<f64> {
-    tutti_fixtures::signal::sine(
-        tutti_units::Hz::new(hz),
-        tutti_units::Amplitude::new(1.0),
-        SampleRate::of(rate),
-        Samples::new(len),
-    )
-}
-
-/// `len` samples of a unit sine at `hz`, starting at phase 0.
-pub(crate) fn sine(hz: f64, rate: f64, len: usize) -> Vec<f32> {
+/// `len` samples of a unit sine at `hz`, starting at phase 0, at the width the caller reads.
+pub(crate) fn sine<F: tutti_buffers::Float>(hz: f64, rate: f64, len: usize) -> Vec<F> {
     tutti_fixtures::signal::sine(
         tutti_units::Hz::new(hz),
         tutti_units::Amplitude::new(1.0),

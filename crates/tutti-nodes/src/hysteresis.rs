@@ -274,7 +274,10 @@ mod tests {
     #[test]
     fn the_drive_is_settable_by_unit_param_and_the_material_saturates() {
         let mut n = node(0.0);
-        let x: Vec<f32> = sine(1_000.0, RATE, 4_800).iter().map(|v| v * 0.5).collect();
+        let x: Vec<f32> = sine::<f32>(1_000.0, RATE, 4_800)
+            .iter()
+            .map(|v| v * 0.5)
+            .collect();
         let before = render_chunked(&mut n, std::slice::from_ref(&x), 256).remove(0);
         assert!(n.param_set().set(UnitParam::GainDb, 18.0));
         let _ = drive_block(&mut n, &[&x[..64]]);
