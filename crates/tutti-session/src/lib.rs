@@ -111,6 +111,8 @@ mod midi_event;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi")]
+mod midi_held;
 #[cfg(feature = "midi-hardware")]
 mod midi_link;
 #[cfg(feature = "midi")]
@@ -252,6 +254,8 @@ pub use midi_ci::{
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
+#[cfg(feature = "midi")]
+pub use midi_held::HeldReader;
 #[cfg(feature = "midi")]
 pub use midi_load::{
     DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
