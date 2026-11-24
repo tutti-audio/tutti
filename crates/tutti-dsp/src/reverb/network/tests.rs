@@ -27,12 +27,13 @@ fn the_pre_delay_is_rounded_to_whole_frames() {
 }
 
 /// A `Network` is a plain value built on the control side: the whole value
-/// stays under 109 KiB: `MAX_STAGES` (8) of the largest stage (13 928 bytes) is 111 424 bytes,
-/// the rate, pre-delay, width and wet gain add 40, and 111 464 bytes round up to 109 KiB.
+/// stays under 113 KiB: `MAX_STAGES` (8) of the largest stage (14 448 bytes, each of its 64
+/// lines holding the 8 bytes of its absorption's stored peak) is 115 584 bytes, the rate,
+/// pre-delay, width and wet gain add 40, and 115 624 bytes round up to 113 KiB.
 #[test]
-fn a_network_stays_under_109_kib() {
+fn a_network_stays_under_113_kib() {
     let bytes = std::mem::size_of::<Network>();
-    assert!(bytes < 109 * 1024, "{bytes}");
+    assert!(bytes < 113 * 1024, "{bytes}");
 }
 
 /// An empty network recirculates nothing: no decay, no tail, stable.
