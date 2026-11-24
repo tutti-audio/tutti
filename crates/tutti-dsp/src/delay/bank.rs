@@ -209,8 +209,8 @@ impl<F: Float + Lerp> DelayBank<F> {
                     let to = if c == 0 || self.times.is_linked() {
                         first
                     } else {
-                        let own = self.times.fixed().get(c - 1).copied();
-                        self.position(own.unwrap_or(Seconds::ZERO))
+                        // The layout's `build` holds one time per channel past the first.
+                        self.position(self.times.fixed()[c - 1])
                     };
                     time.retarget_position(to, Steps::Rate(DELAY_SLEW));
                 }
