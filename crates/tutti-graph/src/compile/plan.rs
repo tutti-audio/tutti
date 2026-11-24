@@ -1171,17 +1171,6 @@ impl<T: Copy> Csr<T> {
     pub(crate) fn to_table<R: Id>(&self) -> Table<R, Vec<T>> {
         (0..self.rows()).map(|i| self.row_at(i).to_vec()).collect()
     }
-
-    /// The raw rows a plan publishes.
-    pub(crate) fn raw(&self) -> Csr
-    where
-        T: Id,
-    {
-        Csr {
-            offsets: self.offsets.clone(),
-            targets: self.targets.iter().map(|t| t.get()).collect(),
-        }
-    }
 }
 
 impl Csr<OpId> {
@@ -1391,9 +1380,10 @@ impl Plan {
         &self.program.sum_lanes
     }
 
-    /// Successors of each op in the dependency DAG.
-    pub fn op_successors(&self) -> Csr {
-        self.program.deps.inverse().raw()
+    /// The ops that op `op` waits for, ascending: the dependency DAG, each
+    /// edge from an earlier op to a later one.
+    pub fn op_dependencies(&self, op: usize) -> &[u32] {
+        raw(self.program.deps.row_at(op))
     }
 
     /// Tasks after coarsening (chains fused, cheap siblings packed): each is

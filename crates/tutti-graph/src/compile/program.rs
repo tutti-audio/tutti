@@ -4,10 +4,13 @@
 //! `emit` writes a `Program<ByValue>`: ops name the values they write and read,
 //! and no buffer exists yet. `group` prices and partitions those ops without
 //! reading a slot. `colour` is the lowering: it gives every value a slot and
-//! returns the `Program<BySlot>` a [`Plan`](crate::Plan) holds. The two forms
-//! differ in what an op's operands are and in what the arena is
-//! ([`Refs`]); everything else (the ops' shape, the dependency rows, the keyed
-//! state tables) is one definition.
+//! returns the `Program<BySlot>` a [`Plan`](crate::Plan) holds.
+//!
+//! The forms differ in three things, each an associated type of [`Refs`]: what
+//! an op's operands and the flattened operand lists hold (a value reference or
+//! a slot), the slot a value records (none, or its own), and the arena sizing
+//! (how many events each value can hold, or each slot's capacity). The ops'
+//! shape, the dependency rows and the keyed state tables are one definition.
 
 use std::fmt::Debug;
 
@@ -74,8 +77,8 @@ impl ERef {
     }
 }
 
-/// How a [`Program`] names the buffers its ops touch: the one thing the two
-/// forms of a program differ in.
+/// How a [`Program`] names the buffers its ops touch: what the two forms of a
+/// program differ in.
 pub(crate) trait Refs {
     /// An op's audio operand.
     type Audio: Copy + Debug + PartialEq;
