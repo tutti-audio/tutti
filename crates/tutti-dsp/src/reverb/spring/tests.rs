@@ -3,7 +3,7 @@ use tutti_rt::SplitMix64;
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
-use crate::reverb::tail_probe;
+use crate::tail_probe;
 use tutti_buffers::InputOutput;
 
 const NZ2: ChannelLayout = ChannelLayout::STEREO;

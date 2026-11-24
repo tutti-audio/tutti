@@ -3,9 +3,10 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_fixtures::signal::impulse;
 use tutti_music::{NoteDuration, NoteValue};
 use tutti_units::Samples;
-use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
 
 use super::*;
+use crate::tail_probe;
 use crate::{ChannelTimes, FeedbackRouting, GAIN_RAMP, MaxDelay, NoteTimes};
 use tutti_buffers::InputOutput;
 
@@ -836,6 +837,230 @@ fn a_switch_on_a_running_delay_keeps_the_lines_and_slews_every_channel_from_wher
                     );
                 }
             }
+        }
+    }
+}
+
+/// The tail's figure from its definition, written out: the first echo, then the trips an echo
+/// makes to fall 60 dB at loop gain `g` (`ceil(ln(10^-3) / ln g)`, none when `g` is 0), each
+/// round the loop at most `d` frames of delay and the two frames a linear read spreads an echo
+/// by, at 8 kHz.
+fn analytic_tail(g: f64, d: usize) -> usize {
+    let trips = if g == 0.0 {
+        0.0
+    } else {
+        (1e-3f64.ln() / g.ln()).ceil()
+    };
+    ((1.0 + trips) * (d as f64 + 2.0)) as usize
+}
+
+/// The frames of a tail, which must be finite.
+fn frames_of(tail: Tail) -> usize {
+    let Tail::Finite(n) = tail else {
+        panic!("a finite tail, not {tail:?}")
+    };
+    n.get()
+}
+
+const KHZ8: SampleRate = SampleRate::of(8_000.0);
+
+/// The tail is the first echo and the trips to -60 dB at the loop gain, each at the longest
+/// channel's delay: a 100 ms delay (800 frames) at feedback 0.5 is `ceil(ln 1e-3 / ln 0.5) =
+/// 10` trips, 11 periods; no feedback is the one echo; the cross-feedback adds to the gain (a
+/// pair over the stable bound is scaled to it, so 0.99 is the most); the longer of two
+/// channels' times is the period; a routing of none leaves the cross-feedback out. The figure
+/// is within a frame of the written-out one (it goes through seconds).
+#[test]
+fn the_tail_is_the_first_echo_and_the_trips_to_the_floor_at_the_loop_gain() {
+    let apart = |right: f64| {
+        DelayLayout::builder(ChannelTopology::STEREO, MAX)
+            .routing(FeedbackRouting::swap())
+            .times(ChannelTimes::try_from(&[Seconds::new(right)][..]).unwrap())
+            .build()
+            .unwrap()
+    };
+    let none = DelayLayout::new(ChannelTopology::MONO, MAX);
+    let cases = [
+        ("feedback 0.5", none, controls(0.1, 0.5, 0.0), 0.5, 800),
+        ("no feedback", none, controls(0.1, 0.0, 0.0), 0.0, 800),
+        ("cross adds", stereo(), controls(0.1, 0.3, 0.4), 0.7, 800),
+        (
+            "past the bound",
+            stereo(),
+            controls(0.1, 0.9, 0.9),
+            Feedback::MAX_STABLE.get(),
+            800,
+        ),
+        (
+            "the longer time",
+            apart(0.2),
+            controls(0.1, 0.5, 0.0),
+            0.5,
+            1600,
+        ),
+        (
+            "no routing",
+            stereo_apart(0.1),
+            controls(0.1, 0.5, 0.9),
+            0.5,
+            800,
+        ),
+    ];
+    for (name, layout, c, g, d) in cases {
+        let rig = Rig::at(&layout, &c, KHZ8);
+        let got = frames_of(rig.bank.tail_of(&rig.ramps, &c));
+        let want = analytic_tail(g, d);
+        assert!(
+            got.abs_diff(want) <= 1,
+            "{name}: {got} frames, wanted {want}"
+        );
+    }
+    let rig = Rig::at(
+        &mono(InterpolationMode::Linear),
+        &controls(0.1, 0.5, 0.0),
+        KHZ8,
+    );
+    assert_eq!(analytic_tail(0.5, 800), 11 * 802, "ten trips and the echo");
+    assert_eq!(frames_of(rig.bank.tail()), analytic_tail(0.99, 8_000));
+}
+
+/// A ramp in flight rings out at the larger of where it is and where it goes: the tail of a
+/// delay at rest at the long, loud setting and aimed at a short, quiet one is the long one's,
+/// and the other way round it is the new long one's.
+#[test]
+fn a_ramp_in_flight_is_the_longer_of_its_two_ends() {
+    let layout = mono(InterpolationMode::Linear);
+    let (long, short) = (controls(0.1, 0.9, 0.0), controls(0.01, 0.2, 0.0));
+    let mut rig = Rig::at(&layout, &long, KHZ8);
+    assert_eq!(
+        frames_of(rig.bank.tail_of(&rig.ramps, &short)),
+        analytic_tail(0.9, 800),
+        "at rest on the long setting, aimed at the short one"
+    );
+    rig.retarget(&short);
+    assert_eq!(
+        frames_of(rig.bank.tail_of(&rig.ramps, &short)),
+        analytic_tail(0.9, 800),
+        "in flight to the short one"
+    );
+    rig.ramps.jump_to_target();
+    assert_eq!(
+        frames_of(rig.bank.tail_of(&rig.ramps, &short)),
+        analytic_tail(0.2, 80),
+        "landed on the short one"
+    );
+    assert_eq!(
+        frames_of(rig.bank.tail_of(&rig.ramps, &long)),
+        analytic_tail(0.9, 800),
+        "aimed at the long one"
+    );
+}
+
+/// A synced delay's time is its note at a tempo that moves between blocks with no control
+/// moving, so its tail is the longest the line holds: 4 s of line at 8 kHz is 32000 frames.
+#[test]
+fn a_synced_delay_rings_for_the_longest_line() {
+    let layout = synced(NoteDuration::QUARTER);
+    let c = DelayControls {
+        sync: DelaySync::Synced,
+        ..controls(0.0, 0.5, 0.0)
+    };
+    let rig = Rig::at(&layout, &c, KHZ8);
+    assert_eq!(
+        frames_of(rig.bank.tail_of(&rig.ramps, &c)),
+        analytic_tail(0.5, 32_000)
+    );
+}
+
+/// The reported tail covers the ring-out: for each stimulus (an impulse, a noise burst and a
+/// step, four longest-periods long) every frame from the tail past the last input is at most
+/// the floor of the render's peak. No feedback, a mid feedback, the stable bound with the
+/// cross-feedback, two channels of different times crossed and read by the cubic at a
+/// fractional delay, a delay in flight from a long, loud setting to a short, quiet one, and a
+/// synced one under a tempo; at 8 kHz.
+#[test]
+fn the_tail_covers_the_ring_out_of_every_stimulus() {
+    let own = |interp| {
+        DelayLayout::builder(ChannelTopology::STEREO, MAX)
+            .routing(FeedbackRouting::swap())
+            .times(ChannelTimes::try_from(&[Seconds::new(0.0301)][..]).unwrap())
+            .interpolation(interp)
+            .build()
+            .unwrap()
+    };
+    let linear = mono(InterpolationMode::Linear);
+    let tempo = Bpm::of(480.0);
+    // (name, layout, at rest on, aimed at, the longest period in frames, the tempo)
+    let cases = [
+        (
+            "no feedback",
+            linear,
+            controls(0.05, 0.0, 0.0),
+            controls(0.05, 0.0, 0.0),
+            400,
+            None,
+        ),
+        (
+            "mid feedback",
+            linear,
+            controls(0.04, 0.6, 0.0),
+            controls(0.04, 0.6, 0.0),
+            320,
+            None,
+        ),
+        (
+            "the bound crossed",
+            stereo(),
+            controls(0.02, 0.9, 0.9),
+            controls(0.02, 0.9, 0.9),
+            160,
+            None,
+        ),
+        (
+            "two times, cubic",
+            own(InterpolationMode::CubicHermite),
+            controls(0.0203, 0.5, 0.3),
+            controls(0.0203, 0.5, 0.3),
+            241,
+            None,
+        ),
+        (
+            "in flight",
+            linear,
+            controls(0.1, 0.8, 0.0),
+            controls(0.01, 0.2, 0.0),
+            800,
+            None,
+        ),
+        (
+            "synced",
+            synced(NoteDuration::QUARTER),
+            controls(0.0, 0.5, 0.0),
+            controls(0.0, 0.5, 0.0),
+            1_000,
+            Some(tempo),
+        ),
+    ];
+    for (name, layout, at, to, period, tempo) in cases {
+        let sync = if tempo.is_some() {
+            DelaySync::Synced
+        } else {
+            DelaySync::Free
+        };
+        let (at, to) = (DelayControls { sync, ..at }, DelayControls { sync, ..to });
+        for (input_name, input) in tail_probe::stimuli::<f32>(4 * period) {
+            let mut rig = Rig::at(&layout, &at, KHZ8);
+            rig.bank.retarget(&mut rig.ramps, &to, tempo);
+            if sync == DelaySync::Synced {
+                rig.ramps.jump_to_target();
+            }
+            let tail = frames_of(rig.bank.tail_of(&rig.ramps, &to));
+            let frames = tail_probe::run_length(input.len(), tail, period);
+            let x = tail_probe::padded(&input, frames);
+            let y = rig.run(&vec![x; layout.width()]);
+            let what = format!("{name}, {input_name}");
+            let channels: Vec<&[f32]> = y.iter().map(Vec::as_slice).collect();
+            tail_probe::assert_tail_covers(&what, input.len(), tail, &channels);
         }
     }
 }

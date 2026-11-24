@@ -24,6 +24,7 @@ use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode, MaxDelay};
 use std::sync::Arc;
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::tail_clock::frames_tail;
 
 /// What a [`DelayNode`] is made from: the [`DelayLayout`] of its lines and the controls it
 /// starts at.
@@ -122,8 +123,20 @@ impl DelayConfig {
 /// [`ParamSet`](tutti_graph::ParamSet) over those three, and a fork of it starts from the
 /// values last set through it. The graph prepares it at the device rate, which sizes the
 /// lines (`ceil(max_delay * rate)` frames each), before its first block; a re-prepare
-/// empties them. Its tail is [`Tail::Unknown`]: a recirculating
-/// line rings for as long as its feedback says, so the executor never skips it.
+/// empties them.
+///
+/// # The tail
+///
+/// The declared tail is the ceiling: the line at the greatest stable feedback
+/// ([`Feedback::MAX_STABLE`]), or [`Tail::Unbounded`] when that is past
+/// [`MAX_NODE_TAIL`](tutti_graph::MAX_NODE_TAIL) (a line of more than about 87 ms), and
+/// [`Tail::Unknown`] before the node is prepared. The node narrows it each block to what
+/// rings at the controls in force: the first echo and the passes round the loop to fall to
+/// the floor ([`TAIL_FLOOR`](tutti_dsp::TAIL_FLOOR)) at the loop gain `feedback +
+/// cross-feedback`, each as long as the longest channel's delay, the larger over where a ramp
+/// is, where it goes and the controls. A synced delay rings for the longest the line holds, as
+/// the tempo moves without a control moving. Once the input has been silent for that long the
+/// node cuts the loop off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the lines and the ramps; a line holds
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
@@ -189,9 +202,8 @@ impl DelaySet {
 ///
 /// The time and the feedback are read per frame when the graph drives them
 /// ([`ControlSignals`]); a cell that moves lands whole on the stream grid and ramps here.
-/// A recirculating line rings for as long as its feedback says, which is a ceiling the
-/// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
-/// the executor never skips it.
+/// The tail is the ceiling of [`DelayBank::tail`] and what [`DelayBank::tail_of`] narrows it
+/// to at the controls ([`Kernel::tail`], [`Kernel::tail_of`]).
 #[derive(Clone, Debug)]
 pub struct DelayKernel<F: Float> {
     layout: DelayLayout,
@@ -292,10 +304,24 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         rendered
     }
 
-    /// A recirculating line rings for as long as its feedback says: unknown, so the graph
-    /// never reads it as none.
+    /// The bank's ceiling (the greatest stable feedback through the longest line), or
+    /// [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
+    /// ([`MAX_NODE_TAIL`](tutti_graph::MAX_NODE_TAIL) at the prepared rate): the node still
+    /// narrows it each block to what rings. Unknown until prepared.
     fn tail(&self) -> Tail {
-        Tail::Unknown
+        match &self.bank {
+            None => Tail::Unknown,
+            Some(bank) => match bank.tail() {
+                Tail::Finite(n) => frames_tail(n.get() as u64, bank.rate()),
+                other => other,
+            },
+        }
+    }
+
+    fn tail_of(&mut self, controls: &DelayControls) -> Tail {
+        self.bank
+            .as_ref()
+            .map_or(Tail::Unknown, |bank| bank.tail_of(&self.ramps, controls))
     }
 }
 
@@ -413,7 +439,6 @@ mod tests {
             (2, 2)
         );
         assert_eq!(shape.latency, Latency::new(Samples::new(0)));
-        assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(
             d.param_base(0),
             Some(0.01),
@@ -811,20 +836,60 @@ mod tests {
         assert_ne!(render(1_056), at_the_point);
     }
 
-    /// The tail is declared unknown and holds: sound goes on after the delay and its
-    /// echoes, and the contract's honest-tail check passes.
+    /// `node` over one block of `x` on every channel, and the tail it reports.
+    fn reported(node: &mut DelayNode<f32>, x: &[f32]) -> Option<Tail> {
+        use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+        use tutti_units::Frame;
+
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: RATE,
+            block_len: Samples::new(x.len()),
+            transport: TransportPosition::default(),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        tutti_graph::contract::drive_input(node, &env, Planes::new(&[x, x]).unwrap(), &[], &[])
+            .reported_tail
+    }
+
+    /// The delay's ceiling is the line at the greatest stable feedback, past what a graph takes
+    /// as a finite tail at this length of line, so it is unbounded; unprepared it is unknown.
+    /// The node reports what rings at its controls (a stereo pair of 10 frames, feedback 0.5 and
+    /// cross-feedback 0.3: loop gain 0.8, `ceil(ln 1e-3 / ln 0.8) = 31` trips, 32 periods of
+    /// 12 frames), and the contract's honest-tail check passes at it.
     #[test]
-    fn the_tail_is_unknown_and_honest() {
-        let mut node = prepared(
+    fn the_node_reports_the_loops_tail_under_an_unbounded_ceiling() {
+        let live =
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                     .controls(controls(frames(10.0), 0.5, 0.3)),
+            );
+        assert_eq!(live.shape().tail, Tail::Unknown, "until it is prepared");
+        let mut node = prepared(live, RATE, 64);
+        assert_eq!(node.shape().tail, Tail::Unbounded);
+        let trips = (1e-3f64.ln() / 0.8f64.ln()).ceil() as usize;
+        let want = (1 + trips) * (10 + 2);
+        let Some(Tail::Finite(got)) = reported(&mut node, &click(64)) else {
+            panic!("a finite reported tail")
+        };
+        assert!(got.get().abs_diff(want) <= 1, "{got:?}, wanted {want}");
+        assert_declared_tail(&mut node, RATE);
+    }
+
+    /// A feedback at the stable bound on half a second of delay rings past what a graph takes
+    /// as a finite tail (688 trips of 0.5 s), so the node reports it unbounded and never parks.
+    #[test]
+    fn a_stable_bound_feedback_reports_an_unbounded_tail() {
+        let mut node = prepared(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(512.0), 0.99, 0.0)),
             ),
             RATE,
             64,
         );
-        assert_eq!(node.shape().tail, Tail::Unknown);
-        assert_declared_tail(&mut node, RATE);
+        assert_eq!(reported(&mut node, &click(64)), Some(Tail::Unbounded));
     }
 
     /// `node` over one block of `x` under a playing transport at `bpm`.

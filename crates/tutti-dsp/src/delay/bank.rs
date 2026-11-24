@@ -27,13 +27,14 @@
 use crate::BlockMismatch;
 use crate::block::expect_widths;
 use tutti_buffers::{Float, InputOutput, Mono};
-use tutti_units::{Bpm, Feedback, ReadPosition, SampleRate, Samples, Seconds};
+use tutti_units::{Bpm, Feedback, ReadPosition, SampleRate, Samples, Seconds, Tail};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, DelaySync, MAX_DELAY_CHANNELS};
 use super::notes::NoteTimes;
 use super::routing::FeedbackRouting;
+use super::taps::{ring_seconds, trips};
 use super::times::ChannelTimes;
-use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, delay_step};
+use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, TAIL_FLOOR, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
 /// in the bank's float `F`, each retargeted by [`DelayBank::retarget`] and stepped by
@@ -167,6 +168,12 @@ impl<F: Float + Lerp> DelayBank<F> {
         }
     }
 
+    /// The rate the lines were sized at.
+    #[must_use]
+    pub fn rate(&self) -> SampleRate {
+        self.rate
+    }
+
     /// Back to silence. No allocation.
     pub fn reset(&mut self) {
         for line in &mut self.lines {
@@ -179,6 +186,17 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// that is not finite is no delay.
     fn position(&self, secs: Seconds) -> ReadPosition {
         position_of(secs.finite_or(Seconds::ZERO), self.max, self.rate, self.cap)
+    }
+
+    /// Channel `c`'s delay while [`Free`](DelaySync::Free) at `controls`: channel 0's time, which
+    /// the channels past the first follow when they are linked, or the time of its own.
+    fn aimed(&self, c: usize, controls: &DelayControls) -> ReadPosition {
+        if c == 0 || self.times.is_linked() {
+            self.position(controls.time)
+        } else {
+            // The layout's `build` holds one time per channel past the first.
+            self.position(self.times.fixed()[c - 1])
+        }
     }
 
     /// Aims `ramps` at `controls`, at `tempo`.
@@ -204,15 +222,8 @@ impl<F: Float + Lerp> DelayBank<F> {
         ramps.sync = controls.sync;
         match (controls.sync, tempo) {
             (DelaySync::Free, _) => {
-                let first = self.position(controls.time);
                 for (c, time) in ramps.times.iter_mut().enumerate().take(width) {
-                    let to = if c == 0 || self.times.is_linked() {
-                        first
-                    } else {
-                        // The layout's `build` holds one time per channel past the first.
-                        self.position(self.times.fixed()[c - 1])
-                    };
-                    time.retarget_position(to, Steps::Rate(DELAY_SLEW));
+                    time.retarget_position(self.aimed(c, controls), Steps::Rate(DELAY_SLEW));
                 }
             }
             (DelaySync::Synced, Some(tempo)) => {
@@ -236,6 +247,86 @@ impl<F: Float + Lerp> DelayBank<F> {
         };
         ramps.feedback.retarget_by(fb, steps);
         ramps.cross.retarget_by(cross, steps);
+    }
+
+    /// The most the delay rings after its input stops, over every control: the loop at the
+    /// greatest stable gain ([`Feedback::MAX_STABLE`]) through the longest line.
+    /// [`tail_of`](Self::tail_of) is at most this.
+    #[must_use]
+    pub fn tail(&self) -> Tail {
+        self.ring(Feedback::MAX_STABLE, Samples::new(self.cap))
+    }
+
+    /// How long the delay rings after its input stops at `controls`, erring long, with `ramps`
+    /// as they are: at most [`tail`](Self::tail). No allocation; the audio state is not touched.
+    ///
+    /// A pass round the loop takes at most the longest channel's delay and scales by at most
+    /// `feedback + cross_feedback` (a routing's rows sum to at most 1 in magnitude), the pair
+    /// bounded as [`Feedback::stable_pair`] bounds it where it is read. The figure is the
+    /// first echo and the passes to fall to [`TAIL_FLOOR`], each as long as the delay and the
+    /// spread of its read, taken at the larger of the loop gain and of the longest delay over
+    /// the ramps where they are, where they are aimed and `controls`: a ramp in flight is
+    /// between its two ends, and a pair's sum is too, so the ends bound it.
+    ///
+    /// A [`Synced`](DelaySync::Synced) delay is the longest the line holds. The tempo is not
+    /// an argument: it moves between blocks without a control moving, so a figure taken at one
+    /// would be stale at the next. A time or feedback a control signal drives is a control
+    /// whose highest value in the block the caller passes: the delay clamps a driven time into
+    /// the line and a driven feedback into the stable range, as the controls are here.
+    #[must_use]
+    pub fn tail_of(&self, ramps: &DelayRamps<F>, controls: &DelayControls) -> Tail {
+        let width = self.lines.len();
+        let gain = |fb: f64, cross: f64| {
+            let (fb, cross) = Feedback::stable_pair(fb, cross);
+            fb.get() + cross.get()
+        };
+        let cross = |c: Feedback| {
+            if self.routing.is_none() {
+                0.0
+            } else {
+                c.finite_or(Feedback::NONE).get()
+            }
+        };
+        let loop_gain = gain(ramps.feedback.now().into(), ramps.cross.now().into())
+            .max(gain(
+                ramps.feedback.target().into(),
+                ramps.cross.target().into(),
+            ))
+            .max(gain(
+                controls.feedback.finite_or(Feedback::NONE).get(),
+                cross(controls.cross_feedback),
+            ));
+        let longest = match controls.sync {
+            DelaySync::Synced => self.position(self.max),
+            DelaySync::Free => (0..width)
+                .map(|c| self.aimed(c, controls))
+                .max()
+                .unwrap_or(ReadPosition::START),
+        };
+        let longest = ramps.times[..width]
+            .iter()
+            .flat_map(|time| [time.now(), time.target()])
+            .fold(longest, ReadPosition::max);
+        let whole = longest.frames();
+        let frames = if ReadPosition::from_frames(whole) < longest {
+            Samples::new(whole.get() + 1)
+        } else {
+            whole
+        };
+        self.ring(Feedback::new_clamped(loop_gain), frames)
+    }
+
+    /// The first echo and the passes to the floor at loop gain `gain`, each as long as `longest`
+    /// frames and the spread of the read (the echo `k` is spread over `k + 1` frames at most for a
+    /// linear read; [`ring_seconds`] allows two a pass, a cubic read's three need one more).
+    fn ring(&self, gain: Feedback, longest: Samples) -> Tail {
+        let spread = match self.interpolation {
+            InterpolationMode::CubicHermite => 1,
+            _ => 0,
+        };
+        let frames = longest.get().saturating_add(spread);
+        let seconds = ring_seconds(frames, trips(gain.get(), TAIL_FLOOR), self.rate);
+        Tail::Finite(seconds.to_samples_ceil(self.rate))
     }
 
     /// Runs `input` into `output`, frame `i` at the ramps' step `taken + 1 + i`, then
