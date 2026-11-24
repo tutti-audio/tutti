@@ -961,7 +961,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
     };
     use tutti_nodes::testing::Osc;
-    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
+    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_units::{
         Beat, Bipolar, Bpm, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
     };
@@ -969,22 +969,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     struct Host {
         filter: NodeKey,
         saw: NodeKey,
-        knobs: [Option<tutti_rt::ParamCell>; 2],
     }
     impl ModHost for Host {
-        fn target(&self, t: TargetKey) -> Option<Target> {
-            let TargetKey::Param { param, .. } = t else {
-                return None;
-            };
-            let knob = match param.as_unit() {
-                Some(a) if a == UnitParam::Cutoff => self.knobs[0].clone(),
-                Some(a) if a == UnitParam::Q => self.knobs[1].clone(),
-                _ => return None,
-            };
-            Some(Target::Native {
-                node: self.filter,
-                knob,
-            })
+        fn node(&self, _: u64) -> Option<NodeKey> {
+            Some(self.filter)
         }
         fn feed(&self, _: SourceKey) -> Option<Feed> {
             Some(Feed::Audio(self.saw))
@@ -994,7 +982,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
         to: RouteTarget::Param(at(p)),
-        depth: Bipolar::of(depth),
+        depth: tutti_rt::Param::new(Bipolar::of(depth)),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     };
@@ -1028,12 +1016,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     exec.process(128, &transport, &[], &mut [&mut out[..]]);
     ed.collect();
 
-    let host = Host {
-        filter,
-        saw,
-        knobs: [params.cell(UnitParam::Cutoff), params.cell(UnitParam::Q)],
-    };
-    let sources = [
+    let host = Host { filter, saw };
+    let cell = |at: tutti_graph::ParamIn| params.cell(at.param);
+    let mirror = |_: NodeKey, _: tutti_units::ParamId| None;
+    let lfo = |rate: f64| {
         (
             SourceKey(1),
             ModSource::Lfo {
@@ -1042,12 +1028,15 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
                     seed: 0,
                 },
                 clock: LayerClock::Seconds {
-                    rate: Hz::new(2.0),
+                    rate: Hz::new(rate),
                     phase: PhaseIncrement::new(0.0),
                     anchor: None,
                 },
             },
-        ),
+        )
+    };
+    let mut sources = [
+        lfo(2.0),
         (
             SourceKey(2),
             ModSource::Follower {
@@ -1056,7 +1045,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
             },
         ),
     ];
-    let mut routes = [
+    let routes = [
         (RouteKey(1), route(1, UnitParam::Cutoff, 0.2)),
         (RouteKey(2), route(2, UnitParam::Q, 0.3)),
     ];
@@ -1084,7 +1073,11 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         routes: &routes,
         targets: &targets,
     };
-    assert!(m.apply(&decl, &mut ed, &host).expect("applies").commit);
+    assert!(
+        m.apply(&decl, &mut ed, &host, &cell, &mirror)
+            .expect("applies")
+            .commit
+    );
     m.commit(&mut ed).expect("commits");
     // Warm-up outside the gate: the commit lands, the connects' declick
     // runs out.
@@ -1094,14 +1087,16 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     }
     let mut sounded = false;
     for i in 0..40 {
-        routes[0].1.depth = Bipolar::of(if i % 2 == 0 { 0.4 } else { 0.1 });
+        sources[0] = lfo(if i % 2 == 0 { 3.0 } else { 2.0 });
         let decl = Declarations {
             sources: &sources,
             routes: &routes,
             targets: &targets,
         };
-        let applied = m.apply(&decl, &mut ed, &host).expect("applies");
-        assert!(!applied.commit, "a depth edit sends no plan");
+        let applied = m
+            .apply(&decl, &mut ed, &host, &cell, &mirror)
+            .expect("applies");
+        assert!(!applied.commit, "a rate edit sends no plan");
         assert_eq!(applied.republished.len(), 1, "the LFO's lane republished");
         for _ in 0..4 {
             exec.process(128, &transport, &[], &mut [&mut out[..]]);

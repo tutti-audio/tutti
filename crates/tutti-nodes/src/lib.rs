@@ -570,7 +570,7 @@ pub use signal::{
 // Declarations compiled and applied to an `Editor` as lanes, signal-source
 // nodes and edges.
 mod reconcile;
-pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
+pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError};
 mod convolution;
 pub use convolution::{
     ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,

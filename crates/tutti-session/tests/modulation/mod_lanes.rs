@@ -30,9 +30,9 @@ use tutti_modulation::{
     RouteKey, RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
+use tutti_nodes::{Feed, ModDelayConfig, ModHost, PhaserConfig, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput, ModKeys,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput,
     ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort,
     PHASES, ParamRef, ParamTarget, PhaseCx, Problem, Replacement, RouteSpec, Session, SessionEvent,
     TargetName, declare_targets,
@@ -624,13 +624,14 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
 }
 
 /// A host's keys: the target key `bits` names `node`; its one source has no
-/// feed.
+/// feed. `depth` is its route's depth cell, kept across updates.
 struct HostKeys {
     bits: u64,
     node: Cell<Option<NodeKey>>,
+    depth: tutti_rt::Param<Bipolar>,
 }
 
-impl ModKeys for HostKeys {
+impl ModHost for HostKeys {
     fn node(&self, target: u64) -> Option<NodeKey> {
         (target == self.bits).then(|| self.node.get()).flatten()
     }
@@ -654,7 +655,7 @@ fn host_update(
         RouteDecl {
             source: SourceKey(1),
             to: RouteTarget::Param(target),
-            depth: Bipolar::of(0.1),
+            depth: keys.depth.clone(),
             polarity: tutti_modulation::Polarity::Bipolar,
             curve: tutti_modulation::Law::Linear,
         },
@@ -691,6 +692,7 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
     let keys = HostKeys {
         bits: cutoff.node().expect("a param target"),
         node: Cell::new(Some(probe.erase())),
+        depth: tutti_rt::Param::new(Bipolar::of(0.1)),
     };
     let one = declare_targets([(cutoff, 0.0, 1_000.0)], []);
     for _ in 0..4 {

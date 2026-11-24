@@ -5,6 +5,7 @@ use crate::LfoShape;
 use crate::shape::shape;
 use tutti_curve::Exponent;
 use tutti_curve::{Breakpoint, Trajectory};
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Frame, Hz, ParamId, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -58,7 +59,7 @@ fn route(source: u64, to: RouteTarget, depth: f64) -> RouteDecl {
     RouteDecl {
         source: SourceKey(source),
         to,
-        depth: Bipolar::of(depth),
+        depth: Param::new(Bipolar::of(depth)),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     }
@@ -238,7 +239,8 @@ fn equal_declarations_in_any_order_compile_equal() {
     for f in reorders {
         let mut r = Rig::new();
         f(&mut r.sources);
-        let mut rt = r.routes.clone();
+        // A route's depth is a cell compared by identity: the clone shares it.
+        let mut rt = rig.routes.clone();
         rt.reverse();
         r.routes = rt;
         // A `TargetDecl` is `Clone` (its curve an `Arc`, kept by identity).
@@ -273,7 +275,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
                     to: RouteTarget::Param(t),
-                    depth,
+                    depth: Param::new(depth),
                     polarity,
                     curve,
                 };
@@ -306,7 +308,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                         RouteDecl {
                             source: SourceKey(5),
                             to: RouteTarget::Depth(RouteKey(5)),
-                            depth: Bipolar::MAX,
+                            depth: Param::new(Bipolar::MAX),
                             polarity: Polarity::Unipolar,
                             curve: Law::Linear,
                         },
@@ -346,36 +348,22 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
     }
 }
 
-/// A depth edit changes only its target's program, and keeps every id: the
-/// edited route's layer differs in its amount alone; every other target's
-/// program, the nodes and the edges are equal.
+/// A depth write changes no program, and keeps every id: the route's layer
+/// reads its depth from the route's cell, so the compile is the same and the
+/// program's depth snapshot is the written value.
 #[test]
-fn a_depth_edit_changes_only_its_targets_program_and_keeps_its_ids() {
+fn a_depth_write_changes_no_program_and_the_snapshot_reads_it() {
     let mut rig = Rig::new();
     let before = rig.compile(None, now(1, 0));
-    rig.route_mut(100).depth = Bipolar::of(0.7);
+    let snapshot = before.programs[&target(1)].depth_snapshot();
+    rig.route_mut(100).depth.store(Bipolar::of(0.7));
     let after = rig.compile(Some(&before), now(1, 5_000));
-    for (t, p) in &after.programs {
-        if *t == target(1) {
-            assert_ne!(
-                p, &before.programs[t],
-                "the edited target's program changed"
-            );
-            let ids = |p: &ControlProgram| p.layers().iter().map(|l| l.id).collect::<Vec<_>>();
-            assert_eq!(ids(p), ids(&before.programs[t]), "ids kept");
-            for (a, b) in p.layers().iter().zip(before.programs[t].layers()) {
-                let same = Layer {
-                    amount: b.amount,
-                    ..a.clone()
-                };
-                assert_eq!(&same, b, "only the amount moved");
-            }
-        } else {
-            assert_eq!(p, &before.programs[t], "{t:?} untouched");
-        }
-    }
-    assert_eq!(after.nodes, before.nodes);
-    assert_eq!(after.edges, before.edges);
+    assert_eq!(after, before);
+    assert_ne!(
+        after.programs[&target(1)].depth_snapshot(),
+        snapshot,
+        "the lane reads the written depth"
+    );
 }
 
 /// A macro move changes exactly the programs it reaches: macro 12 goes to
@@ -482,7 +470,7 @@ fn an_anchor_is_carried_until_a_play_start() {
     let c1 = rig.compile(Some(&c0), now(7, 10_000));
     let a1 = anchor(&c1).expect("anchored");
 
-    rig.route_mut(100).depth = Bipolar::of(0.9);
+    rig.route_mut(100).depth.store(Bipolar::of(0.9));
     let c2 = rig.compile(Some(&c1), now(7, 30_000));
     assert_eq!(anchor(&c2), Some(a1), "a depth edit carries it");
 
@@ -699,7 +687,7 @@ fn each_refusal_fires_by_name() {
         Err(ProgramCompileError::DuplicateSource(SourceKey(1)))
     );
     assert_eq!(
-        run(&one_lfo, &[r1[0], r1[0]], &t1),
+        run(&one_lfo, &[r1[0].clone(), r1[0].clone()], &t1),
         Err(ProgramCompileError::DuplicateRoute(RouteKey(1)))
     );
     assert_eq!(
@@ -818,7 +806,7 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
                 RouteDecl {
                     source: SourceKey(s),
                     to: RouteTarget::Param(target(1 + k % 2)),
-                    depth: Bipolar::of(0.3),
+                    depth: Param::new(Bipolar::of(0.3)),
                     polarity,
                     curve,
                 },

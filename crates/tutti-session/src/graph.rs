@@ -2375,10 +2375,12 @@ impl<F: Float> Graph<F> {
 }
 
 impl<F: Float> Graph<F> {
-    /// Applies `decl` to the editor through `m` (doc 014 §8.2), resolving the
-    /// host's keys through `keys`. A native target's knob is its node's own
-    /// `Param` cell, from the node's `ParamSet`. Marks the graph edited
-    /// when the apply asks for a commit.
+    /// Applies `decl` to the editor through `m`, resolving the host's keys
+    /// through `keys`. A native target's knob is its node's own `Param`
+    /// cell, from the node's `ParamSet`; a plugin target's lane starts at the
+    /// plugin's mirrored value (the session's record of it,
+    /// `Plugin::param_values`). Marks the graph edited when the apply asks
+    /// for a commit.
     ///
     /// # Errors
     ///
@@ -2387,20 +2389,35 @@ impl<F: Float> Graph<F> {
         &mut self,
         m: &mut tutti_nodes::Modulation,
         decl: &tutti_modulation::Declarations<'_>,
-        keys: &dyn ModKeys,
-    ) -> Result<(tutti_nodes::Applied, PluginTargets), tutti_nodes::ReconcileError> {
-        let host = ModHostOver {
-            values: &self.values,
-            #[cfg(feature = "plugin")]
-            plugins: &self.plugins,
-            keys,
-            plugin_targets: std::cell::RefCell::new(BTreeMap::new()),
+        keys: &dyn tutti_nodes::ModHost,
+    ) -> Result<tutti_nodes::Applied, tutti_nodes::ReconcileError> {
+        let values = &self.values;
+        // A node the session hosts no plugin at has no mirror: its lane has
+        // no knob to start from. A plugin target waits for its mirror.
+        #[cfg(feature = "plugin")]
+        let plugins = &self.plugins;
+        #[cfg(feature = "plugin")]
+        let mirror = |node: NodeKey, id: tutti_units::ParamId| {
+            Some(
+                plugins
+                    .get(&node)
+                    .map_or(Some(None), |p| p.param_value(id))?
+                    .map(f64::from),
+            )
         };
-        let applied = m.apply(decl, &mut self.editor, &host)?;
+        #[cfg(not(feature = "plugin"))]
+        let mirror = |_: NodeKey, _: tutti_units::ParamId| Some(None);
+        let applied = m.apply(
+            decl,
+            &mut self.editor,
+            keys,
+            &|at| values.cell(at.node, at.param),
+            &mirror,
+        )?;
         if applied.commit {
             self.edited = true;
         }
-        Ok((applied, host.plugin_targets.into_inner()))
+        Ok(applied)
     }
 }
 
@@ -4047,128 +4064,6 @@ fn render<F: Float>(
             }
             _ => new,
         };
-    }
-}
-
-/// Resolves a host's modulation keys to graph nodes.
-///
-/// `tutti_modulation`'s declarations key a target by `TargetKey { node: u64, param }`
-/// and a source by `SourceKey(u64)`; the `u64` is the host's own minting (an
-/// entity's bits, say), and this is how the session's
-/// [`Modulation`](crate::Phase::Modulation) phase reads it ([`ModInput`](crate::ModInput)).
-pub trait ModKeys {
-    /// The node a target's key names.
-    fn node(&self, target: u64) -> Option<NodeKey>;
-    /// The edge a target's key names (`TargetKey::Edge`), whose gain the
-    /// target modulates. A host with no edge targets leaves the default,
-    /// which names none.
-    fn edge(&self, target: u64) -> Option<crate::ChannelEdge> {
-        let _ = target;
-        None
-    }
-    /// What feeds source `source`'s node.
-    fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed>;
-    /// The cell holding route `route`'s depth, when the host moves it between
-    /// applies: the route's lane reads the depth from it at every
-    /// evaluation, so a depth edit republishes no program. A host that
-    /// declares its depths with its routes leaves the default, which names
-    /// none.
-    fn depth(
-        &self,
-        route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
-        let _ = route;
-        None
-    }
-}
-
-/// `tutti_nodes::ModHost` over the graph's nodes and the host's keys: a
-/// target's key names its node, a native target's knob is that node's
-/// `Param` cell, a plugin target feeds the node's event input 0 and starts at
-/// the plugin's mirrored value (the session's record of it,
-/// `Plugin::param_values`).
-struct ModHostOver<'a> {
-    values: &'a ValueTable,
-    #[cfg(feature = "plugin")]
-    plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
-    keys: &'a dyn ModKeys,
-    /// Each plugin target the apply resolved, by node and parameter: which
-    /// plugin parameters a lane drives (`ModState::plugin_lanes`).
-    plugin_targets: std::cell::RefCell<PluginTargets>,
-}
-
-/// A plugin parameter's modulation target, by its node and parameter id.
-pub(crate) type PluginTargets =
-    BTreeMap<(NodeKey, tutti_units::ParamId), tutti_modulation::TargetKey>;
-
-impl tutti_nodes::ModHost for ModHostOver<'_> {
-    fn target(&self, target: tutti_modulation::TargetKey) -> Option<tutti_nodes::Target> {
-        let tutti_modulation::TargetKey::Param {
-            node: bits,
-            param: addr,
-        } = target
-        else {
-            // A node's mix: the node the host's key names. The mix's knob is
-            // the unit's own cell, which the reconciler takes from the
-            // editor: `MixTarget` is the one writer.
-            if let tutti_modulation::TargetKey::Mix(bits) = target {
-                return Some(tutti_nodes::Target::Mix {
-                    node: self.keys.node(bits)?,
-                });
-            }
-            // An edge's gain: the edge the host's key names, if it names one.
-            let tutti_modulation::TargetKey::Edge(key) = target else {
-                return None;
-            };
-            // The gain's knob is the edge's own cell, which the reconciler
-            // takes from the editor: `GainTarget` is the one writer.
-            return Some(tutti_nodes::Target::Edge {
-                id: Graph::<f32>::edge_id(self.keys.edge(key)?)?,
-            });
-        };
-        let node = self.keys.node(bits)?;
-        Some(match addr.as_unit() {
-            // A native param, at any index: the node's own cell for that
-            // address is the lane's knob.
-            Some(addr) => tutti_nodes::Target::Native {
-                node,
-                knob: self.values.cell(node, addr),
-            },
-            // A plugin target waits for its mirror: a lane built without
-            // a knob could not take one later.
-            None => {
-                let tutti_units::ParamAddr::Id(id) = addr else {
-                    return None;
-                };
-                // A node the session hosts no plugin at has no mirror: its
-                // lane has no knob to start from.
-                #[cfg(feature = "plugin")]
-                let knob = self
-                    .plugins
-                    .get(&node)
-                    .map_or(Some(None), |p| p.param_value(id))?
-                    .map(f64::from);
-                #[cfg(not(feature = "plugin"))]
-                let knob = None;
-                self.plugin_targets.borrow_mut().insert((node, id), target);
-                tutti_nodes::Target::Foreign {
-                    node,
-                    port: 0,
-                    knob,
-                }
-            }
-        })
-    }
-
-    fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed> {
-        self.keys.feed(source)
-    }
-
-    fn depth(
-        &self,
-        route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
-        self.keys.depth(route)
     }
 }
 
