@@ -439,9 +439,7 @@ fn wide(workers: usize) -> (Editor, Executor) {
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
-    if workers > 1 {
-        exec.set_pool(Some(common::TestPool::new(workers)));
-    }
+    common::pooled_fresh(&mut exec, workers);
     (ed, exec)
 }
 
@@ -482,11 +480,5 @@ fn the_parallel_render_reads_the_same_history_as_the_one_participant_one() {
         }
         out
     };
-    let serial = render(1);
-    for workers in 2..=4 {
-        assert!(
-            serial == render(workers),
-            "{workers} workers render the arrival transport as serial does"
-        );
-    }
+    common::agree_across_workers(2..=4, render, Vec::clone);
 }
