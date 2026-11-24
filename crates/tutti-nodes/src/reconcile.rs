@@ -598,7 +598,7 @@ impl Modulation {
 
     /// Frees, on this thread, the programs (and a plugin lane's ranges)
     /// every lane has let go of since its last publish
-    /// ([`LaneControls::reclaim`], [`ForeignLaneControls::reclaim`]), without
+    /// ([`ForeignLaneControls::reclaim`] for a plugin lane), without
     /// publishing; returns how many are still held. A lane republished once and then
     /// left alone would otherwise keep a program a block held across that
     /// publish until the lane is published again. Control thread, once per

@@ -493,9 +493,9 @@ impl ForeignLaneControls {
     }
 
     /// Frees the programs and the ranges the lane has let go of since their
-    /// last publish, as [`LaneControls::reclaim`] does for the programs
-    /// alone; returns how many are still held. Control thread, every tick of
-    /// its owner.
+    /// last publish (one a block still held when a publish replaced it),
+    /// without publishing; returns how many are still held. Control thread,
+    /// every tick of its owner.
     pub fn reclaim(&self) -> usize {
         self.lane.reclaim() + self.range.reclaim()
     }
