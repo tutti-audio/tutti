@@ -348,7 +348,7 @@ fn a_parallel_render_with_logging_on_is_bit_identical_to_the_one_participant_one
     let serial = common::agree_across_workers(
         common::WORKERS,
         |workers| run((workers > 1).then(|| test_pool(workers))),
-        |(audio, records)| (audio.clone(), records.clone()),
+        |(audio, records)| (common::bits(audio), records.clone()),
     );
     assert_eq!(serial.1.len(), blocks.len() * 4 * 3);
 }
