@@ -419,12 +419,13 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
         self.player.program_change(channel, program);
     }
 
-    /// Selects `preset` on a channel, bypassing MIDI: its bank and its
-    /// program, as a Bank Select and a Program Change would. The percussion
-    /// bank (`wBank` 128) is a channel's bank as it is, which a MIDI channel
-    /// other than the percussion channel cannot send, so a chase (`Node::chase`)
-    /// carries it only on the percussion channel. Call it before inserting the
-    /// unit; once in a graph, send the program change on the event input.
+    /// Selects `preset` on a channel, bypassing MIDI: the channel plays that
+    /// preset, whichever channel it is. A Program Change names the percussion
+    /// bank (`wBank` 128) on the percussion channel only and a melodic bank on
+    /// the others only, so a chase (`Node::chase`) carries a selection MIDI
+    /// could have made on that channel, and no other. Call it before
+    /// inserting the unit; once in a graph, send the program change on the
+    /// event input.
     ///
     /// # Errors
     ///

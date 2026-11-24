@@ -168,7 +168,9 @@ fn general_midi_on_returns_programs_banks_and_tuning_to_the_defaults() {
     rig.program(0, 1);
     send(&mut rig, &device_control(0x7F, 0x04, 0x00, 0x4C));
     rig.render(512);
-    near(pitch(&mut rig, 9), 441 * 2, "channel 10 melodic, tuned up");
+    // The melodic preset at its own pitch: master tuning leaves the
+    // percussion channel, whatever it plays (GM2 section 4.2).
+    near(pitch(&mut rig, 9), 441, "channel 10 on the melodic preset");
     send(&mut rig, &GM_ON);
     rig.render(512);
     near(pitch(&mut rig, 0), 441, "program 0 of bank 0, at A440");
