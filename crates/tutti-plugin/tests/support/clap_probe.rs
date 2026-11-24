@@ -516,7 +516,7 @@ pub(crate) fn is_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-pub fn is_alive(pid: u32) -> bool {
+pub(crate) fn is_alive(pid: u32) -> bool {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,

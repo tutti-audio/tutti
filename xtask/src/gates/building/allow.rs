@@ -224,18 +224,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "binding a UDP socket: the failure is the OS's, not a value's",
     ),
     ty(
-        "crates/tutti-plugin-ipc/src/transport/sys/unix.rs",
-        "Watch::of",
-        CTOR,
-        "duplicating a descriptor: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-plugin-ipc/src/transport/sys/windows.rs",
-        "Watch::of",
-        CTOR,
-        "duplicating a handle: the failure is the OS's, not a value's",
-    ),
-    ty(
         "crates/tutti-au-host/",
         "AuHandle::new",
         CTOR,
