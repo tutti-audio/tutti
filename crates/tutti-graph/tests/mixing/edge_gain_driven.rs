@@ -151,15 +151,18 @@ fn run(harness: &mut Harness, blocks: usize) -> Vec<f32> {
 /// `blocks` blocks on one and on four participants, bit for bit; the
 /// one-participant output 0.
 fn render_both(rig: &Rig, blocks: usize) -> Vec<f32> {
-    let serial = common::agree_across_workers([4], |workers| {
-        let mut harness = Harness::with_workers(BLOCK, workers);
-        if let Some((id, range)) = rig.range {
-            harness.start_edge_gain_range(id, range);
-        }
-        harness.switch(&rig.graph(), &rig.kinds);
-        common::bits_of(&run(&mut harness, blocks))
-    });
-    serial.into_iter().map(f32::from_bits).collect()
+    common::agree_across_workers(
+        [4],
+        |workers| {
+            let mut harness = Harness::with_workers(BLOCK, workers);
+            if let Some((id, range)) = rig.range {
+                harness.start_edge_gain_range(id, range);
+            }
+            harness.switch(&rig.graph(), &rig.kinds);
+            run(&mut harness, blocks)
+        },
+        |r| common::bits_of(r),
+    )
 }
 
 /// The weight a driver of this `latency` offset gives frame `n`: the step of

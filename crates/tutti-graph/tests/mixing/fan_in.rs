@@ -91,12 +91,11 @@ fn render(
 /// One-participant and parallel (four participants) renders, which must be bit for bit
 /// the same.
 fn render_both(t: &Topology, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
-    let serial =
-        common::agree_across_workers([4], |workers| bits(&render(t, kinds, workers, blocks)));
-    serial
-        .into_iter()
-        .map(|channel| channel.into_iter().map(f32::from_bits).collect())
-        .collect()
+    common::agree_across_workers(
+        [4],
+        |workers| render(t, kinds, workers, blocks),
+        |r| bits(r),
+    )
 }
 
 /// `((+0.0 + a_0) + a_1) + ..`, one rounding per add.

@@ -181,12 +181,7 @@ impl Rig {
 
     /// One-participant and parallel renders, which must be bit for bit the same.
     fn render_both(&self, blocks: usize) -> Vec<Vec<f32>> {
-        let serial =
-            common::agree_across_workers([4], |workers| bits(&self.render(workers, blocks)));
-        serial
-            .into_iter()
-            .map(|channel| channel.into_iter().map(f32::from_bits).collect())
-            .collect()
+        common::agree_across_workers([4], |workers| self.render(workers, blocks), |r| bits(r))
     }
 }
 

@@ -165,20 +165,20 @@ fn run(harness: &mut Harness, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>
 /// `blocks` blocks of `BLOCK` frames on one and on four participants, the
 /// node's output bit for bit; the one-participant render, with the input.
 fn render_both(rig: &Rig, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let serial = common::agree_across_workers([4], |workers| {
-        let mut harness = Harness::with_workers(BLOCK, workers);
-        if let Some(base) = rig.base {
-            harness.start_mix(key(2), base);
-        }
-        if let Some(range) = rig.range {
-            harness.start_param_range(mix_of(2), range);
-        }
-        harness.switch(&rig.graph(), &rig.kinds);
-        common::bits_of(&run(&mut harness, 0, blocks).0)
-    });
-    (
-        serial.into_iter().map(f32::from_bits).collect(),
-        input_signal(0, blocks * BLOCK),
+    common::agree_across_workers(
+        [4],
+        |workers| {
+            let mut harness = Harness::with_workers(BLOCK, workers);
+            if let Some(base) = rig.base {
+                harness.start_mix(key(2), base);
+            }
+            if let Some(range) = rig.range {
+                harness.start_param_range(mix_of(2), range);
+            }
+            harness.switch(&rig.graph(), &rig.kinds);
+            run(&mut harness, 0, blocks)
+        },
+        |r| common::bits_of(&r.0),
     )
 }
 

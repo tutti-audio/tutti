@@ -1038,19 +1038,21 @@ pub fn pooled_fresh<F: Float>(exec: &mut Executor<F>, workers: usize) {
 }
 
 /// Call `render(1)`, the serial render, then `render(w)` for each `w` of
-/// `workers`, and assert every value equals the serial one (the panic names
-/// the worker count). Returns the serial value, for the caller's own
-/// assertions. A float comparison that must be exact returns [`bits`] from
-/// `render`.
-pub fn agree_across_workers<T: PartialEq + std::fmt::Debug>(
+/// `workers`, and assert `same` of each equals `same` of the serial one (the
+/// panic names the worker count). `same` says what must be equal: the
+/// [`bits`] of a render, one channel's [`bits_of`], a count. Returns the
+/// serial value itself, for the caller's own assertions.
+pub fn agree_across_workers<T, K: PartialEq + std::fmt::Debug>(
     workers: impl IntoIterator<Item = usize>,
     mut render: impl FnMut(usize) -> T,
+    same: impl Fn(&T) -> K,
 ) -> T {
     let serial = render(1);
+    let want = same(&serial);
     for w in workers {
         assert_eq!(
-            render(w),
-            serial,
+            same(&render(w)),
+            want,
             "{w} workers differ from the serial render"
         );
     }

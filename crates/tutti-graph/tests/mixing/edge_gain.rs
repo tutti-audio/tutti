@@ -205,12 +205,11 @@ fn render(
 
 /// One-participant and parallel renders, which must be bit for bit the same.
 fn render_both(graph: &Weighed, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
-    let serial =
-        common::agree_across_workers([4], |workers| bits(&render(graph, kinds, workers, blocks)));
-    serial
-        .into_iter()
-        .map(|channel| channel.into_iter().map(f32::from_bits).collect())
-        .collect()
+    common::agree_across_workers(
+        [4],
+        |workers| render(graph, kinds, workers, blocks),
+        |r| bits(r),
+    )
 }
 
 /// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..`: a multiply and an add per lane,
