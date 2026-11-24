@@ -2,9 +2,8 @@
 //! the [`ChannelResponse`] notification and the [`MpeFeatures`] a receiver
 //! declares.
 //!
-//! The zone the Profile enables is an [`MpeZoneConfig`](crate::MpeZoneConfig)
-//! built by [`profile`](crate::MpeZoneConfig::profile), and a Group's zones
-//! together an [`MpeZones`](crate::MpeZones).
+//! The zone the Profile enables is a [`ProfileZone`](crate::ProfileZone), and a
+//! Group's zones together [`ProfileZones`](crate::ProfileZones).
 
 /// How a receiver's Member Channels take notes (M2-120 section 3.6).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

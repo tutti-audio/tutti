@@ -944,10 +944,11 @@ pub mod midi {
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
-        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        MmcSegmentError, Mpe11Zone, Mpe11Zones, MpeFeatures, MpeLayout, MpeMode, MpeZone, MtcRate,
         NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
-        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
-        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
+        TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,

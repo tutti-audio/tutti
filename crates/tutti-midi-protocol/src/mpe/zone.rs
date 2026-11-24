@@ -16,18 +16,6 @@ use tutti_ump::{
 
 use crate::{ChannelResponse, PitchBendSensitivity};
 
-/// Which MPE specification a zone follows. Its receive rules are this type's,
-/// so a zone cannot carry one specification's layout and the other's rules.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum MpeSpec {
-    /// MPE 1.1 (M1-100): zones anchored at channel 1 and channel 16, set up
-    /// by the MPE Configuration Message.
-    Mpe11,
-    /// The MIDI-CI MPE Profile (M2-120): a zone per enabled Profile.
-    Profile,
-}
-
 /// Which of the two RP-053 zones an MPE 1.1 configuration describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -83,126 +71,213 @@ pub enum Mcm {
     },
 }
 
-/// Where a zone sits, and the bend ranges it keeps: one of MPE 1.1's two
-/// anchors with a range for the master and one for the members, or a Manager
-/// Channel the MPE Profile enabled anywhere with the one range of all its
-/// channels (M2-120 section 3.5). It fixes the zone's specification and which
-/// way its members run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-enum Placement {
-    /// MPE 1.1: master on channel 0 or 15, members counting away from it.
-    Side {
-        side: MpeZone,
-        master: PitchBendSensitivity,
-        member: PitchBendSensitivity,
-    },
-    /// The Profile: the Manager on this channel, members counting up from it.
-    Managed {
-        manager: MidiChannel,
-        range: PitchBendSensitivity,
-    },
-}
-
-/// One zone's layout and bend ranges: the whole description of how an MPE
-/// zone occupies the sixteen channels, under either specification.
+/// Where a zone's channels sit: its master (MPE 1.1's Master, the Profile's
+/// Manager) and the member channels beside it, which are the part of a zone
+/// that every kind shares. The master is the channel directly below the
+/// members, or on channel 16 directly above them, and the whole zone ends by
+/// channel 16.
 ///
-/// Build an MPE 1.1 zone with [`new`](Self::new), [`lower`](Self::lower) or
-/// [`upper`](Self::upper) and a Profile zone with [`profile`](Self::profile);
-/// the constructor is what records the [specification](Self::spec). The
-/// fields are private. A constructor refuses a layout the specification does
-/// not allow, and a persisted configuration (feature `serde`) is read back
-/// through the same check, so a value in hand always names channels that
-/// exist.
+/// A zone of either kind hands its layout out ([`Mpe11Zone::layout`],
+/// [`ProfileZone::layout`]); a [`Midi1Translator`](crate::Midi1Translator)
+/// reads nothing else of a zone, so it takes this.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(try_from = "MpeZoneConfigRaw", into = "MpeZoneConfigRaw")
+    serde(try_from = "MpeLayoutRaw", into = "MpeLayoutRaw")
 )]
-pub struct MpeZoneConfig {
-    placement: Placement,
+pub struct MpeLayout {
+    master: MidiChannel,
+    first_member: MidiChannel,
     member_count: MemberCount,
-    response: ChannelResponse,
 }
 
-/// The persisted shape of an [`MpeZoneConfig`]: its fields as written, checked
-/// by `TryFrom` on the way back in.
+/// The persisted shape of an [`MpeLayout`], checked by `TryFrom` on the way
+/// back in.
 #[cfg(feature = "serde")]
 #[derive(serde::Serialize, serde::Deserialize)]
-struct MpeZoneConfigRaw {
-    placement: Placement,
+struct MpeLayoutRaw {
+    master: MidiChannel,
+    first_member: MidiChannel,
     member_count: MemberCount,
-    response: ChannelResponse,
 }
 
-/// A persisted zone that is not a zone.
+/// A persisted layout that is not a layout.
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("an MPE zone has a master, 1 or more members, and ends by channel 16")]
-pub struct InvalidMpeZoneConfig;
+#[error("an MPE layout's master is directly below its members, or channel 16 directly above them")]
+pub struct InvalidMpeLayout;
 
 #[cfg(feature = "serde")]
-impl From<MpeZoneConfig> for MpeZoneConfigRaw {
-    fn from(c: MpeZoneConfig) -> Self {
+impl From<MpeLayout> for MpeLayoutRaw {
+    fn from(l: MpeLayout) -> Self {
         Self {
-            placement: c.placement,
-            member_count: c.member_count,
-            response: c.response,
+            master: l.master,
+            first_member: l.first_member,
+            member_count: l.member_count,
         }
     }
 }
 
 #[cfg(feature = "serde")]
-impl TryFrom<MpeZoneConfigRaw> for MpeZoneConfig {
-    type Error = InvalidMpeZoneConfig;
+impl TryFrom<MpeLayoutRaw> for MpeLayout {
+    type Error = InvalidMpeLayout;
 
-    fn try_from(raw: MpeZoneConfigRaw) -> Result<Self, Self::Error> {
-        Self::placed(raw.placement, raw.member_count)
-            .map(|c| c.channel_response(raw.response))
-            .ok_or(InvalidMpeZoneConfig)
+    fn try_from(raw: MpeLayoutRaw) -> Result<Self, Self::Error> {
+        Self::new(raw.master, raw.first_member, raw.member_count).ok_or(InvalidMpeLayout)
     }
 }
 
-#[cfg(feature = "serde")]
-impl MpeZoneConfig {
-    /// A persisted zone at `placement`, or `None` when its members run past
-    /// channel 16.
-    fn placed(placement: Placement, member_count: MemberCount) -> Option<Self> {
-        let first_free = match placement {
-            Placement::Side { .. } => 0,
-            Placement::Managed { manager, .. } => manager.get(),
-        };
-        (first_free + member_count.get() <= 15).then_some(Self {
-            placement,
+impl MpeLayout {
+    /// The layout of `member_count` members from `first_member` up with
+    /// `master` directly below the first (an MPE 1.1 lower zone, a Profile
+    /// zone) or on channel 16 directly above the last (an MPE 1.1 upper zone),
+    /// or `None` for any other placement.
+    /// A persisted layout is read back through it.
+    #[cfg(feature = "serde")]
+    const fn new(
+        master: MidiChannel,
+        first_member: MidiChannel,
+        member_count: MemberCount,
+    ) -> Option<Self> {
+        let end = first_member.get() + member_count.get();
+        let below = master.get() + 1 == first_member.get();
+        let above = master.get() == MidiChannel::LAST.get() && master.get() == end;
+        if end <= MidiChannel::COUNT && (below || above) {
+            Some(Self::unchecked(master, first_member, member_count))
+        } else {
+            None
+        }
+    }
+
+    /// A layout its caller has placed as [`new`](Self::new) requires.
+    const fn unchecked(
+        master: MidiChannel,
+        first_member: MidiChannel,
+        member_count: MemberCount,
+    ) -> Self {
+        Self {
+            master,
+            first_member,
             member_count,
-            response: ChannelResponse::Polyphonic,
-        })
+        }
+    }
+
+    /// The zone's master channel. Zone-wide messages (bend, pressure) arrive
+    /// here.
+    #[inline]
+    #[must_use]
+    pub const fn master_channel(&self) -> MidiChannel {
+        self.master
+    }
+
+    /// How many member channels the zone claims.
+    #[inline]
+    #[must_use]
+    pub const fn member_count(&self) -> MemberCount {
+        self.member_count
+    }
+
+    /// How many channels the zone has, the master and its members.
+    #[inline]
+    #[must_use]
+    pub const fn channel_count(&self) -> MpeChannels {
+        MpeChannels::of(self.member_count.get() + 1)
+    }
+
+    /// The lowest member channel: the first of
+    /// [`member_channels`](Self::member_channels). A zone has at least one
+    /// member, so it always exists.
+    #[inline]
+    #[must_use]
+    pub const fn first_member(&self) -> MidiChannel {
+        self.first_member
+    }
+
+    /// The member channels, in ascending order.
+    pub fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
+        let first = self.first_member.get();
+        (first..first + self.member_count.get()).filter_map(MidiChannel::new)
+    }
+
+    /// Reports whether `channel` is the zone's master.
+    #[inline]
+    #[must_use]
+    pub fn is_master_channel(&self, channel: MidiChannel) -> bool {
+        channel == self.master
+    }
+
+    /// Reports whether `channel` is one of the zone's member channels (never
+    /// the master).
+    #[inline]
+    #[must_use]
+    pub fn is_member_channel(&self, channel: MidiChannel) -> bool {
+        (self.first_member.get()..self.first_member.get() + self.member_count.get())
+            .contains(&channel.get())
+    }
+
+    /// Reports whether `channel` belongs to the zone in either role.
+    #[inline]
+    #[must_use]
+    pub fn handles_channel(&self, channel: MidiChannel) -> bool {
+        self.span().contains(channel)
+    }
+
+    /// The channels the zone occupies, master included, as a span from its
+    /// lowest channel.
+    fn span(&self) -> MpeZoneSpan {
+        let lowest = MidiChannel::masked(self.master.get().min(self.first_member.get()));
+        // `new` keeps the zone's last channel by 16.
+        MpeZoneSpan::new(lowest, self.channel_count()).expect("a zone ends by channel 16")
     }
 }
 
-impl MpeZoneConfig {
-    /// An MPE 1.1 zone of `member_count` members, its master channel's bend
+/// One MPE 1.1 zone (RP-053 / M1-100): a side, which fixes the master at
+/// channel 1 or 16 and the way the members count, a bend range for the master
+/// and one for the members, a member count and a response. It is what an MPE
+/// Configuration Message declares ([`to_mcm`](Self::to_mcm),
+/// [`from_mcm`](Self::from_mcm)).
+///
+/// The MIDI-CI MPE Profile's zone is a [`ProfileZone`], which has no
+/// Configuration Message:
+///
+/// ```compile_fail,E0599
+/// use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
+/// use tutti_ump::{MidiChannel, MpeChannels, MpeZoneSpan};
+///
+/// let span = MpeZoneSpan::new(MidiChannel::of(5), MpeChannels::of(4)).unwrap();
+/// let _ = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT).to_mcm();
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Mpe11Zone {
+    side: MpeZone,
+    member_count: MemberCount,
+    master: PitchBendSensitivity,
+    member: PitchBendSensitivity,
+    response: ChannelResponse,
+}
+
+impl Mpe11Zone {
+    /// A zone on `side` of `member_count` members, its master channel's bend
     /// range `master` and its members' `member`, with a polyphonic response.
     /// A receiver of an MPE Configuration Message resets the ranges to
     /// [`PitchBendSensitivity::MPE_MASTER_DEFAULT`] and
     /// [`PitchBendSensitivity::MPE_MEMBER_DEFAULT`].
     ///
-    /// No configuration describes a disabled zone ([`Mcm::Disable`]).
+    /// No zone describes a disabled one ([`Mcm::Disable`]).
     #[must_use]
     pub const fn new(
-        zone: MpeZone,
+        side: MpeZone,
         member_count: MemberCount,
         master: PitchBendSensitivity,
         member: PitchBendSensitivity,
     ) -> Self {
         Self {
-            placement: Placement::Side {
-                side: zone,
-                master,
-                member,
-            },
+            side,
             member_count,
+            master,
+            member,
             response: ChannelResponse::Polyphonic,
         }
     }
@@ -228,56 +303,19 @@ impl MpeZoneConfig {
         Self::new(MpeZone::Upper, member_count, master, member)
     }
 
-    /// A MIDI-CI MPE Profile zone (M2-120 sections 2.1 and 2.2) over `zone`'s
-    /// channels (the Number of Channels of Set Profile On, appendix A.3), with
-    /// `range` as the one bend range of the Manager and every Member (section
-    /// 3.5; the Profile starts at [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]),
-    /// and a polyphonic response. Any channel can be a Manager.
-    #[must_use]
-    pub const fn profile(zone: MpeZoneSpan, range: PitchBendSensitivity) -> Self {
-        Self {
-            placement: Placement::Managed {
-                manager: zone.manager(),
-                range,
-            },
-            // A span has two channels at least, so the Manager has a Member.
-            member_count: MemberCount::of(zone.channels().get() - 1),
-            response: ChannelResponse::Polyphonic,
-        }
-    }
-
-    /// The specification the zone follows, which its constructor fixed: its
-    /// layout and its receive rules go together.
+    /// Which of the two zones this is, and hence which direction members count
+    /// in.
     #[inline]
     #[must_use]
-    pub const fn spec(&self) -> MpeSpec {
-        match self.placement {
-            Placement::Side { .. } => MpeSpec::Mpe11,
-            Placement::Managed { .. } => MpeSpec::Profile,
-        }
+    pub const fn side(&self) -> MpeZone {
+        self.side
     }
 
-    /// Which MPE 1.1 zone this is, and hence which direction members count in;
-    /// `None` for a Profile zone, whose members always count up from its
-    /// Manager.
-    #[inline]
-    #[must_use]
-    pub const fn zone(&self) -> Option<MpeZone> {
-        match self.placement {
-            Placement::Side { side, .. } => Some(side),
-            Placement::Managed { .. } => None,
-        }
-    }
-
-    /// The zone's master channel: the MPE 1.1 Master ([`MpeZone::master_channel`])
-    /// or the Profile's Manager Channel, the zone's lowest.
+    /// The zone's master channel ([`MpeZone::master_channel`]).
     #[inline]
     #[must_use]
     pub const fn master_channel(&self) -> MidiChannel {
-        match self.placement {
-            Placement::Side { side, .. } => side.master_channel(),
-            Placement::Managed { manager, .. } => manager,
-        }
+        self.side.master_channel()
     }
 
     /// How many member channels the zone claims.
@@ -287,48 +325,48 @@ impl MpeZoneConfig {
         self.member_count
     }
 
-    /// How many channels the zone has, the master and its members.
+    /// The master channel's bend range, which applies to every note in the zone
+    /// at once (RP-053 default 2 semitones).
     #[inline]
     #[must_use]
-    pub const fn channel_count(&self) -> MpeChannels {
-        MpeChannels::of(self.member_count.get() + 1)
+    pub const fn master_range(&self) -> PitchBendSensitivity {
+        self.master
     }
 
-    /// How the member channels take notes: MPE 1.1's MIDI Mode 3 (polyphonic)
-    /// or Mode 4 (M1-100 section 2.2.4.3), or the Profile's Channel Response
-    /// (M2-120 section 3.6). For an MPE 1.1 zone it is the mode the zone
-    /// starts in; a Mono Mode On or Poly Mode On from the wire changes it.
-    #[inline]
-    #[must_use]
-    pub const fn response(&self) -> ChannelResponse {
-        self.response
-    }
-
-    /// The bend range that applies to `channel`. An MPE 1.1 zone answers per
-    /// role: the master's range applies to every note in the zone at once
-    /// (RP-053 default 2 semitones), a member's to that channel's single note
+    /// The members' bend range, which applies to a channel's single note
     /// (default 48; the master's 2 would bend a per-note gesture a 24th as
-    /// far). A Profile zone answers its one shared range for every channel
-    /// (M2-120 section 3.5).
+    /// far).
+    #[inline]
+    #[must_use]
+    pub const fn member_range(&self) -> PitchBendSensitivity {
+        self.member
+    }
+
+    /// The bend range that applies to `channel`: the master's on the master
+    /// channel, the members' anywhere else.
     ///
     /// Use this rather than assuming a role's range: picking the wrong one is
     /// a silent 24x pitch error.
     #[inline]
     #[must_use]
     pub fn pitch_bend_range_for(&self, channel: MidiChannel) -> PitchBendSensitivity {
-        match self.placement {
-            Placement::Side { master, member, .. } => {
-                if self.is_master_channel(channel) {
-                    master
-                } else {
-                    member
-                }
-            }
-            Placement::Managed { range, .. } => range,
+        if channel == self.master_channel() {
+            self.master
+        } else {
+            self.member
         }
     }
 
-    /// The zone with `response` as how its member channels take notes
+    /// The mode the members start in: MPE 1.1's MIDI Mode 3 (polyphonic) or
+    /// Mode 4 (M1-100 section 2.2.4.3). A Mono Mode On or Poly Mode On from
+    /// the wire changes it.
+    #[inline]
+    #[must_use]
+    pub const fn response(&self) -> ChannelResponse {
+        self.response
+    }
+
+    /// The zone with `response` as the mode its members start in
     /// ([`response`](Self::response)).
     #[must_use]
     pub const fn channel_response(mut self, response: ChannelResponse) -> Self {
@@ -336,75 +374,24 @@ impl MpeZoneConfig {
         self
     }
 
-    /// Reports whether `channel` is this zone's master.
-    #[inline]
+    /// Where the zone's channels sit: `1..=n` under the master at channel 0
+    /// for the lower zone, `15-n..=14` under the master at channel 15 for the
+    /// upper one.
     #[must_use]
-    pub fn is_master_channel(&self, channel: MidiChannel) -> bool {
-        channel == self.master_channel()
-    }
-
-    /// Reports whether `channel` is one of this zone's member channels (never
-    /// the master).
-    #[inline]
-    #[must_use]
-    pub fn is_member_channel(&self, channel: MidiChannel) -> bool {
-        self.members().contains(&channel.get())
-    }
-
-    /// Reports whether `channel` belongs to this zone in either role.
-    #[inline]
-    #[must_use]
-    pub fn handles_channel(&self, channel: MidiChannel) -> bool {
-        self.occupied().contains(channel)
-    }
-
-    /// The lowest member channel: the first of [`member_channels`](Self::member_channels).
-    /// A zone has at least one member, so it always exists.
-    #[inline]
-    #[must_use]
-    pub const fn first_member(&self) -> MidiChannel {
-        // `members` starts at a channel number below 16.
-        MidiChannel::masked(*self.members().start())
-    }
-
-    /// The member channels, in ascending order whichever direction the zone
-    /// counts: `1..=n` for the lower zone, `15-n..=14` for the upper one.
-    pub fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
-        self.members().filter_map(MidiChannel::new)
-    }
-
-    /// The members as raw channel numbers. The zones' spans are compared and
-    /// walked here once.
-    const fn members(&self) -> core::ops::RangeInclusive<u8> {
-        match self.placement {
-            Placement::Side {
-                side: MpeZone::Lower,
-                ..
-            } => 1..=self.member_count.get(),
-            // `MemberCount` holds at most 15, so the subtraction cannot wrap.
-            Placement::Side {
-                side: MpeZone::Upper,
-                ..
-            } => (15 - self.member_count.get())..=14,
-            // `placed` keeps `manager + member_count <= 15`.
-            Placement::Managed { manager, .. } => {
-                (manager.get() + 1)..=(manager.get() + self.member_count.get())
-            }
+    pub const fn layout(&self) -> MpeLayout {
+        match self.side {
+            // `MemberCount` holds at most 15, so the channels end by 16.
+            MpeZone::Lower => MpeLayout::unchecked(
+                MidiChannel::FIRST,
+                MidiChannel::masked(1),
+                self.member_count,
+            ),
+            MpeZone::Upper => MpeLayout::unchecked(
+                MidiChannel::LAST,
+                MidiChannel::masked(15 - self.member_count.get()),
+                self.member_count,
+            ),
         }
-    }
-
-    /// The channels the zone occupies, master included, as a span from its
-    /// lowest channel (the Manager of a Profile zone, the lower zone's master,
-    /// or the upper zone's lowest member).
-    fn occupied(&self) -> MpeZoneSpan {
-        let lowest = MidiChannel::masked(self.master_channel().get().min(*self.members().start()));
-        // `members` ends by channel 14 (upper) or 15, so the zone ends by 16.
-        MpeZoneSpan::new(lowest, self.channel_count()).expect("a zone ends by channel 16")
-    }
-
-    /// Whether this zone shares a channel with `other`.
-    fn overlaps(&self, other: &Self) -> bool {
-        self.occupied().overlaps(other.occupied())
     }
 
     /// Encodes this zone as an **MPE Configuration Message** (MCM): a MIDI 2.0
@@ -461,31 +448,126 @@ impl MpeZoneConfig {
     }
 }
 
-/// The zones of an instrument or of one Group: all of one specification, none
-/// sharing a channel.
-///
-/// [`MpeZoneConfig`] describes *a* zone; this is the one or more an instrument
-/// holds, checked together. MPE 1.1 has a lower and an upper zone, so at most
-/// two (RP-053 makes the sender keep them apart; here the type does), and
-/// sixteen channels less two masters leave 14 members to share. The Profile
-/// has up to [`MAX_ZONES`](Self::MAX_ZONES), a Manager with at least one
-/// Member each (M2-120 section 3.4). The two limits follow from the layouts: a
-/// third MPE 1.1 zone would be a second lower or upper zone, and a ninth Profile
-/// zone cannot fit in the sixteen channels.
-///
-/// [`new`](Self::new) and [`with`](Self::with) refuse a zone of the other
-/// specification, a zone that shares a channel with one held, and, for
-/// `new`, a zone in the wrong role. The zones are kept in order of their
-/// master, so equal sets compare equal whatever order they were added in.
-/// There is no empty set: no zones is no `MpeZones` ([`without`](Self::without)).
+/// One zone of the MIDI-CI MPE Profile (M2-120): a Manager Channel enabled
+/// anywhere, the channels above it, the one bend range of the Manager and
+/// every Member (section 3.5), and the Channel Response of its Members
+/// (section 3.6). A MIDI-CI peer sets it through the Profile; it has no MPE
+/// Configuration Message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(try_from = "Vec<MpeZoneConfig>", into = "Vec<MpeZoneConfig>")
+    serde(try_from = "ProfileZoneRaw", into = "ProfileZoneRaw")
 )]
-pub struct MpeZones {
-    zones: [Option<MpeZoneConfig>; Self::MAX_ZONES],
+pub struct ProfileZone {
+    span: MpeZoneSpan,
+    range: PitchBendSensitivity,
+    response: ChannelResponse,
+}
+
+/// The persisted shape of a [`ProfileZone`], checked by `TryFrom` on the way
+/// back in.
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ProfileZoneRaw {
+    manager: MidiChannel,
+    member_count: MemberCount,
+    range: PitchBendSensitivity,
+    response: ChannelResponse,
+}
+
+/// A persisted Profile zone whose members run past channel 16.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("a Profile zone has a manager, 1 or more members, and ends by channel 16")]
+pub struct InvalidProfileZone;
+
+#[cfg(feature = "serde")]
+impl From<ProfileZone> for ProfileZoneRaw {
+    fn from(z: ProfileZone) -> Self {
+        Self {
+            manager: z.manager(),
+            member_count: z.layout().member_count(),
+            range: z.range,
+            response: z.response,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<ProfileZoneRaw> for ProfileZone {
+    type Error = InvalidProfileZone;
+
+    fn try_from(raw: ProfileZoneRaw) -> Result<Self, Self::Error> {
+        let channels = MpeChannels::new(raw.member_count.get() + 1).ok_or(InvalidProfileZone)?;
+        let span = MpeZoneSpan::new(raw.manager, channels).ok_or(InvalidProfileZone)?;
+        Ok(Self::new(span, raw.range).channel_response(raw.response))
+    }
+}
+
+impl ProfileZone {
+    /// A Profile zone over `span`'s channels (the Number of Channels of Set
+    /// Profile On, appendix A.3), with `range` as the one bend range of the
+    /// Manager and every Member (the Profile starts at
+    /// [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]), and a polyphonic
+    /// response. Any channel can be a Manager.
+    #[must_use]
+    pub const fn new(span: MpeZoneSpan, range: PitchBendSensitivity) -> Self {
+        Self {
+            span,
+            range,
+            response: ChannelResponse::Polyphonic,
+        }
+    }
+
+    /// The channels the zone occupies.
+    #[inline]
+    #[must_use]
+    pub const fn span(&self) -> MpeZoneSpan {
+        self.span
+    }
+
+    /// The Manager Channel, the zone's lowest.
+    #[inline]
+    #[must_use]
+    pub const fn manager(&self) -> MidiChannel {
+        self.span.manager()
+    }
+
+    /// The one bend range of the Manager and every Member.
+    #[inline]
+    #[must_use]
+    pub const fn range(&self) -> PitchBendSensitivity {
+        self.range
+    }
+
+    /// How the members take notes (M2-120 section 3.6).
+    #[inline]
+    #[must_use]
+    pub const fn response(&self) -> ChannelResponse {
+        self.response
+    }
+
+    /// The zone with `response` as how its members take notes
+    /// ([`response`](Self::response)).
+    #[must_use]
+    pub const fn channel_response(mut self, response: ChannelResponse) -> Self {
+        self.response = response;
+        self
+    }
+
+    /// Where the zone's channels sit: the Members count up from the Manager.
+    #[must_use]
+    pub const fn layout(&self) -> MpeLayout {
+        let manager = self.span.manager();
+        // A span has two channels at least, so the Manager has a Member, and
+        // it ends by channel 16.
+        MpeLayout::unchecked(
+            manager,
+            MidiChannel::masked(manager.get() + 1),
+            MemberCount::of(self.span.channels().get() - 1),
+        )
+    }
 }
 
 /// A list of zones that is not a zone layout.
@@ -494,128 +576,235 @@ pub enum InvalidMpeZones {
     /// The list holds no zone.
     #[error("no MPE zone")]
     Empty,
-    /// The zones overlap or follow different specifications.
-    #[error("MPE zones overlap or follow different specifications")]
-    Conflict,
+    /// Two zones share a channel.
+    #[error("MPE zones share a channel")]
+    Overlap,
 }
 
-impl From<MpeZones> for Vec<MpeZoneConfig> {
-    fn from(zones: MpeZones) -> Self {
+/// The MPE 1.1 zones of an instrument or of one Group: a lower zone, an upper
+/// zone or both, sharing no channel.
+///
+/// Sixteen channels less two masters leave 14 members to share between the
+/// lower zone's `1..=l` and the upper zone's `15-u..=14`. The zones are kept
+/// by side, so equal sets compare equal whatever order their zones were added
+/// in. There is no empty set: no zones is no `Mpe11Zones`
+/// ([`without`](Self::without)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "Vec<Mpe11Zone>", into = "Vec<Mpe11Zone>")
+)]
+pub struct Mpe11Zones {
+    lower: Option<Mpe11Zone>,
+    upper: Option<Mpe11Zone>,
+}
+
+impl From<Mpe11Zones> for Vec<Mpe11Zone> {
+    fn from(zones: Mpe11Zones) -> Self {
         zones.zones().copied().collect()
     }
 }
 
-impl TryFrom<Vec<MpeZoneConfig>> for MpeZones {
+impl TryFrom<Vec<Mpe11Zone>> for Mpe11Zones {
     type Error = InvalidMpeZones;
 
-    fn try_from(zones: Vec<MpeZoneConfig>) -> Result<Self, Self::Error> {
+    fn try_from(zones: Vec<Mpe11Zone>) -> Result<Self, Self::Error> {
         let mut zones = zones.into_iter();
         let first = zones.next().ok_or(InvalidMpeZones::Empty)?;
-        zones
-            .try_fold(Self::single(first), |set, zone| set.with(zone))
-            .ok_or(InvalidMpeZones::Conflict)
+        zones.try_fold(Self::single(first), |set, zone| {
+            if set.on(zone.side()).is_some() {
+                return Err(InvalidMpeZones::Overlap);
+            }
+            set.with(zone).ok_or(InvalidMpeZones::Overlap)
+        })
     }
 }
 
-impl MpeZones {
-    /// The most zones any specification has: the Profile's eight, every zone
-    /// with two channels at least.
-    pub const MAX_ZONES: usize = 8;
-
+impl Mpe11Zones {
     /// The set of `zone` alone.
     #[must_use]
-    pub const fn single(zone: MpeZoneConfig) -> Self {
-        let mut zones = [None; Self::MAX_ZONES];
-        zones[0] = Some(zone);
-        Self { zones }
+    pub const fn single(zone: Mpe11Zone) -> Self {
+        match zone.side() {
+            MpeZone::Lower => Self {
+                lower: Some(zone),
+                upper: None,
+            },
+            MpeZone::Upper => Self {
+                lower: None,
+                upper: Some(zone),
+            },
+        }
     }
 
-    /// The Profile zones of `set`, each at `range`, a polyphonic response.
+    /// The set with `zone` on its side, in place of the zone that was there,
+    /// or `None` when it shares a channel with the zone on the other side.
     #[must_use]
-    pub fn profile(set: &MpeZoneSet, range: PitchBendSensitivity) -> Self {
-        // `set` holds zones that share no channel, so the Profile zones agree
-        // and do not overlap.
-        Self::sorted(set.zones().map(|zone| MpeZoneConfig::profile(zone, range)))
-    }
-
-    /// The MPE 1.1 arrangement of `lower` and `upper`, or `None` when both are
-    /// absent, `lower` is not a lower zone or `upper` not an upper one, or the
-    /// two zones' members overlap.
-    #[must_use]
-    pub fn new(lower: Option<MpeZoneConfig>, upper: Option<MpeZoneConfig>) -> Option<Self> {
-        if lower.is_some_and(|c| c.zone() != Some(MpeZone::Lower))
-            || upper.is_some_and(|c| c.zone() != Some(MpeZone::Upper))
-        {
+    pub fn with(self, zone: Mpe11Zone) -> Option<Self> {
+        let other = match zone.side() {
+            MpeZone::Lower => self.upper,
+            MpeZone::Upper => self.lower,
+        };
+        if other.is_some_and(|held| held.layout().span().overlaps(zone.layout().span())) {
             return None;
         }
-        let mut zones = lower.into_iter().chain(upper);
-        let first = zones.next()?;
-        zones.try_fold(Self::single(first), |set, zone| set.with(zone))
+        Some(match zone.side() {
+            MpeZone::Lower => Self {
+                lower: Some(zone),
+                ..self
+            },
+            MpeZone::Upper => Self {
+                upper: Some(zone),
+                ..self
+            },
+        })
     }
 
-    /// The set with `zone` added, or `None` when it follows another
-    /// specification than the zones held or shares a channel with one of them.
+    /// The set without its zone on `side`, or `None` when that was the only
+    /// one. A side with no zone leaves the set as it is.
     #[must_use]
-    pub fn with(self, zone: MpeZoneConfig) -> Option<Self> {
-        if self
-            .zones()
-            .any(|held| held.spec() != zone.spec() || held.overlaps(&zone))
-        {
-            return None;
+    pub const fn without(self, side: MpeZone) -> Option<Self> {
+        let rest = match side {
+            MpeZone::Lower => Self {
+                lower: None,
+                ..self
+            },
+            MpeZone::Upper => Self {
+                upper: None,
+                ..self
+            },
+        };
+        if rest.lower.is_none() && rest.upper.is_none() {
+            None
+        } else {
+            Some(rest)
         }
-        Some(Self::sorted(self.zones().copied().chain([zone])))
     }
 
-    /// The set without the zone whose master is `master`, or `None` when that
-    /// was the last. A `master` that names no zone leaves the set as it is.
+    /// The zone on `side`, if the set has one.
     #[must_use]
-    pub fn without(self, master: MidiChannel) -> Option<Self> {
-        let mut rest = self
-            .zones()
-            .copied()
-            .filter(|zone| zone.master_channel() != master)
-            .peekable();
-        rest.peek()?;
-        Some(Self::sorted(rest))
-    }
-
-    /// Builds the set of zones already known to agree and not to overlap,
-    /// ordered by master.
-    fn sorted(zones: impl Iterator<Item = MpeZoneConfig>) -> Self {
-        let mut held = [None; Self::MAX_ZONES];
-        let mut count = 0;
-        for zone in zones {
-            held[count] = Some(zone);
-            count += 1;
+    pub const fn on(&self, side: MpeZone) -> Option<&Mpe11Zone> {
+        match side {
+            MpeZone::Lower => self.lower.as_ref(),
+            MpeZone::Upper => self.upper.as_ref(),
         }
-        held[..count].sort_by_key(|zone| zone.map(|z| z.master_channel().get()));
-        Self { zones: held }
     }
 
-    /// The MPE 1.1 zone anchored at channel 0, if the set has one.
-    #[must_use]
-    pub fn lower(&self) -> Option<&MpeZoneConfig> {
-        self.zones()
-            .find(|zone| zone.zone() == Some(MpeZone::Lower))
-    }
-
-    /// The MPE 1.1 zone anchored at channel 15, if the set has one.
-    #[must_use]
-    pub fn upper(&self) -> Option<&MpeZoneConfig> {
-        self.zones()
-            .find(|zone| zone.zone() == Some(MpeZone::Upper))
-    }
-
-    /// The zones, lowest master first.
-    pub fn zones(&self) -> impl Iterator<Item = &MpeZoneConfig> + Clone {
-        self.zones.iter().flatten()
+    /// The zones, the lower one first.
+    pub fn zones(&self) -> impl Iterator<Item = &Mpe11Zone> + Clone {
+        self.lower.iter().chain(self.upper.iter())
     }
 
     /// The zone that owns `channel` (as its master or one of its members), if
     /// any. The zones share no channel, so there is at most one.
     #[must_use]
-    pub fn zone_of(&self, channel: MidiChannel) -> Option<&MpeZoneConfig> {
-        self.zones().find(|z| z.handles_channel(channel))
+    pub fn zone_of(&self, channel: MidiChannel) -> Option<&Mpe11Zone> {
+        self.zones().find(|z| z.layout().handles_channel(channel))
+    }
+}
+
+/// The MIDI-CI MPE Profile zones of one Group: at least one, in order of
+/// Manager Channel, no two sharing a channel (M2-120 section 3.4). A Manager
+/// with at least one Member each fills the sixteen channels with at most
+/// [`MAX`](Self::MAX) zones.
+///
+/// [`with`](Self::with) refuses a zone that shares a channel with one held.
+/// The zones are kept in order of their Manager, so equal sets compare equal
+/// whatever order their zones were added in. There is no empty set: no zones
+/// is no `ProfileZones` ([`without`](Self::without)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "Vec<ProfileZone>", into = "Vec<ProfileZone>")
+)]
+pub struct ProfileZones {
+    zones: [Option<ProfileZone>; Self::MAX],
+}
+
+impl From<ProfileZones> for Vec<ProfileZone> {
+    fn from(zones: ProfileZones) -> Self {
+        zones.zones().copied().collect()
+    }
+}
+
+impl TryFrom<Vec<ProfileZone>> for ProfileZones {
+    type Error = InvalidMpeZones;
+
+    fn try_from(zones: Vec<ProfileZone>) -> Result<Self, Self::Error> {
+        let mut zones = zones.into_iter();
+        let first = zones.next().ok_or(InvalidMpeZones::Empty)?;
+        zones
+            .try_fold(Self::single(first), |set, zone| set.with(zone))
+            .ok_or(InvalidMpeZones::Overlap)
+    }
+}
+
+impl ProfileZones {
+    /// The most zones: eight, every zone with two channels at least.
+    pub const MAX: usize = MpeZoneSet::MAX;
+
+    /// The set of `zone` alone.
+    #[must_use]
+    pub const fn single(zone: ProfileZone) -> Self {
+        let mut zones = [None; Self::MAX];
+        zones[0] = Some(zone);
+        Self { zones }
+    }
+
+    /// The zones of `set`, each at `range`, a polyphonic response.
+    #[must_use]
+    pub fn new(set: &MpeZoneSet, range: PitchBendSensitivity) -> Self {
+        // `set` holds zones that share no channel.
+        Self::sorted(set.zones().map(|span| ProfileZone::new(span, range)))
+    }
+
+    /// The set with `zone` added, or `None` when it shares a channel with one
+    /// of the zones held.
+    #[must_use]
+    pub fn with(self, zone: ProfileZone) -> Option<Self> {
+        if self.zones().any(|held| held.span().overlaps(zone.span())) {
+            return None;
+        }
+        Some(Self::sorted(self.zones().copied().chain([zone])))
+    }
+
+    /// The set without the zone whose Manager is `manager`, or `None` when that
+    /// was the last. A `manager` that names no zone leaves the set as it is.
+    #[must_use]
+    pub fn without(self, manager: MidiChannel) -> Option<Self> {
+        let mut rest = self
+            .zones()
+            .copied()
+            .filter(|zone| zone.manager() != manager)
+            .peekable();
+        rest.peek()?;
+        Some(Self::sorted(rest))
+    }
+
+    /// Builds the set of zones already known not to overlap, ordered by
+    /// Manager.
+    fn sorted(zones: impl Iterator<Item = ProfileZone>) -> Self {
+        let mut held = [None; Self::MAX];
+        let mut count = 0;
+        for zone in zones {
+            held[count] = Some(zone);
+            count += 1;
+        }
+        held[..count].sort_by_key(|zone| zone.map(|z| z.manager().get()));
+        Self { zones: held }
+    }
+
+    /// The zones, lowest Manager first.
+    pub fn zones(&self) -> impl Iterator<Item = &ProfileZone> + Clone {
+        self.zones.iter().flatten()
+    }
+
+    /// The zone that owns `channel` (as its Manager or one of its Members), if
+    /// any. The zones share no channel, so there is at most one.
+    #[must_use]
+    pub fn zone_of(&self, channel: MidiChannel) -> Option<&ProfileZone> {
+        self.zones().find(|z| z.span().contains(channel))
     }
 }
 
@@ -627,7 +816,7 @@ pub enum MpeMode {
     #[default]
     Disabled,
     /// One or two MPE zones.
-    Zones(MpeZones),
+    Zones(Mpe11Zones),
     /// Single-channel **Note Number Rotation** (M2-104 Appendix C.3): all notes
     /// on the one channel, with no zones and no member-channel spreading.
     /// Rotation is a *sender* scheme and a receiver need not know it is used,
