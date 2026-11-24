@@ -9,7 +9,7 @@ use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
     EditReader, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor, ReportSink,
 };
-use tutti_rt::Reader;
+use tutti_rt::{CappedVec, Reader};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -32,7 +32,7 @@ pub(crate) struct ProcessorParts {
     pub ranges: Reader<RangeTable>,
     pub drain: EditReader,
     /// Room for one carried edit per declared parameter.
-    pub carried: Vec<(ParamId, Normalized)>,
+    pub carried: CappedVec<(ParamId, Normalized)>,
     pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
@@ -57,7 +57,7 @@ pub struct ClapProcessor {
     pub(crate) drain: EditReader,
     /// The Controller's edits to parameters that require `process`, which a
     /// flush drained and left for the next block.
-    pub(crate) carried: Vec<(ParamId, Normalized)>,
+    pub(crate) carried: CappedVec<(ParamId, Normalized)>,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,

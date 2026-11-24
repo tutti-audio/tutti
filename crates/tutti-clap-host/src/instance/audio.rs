@@ -20,6 +20,7 @@ use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
+use tutti_rt::CappedVec;
 use tutti_units::{Normalized, ParamId};
 
 /// Owned snapshot of the plugin's per-block output. Returned for
@@ -344,9 +345,10 @@ impl ClapProcessor {
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
             // What a flush left for a block goes first.
-            for (id, value) in self.carried.drain(..) {
+            for &(id, value) in self.carried.as_slice() {
                 input_events.add_param_edit(id, value.get(), &table.ranges, table.claims);
             }
+            self.carried.clear();
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(each);
             });
@@ -387,11 +389,14 @@ impl ClapProcessor {
     /// Controller's writes first, as at the head of a block. A parameter that
     /// requires `process` takes no value from a flush of an active plugin: its
     /// Controller edit and its point in `changes` are kept, and the next block
-    /// delivers each parameter's last value at its head. `false` when the
-    /// plugin has no flush entry or is busy.
+    /// delivers each parameter's last value at the head of the block, whatever
+    /// offset the point had (a value a flush held back lands at frame 0). `false`
+    /// when the plugin has no flush entry or is busy.
     pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
+        // Held values the room could not keep.
+        let mut refused = 0u64;
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
@@ -400,7 +405,7 @@ impl ClapProcessor {
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(|id, value| {
                     if ParamBounds::find(&table.ranges, id).is_some_and(|b| b.requires_process) {
-                        carry(carried, id, value);
+                        refused += u64::from(!carry(carried, id, value));
                     } else {
                         each(id, value);
                     }
@@ -411,10 +416,11 @@ impl ClapProcessor {
                     changes,
                     &table.ranges,
                     table.claims,
-                    |id, value| carry(carried, id, value),
+                    |id, value| refused += u64::from(!carry(carried, id, value)),
                 );
             }
         }
+        self.scratch.input_events.count_refused(refused);
         self.scratch.input_events.sort_by_time();
         let AudioScratch {
             input_events,
@@ -618,12 +624,22 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
     }
 }
 
-/// Keeps an edit a flush could not deliver for the next block: the newest of a
-/// parameter. The room is one entry per declared parameter, reserved at
-/// activation, so this never allocates.
-fn carry(carried: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normalized) {
-    match carried.iter_mut().find(|(known, _)| *known == id) {
-        Some(entry) => entry.1 = value,
+/// Keeps an edit a flush could not deliver for the next block: the newest of
+/// a parameter. `false` when the room is full, which it cannot be: the room is
+/// one entry per declared parameter, ids are distinct, and the list of ids is
+/// fixed for an activation (a rescan that adds or removes one reactivates the
+/// plugin and builds a new Processor). The scan is over the held parameters,
+/// which are those that require `process`: few.
+fn carry(carried: &mut CappedVec<(ParamId, Normalized)>, id: ParamId, value: Normalized) -> bool {
+    match carried
+        .as_mut_slice()
+        .iter_mut()
+        .find(|(known, _)| *known == id)
+    {
+        Some(entry) => {
+            entry.1 = value;
+            true
+        }
         None => carried.push((id, value)),
     }
 }

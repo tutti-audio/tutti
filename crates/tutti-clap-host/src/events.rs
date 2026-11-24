@@ -1093,6 +1093,12 @@ impl InputEventList {
         pushed
     }
 
+    /// `n` more refusals of a source the list does not stage (counted as the
+    /// list's own).
+    pub(crate) fn count_refused(&mut self, n: u64) {
+        self.refused += n;
+    }
+
     /// `event` onto the list; one refused is counted ([`refused`](Self::refused)).
     fn push(&mut self, event: ClapEvent) -> bool {
         let pushed = self.events.push(event);
