@@ -9,7 +9,7 @@ use super::super::{
 };
 use super::super::{Unread, UnreadReason};
 use super::*;
-use crate::PeStatus;
+use crate::{PeStatus, ReplyVersion2};
 use tutti_ump::ManufacturerId;
 use tutti_ump::SoftwareRevision;
 
@@ -45,25 +45,31 @@ fn device(
     (device, actions, now)
 }
 
-fn data(path: u8, block: Option<u8>) -> DiscoveryData {
-    let mut data = DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(128));
-    data.output_path_id = Some(U7::of(path));
-    data.function_block = block.map(|b| FunctionBlockId::new(b).unwrap());
-    data
+fn body() -> DeviceBody {
+    DeviceBody::new(identity(), CiCategories::empty(), MaxSysexSize::of(128))
 }
 
 fn reply(from: u32, to: u32, block: Option<u8>) -> Decoded {
     Decoded::Message(CiMessage::DiscoveryReply {
         header: CiHeader::new(Muid::of(from)),
         to: Muid::of(to),
-        data: data(0, block),
+        data: ReplyData {
+            body: body(),
+            version_2: Some(ReplyVersion2 {
+                output_path_id: U7::of(0),
+                function_block: block.map(|b| FunctionBlockId::new(b).unwrap()),
+            }),
+        },
     })
 }
 
 fn discovery(from: u32, path: u8) -> Decoded {
     Decoded::Message(CiMessage::Discovery {
         header: CiHeader::new(Muid::of(from)),
-        data: data(path, None),
+        data: DiscoveryData {
+            body: body(),
+            output_path_id: Some(U7::of(path)),
+        },
     })
 }
 
@@ -86,7 +92,7 @@ fn a_new_device_sends_a_discovery_from_its_muid_to_everyone_on_output_path_0() {
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(data.output_path_id, Some(U7::of(0)));
-    assert_eq!(data.max_sysex_size, MaxSysexSize::of(512));
+    assert_eq!(data.body.max_sysex_size, MaxSysexSize::of(512));
     assert_eq!(
         sent(&actions)[0].destination(),
         Destination::Broadcast,
@@ -121,7 +127,7 @@ fn a_reply_to_our_discovery_finds_the_peer() {
     assert_eq!(actions, vec![CiAction::Found(Muid::of(PEER))]);
     let peer = device.peer(Muid::of(PEER)).expect("found");
     assert_eq!(peer.function_block(), None);
-    assert_eq!(peer.discovery().identity, identity());
+    assert_eq!(peer.discovery().body.identity, identity());
     assert_eq!(peer.product_instance_id(), None);
 }
 
@@ -162,8 +168,13 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
     };
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
-    assert_eq!(data.output_path_id, Some(U7::of(9)));
-    assert_eq!(data.function_block, None);
+    assert_eq!(
+        data.version_2,
+        Some(ReplyVersion2 {
+            output_path_id: U7::of(9),
+            function_block: None
+        })
+    );
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(device.muid(), Muid::of(OURS));
 }
@@ -424,6 +435,17 @@ fn a_nak_of_the_endpoint_inquiry_leaves_the_id_unknown() {
 }
 
 #[test]
+fn a_second_endpoint_reply_replaces_the_id_and_updates() {
+    let (mut device, _, now) = device([OURS]);
+    device.on_message(&reply(PEER, OURS, Some(0)), now);
+    device.on_message(&id_reply(PEER, OURS, "first"), now);
+    let actions = device.on_message(&id_reply(PEER, OURS, "second"), now);
+    assert_eq!(actions, vec![CiAction::Updated(Muid::of(PEER))]);
+    let id = device.peer(Muid::of(PEER)).unwrap().product_instance_id();
+    assert_eq!(id.map(ProductInstanceId::as_str), Some("second"));
+}
+
+#[test]
 fn an_endpoint_inquiry_to_us_is_nakked_for_we_have_no_id_to_give() {
     // §5.8: a device that cannot provide the requested information replies with a NAK.
     let (mut device, _, now) = device([OURS]);
@@ -675,7 +697,8 @@ fn process_device() -> (CiDevice<impl FnMut() -> u32>, Instant) {
 fn report_inquiry(scope: ReportScope, to: u32) -> Decoded {
     on(scope.address(), PEER, to, |header, to| {
         CiMessage::MessageReportInquiry {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
             to,
             control: DataControl::Full,
             scope,
@@ -689,19 +712,18 @@ fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
     // §9.3, Table 42: D0, MIDI Message Report, which the empty report below is.
     let (mut device, now) = process_device();
     let inquiry = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
-        CiMessage::ProcessCapabilitiesInquiry { header, to }
+        CiMessage::ProcessCapabilitiesInquiry {
+            source: header.source,
+            ci_version: header.ci_version,
+            to,
+        }
     });
     let actions = device.on_message(&inquiry, now);
-    let [
-        CiMessage::ProcessCapabilitiesReply {
-            header,
-            to,
-            features,
-        },
-    ] = sent(&actions)[..]
+    let [reply @ CiMessage::ProcessCapabilitiesReply { to, features, .. }] = sent(&actions)[..]
     else {
         panic!("one Reply, got {actions:?}");
     };
+    let header = reply.header();
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
@@ -718,10 +740,10 @@ fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that
         let scope = ReportScope::from_wire(address, 0, 0x3F, 0x1F).unwrap();
         let actions = device.on_message(&report_inquiry(scope, OURS), now);
         let [
-            CiMessage::MessageReportReply {
-                header: begin,
+            begin @ CiMessage::MessageReportReply {
                 to,
                 scope: declared,
+                ..
             },
             CiMessage::MessageReportEnd {
                 header: end,
@@ -731,7 +753,10 @@ fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that
         else {
             panic!("a Reply and an End, got {actions:?}");
         };
-        assert_eq!((begin.device_id, end.device_id), (address, address));
+        assert_eq!(
+            (begin.header().device_id, end.device_id),
+            (address, address)
+        );
         assert_eq!((*to, *to_end), (Muid::of(PEER), Muid::of(PEER)));
         assert_eq!(*declared, ReportScope::none(address));
         assert!(declared.is_empty());
@@ -769,7 +794,11 @@ fn a_process_inquiry_for_another_muid_is_not_answered() {
 fn a_device_not_declaring_process_inquiry_nakks_both_inquiries_0x01() {
     let (mut device, _, now) = device([OURS]);
     let capabilities = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
-        CiMessage::ProcessCapabilitiesInquiry { header, to }
+        CiMessage::ProcessCapabilitiesInquiry {
+            source: header.source,
+            ci_version: header.ci_version,
+            to,
+        }
     });
     let report = report_inquiry(ReportScope::none(CiDeviceId::Group), OURS);
     for (inquiry, original) in [
@@ -791,7 +820,8 @@ fn a_process_reply_or_end_is_the_initiators_and_is_not_answered() {
     let (mut device, now) = process_device();
     let reply = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
         CiMessage::ProcessCapabilitiesReply {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
             to,
             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
         }

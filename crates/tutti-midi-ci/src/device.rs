@@ -93,9 +93,9 @@ use tutti_platform::Instant;
 use tutti_ump::{DeviceIdentity, U7};
 
 use super::{
-    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage, PeMessageKind,
-    ProcessFeatures, ProfileLists, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
+    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
+    DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage,
+    PeMessageKind, ProcessFeatures, ProfileLists, ReplyData, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
 };
 use tutti_ump::FunctionBlockId;
 
@@ -132,7 +132,7 @@ pub enum CiAction {
 /// What Discovery told about a peer, and what was learned since.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CiPeer {
-    data: DiscoveryData,
+    data: ReplyData,
     instance_id: Option<ProductInstanceId>,
     asked: bool,
 }
@@ -141,14 +141,14 @@ impl CiPeer {
     /// What its Reply to Discovery declared: identity, categories, receivable
     /// size, and the Output Path ID and Function Block of the reply.
     #[must_use]
-    pub fn discovery(&self) -> &DiscoveryData {
+    pub fn discovery(&self) -> &ReplyData {
         &self.data
     }
 
     /// The Function Block the peer represents, `None` for none (`0x7F`).
     #[must_use]
     pub fn function_block(&self) -> Option<FunctionBlockId> {
-        self.data.function_block
+        self.data.function_block()
     }
 
     /// Its Endpoint's Product Instance Id, once an Endpoint Inquiry was answered.
@@ -170,7 +170,7 @@ struct Round {
 /// One MIDI-CI Device on one Group of one connection.
 pub struct CiDevice<R> {
     muid: Muid,
-    own: DiscoveryData,
+    own: DeviceBody,
     entropy: R,
     peers: BTreeMap<Muid, CiPeer>,
     round: Round,
@@ -204,7 +204,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         let muid = draw(&mut entropy, |_| false);
         let mut device = Self {
             muid,
-            own: DiscoveryData::new(identity, categories, max_sysex_size),
+            own: DeviceBody::new(identity, categories, max_sysex_size),
             entropy,
             peers: BTreeMap::new(),
             round: Round {
@@ -280,16 +280,10 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                         self.collide(now, actions);
                     }
                 } else {
-                    let mut reply = self.own;
-                    // §5.6.1: the Reply returns the Output Path ID of the Discovery;
-                    // a Version 1 Discovery has none, which an initiator with a
-                    // single output sets to 0 (§5.5.4).
-                    reply.output_path_id = Some(data.output_path_id.unwrap_or_default());
-                    reply.function_block = None;
                     actions.push(CiAction::Send(CiMessage::DiscoveryReply {
                         header: self.header(),
                         to: header.source,
-                        data: reply,
+                        data: ReplyData::answering(data, self.own),
                     }));
                 }
             }
@@ -370,10 +364,47 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     }));
                 }
             }
-            CiMessage::ProcessCapabilitiesInquiry { header, to }
-            | CiMessage::MessageReportInquiry { header, to, .. } => {
+            CiMessage::ProcessCapabilitiesInquiry { source, to, .. } => {
                 if *to == self.muid {
-                    self.answer_process(message, header, actions);
+                    actions.push(match self.process_refusal(message) {
+                        Some(refusal) => refusal,
+                        None => CiAction::Send(CiMessage::ProcessCapabilitiesReply {
+                            source: self.muid,
+                            ci_version: CI_VERSION,
+                            to: *source,
+                            features: ProcessFeatures::MIDI_MESSAGE_REPORT,
+                        }),
+                    });
+                }
+            }
+            CiMessage::MessageReportInquiry {
+                source, to, scope, ..
+            } => {
+                if *to == self.muid {
+                    match (self.process_refusal(message), scope.address()) {
+                        (Some(refusal), _) => actions.push(refusal),
+                        // Tutti has no Channel in use (§9.5).
+                        (None, address @ CiDeviceId::Channel(_)) => {
+                            actions.push(self.nak_on(
+                                address,
+                                *source,
+                                message.sub_id2(),
+                                NakStatus::NotInUse,
+                            ));
+                        }
+                        (None, address) => {
+                            actions.push(CiAction::Send(CiMessage::MessageReportReply {
+                                source: self.muid,
+                                ci_version: CI_VERSION,
+                                to: *source,
+                                scope: ReportScope::none(address),
+                            }));
+                            actions.push(CiAction::Send(CiMessage::MessageReportEnd {
+                                header: self.header_on(address),
+                                to: *source,
+                            }));
+                        }
+                    }
                 }
             }
             // A Property Exchange Responder is not the Management core's: a device
@@ -415,47 +446,33 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }
     }
 
-    /// An Inquiry: Process Inquiry Capabilities or Inquiry: MIDI Message Report
-    /// addressed to this device (§9).
-    fn answer_process(&self, message: &CiMessage, asked: &CiHeader, actions: &mut Vec<CiAction>) {
-        let nak_on = |address, status| {
-            CiAction::Send(CiMessage::Nak {
-                header: self.header_on(address),
-                to: asked.source,
-                nak: Nak::new(U7::new(message.sub_id2()).unwrap_or_default(), status),
-            })
-        };
-        if !self.own.categories.contains(CiCategories::PROCESS_INQUIRY) {
-            actions.push(nak_on(asked.device_id, NakStatus::MessageNotSupported));
-            return;
+    /// The NAK a Process Inquiry Capabilities or MIDI Message Report inquiry
+    /// addressed to this device is refused with, on the address it used, when
+    /// the device does not declare Process Inquiry (§9), or `None`.
+    fn process_refusal(&self, inquiry: &CiMessage) -> Option<CiAction> {
+        if self.own.categories.contains(CiCategories::PROCESS_INQUIRY) {
+            return None;
         }
-        match message {
-            CiMessage::MessageReportInquiry { scope, .. } => match scope.address() {
-                // Tutti has no Channel in use (§9.5).
-                address @ CiDeviceId::Channel(_) => {
-                    actions.push(nak_on(address, NakStatus::NotInUse));
-                }
-                address => {
-                    actions.push(CiAction::Send(CiMessage::MessageReportReply {
-                        header: self.header_on(address),
-                        to: asked.source,
-                        scope: ReportScope::none(address),
-                    }));
-                    actions.push(CiAction::Send(CiMessage::MessageReportEnd {
-                        header: self.header_on(address),
-                        to: asked.source,
-                    }));
-                }
-            },
-            _ => actions.push(CiAction::Send(CiMessage::ProcessCapabilitiesReply {
-                header: self.header_on(CiDeviceId::FunctionBlock),
-                to: asked.source,
-                features: ProcessFeatures::MIDI_MESSAGE_REPORT,
-            })),
-        }
+        let asked = inquiry.header();
+        Some(self.nak_on(
+            asked.device_id,
+            asked.source,
+            inquiry.sub_id2(),
+            NakStatus::MessageNotSupported,
+        ))
     }
 
-    fn on_reply(&mut self, source: Muid, data: DiscoveryData, actions: &mut Vec<CiAction>) {
+    /// A NAK of `original` to `to`, on `address`.
+    fn nak_on(&self, address: CiDeviceId, to: Muid, original: u8, status: NakStatus) -> CiAction {
+        CiAction::Send(CiMessage::Nak {
+            header: self.header_on(address),
+            to,
+            // A sub-ID#2 is seven bits wherever it was read from.
+            nak: Nak::new(U7::new(original).unwrap_or_default(), status),
+        })
+    }
+
+    fn on_reply(&mut self, source: Muid, data: ReplyData, actions: &mut Vec<CiAction>) {
         if !self.round.replied.insert(source) {
             // §5.9.2: a second reply with the same MUID.
             actions.push(CiAction::Send(CiMessage::InvalidateMuid {
@@ -467,7 +484,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             }
             return;
         }
-        let asks = data.function_block.is_some();
+        let asks = data.function_block().is_some();
         self.peers.insert(
             source,
             CiPeer {
@@ -526,12 +543,9 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }));
     }
 
-    /// The body of the Discovery this device sends: Output Path 0, no Function Block.
+    /// The body of the Discovery this device sends: Output Path 0.
     fn sent_discovery(&self) -> DiscoveryData {
-        let mut data = self.own;
-        data.output_path_id = Some(U7::default());
-        data.function_block = None;
-        data
+        DiscoveryData::new(self.own)
     }
 
     fn header(&self) -> CiHeader {

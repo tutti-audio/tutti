@@ -1,6 +1,6 @@
 use tutti_ump::MidiChannel;
 
-use super::super::testing::{DST, channel, decoded, header_on, preamble, to_dst, unread};
+use super::super::testing::{DST, SRC, channel, decoded, header_on, preamble, to_dst, unread};
 use super::super::*;
 
 /// Every flag of a set against the bit the table gives it.
@@ -142,19 +142,16 @@ fn a_reply_scope_within_a_request_keeps_only_what_was_asked() {
 #[test]
 fn the_capabilities_inquiry_is_table_40_on_the_function_block() {
     let message = CiMessage::ProcessCapabilitiesInquiry {
-        header: header_on(CiDeviceId::FunctionBlock),
+        source: Muid::of(SRC),
+        ci_version: CI_VERSION,
         to: Muid::of(DST),
     };
     let mut want = preamble(0x7F, 0x40, to_dst());
     assert_eq!(message.encode(), want);
     assert_eq!(decoded(&want), message);
-    // Per-channel requests are not allowed: the Device ID is 0x7F whatever the
-    // header says, and a message on another Device ID is not read.
-    let channelized = CiMessage::ProcessCapabilitiesInquiry {
-        header: header_on(channel(4)),
-        to: Muid::of(DST),
-    };
-    assert_eq!(channelized.encode(), want);
+    // Per-channel requests are not allowed: the Device ID is 0x7F, and a message
+    // on another Device ID is not read.
+    assert_eq!(message.header().device_id, CiDeviceId::FunctionBlock);
     want[1] = 0x04;
     assert_eq!(unread(&want).reason, UnreadReason::Malformed);
     want[1] = 0x7E;
@@ -164,7 +161,8 @@ fn the_capabilities_inquiry_is_table_40_on_the_function_block() {
 #[test]
 fn the_capabilities_reply_is_table_41_with_the_features_byte() {
     let message = CiMessage::ProcessCapabilitiesReply {
-        header: header_on(CiDeviceId::FunctionBlock),
+        source: Muid::of(SRC),
+        ci_version: CI_VERSION,
         to: Muid::of(DST),
         features: ProcessFeatures::MIDI_MESSAGE_REPORT,
     };
@@ -193,7 +191,8 @@ fn the_capabilities_reply_is_table_41_with_the_features_byte() {
 
 fn inquiry(control: DataControl, scope: ReportScope) -> CiMessage {
     CiMessage::MessageReportInquiry {
-        header: header_on(scope.address()),
+        source: Muid::of(SRC),
+        ci_version: CI_VERSION,
         to: Muid::of(DST),
         control,
         scope,
@@ -223,11 +222,7 @@ fn the_message_report_inquiry_is_on_the_device_id_of_its_scope() {
         (ReportScope::none(CiDeviceId::Group), 0x7E),
         (ReportScope::none(CiDeviceId::FunctionBlock), 0x7F),
     ] {
-        let mut message = inquiry(DataControl::Capabilities, scope);
-        // The header's own Device ID is not the one sent.
-        if let CiMessage::MessageReportInquiry { header, .. } = &mut message {
-            header.device_id = channel(9);
-        }
+        let message = inquiry(DataControl::Capabilities, scope);
         let mut want = preamble(id, 0x42, to_dst());
         want.extend([0x00, 0, 0, 0, 0]);
         assert_eq!(message.encode(), want, "{id:#x}");
@@ -294,7 +289,8 @@ fn the_message_report_reply_is_table_45_on_the_inquirys_device_id() {
         notes: NoteData::empty(),
     };
     let message = CiMessage::MessageReportReply {
-        header: header_on(CiDeviceId::Group),
+        source: Muid::of(SRC),
+        ci_version: CI_VERSION,
         to: Muid::of(DST),
         scope,
     };
