@@ -111,3 +111,33 @@ fn a_drain_in_epoch_yields_the_epoch_it_checked() {
     reader.drain_in_epoch(|slot, value, epoch| seen.push((slot, value, epoch)));
     assert_eq!(seen, [(0, 2.0, 1)]);
 }
+
+/// **A drain no write overlaps brings `swept` up to `written`**, and a drain
+/// with nothing written leaves it there; a new epoch voids the write and still
+/// counts it as swept.
+#[test]
+fn a_quiet_drain_sweeps_up_to_what_was_written() {
+    let (mut writer, mut reader) = seq_slots::<f64>(2);
+    assert_eq!(writer.written(), reader.swept(), "nothing written");
+    writer.write(0, 1.0);
+    writer.write(1, 2.0);
+    assert_eq!(writer.written(), Generation::new(2));
+    assert!(!reader.swept().has_reached(writer.written()));
+    assert_eq!(drained(&mut reader).len(), 2);
+    assert_eq!(reader.swept(), writer.written());
+    assert!(drained(&mut reader).is_empty());
+    assert_eq!(reader.swept(), writer.written());
+
+    writer.write(0, 3.0);
+    writer.new_epoch();
+    assert!(drained(&mut reader).is_empty(), "stale by the epoch");
+    assert!(reader.swept().has_reached(writer.written()));
+}
+
+/// **Generations compare as serial numbers across the wrap.**
+#[test]
+fn a_generation_has_reached_an_earlier_one_across_the_wrap() {
+    let (late, early) = (Generation::new(3), Generation::new(u32::MAX - 2));
+    assert!(late.has_reached(early) && !early.has_reached(late));
+    assert!(late.has_reached(late));
+}

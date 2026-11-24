@@ -747,11 +747,11 @@ fn binary_property_data_reaches_the_caller_with_its_media_type() {
     let Ok(PeData::Opaque(opaque)) = link.got(call) else {
         panic!("{:?}", link.events);
     };
-    let OpaqueBody::Binary { media_type, bytes } = opaque.body() else {
+    let OpaqueBody::Binary(binary) = opaque.body() else {
         panic!("not binary");
     };
-    assert_eq!(*media_type, octets());
-    assert_eq!(*bytes, blob_bytes(300));
+    assert_eq!(*binary.media_type(), octets());
+    assert_eq!(binary.bytes(), blob_bytes(300));
     let replies = reply_header(&link, true);
     assert!(replies.iter().any(|r| r.media_type == Some(octets())));
 }
@@ -857,6 +857,10 @@ fn only_an_untyped_resource_holds_binary_data() {
         )
         .is_none()
     );
+    // The refusal is of the media type, not of its spelling.
+    let shouted = MediaType::new("Application/JSON").unwrap();
+    assert!(PeOpaque::binary(custom("X-A"), shouted.clone(), vec![]).is_none());
+    assert!(PeState::binary(shouted, vec![]).is_none());
     assert!(PeOpaque::binary(custom("X-A"), octets(), vec![1, 255]).is_some());
     assert!(PeData::decode_bytes(&PeResource::LocalOn, Some(&octets()), b"x").is_err());
     let json_bytes = PeData::decode_bytes(&PeResource::LocalOn, None, b"true").unwrap();

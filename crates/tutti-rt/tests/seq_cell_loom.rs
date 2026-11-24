@@ -16,13 +16,13 @@
 //! - **no going back**: two reads in program order never return an older
 //!   write after a newer one, nor "never written" after a write;
 //! - **the last write is read**, on the first copy, once the writer is done;
-//! - **a `try_read` is one whole write or `None`**, and its sequence is the
+//! - **a `try_read` is one whole write or not stable**, and its sequence is the
 //!   write's own: write `i` is sequence `2 * i`.
 
 #![cfg(loom)]
 
 use loom::thread;
-use tutti_rt::{Contended, SeqReader, SeqWriter};
+use tutti_rt::{Attempt, Contended, SeqReader, SeqWriter};
 
 type Value = [u32; 3];
 
@@ -118,18 +118,18 @@ fn a_reader_beside_a_spawned_writer_never_sees_a_mixed_or_older_copy() {
     });
 }
 
-/// One `try_read` against two writes: `None` or exactly one whole write
+/// One `try_read` against two writes: not stable, or exactly one whole write
 /// whose sequence is its own.
 #[test]
-fn a_try_read_is_none_or_one_whole_write_with_its_own_sequence() {
+fn a_try_read_is_unstable_or_one_whole_write_with_its_own_sequence() {
     loom::model(|| {
         let mut writer = SeqWriter::<Value>::new();
         let reader = writer.reader();
         let handle = {
             let reader = reader.clone();
             thread::spawn(move || match reader.try_read() {
-                None => {}
-                Some((seq, [a, b, c])) => {
+                Attempt::Never | Attempt::Torn => {}
+                Attempt::Stable(seq, [a, b, c]) => {
                     assert!(a == b && b == c, "a mixed copy: {:?}", [a, b, c]);
                     assert!(WRITES.contains(&a), "a value no write stored: {a}");
                     assert_eq!(seq, 2 * u64::from(a), "the sequence is the write's own");
@@ -142,7 +142,7 @@ fn a_try_read_is_none_or_one_whole_write_with_its_own_sequence() {
         handle.join().unwrap();
         assert_eq!(
             reader.try_read(),
-            Some((4, [2; 3])),
+            Attempt::Stable(4, [2; 3]),
             "the last write is read"
         );
     });

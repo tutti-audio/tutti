@@ -373,20 +373,27 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     assert_eq!(header.status, PeStatus::NotFound);
 }
 
-/// M2-103 section 12.2: a Get no one answers resolves `TimedOut` after the Property
-/// Exchange timeout since it was sent, and not before.
+/// M2-103 section 12.2: a Get no one answers resolves `TimedOut`. The time it
+/// takes is pinned with constructed instants in `tutti-midi-ci`'s Property
+/// Exchange initiator tests: here the session's MIDI-CI task also steps, on the
+/// real clock, so a request's deadline may start on either clock and only the
+/// outcome is asserted.
+/// The bound is a count of steps, and guards a request that never resolves.
 #[test]
-fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
+fn a_fetch_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
     let mut request = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
-    let wait = PE_TIMEOUT.as_millis() as u64;
-    wire.step(wait - 20);
-    assert_eq!(wire.result(&mut request), None, "still waiting");
-    wire.step(40);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    wire.step(PE_TIMEOUT.as_millis() as u64);
+    let ended = (0..2000).find_map(|_| {
+        let out = wire.result(&mut request);
+        if out.is_none() {
+            wire.step(1);
+        }
+        out
+    });
+    assert_eq!(ended, Some(Err(PeerError::TimedOut)));
 }
 
 /// A peer that leaves before it answers ends the call as `Disconnected`.
@@ -1254,7 +1261,7 @@ mod state {
         let target = ResourceTarget::entry(PeResource::State, full_state().resource_id()).unwrap();
         match wire.peer.store.get(&target) {
             Some(PeData::State(state)) => match state.body() {
-                OpaqueBody::Binary { bytes, .. } => bytes.clone(),
+                OpaqueBody::Binary(binary) => binary.bytes().to_vec(),
                 OpaqueBody::Json(_) => panic!("binary expected"),
             },
             other => panic!("the device holds no state: {other:?}"),
@@ -1662,7 +1669,7 @@ fn a_fetched_custom_resource_is_opaque_json() {
         panic!("opaque data");
     };
     assert_eq!(
-        opaque.json(),
+        opaque.body().json(),
         Some(&json(r#"{"name":"PIANO 4","lfoSpeed":30}"#))
     );
 }

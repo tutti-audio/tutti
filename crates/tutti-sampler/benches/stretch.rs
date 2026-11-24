@@ -19,9 +19,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
-use tutti_sampler::{
-    MemorySource, Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
-};
+use tutti_sampler::{MemorySource, Playback, SlotId, VoiceNode, VoicePool, VoiceWindow};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, Seconds, StretchFactor};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -44,11 +42,7 @@ fn stretch(c: &mut Criterion) {
         pitch: Cents::new(200.0),
         ..Playback::default()
     };
-    let node = VoiceNode::<f32>::new(Voice {
-        source: VoiceSource::Memory(source),
-        play,
-    })
-    .expect("a finite gain and a nonempty width");
+    let node = VoiceNode::<f32>::new(source, play).expect("a finite gain and a nonempty width");
     let mut direct = Direct::new(node, RATE, BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut blocks = 0usize;

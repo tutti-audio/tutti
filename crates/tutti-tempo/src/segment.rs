@@ -15,11 +15,34 @@
 //! because the closed forms mix beats, seconds and rates in one expression.
 //! Two quantities stay bare `f64` because no unit covers them: a rate in
 //! beats per second (`r0`, `r1`; a `Bpm` over 60, kept apart so the forms
-//! read as written above) and a ramp's coefficient (`k`: beats per second
-//! per second for a time ramp, per beat for a beat ramp).
+//! read as written above) and a ramp's coefficient (`a`: beats per second
+//! per second for a time ramp; `g`: beats per second per beat for a beat
+//! ramp), which lives in its [`Law`].
 
 use crate::point::Transition;
 use tutti_units::{Beat, BeatDuration, Bpm, Seconds};
+
+/// How the tempo moves across a segment, with the coefficient of its form.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Law {
+    /// Constant tempo.
+    Step,
+    /// Tempo linear in time: `r(s) = r0 + a s`.
+    Time { a: f64 },
+    /// Tempo linear in beats: `r(b) = r0 + g b`.
+    Beats { g: f64 },
+}
+
+impl Law {
+    /// Whether the coefficient is finite (a step has none).
+    fn is_finite(self) -> bool {
+        match self {
+            Self::Step => true,
+            Self::Time { a } => a.is_finite(),
+            Self::Beats { g } => g.is_finite(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Seg {
@@ -31,11 +54,9 @@ pub(crate) struct Seg {
     pub bpm0: Bpm,
     /// `bpm0 / 60`, in beats per second.
     pub r0: f64,
-    pub transition: Transition,
+    pub law: Law,
     /// How long the segment lasts (`INFINITY` for the last).
     pub dsec: Seconds,
-    /// `a` (time ramp) or `g` (beat ramp); 0 for a step.
-    pub k: f64,
 }
 
 impl Seg {
@@ -56,15 +77,15 @@ impl Seg {
         } else {
             transition
         };
-        let (k, dsec) = match transition {
-            Transition::Step => (0.0, dbeats / r0),
+        let (law, dsec) = match transition {
+            Transition::Step => (Law::Step, dbeats / r0),
             Transition::RampTime { .. } => {
                 let t = 2.0 * dbeats / (r0 + r1);
-                ((r1 - r0) / t, t)
+                (Law::Time { a: (r1 - r0) / t }, t)
             }
             Transition::RampBeats { .. } => {
                 let g = (r1 - r0) / dbeats;
-                (g, ln_ratio(g, dbeats, r0))
+                (Law::Beats { g }, ln_ratio(g, dbeats, r0))
             }
         };
         Self {
@@ -72,9 +93,8 @@ impl Seg {
             sec0,
             bpm0,
             r0,
-            transition,
+            law,
             dsec: Seconds::new(dsec),
-            k,
         }
     }
 
@@ -84,7 +104,7 @@ impl Seg {
     pub fn is_sound(&self, dbeats: BeatDuration) -> bool {
         let back = self.sec_in(dbeats).get();
         let dsec = self.dsec.get();
-        dsec.is_finite() && dsec > 0.0 && self.k.is_finite() && (back - dsec).abs() <= 1e-9 * dsec
+        dsec.is_finite() && dsec > 0.0 && self.law.is_finite() && (back - dsec).abs() <= 1e-9 * dsec
     }
 
     /// Time into the segment at `db` beats in.
@@ -96,12 +116,10 @@ impl Seg {
         if db < 0.0 {
             return db / self.r0;
         }
-        match self.transition {
-            Transition::Step => db / self.r0,
-            Transition::RampTime { .. } => {
-                2.0 * db / (self.r0 + libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db))
-            }
-            Transition::RampBeats { .. } => ln_ratio(self.k, db, self.r0),
+        match self.law {
+            Law::Step => db / self.r0,
+            Law::Time { a } => 2.0 * db / (self.r0 + libm::sqrt(self.r0 * self.r0 + 2.0 * a * db)),
+            Law::Beats { g } => ln_ratio(g, db, self.r0),
         }
     }
 
@@ -114,11 +132,11 @@ impl Seg {
         if ds < 0.0 {
             return self.r0 * ds;
         }
-        match self.transition {
-            Transition::Step => self.r0 * ds,
-            Transition::RampTime { .. } => ds * (self.r0 + 0.5 * self.k * ds),
-            Transition::RampBeats { .. } => {
-                let y = self.k * ds;
+        match self.law {
+            Law::Step => self.r0 * ds,
+            Law::Time { a } => ds * (self.r0 + 0.5 * a * ds),
+            Law::Beats { g } => {
+                let y = g * ds;
                 if y == 0.0 {
                     self.r0 * ds
                 } else {
@@ -136,15 +154,15 @@ impl Seg {
             return self.bpm0;
         }
         let bpm0 = self.bpm0.get();
-        self.in_range(match self.transition {
-            Transition::Step => bpm0,
-            Transition::RampTime { .. } => bpm0 + 60.0 * self.k * ds,
-            Transition::RampBeats { .. } => bpm0 * libm::exp(self.k * ds),
+        self.in_range(match self.law {
+            Law::Step => bpm0,
+            Law::Time { a } => bpm0 + 60.0 * a * ds,
+            Law::Beats { g } => bpm0 * libm::exp(g * ds),
         })
     }
 
     /// Tempo in BPM `db` beats in. As [`bpm_at_sec`](Self::bpm_at_sec); the
-    /// time ramp's `sqrt(r0^2 + 2 k db) - r0` is `2 k db / (sqrt(..) + r0)`,
+    /// time ramp's `sqrt(r0^2 + 2 a db) - r0` is `2 a db / (sqrt(..) + r0)`,
     /// which does not cancel.
     pub fn bpm_at_beat(&self, db: BeatDuration) -> Bpm {
         let db = db.get();
@@ -152,13 +170,13 @@ impl Seg {
             return self.bpm0;
         }
         let bpm0 = self.bpm0.get();
-        self.in_range(match self.transition {
-            Transition::Step => bpm0,
-            Transition::RampTime { .. } => {
-                let root = libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db);
-                bpm0 + 60.0 * (2.0 * self.k * db) / (root + self.r0)
+        self.in_range(match self.law {
+            Law::Step => bpm0,
+            Law::Time { a } => {
+                let root = libm::sqrt(self.r0 * self.r0 + 2.0 * a * db);
+                bpm0 + 60.0 * (2.0 * a * db) / (root + self.r0)
             }
-            Transition::RampBeats { .. } => bpm0 + 60.0 * self.k * db,
+            Law::Beats { g } => bpm0 + 60.0 * g * db,
         })
     }
 
