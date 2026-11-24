@@ -216,5 +216,4 @@ pub(crate) struct LifecycleFlags {
     /// plugin that knows it is active reports the host for calling on the wrong
     /// thread.
     pub active: bool,
-    pub gui_created: bool,
 }

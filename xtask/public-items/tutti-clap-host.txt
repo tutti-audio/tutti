@@ -2,10 +2,13 @@
 # sorted (`cargo xtask write-public-items` rewrites this file from the tree).
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
+const types::NoteSend::CLAP_AND_MIDI
+const types::NoteSend::CLAP_ONLY
 const types::RT_NOTE_EXPR_CAPACITY
 enum error::ClapError
 enum events::ClapEvent
 enum types::NoteDialect
+enum types::NoteSend
 enum types::SurroundChannel
 fn events::ClapEvent::header
 fn events::ClapEvent::midi
@@ -66,11 +69,11 @@ fn instance::audio::ClapProcessor::is_sleeping
 fn instance::audio::ClapProcessor::is_tailing
 fn instance::audio::ClapProcessor::last_process_status
 fn instance::audio::ClapProcessor::midi_dropped
+fn instance::audio::ClapProcessor::note_send
 fn instance::audio::ClapProcessor::output_events_refused
 fn instance::audio::ClapProcessor::output_param_points_dropped
 fn instance::audio::ClapProcessor::param_points_dropped
 fn instance::audio::ClapProcessor::process
-fn instance::audio::ClapProcessor::sends_midi_notes
 fn instance::audio::ClapProcessor::sysex_dropped
 fn instance::audio::ProcessOutputRef::into_owned
 fn instance::config::AudioScratch::new
@@ -128,14 +131,14 @@ fn instance::ports::ClapLoaded::has_hard_realtime_requirement
 fn instance::ports::ClapLoaded::is_ambisonic_config_supported
 fn instance::ports::ClapLoaded::is_surround_channel_mask_supported
 fn instance::ports::ClapLoaded::latency_samples
-fn instance::ports::ClapLoaded::midi_capable_ports
 fn instance::ports::ClapLoaded::note_name
 fn instance::ports::ClapLoaded::note_name_count
 fn instance::ports::ClapLoaded::note_port_count
 fn instance::ports::ClapLoaded::note_port_info
+fn instance::ports::ClapLoaded::note_send
+fn instance::ports::ClapLoaded::note_sends
 fn instance::ports::ClapLoaded::num_input_channels
 fn instance::ports::ClapLoaded::num_output_channels
-fn instance::ports::ClapLoaded::sends_midi_notes
 fn instance::ports::ClapLoaded::surround_channel_map
 fn instance::ports::ClapLoaded::tail_samples
 fn instance::ports::ClapLoaded::voice_info
@@ -163,6 +166,7 @@ fn types::ClapParamInfo::module
 fn types::ClapParamInfo::new
 fn types::ClapParamInfo::range
 fn types::NotePortInfo::dialect_to_send
+fn types::NoteSend::takes_midi
 fn types::PluginInfo::description
 fn types::PluginInfo::features
 fn types::PluginInfo::new
