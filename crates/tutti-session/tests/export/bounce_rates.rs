@@ -39,7 +39,6 @@ fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, B
 #[test]
 fn a_bounce_at_a_rate_a_node_does_not_run_at_is_refused() {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");

@@ -99,7 +99,6 @@ use core::marker::PhantomData;
 /// FTZ/DAZ. The call only adds those bits to the thread's register, so this
 /// assumes the other control bits (rounding mode, exception masks) are at
 /// their defaults on every participating thread, which Rust requires anyway.
-/// The reference interpreter wraps its render the same way.
 ///
 /// # Examples
 ///

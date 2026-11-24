@@ -1,9 +1,10 @@
-//! The plan verifier (compiler step 8; Dropseed's verifier is the prior
-//! art).
+//! The plan verifier (compiler step 8).
 //!
 //! It re-derives every slot access from the **ops** — what the executor will
 //! actually do — and checks it against the op DAG, trusting neither the
-//! colouring nor the value table it is checking:
+//! colouring nor the value table it is checking. What the typed ids and
+//! tables already hold (an id of one kind never names another's table, a table
+//! row an id names is the one the table built) is not checked again.
 //!
 //! 1. The zero / empty slots and the feedback slots are never written by an
 //!    op (the executor fills feedback slots before the block), and every
@@ -43,8 +44,8 @@
 //!    one it fades to — so the op, its PDC and its borrows are right for
 //!    both, and the scratch sized from the plan fits the outgoing unit.
 //!
-//! Run by `compile` in every debug build, and callable directly — the tests
-//! run it on every proptest graph.
+//! `compile` runs it in every debug build, and a test calls it directly on
+//! every random graph.
 
 use crate::compile::ids::{
     DelayId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
@@ -815,7 +816,6 @@ mod tests {
     use crate::compile::ids::{AudioSlotId, AudioValueId, EventSlotId, PlanUnitId, TaskId};
     use crate::compile::{Shapes, compile};
     use crate::model::spec::GraphSpec;
-    use crate::node::InPlaceMask;
     use crate::node::shape::Shape;
     use crate::{NodeKey, Topology};
     use crate::{NodeSpec, OutputPort, PortSource};
@@ -1302,240 +1302,128 @@ mod tests {
         assert!(verify(&bad).unwrap_err().0.contains("store index"));
     }
 
-    /// Every node record carries what the plan says: its unit's fields, the
-    /// shape's port counts, the op's slots and sorted borrow runs, and the
-    /// form its shape and slots call for. A table row is one node: a source
-    /// with latency and a finite tail, an in-place node with an unbounded
-    /// tail, a split, an event source and sink (the general form), a stereo
-    /// node (direct) and a three-channel one (the audio walk). The expected
-    /// values are read off the shapes and the plan's ops, never off the
-    /// lowering.
+    /// Ids are minted by arithmetic in the compiler, so an index or span past
+    /// its table is a compile error the verifier reports, never a panic on the
+    /// audio thread.
     #[test]
-    fn every_node_record_carries_what_the_plan_says() {
-        use crate::compile::plan::{Direct, Form};
-        use crate::exec::arena::Role;
-        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
-        use tutti_units::{Latency, Samples, Tail};
-        let mono = ChannelLayout::MONO;
-        let latent = Latency::new(Samples::new(4));
-        let wide = ChannelLayout::from_count(3);
-        // (key, shape, the audio source feeding it, if any).
-        let rows = [
-            (
-                1,
-                Shape::source_unassigned(mono)
-                    .latency(latent)
-                    .tail(Tail::Finite(Samples::new(9))),
-                None,
-            ),
-            (
-                2,
-                Shape::through_unassigned(mono)
-                    .in_place()
-                    .tail(Tail::Unbounded),
-                Some(1),
-            ),
-            (3, Shape::through_unassigned(mono), Some(2)),
-            (
-                4,
-                Shape::EMPTY
-                    .events(0, 1)
-                    .event_capacity(crate::testing::cap_of(5)),
-                None,
-            ),
-            (5, Shape::source_unassigned(mono).events(1, 0), None),
-            (6, Shape::source_unassigned(ChannelLayout::STEREO), None),
-            (7, Shape::through_unassigned(ChannelLayout::STEREO), Some(6)),
-            (8, Shape::source_unassigned(wide), None),
-            (9, Shape::through_unassigned(wide), Some(8)),
-        ];
-        let mut t = Topology::default();
-        let mut shapes = Shapes::new();
-        for &(k, shape, from) in &rows {
-            let key = NodeKey(k);
-            let mut spec = NodeSpec::new("n", shape.audio_in(), shape.audio_out());
-            spec.latency = shape.latency.samples();
-            spec.tail = shape.tail;
-            t.nodes.insert(key, spec);
-            shapes.insert(key, shape);
-            for port in 0..shape.audio_in().count() {
-                let from = NodeKey(from.expect("a node with inputs is fed"));
-                t.edges.insert(
-                    crate::InputPort::new(key, port),
-                    vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
-                        from, port,
-                    )))],
-                );
-            }
-        }
-        t.set_outputs(
-            [3, 5, 7, 7, 9, 9, 9]
-                .into_iter()
-                .zip([0, 0, 0, 1, 0, 1, 2])
-                .map(|(k, p)| PortSource::Node(OutputPort::new(NodeKey(k), p)))
-                .collect::<Vec<_>>(),
-        );
-        let mut g = GraphSpec::new(t);
-        g.connect_events(
-            EventInputPort::new(NodeKey(5), 0),
-            EventEdge::Direct(EventOutputPort::new(NodeKey(4), 0)),
-        );
-        let prep = crate::node::Prepare::new(
-            tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(Samples::new(64)),
-        );
-        let plan = compile(&g.validate().expect("valid"), &shapes, &prep, None)
-            .expect("compiles")
-            .0;
+    fn the_verifier_rejects_an_index_or_span_past_its_table() {
+        use crate::compile::plan::Span;
+        let good = independent_pair();
+        verify(&good).expect("sound");
+        let err = |p: &Plan| verify(p).expect_err("corrupt").0;
+        let out = good
+            .ops
+            .iter_enumerated()
+            .find(|(_, o)| matches!(o, Op::Output { .. }))
+            .map(|(i, _)| i)
+            .expect("an output");
+        let empty = Span { start: 0, len: 0 };
 
-        assert_eq!(plan.nodes.recs.len(), plan.units.len(), "a record a unit");
-        assert_eq!(plan.units.len(), rows.len());
-        let mut forms = Vec::new();
-        for op in &plan.ops {
-            let Op::Node {
-                unit,
-                audio_in,
-                audio_out,
-                event_in,
-                event_out,
-                in_place,
-                params,
-            } = *op
-            else {
-                continue;
-            };
-            let unit = PlanUnitId::new(unit);
-            let rec = &plan.nodes.recs[unit];
-            let pu = &plan.units[unit];
-            let shape = shapes[&pu.key];
-            let at = format!("node {:?}", pu.key);
-            assert_eq!(rec.unit, unit, "{at}");
-            assert_eq!(rec.store, pu.idx, "{at}");
-            assert_eq!(
-                rec.generation,
-                crate::compile::ids::Generation::new(pu.generation),
-                "{at}"
-            );
-            assert_eq!(rec.arrival, pu.arrival, "{at}");
-            assert_eq!(rec.latency, shape.latency.samples(), "{at}");
-            assert_eq!(rec.tail, shape.tail, "{at}");
-            assert_eq!(
-                rec.park_after,
-                Tail::Finite(shape.latency.samples()).then(shape.tail),
-                "{at}"
-            );
-            assert_eq!(rec.event_capacity, shape.event_capacity, "{at}");
-            assert_eq!(rec.in_place, in_place, "{at}");
-            assert_eq!(rec.params, params, "{at}");
-            assert_eq!(rec.declared, shape.params, "{at}");
-            assert_eq!(
-                in_place.get(0),
-                pu.key == NodeKey(2),
-                "only the in-place node is aliased: {at}"
-            );
-
-            let ain = &plan.audio_list[audio_in.range()];
-            let aout = &plan.audio_list[audio_out.range()];
-            let ein = &plan.event_list[event_in.range()];
-            let eout = &plan.event_list[event_out.range()];
-            let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
-            assert_eq!(
-                counts,
-                [
-                    usize::from(shape.audio_in().count()),
-                    usize::from(shape.audio_out().count()),
-                    usize::from(shape.event_in),
-                    usize::from(shape.event_out)
-                ],
-                "{at}"
-            );
-            assert_eq!(
-                counts,
-                [ain.len(), aout.len(), ein.len(), eout.len()],
-                "{at}"
-            );
-            assert_eq!(
-                rec.ports(&plan.nodes),
-                crate::compile::plan::NodePorts {
-                    ain,
-                    aout,
-                    ein,
-                    eout
+        // A tap, an event tap and a meter op past their tables.
+        for (op, want) in [
+            (
+                Op::Tap {
+                    tap: 99,
+                    srcs: empty,
                 },
-                "{at}"
-            );
-
-            // The requests the op makes, each run sorted.
-            fn sorted<S: Ord>(mut v: Vec<(S, Role)>) -> Vec<(S, Role)> {
-                v.sort_unstable();
-                v
-            }
-            fn reads<S: Copy>(slots: &[S], skip: InPlaceMask) -> Vec<(S, Role)> {
-                slots
-                    .iter()
-                    .enumerate()
-                    .filter(|&(c, _)| !skip.get(c))
-                    .map(|(c, &s)| (s, Role::Read(c as u8)))
-                    .collect()
-            }
-            fn writes<S: Copy>(slots: &[S]) -> Vec<(S, Role)> {
-                slots
-                    .iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8)))
-                    .collect()
-            }
-            assert_eq!(
-                plan.nodes.audio_borrows[rec.borrows.range()],
-                sorted([reads(ain, in_place), writes(aout)].concat()),
-                "{at}"
-            );
-            assert_eq!(
-                plan.nodes.event_borrows[rec.event_borrows.range()],
-                sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
-                "{at}"
-            );
-
-            let width = (ain.len(), aout.len());
-            let want = match (ein.len() + eout.len() > 0, width) {
-                (true, _) => "General",
-                (_, (0, 1)) => "Source",
-                (_, (1, 1)) if in_place.get(0) => "InPlace",
-                (_, (1, 1)) => "Split",
-                (_, w) if Direct::SHAPES.contains(&w) => "Direct",
-                _ => "Audio",
-            };
-            let got = match rec.form {
-                Form::General => "General",
-                Form::Source { out } => {
-                    assert_eq!(aout, [out], "{at}");
-                    "Source"
-                }
-                Form::Split { input, out } => {
-                    assert_eq!((ain, aout), (&[input][..], &[out][..]), "{at}");
-                    assert_ne!(input, out, "a split never reads and writes one slot");
-                    "Split"
-                }
-                Form::InPlace { slot } => {
-                    assert_eq!((ain, aout), (&[slot][..], &[slot][..]), "{at}");
-                    "InPlace"
-                }
-                Form::Direct(d) => {
-                    assert_eq!((usize::from(d.ins), usize::from(d.outs)), width, "{at}");
-                    "Direct"
-                }
-                Form::Audio => "Audio",
-            };
-            assert_eq!(got, want, "{at}");
-            forms.push(got);
+                "names tap 99",
+            ),
+            (Op::EventTap { tap: 99, src: 0 }, "names tap 99"),
+            (
+                Op::Meter {
+                    meter: 99,
+                    srcs: empty,
+                },
+                "names meter 99",
+            ),
+        ] {
+            let mut bad = good.clone();
+            bad.ops[out] = op;
+            assert!(err(&bad).contains(want), "{}", err(&bad));
         }
-        forms.sort_unstable();
-        forms.dedup();
-        assert_eq!(
-            forms,
-            ["Audio", "Direct", "General", "InPlace", "Source", "Split"],
-            "the table holds a node of each form"
-        );
+
+        // A node op past the units, and an output past the delays.
+        let mut bad = good.clone();
+        for op in &mut bad.ops {
+            if let Op::Node { unit, .. } = op {
+                *unit = 99;
+                break;
+            }
+        }
+        assert!(err(&bad).contains("names unit 99"), "{}", err(&bad));
+        let mut bad = good.clone();
+        let Op::Output { channel, src, .. } = good.ops[out] else {
+            unreachable!()
+        };
+        bad.ops[out] = Op::Output {
+            channel,
+            src,
+            delay: Some(99),
+        };
+        assert!(err(&bad).contains("names delay 99"), "{}", err(&bad));
+
+        // A task running past the task op list; task tables of the wrong
+        // length; a successor past the tasks.
+        let mut bad = good.clone();
+        bad.tasks[TaskId::new(0)].len += 99;
+        assert!(err(&bad).contains("past the task op list"), "{}", err(&bad));
+        let mut bad = good.clone();
+        bad.task_activation.push(0);
+        assert!(err(&bad).contains("wrong length"), "{}", err(&bad));
+        let mut bad = good.clone();
+        let mut rows: Vec<Vec<u32>> = (0..bad.tasks.len())
+            .map(|t| bad.task_succ.row(t).to_vec())
+            .collect();
+        rows[0].push(99);
+        bad.task_succ = crate::compile::plan::Csr::from_rows(&rows);
+        assert!(err(&bad).contains("bad successor"), "{}", err(&bad));
+
+        // A weighted sum's lanes and driven lanes past their lists.
+        let sums = summed_pair();
+        let i = sums
+            .ops
+            .iter_enumerated()
+            .find(|(_, o)| matches!(o, Op::Sum { .. }))
+            .map(|(i, _)| i)
+            .expect("a sum");
+        let Op::Sum { srcs, dst } = sums.ops[i] else {
+            unreachable!()
+        };
+        let mut bad = sums.clone();
+        bad.ops[i] = Op::WeightedSum {
+            srcs,
+            dst,
+            lanes: Span { start: 0, len: 2 },
+            gains: empty,
+        };
+        assert!(err(&bad).contains("names lanes past"), "{}", err(&bad));
+        let mut bad = sums.clone();
+        bad.sum_lanes.extend([
+            None,
+            Some(crate::EdgeId {
+                sink: crate::PortSink::Port(crate::InputPort::new(NodeKey(1), 0)),
+                from: crate::Edge::Direct(PortSource::Zero),
+            }),
+        ]);
+        bad.ops[i] = Op::WeightedSum {
+            srcs,
+            dst,
+            lanes: Span { start: 0, len: 2 },
+            gains: Span { start: 0, len: 3 },
+        };
+        assert!(err(&bad).contains("driven lanes past"), "{}", err(&bad));
+
+        // A node's driven ports past the param table.
+        let (driven, _) = modulated_plan();
+        let mut bad = driven.clone();
+        for op in &mut bad.ops {
+            if let Op::Node { params, .. } = op
+                && params.len > 0
+            {
+                params.len += 99;
+            }
+        }
+        assert!(err(&bad).contains("past the table"), "{}", err(&bad));
     }
 
     /// A merge whose slot is smaller than its inputs together is refused —

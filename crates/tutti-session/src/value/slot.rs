@@ -154,6 +154,16 @@ impl SlotId {
             _ => None,
         }
     }
+
+    /// The node whose *instance* holds the value, or `None` for a value that
+    /// outlives a replace of the node: an automation is a declaration on the
+    /// node's key, so a replacement keeps it.
+    pub(crate) const fn instance_node(self) -> Option<NodeKey> {
+        match self {
+            Self::Automation(_) => None,
+            _ => self.node(),
+        }
+    }
 }
 
 /// A session value behind a target: how it is read, checked and stored.

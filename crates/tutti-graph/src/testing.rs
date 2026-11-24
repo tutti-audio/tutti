@@ -1,11 +1,10 @@
-//! Small test nodes, a harness that drives the executor, and a pair that
-//! drives it beside the reference interpreter.
+//! Small test nodes and a harness that drives the executor.
 //!
 //! Every node here is deterministic, declares an **honest** tail (the
 //! executor's silence skip trusts it), and never turns silence into `-0.0`
 //! (all gains are positive): a skipped node writes `+0.0`, so a node that
 //! produced `-0.0` from silence would differ in the sign bit only, which the
-//! bit-exact comparisons below would report as a failure of the skip rather
+//! bit-exact comparisons of the tests would report as a failure of the skip rather
 //! than of the node.
 
 // Test support, not API: its items are named by the tests that use them.
@@ -26,8 +25,8 @@ use tutti_buffers::MaxBlock;
 
 use crate::NodeKey;
 use crate::{
-    Cx, Editor, Event, EventKind, Executor, Fade, Io, Node, Plan, Prepare, Reference, Shape,
-    Shapes, Status, TransportChanges, TransportPosition, ValidGraph, compile,
+    Cx, Editor, Event, EventKind, Executor, Fade, Io, Node, Plan, Prepare, Shape, Shapes, Status,
+    TransportChanges, TransportPosition, ValidGraph, compile,
 };
 use tutti_buffers::ChannelLayout;
 use tutti_ump::Ump;
@@ -52,9 +51,9 @@ pub fn smooth_gains(j: usize, n: usize) -> (f64, f64) {
 /// How many times an `EventLag` forwards one event.
 pub const MAX_HOPS: u32 = 2;
 
-/// Events per slot in the differential harness: far above what a generated
-/// graph produces, so an overflow is a finding (asserted) rather than a
-/// divergence.
+/// Events per slot in the harness: far above what a generated graph produces,
+/// so a refused event is a declared capacity's (`Kind::Burst`) and nothing
+/// else's.
 pub const EVENT_CAPACITY: usize = 16_384;
 
 /// What a [`Kind::GainDriver`] steps its gain to at frame `f`: a figure
@@ -75,8 +74,8 @@ fn ch(n: usize) -> ChannelLayout {
     ChannelLayout::try_from(n).expect("a test width is small")
 }
 
-/// What a test node does. `Clone` so the harness can build two identical
-/// instances — one for each interpreter.
+/// What a test node does. `Clone` so the harness builds a fresh unit of a kind
+/// each time it places a key.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     /// Constant `value` on `width` outputs; writes sample 0 and returns
@@ -97,7 +96,7 @@ pub enum Kind {
     /// period == 0`, on a port declaring `cap` events per block
     /// (`Shape::event_capacity`); also outputs how many its writer
     /// accepted, as audio. With `cap < burst` the writer refuses the newest
-    /// of each burst — the same ones in both interpreters. `period` is at
+    /// of each burst — the same ones on every participant count. `period` is at
     /// least `MAX_BLOCK` in the generator, so the port keeps its declared
     /// *rate* (at most `cap` per `MaxBlock` frames) and nothing downstream
     /// may drop.
@@ -523,9 +522,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     // times bounds how far an event feedback loop can
                     // multiply events -- without it a random graph can
                     // amplify exponentially until the executor's
-                    // preallocated slots overflow (which it reports, see
-                    // `Pair::block`) and the unbounded reference runs out of
-                    // memory.
+                    // preallocated slots overflow.
                     let EventKind::Midi(Ump(mut w)) = e.kind else {
                         continue;
                     };
@@ -561,8 +558,8 @@ impl<F: Float> Node<F> for TestNode<F> {
             Kind::EnvProbe => {
                 let base =
                     cx.arrival.samples().get() as f32 + cx.env.transport.tempo.get() as f32 * 1e-3;
-                // The transport per frame, changes included, so both
-                // interpreters must hand every node the same `Env`.
+                // The transport per frame, changes included, so every
+                // participant count must hand every node the same `Env`.
                 let env = *cx.env;
                 for (k, o) in env.offsets().zip(io.output(0).iter_mut()) {
                     let t = env.transport_at(k);
@@ -692,15 +689,7 @@ fn costed<F: Float>(
     }
 }
 
-/// A fresh unit for each key in `keys`.
-pub fn units_for<F: Float>(
-    kinds: &BTreeMap<NodeKey, Kind>,
-    keys: impl IntoIterator<Item = NodeKey>,
-) -> BTreeMap<NodeKey, Box<dyn Node<F>>> {
-    units_costed(kinds, &BTreeMap::new(), keys)
-}
-
-/// `units_for`, those in `costs` declaring that cost.
+/// Fresh units for `keys`, those in `costs` declaring that cost.
 pub fn units_costed<F: Float>(
     kinds: &BTreeMap<NodeKey, Kind>,
     costs: &BTreeMap<NodeKey, crate::Cost>,
@@ -1006,166 +995,6 @@ impl<F: Float> Harness<F> {
     }
 }
 
-/// The executor and the reference, driven together.
-pub struct Pair<F: Float = f32> {
-    pub harness: Harness<F>,
-    pub reference: Reference<F>,
-}
-
-impl<F: Float> std::ops::Deref for Pair<F> {
-    type Target = Harness<F>;
-    fn deref(&self) -> &Harness<F> {
-        &self.harness
-    }
-}
-
-impl<F: Float> std::ops::DerefMut for Pair<F> {
-    fn deref_mut(&mut self) -> &mut Harness<F> {
-        &mut self.harness
-    }
-}
-
-impl Pair {
-    /// An `f32` pair. [`with_format`](Pair::with_format) builds one for
-    /// another sample format.
-    pub fn new(max_block: usize) -> Self {
-        Self::with_format(max_block)
-    }
-
-    /// As [`new`](Self::new), with the executor running blocks on a shared
-    /// [`TestPool`] of `workers` participants (`1`: no pool).
-    pub fn with_workers(max_block: usize, workers: usize) -> Self {
-        let mut pair = Self::new(max_block);
-        if workers > 1 {
-            pair.exec.set_pool(Some(test_pool(workers)));
-        }
-        pair
-    }
-}
-
-impl<F: Float> Pair<F> {
-    /// A pair in sample format `F`.
-    pub fn with_format(max_block: usize) -> Self {
-        Self {
-            harness: Harness::with_format(max_block),
-            reference: Reference::with_format(prepare(max_block)),
-        }
-    }
-
-    /// Switch both to `graph`, building fresh units for whatever is new or
-    /// regenerated.
-    pub fn switch(&mut self, graph: &ValidGraph, kinds: &BTreeMap<NodeKey, Kind>) {
-        self.switch_with_fades(graph, kinds, &BTreeMap::new());
-    }
-
-    /// [`Harness::switch_with_fades`]; the reference gets every fade and
-    /// decides for itself, and derives a cut from the two specs.
-    pub fn switch_with_fades(
-        &mut self,
-        graph: &ValidGraph,
-        kinds: &BTreeMap<NodeKey, Kind>,
-        fades: &BTreeMap<NodeKey, Fade>,
-    ) {
-        self.harness.switch_with_fades(graph, kinds, fades);
-        // The reference decides for itself what is new, from generations; give
-        // it a fresh unit for every key it might need.
-        let all = units_costed(
-            kinds,
-            &self.harness.costs,
-            graph.topology().nodes.keys().copied(),
-        );
-        self.reference
-            .set_graph_with(graph, all, fades, self.harness.editor.values());
-    }
-
-    /// Move edge `id`'s weight to `base` in both.
-    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
-        self.harness.set_edge_gain(id, base);
-        self.reference.set_edge_gain(id, base);
-    }
-
-    /// Move `key`'s mode in both.
-    pub fn set_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
-        self.harness.set_mode(key, mode);
-        self.reference.set_mode(key, mode);
-    }
-
-    /// Move `key`'s mix in both.
-    pub fn set_mix(&mut self, key: NodeKey, mix: tutti_units::Mix) {
-        self.harness.set_mix(key, mix);
-        self.reference.set_mix(key, mix);
-    }
-
-    /// Move `key`'s mix range in both.
-    pub fn set_mix_range(&mut self, key: NodeKey, range: crate::ParamRange) {
-        self.harness.set_mix_range(key, range);
-        let at = crate::ParamIn {
-            node: key,
-            param: crate::NodeMix::ADDR,
-        };
-        self.reference.set_param_range(at, range);
-    }
-
-    /// Move edge `id`'s range in both.
-    pub fn set_edge_gain_range(&mut self, id: crate::EdgeId, range: crate::ParamRange) {
-        self.harness.set_edge_gain_range(id, range);
-        self.reference.set_edge_gain_range(id, range);
-    }
-
-    /// Render one block through both; return (executor, reference) outputs.
-    pub fn block(&mut self, frames: usize, input: &[F]) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
-        let transport = TransportPosition::new(
-            true,
-            tutti_units::Bpm::of(120.0),
-            tutti_units::Beat::new(0.0),
-            None,
-        );
-        self.block_at(frames, input, &transport)
-    }
-
-    /// `block`, under a transport the caller moves.
-    pub fn block_at(
-        &mut self,
-        frames: usize,
-        input: &[F],
-        transport: &TransportPosition,
-    ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
-        self.block_with_changes(frames, input, transport, &TransportChanges::NONE)
-    }
-
-    /// `block_at`, with the transport changing inside the block.
-    pub fn block_with_changes(
-        &mut self,
-        frames: usize,
-        input: &[F],
-        transport: &TransportPosition,
-        changes: &TransportChanges,
-    ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
-        let chans = self.harness.channels(frames, input);
-        let ins: Vec<&[F]> = chans.iter().map(Vec::as_slice).collect();
-        let a = self
-            .harness
-            .block_with_changes(frames, input, transport, changes);
-        let mut b = vec![vec![F::ZERO; frames]; self.harness.outputs];
-        {
-            let mut outs: Vec<&mut [F]> = b.iter_mut().map(Vec::as_mut_slice).collect();
-            self.reference
-                .process_with_changes(frames, transport, changes, &ins, &mut outs);
-        }
-        // The one place either interpreter may refuse an event is a writer
-        // past its node's declared capacity (`Kind::Burst`), which both do
-        // alike. Anything else the executor drops would surface as a
-        // divergence far from its cause, so the two counts are asserted equal
-        // here, where it happens.
-        assert_eq!(
-            self.harness.exec.dropped_event_count(),
-            self.reference.dropped_event_count(),
-            "the executor dropped events the reference did not"
-        );
-        (a, b)
-    }
-}
-
 /// A deterministic main input signal.
 pub fn input_signal<F: Float>(start: u64, frames: usize) -> Vec<F> {
     (0..frames)
@@ -1298,11 +1127,6 @@ pub fn test_pool(participants: usize) -> Arc<dyn crate::Pool> {
 /// block's tasks rarely split evenly), four and eight (more participants
 /// than a small graph has tasks).
 pub const WORKERS: [usize; 4] = [2, 3, 4, 8];
-
-/// A participant count from `WORKERS` for a proptest `seed`.
-pub fn workers_for(seed: u64) -> usize {
-    WORKERS[(seed.rotate_left(17) % WORKERS.len() as u64) as usize]
-}
 
 /// A source that is `1.0` for its first `len` frames, then silent for good
 /// (and says so, `Status::Silent`).

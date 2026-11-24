@@ -106,7 +106,6 @@ impl Default for BlockConfig {
 /// What every build shares, whichever state the builder is in.
 #[derive(Debug)]
 pub(crate) struct Options {
-    inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     main_output: Option<ChannelTopology>,
     /// What the output device's channels are, when the host states it
@@ -150,7 +149,6 @@ impl std::fmt::Debug for MidiBackend {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            inputs: ChannelLayout::EMPTY,
             outputs_floor: ChannelLayout::STEREO,
             main_output: None,
             device_topology: None,
@@ -436,7 +434,6 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         );
         let transport = Transport::new(rate);
         let mut graph = Graph::new(
-            self.opts.inputs,
             outputs,
             rate,
             LIVE_MAX_BLOCK,
@@ -685,14 +682,6 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
 }
 
 impl<C: Clock> SessionBuilder<C> {
-    /// Main inputs (hardware or host input channels). Default none
-    /// ([`ChannelLayout::EMPTY`]).
-    #[must_use]
-    pub fn inputs(mut self, inputs: ChannelLayout) -> Self {
-        self.opts.inputs = inputs;
-        self
-    }
-
     /// The platform audio host the output device and every input the session
     /// opens (`Session::add_input`, feature `capture`) go through.
     /// Default [`AudioHost::Default`](tutti_cpal::AudioHost::Default); asking for
@@ -965,7 +954,6 @@ impl<C: Clock> SessionBuilder<C> {
 
         let transport = Transport::new(rate);
         let mut graph = Graph::new(
-            self.opts.inputs,
             outputs,
             rate,
             max_block,
