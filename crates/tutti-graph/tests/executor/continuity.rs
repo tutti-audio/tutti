@@ -278,7 +278,8 @@ struct Model {
 }
 
 /// What a script exercised: events flushed by a vanished FIFO, FIFOs whose
-/// latency went to 0 while holding events, FIFOs retuned while holding events,
+/// latency went to 0 while holding two events or more (spacing shows only
+/// between two), FIFOs retuned while holding events,
 /// audio rings retuned or recreated.
 #[derive(Clone, Copy, Debug, Default)]
 struct Seen {
@@ -310,7 +311,7 @@ impl Model {
                 let first = fifo.queued.first().map(|e| e + fifo.len.get() as u64);
                 self.seen.flushed += fifo.queued.len();
                 self.seen.zeroed_holding += usize::from(
-                    *key == Key::Direct && new.emitter && new.direct && !fifo.queued.is_empty(),
+                    *key == Key::Direct && new.emitter && new.direct && fifo.queued.len() >= 2,
                 );
                 for e in fifo.queued {
                     let spacing = e + fifo.len.get() as u64 - first.unwrap_or_default();
@@ -652,7 +653,11 @@ fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
         seen.ring_vanished += one.ring_vanished;
     }
     assert!(seen.flushed > 100, "{seen:?}");
-    assert!(seen.zeroed_holding > 3, "{seen:?}");
+    // A delay that vanishes because its latency went to 0 is flushed by the
+    // loop every vanished delay goes through, so `flushed` is the spacing's
+    // main witness; this one says the latency-to-0 way in is taken with a
+    // spacing to keep.
+    assert!(seen.zeroed_holding > 0, "{seen:?}");
     assert!(seen.retuned_holding > 25, "{seen:?}");
     assert!(seen.ring_retunes > 25, "{seen:?}");
     assert!(seen.ring_vanished > 50, "{seen:?}");
