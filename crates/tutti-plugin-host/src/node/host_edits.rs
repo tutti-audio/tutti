@@ -8,18 +8,20 @@
 //! through its `Control` on the main thread (its editor, its presets); the two
 //! are different writers.
 //!
-//! **One reader, claimed.** The slots have one reader, in one cell shared by
-//! every node of the plugin, so a rebind's successor drains the same slots. It
-//! is taken by:
+//! **One reader, claimed, and the claim is "the plugin is being called".** The
+//! slots have one reader, in one cell shared by every node of the plugin, so a
+//! rebind's successor drains the same slots. It is taken by:
 //!
-//! - the node, at the head of each block and in each parked poll:
-//!   [`EditPort::drain`] claims the cell without waiting, and a refused claim
-//!   drains on the next one, losing nothing. After the writes it drained are
-//!   handed to the plugin, the node [publishes](EditPort::publish) how far the
-//!   slots were swept;
+//! - the node, for the whole of a block and of a parked flush
+//!   ([`EditPort::claim`]): from its head until the Processor's call has returned
+//!   and the hand-off is [published](EditPort::publish). A claim the control side
+//!   holds means the plugin is being called from there, so the node makes no call:
+//!   the block is refused whole and counted as an unlent one;
 //! - the control side, only when a [`Settle`] finds the node idle (a whole window
-//!   with no drain): [`EditPost::apply_idle`] claims the cell, no wait, and
+//!   with no visit): [`EditPost::apply_idle`] claims the cell, no wait, and
 //!   applies what no block took through the plugin's own `Control`, out of band.
+//!   It is refused exactly while a block runs, so it never calls the plugin
+//!   beside one that began before it.
 //!
 //! A read or a save made after a write waits, as a polled value, until the node
 //! has published a sweep that reaches the write ([`EditPost::poll`]). Each write
