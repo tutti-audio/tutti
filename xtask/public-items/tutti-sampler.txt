@@ -93,6 +93,7 @@ fn streamer::stream::StreamHandle::id
 fn streamer::stream::StreamHandle::loop_
 fn streamer::stream::StreamHandle::looping_cell
 fn streamer::stream::StreamHandle::reclaim
+fn streamer::stream::StreamHandle::reclaimer
 fn streamer::stream::StreamHandle::status
 fn testing::MockTransport::advance
 fn testing::MockTransport::beat
