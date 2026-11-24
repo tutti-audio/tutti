@@ -466,12 +466,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         WIDTH,
         NO_AUDIO_PORT,
     ),
-    ty(
-        "crates/tutti-nodes/",
-        "ForeignLaneConfig",
-        WIDTH,
-        NO_AUDIO_PORT,
-    ),
     ty("crates/tutti-nodes/", "KernelConfig", WIDTH, KERNEL_WIDTH),
     ty("crates/tutti-nodes/", "EqBandConfig", WIDTH, MONO_ONLY),
     ty("crates/tutti-nodes/", "MidSideConfig", WIDTH, STEREO_ONLY),

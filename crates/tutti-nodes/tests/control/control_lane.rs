@@ -370,14 +370,14 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
         Some(1000.0),
     );
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::from(
-        ForeignLaneConfig::new(
-            ParamId::new(9),
-            program(Some(flat), vec![]),
-            ParamRange::of(0.0, 2000.0),
-        )
-        .knob(1000.0),
-    );
+    let plugin = ForeignLaneConfig::new(
+        ParamId::new(9),
+        program(Some(flat), vec![]),
+        ParamRange::of(0.0, 2000.0),
+    )
+    .knob(1000.0)
+    .build()
+    .0;
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");
     let (mut host, mut all) = (Host::new(), Vec::new());
@@ -412,11 +412,13 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, f64::from(BOUND)));
     let lane = native(&ed, 2, program(Some(ramp()), vec![]), Some(0.0));
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::from(ForeignLaneConfig::new(
+    let plugin = ForeignLaneConfig::new(
         ParamId::new(9),
         program(Some(ramp()), vec![]),
         ParamRange::of(0.0, f64::from(BOUND)),
-    ));
+    )
+    .build()
+    .0;
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");
     let (mut host, mut all) = (Host::new(), Vec::new());
@@ -554,9 +556,10 @@ fn an_export_is_the_live_render_bit_for_bit() {
     wire_sink(
         &mut ed,
         300,
-        ControlLaneNode::from(
-            ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::of(0.0, 1.0)).knob(0.5),
-        ),
+        ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::of(0.0, 1.0))
+            .knob(0.5)
+            .build()
+            .0,
         301,
     );
     ed.commit().expect("commits");
@@ -849,11 +852,13 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(128)),
     ));
-    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
+    let lane = ForeignLaneConfig::new(
         ParamId::new(3),
         ControlProgram::from_curve(Arc::clone(&curve)),
         ParamRange::of(0.0, 1.0),
-    ));
+    )
+    .build()
+    .0;
     wire_sink(&mut ed, 1, lane, 2);
     ed.commit().expect("commits");
     let (mut host, mut all) = (Host::new(), Vec::new());
@@ -1252,9 +1257,10 @@ fn an_unread_source_is_no_point() {
         .inputs(vec![input])
         .build()
         .expect("valid");
-    let lane = ControlLaneNode::from(
-        ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0)).knob(0.25),
-    );
+    let lane = ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0))
+        .knob(0.25)
+        .build()
+        .0;
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0));
     let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
@@ -1373,14 +1379,14 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
 /// built without a knob refuses one.
 #[test]
 fn lane_controls_reach_their_own_cells() {
-    let plugin = ControlLaneNode::from(
-        ForeignLaneConfig::new(
-            ParamId::new(1),
-            ControlProgram::default(),
-            ParamRange::of(0.0, 1.0),
-        )
-        .knob(0.25),
-    );
+    let plugin = ForeignLaneConfig::new(
+        ParamId::new(1),
+        ControlProgram::default(),
+        ParamRange::of(0.0, 1.0),
+    )
+    .knob(0.25)
+    .build()
+    .0;
     let c = plugin.controls();
     assert_eq!(c.value(), Some(0.25));
     assert!(c.store(0.75));
@@ -1426,9 +1432,10 @@ fn a_constant_layer_is_one_held_value() {
     for (layers, rolling) in cases {
         let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
         let p = program(None, layers);
-        let lane = ControlLaneNode::from(
-            ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0)).knob(0.25),
-        );
+        let lane = ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0))
+            .knob(0.25)
+            .build()
+            .0;
         wire_sink(&mut ed, 1, lane, 2);
         ed.commit().expect("commits");
         let mut host = Host::new();
