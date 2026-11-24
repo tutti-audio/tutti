@@ -217,7 +217,7 @@ impl GainCells {
         values: &GraphValues,
         bus_weights: &BusLanes,
     ) -> BTreeMap<EdgeId, GainCell> {
-        let lanes: BTreeSet<EdgeId> = plan.sum_lanes.iter().flatten().copied().collect();
+        let lanes: BTreeSet<EdgeId> = plan.program.sum_lanes.iter().flatten().copied().collect();
         self.0.retain(|id, _| lanes.contains(id));
         lanes
             .into_iter()

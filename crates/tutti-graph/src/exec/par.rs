@@ -254,16 +254,16 @@ impl Claims {
     fn for_plan(plan: &Plan, store_len: usize, injects: usize) -> Self {
         let units = plan.units.len();
         Self {
-            audio: ClaimTable::new(plan.audio_slots as usize),
-            events: ClaimTable::new(plan.event_slots as usize),
+            audio: ClaimTable::new(plan.program.sizing.audio.len()),
+            events: ClaimTable::new(plan.program.sizing.events.len()),
             units: ClaimTable::new(store_len),
-            rings: ClaimTable::new(plan.delays.len()),
-            audio_fb: ClaimTable::new(plan.audio_feedback.len()),
-            event_fb: ClaimTable::new(plan.event_feedback.len()),
-            taps: ClaimTable::new(plan.taps.len()),
-            event_taps: ClaimTable::new(plan.event_taps.len()),
-            meters: ClaimTable::new(plan.meters.len()),
-            lanes: ClaimTable::new(plan.sum_lanes.len()),
+            rings: ClaimTable::new(plan.program.delays.len()),
+            audio_fb: ClaimTable::new(plan.program.audio_feedback.len()),
+            event_fb: ClaimTable::new(plan.program.event_feedback.len()),
+            taps: ClaimTable::new(plan.program.taps.len()),
+            event_taps: ClaimTable::new(plan.program.event_taps.len()),
+            meters: ClaimTable::new(plan.program.meters.len()),
+            lanes: ClaimTable::new(plan.program.sum_lanes.len()),
             inject: ClaimTable::new(injects),
             has_inject: ClaimTable::new(units),
             has_due: ClaimTable::new(units),
@@ -286,7 +286,7 @@ impl Par {
         let graph = TaskGraph::new(
             plan.task_activation.as_slice(),
             &plan.task_succ.offsets,
-            &plan.task_succ.targets,
+            crate::compile::ids::raw(&plan.task_succ.targets),
         );
         let units = plan.units.len();
         let mut inject_spans = IdTable::filled(units, Span::default());
@@ -311,7 +311,9 @@ impl Par {
             participants,
             spreads,
             graph,
-            flags: (0..plan.audio_slots).map(|_| AtomicU8::new(0)).collect(),
+            flags: (0..plan.program.sizing.audio.len())
+                .map(|_| AtomicU8::new(0))
+                .collect(),
             claims: Claims::for_plan(plan, store_len, n_inject as usize),
             inject_spans,
             workers: (0..workers)
@@ -488,7 +490,7 @@ fn run_alone<F: Float>(par: &mut Par, b: Block<'_, '_, F>) -> bool {
         fade_ended: &mut ended,
         log: &mut b.logs[0],
     };
-    for op in &b.plan.ops {
+    for op in &b.plan.program.ops {
         cx.run_op(&frame, op);
     }
     ended
@@ -657,7 +659,7 @@ impl<F: Float> Shared<'_, '_, F> {
                 self.graph.work(who, self.waits, |t| {
                     let span = self.frame.plan.tasks[TaskId::new(t)];
                     for &op in &self.frame.plan.task_ops[span.range()] {
-                        cx.run_op(&self.frame, &self.frame.plan.ops[op]);
+                        cx.run_op(&self.frame, &self.frame.plan.program.ops[op]);
                     }
                 });
             }));
@@ -734,7 +736,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &mut a,
                     flags,
                     &e,
-                    &fx.plan.audio_list[srcs.range()],
+                    &fx.plan.program.audio_list[srcs.range()],
                     &mut [],
                     &[],
                     AudioSlotId::new(dst),
@@ -757,9 +759,9 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &mut a,
                     flags,
                     &e,
-                    &fx.plan.audio_list[srcs.range()],
+                    &fx.plan.program.audio_list[srcs.range()],
                     &mut lanes,
-                    &fx.plan.gain_ports[gains.range()],
+                    &fx.plan.program.gain_ports[gains.range()],
                     AudioSlotId::new(dst),
                     frames,
                     fx.plan.prepare.declick(),
@@ -780,7 +782,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
             Op::EventMerge { srcs, dst, bound } => {
                 let mut e = self.events.slots();
                 let lost = event_merge_op(
-                    &fx.plan.event_list[srcs.range()],
+                    &fx.plan.program.event_list[srcs.range()],
                     EventSlotId::new(dst),
                     bound,
                     &mut e,
@@ -849,7 +851,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     crate::edges::tap::tap_op::<F, _>(
                         tap,
                         &a,
-                        &fx.plan.audio_list[srcs.range()],
+                        &fx.plan.program.audio_list[srcs.range()],
                         fx.env.frame,
                         frames,
                     );
@@ -870,7 +872,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                         meter,
                         &a,
                         flags,
-                        &fx.plan.audio_list[srcs.range()],
+                        &fx.plan.program.audio_list[srcs.range()],
                         frames,
                     );
                 }

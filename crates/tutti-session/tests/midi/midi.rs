@@ -110,7 +110,7 @@ fn plan_nodes(s: &Session) -> usize {
         .testing()
         .sent_plan()
         .expect("a plan")
-        .order()
+        .units()
         .len()
 }
 

@@ -409,7 +409,7 @@ impl<F: Float> Executor<F> {
                 RingFrom::Keep { from, rate } => {
                     let mut ring = old.rings.get_mut(from as usize).and_then(Option::take);
                     if let Some(Ring::Event(f)) = &mut ring {
-                        f.retune(plan.delays.as_slice()[i].len);
+                        f.retune(plan.program.delays.as_slice()[i].len);
                         f.resize(rate, max_block);
                     }
                     new.rings[i] = ring;
@@ -469,7 +469,7 @@ impl<F: Float> Executor<F> {
             if let Some(j) = *from {
                 let writer = old.meters.get_mut(j as usize).and_then(Option::take);
                 if let Some(w) = &writer {
-                    w.set_width(plan.meters.as_slice()[i].1);
+                    w.set_width(plan.program.meters.as_slice()[i].1);
                 }
                 new.meters[i] = writer;
             }
