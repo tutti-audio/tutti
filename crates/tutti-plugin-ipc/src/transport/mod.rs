@@ -5,8 +5,8 @@
 //!   commands and responses.
 //! - [`shm`] — named shared-memory audio storage for bulk sample transfer.
 //!
-pub mod control;
-pub mod shm;
+pub(crate) mod control;
+pub(crate) mod shm;
 
 // The control stream's platform difference (how the server is handed its end of the
 // connection, waiting for bytes) is `sys`'s: this `mod` line carries the transport's only platform `cfg`.
@@ -18,6 +18,13 @@ mod sys;
 mod sys;
 
 #[cfg(any(test, feature = "testing"))]
+#[cfg_attr(
+    not(feature = "testing"),
+    expect(
+        unreachable_pub,
+        reason = "exported with feature `testing`; the crate's tests use it too"
+    )
+)]
 pub use sys::broker_pair;
 /// What a mock server receives a slab over.
 #[cfg(test)]

@@ -22,7 +22,7 @@ enum AttributeValue {
     Binary(Arc<[u8]>),
 }
 
-pub struct AttributeList {
+pub(crate) struct AttributeList {
     attributes: Mutex<HashMap<String, AttributeValue>>,
     /// The value `getBinary` last handed a pointer to, per key.
     /// `getBinary` returns a pointer with no lifetime and releases the lock, so
@@ -39,7 +39,7 @@ impl Class for AttributeList {
 }
 
 impl AttributeList {
-    pub fn new() -> ComWrapper<Self> {
+    pub(crate) fn new() -> ComWrapper<Self> {
         ComWrapper::new(Self {
             attributes: Mutex::new(HashMap::new()),
             lent: Mutex::new(HashMap::new()),

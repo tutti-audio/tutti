@@ -14,7 +14,7 @@ use vst::plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters}
 use crate::core::{self, Core, Dsp, Ev, MAX_CHANNELS, Sample, Transport};
 
 /// `AEffect::uniqueId`.
-pub const UNIQUE_ID: i32 = i32::from_be_bytes(*b"TSHP");
+pub(crate) const UNIQUE_ID: i32 = i32::from_be_bytes(*b"TSHP");
 
 /// The parameters' object, with the host to tell what `core::NOTICE_ON_LOAD` says.
 struct Params(Arc<Core>, HostCallback);
@@ -311,6 +311,6 @@ impl Shared {
 /// `callback` must be the host's `audioMaster` function.
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "C" fn VSTPluginMain(callback: HostCallbackProc) -> *mut AEffect {
+pub(crate) extern "C" fn VSTPluginMain(callback: HostCallbackProc) -> *mut AEffect {
     vst::main::<Shared>(callback)
 }

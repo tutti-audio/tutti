@@ -39,7 +39,7 @@ enum State {
 }
 
 /// A unit in whichever state it is in; see the module docs.
-pub struct Au {
+pub(crate) struct Au {
     state: State,
     /// What the next activation carries: the rate and block ceiling of the
     /// configuration the unit was built at, then whatever the test changed.
@@ -56,7 +56,7 @@ fn prepare_of(rate: SampleRate, block: u32) -> Prepare {
 
 impl Au {
     /// A unit at `rate`/`block`, not initialized. See [`AuLoaded::new`].
-    pub fn new(
+    pub(crate) fn new(
         component: tutti_au_host::component::AuComponentRef,
         rate: SampleRate,
         block: u32,
@@ -71,7 +71,7 @@ impl Au {
 
     /// [`new`](Self::new) with its drops handed to `work`, for a test that
     /// runs the collector itself.
-    pub fn new_on(
+    pub(crate) fn new_on(
         component: tutti_au_host::component::AuComponentRef,
         rate: SampleRate,
         block: u32,
@@ -81,7 +81,7 @@ impl Au {
     }
 
     /// See [`AuLoaded::new_with_config`].
-    pub fn new_with_config(
+    pub(crate) fn new_with_config(
         component: tutti_au_host::component::AuComponentRef,
         config: StreamConfig,
     ) -> tutti_au_host::Result<Self> {
@@ -98,7 +98,7 @@ impl Au {
     /// # Panics
     ///
     /// When the unit does not load or refuses the stream configuration.
-    pub fn shared(rate: SampleRate, block: u32) -> Self {
+    pub(crate) fn shared(rate: SampleRate, block: u32) -> Self {
         let loaded = AuLoaded::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
@@ -119,7 +119,7 @@ impl Au {
     }
 
     /// A unit from a scan result, not initialized.
-    pub fn from_info(
+    pub(crate) fn from_info(
         info: &AuComponentInfo,
         rate: SampleRate,
         block: u32,
@@ -136,14 +136,14 @@ impl Au {
     }
 
     /// Whether the unit is initialized: split into its halves.
-    pub fn is_initialized(&self) -> bool {
+    pub(crate) fn is_initialized(&self) -> bool {
         matches!(self.state, State::Active { .. })
     }
 
     /// Activates at the current [`Prepare`]. No-op if already active. On a
     /// refusal the unit is as it was (loaded), unless it could not be handed
     /// back, which leaves it gone.
-    pub fn initialize(&mut self) -> tutti_au_host::Result<()> {
+    pub(crate) fn initialize(&mut self) -> tutti_au_host::Result<()> {
         match std::mem::replace(&mut self.state, State::Gone) {
             State::Loaded(loaded) => match loaded.initialize(self.prepare) {
                 Ok((processor, controller)) => {
@@ -170,7 +170,7 @@ impl Au {
 
     /// Rejoins the halves. No-op if not initialized. A unit that will not
     /// uninitialize stays active.
-    pub fn uninitialize(&mut self) -> tutti_au_host::Result<()> {
+    pub(crate) fn uninitialize(&mut self) -> tutti_au_host::Result<()> {
         match std::mem::replace(&mut self.state, State::Gone) {
             State::Active {
                 processor,
@@ -216,13 +216,13 @@ impl Au {
     }
 
     /// A new sample rate: a rejected one leaves the unit on the rate it was on.
-    pub fn set_sample_rate(&mut self, rate: SampleRate) -> tutti_au_host::Result<()> {
+    pub(crate) fn set_sample_rate(&mut self, rate: SampleRate) -> tutti_au_host::Result<()> {
         let block = self.block_size();
         self.restream(rate, block)
     }
 
     /// A new block ceiling. Zero is refused.
-    pub fn set_block_size(&mut self, frames: u32) -> tutti_au_host::Result<()> {
+    pub(crate) fn set_block_size(&mut self, frames: u32) -> tutti_au_host::Result<()> {
         if frames == 0 {
             return Err(AuError::InvalidBuffer(
                 "block_size must be non-zero".to_string(),
@@ -234,7 +234,10 @@ impl Au {
 
     /// Writes the render mode the way the host does: the next activation carries
     /// it. Returns whether *this unit* accepted the property.
-    pub fn set_offline_render_bracketed(&mut self, offline: bool) -> tutti_au_host::Result<bool> {
+    pub(crate) fn set_offline_render_bracketed(
+        &mut self,
+        offline: bool,
+    ) -> tutti_au_host::Result<bool> {
         self.prepare = self.prepare.with_mode(if offline {
             RenderMode::Offline
         } else {
@@ -260,7 +263,7 @@ impl Au {
     }
 
     /// See [`AuProcessor::render_planes`]; an uninitialized unit refuses.
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         input: &[&[f32]],
         output: &mut [&mut [f32]],
@@ -275,7 +278,7 @@ impl Au {
     }
 
     /// See [`AuProcessor::render_planes`]; an uninitialized unit refuses.
-    pub fn process_f64(
+    pub(crate) fn process_f64(
         &mut self,
         input: &[&[f64]],
         output: &mut [&mut [f64]],
@@ -292,7 +295,7 @@ impl Au {
     /// Clears the unit's audio state. Legal before initialization too, where it
     /// is a no-op in practice (see `au_notification.rs`); while active the
     /// Processor's flush also restarts its render clock.
-    pub fn reset(&mut self) -> tutti_au_host::Result<()> {
+    pub(crate) fn reset(&mut self) -> tutti_au_host::Result<()> {
         match &self.state {
             State::Active { processor, .. } => processor.borrow_mut().flush(),
             _ => Ok(self.unit().reset(Scope::GLOBAL, Element::ZERO)?),
@@ -301,7 +304,7 @@ impl Au {
 
     /// See [`AuProcessor::send_midi`]. Only an active unit has the SysEx room
     /// and the render path; a loaded one takes nothing.
-    pub fn send_midi(&self, events: &[tutti_graph::UmpAt]) {
+    pub(crate) fn send_midi(&self, events: &[tutti_graph::UmpAt]) {
         if let State::Active { processor, .. } = &self.state {
             processor.borrow_mut().send_midi(events);
         }
@@ -309,7 +312,7 @@ impl Au {
 
     /// The protocol the active unit takes MIDI in; `None` before activation or
     /// for a legacy unit.
-    pub fn midi_protocol(&self) -> Option<tutti_au_ffi::Wire> {
+    pub(crate) fn midi_protocol(&self) -> Option<tutti_au_ffi::Wire> {
         match &self.state {
             State::Active { processor, .. } => processor.borrow().midi_protocol(),
             _ => None,
@@ -317,7 +320,7 @@ impl Au {
     }
 
     /// See [`AuProcessor::groups_dropped`]; zero before activation.
-    pub fn groups_dropped(&self) -> u64 {
+    pub(crate) fn groups_dropped(&self) -> u64 {
         match &self.state {
             State::Active { processor, .. } => processor.borrow().groups_dropped(),
             _ => 0,
@@ -325,7 +328,7 @@ impl Au {
     }
 
     /// See [`AuProcessor::unsendable_dropped`]; zero before activation.
-    pub fn unsendable_dropped(&self) -> u64 {
+    pub(crate) fn unsendable_dropped(&self) -> u64 {
         match &self.state {
             State::Active { processor, .. } => processor.borrow().unsendable_dropped(),
             _ => 0,
@@ -333,7 +336,7 @@ impl Au {
     }
 
     /// See [`AuProcessor::sysex_dropped`]; zero before activation.
-    pub fn sysex_dropped(&self) -> u64 {
+    pub(crate) fn sysex_dropped(&self) -> u64 {
         match &self.state {
             State::Active { processor, .. } => processor.borrow().sysex_dropped(),
             _ => 0,
@@ -341,7 +344,7 @@ impl Au {
     }
 
     /// See [`AuController::process_push`]; an uninitialized unit refuses.
-    pub fn process_push(
+    pub(crate) fn process_push(
         &mut self,
         scratch: &mut PushScratch,
         frames: u32,
@@ -353,7 +356,7 @@ impl Au {
     }
 
     /// See [`AuController::process_push_multiple`]; an uninitialized unit refuses.
-    pub fn process_push_multiple(
+    pub(crate) fn process_push_multiple(
         &mut self,
         scratch: &mut PushScratch,
         frames: u32,
@@ -365,7 +368,7 @@ impl Au {
     }
 
     /// The state as bytes ([`AuLoaded::class_info`]).
-    pub fn get_state(
+    pub(crate) fn get_state(
         &self,
         _main: tutti_plugin_types::MainThreadMarker,
     ) -> tutti_au_host::Result<Vec<u8>> {
@@ -373,7 +376,7 @@ impl Au {
     }
 
     /// Restores state ([`AuLoaded::set_class_info`]).
-    pub fn set_state(
+    pub(crate) fn set_state(
         &mut self,
         _main: tutti_plugin_types::MainThreadMarker,
         data: &[u8],
@@ -383,7 +386,7 @@ impl Au {
 
     /// How many times the input render callback was installed on the current
     /// activation (0 when not active).
-    pub fn callback_install_count(&self) -> u32 {
+    pub(crate) fn callback_install_count(&self) -> u32 {
         match &self.state {
             State::Active { processor, .. } => processor.borrow().input_callback_installs(),
             _ => 0,
@@ -391,7 +394,7 @@ impl Au {
     }
 
     /// The halves, for a test that drives the traits itself.
-    pub fn halves(&mut self) -> Option<(&mut AuProcessor, &mut AuController)> {
+    pub(crate) fn halves(&mut self) -> Option<(&mut AuProcessor, &mut AuController)> {
         match &mut self.state {
             State::Active {
                 processor,
