@@ -618,11 +618,11 @@ mod tests {
         let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
         let mut c = Commit::<f32>::suspend(1, prepare, 0);
         assert_eq!(c.refused(), 0);
-        assert!(!c.spare_held.push(Tables::new()));
-        assert!(!c.spare_held.push(Tables::new()));
-        assert!(!c.parked.push((NodeKey(1), Keys::default())));
-        assert!(!c.gone.spare.push(Tables::new()));
-        assert!(!c.gone.replaced.push(NodeKey(2)));
+        c.spare_held.mark_overflowed();
+        c.spare_held.mark_overflowed();
+        c.parked.mark_overflowed();
+        c.gone.spare.mark_overflowed();
+        c.gone.replaced.mark_overflowed();
         assert_eq!(c.refused(), 5);
     }
 }

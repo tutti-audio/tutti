@@ -52,6 +52,16 @@ fn a_zero_cap_refuses_every_push() {
     assert!(v.is_overflowed() && v.is_empty() && v.is_full());
 }
 
+/// `mark_overflowed` latches the flag without changing the run.
+#[test]
+fn mark_overflowed_latches_without_pushing() {
+    let mut v = CappedVec::with_capacity(4);
+    assert!(v.push('a'));
+    v.mark_overflowed();
+    assert!(v.is_overflowed());
+    assert_eq!(v.as_slice(), &['a']);
+}
+
 /// `pop` takes the last item and leaves the overflow flag latched.
 #[test]
 fn pop_takes_the_last_item_and_keeps_the_flag() {

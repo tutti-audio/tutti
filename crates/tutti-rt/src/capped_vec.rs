@@ -190,6 +190,13 @@ impl<T> CappedVec<T> {
         self.buf.remove(index)
     }
 
+    /// Counts one refusal in [`refused`](Self::refused) without pushing: the
+    /// caller refused a group of items as a whole and dropped it.
+    #[inline]
+    pub fn mark_overflowed(&mut self) {
+        self.refused = self.refused.saturating_add(1);
+    }
+
     /// Appends from an iterator, stopping at the cap.
     ///
     /// Returns how many items were written; a short return means the rest were
@@ -271,7 +278,8 @@ impl<T> CappedVec<T> {
     /// How many items were refused since the last [`clear`](Self::clear): one
     /// for each refused [`push`](Self::push) or
     /// [`push_within_capacity`](Self::push_within_capacity), each item an
-    /// [`extend`](Self::extend) did not take. Saturates at `usize::MAX`.
+    /// [`extend`](Self::extend) did not take, and each
+    /// [`mark_overflowed`](Self::mark_overflowed). Saturates at `usize::MAX`.
     ///
     /// ```
     /// use tutti_rt::CappedVec;
