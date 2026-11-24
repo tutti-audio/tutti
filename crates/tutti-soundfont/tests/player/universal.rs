@@ -175,6 +175,20 @@ fn general_midi_on_returns_programs_banks_and_tuning_to_the_defaults() {
     near(pitch(&mut rig, 9), 882, "channel 10 is the drum bank again");
 }
 
+/// A preset selected on a channel is the preset the channel plays, whatever
+/// the channel: the melodic preset 0:0 (441 Hz) selected on the percussion
+/// channel, whose own bank holds the octave instrument (882 Hz), plays 441.
+#[test]
+fn a_melodic_preset_selected_on_the_percussion_channel_is_played() {
+    let font = font_with(true);
+    let mut rig = Rig::dry(&font);
+    near(pitch(&mut rig, 9), 882, "the drum bank is the octave one");
+    rig.hand
+        .select(MidiChannel::of(9), &font.presets()[0])
+        .unwrap();
+    near(pitch(&mut rig, 9), 441, "the selected melodic preset");
+}
+
 /// GM2 section 4.9: General MIDI On mutes every sounding note.
 #[test]
 fn general_midi_on_mutes_the_sounding_notes() {
