@@ -19,13 +19,13 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
 
-use tutti_fixtures::midi;
+use tutti_fixtures::{cycle_blocks, midi};
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
     ForkByClone, ForkCause, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
     Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, RenderMode, Shape,
-    Status, TapAlign, TapEvent, TransportPosition, Unforkable, note_off_room,
+    Status, TapAlign, TapEvent, Unforkable, note_off_room,
 };
 use tutti_graph::{NodeMode, Scheduled};
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1};
@@ -154,12 +154,10 @@ struct Rig {
 /// (so the graph's output time is `m` frames).
 fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     ed.insert(
         NodeKey(90),
@@ -193,18 +191,9 @@ fn commit(r: &mut Rig) {
 /// Renders `total` frames in blocks of `sizes` taken in turn (the last one cut
 /// to fit), starting at the executor's current frame.
 fn render(r: &mut Rig, sizes: &[usize], total: usize) {
-    let t = TransportPosition::default();
-    let (mut done, mut i) = (0, 0);
-    while done < total {
-        let n = sizes[i % sizes.len()].min(total - done);
-        let mut chan = vec![0.0f32; n];
-        {
-            let mut outs: Vec<&mut [f32]> = vec![chan.as_mut_slice()];
-            r.exec.process(n, &t, &[], &mut outs);
-        }
+    for n in cycle_blocks(sizes, total) {
+        common::block(&mut r.exec, n, 1);
         r.ed.collect();
-        done += n;
-        i += 1;
     }
 }
 
@@ -986,8 +975,11 @@ fn run_busy(r: &mut Rig) -> Vec<Vec<TapEvent>> {
 /// one-participant run itself is checked against the script and the compensation.
 #[test]
 fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
-    let mut s = rig(1, false, 40);
-    let serial = run_busy(&mut s);
+    let serial = common::agree_across_workers(
+        [2, 3, 4],
+        |workers| run_busy(&mut rig(workers, workers > 1, 40)),
+        Vec::clone,
+    );
     assert!(
         serial.iter().all(|t| !t.is_empty()),
         "every tap carries events"
@@ -1000,10 +992,6 @@ fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
         .map(|(f, u)| at(f, on_port(u, 0)))
         .collect();
     assert_eq!(serial[0], first);
-    for workers in [2, 3, 4] {
-        let mut p = rig(workers, true, 40);
-        assert_eq!(serial, run_busy(&mut p), "{workers} workers");
-    }
 }
 
 /// MIDI 1.0 sustain pedal (CC 64) at `value`.

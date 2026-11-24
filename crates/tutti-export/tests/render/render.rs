@@ -17,12 +17,12 @@ use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
-use tutti_export::{RenderGraph, Resample, Setup};
+use tutti_export::{Control, Normalize, Progress, RenderGraph, Resample, Setup, Stage, TailPolicy};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_timeline::{FrozenClock, RenderClock};
-use tutti_units::Seconds;
 use tutti_units::{Amplitude, Drive, Hz, SampleRate};
+use tutti_units::{Db, Samples, Seconds, Tail};
 
 /// The rate [`config`] renders at.
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -206,7 +206,7 @@ fn a_tail_lengthens_the_output_by_exactly_the_tail() {
     let untailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     let tail = tutti_units::Samples::new(4096);
-    s.render.tail = tail;
+    s.render.tail = TailPolicy::Frames(tail);
     let tailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     assert_eq!(
@@ -234,7 +234,7 @@ fn a_convolver_reports_its_ir_ring_out() {
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     assert_eq!(
-        built(g, RATE).reported_tail().samples(),
+        built(g, RATE).declared_tail().samples(),
         Some(tutti_units::Samples::new(4095)),
     );
 }
@@ -256,7 +256,7 @@ fn cascaded_convolvers_sum_their_tails() {
 
     // 1023 + 2047, which is the ring-out of the 3071-sample cascaded response.
     assert_eq!(
-        built(g, RATE).reported_tail().samples(),
+        built(g, RATE).declared_tail().samples(),
         Some(tutti_units::Samples::new(3070)),
     );
 }
@@ -295,7 +295,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
         .connect(quiet, 0, conv, 0)
         .pipe_output(conv);
 
-    let reported = built(g, RATE).reported_tail();
+    let reported = built(g, RATE).declared_tail();
     assert_eq!(reported.unknown_nodes(), 1, "one node never answered");
     assert_eq!(
         reported.samples(),
@@ -316,7 +316,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
 /// unreporting node on the output path makes the whole figure unspendable.
 #[test]
 fn a_graph_of_stock_nodes_reports_a_spendable_tail() {
-    let reported = dc(RATE).reported_tail();
+    let reported = dc(RATE).declared_tail();
     assert_eq!(reported.unknown_nodes(), 0);
     assert_eq!(reported.samples(), Some(tutti_units::Samples::new(0)));
 }
@@ -369,7 +369,7 @@ fn resolving_an_unbounded_graph_spends_the_cap() {
         .connect(src, 1, rev, 1)
         .pipe_output(rev);
 
-    let reported = built(g, RATE).reported_tail();
+    let reported = built(g, RATE).declared_tail();
     let cap = tutti_units::Samples::new(384_000);
     assert!(
         reported.is_unbounded(),
@@ -392,7 +392,7 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
     let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
-    let reported = built(g, RATE).reported_tail();
+    let reported = built(g, RATE).declared_tail();
     assert_eq!(
         reported.resolve(tutti_units::Samples::new(384_000)),
         tutti_units::Samples::new(4095),
@@ -1356,49 +1356,346 @@ fn silence_planes_carry_no_dither() {
     assert!(out.planes().iter().flatten().all(|s| s.to_bits() == 0));
 }
 
-/// Rings 4000 frames at most (its ceiling), and reports 100 each block.
+/// Rings `ceiling` frames at most, and reports `report` each block (nothing
+/// when `None`).
 #[derive(Clone)]
-struct Narrowing;
+struct Narrowing {
+    ceiling: Tail,
+    report: Option<Tail>,
+}
 
 impl Node for Narrowing {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .tail(tutti_units::Tail::Finite(tutti_units::Samples::new(4_000)))
+        Shape::through_unassigned(ChannelLayout::MONO).tail(self.ceiling)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.report_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(100)));
+        if let Some(report) = self.report {
+            io.report_tail(report);
+        }
         let (ins, mut outs) = io.split();
+        if ins.get(0).iter().all(|&x| x == 0.0) {
+            return Status::Silent;
+        }
         outs.get(0).copy_from_slice(ins.get(0));
         Status::Modified
     }
     fn reset(&mut self) {}
 }
 
-/// **Export spends a node's ceiling, not what it reports each block** (the
-/// fallback when a tail is only known per block). `RenderConfig::tail` is a frame count fixed
-/// before the render (`RenderPlan::new` sizes `output_length` and `total`
-/// from it, and the sink, the progress total, the resampler and the
-/// normalized two-pass render all read it), so a tail the graph reports
-/// only at the programme's end has nowhere to go without a second phase in
-/// all of them. Until that lands the figure is the spec's: a node that
-/// narrows its tail renders the longer, safe ceiling.
-#[test]
-fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let src = g.add(Const::mono(0.5));
-    let node = g.add(ForkByClone(Narrowing));
-    g.connect(src, 0, node, 0).pipe_output(node);
-    let graph = built(g, RATE);
+/// A mono source that is silent, and says so.
+#[derive(Clone)]
+struct Silence;
 
-    let reported = graph.reported_tail();
-    assert_eq!(reported.samples(), Some(tutti_units::Samples::new(4_000)));
+impl Node for Silence {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+fn frames_tail(frames: usize) -> Tail {
+    Tail::Finite(Samples::new(frames))
+}
+
+/// A mono constant of `level` (silence, for 0) through `nodes` in series, each
+/// with its declared ceiling and what it reports.
+fn narrowing_chain(level: f32, nodes: &[(Tail, Option<Tail>)]) -> RenderGraph {
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let source = if level == 0.0 {
+        g.add(ForkByClone(Silence))
+    } else {
+        g.add(Const::mono(level))
+    };
+    through(g, source, nodes)
+}
+
+/// `source` through `nodes` in series, to the output.
+fn through(
+    mut g: GraphBuilder,
+    source: tutti_graph::NodeKey,
+    nodes: &[(Tail, Option<Tail>)],
+) -> RenderGraph {
+    let mut at = source;
+    for &(ceiling, report) in nodes {
+        let node = g.add(ForkByClone(Narrowing { ceiling, report }));
+        g.connect(at, 0, node, 0);
+        at = node;
+    }
+    g.pipe_output(at);
+    built(g, RATE)
+}
+
+/// A mono source of 0.5 for its first `loud` frames and silence after.
+#[derive(Clone)]
+struct Burst {
+    loud: usize,
+    at: usize,
+}
+
+impl Node for Burst {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let out = io.output(0);
+        for (i, x) in out.iter_mut().enumerate() {
+            *x = if self.at + i < self.loud { 0.5 } else { 0.0 };
+        }
+        let silent = self.at >= self.loud;
+        self.at += out.len();
+        if silent {
+            Status::Silent
+        } else {
+            Status::Modified
+        }
+    }
+    fn reset(&mut self) {
+        self.at = 0;
+    }
+}
+
+/// The frames of `graph`'s 0.2 s render (8,820 at 44.1 kHz) with `tail`.
+fn tailed_frames(graph: RenderGraph, tail: TailPolicy) -> usize {
+    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    cfg.render.tail = tail;
+    render_to_buffers(graph, &cfg, &FrozenClock)
+        .unwrap()
+        .frames()
+        .get()
+}
+
+/// 0.2 s at 44.1 kHz.
+const PROGRAMME: usize = 8_820;
+
+fn reported(ceiling: usize) -> TailPolicy {
+    TailPolicy::Reported {
+        ceiling: Samples::new(ceiling),
+        kept_latency: Samples::ZERO,
+    }
+}
+
+/// **An export spends the tail its nodes report at the programme's end**, not
+/// the ceiling they declare: the node declares 4,000 frames and reports 100.
+#[test]
+fn export_spends_the_tail_its_nodes_report_at_the_programmes_end() {
+    let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(frames_tail(100)))]);
+    assert_eq!(graph.declared_tail().samples(), Some(Samples::new(4_000)));
+    assert_eq!(tailed_frames(graph, reported(4_000)), PROGRAMME + 100);
+}
+
+/// A node fed by one that still owes rings out its whole ceiling after it: the
+/// reported figure says what its own last input left, not what the upstream's
+/// remaining output will excite. Upstream reports 300 (ceiling 5,000), the
+/// node after it declares 4,000 and reports 100: 300 + 4,000.
+#[test]
+fn a_node_fed_by_one_that_still_owes_spends_its_ceiling_after_it() {
+    let graph = narrowing_chain(
+        0.5,
+        &[
+            (frames_tail(5_000), Some(frames_tail(300))),
+            (frames_tail(4_000), Some(frames_tail(100))),
+        ],
+    );
+    assert_eq!(graph.declared_tail().samples(), Some(Samples::new(9_000)));
+    assert_eq!(
+        tailed_frames(graph, reported(9_000)),
+        PROGRAMME + 300 + 4_000
+    );
+}
+
+/// A node whose input went quiet owes what its report has left: its input is
+/// silent from frame 5,120 (five 1,024-frame blocks) and the programme ends at
+/// frame 8,820, so three whole quiet blocks and the last block's 628 frames
+/// have passed (3,700) of the 5,000 it reports: 1,300 are left.
+#[test]
+fn a_node_whose_input_went_quiet_spends_what_is_left_of_its_report() {
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let source = g.add(ForkByClone(Burst { loud: 5_120, at: 0 }));
+    let graph = through(g, source, &[(frames_tail(6_000), Some(frames_tail(5_000)))]);
+    assert_eq!(tailed_frames(graph, reported(6_000)), PROGRAMME + 1_300);
+}
+
+/// Passes its input, then rings `T` frames of 0.25 after the input stops, and
+/// reports `T` under a larger ceiling.
+#[derive(Clone)]
+struct Rings {
+    ring: usize,
+    left: usize,
+}
+
+impl Node for Rings {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO).tail(frames_tail(self.ring + 5_000))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.report_tail(frames_tail(self.ring));
+        let (ins, mut outs) = io.split();
+        for (o, &i) in outs.get(0).iter_mut().zip(ins.get(0)) {
+            *o = if i != 0.0 {
+                self.left = self.ring;
+                i
+            } else if self.left > 0 {
+                self.left -= 1;
+                0.25
+            } else {
+                0.0
+            };
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {
+        self.left = 0;
+    }
+}
+
+/// Delays its input by `D` frames and declares that latency.
+#[derive(Clone)]
+struct Delay {
+    line: Vec<f32>,
+    at: usize,
+}
+
+impl Node for Delay {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .latency(tutti_units::Latency::new(Samples::new(self.line.len())))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let (ins, mut outs) = io.split();
+        for (o, &i) in outs.get(0).iter_mut().zip(ins.get(0)) {
+            *o = std::mem::replace(&mut self.line[self.at], i);
+            self.at = (self.at + 1) % self.line.len();
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {
+        self.line.fill(0.0);
+        self.at = 0;
+    }
+}
+
+/// The ring-out of a node reaches the output through the latency after it: a
+/// source ends exactly at the programme's end, a node rings 3,000 frames
+/// after it and reports so, and a node of 2,048 frames' latency follows. The
+/// ring leaves the graph 2,048 frames later than it is made, so the export
+/// pulls 2,048 + 3,000 frames past the programme, keeps the 3,000 (the
+/// latency is trimmed) and its last frame is the ring's last. A query taken
+/// after the latency's flush would find the ring node 1,652 quiet frames in
+/// and cut the end of it.
+#[test]
+fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
+    const RING: usize = 3_000;
+    const DELAY: usize = 2_048;
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let source = g.add(ForkByClone(Burst {
+        loud: PROGRAMME,
+        at: 0,
+    }));
+    let rings = g.add(ForkByClone(Rings {
+        ring: RING,
+        left: 0,
+    }));
+    let delay = g.add(ForkByClone(Delay {
+        line: vec![0.0; DELAY],
+        at: 0,
+    }));
+    g.connect(source, 0, rings, 0);
+    g.connect(rings, 0, delay, 0);
+    g.pipe_output(delay);
+    let graph = built(g, RATE);
+    assert_eq!(graph.reported_latency(), Samples::new(DELAY));
 
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
-    cfg.render.tail = reported.samples().expect("finite");
+    cfg.render.latency = graph.reported_latency();
+    cfg.render.tail = reported(9_000);
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
-    let duration = 8_820; // 0.2 s at 44.1 kHz
-    assert_eq!(out.frames().get(), duration + 4_000);
+    let plane = &out.planes()[0];
+    assert_eq!(plane.len(), PROGRAMME + RING);
+    assert_eq!(plane[PROGRAMME + RING - 1], 0.25, "the last ring frame");
+    assert_eq!(plane[PROGRAMME - 1], 0.5, "the last frame of the programme");
+}
+
+/// A node whose input has been silent for its whole tail by the programme's
+/// end is skipped by the executor and owes nothing: the render ends with the
+/// programme, though the node declares 4,000 frames and reports 100.
+#[test]
+fn a_node_at_rest_at_the_programmes_end_adds_no_tail() {
+    let graph = narrowing_chain(0.0, &[(frames_tail(4_000), Some(frames_tail(100)))]);
+    assert_eq!(graph.declared_tail().samples(), Some(Samples::new(4_000)));
+    assert_eq!(tailed_frames(graph, reported(4_000)), PROGRAMME);
+}
+
+/// A report that never decays is spent at the job's ceiling, and a report
+/// above a finite declared ceiling is clamped to that ceiling when the job's
+/// own is larger.
+#[test]
+fn an_unbounded_report_spends_the_ceiling_it_is_under() {
+    let graph = narrowing_chain(0.5, &[(Tail::Unbounded, Some(Tail::Unbounded))]);
+    assert!(graph.reported_tail().is_unbounded());
+    assert_eq!(tailed_frames(graph, reported(2_000)), PROGRAMME + 2_000);
+
+    let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(Tail::Unbounded))]);
+    assert_eq!(tailed_frames(graph, reported(10_000)), PROGRAMME + 4_000);
+}
+
+/// A node that never reports is spent at its declared ceiling, and the job's
+/// ceiling bounds it.
+#[test]
+fn a_node_that_never_reports_spends_its_ceiling() {
+    let graph = narrowing_chain(0.5, &[(frames_tail(4_000), None)]);
+    assert_eq!(tailed_frames(graph, reported(10_000)), PROGRAMME + 4_000);
+
+    let graph = narrowing_chain(0.5, &[(frames_tail(4_000), None)]);
+    assert_eq!(tailed_frames(graph, reported(1_500)), PROGRAMME + 1_500);
+}
+
+/// A normalized export renders once and measures and writes what it spilled:
+/// both passes cover the frames the render kept (programme and reported tail),
+/// as does the file, and the rendering stage ends at that true total.
+#[test]
+fn the_passes_of_a_normalized_export_agree_on_the_reported_length() {
+    let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(frames_tail(100)))]);
+    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    cfg.render.tail = reported(4_000);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("n.wav");
+    let mut seen = Vec::new();
+    let mut watch = |p: &Progress| seen.push(*p);
+    let token = tutti_export::CancelToken::new();
+    let mut control = Control::new(&token).on_progress(&mut watch);
+    let written = support::render_file_under(
+        graph,
+        &cfg,
+        &FrozenClock,
+        Some(Normalize::peak(Db::new(-6.0))),
+        &path,
+        &mut control,
+    )
+    .unwrap()
+    .into_finished()
+    .expect("nothing cancels it");
+    let kept = Samples::new(PROGRAMME + 100);
+    let last = |stage| {
+        seen.iter()
+            .rfind(|p| p.stage() == stage)
+            .and_then(Progress::frames)
+    };
+    assert_eq!(last(Stage::Rendering), Some((kept, kept)), "the render");
+    assert_eq!(last(Stage::Measuring), Some((kept, kept)), "the measure");
+    assert_eq!(last(Stage::Writing), Some((kept, kept)), "the write");
+    assert_eq!(written.frames, kept);
+    assert_eq!(
+        hound::WavReader::open(&path).unwrap().duration(),
+        kept.get() as u32
+    );
 }
 
 /// A one-channel convolver over `ir`, with the default head partition.

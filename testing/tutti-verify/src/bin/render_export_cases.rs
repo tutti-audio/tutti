@@ -152,7 +152,7 @@ fn base(format: Format, channels: ChannelLayout) -> Case {
             rate,
             Seconds::new(DUR).to_samples(rate),
             Samples::new(0),
-            Samples::new(0),
+            tutti_export::TailPolicy::Frames(Samples::ZERO),
         )
         .expect("a render"),
         format,
