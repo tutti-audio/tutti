@@ -134,42 +134,35 @@ fn the_tail_is_the_schroeder_figure() {
     }
 }
 
-/// The General MIDI send takes a mono input and gives a stereo one, with no
-/// latency, and offers no cell to the graph (its dry/wet is the graph's mix); a
-/// live node offers the room and the damping. Its tail is a ceiling.
+/// A Freeverb, the General MIDI send included, takes a mono input and gives a stereo one, with
+/// no latency; it offers the room and the damping and no mix (the blend is the graph's mix).
+/// Its declared tail is the ceiling (the room at its largest), and the first block reports the
+/// General MIDI room's own figure, the Schroeder tail of room 0.5.
 #[test]
 fn the_ports_and_the_ceiling() {
-    let fixed = prepared(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-        SR,
-        BLOCK,
-    );
-    let shape = fixed.shape();
+    let send = prepared(FreeverbNode::<f32>::from(FreeverbConfig::new()), SR, BLOCK);
+    let shape = send.shape();
     assert_eq!(shape.audio_in(), ChannelLayout::MONO);
     assert_eq!(shape.audio_out(), ChannelLayout::STEREO);
     assert_eq!(shape.latency.samples(), Samples::ZERO);
-    assert_eq!(shape.params.len(), 0, "no cells");
-    assert_eq!(shape.tail, Tail::Finite(Samples::new(tail_of(gm()))));
-    assert_eq!(fixed.param_set().params().count(), 0);
-
-    let live = live(gm());
-    let shape = live.shape();
-    let ports = shape.params.len();
-    assert_eq!(ports, 2, "the room and the damping");
+    assert_eq!(shape.params.len(), 2, "the room and the damping");
+    assert_eq!(send.param_set().params().count(), 2);
+    assert_eq!(
+        send.param_set().get(UnitParam::Wet),
+        None,
+        "wet only: the blend is the graph's mix, not a port"
+    );
     let Tail::Finite(ceiling) = shape.tail else {
         panic!("finite")
     };
+    let reported = tail_of(gm()) as i64;
+    assert!(
+        (reported - schroeder_tail(0.5)).abs() <= 1,
+        "the send reports {reported}"
+    );
     assert!(
         ceiling.get() > 2 * tail_of(gm()),
-        "the live ceiling is the worst case (room 1), far above the General MIDI room's"
-    );
-    // The fixed node's ceiling is exact, the live node's is not.
-    assert_eq!(live.param_set().params().count(), 2);
-    assert_eq!(fixed.param_set().params().count(), 0);
-    assert_eq!(
-        live.param_set().get(UnitParam::Wet),
-        None,
-        "wet only: the blend is the graph's mix, not a port"
+        "the ceiling is the worst case (room 1), far above the General MIDI room's"
     );
 }
 
@@ -228,19 +221,12 @@ fn a_live_node_reports_the_tail_of_its_current_network() {
     }
 }
 
-/// The reported tail holds: past it the output is exactly silent, for the fixed
-/// send and a live node at a short and a long room (the harness's check, which
+/// The reported tail holds: past it the output is exactly silent, for the
+/// General MIDI room and a short and a long one (the harness's check, which
 /// also looks past the ceiling).
 #[test]
 fn the_reported_tail_is_honest() {
-    assert_declared_tail(
-        &mut prepared(
-            FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-            SR,
-            BLOCK,
-        ),
-        SR,
-    );
+    assert_declared_tail(&mut live(gm()), SR);
     assert_declared_tail(&mut live(controls(0.1, 0.5)), SR);
     assert_declared_tail(&mut live(controls(0.9, 0.2)), SR);
 }
@@ -294,7 +280,7 @@ fn the_room_is_cut_at_its_tail_to_the_frame() {
     // Block-aligned input ends at a block edge: 4000 = 62 * 64 + 32, so the last
     // input frame is mid-block, as it may be.
     let mut rig = Rig::new(prepared(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        FreeverbNode::<f32>::from(FreeverbConfig::new()),
         SR,
         BLOCK,
     ));
@@ -582,8 +568,8 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         let editor = r.editor_mut();
         editor.insert(key, "lane", lane);
         editor
-            .spec_mut()
-            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0));
+            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0))
+            .unwrap();
         editor.commit().expect("the lane commits");
         let frames = 60_000;
         let mut x = noise(8, 4_800);
@@ -615,8 +601,6 @@ fn it_is_inserted_with_a_param_set() {
         !set.set(UnitParam::Wet, 0.25),
         "no mix port: the graph blends"
     );
-    let (_, fixed) = FreeverbNode::<f32>::from(FreeverbConfig::general_midi()).into_node();
-    assert!(!fixed.set(UnitParam::RoomSize, 0.7), "the send has no room");
 }
 
 /// A node has no rate until it is prepared: it declares no latency and an unknown tail
@@ -625,7 +609,7 @@ fn it_is_inserted_with_a_param_set() {
 /// declares two tails.
 #[test]
 fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
-    let node = FreeverbNode::<f32>::from(FreeverbConfig::general_midi());
+    let node = FreeverbNode::<f32>::from(FreeverbConfig::new());
     let shape = node.shape();
     assert_eq!(shape.latency.samples().get(), 0);
     assert_eq!(shape.tail, Tail::Unknown);

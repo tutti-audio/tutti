@@ -187,7 +187,7 @@ fn a_spec_narrowed_without_a_commit_still_renders_the_committed_width() {
     let (mut editor, executor) = g.build(RenderGraph::prepare(RATE)).expect("builds");
     let committed = editor.spec().topology.outputs.len();
     assert!(committed >= 2, "a stereo graph has two outputs");
-    editor.spec_mut().topology.outputs.truncate(1);
+    editor.resize_outputs(ChannelLayout::from_count(1));
     let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
     let frames = render(&mut graph, &FrozenClock, 2, 16);
     assert!(frames.iter().all(|f| f[0] == 0.5 && f[1] == 0.5));

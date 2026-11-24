@@ -21,6 +21,7 @@
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, MaxBlock};
 use tutti_dsp::LadderSaturation;
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::Node;
@@ -99,16 +100,16 @@ fn channel_sum(c: &mut Criterion) {
         for block in BLOCKS {
             let (mut ed, mut exec) =
                 Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
-            ed.spec_mut().topology.inputs = ChannelLayout::from(sources * width);
-            ed.spec_mut()
-                .topology
-                .set_outputs(vec![PortSource::Zero; width as usize]);
+            ed.resize_inputs(ChannelLayout::from(sources * width));
+            ed.wire_outputs(vec![PortSource::Zero; width as usize])
+                .unwrap();
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.spec_mut().topology.connect_output(
-                        channel as usize,
+                    ed.connect_edge(EdgeId::into_output(
+                        (channel as usize) as u16,
                         PortSource::MainInput(k * width + channel),
-                    );
+                    ))
+                    .unwrap();
                 }
             }
             ed.commit().expect("commits");
@@ -518,7 +519,7 @@ fn reverb(c: &mut Criterion) {
         c,
         "reverb",
         "freeverb",
-        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        || FreeverbNode::<f32>::from(FreeverbConfig::new()),
         None,
     );
     run(

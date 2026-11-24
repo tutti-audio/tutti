@@ -75,9 +75,8 @@ fn graph(log: &Log) -> (Editor, Executor) {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

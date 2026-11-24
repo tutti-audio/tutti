@@ -5,6 +5,7 @@
 //! Each scenario runs on the one-participant executor and on the parallel one, and the
 //! two must log the same events.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -227,12 +228,13 @@ impl Rig {
                 }),
             );
             if lag {
-                ed.spec_mut().topology.edges.insert(
+                ed.connect_edge(EdgeId::into_port(
                     tutti_graph::InputPort::new(NodeKey(s), 0),
-                    vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
+                    tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
                         tutti_graph::OutputPort::new(NodeKey(LAG), 0),
-                    ))],
-                );
+                    )),
+                ))
+                .unwrap();
             }
         }
         r
@@ -245,10 +247,9 @@ impl Rig {
             Some(delay) => EventEdge::feedback(out(f), delay),
             None => EventEdge::Direct(out(f)),
         };
-        let spec = self.ed.spec_mut();
-        spec.events.clear();
+        clear_events(&mut self.ed);
         for &(f, to) in edges {
-            spec.connect_events(at(to), edge(f));
+            self.ed.connect_events(at(to), edge(f)).unwrap();
         }
         self.ed.commit().expect("commits");
         self.exec.apply_pending();
@@ -748,10 +749,10 @@ fn fan_in_closes_the_cut_sources_keys_only() {
     }
     let both = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = &mut r.ed;
-        let spec = ed.spec_mut();
-        spec.events.clear();
+        clear_events(ed);
         for &(f, to) in edges {
-            spec.connect_events(at(to), EventEdge::Direct(out(f)));
+            ed.connect_events(at(to), EventEdge::Direct(out(f)))
+                .unwrap();
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -817,10 +818,10 @@ fn fan_in_on_one_key_is_closed_by_either_source() {
     );
     let wire = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = &mut r.ed;
-        ed.spec_mut().events.clear();
+        clear_events(ed);
         for &(f, to) in edges {
-            ed.spec_mut()
-                .connect_events(at(to), EventEdge::Direct(out(f)));
+            ed.connect_events(at(to), EventEdge::Direct(out(f)))
+                .unwrap();
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -1445,7 +1446,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
             Fade::new(Samples::new(0)),
         )
         .unwrap();
-        ed.spec_mut().events.clear();
+        clear_events(ed);
         ed.commit().unwrap();
         r.exec.apply_pending();
         ed.collect();
@@ -1571,10 +1572,9 @@ fn a_source_without_note_events_closes_nothing() {
         let ed = &mut r.ed;
         if wired {
             ed.insert(NodeKey(6), "clock", Unforkable(Clock));
-            ed.spec_mut()
-                .connect_events(at(2), EventEdge::Direct(out(6)));
+            ed.connect_events(at(2), EventEdge::Direct(out(6))).unwrap();
         } else {
-            ed.spec_mut().events.clear();
+            clear_events(ed);
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -1691,13 +1691,11 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prep);
     ed.insert(NodeKey(1), "once", ForkByClone(Once(false, mid_note)));
     ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)));
-    ed.spec_mut()
-        .connect_events(at(2), EventEdge::Direct(out(1)));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![tutti_graph::PortSource::Node(
-            tutti_graph::OutputPort::new(NodeKey(2), 0),
-        )]);
+    ed.connect_events(at(2), EventEdge::Direct(out(1))).unwrap();
+    ed.wire_outputs(vec![tutti_graph::PortSource::Node(
+        tutti_graph::OutputPort::new(NodeKey(2), 0),
+    )])
+    .unwrap();
     ed.commit().unwrap();
     exec.apply_pending();
     ed.collect();
@@ -1727,7 +1725,7 @@ fn a_fork_closes_what_it_has_seen() {
     let t = TransportPosition::default();
     fexec.process(MAX, &t, &[], &mut [&mut out_buf[..]]);
     assert_eq!(sink_words(&log.lock().unwrap(), 2), vec![on60()]);
-    fed.spec_mut().events.clear();
+    clear_events(&mut fed);
     fed.commit().unwrap();
     fexec.apply_pending();
     fed.collect();
@@ -1754,7 +1752,7 @@ fn a_fork_does_not_close_a_key_held_at_fork_time() {
     let mut out_buf = [0.0f32; MAX];
     let t = TransportPosition::default();
     fexec.process(MAX, &t, &[], &mut [&mut out_buf[..]]);
-    fed.spec_mut().events.clear();
+    clear_events(&mut fed);
     fed.commit().unwrap();
     fexec.apply_pending();
     fed.collect();
@@ -1982,8 +1980,7 @@ mod no_alloc {
         ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
         for s in [2u64, 3] {
             ed.insert(NodeKey(s), "c", Unforkable(Count(n.clone())));
-            ed.spec_mut()
-                .connect_events(at(s), EventEdge::Direct(out(1)));
+            ed.connect_events(at(s), EventEdge::Direct(out(1))).unwrap();
         }
         ed.commit().unwrap();
         exec.apply_pending();
@@ -2025,5 +2022,14 @@ mod no_alloc {
     #[test]
     fn parallel() {
         run(2);
+    }
+}
+
+/// Takes every event edge out of the editor's graph.
+fn clear_events(ed: &mut Editor) {
+    for (at, edges) in ed.spec().events.clone() {
+        for edge in edges {
+            ed.disconnect_events(at, edge);
+        }
     }
 }

@@ -87,11 +87,10 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
     for (i, u) in units.into_iter().enumerate() {
         ed.insert(NodeKey(i as u64 + 1), "voice", u);
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(routes(n).into_iter().map(|(unit, port)| {
-            PortSource::Node(OutputPort::new(NodeKey(unit as u64 + 1), port as u16))
-        }));
+    ed.wire_outputs(routes(n).into_iter().map(|(unit, port)| {
+        PortSource::Node(OutputPort::new(NodeKey(unit as u64 + 1), port as u16))
+    }))
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed)

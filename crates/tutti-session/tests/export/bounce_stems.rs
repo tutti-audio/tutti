@@ -558,12 +558,7 @@ fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
     let b = bounce(0.01)
         .stem_with(Stem::new(node.erase()))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-            prepared
-                .editor
-                .spec_mut()
-                .topology
-                .nodes
-                .remove(&node.erase());
+            prepared.editor.remove(node.erase());
         }));
     match refused(&mut session, b) {
         BounceError::Config(BounceConfigError::StemNotInGraph { node: gone }) => {

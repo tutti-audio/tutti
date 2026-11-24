@@ -35,6 +35,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
 
 mod support;
 
@@ -122,16 +123,14 @@ fn graph(nodes: usize) -> (Editor, Executor) {
         // itself; it has to be one that takes an input, and `tutti-nodes`'
         // filters are out of reach from here (see `support`).
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(i), 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                NodeKey(i - 1),
-                0,
-            )))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(i - 1), 0))),
+        ))
+        .unwrap();
     }
     let last = PortSource::Node(OutputPort::new(NodeKey(nodes as u64), 0));
-    ed.spec_mut().topology.set_outputs(vec![last, last]);
+    ed.wire_outputs(vec![last, last]).unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -234,19 +233,18 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
     ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     for i in 1..=nodes as u64 {
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(i), 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                NodeKey(0),
-                0,
-            )))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(0), 0))),
+        ))
+        .unwrap();
     }
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_outputs(
         [1, 2]
             .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

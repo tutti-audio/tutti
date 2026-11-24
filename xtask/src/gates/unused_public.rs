@@ -30,6 +30,12 @@
 //! declaration's text (`pub ` and no restriction).
 
 use super::lex::{blank, find_word_from, ident_at, is_test_file, test_ranges};
+mod app;
+mod named;
+
+pub(crate) use app::app_report;
+use named::{Corpus, Hit};
+
 use super::public_items::scan;
 use super::scip::{self, Document};
 use super::{Tree, lex};
@@ -109,7 +115,7 @@ pub(super) enum Refs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Row {
+struct Row {
     pub(super) krate: String,
     pub(super) file: String,
     pub(super) line: usize,
@@ -117,6 +123,10 @@ pub(super) struct Row {
     pub(super) path: String,
     pub(super) refs: Refs,
     pub(super) in_macro: bool,
+    /// The first doc example that names it, by name.
+    pub(super) doc: Option<Hit>,
+    /// A `macro_rules!` body names it and nothing references it.
+    pub(super) macro_named: bool,
 }
 
 /// What each rule removed, per crate.
@@ -133,11 +143,12 @@ pub(super) struct Removed {
 /// The items that have no production reference, as rows, and the umbrella and
 /// implemented-trait rules' counts. `umbrella` is the names `tutti` exports, or
 /// `None` when that was not checked.
-pub(super) fn classify(
+fn classify(
     items: &[Item],
     is_test: &dyn Fn(&str, usize) -> bool,
     umbrella: Option<&Reach>,
     implemented: &BTreeSet<String>,
+    corpus: &Corpus,
 ) -> (Vec<Row>, Removed) {
     let mut rows = Vec::new();
     let mut removed = Removed::default();
@@ -169,6 +180,8 @@ pub(super) fn classify(
                 Refs::TestOnly(test)
             },
             in_macro: it.in_macro,
+            doc: corpus.doc_example(it),
+            macro_named: test == 0 && corpus.in_macro(it),
         });
     }
     rows.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
@@ -270,6 +283,8 @@ struct Src {
     code: String,
     starts: Vec<usize>,
     tests: Vec<(usize, usize)>,
+    /// The 1-based line ranges of the `pub use` statements.
+    reexports: Vec<(usize, usize)>,
 }
 
 impl Src {
@@ -284,11 +299,23 @@ impl Src {
                 (line(a), line(b.saturating_sub(1).max(a)))
             })
             .collect();
+        let line = |o: usize| starts.partition_point(|&s| s <= o);
+        let mut reexports = Vec::new();
+        let mut from = 0;
+        while let Some(p) = find_word_from(&code, "pub", from) {
+            from = p + 3;
+            if ident_at(&code, from).0 == "use"
+                && let Some(end) = code[from..].find(';')
+            {
+                reexports.push((line(p), line(from + end)));
+            }
+        }
         Src {
             text: text.to_owned(),
             code,
             starts,
             tests,
+            reexports,
         }
     }
 
@@ -406,6 +433,12 @@ impl<'a> Sources<'a> {
         self.files.get(path)?.as_ref()
     }
 
+    /// Whether 1-based `line` of `path` lies in a `pub use` statement.
+    fn is_reexport(&self, path: &str, line: usize) -> bool {
+        self.get(path)
+            .is_some_and(|s| s.reexports.iter().any(|&(a, b)| a <= line && line <= b))
+    }
+
     fn is_test(&self, path: &str, line: usize) -> bool {
         self.test_file(path)
             || self
@@ -483,14 +516,40 @@ fn crate_of(path: &str) -> Option<&str> {
     path.strip_prefix("crates/")?.split('/').next()
 }
 
-/// The report over `index` (a serialized SCIP index) for `crates`, read against
-/// `tree`. `umbrella` is `tutti`'s `public-api` text, or `None`.
-pub(crate) fn report(
-    tree: &dyn Tree,
+/// How many of the scanned public item locations have no definition in `defined`.
+fn without_symbol(scanned: &[(&str, usize)], defined: &BTreeSet<(&str, usize)>) -> usize {
+    scanned.iter().filter(|l| !defined.contains(l)).count()
+}
+
+/// `header` with the lines that say what the index was built from after its first line.
+fn with_preamble(header: &str, built_at: &str) -> String {
+    let (title, rest) = header.split_once('\n').unwrap_or((header, ""));
+    format!(
+        "{title}\nindex built at commit {built_at}\nindex features: every cargo feature on, through the rust-analyzer config {{\"cargo\": {{\"features\": \"all\"}}}}; a reference under a feature that was off does not exist.\n{rest}"
+    )
+}
+
+/// What both reports read: the public items of the named crates with their
+/// references, the umbrella's reach, and the files read.
+struct Gathered<'a> {
+    items: Vec<Item>,
+    reach: Option<Reach>,
+    sources: Sources<'a>,
+    implemented_by: BTreeSet<String>,
+    /// The public methods of each `(crate, type)`, as the scan counts them.
+    methods: BTreeMap<(String, String), usize>,
+    /// Per crate: the public items scanned, and how many had no symbol in the index.
+    coverage: BTreeMap<String, (usize, usize)>,
+}
+
+/// Reads `index` for `crates` against `tree`. `umbrella` is `tutti`'s
+/// `public-api` text, or `None`.
+fn gather<'a>(
+    tree: &'a dyn Tree,
     index: &[u8],
     crates: &[String],
     umbrella: Option<&str>,
-) -> Result<String, String> {
+) -> Result<Gathered<'a>, String> {
     let by_name = umbrella.map(umbrella_names);
     let mut resolved = BTreeSet::new();
     // What `lib.rs` names, whatever features the index was built with.
@@ -572,7 +631,7 @@ pub(crate) fn report(
             }
         }
     }
-    let names = by_name.map(|b| Reach::new(resolved, b));
+    let reach = by_name.map(|b| Reach::new(resolved, b));
     // A mention in an `impl` header is not a use of the type.
     let paths: BTreeSet<String> = items
         .values()
@@ -604,8 +663,63 @@ pub(crate) fn report(
             }
         }
     }
+    let mut methods: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for (krate, found) in &scanned {
+        for i in found.iter().filter(|i| i.kind == "fn") {
+            if let Some(owner) = &i.owner {
+                *methods.entry((krate.clone(), owner.clone())).or_default() += 1;
+            }
+        }
+    }
+    let mut coverage = BTreeMap::new();
+    for krate in crates {
+        let defined: BTreeSet<(&str, usize)> = items
+            .values()
+            .filter(|i| &i.krate == krate)
+            .map(|i| (i.file.as_str(), i.line))
+            .collect();
+        let mut locations = Vec::new();
+        for i in scanned.get(krate).into_iter().flatten() {
+            sources.load(&i.file);
+            if Kind::of(i.kind).is_some() && !sources.test_file(&i.file) {
+                locations.push((i.file.as_str(), i.line));
+            }
+        }
+        coverage.insert(
+            krate.clone(),
+            (locations.len(), without_symbol(&locations, &defined)),
+        );
+    }
+    Ok(Gathered {
+        items: items.into_values().collect(),
+        coverage,
+        reach,
+        sources,
+        implemented_by,
+        methods,
+    })
+}
+
+/// The report over `index` (a serialized SCIP index) for `crates`, read against
+/// `tree`. `umbrella` is `tutti`'s `public-api` text, or `None`.
+pub(crate) fn report(
+    tree: &dyn Tree,
+    index: &[u8],
+    crates: &[String],
+    umbrella: Option<&str>,
+    built_at: &str,
+) -> Result<String, String> {
+    let Gathered {
+        coverage,
+        items,
+        reach: names,
+        sources,
+        implemented_by,
+        ..
+    } = gather(tree, index, crates, umbrella)?;
+    let corpus = Corpus::read(tree);
     let mut out = String::new();
-    out.push_str(HEADER);
+    out.push_str(&with_preamble(HEADER, built_at));
     if names.is_none() {
         out.push_str("umbrella reachability not checked (cargo public-api did not run)\n");
     }
@@ -614,11 +728,11 @@ pub(crate) fn report(
     let (mut total_rows, mut total_items) = (0, 0);
     for krate in crates {
         let mine: Vec<Item> = items
-            .values()
+            .iter()
             .filter(|i| &i.krate == krate)
             .cloned()
             .collect();
-        let (rows, removed) = classify(&mine, &is_test, names.as_ref(), &implemented_by);
+        let (rows, removed) = classify(&mine, &is_test, names.as_ref(), &implemented_by, &corpus);
         let mut removed = removed;
         removed.in_macro = rows.iter().filter(|r| r.in_macro).count();
         let _ = writeln!(out, "{krate}: {} items", rows.len());
@@ -627,7 +741,16 @@ pub(crate) fn report(
                 Refs::None => "none".to_owned(),
                 Refs::TestOnly(k) => format!("test-only ({k})"),
             };
-            let note = if r.in_macro { "  in macro" } else { "" };
+            let mut note = String::new();
+            if r.in_macro {
+                note.push_str("  in macro");
+            }
+            if r.macro_named {
+                note.push_str("  named in a macro");
+            }
+            if let Some((f, l)) = &r.doc {
+                let _ = write!(note, "  named in a doc example ({f}:{l})");
+            }
             let unchecked = if names.is_none() {
                 "  umbrella reachability not checked"
             } else {
@@ -643,14 +766,23 @@ pub(crate) fn report(
             );
         }
         let none = rows.iter().filter(|r| r.refs == Refs::None).count();
+        let (macro_named, documented) = (
+            rows.iter().filter(|r| r.macro_named).count(),
+            rows.iter().filter(|r| r.doc.is_some()).count(),
+        );
         let _ = writeln!(
             out,
-            "{krate}: {} listed ({none} with no reference, {} test-only); left out: {} implemented-trait, {} umbrella-named; labelled in macro: {}\n",
+            "{krate}: {} listed ({none} with no reference, {} test-only); left out: {} implemented-trait, {} umbrella-named; labelled in macro: {}, named in a macro: {macro_named}, named in a doc example: {documented}\n",
             rows.len(),
             rows.len() - none,
             removed.implemented_traits,
             removed.umbrella,
             removed.in_macro
+        );
+        let (scanned, missing) = coverage.get(krate).copied().unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "{krate}: scanned {scanned} public items, {missing} had no symbol in the index\n"
         );
         total_rows += rows.len();
         total_items += 1;
@@ -683,8 +815,17 @@ public trait that some non-test `impl .. <Trait> for ..` under crates/ implement
 A definition inside a macro invocation is kept and labelled `in macro`.\n\
 Test code: files under tests/, benches/, examples/, testing/; tests.rs, testing.rs, *_tests.rs; any file of a\n\
 module whose `mod` line carries cfg(feature = \"testing\") or \"contract\"; and #[cfg(test)] items.\n\
-The index is built with every cargo feature on.\n\
-It cannot see: use only through a trait object or a macro expansion (may show as unreferenced);\n\
+Items the scan finds with no definition in the index are not listed; the count per crate is printed after its summary.\n\
+Absence from the list does not mean a production use when the item is among those (written by a macro, or behind a feature the index lacks).\n\
+An `examples/` directory is test code in this report and app-side code in `--app`: the two reports ask different questions.\n\
+A row is labelled `named in a macro` (refs none only) when a macro_rules! body names it, and `named in a doc example`\n\
+(with the first file:line) when a ``` block in a /// or //! comment, or in book/ Markdown, names it. Both\n\
+matches are by name (`.name(` or `Type::name`, `name(`, the bare type name) and can over-label.\n\
+It cannot see: use only through a trait object or a macro expansion (an item called only from one, such as\n\
+`Sweep::new` in `declare_params!`, may show as unreferenced: see the label); doc examples, which the index\n\
+does not read and nothing but `cargo test --doc` compiles: a row is not safe to delete until\n\
+`cargo test --doc --workspace` passes without the item (a doc example may be its only user), and until the\n\
+workspace compiles with all targets after merging main (a row is true at one commit);\n\
 trait methods (not listed); a re-exported item used by an app (filtered by name); code behind a\n\
 cfg of another platform (macOS and Windows code is not indexed on Linux).\n";
 
@@ -711,7 +852,7 @@ mod tests {
             umbrella.iter().map(|s| (*s).to_owned()).collect(),
         );
         let t = |f: &str, _: usize| f.contains("/tests/");
-        classify(items, &t, Some(&u), &BTreeSet::new()).0
+        classify(items, &t, Some(&u), &BTreeSet::new(), &Corpus::default()).0
     }
 
     #[test]
@@ -787,11 +928,23 @@ mod tests {
     }
 
     #[test]
+    fn a_scanned_item_with_no_symbol_is_counted() {
+        let scanned = [("a.rs", 1), ("a.rs", 9), ("b.rs", 4)];
+        let defined = BTreeSet::from([("a.rs", 1), ("b.rs", 4)]);
+        assert_eq!(without_symbol(&scanned, &defined), 1);
+        let text = with_preamble("title\nrest\n", "abc123");
+        assert!(text.starts_with(
+            "title\nindex built at commit abc123\nindex features: every cargo feature on"
+        ));
+        assert!(text.ends_with("rest\n"));
+    }
+
+    #[test]
     fn an_implemented_trait_is_not_listed() {
         let mut t = item("Tr", None, &[]);
         t.kind = Kind::Trait;
         let implemented = BTreeSet::from(["Tr".to_owned()]);
-        let (rows, removed) = classify(&[t], &|_, _| false, None, &implemented);
+        let (rows, removed) = classify(&[t], &|_, _| false, None, &implemented, &Corpus::default());
         assert!(rows.is_empty());
         assert_eq!(removed.implemented_traits, 1);
     }

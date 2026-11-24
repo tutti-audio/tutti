@@ -1619,9 +1619,10 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
 /// A header message is used when the tempo map or the meter is built from it: a
 /// Set Tempo with a tempo, and a Set Time Signature (held, or refused and listed
 /// by the clip). Any other message, and a Set Tempo of 0 (M2-104 section 7.5.3:
-/// no tempo), is unused.
+/// no tempo), configures the receiver, except the leading Set Profile On
+/// messages, which are the header's profiles.
 #[test]
-fn a_header_messages_unused_by_the_timeline_are_all_but_the_tempo_and_the_meter() {
+fn a_headers_setup_messages_are_all_but_the_profiles_the_tempo_and_the_meter() {
     let zero_tempo: Ump = Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(0))).into();
     let metronome: Ump = Message::Flex(
         MidiGroup::FIRST,
@@ -1642,11 +1643,21 @@ fn a_header_messages_unused_by_the_timeline_are_all_but_the_tempo_and_the_meter(
         program_change(),
         metronome,
     ];
+    let profile = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
     let header = messages
         .into_iter()
-        .fold(ClipHeader::new(), |h, m| h.push(Tick(0), m).unwrap());
+        .fold(ClipHeader::new().profile_on(profile), |h, m| {
+            h.push(Tick(0), m).unwrap()
+        });
+    // The Set Profile On packets lead; the six pushed messages follow them.
+    assert_eq!(header.profiles(), [profile]);
+    assert!(!header.profile_messages().is_empty());
+    assert_eq!(header.profile_messages().len() + 6, header.messages().len());
     assert_eq!(
-        header.unused_messages().collect::<Vec<_>>(),
+        header.setup_messages().collect::<Vec<_>>(),
         [
             (Tick(0), zero_tempo),
             (Tick(0), program_change()),

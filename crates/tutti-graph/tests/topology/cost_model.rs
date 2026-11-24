@@ -5,6 +5,7 @@
 //! The random-topology check is in `tests/executor/invariants.rs`
 //! (`a_coarsened_plan_renders_as_one_participant_does`).
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
@@ -36,10 +37,11 @@ fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
 }
 
 fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NodeKey(node), port),
-        vec![Edge::Direct(from)],
-    );
+        Edge::Direct(from),
+    ))
+    .unwrap();
 }
 
 fn node(key: u64) -> PortSource {
@@ -63,7 +65,7 @@ fn commit(ed: &mut Editor, exec: &mut Executor) {
 /// For each of `fans` main inputs, `lanes` gains off it, summed onto its
 /// own output: `tiny/16` of `tutti-nodes`' bench when `fans` is 1.
 fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: Option<Cost>) {
-    ed.spec_mut().topology.inputs = ChannelLayout::try_from(fans).expect("a test width is small");
+    ed.resize_inputs(ChannelLayout::try_from(fans).expect("a test width is small"));
     let mut outputs = Vec::new();
     for f in 0..fans {
         let s = 1_000 * (f as u64 + 1);
@@ -76,13 +78,13 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
         }
         outputs.push(node(s));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_outputs(outputs).unwrap();
 }
 
 /// `lanes` chains of `depth` gains declaring `cost`, each off the main
 /// input, summed (lightly) onto one output.
 fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let s = 1_000_000;
     ed.insert(NodeKey(s), "sum", sum(lanes, Some(Cost::Light)));
     for l in 0..lanes {
@@ -95,7 +97,7 @@ fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
         }
         wire(ed, s, l as u16, last);
     }
-    ed.spec_mut().topology.set_outputs(vec![node(s)]);
+    ed.wire_outputs(vec![node(s)]).unwrap();
 }
 
 /// Render `blocks` (input on every channel), every output's samples.
@@ -160,7 +162,7 @@ fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
 fn packed_siblings_render_bit_identically() {
     let build = |workers: usize| {
         let (mut ed, mut exec) = with_pool(workers);
-        ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+        ed.resize_inputs(ChannelLayout::MONO);
         let s = 1_000_000;
         ed.insert(NodeKey(s), "sum", sum(15, None));
         for l in 0..15u64 {
@@ -170,7 +172,7 @@ fn packed_siblings_render_bit_identically() {
             wire(&mut ed, l + 1, 0, PortSource::MainInput(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }
-        ed.spec_mut().topology.set_outputs(vec![node(s)]);
+        ed.wire_outputs(vec![node(s)]).unwrap();
         commit(&mut ed, &mut exec);
         exec
     };

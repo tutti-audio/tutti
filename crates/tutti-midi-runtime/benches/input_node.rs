@@ -63,10 +63,12 @@ fn rig() -> (Executor, DeviceInput) {
         MidiInputNode::new().following(&generation),
     );
     editor.insert(NodeKey(2), "inlet", inlet);
-    editor.spec_mut().connect_events(
-        EventInputPort::new(NodeKey(1), 0),
-        EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
-    );
+    editor
+        .connect_events(
+            EventInputPort::new(NodeKey(1), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
+        )
+        .unwrap();
     editor.commit().expect("commits");
     (exec, device)
 }

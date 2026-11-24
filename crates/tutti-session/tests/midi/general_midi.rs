@@ -136,8 +136,8 @@ fn the_setup_does_not_take_the_graphs_outputs() {
 
 /// Every stage declares its own tail, so an export keeps the release and then
 /// the room: the unit's is the release alone, the chorus's the 5 ms of its
-/// line, the reverb's a bound over its ring-out (about 1.5 s at 48 kHz), and
-/// the fader's none (the graph's sum has no tail of its own).
+/// line, the reverb's the ceiling of its bank (the room at its largest, past 10 s at 48 kHz;
+/// the room it holds is reported per block), and the fader's none (the graph's sum has no tail of its own).
 #[test]
 fn every_stage_declares_its_own_tail() {
     let mut session = offline_session();
@@ -154,7 +154,10 @@ fn every_stage_declares_its_own_tail() {
         "the longest release in the font"
     );
     assert_eq!(frames(gm.chorus().erase()), 240);
-    assert!((1.0..2.0).contains(&seconds(gm.reverb().erase())));
+    assert!(
+        seconds(gm.reverb().erase()) > 10.0,
+        "the room at its largest"
+    );
     assert_eq!(graph.node_tail(gm.output()).unwrap(), Tail::None);
 }
 

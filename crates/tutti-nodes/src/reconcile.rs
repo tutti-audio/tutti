@@ -819,10 +819,12 @@ impl Modulation {
                 continue;
             }
             if let (Some(src), Some(lane)) = (self.sources.get(&s), self.lanes.get(&t)) {
-                remove_event_edge(
-                    editor,
+                // The direct edge this reconciler wired and no other between
+                // them: a host's feedback edge from a node it put at a taken
+                // key stays.
+                editor.disconnect_events(
                     EventInputPort::new(lane.key, 0),
-                    EventOutputPort::new(src.key, 0),
+                    EventEdge::Direct(EventOutputPort::new(src.key, 0)),
                 );
             }
         }
@@ -833,11 +835,13 @@ impl Modulation {
                 Wired::Port(at, _) => {
                     // Only the source it wired: a port another source has
                     // taken since is left alone.
-                    editor.spec_mut().disconnect_param(at, out);
+                    editor.disconnect_param(at, out);
                 }
-                Wired::Plugin { input, .. } => remove_event_edge(editor, input, out),
+                Wired::Plugin { input, .. } => {
+                    editor.disconnect_events(input, EventEdge::Direct(out));
+                }
                 Wired::Gain(id, _) => {
-                    editor.spec_mut().disconnect_edge_gain(id, out);
+                    editor.disconnect_edge_gain(id, out);
                 }
             }
             *commit = true;
@@ -896,9 +900,9 @@ impl Modulation {
             .collect();
         for (s, t) in stale {
             if let (Some(src), Some(lane)) = (self.sources.get(&s), self.lanes.get(&t)) {
-                editor.spec_mut().disconnect_events(
+                editor.disconnect_events(
                     EventInputPort::new(lane.key, 0),
-                    EventOutputPort::new(src.key, 0),
+                    EventEdge::Direct(EventOutputPort::new(src.key, 0)),
                 );
                 *commit = true;
             }
@@ -993,8 +997,8 @@ impl Modulation {
                     let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
-                        .spec_mut()
-                        .connect_param(at, EventOutputPort::new(key, 0));
+                        .connect_param(at, EventOutputPort::new(key, 0))
+                        .expect("checked: the port's node, and the lane's output");
                     Wired::Port(at, controls)
                 }
                 Drive::Gain(id) => {
@@ -1012,8 +1016,8 @@ impl Modulation {
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
-                        .spec_mut()
-                        .connect_edge_gain(id, EventOutputPort::new(key, 0));
+                        .connect_edge_gain(id, EventOutputPort::new(key, 0))
+                        .expect("checked: the edge, and the lane's output");
                     Wired::Gain(id, controls)
                 }
                 Drive::Plugin { input, id } => {
@@ -1024,8 +1028,8 @@ impl Modulation {
                     let (node, controls) = config.build();
                     editor.insert(key, "control-lane", node);
                     editor
-                        .spec_mut()
-                        .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
+                        .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)))
+                        .expect("checked: the plugin's event input, and the lane's output");
                     Wired::Plugin {
                         input,
                         id,
@@ -1051,10 +1055,12 @@ impl Modulation {
         for &(s, t) in &edges {
             if self.edges.insert((s, t)) {
                 let (src, lane) = (self.sources[&s].key, self.lanes[&t].key);
-                editor.spec_mut().connect_events(
-                    EventInputPort::new(lane, 0),
-                    EventEdge::Direct(EventOutputPort::new(src, 0)),
-                );
+                editor
+                    .connect_events(
+                        EventInputPort::new(lane, 0),
+                        EventEdge::Direct(EventOutputPort::new(src, 0)),
+                    )
+                    .expect("checked: the lane's input, and the source's output");
                 *commit = true;
             }
         }
@@ -1475,18 +1481,19 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
                 .shapes()
                 .get(&from)
                 .map_or(0, |s| s.audio_out().count());
-            let t = &mut editor.spec_mut().topology;
             for port in 0..width {
-                t.edges.insert(
-                    InputPort::new(key, port),
-                    vec![Edge::Direct(PortSource::Node(OutputPort::new(from, port)))],
-                );
+                editor
+                    .connect_edge(EdgeId::into_port(
+                        InputPort::new(key, port),
+                        Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
+                    ))
+                    .expect("checked: the feed's node, and the follower's inputs");
             }
         }
         Some(Feed::Events(from)) => {
             editor
-                .spec_mut()
-                .connect_events(EventInputPort::new(key, 0), EventEdge::Direct(from));
+                .connect_events(EventInputPort::new(key, 0), EventEdge::Direct(from))
+                .expect("checked: the feed's event output, and the envelope's input");
         }
         None => {}
     }
@@ -1503,17 +1510,15 @@ fn unwire_feed<F: Float>(
         Some(Feed::Audio(from)) => {
             // Only the edges it wired: a host that took the key may have
             // wired the port itself since.
-            let t = &mut editor.spec_mut().topology;
             for port in 0..width.count() {
-                let at = InputPort::new(key, port);
-                let ours = Edge::Direct(PortSource::Node(OutputPort::new(from, port)));
-                t.disconnect(at, ours);
+                editor.disconnect_edge(EdgeId::into_port(
+                    InputPort::new(key, port),
+                    Edge::Direct(PortSource::Node(OutputPort::new(from, port))),
+                ));
             }
         }
         Some(Feed::Events(from)) => {
-            editor
-                .spec_mut()
-                .disconnect_events(EventInputPort::new(key, 0), from);
+            editor.disconnect_events(EventInputPort::new(key, 0), EventEdge::Direct(from));
         }
         None => {}
     }
@@ -1537,18 +1542,4 @@ fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
 fn taken<F: Float>(editor: &Editor<F>, key: NodeKey, generation: u32) -> bool {
     let spec = editor.spec();
     !spec.topology.nodes.contains_key(&key) || spec.generation(key) != generation
-}
-
-/// Removes the direct event edge `from` → `at` this reconciler wired, and
-/// no other edge between them (a host's feedback edge from a node it put
-/// at a taken key stays). An identical direct edge the host wired itself
-/// cannot be told apart, and goes too.
-fn remove_event_edge<F: Float>(editor: &mut Editor<F>, at: EventInputPort, from: EventOutputPort) {
-    let events = &mut editor.spec_mut().events;
-    if let Some(sources) = events.get_mut(&at) {
-        sources.retain(|e| *e != EventEdge::Direct(from));
-        if sources.is_empty() {
-            events.remove(&at);
-        }
-    }
 }

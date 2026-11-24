@@ -1215,7 +1215,8 @@ impl From<tutti_export::RenderError> for BounceError {
 /// The graph an bounce is about to render, handed to its
 /// [`PrepareEdit`] on the job's thread once the fork is built.
 ///
-/// `editor` is the fork's: edit it (insert nodes, `spec_mut`); the job
+/// `editor` is the fork's: edit it (insert nodes, wire them with
+/// [`connect_edge`](Editor::connect_edge) and the calls beside it); the job
 /// commits whatever the edit leaves, and a commit the fork refuses fails the
 /// bounce with the reason. A fork's units are on its executor by now, so a
 /// unit already in it cannot be refilled: insert a new one. The fork's

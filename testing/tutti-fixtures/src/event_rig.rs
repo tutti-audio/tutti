@@ -147,9 +147,8 @@ impl EventRig {
         );
         if output == Output::Mono {
             editor
-                .spec_mut()
-                .topology
-                .set_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))]);
+                .wire_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
+                .unwrap();
         }
         Self {
             editor,
@@ -160,11 +159,17 @@ impl EventRig {
     }
 
     /// Feeds event input `to` of the sink from event output `from_port` of `from`.
+    ///
+    /// # Panics
+    ///
+    /// When `from` or its port, or the sink's input, does not exist.
     pub fn feed(&mut self, from: NodeKey, from_port: u16, to: u16) {
-        self.editor.spec_mut().connect_events(
-            EventInputPort::new(Self::SINK, to),
-            EventEdge::Direct(EventOutputPort::new(from, from_port)),
-        );
+        self.editor
+            .connect_events(
+                EventInputPort::new(Self::SINK, to),
+                EventEdge::Direct(EventOutputPort::new(from, from_port)),
+            )
+            .unwrap();
     }
 
     /// Applies what the editor holds.

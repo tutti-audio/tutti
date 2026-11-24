@@ -16,21 +16,19 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// A [`KernelNode`] over [`FreeverbKernel`], the combs and all-passes being
 /// [`FreeverbBank`]'s. Its blend with its input, for use as an insert, is the graph's mix
 /// (`Editor::set_mix`); it declares no latency. Made from a [`FreeverbConfig`]
-/// (`FreeverbNode::from`), whose [`general_midi`](FreeverbConfig::general_midi) is the General
-/// MIDI reverb send of the SoundFont player.
+/// (`FreeverbNode::from`); [`FreeverbConfig::new`] is the General MIDI reverb send of the
+/// SoundFont player.
 ///
 /// # The controls
 ///
 /// The ports are the room size and the damping, each a position on `0..1`
 /// ([`FreeverbControls`]). A cell that moves lands whole on the 32-frame grid and ramps in
-/// the bank over 20 ms. The send declares no ports: its controls are the General MIDI
-/// figures.
+/// the bank over 20 ms.
 ///
 /// # The tail
 ///
 /// The declared tail is the ceiling: the room at its largest, whatever the damping (the
-/// loop's DC gain is the comb's feedback alone), and for the send the exact figure of its one
-/// room. The node narrows it each block to what the controls in force ring, and once the
+/// loop's DC gain is the comb's feedback alone). The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the combs and all-passes; the lines hold
@@ -39,41 +37,26 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// the session.
 pub type FreeverbNode<F> = KernelNode<FreeverbKernel<F>>;
 
-/// What a [`FreeverbNode`] is made from: the room size and damping it starts at, and whether
-/// they are cells.
-///
-/// [`new`](Self::new) is a reverb whose controls are cells; [`general_midi`](Self::general_midi)
-/// is the General MIDI reverb send, whose controls are fixed.
+/// What a [`FreeverbNode`] is made from: the room size and damping it starts at, which are its
+/// two cells.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FreeverbConfig {
     controls: FreeverbControls,
-    cells: bool,
 }
 
 impl FreeverbConfig {
     /// A reverb whose room size and damping are cells, starting at
-    /// [`FreeverbControls::GENERAL_MIDI`]. It has no rate until the graph's `prepare` gives it
-    /// one: it declares no latency and an unknown tail before, and renders silence.
+    /// [`FreeverbControls::GENERAL_MIDI`] (room 0.5 and damping 0.5: the General MIDI reverb
+    /// send), mono in and stereo out, wet only. It has no rate until the graph's `prepare`
+    /// gives it one: it declares no latency and an unknown tail before, and renders silence.
     #[must_use]
     pub const fn new() -> Self {
         Self {
             controls: FreeverbControls::GENERAL_MIDI,
-            cells: true,
         }
     }
 
-    /// The General MIDI reverb send: room 0.5 and damping 0.5, mono in and stereo out, wet
-    /// only. Its controls are fixed, so its tail is the exact figure of that one room, and its
-    /// node declares no cells.
-    #[must_use]
-    pub const fn general_midi() -> Self {
-        Self {
-            controls: FreeverbControls::GENERAL_MIDI,
-            cells: false,
-        }
-    }
-
-    /// The room size and damping the reverb starts at, or holds for good on the send.
+    /// The room size and damping the reverb starts at.
     #[must_use]
     pub const fn controls(mut self, controls: FreeverbControls) -> Self {
         self.controls = controls;
@@ -90,28 +73,18 @@ impl Default for FreeverbConfig {
 impl<F: Float + Lerp> From<FreeverbConfig> for FreeverbNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: FreeverbConfig) -> Self {
-        let fixed = (!config.cells).then_some(config.controls);
-        Self::with_kernel(
-            FreeverbKernel::new(fixed),
-            FreeverbSet {
-                cells: config.cells,
-            },
-            config.controls,
-        )
+        Self::with_kernel(FreeverbKernel::new(), FreeverbSet, config.controls)
     }
 }
 
-/// Freeverb's controls: the room size and the damping, as positions on `0..1`; none for the
-/// General MIDI send.
+/// Freeverb's controls: the room size and the damping, as positions on `0..1`.
 #[derive(Clone, Copy, Debug)]
-pub struct FreeverbSet {
-    cells: bool,
-}
+pub struct FreeverbSet;
 
 // Each lands whole: the bank's ramps are the ramp.
 control_set! {
-    FreeverbSet(s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
-    live: (if s.cells { 2 } else { 0 });
+    FreeverbSet(_s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
+    live: (all);
     RoomSize => Mix = room { whole },
     Damping => Mix = damp { whole, no_ring };
 
@@ -135,8 +108,6 @@ struct Running<F: Float> {
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
 pub struct FreeverbKernel<F: Float> {
-    /// The one room of a send that has no cells: its tail is this room's exactly.
-    fixed: Option<FreeverbControls>,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
     /// Whether the first retarget after `prepare` has been applied.
@@ -144,11 +115,9 @@ pub struct FreeverbKernel<F: Float> {
 }
 
 impl<F: Float + Lerp> FreeverbKernel<F> {
-    /// A reverb with no lines until `prepare` gives it a rate; `fixed` is the room of a send
-    /// whose controls never change.
-    fn new(fixed: Option<FreeverbControls>) -> Self {
+    /// A reverb with no lines until `prepare` gives it a rate.
+    fn new() -> Self {
         Self {
-            fixed,
             running: None,
             applied: false,
         }
@@ -210,18 +179,13 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         rendered
     }
 
-    /// The bank's ceiling (the room at its largest), or the room's own for a send, or
-    /// [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
+    /// The bank's ceiling (the room at its largest), or [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
     /// ([`MAX_NODE_TAIL`] at the prepared rate).
     fn tail(&self) -> Tail {
         let Some(r) = &self.running else {
             return Tail::Unknown;
         };
-        let tail = self
-            .fixed
-            .as_ref()
-            .map_or_else(|| r.bank.tail(), |c| r.bank.tail_of(c));
-        match tail {
+        match r.bank.tail() {
             Tail::Finite(n) if n > MAX_NODE_TAIL.to_samples_ceil(r.rate) => Tail::Unbounded,
             tail => tail,
         }
@@ -243,7 +207,7 @@ mod tests {
     /// The damping is the one control the tail does not read.
     #[test]
     fn only_the_damping_is_flagged_no_ring() {
-        let set = FreeverbSet { cells: true };
+        let set = FreeverbSet;
         assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::Damping)]);
     }
 }

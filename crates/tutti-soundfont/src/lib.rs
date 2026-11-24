@@ -46,14 +46,14 @@
 //! unit.program_change(MidiChannel::FIRST, U7::of(0)); // channel 0 → program 0
 //!
 //! // Into the graph: no audio input, five outputs, one MIDI event input (wire a
-//! // clip or a keyboard's queue node to it with `GraphSpec::connect_events`).
+//! // clip or a keyboard's queue node to it with `Editor::connect_events`).
 //! // The graph runs at 48 kHz, so `prepare` rebuilds the synthesizer at 48 kHz,
 //! // keeping the preset (the unit has no rate of its own before that).
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
-//! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort::new(key, port))));
+//! editor
+//!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))?;
 //! editor.commit()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

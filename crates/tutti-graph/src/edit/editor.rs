@@ -77,6 +77,8 @@ use tutti_buffers::Float;
 mod cells;
 mod commit;
 mod controls;
+#[cfg(test)]
+mod corrupted;
 mod errors;
 mod lifecycle;
 mod link;
@@ -85,9 +87,10 @@ mod outlets;
 mod placements;
 mod taps;
 mod unwired;
+mod wiring;
 use cells::LiveCells;
 pub use commit::Rewired;
-pub use errors::{CloseError, CommitError, MissingSource};
+pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
@@ -153,7 +156,8 @@ impl Limits {
 /// [`Editor::new`] builds the editor and its executor together, from one
 /// [`Prepare`]. Nodes are added with [`insert`](Self::insert) (which
 /// prepares the unit and returns its typed controls), wired through
-/// [`spec_mut`](Self::spec_mut), and shipped with [`commit`](Self::commit),
+/// [`connect_edge`](Self::connect_edge), [`wire_outputs`](Self::wire_outputs) and the calls beside them, and shipped
+/// with [`commit`](Self::commit),
 /// which validates and compiles the spec against the plan sent last and
 /// sends a commit — the new [`Plan`] and only the units that changed — over a
 /// preallocated queue. The executor installs it at the start of its next
@@ -178,7 +182,7 @@ impl Limits {
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
-/// use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
+/// use tutti_graph::{OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
@@ -187,14 +191,11 @@ impl Limits {
 /// struct Half;
 /// impl Node for Half {
 ///     fn shape(&self) -> Shape {
-///         Shape::through_unassigned(ChannelLayout::MONO)
+///         Shape::source_unassigned(ChannelLayout::MONO)
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-///         let (ins, mut outs) = io.split();
-///         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
-///             *o = 0.5 * i;
-///         }
+///         io.output(0).fill(0.5);
 ///         Status::Modified
 ///     }
 ///     fn reset(&mut self) {}
@@ -203,17 +204,15 @@ impl Limits {
 /// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
-/// let topology = &mut editor.spec_mut().topology;
-/// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InputPort::new(half, 0), Edge::Direct(PortSource::MainInput(0)));
-/// topology.set_outputs([PortSource::Node(OutputPort::new(half, 0))]);
+/// editor
+///     .wire_outputs([PortSource::Node(OutputPort::new(half, 0))])
+///     .expect("the node exists");
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:
-/// let input = [1.0_f32; 64];
 /// let mut output = [0.0_f32; 64];
 /// let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
-/// executor.process(64, &transport, &[&input], &mut [&mut output]);
+/// executor.process(64, &transport, &[], &mut [&mut output]);
 /// assert_eq!(output[0], 0.5);
 /// ```
 pub struct Editor<F: Float = f32> {
@@ -603,19 +602,13 @@ impl<F: Float> Editor<F> {
         &self.spec
     }
 
-    /// The graph value, for wiring. Nodes are added with
-    /// [`insert`](Self::insert), not here, so every node has a unit.
-    /// Moves the [`revision`](Self::revision), whether or not the borrow
-    /// writes.
-    ///
-    /// A gain entry is declared by the editor, which makes its cell
-    /// ([`set_edge_gain`](Self::set_edge_gain),
-    /// [`set_edge_gain_range`](Self::set_edge_gain_range),
-    /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
-    /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
-    /// and never write [`GraphSpec::gains`] through this borrow. A commit
-    /// that finds an entry without its cell makes one from the values.
-    pub fn spec_mut(&mut self) -> &mut GraphSpec {
+    /// The graph value, for the editor's own edits and the tests inside the
+    /// crate. Every edit an outside caller makes goes through a typed call
+    /// ([`connect_edge`](Self::connect_edge), [`insert`](Self::insert) and
+    /// the rest), which checks it and marks the [`revision`](Self::revision)
+    /// only when it changes something. Moves the revision, whether or not the
+    /// borrow writes.
+    pub(crate) fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec
     }
@@ -635,7 +628,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// A count that moves whenever anything the editor shows a reader may
-    /// have changed: the spec ([`spec_mut`](Self::spec_mut) included), the
+    /// have changed: the spec (any wiring call), the
     /// shapes and generations, the plan sent last ([`base`](Self::base)),
     /// a param range or its cells, the [`Prepare`]. Equal revisions mean
     /// none of those changed in between, so a control-side pass that is a
