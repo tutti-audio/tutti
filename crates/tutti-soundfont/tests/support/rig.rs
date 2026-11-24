@@ -14,60 +14,60 @@ use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1, Voice2};
 use tutti_units::SampleRate;
 
-pub const RATE: SampleRate = SampleRate::SR_44K1;
+pub(crate) const RATE: SampleRate = SampleRate::SR_44K1;
 
-pub fn timgm6mb() -> Arc<SoundFont> {
+pub(crate) fn timgm6mb() -> Arc<SoundFont> {
     Arc::new(SoundFont::open(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap())
 }
 
 /// A unit over a font, with typed messages.
-pub struct Rig {
+pub(crate) struct Rig {
     pub hand: Hand,
 }
 
 impl Rig {
     /// A unit at the default settings. Its dry pair is true silence once a voice stops: the effects are not in it.
-    pub fn dry(font: &Arc<SoundFont>) -> Self {
+    pub(crate) fn dry(font: &Arc<SoundFont>) -> Self {
         Self::with(SoundFontConfig::new(Arc::clone(font)))
     }
 
     /// A unit at the default settings, prepared by a graph at `rate`.
-    pub fn dry_at(font: &Arc<SoundFont>, rate: SampleRate) -> Self {
+    pub(crate) fn dry_at(font: &Arc<SoundFont>, rate: SampleRate) -> Self {
         let unit = SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).unwrap();
         Self {
             hand: Hand::at(unit, rate),
         }
     }
 
-    pub fn with(config: SoundFontConfig) -> Self {
+    pub(crate) fn with(config: SoundFontConfig) -> Self {
         Self {
             hand: Hand::new(SoundFontUnit::try_from(config).unwrap()),
         }
     }
 
-    pub fn note_on(&mut self, ch: u8, k: u8, velocity: u8) {
+    pub(crate) fn note_on(&mut self, ch: u8, k: u8, velocity: u8) {
         let e = midi::m1_note_on(MidiChannel::of(ch), k, U7::of(velocity));
         self.hand.queue_midi(&[e]);
     }
 
-    pub fn note_off(&mut self, ch: u8, k: u8) {
+    pub(crate) fn note_off(&mut self, ch: u8, k: u8) {
         let e = midi::m1_note_off(MidiChannel::of(ch), k, U7::of(0));
         self.hand.queue_midi(&[e]);
     }
 
-    pub fn cc(&mut self, ch: u8, controller: CCNumber, value: u8) {
+    pub(crate) fn cc(&mut self, ch: u8, controller: CCNumber, value: u8) {
         let e = midi::m1_cc(MidiChannel::of(ch), controller, U7::of(value));
         self.hand.queue_midi(&[e]);
     }
 
     /// A MIDI 2.0 message, as the input edge's translator sends an RPN,
     /// an NRPN or a Program Change with its bank.
-    pub fn voice2(&mut self, ch: u8, voice: Voice2) {
+    pub(crate) fn voice2(&mut self, ch: u8, voice: Voice2) {
         self.hand
             .queue_midi(&[Ump::from(Message::midi2(MidiChannel::of(ch), voice))]);
     }
 
-    pub fn program(&mut self, ch: u8, program: u8) {
+    pub(crate) fn program(&mut self, ch: u8, program: u8) {
         let e = Ump::from(Message::midi1(
             MidiChannel::of(ch),
             Voice1::ProgramChange(U7::of(program)),
@@ -75,7 +75,7 @@ impl Rig {
         self.hand.queue_midi(&[e]);
     }
 
-    pub fn bend(&mut self, ch: u8, bend: u16) {
+    pub(crate) fn bend(&mut self, ch: u8, bend: u16) {
         let e = Ump::from(Message::midi1(
             MidiChannel::of(ch),
             Voice1::PitchBend(U14::of(bend)),
@@ -84,14 +84,14 @@ impl Rig {
     }
 
     /// All Sound Off on every channel.
-    pub fn cut_all(&mut self) {
+    pub(crate) fn cut_all(&mut self) {
         for ch in 0..16 {
             self.cc(ch, CCNumber::ALL_SOUND_OFF, 0);
         }
     }
 
     /// Renders `frames` frames, left then right.
-    pub fn render(&mut self, frames: usize) -> (Vec<f32>, Vec<f32>) {
+    pub(crate) fn render(&mut self, frames: usize) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
         while left.len() < frames {
             let n = (frames - left.len()).min(BLOCK);
@@ -106,7 +106,7 @@ impl Rig {
     /// send left and right, reverb send. Each block's outputs are what the
     /// executor would hand on (zeros for a block that returned `Silent` or
     /// `Idle`). The status of the last block is `self.hand.status()`.
-    pub fn render_all(&mut self, frames: usize) -> [Vec<f32>; 5] {
+    pub(crate) fn render_all(&mut self, frames: usize) -> [Vec<f32>; 5] {
         let mut planes: [Vec<f32>; 5] = std::array::from_fn(|_| Vec::with_capacity(frames));
         let mut done = 0;
         while done < frames {
@@ -121,13 +121,13 @@ impl Rig {
     }
 
     /// The summed magnitude of the next `frames` frames.
-    pub fn energy(&mut self, frames: usize) -> f32 {
+    pub(crate) fn energy(&mut self, frames: usize) -> f32 {
         let (l, r) = self.render(frames);
         l.iter().chain(&r).map(|s| s.abs()).sum()
     }
 
     /// The summed magnitude of the next `frames` frames, per channel.
-    pub fn energy_lr(&mut self, frames: usize) -> (f32, f32) {
+    pub(crate) fn energy_lr(&mut self, frames: usize) -> (f32, f32) {
         let (l, r) = self.render(frames);
         let sum = |b: &[f32]| b.iter().map(|s| s.abs()).sum();
         (sum(&l), sum(&r))

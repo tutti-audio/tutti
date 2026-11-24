@@ -59,7 +59,7 @@ fn protocol_of(protocol: VirtualProtocol) -> Protocol {
 /// endpoint is a main-thread object, so this type is `!Send`; what sends from
 /// another thread is the [`SenderBackend`] it hands out.
 #[must_use = "dropping it removes the virtual endpoint"]
-pub struct UmpVirtualEndpoint {
+pub(crate) struct UmpVirtualEndpoint {
     endpoint: Endpoint,
     name: String,
 }

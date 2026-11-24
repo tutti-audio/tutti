@@ -124,7 +124,7 @@ impl<T> std::fmt::Debug for NoteLedger<T> {
 impl<T: Copy + PartialEq> NoteLedger<T> {
     /// A ledger for up to `capacity` keys at once. Control thread: allocates.
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             entries: Vec::with_capacity(capacity),
             capacity,
@@ -141,7 +141,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
 
     /// Forgets every note: the node was reset, and whatever it fed is reset
     /// with it.
-    pub fn forget(&mut self) {
+    pub(crate) fn forget(&mut self) {
         self.entries.clear();
         self.owing = 0;
         self.controllers.clear();
@@ -150,7 +150,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
     /// The handle a block sends through. Everything owed goes out first, at
     /// `first`, the block's first frame: a node cannot write a note before it
     /// has paid what it owes, because this is how it gets the handle.
-    pub fn block<'l, 'w>(
+    pub(crate) fn block<'l, 'w>(
         &'l mut self,
         out: &'l mut EventWriter<'w>,
         first: Offset,
@@ -278,7 +278,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     /// A note-on of a key that sounds ends the sounding note first, on the
     /// same frame, and takes the key. A tagged off ends the key only when its
     /// owner owns it, and is swallowed otherwise.
-    pub fn send(&mut self, at: Offset, ump: impl Into<Ump>, owner: Option<T>) {
+    pub(crate) fn send(&mut self, at: Offset, ump: impl Into<Ump>, owner: Option<T>) {
         let ump = ump.into();
         match Class::of(ump) {
             Class::Other => {
@@ -412,7 +412,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     /// one the rest are not tried (it is full), but each is owed and counted:
     /// a note that gets no off is a lost event whether or not its push was
     /// attempted.
-    pub fn release_all(&mut self, at: Offset) {
+    pub(crate) fn release_all(&mut self, at: Offset) {
         let mut full = false;
         self.ledger.entries.retain_mut(|e| {
             // What was refused belongs to the pass that is ending.

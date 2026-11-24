@@ -19,10 +19,10 @@ pub(crate) mod loop_span;
 // places itself by.
 pub(crate) mod clock;
 // Shared zero-alloc interpolation kernel (one cubic Hermite for both units).
-pub mod interp;
-pub mod memory_source;
+pub(crate) mod interp;
+pub(crate) mod memory_source;
 // Disk streaming: the unit is fed by the streamer engine (`DiskStreamer`).
-pub mod disk_voice;
+pub(crate) mod disk_voice;
 // The first error an offline voice hit, for its fork's health probe.
 mod fault;
 // A live disk voice reads the streamer's ring by position here.
@@ -30,12 +30,12 @@ mod live_read;
 // A forked disk voice reads its file here instead of the streamer's ring.
 mod offline_read;
 // The voice pool, one file per duty.
-pub mod command;
-pub mod node;
-pub mod pool;
-pub mod slot;
+pub(crate) mod command;
+pub(crate) mod node;
+pub(crate) mod pool;
+pub(crate) mod slot;
 pub(crate) mod stretched;
-pub mod types;
+pub(crate) mod types;
 // Tests only: they exercise the five modules above in combination and reach
 // private state a sibling module could not see.
 #[cfg(test)]

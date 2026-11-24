@@ -169,7 +169,7 @@ impl SynthVoice {
         if self.gate { 1.0 } else { 0.0 }
     }
     #[cfg(test)]
-    pub fn mpe_state(&self) -> &MpeVoiceState {
+    pub(crate) fn mpe_state(&self) -> &MpeVoiceState {
         &self.mpe
     }
 
@@ -362,7 +362,7 @@ impl SynthVoice {
     }
 
     #[cfg(test)]
-    pub fn sub_voice_count(&self) -> usize {
+    pub(crate) fn sub_voice_count(&self) -> usize {
         usize::from(self.sub_voices.get())
     }
 
