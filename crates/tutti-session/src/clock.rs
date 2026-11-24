@@ -56,7 +56,7 @@ impl SessionFloat for f64 {}
 pub(crate) mod sealed {
     use tutti_platform::Instant;
 
-    use tutti_engine::OutputStream;
+    use tutti_engine::{OutputQuantum, OutputStream};
 
     use crate::SessionEvent;
 
@@ -70,8 +70,16 @@ pub(crate) mod sealed {
         }
 
         /// The clock's own share of `Phase::Poll`, after the stream's faults
-        /// were read (`lost`: the stream's device left).
-        fn poll(&mut self, _now: Instant, _lost: bool, _out: &mut Vec<SessionEvent>) {}
+        /// were read (`lost`: the stream's device left; `prepared`: the
+        /// callback size the graph is prepared for, `Prepare::quantum`).
+        fn poll(
+            &mut self,
+            _now: Instant,
+            _lost: bool,
+            _prepared: Option<OutputQuantum>,
+            _out: &mut Vec<SessionEvent>,
+        ) {
+        }
     }
 
     /// A [`Running`] with a stream, which a real-time clock holds.
@@ -319,9 +327,10 @@ impl<F: SessionFloat> sealed::Running for crate::device::DeviceHandle<F> {
         &mut self,
         now: tutti_platform::Instant,
         lost: bool,
+        prepared: Option<tutti_engine::OutputQuantum>,
         out: &mut Vec<crate::SessionEvent>,
     ) {
-        self.poll_device(now, lost, out);
+        self.poll_device(now, lost, prepared, out);
     }
 }
 

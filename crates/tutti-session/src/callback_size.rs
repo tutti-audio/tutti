@@ -5,7 +5,8 @@
 //! for, so callbacks of another size leave it mostly silent.
 //! [`CallbackSizeRule`] is the decision as a value: it is fed one reading per
 //! session update (the span of every callback since the previous one) and the
-//! size the graph is prepared for, and answers when the delivered size has
+//! size the graph is prepared for (`Prepare::quantum`; not the stream's spec,
+//! which says what the stream opened at), and answers when the delivered size has
 //! settled at one other value, or never settles. It has no clock and does no
 //! I/O.
 
