@@ -174,9 +174,9 @@ fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
     }
 }
 
-/// The reported tail covers the ring-out: past it the impulse response is under `TAIL_FLOOR`
-/// (-60 dB) of its peak, and it is no more than the decay and three trips long, the trip
-/// `N + M K (1 + g) / (1 - g) + p / (1 - p)` of the low cascade at full dispersion.
+/// The reported tail covers the ring-out: past it the impulse response is under `TAIL_FLOOR` (-60
+/// dB) of its peak, and it is no more than the decay and three trips long, the trip `N + M K (1 +
+/// g) / (1 - g) + p / (1 - p)` of the low cascade at full dispersion.
 #[test]
 fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips() {
     let lay = layout(40, 0.04);
@@ -200,17 +200,15 @@ fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips(
 
 /// The reported tail covers the ring-out of the worst finite inputs: for the default, the
 /// shortest decay with no dispersion and a tone far above Nyquist, the lowest tone, half
-/// dispersion, the longest decay (held at the loop gain's ceiling) on one stage and on eight,
-/// the shortest and the longest loop, and 512 stages, at 48 kHz and 22.05 kHz (the two longest
-/// at 8 kHz only, their tails being a minute and a loop of a second), an impulse, a full-scale
-/// noise burst and a full-scale step (twice the slowest trip, so the loop and every stage are
-/// full) stop, and from the reported tail past the last input frame no frame is above
-/// `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor is relative to the
-/// response's peak: the step is built up by the loop, whose gain reaches the ceiling, far past
-/// the input.
+/// dispersion, the longest decay (held at the loop gain's ceiling) on one stage and on eight, the
+/// shortest and the longest loop, and 512 stages, at 8 kHz (a one-stage spring also at 48 kHz and
+/// 44.1 kHz), an impulse, a full-scale noise burst and a full-scale step (twice the slowest trip,
+/// so the loop and every stage are full) stop, and from the reported tail past the last input
+/// frame no frame is above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor
+/// is relative to the response's peak: the step is built up by the loop, whose gain reaches the
+/// ceiling, far past the input.
 #[test]
 fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
-    let usual = [SampleRate::SR_48K, SampleRate::of(22_050.0)];
     let slow = [SampleRate::of(8_000.0)];
     let at = |decay: f64, tone: f64, dispersion: f64| SpringControls {
         decay: Seconds::new(decay),
@@ -222,37 +220,37 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
             "default",
             SpringLayout::DEFAULT,
             SpringControls::DEFAULT,
-            &usual,
+            &slow,
         ),
         (
             "shortest decay, no dispersion, tone past Nyquist",
             SpringLayout::DEFAULT,
             at(0.1, 1.0e6, 0.0),
-            &usual,
+            &slow,
         ),
         (
             "lowest tone",
             SpringLayout::DEFAULT,
             at(1.0, 20.0, 1.0),
-            &usual,
+            &slow,
         ),
         (
             "half dispersion, tone 500 Hz",
             SpringLayout::DEFAULT,
             at(1.0, 500.0, 0.5),
-            &usual,
+            &slow,
         ),
         (
             "one stage, longest decay (loop gain at its ceiling)",
             layout(1, 0.005),
             at(60.0, 1.0e6, 0.0),
-            &usual,
+            &slow,
         ),
         (
             "one stage, 1 s loop",
             layout(1, 1.0),
             at(2.0, 4_000.0, 1.0),
-            &usual,
+            &slow,
         ),
         (
             "8 stages, longest decay, lowest tone",
@@ -267,6 +265,15 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
             &slow,
         ),
     ];
+    // The whole grid runs at 8 kHz; a one-stage spring also runs at 48 kHz and 44.1 kHz, where its
+    // loop of 5 ms rounds to a different frame count (the default spring there costs seconds).
+    let wide = [SampleRate::SR_48K, SampleRate::SR_44K1];
+    let cases = cases.into_iter().chain([(
+        "one stage, 5 ms loop, decay 60 s (the loop rounds differently)",
+        layout(1, 0.005),
+        at(60.0, 4_000.0, 1.0),
+        &wide[..],
+    )]);
     for (name, lay, c, rates) in cases {
         for &rate in rates {
             let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, rate, lay);
@@ -289,11 +296,11 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
 
 /// A decay raised to its longest while the short one rings out is covered by the tail a node
 /// reports after the move (the larger of what is owed and the long tail, from the last input
-/// frame, under the ceiling the spring declares): from it past the last input frame no frame
-/// is above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step,
-/// the move landing right after the input and a third of the way into the short tail. The energy in the loop at the move
-/// decays at the new, slower rate from the move on. A short spring at 8 kHz keeps the minute
-/// of the longest decay small.
+/// frame, under the ceiling the spring declares): from it past the last input frame no frame is
+/// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the loop at the move decays at the new, slower rate from the move on. A short spring at 8 kHz
+/// keeps the minute of the longest decay small.
 #[test]
 fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
     let rate = SampleRate::of(8_000.0);

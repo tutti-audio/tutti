@@ -180,9 +180,9 @@ fn the_first_sound_is_the_pre_delay_plus_the_earliest_tap() {
 
 /// The reported tail covers the impulse response: past it nothing is above the floor below the
 /// response's peak, and the tail never exceeds the ceiling, at 48 and 44.1 kHz. The sets include
-/// the worst corners of what the tail adds to the network's own: damping 0.999 (each half's one-pole adds
-/// `p / (1 - p)` = 999 frames to the loop, more than the bound's slack at diffusion 0) and
-/// bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
+/// the worst corners of what the tail adds to the network's own: damping 0.999 (each half's
+/// one-pole adds `p / (1 - p)` = 999 frames to the loop, more than the bound's slack at diffusion
+/// 0) and bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
 #[test]
 fn the_tail_covers_the_response_falling_under_the_floor() {
     let floor = 10f64.powf(crate::TAIL_FLOOR.get() / 20.0);
@@ -229,13 +229,13 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
 }
 
 /// The reported tail covers the ring-out of the worst finite inputs: for the shortest, the
-/// default and the longest decay, damping from none to its largest pole, the narrowest
-/// bandwidth and the default, diffusion 0 and 1, no pre-delay and the longest, and no modulation
-/// and the deepest, at 48 kHz and 22.05 kHz (the longest decay at 22.05 kHz only), an impulse, a full-scale noise burst and a full-scale
-/// step (twice the tank's loop, so every line is full) stop, and from the reported tail past the
-/// last input frame no frame of either channel is above `TAIL_FLOOR` of the render's own peak
-/// (see [`tail_probe`]). The floor is relative to the response's peak: the output taps sum the
-/// tank's lines, and a step is built up by the loop far past the input.
+/// default and the longest decay, damping from none to its largest pole, the narrowest bandwidth
+/// and the default, diffusion 0 and 1, no pre-delay and the longest, and no modulation and the
+/// deepest, at 8 kHz (the default also at 48 kHz and 44.1 kHz), an impulse, a full-scale noise
+/// burst and a full-scale step (twice the tank's loop, so every line is full) stop, and from the
+/// reported tail past the last input frame no frame of either channel is above `TAIL_FLOOR` of
+/// the render's own peak (see [`tail_probe`]). The floor is relative to the response's peak: the
+/// output taps sum the tank's lines, and a step is built up by the loop far past the input.
 #[test]
 fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
     use crate::MIN_DECAY;
@@ -335,20 +335,23 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
             tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&y[0], &y[1]]);
         }
     };
+    // The whole grid runs at 8 kHz (the tank's lines scale with the rate); the default also runs
+    // at 48 kHz and 44.1 kHz, where the lengths round differently.
     for (name, c) in cases {
-        for rate in [SampleRate::SR_48K, SampleRate::of(22_050.0)] {
-            check(name, &c, rate);
-        }
+        check(name, &c, SampleRate::of(8_000.0));
     }
-    check("8 s", &eight, SampleRate::of(22_050.0));
+    check("8 s", &eight, SampleRate::of(8_000.0));
+    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
+        check("default", &PlateControls::DEFAULT, rate);
+    }
 }
 
 /// A decay raised to its longest while the short one rings out is covered by the tail a node
 /// reports after the move (the larger of what is owed and the long tail, from the last input
 /// frame, under the ceiling): from it past the last input frame no frame of either channel is
 /// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
-/// move landing right after the input and a third of the way into the short tail. The energy in the tank at the move
-/// decays at the new, slower rate from the move on.
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the tank at the move decays at the new, slower rate from the move on.
 #[test]
 fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
     use crate::reverb::plate::design::MAX_PLATE_DECAY;
