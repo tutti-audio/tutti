@@ -956,9 +956,7 @@ pub mod midi {
         OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages,
         SyncOut, SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{
-        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
-    };
+    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
@@ -1011,10 +1009,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowMachineControl,
-        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
-        NotInstrument, OpenMidiSink, Stamping, TrackError,
+        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
+        FollowMachineControl, FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi,
+        LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink,
+        NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -1095,9 +1093,9 @@ pub mod midi {
             MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
             MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
             NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-            NotQuarterFramePiece, NotWritable, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
-            Recipient, RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
-            UniversalRead, UniversalReader, VitcInsert,
+            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
+            RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload, UniversalRead,
+            UniversalReader, VitcInsert,
         };
     }
 
