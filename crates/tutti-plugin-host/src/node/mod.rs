@@ -24,6 +24,8 @@ mod instance;
 mod loader;
 #[cfg(test)]
 mod midi_map_tests;
+#[cfg(test)]
+mod mute_tests;
 mod off_main_wait;
 mod rebind;
 mod width_error;

@@ -85,6 +85,7 @@ enum lifecycle::Effect
 enum lifecycle::Event
 enum lifecycle::HostOp
 enum lifecycle::Notice
+enum lifecycle::Recovery
 enum lifecycle::Reply
 enum lifecycle::Request
 enum lifecycle::RescanScope
@@ -313,6 +314,7 @@ fn lifecycle::Prepare::rate
 fn lifecycle::Prepare::with_format
 fn lifecycle::Prepare::with_mode
 fn lifecycle::Prepare::with_rate
+fn lifecycle::State::applied
 fn lifecycle::State::has_backlog
 fn lifecycle::State::is_busy
 fn lifecycle::State::is_parked
@@ -320,11 +322,12 @@ fn lifecycle::State::is_quiet
 fn lifecycle::State::latency
 fn lifecycle::State::layout
 fn lifecycle::State::new
-fn lifecycle::State::prepare
 fn lifecycle::State::renders
+fn lifecycle::State::retuned
 fn lifecycle::State::set_mode
 fn lifecycle::State::stage
 fn lifecycle::State::tail
+fn lifecycle::State::wanted
 fn lifecycle::standing
 fn lifecycle::step
 fn locate::Helper::file_stem
