@@ -374,9 +374,10 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
 }
 
 /// M2-103 section 12.2: a Get no one answers resolves `TimedOut`. The time it
-/// takes is pinned with constructed instants in `tutti-midi-hardware`'s MIDI-CI
-/// tests: here the session's MIDI-CI task also steps, on the real clock, so a
-/// request's deadline may start on either clock and only the outcome is asserted.
+/// takes is pinned with constructed instants in `tutti-midi-ci`'s Property
+/// Exchange initiator tests: here the session's MIDI-CI task also steps, on the
+/// real clock, so a request's deadline may start on either clock and only the
+/// outcome is asserted.
 /// The bound is a count of steps, and guards a request that never resolves.
 #[test]
 fn a_fetch_nothing_answers_resolves_timed_out() {
