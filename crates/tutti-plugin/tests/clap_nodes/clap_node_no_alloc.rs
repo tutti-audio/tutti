@@ -32,7 +32,7 @@ use tutti_modulation::{
     Waveform,
 };
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, ForeignLaneConfig, Law, Trajectory};
+use tutti_nodes::automation::{Breakpoint, ForeignLaneConfig, Law, Trajectory};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_units::{Bipolar, ParamId, PhaseIncrement};
