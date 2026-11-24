@@ -954,6 +954,23 @@ impl Destination for OpenOutput {
     }
 }
 
+impl UmpOut<OpenOutput> {
+    /// The device output this sends into.
+    pub(crate) fn destination(&self) -> &OpenOutput {
+        &self.destination
+    }
+
+    /// The device output this sends into, to follow what its device settled.
+    pub(crate) fn destination_mut(&mut self) -> &mut OpenOutput {
+        &mut self.destination
+    }
+
+    /// The stamp stream, which outlives the output it stamped for.
+    pub(crate) fn into_stream(self) -> JrStream {
+        self.stream
+    }
+}
+
 /// One output port as the session keeps it.
 struct OutputPort {
     /// Upgrades while a handle of the port lives.
@@ -1645,7 +1662,7 @@ fn open_device_output(
     started: Started,
     id: &MidiDeviceId,
     active_sensing: bool,
-) -> Result<OpenOutput, MidiPortError> {
+) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
     let mut device = io
         .connect_output(started, id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
@@ -1785,7 +1802,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let id = ids.mint();
         let rate = self.graph.prepared().sample_rate();
         let (node, tap, departure) = self.add_output_node();
-        let config = device.as_ref().map(OpenOutput::config);
+        let config = device.as_ref().map(tutti_midi_hardware::OpenOutput::config);
         let info = found.clone().unwrap_or_else(|| saved.clone());
         let live = device.is_some();
         let (losses, readers) = loss_cells();

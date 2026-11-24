@@ -240,8 +240,12 @@ impl Destination for HostSink {
 /// not one drain's: a per-drain origin would restart each at zero and
 /// interleave stamps that walk backwards.
 pub(crate) struct UmpOut<D: Destination> {
-    destination: D,
-    stream: tutti_midi_runtime::JrStream,
+    /// Where batches are queued. Also read by the device port's
+    /// `impl UmpOut<OpenOutput>` in `midi_port.rs`.
+    pub(crate) destination: D,
+    /// Also read by the device port's `impl UmpOut<OpenOutput>` in
+    /// `midi_port.rs`, which parks it across a close.
+    pub(crate) stream: tutti_midi_runtime::JrStream,
     /// Scratch for the stamped block, reused across sends: stamping runs
     /// once per block and the result is only borrowed, straight to
     /// `MidiOut::queue`. `JrStream::stamp` clears it on entry, so nothing
@@ -406,26 +410,6 @@ impl<D: Destination> UmpOut<D> {
     #[cfg(test)]
     pub(crate) fn origin(&self) -> Frame {
         self.stream.origin()
-    }
-}
-
-/// What a device's output port uses: it follows its output's settled
-/// configuration and parks the stamp stream across a close.
-#[cfg_attr(not(feature = "midi-hardware"), allow(dead_code))]
-impl<D: Destination> UmpOut<D> {
-    /// The destination this sends into.
-    pub(crate) fn destination(&self) -> &D {
-        &self.destination
-    }
-
-    /// The destination this sends into, to follow what its device settled.
-    pub(crate) fn destination_mut(&mut self) -> &mut D {
-        &mut self.destination
-    }
-
-    /// The stamp stream, which outlives the destination it stamped for.
-    pub(crate) fn into_stream(self) -> tutti_midi_runtime::JrStream {
-        self.stream
     }
 }
 
