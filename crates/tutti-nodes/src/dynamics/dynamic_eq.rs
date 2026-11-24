@@ -7,9 +7,10 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp,
     SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::Shape;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
+use super::keyed_shape;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DynamicEqNode`] is made from: its width, the band's centre and Q, and optionally
@@ -225,14 +226,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let main = Buses::main(self.input);
-        let inputs = match self.key {
-            KeySource::Own => main,
-            KeySource::Sidechain => main
-                .with(Bus::new(self.input, BusRole::Sidechain))
-                .expect("a main bus and a key are two buses"),
-        };
-        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
+        keyed_shape(self.input, self.key)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

@@ -37,8 +37,8 @@ use tutti_buffers::{Float, InputOutput, Mono, Planes};
 use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};
-use super::gain_pass::{CHUNK, GAIN_RAMP, floored, key_levels};
-use super::key_filter::{KeyFilter, KeyStage};
+use super::gain_pass::{CHUNK, GAIN_RAMP, floored};
+use super::key_filter::{KeyFilter, KeyPath};
 use crate::follower::{Follower, Smoothed};
 use crate::{Lerp, Ramp, SimdLanes, Steps};
 
@@ -65,10 +65,14 @@ pub struct GateControls {
     /// down to the `range`. The infinite ratio (the default) is a gate: a key
     /// under the threshold is at the range at once. A NaN reads as the gate.
     pub ratio: CompressionRatio,
-    /// The cutoff of the key filter: read only by a bank built with
-    /// [`key_filter`](GateBank::key_filter). Held in the SVF's range.
+    /// The filter the detector hears the key through. A running bank switches: from
+    /// [`Off`](KeyFilter::Off) the filter starts from silence at the cutoff and Q below, and
+    /// between its two responses it keeps its state.
+    pub key_filter: KeyFilter,
+    /// The cutoff of the key filter, held in the SVF's range. Not in use while the filter is
+    /// off, and kept: a switch in lands on it.
     pub key_cutoff: Hz,
-    /// The Q of the key filter, read as `key_cutoff` is.
+    /// The Q of the key filter, kept as `key_cutoff` is.
     pub key_q: Q,
 }
 
@@ -83,6 +87,7 @@ impl GateControls {
         release: Seconds::ZERO,
         range: Db::UNITY,
         ratio: CompressionRatio::new(f64::INFINITY),
+        key_filter: KeyFilter::Off,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
@@ -191,14 +196,16 @@ pub struct GateBank<F: Float + SimdLanes> {
     follower: Smoothed<F>,
     /// The frames of hold left.
     hold_counter: usize,
-    /// The filter on the key, if the bank has one.
-    key: Option<KeyStage<F>>,
+    /// The path the key takes to the detector, through its filter while the filter is on.
+    key: KeyPath<F>,
 }
 
 impl<F: Float + SimdLanes + Lerp> GateBank<F> {
-    /// A gate that passes everything at `rate`, to be set.
+    /// A gate that passes everything at `rate`, to be set, whose key filter covers `width` key
+    /// channels (key channels past `width` are not heard through it). Allocates: build it on
+    /// the control side.
     #[must_use]
-    pub fn new(rate: SampleRate) -> Self {
+    pub fn new(width: ChannelLayout, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
@@ -210,20 +217,8 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
             rate,
             follower: Smoothed::ZERO,
             hold_counter: 0,
-            key: None,
+            key: KeyPath::new(width, rate),
         }
-    }
-
-    /// This bank with the detector hearing its key through `filter`, over `width` key
-    /// channels at the cutoff and Q [`retarget`](Self::retarget) gives it. [`KeyFilter::Off`] is no
-    /// filter; key channels past `width` are not heard. Allocates: build it on the control
-    /// side.
-    #[must_use]
-    pub fn key_filter(mut self, filter: KeyFilter, width: ChannelLayout) -> Self {
-        self.key = filter
-            .response()
-            .map(|ty| KeyStage::new(ty, width, self.rate));
-        self
     }
 
     /// Back to silence: the gate closed and no hold left, and the range at rest on its
@@ -232,32 +227,28 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
         self.follower = Smoothed::ZERO;
         self.hold_counter = 0;
         self.range.jump_to_target();
-        if let Some(key) = &mut self.key {
-            key.reset();
-        }
+        self.key.reset();
     }
 
     /// Lands the range on its target now.
     pub fn jump_to_target(&mut self) {
         self.range.jump_to_target();
-        if let Some(key) = &mut self.key {
-            key.jump_to_target();
-        }
+        self.key.jump_to_target();
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
-    /// the range ramps over [`GAIN_RAMP`]. The key filter, if any, ramps to the cutoff and
-    /// Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)); a non-finite one is
-    /// the default's. No allocation.
+    /// the range ramps over [`GAIN_RAMP`]. The key filter, while on, ramps to the cutoff and
+    /// Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)), and a switch in from
+    /// off starts it from silence on them at once; a non-finite one is the default's. No
+    /// allocation.
     pub fn retarget(&mut self, controls: &GateControls) {
         self.design = Design::of(controls, self.rate);
-        if let Some(key) = &mut self.key {
-            let d = GateControls::DEFAULT;
-            key.retarget(
-                controls.key_cutoff.finite_or(d.key_cutoff),
-                controls.key_q.finite_or(d.key_q),
-            );
-        }
+        let d = GateControls::DEFAULT;
+        self.key.retarget(
+            controls.key_filter,
+            controls.key_cutoff.finite_or(d.key_cutoff),
+            controls.key_q.finite_or(d.key_q),
+        );
         self.range
             .retarget_by(F::from_unit(self.design.range), Steps::Fixed(self.steps));
     }
@@ -266,7 +257,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     /// `key`.
     ///
     /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
-    /// for a gate on its own signal, through the key filter if the bank has one (the signal
+    /// for a gate on its own signal, through the key filter while it is on (the signal
     /// it gains is never filtered). Channel `c` of `input` feeds channel `c` of `output`.
     /// A NaN key sample reads as quiet and an infinite one as the largest finite level. Frame
     /// `i` reads the range at the ramp's step `taken + 1 + i`, then the block's steps are
@@ -298,10 +289,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
             let end = start + n;
             let gains = &mut gains[..n];
             // The key's level: the loudest channel at each frame, after the key filter.
-            match &mut self.key {
-                Some(stage) => stage.levels(&key, start..end, gains),
-                None => key_levels(&key, start..end, gains),
-            }
+            self.key.levels(&key, start..end, gains);
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
                 let level = *g;

@@ -8,6 +8,7 @@
 //! cycles of a settled sine is the curve at the sine's peak, `amplitude * |H(f)|`.
 
 use core::f64::consts::PI;
+use std::sync::Arc;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_units::{Amplitude, Samples};
@@ -106,8 +107,10 @@ fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
     CompressorNode::<f32>::from(
         CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
-            .key_filter(filter)
-            .controls(compressor_controls(cutoff, q)),
+            .controls(CompressorControls {
+                key_filter: filter,
+                ..compressor_controls(cutoff, q)
+            }),
     )
 }
 
@@ -276,8 +279,10 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
         CompressorNode::<f32>::from(
             CompressorConfig::new(ChannelTopology::MONO)
                 .key(KeySource::Sidechain)
-                .key_filter(KeyFilter::HighPass)
-                .controls(controls),
+                .controls(CompressorControls {
+                    key_filter: KeyFilter::HighPass,
+                    ..controls
+                }),
         ),
         SR,
         1_024,
@@ -313,8 +318,10 @@ fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32>
     GateNode::<f32>::from(
         GateConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
-            .key_filter(filter)
-            .controls(gate_controls(threshold, cutoff, q)),
+            .controls(GateControls {
+                key_filter: filter,
+                ..gate_controls(threshold, cutoff, q)
+            }),
     )
 }
 
@@ -405,39 +412,116 @@ fn the_gate_applies_its_gain_to_the_unfiltered_audio() {
     }
 }
 
-/// `Off` declares no key-filter control: the compressor's six and the gate's five are all the
-/// node has, and writing a cutoff or Q reaches nothing. A node with a filter declares the
-/// cutoff and Q after them, at the values it was built with, and the controls it had keep their
-/// values.
+/// A compressor and a gate declare the cutoff and Q after their other params, eight each,
+/// whatever filter they start at; the cutoff and Q start at the controls' values and the other
+/// controls keep theirs.
 #[test]
-fn off_declares_no_controls_and_a_filter_declares_two_more() {
+fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
     let controls = CompressorControls {
         makeup: Db::new(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
-    let config = CompressorConfig::new(ChannelTopology::MONO)
-        .key(KeySource::Sidechain)
-        .controls(controls);
-    let off = CompressorNode::<f32>::from(config);
-    assert_eq!(off.shape().params.len(), 6);
-    assert!(!off.param_set().set(UnitParam::Cutoff, 500.0));
-    assert!(!off.param_set().set(UnitParam::Q, 2.0));
-    let on = CompressorNode::<f32>::from(config.key_filter(KeyFilter::BandPass));
-    assert_eq!(
-        &on.shape().params.as_slice()[6..],
-        &[UnitParam::Cutoff, UnitParam::Q][..]
-    );
-    let bases: Vec<_> = (0..8).map(|k| on.param_base(k)).collect();
-    assert_eq!(
-        bases,
-        [-40.0, 0.0, 4.0, 0.0, 0.0, 3.0, 2_000.0, 1.5].map(Some)
-    );
+    for filter in [KeyFilter::Off, KeyFilter::HighPass, KeyFilter::BandPass] {
+        let node = CompressorNode::<f32>::from(
+            CompressorConfig::new(ChannelTopology::MONO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    key_filter: filter,
+                    ..controls
+                }),
+        );
+        assert_eq!(
+            &node.shape().params.as_slice()[6..],
+            &[UnitParam::Cutoff, UnitParam::Q][..],
+            "{filter:?}"
+        );
+        assert_eq!(node.shape().params.len(), 8, "{filter:?}");
+        let bases: Vec<_> = (0..8).map(|k| node.param_base(k)).collect();
+        assert_eq!(
+            bases,
+            [-40.0, 0.0, 4.0, 0.0, 0.0, 3.0, 2_000.0, 1.5].map(Some),
+            "{filter:?}"
+        );
+        let gate = gate(filter, -30.0, 100.0, 1.0);
+        assert_eq!(gate.shape().params.len(), 8, "{filter:?}");
+        assert_eq!(
+            &gate.shape().params.as_slice()[6..],
+            &[UnitParam::Cutoff, UnitParam::Q][..],
+            "{filter:?}"
+        );
+    }
+}
 
-    let gate = gate(KeyFilter::Off, -30.0, 100.0, 1.0);
-    assert_eq!(gate.shape().params.len(), 6);
-    let gate = self::gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
-    assert_eq!(
-        &gate.shape().params.as_slice()[6..],
-        &[UnitParam::Cutoff, UnitParam::Q][..]
+/// A running compressor follows its filter word: a 250 Hz key reduces by the curve at its full
+/// level while off, at its level through the high-pass once the word is stored as high-pass
+/// (at the cutoff the param was moved to while the filter was off, not the one it started
+/// with), and back at the full level when it is stored off again.
+#[test]
+fn a_running_compressor_follows_its_key_filter_word_and_keeps_the_cutoff_set_while_off() {
+    let (f, started, moved, q, a) = (250.0, 100.0, 1_000.0, BUTTERWORTH, 0.5);
+    let node = compressor(KeyFilter::Off, started, q);
+    let (word, set) = (Arc::clone(node.key_filter()), node.param_set());
+    let mut node = prepared(node, SR, 1_024);
+    let key = tone(f, a, 24_000);
+    let off = curve_db(amplitude_db(a), THRESHOLD, RATIO);
+    let on = curve_db(
+        amplitude_db(a) + response_db(KeyFilter::HighPass, f, moved, q),
+        THRESHOLD,
+        RATIO,
     );
+    assert!(on < off - 5.0, "the moved cutoff attenuates the key");
+    let tolerance = sampled_peak_tolerance_db(f);
+    assert!((deepest_reduction_db(&run(&mut node, &key)) - off).abs() < tolerance);
+    assert!(set.set(UnitParam::Cutoff, moved));
+    assert!((deepest_reduction_db(&run(&mut node, &key)) - off).abs() < tolerance);
+    for (filter, want) in [(KeyFilter::HighPass, on), (KeyFilter::Off, off)] {
+        word.store(filter);
+        let got = deepest_reduction_db(&run(&mut node, &key));
+        assert!(
+            (got - want).abs() < tolerance,
+            "{filter:?}: {got} dB, curve says {want} dB"
+        );
+    }
+}
+
+/// A running gate follows its filter word: a 250 Hz key whose high-passed peak is under the
+/// threshold and whose full level is over it opens the gate while off, closes it once the word
+/// is high-pass and opens it again when it is stored off.
+#[test]
+fn a_running_gate_follows_its_key_filter_word() {
+    let (f, fc, q, a) = (250.0, 1_000.0, BUTTERWORTH, 0.5);
+    let threshold = amplitude_db(a) + response_db(KeyFilter::HighPass, f, fc, q) + 0.3;
+    let node = gate(KeyFilter::Off, threshold, fc, q);
+    let word = Arc::clone(node.key_filter());
+    let mut node = prepared(node, SR, 1_024);
+    let key = tone(f, a, 24_000);
+    for (filter, opens) in [
+        (KeyFilter::Off, true),
+        (KeyFilter::HighPass, false),
+        (KeyFilter::Off, true),
+    ] {
+        word.store(filter);
+        let gain = highest_gain(&run(&mut node, &key));
+        if opens {
+            assert!(gain > 0.999, "{filter:?}: gain {gain}");
+        } else {
+            assert!(gain < 1e-3, "{filter:?}: gain {gain}");
+        }
+    }
+}
+
+/// A fork holds a filter word of its own, at the value at the fork: a store on the node's word
+/// after the fork does not reach it, and a clone shares the node's.
+#[test]
+fn a_fork_holds_its_own_key_filter_word_and_a_clone_shares_it() {
+    let node = compressor(KeyFilter::BandPass, 100.0, BUTTERWORTH);
+    let (fork, clone) = (node.fork_fresh(), node.clone());
+    node.key_filter().store(KeyFilter::Off);
+    assert_eq!(fork.key_filter().load(), KeyFilter::BandPass);
+    assert_eq!(clone.key_filter().load(), KeyFilter::Off);
+    let node = gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
+    let (fork, clone) = (node.fork_fresh(), node.clone());
+    node.key_filter().store(KeyFilter::Off);
+    assert_eq!(fork.key_filter().load(), KeyFilter::HighPass);
+    assert_eq!(clone.key_filter().load(), KeyFilter::Off);
 }
