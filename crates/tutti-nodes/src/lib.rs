@@ -57,8 +57,9 @@
 //!   `DcBlockerConfig`.
 //! - **Modulation sources** — `LfoNode`, the per-sample LFO over
 //!   `tutti_modulation::Waveform`, the wave a control lane evaluates: an audio generator, whose output feeds a node's
-//!   audio input. Its `LfoClock` is free (a rate in `Hz`, a param) or synced to the
-//!   transport beat (a span fixed at build); its depth and rate are read per frame.
+//!   audio input. Its `LfoSync` is a setting a running node reads: free (a rate in `Hz`, a param) or
+//!   synced to the transport beat (a span from its config); a switch to synced slews onto the beat lock
+//!   over `LFO_SYNC_RAMP`. Its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
 //! - **Wavetable** — [`WavetableNode`], a source playing a mipmapped `tutti_dsp::Wavetable` (frames
@@ -319,7 +320,7 @@ pub use click::{
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
 // `lfo`, so `use tutti_nodes::LfoShape` works.
-pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
+pub use lfo::{LFO_SYNC_RAMP, LfoConfig, LfoNode, LfoShape, LfoSync, Waveform};
 
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};

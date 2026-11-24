@@ -380,7 +380,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::from(
         LfoConfig::new(LfoShape::Sine)
-            .rate(Some(Hz::new(1.0)))
+            .rate(Hz::new(1.0))
             .depth(Bipolar::of(0.25)),
     );
     let (n, params) = g.add_with_controls(lfo);
@@ -711,7 +711,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::from(
         LfoConfig::new(LfoShape::Square)
-            .rate(Some(Hz::new(1.0)))
+            .rate(Hz::new(1.0))
             .depth(Bipolar::of(0.25)),
     );
     let (n, _) = g.add_with_controls(lfo);

@@ -15,7 +15,7 @@
 //! by a gain that rises linearly from zero to one over its time, from the end of the delay.
 
 use tutti_units::{
-    Bipolar, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate, Samples, Seconds,
+    Bipolar, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, SampleRate, Samples, Seconds,
 };
 
 use tutti_buffers::Float;
@@ -126,6 +126,19 @@ impl Lfo {
     pub fn retarget(&mut self, rate: Hz, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
         self.step = step_of(rate, sample_rate);
+    }
+
+    /// Puts the clock at `cycles` unwrapped cycles since the start (negative running
+    /// backwards): [`cycles`](Self::cycles) then reads `cycles` to the phase's `2^-64` quantum,
+    /// and [`advance`](Self::advance) carries on from there. The step, the delay, the fade-in
+    /// and the frames counted are kept. A `cycles` that is not finite is not taken.
+    pub fn locate(&mut self, cycles: f64) {
+        if !cycles.is_finite() {
+            return;
+        }
+        let whole = cycles.floor();
+        self.cycle = whole as i64;
+        self.phase = RunningPhase::at(Phase::wrapped(cycles - whole));
     }
 
     /// Back to the start: the delay again, and the first cycle after it.

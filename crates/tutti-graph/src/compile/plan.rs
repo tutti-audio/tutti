@@ -492,6 +492,37 @@ impl EventSlotCapacity {
     }
 }
 
+/// The writers of what a delayed copy of an event input holds, over a delay
+/// of `len` frames at blocks of `block`: `sources`' declared capacities, then
+/// one writer for the commands scheduled to the input. Its rate is the room
+/// for one block's commands (`COMMAND_CAPACITY`) spread over the delay's
+/// blocks, so the FIFO holds that once, not once a block; a command past it
+/// is counted lost at the tap like any other refusal.
+pub(crate) fn input_writers(
+    sources: impl IntoIterator<Item = Option<NonZeroU32>>,
+    len: Samples,
+    block: usize,
+) -> Vec<Option<NonZeroU32>> {
+    let blocks = crate::exec::rings::EventFifo::blocks(len.get(), block);
+    let commands = crate::COMMAND_CAPACITY.div_ceil(blocks);
+    sources
+        .into_iter()
+        .chain([NonZeroU32::new(u32::try_from(commands).unwrap_or(u32::MAX))])
+        .collect()
+}
+
+/// What an event input's view holds at most of its source's events: the
+/// source's `price`, and under the node's declared input bound `bound`, no
+/// more than that. The one price `emit` gives a view and `verify` demands of
+/// it; the room for the commands and flushed events a block adds is staged
+/// with the executor (`stage.rs`).
+pub(crate) fn view_capacity(
+    price: EventSlotCapacity,
+    bound: Option<NonZeroU32>,
+) -> EventSlotCapacity {
+    price.bounded(bound)
+}
+
 /// One node of the plan, resolved to its place in the unit store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlanUnit {
@@ -608,7 +639,15 @@ pub enum Op<A, E> {
         audio_in: Span<A>,
         /// Audio slot per output channel.
         audio_out: Span<A>,
-        /// Event slot per input port (into [`Plan::event_list`]).
+        /// Event slot per input port: what each input is merged from (into
+        /// [`Plan::event_list`]): the merge of its edges, a feedback slot or
+        /// the empty slot. Read by this op.
+        event_src: Span<E>,
+        /// Event slot per input port: the view of each input, the events the
+        /// node is handed there this block. This op writes it from
+        /// `event_src`, the unit's flushed events, its scheduled commands, its
+        /// declared input bound and, when it is bypassed, the closes it owes;
+        /// the node, the held-key tables and the input taps read it.
         event_in: Span<E>,
         /// Event slot per output port.
         event_out: Span<E>,
@@ -636,8 +675,8 @@ pub enum Op<A, E> {
         srcs: Span<A>,
     },
     /// Push every MIDI event of an event slot into an event tap's ring, each
-    /// stamped with its frame. The slot is an output port's, or the merge a
-    /// node reads at an input.
+    /// stamped with its frame. The slot is an output port's, or the view a
+    /// node is handed at an input (or that view delayed).
     EventTap {
         /// Index into `Plan::event_taps`.
         tap: PlanEventTapId,
@@ -710,6 +749,7 @@ impl<A, E> Op<A, E> {
                 unit,
                 audio_in,
                 audio_out,
+                event_src,
                 event_in,
                 event_out,
                 in_place,
@@ -718,6 +758,7 @@ impl<A, E> Op<A, E> {
                 unit,
                 audio_in: audio_in.retype(),
                 audio_out: audio_out.retype(),
+                event_src: event_src.retype(),
                 event_in: event_in.retype(),
                 event_out: event_out.retype(),
                 in_place,
@@ -980,8 +1021,12 @@ pub(crate) struct NodeRec {
     /// every input not aliased in place, and every output.
     pub(crate) borrows: Span<(AudioSlotId, Role)>,
     /// The event borrow requests, sorted (into [`NodeTables::event_borrows`]):
-    /// every input and every output.
+    /// every input's view and every output.
     pub(crate) event_borrows: Span<(EventSlotId, Role)>,
+    /// The requests of the step that fills the views, sorted (into
+    /// [`NodeTables::event_assemble`]): each input's source read as
+    /// `Role::Read(port)`, each view written as `Role::Write(port)`.
+    pub(crate) event_assemble: Span<(EventSlotId, Role)>,
     /// How the call borrows its buffers.
     pub(crate) form: Form,
     /// The node's driven params (into [`Plan::param_ports`]).
@@ -1006,6 +1051,8 @@ pub(crate) struct NodeTables {
     pub(crate) audio_borrows: Vec<(AudioSlotId, Role)>,
     /// Event borrow requests, each record's run sorted.
     pub(crate) event_borrows: Vec<(EventSlotId, Role)>,
+    /// The requests that fill each record's views, each run sorted.
+    pub(crate) event_assemble: Vec<(EventSlotId, Role)>,
 }
 
 /// The slots of one node op's ports.
@@ -1066,11 +1113,13 @@ impl NodeTables {
         let mut event_slots = Vec::new();
         let mut audio_borrows = Vec::new();
         let mut event_borrows = Vec::new();
+        let mut event_assemble = Vec::new();
         for op in &program.ops {
             let Op::Node {
                 unit,
                 audio_in,
                 audio_out,
+                event_src,
                 event_in,
                 event_out,
                 in_place,
@@ -1119,6 +1168,19 @@ impl NodeTables {
                     ),
             );
             event_borrows[event.range()].sort_unstable();
+            let assemble = Span::extend(
+                &mut event_assemble,
+                event_list[event_src.range()]
+                    .iter()
+                    .enumerate()
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        ein.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
+            );
+            event_assemble[assemble.range()].sort_unstable();
 
             let form = match (ain, aout, ein.is_empty() && eout.is_empty()) {
                 (_, _, false) => Form::General,
@@ -1149,6 +1211,7 @@ impl NodeTables {
                 eout: eout.len() as u16,
                 borrows: audio,
                 event_borrows: event,
+                event_assemble: assemble,
                 form,
                 params,
                 declared: pu.shape.params,
@@ -1181,6 +1244,7 @@ impl NodeTables {
                     eout: 0,
                     borrows: Span::default(),
                     event_borrows: Span::default(),
+                    event_assemble: Span::default(),
                     form: Form::Audio,
                     params: Span::default(),
                     declared: pu.shape.params,
@@ -1193,6 +1257,7 @@ impl NodeTables {
             event_slots,
             audio_borrows,
             event_borrows,
+            event_assemble,
         }
     }
 }
@@ -1512,48 +1577,66 @@ impl Plan {
     }
 
     /// Whether what an event tap's source carries includes param events: the
-    /// port itself writes them, or, for an input, a port with an edge into it
-    /// does.
+    /// port itself writes them, or, for an input, its node takes them (a
+    /// scheduled command can carry one) or a port with an edge into it
+    /// writes them.
     pub(crate) fn event_tap_params(&self, source: crate::EventTapPort) -> bool {
         match source {
             crate::EventTapPort::Out(port) => self.event_port_params(port),
-            crate::EventTapPort::In(at) => self
-                .event_edges
-                .iter()
-                .any(|&(from, to)| to == at && self.event_port_params(from)),
+            crate::EventTapPort::In(at) => {
+                self.unit(at.node).is_some_and(|u| u.shape.param_events)
+                    || self
+                        .event_edges
+                        .iter()
+                        .any(|&(from, to)| to == at && self.event_port_params(from))
+            }
         }
     }
 
-    /// The declared capacity of each output port that writes what an event
-    /// tap's source carries: the port itself, or, for an input, every port
-    /// with an edge into it (what the node can receive there, summed).
-    pub(crate) fn event_tap_ports(&self, source: crate::EventTapPort) -> Vec<Option<NonZeroU32>> {
+    /// The declared capacity of each writer of what an event tap's source
+    /// carries over a delay of `len` frames at blocks of `block`: the output
+    /// port itself, or, for an input, every port with an edge into it and
+    /// the commands scheduled to it ([`input_writers`]).
+    pub(crate) fn event_tap_ports(
+        &self,
+        source: crate::EventTapPort,
+        len: Samples,
+        block: usize,
+    ) -> Vec<Option<NonZeroU32>> {
         match source {
             crate::EventTapPort::Out(port) => vec![self.event_port_capacity(port)],
-            crate::EventTapPort::In(at) => self
-                .event_edges
-                .iter()
-                .filter(|&&(_, to)| to == at)
-                .map(|&(from, _)| self.event_port_capacity(from))
-                .collect(),
+            crate::EventTapPort::In(at) => input_writers(
+                self.event_edges
+                    .iter()
+                    .filter(|&&(_, to)| to == at)
+                    .map(|&(from, _)| self.event_port_capacity(from)),
+                len,
+                block,
+            ),
         }
     }
 
     /// What the delay FIFO of an event tap's source holds: the `fifo` bound of
-    /// each writing port, added.
+    /// each writer, added.
     pub(crate) fn event_tap_fifo(
         &self,
         source: crate::EventTapPort,
         len: Samples,
         block: usize,
     ) -> EventSlotCapacity {
-        EventSlotCapacity::fifo_sum(self.event_tap_ports(source), len, block)
+        EventSlotCapacity::fifo_sum(self.event_tap_ports(source, len, block), len, block)
     }
 
     /// The rate an event tap's delay ring is sized from: the note-off room of
-    /// each writing port's capacity (or `default`), added.
-    pub(crate) fn event_tap_rate(&self, source: crate::EventTapPort, default: usize) -> usize {
-        self.event_tap_ports(source)
+    /// each writer's capacity (or `default`), added.
+    pub(crate) fn event_tap_rate(
+        &self,
+        source: crate::EventTapPort,
+        len: Samples,
+        block: usize,
+        default: usize,
+    ) -> usize {
+        self.event_tap_ports(source, len, block)
             .into_iter()
             .map(|c| crate::event::writer::note_off_room(c.map_or(default, |n| n.get() as usize)))
             .sum()
@@ -1922,6 +2005,7 @@ mod tests {
                 unit,
                 audio_in,
                 audio_out,
+                event_src,
                 event_in,
                 event_out,
                 in_place,
@@ -1962,6 +2046,7 @@ mod tests {
             let ain = &plan.program.audio_list[audio_in.range()];
             let aout = &plan.program.audio_list[audio_out.range()];
             let ein = &plan.program.event_list[event_in.range()];
+            let esrc = &plan.program.event_list[event_src.range()];
             let eout = &plan.program.event_list[event_out.range()];
             let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
             assert_eq!(
@@ -2018,6 +2103,11 @@ mod tests {
             assert_eq!(
                 plan.nodes.event_borrows[rec.event_borrows.range()],
                 sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
+                "{at}"
+            );
+            assert_eq!(
+                plan.nodes.event_assemble[rec.event_assemble.range()],
+                sorted([reads(esrc, InPlaceMask::NONE), writes(ein)].concat()),
                 "{at}"
             );
 

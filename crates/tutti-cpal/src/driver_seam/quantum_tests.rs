@@ -114,3 +114,48 @@ fn an_unknown_range_takes_the_request_as_given() {
     let (spec, _) = spec_from_supported(&device_with_range(16, 4096), "card", None).unwrap();
     assert_eq!(spec.quantum, Some(PREFERRED_QUANTUM));
 }
+
+/// A refused fixed size is retried once on the default buffer; no other
+/// failure is, and a default buffer has nothing left to fall back to.
+#[test]
+fn only_a_refused_fixed_size_retries_on_the_default_buffer() {
+    use cpal::ErrorKind::{
+        BackendError, DeviceBusy, DeviceChanged, DeviceNotAvailable, HostUnavailable, Other,
+        PermissionDenied, StreamInvalidated, UnsupportedConfig,
+    };
+    let fixed = cpal::BufferSize::Fixed(480);
+    assert_eq!(
+        on_build_failure(fixed, UnsupportedConfig),
+        Fallback::RetryOnDefault
+    );
+    for kind in [
+        DeviceNotAvailable,
+        DeviceBusy,
+        PermissionDenied,
+        HostUnavailable,
+        StreamInvalidated,
+        BackendError,
+        DeviceChanged,
+        Other,
+    ] {
+        assert_eq!(on_build_failure(fixed, kind), Fallback::GiveUp, "{kind:?}");
+    }
+    assert_eq!(
+        on_build_failure(cpal::BufferSize::Default, UnsupportedConfig),
+        Fallback::GiveUp
+    );
+}
+
+/// A frame count the stream reports is a quantum when `OutputQuantum` holds
+/// it; zero and a count past `MAX_FRAMES` are not, and do not panic.
+#[test]
+fn a_reported_frame_count_is_a_quantum_only_in_range() {
+    assert_eq!(opened_quantum(480), Some(OutputQuantum::of(480)));
+    assert_eq!(
+        opened_quantum(MAX_FRAMES as u32),
+        Some(OutputQuantum::of(MAX_FRAMES))
+    );
+    assert_eq!(opened_quantum(0), None);
+    assert_eq!(opened_quantum(MAX_FRAMES as u32 + 1), None);
+    assert_eq!(opened_quantum(u32::MAX), None);
+}

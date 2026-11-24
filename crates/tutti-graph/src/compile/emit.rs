@@ -7,6 +7,7 @@
 //! of the program `colour` lowers.
 
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 
 use crate::NodeMix;
 use crate::compile::ids::{
@@ -15,7 +16,8 @@ use crate::compile::ids::{
 };
 use crate::compile::plan::{
     AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, EventDelay, EventDelayKey, EventFeedbackKey,
-    EventSlotCapacity, GainPortOp, InputBound, Op, ParamPortOp, Span, Value,
+    EventSlotCapacity, GainPortOp, InputBound, Op, ParamPortOp, Span, Value, input_writers,
+    view_capacity,
 };
 use crate::compile::program::{ARef, ByValue, Capacities, ERef, Program};
 use crate::compile::shapes::Units;
@@ -268,6 +270,15 @@ impl<'a> Emitter<'a> {
         )
     }
 
+    /// How many events the value or feedback slot `r` names can hold.
+    fn price(&self, r: ERef) -> EventSlotCapacity {
+        match r {
+            ERef::Val(v) => self.program.sizing.values[v],
+            ERef::Fb(f) => self.feedback_capacity(&self.program.event_feedback[f]),
+            ERef::Empty => EventSlotCapacity::NONE,
+        }
+    }
+
     // ---- values and ops ------------------------------------------------------
 
     fn new_audio(&mut self) -> AudioValueId {
@@ -297,11 +308,15 @@ impl<'a> Emitter<'a> {
             Op::EventDelay { dst, .. } | Op::EventMerge { dst, .. } => (Vec::new(), vec![dst]),
             Op::Node {
                 audio_out,
+                event_in,
                 event_out,
                 ..
             } => (
                 self.program.audio_list[audio_out.range()].to_vec(),
-                self.program.event_list[event_out.range()].to_vec(),
+                [event_in, event_out]
+                    .into_iter()
+                    .flat_map(|span| self.program.event_list[span.range()].iter().copied())
+                    .collect(),
             ),
             _ => (Vec::new(), Vec::new()),
         };
@@ -460,27 +475,32 @@ impl<'a> Emitter<'a> {
     /// Event value `v`, delayed by `by` through a ring keyed `key` when `by` is
     /// not zero (the value itself otherwise). The delayed value holds all its
     /// FIFO can: what can fall due in one block, from every port that writes
-    /// the stream.
+    /// the stream (an input's, its scheduled commands too).
     fn align_event(&mut self, v: EventValueId, by: Samples, key: EventDelayKey) -> EventValueId {
         if by.is_zero() {
             return v;
         }
-        let ports: Vec<EventOutputPort> = match key.origin() {
-            crate::EventTapPort::Out(port) => vec![port],
-            crate::EventTapPort::In(at) => self
-                .graph
-                .events()
-                .get(&at)
-                .map(|edges| edges.iter().map(|e| e.from()).collect())
-                .unwrap_or_default(),
-        };
-        let capacity = EventSlotCapacity::fifo_sum(
+        let caps = |ports: Vec<EventOutputPort>| -> Vec<Option<NonZeroU32>> {
             ports
                 .iter()
-                .map(|p| self.units.shape_of(p.node).event_capacity),
-            by,
-            self.block,
-        );
+                .map(|p| self.units.shape_of(p.node).event_capacity)
+                .collect()
+        };
+        let writers = match key.origin() {
+            crate::EventTapPort::Out(port) => caps(vec![port]),
+            crate::EventTapPort::In(at) => input_writers(
+                caps(
+                    self.graph
+                        .events()
+                        .get(&at)
+                        .map(|edges| edges.iter().map(|e| e.from()).collect())
+                        .unwrap_or_default(),
+                ),
+                by,
+                self.block,
+            ),
+        };
+        let capacity = EventSlotCapacity::fifo_sum(writers, by, self.block);
         let delay = self.program.event_delays.push(EventDelay { key, len: by });
         let dst = self.new_event(capacity);
         let op = self.push(Op::EventDelay {
@@ -500,9 +520,18 @@ impl<'a> Emitter<'a> {
         let key = self.units.keys[n];
         let shape = self.units.shapes[n];
         let ain = self.audio_inputs(n, key, &shape);
-        let ein = self.event_inputs(n, key, &shape);
+        let src = self.event_inputs(n, key, &shape);
         let params = self.params(n, key, &shape);
         let reads: Vec<EventValueId> = params.iter().filter_map(|p| p.slot.value()).collect();
+        // The views and outputs are written by this op, so they are made
+        // after every value its sources and params needed ahead of it.
+        let ein: Vec<ERef> = src
+            .iter()
+            .map(|&r| {
+                let capacity = view_capacity(self.price(r), shape.event_input_capacity);
+                self.new_event(capacity).into()
+            })
+            .collect();
 
         let aout: Vec<ARef> = (0..shape.audio_out().count())
             .map(|_| self.new_audio().into())
@@ -515,7 +544,8 @@ impl<'a> Emitter<'a> {
             unit: n,
             audio_in: Span::extend(&mut self.program.audio_list, ain.iter().copied()),
             audio_out: Span::extend(&mut self.program.audio_list, aout),
-            event_in: Span::extend(&mut self.program.event_list, ein.iter().copied()),
+            event_src: Span::extend(&mut self.program.event_list, src.iter().copied()),
+            event_in: Span::extend(&mut self.program.event_list, ein),
             event_out: Span::extend(&mut self.program.event_list, eout),
             in_place: InPlaceMask::NONE,
             params: Span::extend(&mut self.program.param_ports, params),
@@ -525,7 +555,7 @@ impl<'a> Emitter<'a> {
         for r in ain {
             self.read_aref(r, op);
         }
-        for r in ein {
+        for r in src {
             self.read_eref(r, op);
         }
         for v in reads {
@@ -873,9 +903,11 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// Event taps: one event output each. An aligned tap is delayed to the
-    /// graph's output time (the compensation an event edge into an output-time
-    /// sink would get); a raw one reads the port as it leaves its node. A
+    /// Event taps: one event port each, an output or an input's view. An
+    /// aligned tap is delayed to the graph's output time (the compensation an
+    /// event edge into an output-time sink would get), whatever feeds it; a
+    /// raw one reads the port as it leaves its node, or the view as its node
+    /// is handed it. A
     /// closed tap is not in the topology, so nothing is emitted for it. A tap
     /// whose port does not exist (a node replaced by one with fewer event
     /// outputs, a removed node) keeps its place in the table, so its writer is
@@ -907,11 +939,8 @@ impl<'a> Emitter<'a> {
                     (r, timing.arrival[n])
                 }
             };
-            if carried == ERef::Empty {
-                continue;
-            }
-            // A feedback edge's slot is read as the node reads it: it has no
-            // value to delay.
+            // The value to delay: an output's, or the input's view, which is
+            // a value whatever feeds the input.
             let src = match (spec.align, carried) {
                 (crate::TapAlign::ToOutput, ERef::Val(v)) => ERef::Val(self.align_event(
                     v,
@@ -1097,13 +1126,7 @@ impl<'a> Emitter<'a> {
             n if n <= MAX_PORTS => {
                 let capacity = refs
                     .iter()
-                    .fold(EventSlotCapacity::NONE, |acc, r| {
-                        acc.plus(match *r {
-                            ERef::Val(v) => self.program.sizing.values[v],
-                            ERef::Fb(f) => self.feedback_capacity(&self.program.event_feedback[f]),
-                            ERef::Empty => EventSlotCapacity::NONE,
-                        })
-                    })
+                    .fold(EventSlotCapacity::NONE, |acc, &r| acc.plus(self.price(r)))
                     .bounded(bound.map(|b| b.capacity));
                 let dst = self.new_event(capacity);
                 let merge = Op::EventMerge {
