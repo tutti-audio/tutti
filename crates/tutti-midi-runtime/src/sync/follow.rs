@@ -3,9 +3,9 @@
 //!
 //! One follower reads one source's UMPs, each with the time it arrived, and
 //! says what the source asks of a transport: a tempo, play and stop, a locate,
-//! and whether it is locked to the source ([`ClockEvent`], [`BeatClockEvent`], [`MtcEvent`]). It holds no clock
-//! and no transport: whoever owns the transport places each event (the session,
-//! in `tutti-session`).
+//! and whether it is locked to the source. It holds no clock and no transport:
+//! whoever owns the transport places each event (the session, in
+//! `tutti-session`).
 //!
 //! **Time** is [`Seconds`] on one clock, whose zero the caller picks (the
 //! session's is graph frame 0): every `at` and `now` of a follower is read on
@@ -15,7 +15,8 @@
 //!
 //! The two clocks are two state machines, [`BeatClockFollower`] and
 //! [`MtcFollower`], each holding only its own state, steered in its own unit and
-//! reporting in its own event type ([`ClockEvent`], [`BeatClockEvent`], [`MtcEvent`]): a Beat
+//! reporting in its own event type ([`BeatClockEvent`], [`MtcEvent`], which share
+//! [`ClockEvent`]): a Beat
 //! Clock follower is given a [`Beat`] and an MTC follower a [`Seconds`], and a
 //! tempo is a Beat Clock event alone and a reversal an MTC one alone. An app
 //! that picks the clock at run time holds one or the other.
@@ -361,7 +362,7 @@ impl BeatClockFollower {
     ///
     /// A time is not a beat: an MTC position is refused.
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0308
     /// use tutti_midi_runtime::BeatClockFollower;
     /// use tutti_units::Seconds;
     ///
@@ -642,7 +643,7 @@ impl MtcFollower {
     ///
     /// A beat is not a time: a Beat Clock position is refused.
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0308
     /// use tutti_midi_runtime::MtcFollower;
     /// use tutti_units::{Beat, Seconds};
     ///
