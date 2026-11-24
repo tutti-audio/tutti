@@ -236,6 +236,8 @@ impl DeviceStream {
 
 /// One device's negotiation, by what the device is: chosen once, where the
 /// device is connected and its description and output are known. Control side.
+// Each variant is boxed: `DeviceStream` and `OpenOutput` are a few KB, which
+// clippy's `large_enum_variant` reports against the small variants.
 pub(crate) enum Negotiation {
     /// A UMP Endpoint with an output: asked what it is, and answering what it asks
     /// of the session.
@@ -246,8 +248,8 @@ pub(crate) enum Negotiation {
     Described(Box<DeviceStream>),
 }
 
-/// What a device with an output has: the output and MIDI-CI over it.
-struct Link {
+/// The open output of a device and the MIDI-CI state that talks through it.
+struct CiOutput {
     out: OpenOutput,
     ci: Ci,
 }
@@ -255,7 +257,7 @@ struct Link {
 /// A UMP Endpoint with an output: its [`EndpointDiscovery`], while one runs, and
 /// what answers the Endpoint's own Stream messages.
 pub(crate) struct UmpNegotiation {
-    link: Link,
+    ci_output: CiOutput,
     os: Endpoint,
     run: Run,
     /// The Endpoint the session answers a peer's Stream messages as, with what
@@ -269,7 +271,7 @@ pub(crate) struct UmpNegotiation {
 /// A MIDI 1.0 port with an output: described from the connect, and its Identity
 /// Request.
 pub(crate) struct Midi1Negotiation {
-    link: Link,
+    ci_output: CiOutput,
     /// What is known of the port: the OS's description, with the identity once
     /// the port gave one.
     stream: DeviceStream,
@@ -456,7 +458,7 @@ impl Stepped {
     }
 }
 
-impl Link {
+impl CiOutput {
     /// One MIDI-CI step at `now`, with `identity` the session runs it with.
     fn poll(
         &mut self,
@@ -499,13 +501,13 @@ impl Negotiation {
                 basis: Basis::Described,
             }));
         };
-        let link = Link {
+        let ci_output = CiOutput {
             out,
             ci: Ci::new(device, ci_refused),
         };
         if is_ump_endpoint(&os) {
             Self::Ump(Box::new(UmpNegotiation {
-                link,
+                ci_output,
                 os,
                 run: Run::Idle,
                 answering: None,
@@ -514,7 +516,7 @@ impl Negotiation {
             }))
         } else {
             Self::Midi1Port(Box::new(Midi1Negotiation {
-                link,
+                ci_output,
                 stream: DeviceStream {
                     endpoint: described(&os),
                     basis: Basis::Described,
@@ -525,18 +527,18 @@ impl Negotiation {
     }
 
     /// The output and MIDI-CI of a device that has an output.
-    const fn link(&self) -> Option<&Link> {
+    const fn ci_output(&self) -> Option<&CiOutput> {
         match self {
-            Self::Ump(ump) => Some(&ump.link),
-            Self::Midi1Port(port) => Some(&port.link),
+            Self::Ump(ump) => Some(&ump.ci_output),
+            Self::Midi1Port(port) => Some(&port.ci_output),
             Self::Described(_) => None,
         }
     }
 
-    const fn link_mut(&mut self) -> Option<&mut Link> {
+    const fn ci_output_mut(&mut self) -> Option<&mut CiOutput> {
         match self {
-            Self::Ump(ump) => Some(&mut ump.link),
-            Self::Midi1Port(port) => Some(&mut port.link),
+            Self::Ump(ump) => Some(&mut ump.ci_output),
+            Self::Midi1Port(port) => Some(&mut port.ci_output),
             Self::Described(_) => None,
         }
     }
@@ -559,10 +561,10 @@ impl Negotiation {
     /// are about to.
     pub(crate) fn hears_sysex(&self, has_identity: bool) -> bool {
         match self {
-            Self::Ump(ump) => ump.link.ci.hears_sysex(has_identity),
+            Self::Ump(ump) => ump.ci_output.ci.hears_sysex(has_identity),
             Self::Midi1Port(port) => {
                 matches!(port.inquire, Inquire::Idle | Inquire::Asking(_))
-                    || port.link.ci.hears_sysex(has_identity)
+                    || port.ci_output.ci.hears_sysex(has_identity)
             }
             Self::Described(_) => false,
         }
@@ -573,9 +575,9 @@ impl Negotiation {
     /// decided or been asked since the last poll.
     pub(crate) fn needs_poll(&self) -> bool {
         match self {
-            Self::Ump(ump) => matches!(ump.run, Run::Idle) || ump.link.ci.needs_poll(),
+            Self::Ump(ump) => matches!(ump.run, Run::Idle) || ump.ci_output.ci.needs_poll(),
             Self::Midi1Port(port) => {
-                matches!(port.inquire, Inquire::Idle) || port.link.ci.needs_poll()
+                matches!(port.inquire, Inquire::Idle) || port.ci_output.ci.needs_poll()
             }
             Self::Described(_) => false,
         }
@@ -584,60 +586,61 @@ impl Negotiation {
     /// When the negotiation, the inquiry or MIDI-CI next needs a poll for a
     /// wait that runs out, or `None` while none waits.
     pub(crate) fn deadline(&self) -> Option<Instant> {
-        let (own, link) = match self {
+        let (own, ci_output) = match self {
             Self::Ump(ump) => (
                 match &ump.run {
                     Run::Idle => None,
                     Run::Asking(connection) => connection.deadline(),
                     Run::Done { listening, .. } => listening.as_ref().and_then(|c| c.deadline()),
                 },
-                &ump.link,
+                &ump.ci_output,
             ),
             Self::Midi1Port(port) => (
                 match &port.inquire {
                     Inquire::Asking(asking) => asking.inquiry.deadline(),
                     Inquire::Idle | Inquire::Over => None,
                 },
-                &port.link,
+                &port.ci_output,
             ),
             Self::Described(_) => return None,
         };
-        [own, link.ci.deadline()].into_iter().flatten().min()
+        [own, ci_output.ci.deadline()].into_iter().flatten().min()
     }
 
     /// The input is closing: MIDI-CI ends on the device's output.
     pub(crate) fn close(&mut self) {
-        if let Some(link) = self.link_mut() {
-            link.close();
+        if let Some(ci_output) = self.ci_output_mut() {
+            ci_output.close();
         }
     }
 
     /// The MIDI-CI peers found on this device.
     pub(crate) fn ci_peers(&self) -> Arc<[CiPeerInfo]> {
-        self.link().map_or_else(Arc::default, |l| l.ci.peers())
+        self.ci_output().map_or_else(Arc::default, |l| l.ci.peers())
     }
 
     /// The Profiles of the MIDI-CI peers found on this device.
     pub(crate) fn profiles(&self) -> Snapshot {
-        self.link().map_or_else(Arc::default, |l| l.ci.profiles())
+        self.ci_output()
+            .map_or_else(Arc::default, |l| l.ci.profiles())
     }
 
     /// The MIDI-CI peers of this device that can be asked for a MIDI Message
     /// Report.
     pub(crate) fn report_peers(&self) -> process::Snapshot {
-        self.link()
+        self.ci_output()
             .map_or_else(Arc::default, |l| l.ci.report_peers())
     }
 
     /// The MIDI-CI peers of this device that can be asked for Property Exchange.
     pub(crate) fn property_peers(&self) -> properties::Snapshot {
-        self.link()
+        self.ci_output()
             .map_or_else(Arc::default, |l| l.ci.property_peers())
     }
 
     /// Asks that a peer be made a Property Exchange call at the next poll.
     pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerRequestError> {
-        self.link_mut()
+        self.ci_output_mut()
             .ok_or(PeerRequestError::NoSuchPeer)?
             .ci
             .ask_property(ask)
@@ -645,7 +648,7 @@ impl Negotiation {
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
     pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerRequestError> {
-        self.link_mut()
+        self.ci_output_mut()
             .ok_or(PeerRequestError::NoSuchPeer)?
             .ci
             .report(ask)
@@ -653,7 +656,7 @@ impl Negotiation {
 
     /// Asks that a peer's Profile be switched at the next poll.
     pub(crate) fn set_profile(&mut self, switch: ProfileSwitch) -> Result<(), ProfileError> {
-        self.link_mut()
+        self.ci_output_mut()
             .ok_or(PeerRequestError::NoSuchPeer)?
             .ci
             .set_profile(switch)
@@ -681,13 +684,13 @@ impl Negotiation {
         let identity = presented.map(|p| p.identity.device);
         match self {
             Self::Ump(ump) => {
-                let changes = ump.link.poll(now, heard, identity, store);
+                let changes = ump.ci_output.poll(now, heard, identity, store);
                 let stream = ump.poll_stream(now, heard);
                 let granted = ump.answer(heard, presented);
                 Stepped::of(granted.or(stream), changes)
             }
             Self::Midi1Port(port) => {
-                let changes = port.link.poll(now, heard, identity, store);
+                let changes = port.ci_output.poll(now, heard, identity, store);
                 let stream = port.poll_inquiry(now, heard);
                 Stepped::of(stream, changes)
             }
@@ -727,14 +730,14 @@ impl Midi1Negotiation {
         for action in actions {
             match action {
                 InquiryAction::Wait => {}
-                InquiryAction::Send(ump) => self.link.send(ump),
+                InquiryAction::Send(ump) => self.ci_output.send(ump),
                 InquiryAction::GaveUp => {
                     self.inquire = Inquire::Over;
-                    self.link.ci.decide(groups_of_a_midi1_port());
+                    self.ci_output.ci.decide(groups_of_a_midi1_port());
                 }
                 InquiryAction::Answered(identity) => {
                     self.inquire = Inquire::Over;
-                    self.link.ci.decide(groups_of_a_midi1_port());
+                    self.ci_output.ci.decide(groups_of_a_midi1_port());
                     self.stream.endpoint = self.stream.endpoint.identified(identity);
                     self.stream.basis = Basis::Inquired;
                     return Some(self.stream);
@@ -828,7 +831,7 @@ impl UmpNegotiation {
             )
         });
         for ump in replies {
-            queue(&mut self.link.out, ump, false);
+            queue(&mut self.ci_output.out, ump, false);
         }
         let active = granted?;
         let Run::Done { stream, listening } = &mut self.run else {
@@ -935,7 +938,7 @@ impl UmpNegotiation {
         for action in actions {
             match action {
                 DiscoveryAction::Wait | DiscoveryAction::Changed => {}
-                DiscoveryAction::Send(ump) => self.link.send(ump),
+                DiscoveryAction::Send(ump) => self.ci_output.send(ump),
                 DiscoveryAction::Ended(over) => {
                     ending = Some(over);
                     break;
@@ -961,7 +964,7 @@ impl UmpNegotiation {
                 None,
             ),
         };
-        self.link.ci.decide(groups_after_settle(&stream));
+        self.ci_output.ci.decide(groups_after_settle(&stream));
         let run = Run::Done {
             stream: Box::new(stream),
             listening,
@@ -992,7 +995,7 @@ impl UmpNegotiation {
             stream.endpoint = *connection.endpoint();
             // MIDI-CI follows: its Groups are the blocks' now, taken
             // up by the next poll (`Ci::poll`).
-            self.link.ci.decide(groups_after_settle(&stream));
+            self.ci_output.ci.decide(groups_after_settle(&stream));
             reported = Some(*stream);
         }
         // A device that sends JR Timestamps the input did not ask for
@@ -1006,7 +1009,7 @@ impl UmpNegotiation {
             tx_jr: wanted.tx_jr,
             ..stream.endpoint.active()
         };
-        let out = &mut self.link.out;
+        let out = &mut self.ci_output.out;
         self.stop = self.stop.next(unwanted, |retry| {
             let request = Stream::StreamConfigurationRequest(asked);
             queue(out, Ump::from(Message::Stream(request)), retry)

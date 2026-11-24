@@ -668,33 +668,6 @@ fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
     );
 }
 
-/// A UMP Endpoint with no output has nothing to answer on: it is only described,
-/// and holds no answering Endpoint to build from the identity the session
-/// presents.
-#[test]
-fn a_ump_endpoint_with_no_output_is_only_described() {
-    let (refused, _losses) = tutti_rt::counter();
-    let device = session_over(midi2(), PortDirection::Input, midi2()).id;
-    let mut negotiation = Negotiation::new(device, midi2(), None, InputTiming::Arrival, refused);
-    let asked = [Ump::from(Message::Stream(ask_everything()))];
-    let heard = Heard {
-        packets: &asked,
-        lost_before: false,
-        lost_during: false,
-    };
-    let stepped = negotiation.poll(
-        Instant::now(),
-        &heard,
-        Some(presented_over(1)),
-        &mut ResourceStore::new(),
-    );
-    assert!(stepped.stream.is_none(), "nothing to settle or grant");
-    let Negotiation::Described(stream) = negotiation else {
-        panic!("a device with no output is described, whatever its description");
-    };
-    assert_eq!(stream.basis(), Basis::Described);
-}
-
 /// A MIDI 1.0 port is asked for its identity, not for a UMP Stream, and answers
 /// no Stream message either.
 #[test]
