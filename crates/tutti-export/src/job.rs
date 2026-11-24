@@ -51,7 +51,10 @@ pub enum TailPolicy {
     /// asked at the programme's last frame and again after every block of the
     /// tail, spent under `ceiling` in all: each ask bounds the tail (what is
     /// spent plus what is owed) and the tail is the smallest bound seen, so
-    /// it is never longer than the first ask's. A node owes what is left of its
+    /// it is never longer than the first ask's. A bound holds when each report
+    /// covers its node's ring-out for the controls still to come; a report that
+    /// follows a control driven lower for a block can cut the tail at that
+    /// setting. A node owes what is left of its
     /// report when nothing upstream still owes, and its declared ceiling after
     /// an upstream that does. A graph that never decays, or whose nodes decline
     /// to say, is spent as
