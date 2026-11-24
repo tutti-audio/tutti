@@ -108,15 +108,15 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
 
 /// One block of `input` through `exec`; both its outputs.
 fn block(exec: &mut Executor, input: &[f32]) -> [Vec<f32>; 2] {
-    let n = input.len();
-    let (mut a, mut b) = (vec![0.0f32; n], vec![0.0f32; n]);
-    exec.process(
-        n,
-        &TransportPosition::default(),
+    common::block_in(
+        exec,
+        input.len(),
         &[input],
-        &mut [&mut a, &mut b],
-    );
-    [a, b]
+        2,
+        &TransportPosition::default(),
+    )
+    .try_into()
+    .expect("two outputs")
 }
 
 /// A one at `at`, zeros elsewhere.

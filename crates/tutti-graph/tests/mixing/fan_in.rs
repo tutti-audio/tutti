@@ -20,8 +20,7 @@ use common::{Harness, Kind, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InputPort, Io, Node, NodeKey, Op,
-    OutputPort, Plan, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
-    compile,
+    OutputPort, Plan, PortSource, Prepare, Shape, Status, Topology, Unforkable, compile,
 };
 use tutti_units::Samples;
 
@@ -554,14 +553,7 @@ fn flags(n: u64) -> Flags {
 }
 
 fn block(exec: &mut Executor) -> Vec<f32> {
-    let mut out = vec![0.0f32; BLOCK];
-    exec.process(
-        BLOCK,
-        &TransportPosition::default(),
-        &[],
-        &mut [out.as_mut_slice()],
-    );
-    out
+    common::block(exec, BLOCK, 1).remove(0)
 }
 
 /// Silent addends make a silent sum: the probe (no tail) is called once and

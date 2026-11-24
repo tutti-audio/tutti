@@ -12,8 +12,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, Executor, FadeLaw, Io, Law, Node, NodeKey, ParamEvent, ParamIn,
-    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status,
-    TransportPosition, Unforkable,
+    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{ArcDegrees, Azimuth, SampleRate, Samples, UnitParam};
@@ -116,16 +115,9 @@ fn graph(
 
 /// `frames` frames in one block: the two outputs.
 fn render(ed: &mut Editor, exec: &mut Executor, frames: usize) -> [Vec<f32>; 2] {
-    let mut a = vec![0.0; frames];
-    let mut b = vec![0.0; frames];
-    exec.process(
-        frames,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut a[..], &mut b[..]],
-    );
+    let out = common::block(exec, frames, 2);
     ed.collect();
-    [a, b]
+    out.try_into().expect("two outputs")
 }
 
 /// One sender of the same segment to both params (their raw values), at frame 0.
@@ -303,9 +295,7 @@ impl Node for Heavy {
 /// executor); every probe reads the same.
 fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
-    if workers > 1 {
-        exec.set_pool(Some(common::test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let probe = |k: u64| NodeKey(PROBE + k);
     for k in 0..WIDTH {
         ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
@@ -322,9 +312,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         .set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))));
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
-        let mut chans = vec![vec![0.0f32; frames]; WIDTH as usize];
-        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(frames, &TransportPosition::default(), &[], &mut outs);
+        let chans = common::block(exec, frames, WIDTH as usize);
         ed.collect();
         chans
     };

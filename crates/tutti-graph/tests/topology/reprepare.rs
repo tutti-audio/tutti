@@ -155,9 +155,7 @@ impl Rig {
         let t = TransportPosition::default();
         for &n in blocks {
             let input = vec![1.0f32; n];
-            let mut a = vec![0.0f32; n];
-            self.exec.process(n, &t, &[&input[..]], &mut [&mut a[..]]);
-            all.extend(a);
+            all.extend(common::block_in(&mut self.exec, n, &[&input[..]], 1, &t).remove(0));
         }
         all
     }

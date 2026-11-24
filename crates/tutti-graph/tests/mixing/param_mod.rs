@@ -42,6 +42,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::{cycle_blocks, fixed_blocks};
+use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
 
 use proptest::prelude::*;
@@ -50,7 +51,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node,
     ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare,
-    Shape, Status, TransportPosition, Unforkable,
+    Shape, Status, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -444,16 +445,7 @@ fn render(exec: &mut Executor, ed: &mut Editor, frames: usize, block: usize) -> 
     let mut done = 0;
     while done < frames {
         let n = block.min(frames - done);
-        let mut b = [vec![0.0; n], vec![0.0; n], vec![0.0; n]];
-        {
-            let [a, c, d] = &mut b;
-            exec.process(
-                n,
-                &TransportPosition::default(),
-                &[],
-                &mut [&mut a[..], &mut c[..], &mut d[..]],
-            );
-        }
+        let b = common::block(exec, n, 3);
         ed.collect();
         for (o, x) in out.iter_mut().zip(b) {
             o.extend(x);
@@ -1663,13 +1655,9 @@ fn segment_then_ramp(at: u64, step_at: Option<u64>) -> (Vec<f32>, Vec<f32>) {
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
     ed.commit().expect("commits");
     let mut run = |n: usize| -> Vec<f32> {
-        let mut out = [vec![0.0; n], vec![0.0; n], vec![0.0; n]];
-        let [a, c, d] = &mut out;
-        let mut bufs = [&mut a[..], &mut c[..], &mut d[..]];
-        exec.process(n, &TransportPosition::default(), &[], &mut bufs);
+        let out = common::block(&mut exec, n, 3);
         ed.collect();
-        let [cut, _, _] = out;
-        cut
+        out.into_iter().next().expect("three outputs")
     };
     let first = run(8);
     cutoff.set(3.0);
@@ -2250,9 +2238,7 @@ fn generator() -> impl Strategy<Value = Gen> {
 fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
     let prep = prepare(MAX_BLOCK);
     let (mut ed, mut exec) = Editor::new(prep);
-    if workers > 1 {
-        exec.set_pool(Some(tutti_graph::testing::test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let cells: Vec<[Cell; 2]> = g
         .probes
         .iter()
@@ -2355,11 +2341,7 @@ fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
             }
         }
 
-        let mut out = vec![vec![0.0f32; n]; width];
-        {
-            let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-            exec.process(n, &TransportPosition::default(), &[], &mut outs);
-        }
+        let out = common::block(&mut exec, n, width);
         ed.collect();
         rendered.push(out);
     }
@@ -2505,9 +2487,7 @@ fn corners_skip_a_resend_at_any_block_size() {
         let mut done = 0;
         while done < 128 {
             let n = block.min(128 - done);
-            let mut out = vec![vec![0.0f32; n]; 4];
-            let mut refs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-            exec.process(n, &TransportPosition::default(), &[], &mut refs);
+            let out = common::block(&mut exec, n, 4);
             ed.collect();
             corners.extend(
                 (0..n)
