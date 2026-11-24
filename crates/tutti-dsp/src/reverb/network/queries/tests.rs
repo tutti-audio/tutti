@@ -133,17 +133,18 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
     assert!((a.gain(Band::Low).get() - 0.8).abs() < 1e-15);
     assert!((a.gain(Band::Mid).get() - 0.8 * 0.5 / 1.25f64.sqrt()).abs() < 1e-15);
     assert!((a.gain(Band::High).get() - 0.8 * 0.5 / 1.5).abs() < 1e-15);
-    let b = Absorption::Bands {
-        low: Amplitude::new(0.9),
-        mid: Amplitude::new(0.8),
-        high: Amplitude::new(0.7),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let b = Absorption::bands(
+        Amplitude::new(0.9),
+        Amplitude::new(0.8),
+        Amplitude::new(0.7),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     assert_eq!(
         Band::ALL.map(|x| b.gain(x)),
         [0.9, 0.8, 0.7].map(Amplitude::new)
     );
-    let from = Absorption::from_rt60(
+    let from = Absorption::designed(
         [Seconds::new(2.0), Seconds::new(1.0), Seconds::new(0.5)],
         [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
         SampleSpan::of(4800.0),
@@ -234,12 +235,13 @@ fn stability_follows_the_gains_and_the_matrix() {
         assert!(stable(&two(0.99), m.clone()));
         assert!(!stable(&two(1.01), m));
     }
-    let low_only = Absorption::Bands {
-        low: Amplitude::new(1.0),
-        mid: Amplitude::new(0.9),
-        high: Amplitude::new(0.9),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let low_only = Absorption::bands(
+        Amplitude::new(1.0),
+        Amplitude::new(0.9),
+        Amplitude::new(0.9),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     let n = network(&[NetworkStage::Fdn(fdn(
         &[line(100.0, low_only), line(130.0, low_only)],
         Matrix::Hadamard,
@@ -299,12 +301,13 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
     assert!(frozen.is_lossless() && frozen.is_stable());
     assert_eq!(frozen.tail(Db::new(-60.0)), DecayTime::Unbounded);
     assert_eq!(frozen.rt60(Band::Mid).get(), f64::INFINITY);
-    let almost = Absorption::Bands {
-        low: Amplitude::new(1.0),
-        mid: Amplitude::new(1.0),
-        high: Amplitude::new(0.999),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let almost = Absorption::bands(
+        Amplitude::new(1.0),
+        Amplitude::new(1.0),
+        Amplitude::new(0.999),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     let n = network(&[NetworkStage::Fdn(fdn(
         &[line(100.0, almost), line(130.0, almost)],
         Matrix::Hadamard,
@@ -403,7 +406,7 @@ fn the_shortest_path_decides_the_direct_path() {
         }])
         .unwrap(),
     );
-    // A network is 111 KB: each is built and read in its own frame, never held across the test.
+    // A network is 115 KB: each is built and read in its own frame, never held across the test.
     let min_delay = |stages: &[NetworkStage]| network(stages).min_delay();
     let direct = |stages: &[NetworkStage]| network(stages).has_direct_path();
     assert!(direct(std::slice::from_ref(&ap)));
@@ -704,12 +707,13 @@ fn a_nearly_orthogonal_matrix_adds_a_lag_a_structured_one_does_not() {
 }
 
 fn bands(low: f64, mid: f64, high: f64) -> Absorption {
-    Absorption::Bands {
-        low: Amplitude::new(low),
-        mid: Amplitude::new(mid),
-        high: Amplitude::new(high),
-        crossover: [Hz::new(300.0), Hz::new(4_000.0)],
-    }
+    Absorption::bands(
+        Amplitude::new(low),
+        Amplitude::new(mid),
+        Amplitude::new(high),
+        [Hz::new(300.0), Hz::new(4_000.0)],
+        RATE,
+    )
 }
 
 /// The decay bound reads the absorption's largest response over every frequency, not its

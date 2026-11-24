@@ -10,7 +10,7 @@
 //! capacity and allocation-free to build.
 //!
 //! **A `Network` is a control-side value.** It holds room for [`MAX_STAGES`]
-//! stages of about 14 KB each, some 111 KB in all, which is too large to build or
+//! stages of about 14 KB each, some 115 KB in all, which is too large to build or
 //! copy on an audio thread (whose stack may be 512 KB). It is allocation-free
 //! (no heap, so building one never waits on the allocator), not small.
 //!
@@ -36,8 +36,9 @@ pub(crate) use capacity::NetworkCapacity;
 pub(crate) use gain::loop_gain;
 pub use gain::rt60_from_gain;
 pub use inline::{Full, Inline};
-pub(crate) use peak::peak_bound;
+pub(crate) use peak::{peak_bound, rescale_bands};
 
+use crate::onepole::cutoff_pole;
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
 
 /// The energy of a row of gains, `sum g^2`, in `f64`.
@@ -402,7 +403,24 @@ pub enum Absorption {
         high: Amplitude,
         /// Where the bands meet.
         crossover: [Hz; 2],
+        /// An upper bound of the response's peak, set where the absorption is made
+        /// ([`Absorption::bands`], or the design's scaling) and read by every decay query.
+        peak: BandPeak,
     },
+}
+
+/// An upper bound of the largest magnitude response of a [`Absorption::Bands`] over every
+/// frequency. It is made with the absorption and cannot be written outside this crate, so it is
+/// never below the response's true peak.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BandPeak(f64);
+
+impl BandPeak {
+    /// The bound.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
 }
 
 impl Absorption {
@@ -453,21 +471,55 @@ impl Absorption {
         }
     }
 
-    /// Bands that give a loop of `length` frames the three RT60s
-    /// `rt60 = [low, mid, high]` (the design from band decay times:
-    /// [`loop_gain`] per band).
+    /// Bands with the given gains: their peak response is bounded by a search (exact where
+    /// the gains do not rise with frequency), infinite for gains that are not loop gains. The
+    /// gains are as given; a design scales them first.
     #[must_use]
-    pub(crate) fn from_rt60(
+    pub fn bands(
+        low: Amplitude,
+        mid: Amplitude,
+        high: Amplitude,
+        crossover: [Hz; 2],
+        rate: SampleRate,
+    ) -> Self {
+        let g = [low.get(), mid.get(), high.get()];
+        let pole = crossover.map(|fc| cutoff_pole(fc, rate));
+        let valid = g.iter().all(|x| x.is_finite() && *x >= 0.0)
+            && pole.iter().all(|p| p.is_finite() && *p > 0.0 && *p < 1.0);
+        let peak = if valid {
+            peak_bound(g, pole)
+        } else {
+            f64::INFINITY
+        };
+        Absorption::Bands {
+            low,
+            mid,
+            high,
+            crossover,
+            peak: BandPeak(peak),
+        }
+    }
+
+    /// Bands that give a loop of `length` frames the three RT60s `rt60 = [low, mid, high]`
+    /// (the design from band decay times: [`loop_gain`] per band), scaled by
+    /// [`rescale_bands`] so no frequency decays slower than the longest band: the peak is
+    /// bounded by the largest gain (0.9999 at most).
+    #[must_use]
+    pub(crate) fn designed(
         rt60: [Seconds; 3],
         crossover: [Hz; 2],
         length: SampleSpan,
         rate: SampleRate,
     ) -> Self {
+        let g = rt60.map(|t| loop_gain(length, t, rate));
+        let pole = crossover.map(|fc| cutoff_pole(fc, rate));
+        let ([low, mid, high], peak) = rescale_bands(g, pole);
         Absorption::Bands {
-            low: loop_gain(length, rt60[0], rate),
-            mid: loop_gain(length, rt60[1], rate),
-            high: loop_gain(length, rt60[2], rate),
+            low,
+            mid,
+            high,
             crossover,
+            peak: BandPeak(peak),
         }
     }
 }

@@ -9,6 +9,8 @@
 
 use std::f64::consts::PI;
 
+use tutti_units::Amplitude;
+
 /// A complex number as `(re, im)`.
 type C = (f64, f64);
 
@@ -21,45 +23,54 @@ fn norm(a: C) -> f64 {
 }
 
 /// The intervals the first pass splits `[0, PI]` into (dense toward DC, where the bands change).
-const FIRST_PASS: u32 = 64;
+const FIRST_PASS: usize = 16;
 /// The deepest bisection: an interval narrower than `PI / 2^MAX_DEPTH` is returned as it is.
 const MAX_DEPTH: u32 = 40;
 
-/// `(H, H', |D|^2)` of the one-pole `p` at `w`, `D = 1 - p e^-jw`.
-fn one_pole(p: f64, w: f64) -> (C, C, f64) {
-    let d = (1.0 - p * libm::cos(w), p * libm::sin(w));
+/// `(H, H')` of the one-pole `p` at the angle whose cosine and sine are `cos` and `sin`,
+/// `D = 1 - p e^-jw`.
+fn one_pole(p: f64, cos: f64, sin: f64) -> (C, C) {
+    let d = (1.0 - p * cos, p * sin);
     let norm2 = d.0 * d.0 + d.1 * d.1;
     let h = ((1.0 - p) * d.0 / norm2, -(1.0 - p) * d.1 / norm2);
     // `H' = -(1 - p) D' / D^2`, `D' = j p e^-jw`, `1 / D^2 = conj(D^2) / |D|^4`.
-    let d_prime = (p * libm::sin(w), p * libm::cos(w));
+    let d_prime = (p * sin, p * cos);
     let d_sq = mul(d, d);
     let k = -(1.0 - p) / (norm2 * norm2);
-    let h_prime = mul(d_prime, (d_sq.0 * k, -d_sq.1 * k));
-    (h, h_prime, norm2)
+    (h, mul(d_prime, (d_sq.0 * k, -d_sq.1 * k)))
 }
 
-/// `(R, R')` of the response at `w`.
-fn response(c: [f64; 3], pole: [f64; 2], w: f64) -> (C, C) {
+/// The response at one angle: its cosine, `R` and `R'`.
+#[derive(Clone, Copy)]
+struct Point {
+    cos: f64,
+    r: C,
+    r_prime: C,
+}
+
+fn response(c: [f64; 3], pole: [f64; 2], w: f64) -> Point {
     let (high, c2, c1) = (c[0], c[1], c[2]);
-    let (h2, h2p, _) = one_pole(pole[1], w);
-    let (h1, h1p, _) = one_pole(pole[0], w);
+    let (cos, sin) = (libm::cos(w), libm::sin(w));
+    let (h2, h2p) = one_pole(pole[1], cos, sin);
+    let (h1, h1p) = one_pole(pole[0], cos, sin);
     let (l2, l1) = (mul(h2, h2), mul(h1, h1));
     let (l2p, l1p) = (mul(h2, h2p), mul(h1, h1p));
-    (
-        (high + c2 * l2.0 + c1 * l1.0, c2 * l2.1 + c1 * l1.1),
-        (
+    Point {
+        cos,
+        r: (high + c2 * l2.0 + c1 * l1.0, c2 * l2.1 + c1 * l1.1),
+        r_prime: (
             2.0 * (c2 * l2p.0 + c1 * l1p.0),
             2.0 * (c2 * l2p.1 + c1 * l1p.1),
         ),
-    )
+    }
 }
 
-/// A bound on `|R''|` from `w0` on: `|L''| <= 2 (|H'|^2 + |H| |H''|)` with `|H| <= (1-p)/|D|`,
-/// `|H'| <= (1-p) p / |D|^2` and `|H''| <= (1-p) (2 p^2 / |D|^3 + p / |D|^2)`, each falling
-/// with `w` because `|D|^2 = 1 - 2 p cos w + p^2` rises.
-fn second_derivative(c: [f64; 3], pole: [f64; 2], w0: f64) -> f64 {
+/// A bound on `|R''|` from the angle of cosine `cos` on: `|L''| <= 2 (|H'|^2 + |H| |H''|)` with
+/// `|H| <= (1-p)/|D|`, `|H'| <= (1-p) p / |D|^2` and `|H''| <= (1-p) (2 p^2 / |D|^3 +
+/// p / |D|^2)`, each falling with `w` because `|D|^2 = 1 - 2 p cos w + p^2` rises.
+fn second_derivative(c: [f64; 3], pole: [f64; 2], cos: f64) -> f64 {
     let term = |p: f64| {
-        let d = 1.0 - 2.0 * p * libm::cos(w0) + p * p;
+        let d = 1.0 - 2.0 * p * cos + p * p;
         let s = libm::sqrt(d);
         let h = (1.0 - p) / s;
         let h1 = (1.0 - p) * p / d;
@@ -79,20 +90,26 @@ struct Search {
 }
 
 impl Search {
-    fn eval(&mut self, w: f64) -> (C, C) {
-        let r = response(self.c, self.pole, w);
-        self.best = self.best.max(norm(r.0));
-        r
+    fn eval(&mut self, w: f64) -> Point {
+        let p = response(self.c, self.pole, w);
+        self.best = self.best.max(norm(p.r));
+        p
     }
 
     /// A bound on `|R|` over `[w0, w1]`, from the Taylor expansion with the second-derivative
     /// bound at either end (`|R(w)| <= max |R0 + R0' t| + D2 t^2 / 2`, the linear part convex
     /// in `t`), bisected while it exceeds `best + tol`.
-    fn bound(&mut self, w0: f64, w1: f64, e0: (C, C), e1: (C, C), depth: u32) -> f64 {
+    fn bound(&mut self, w0: f64, w1: f64, e0: Point, e1: Point, depth: u32) -> f64 {
         let step = w1 - w0;
-        let slack = second_derivative(self.c, self.pole, w0) * step * step / 2.0;
-        let left = norm(e0.0).max(norm((e0.0.0 + e0.1.0 * step, e0.0.1 + e0.1.1 * step)));
-        let right = norm(e1.0).max(norm((e1.0.0 - e1.1.0 * step, e1.0.1 - e1.1.1 * step)));
+        let slack = second_derivative(self.c, self.pole, e0.cos) * step * step / 2.0;
+        let left = norm(e0.r).max(norm((
+            e0.r.0 + e0.r_prime.0 * step,
+            e0.r.1 + e0.r_prime.1 * step,
+        )));
+        let right = norm(e1.r).max(norm((
+            e1.r.0 - e1.r_prime.0 * step,
+            e1.r.1 - e1.r_prime.1 * step,
+        )));
         let ub = left.min(right) + slack;
         if ub <= self.best + self.tol || depth >= MAX_DEPTH {
             return ub;
@@ -123,13 +140,42 @@ pub(crate) fn peak_bound(g: [f64; 3], pole: [f64; 2]) -> f64 {
         best: 0.0,
         tol,
     };
-    let mut prev = (0.0, search.eval(0.0));
+    let angle = |k: usize| PI * (k as f64 / FIRST_PASS as f64).powi(2);
+    let mut points = [search.eval(0.0); FIRST_PASS + 1];
+    for (k, point) in points.iter_mut().enumerate().skip(1) {
+        *point = search.eval(angle(k));
+    }
+    // The bound of each interval is held against the largest of all the samples.
     let mut bound = 0.0f64;
-    for k in 1..=FIRST_PASS {
-        let w = PI * (f64::from(k) / f64::from(FIRST_PASS)).powi(2);
-        let next = search.eval(w);
-        bound = bound.max(search.bound(prev.0, w, prev.1, next, 0));
-        prev = (w, next);
+    for k in 0..FIRST_PASS {
+        bound = bound.max(search.bound(angle(k), angle(k + 1), points[k], points[k + 1], 0));
     }
     bound
+}
+
+/// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are `pole`
+/// (`exp(-2 pi fc / fs)` for the two crossovers), scaled so that no frequency decays slower
+/// than the slowest band, and a bound of the scaled response's peak.
+///
+/// Where the response between the crossovers peaks above the largest gain `M` (bands that
+/// rise with frequency, whose one-poles' phase adds to a bump), all three gains are multiplied
+/// by `min(M, 0.9999) / peak`, `peak` the [`peak_bound`]: the true peak is at most
+/// `min(M, 0.9999)`, which is the bound returned, and the other bands decay a little faster
+/// than set. Gains that do not rise with frequency peak at the low band, which is `M`: they are
+/// returned as they are with `M`. NaN, infinite or negative gains are silence.
+///
+/// The design runs it ([`Absorption::designed`](super::Absorption)) and the network carries the
+/// result, which the bank reads as it is: the gains a network has are the ones the bank runs.
+pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> ([Amplitude; 3], f64) {
+    if !g.iter().all(|x| x.get().is_finite() && x.get() >= 0.0) {
+        return ([Amplitude::SILENT; 3], 0.0);
+    }
+    let top = g.iter().map(|x| x.get()).fold(0.0, f64::max);
+    let peak = peak_bound(g.map(Amplitude::get), pole);
+    if peak > top {
+        let held = top.min(0.9999);
+        (g.map(|x| x * (held / peak)), held)
+    } else {
+        (g, peak)
+    }
 }

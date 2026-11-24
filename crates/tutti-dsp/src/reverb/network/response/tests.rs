@@ -499,13 +499,14 @@ fn an_output_the_network_lacks_has_no_response() {
     assert!(g[0].re.is_nan());
 }
 
-fn bands(low: f64, mid: f64, high: f64) -> Absorption {
-    Absorption::Bands {
-        low: Amplitude::new(low),
-        mid: Amplitude::new(mid),
-        high: Amplitude::new(high),
-        crossover: [Hz::new(300.0), Hz::new(4_000.0)],
-    }
+fn bands(low: f64, mid: f64, high: f64, rate: SampleRate) -> Absorption {
+    Absorption::bands(
+        Amplitude::new(low),
+        Amplitude::new(mid),
+        Amplitude::new(high),
+        [Hz::new(300.0), Hz::new(4_000.0)],
+        rate,
+    )
 }
 
 /// The peak of the response over a fine grid, dense toward DC.
@@ -532,7 +533,11 @@ fn the_sup_of_bands_is_their_low_gain_when_they_fall_and_a_tight_bound_when_they
         SampleRate::of(96_000.0),
     ] {
         for (low, mid, high) in [(0.9, 0.5, 0.1), (0.8, 0.8, 0.8), (0.99, 0.99, 0.0)] {
-            assert_eq!(bands(low, mid, high).sup(rate), low, "{low} {mid} {high}");
+            assert_eq!(
+                bands(low, mid, high, rate).sup(rate),
+                low,
+                "{low} {mid} {high}"
+            );
         }
         for (low, mid, high) in [
             (0.05, 0.99, 0.99),
@@ -541,13 +546,13 @@ fn the_sup_of_bands_is_their_low_gain_when_they_fall_and_a_tight_bound_when_they
             (0.5, 0.2, 0.9),
             (0.0, 1.0, 0.0),
         ] {
-            let a = bands(low, mid, high);
+            let a = bands(low, mid, high, rate);
             let (sup, fine) = (a.sup(rate), fine_peak(&a, rate));
             assert!(sup >= fine, "{low} {mid} {high}: {sup} under {fine}");
             assert!(sup <= fine + 1e-4, "{low} {mid} {high}: {sup} over {fine}");
         }
         assert!(
-            bands(0.05, 0.99, 0.99).sup(rate) > 1.1,
+            bands(0.05, 0.99, 0.99, rate).sup(rate) > 1.1,
             "the peak is above every gain"
         );
     }

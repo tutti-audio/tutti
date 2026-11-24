@@ -752,7 +752,8 @@ fn the_reported_tail_covers_the_ring_out_where_the_echoes_of_lines_sum() {
 /// high band) has a response between the crossovers above every band's gain, which the design
 /// scales back to the largest set gain: no frequency decays slower than the longest band set.
 /// The reported tail is then the longest band's, never longer than the same controls with
-/// every band at the longest decay, and covers the ring-out of the worst inputs.
+/// every band at the longest decay (a line's stored peak is that band's gain or under), and
+/// covers the ring-out of the worst inputs.
 #[test]
 fn the_reported_tail_of_a_band_profile_that_is_not_monotone_covers_it_and_is_the_longest_bands() {
     let (low, two, eight) = (Seconds::new(0.05), Seconds::new(2.0), Seconds::new(8.0));
@@ -778,12 +779,9 @@ fn the_reported_tail_of_a_band_profile_that_is_not_monotone_covers_it_and_is_the
         else {
             panic!("{name}: a finite tail")
         };
-        // The search leaves the scaled peak a thousandth of `1 - M` under `M`, so the figure may
-        // exceed the all-bands-longest one by that much of a decay per trip: well under 0.5%.
-        assert!(
-            tail.get() as f64 <= all_longest.get() as f64 * 1.005,
-            "{name}: {tail:?} over {all_longest:?}"
-        );
+        // The stored peak of a scaled line is the largest set gain or under, which the
+        // all-bands-longest controls have as theirs: the tail is no longer.
+        assert!(tail <= all_longest, "{name}: {tail:?} over {all_longest:?}");
     }
     assert_tails_cover(
         cases
@@ -1557,7 +1555,14 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
                 ))
             });
             let top = set.iter().copied().fold(0.0, f64::max);
-            let Absorption::Bands { low, mid, high, .. } = line.absorption else {
+            let Absorption::Bands {
+                low,
+                mid,
+                high,
+                peak: stored,
+                ..
+            } = line.absorption
+            else {
                 panic!("bands")
             };
             let got = [low.get(), mid.get(), high.get()];
@@ -1566,10 +1571,23 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
                 peak <= top * (1.0 + 1e-9) && peak < 1.0,
                 "{rate:?} size {size} {d:?}: peak {peak} over the longest band's {top}"
             );
+            // The stored peak is a bound of the true one (never under it) and at most the
+            // longest band's gain.
+            let stored = stored.get();
+            assert!(
+                stored >= peak * (1.0 - 1e-12) && stored <= top.min(0.9999) * (1.0 + 1e-12),
+                "{rate:?} size {size} {d:?}: stored {stored}, true {peak}, set {top}"
+            );
+            // The search leaves the scaled peak within its tolerance of the set gain.
+            assert!(
+                peak >= top - 1e-3 * (1.0 - top) - 1e-12 || got == set,
+                "{rate:?} size {size} {d:?}: peak {peak} under {top} by more than the tolerance"
+            );
             if set[0] >= set[1] && set[1] >= set[2] {
                 assert_eq!(got, set, "{rate:?} {d:?}: monotone gains are not scaled");
             } else if got != set {
-                worst_short = worst_short.max(1.0 - peak / top);
+                // The decay at the peak against the set one, `RT60 ∝ 1 / ln(1/g)`.
+                worst_short = worst_short.max(1.0 - libm::log(top) / libm::log(peak));
             }
         }
     };
@@ -1589,8 +1607,9 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
         }
     }
     check(SampleRate::of(96_000.0), 1.0, [8.0, 0.3, 8.0], 100_000);
-    // The scaled peak is not far under the set gain: the bound's slack is a thousandth of `1 - M`.
-    assert!(worst_short < 2e-3, "{worst_short}");
+    // The decay at the peak is at most `1e-3 (1 - M) / (M ln(1/M))` short of the set one, about
+    // a thousandth for long decays and under a percent for the shortest (`M` = 0.04).
+    assert!(worst_short < 1e-2, "{worst_short}");
 }
 
 /// At the frequency the response peaks at, a profile that is not monotone decays no slower than
@@ -1598,8 +1617,15 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
 /// channel the first line alone (see `each_band_decays_at_its_designed_rt60`): its echoes' DTFT
 /// at the peak frequency, one over the one before, is the absorption's magnitude there. With the
 /// mid band 2 s over a low band of 0.05 s and a high band of 2 s, the unscaled response there
-/// is above the loop gain of 2 s by the margin the test checks; the bank's is at most that
-/// gain, whose RT60 over the line is the 2 s the mid band was set to.
+/// is above the loop gain `M` of 2 s by the margin the test checks.
+///
+/// The bounds are derived, not widened. The true peak `G` of the scaled response is at most
+/// `M` (the design's scale uses an upper bound of the peak) and, the search stopping within
+/// `1e-3 (1 - M)` of the largest sample, at least `M - 1e-3 (1 - M)`; RT60 goes as `1 / ln(1/G)`,
+/// so the RT60 at the peak is at most the set 2 s and at least `2 s (1 - s)`, `s = 1e-3 (1 - M)
+/// / (M ln(1/M))`. The measurement adds its own error: the five echo ratios, from the `f32`
+/// render, agree with the analytic magnitude to under `1e-7` (the test asserts `1e-6`), which
+/// moves the RT60 by that over `ln(1/M)`, `m`.
 #[test]
 fn a_profile_that_rises_decays_no_slower_at_its_peak_than_its_longest_band() {
     let l = FdnLayout::new(
@@ -1641,10 +1667,28 @@ fn a_profile_that_rises_decays_no_slower_at_its_peak_than_its_longest_band() {
         .collect();
     let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
     let rt60 = rt60_of_trip_gain(mean, length, RATE);
-    assert!(rt60 <= 2.0 * 1.005, "{rt60} s at the peak, {ratios:?}");
+    let Absorption::Bands { low, mid, high, .. } =
+        fdn_of(&design(&l, RATE, &c)).lines[0].absorption
+    else {
+        panic!("bands")
+    };
+    let scaled = absorption_at([low.get(), mid.get(), high.get()], w_peak, RATE);
+    for ratio in &ratios {
+        assert!(
+            (ratio / scaled - 1.0).abs() < 1e-6,
+            "{ratio} against {scaled}"
+        );
+    }
+    let (m_gain, ln_m) = (set[1], -libm::log(set[1]));
+    let search = 1e-3 * (1.0 - m_gain) / (m_gain * ln_m);
+    let measure = 1e-6 / ln_m;
     assert!(
-        rt60 > 0.95 * 2.0,
-        "the peak is held at the longest band, not far under: {rt60}"
+        rt60 <= 2.0 * (1.0 + measure),
+        "{rt60} s at the peak, {ratios:?}"
+    );
+    assert!(
+        rt60 >= 2.0 * (1.0 - search - measure),
+        "{rt60} s at the peak: the held peak is not far under the longest band's"
     );
 }
 

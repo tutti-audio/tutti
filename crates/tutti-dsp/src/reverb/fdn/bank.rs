@@ -48,7 +48,7 @@
 //! gains is a ramp of the filter; with every gain 1 it is the identity, and a
 //! frozen loop loses nothing. A set of gains whose response peaks above the largest
 //! of them between the crossovers (a mid band that rings longer than a neighbour) is
-//! scaled by [`rescale_bands`] so no frequency decays slower than the longest band
+//! scaled by the design (`rescale_bands`) so no frequency decays slower than the longest band
 //! set, and the loop cannot grow.
 //!
 //! **The shimmer.** A [shimmering](FdnLayout::shimmering) layout runs one mono fixed-rate
@@ -76,8 +76,8 @@ use crate::block::expect_output_width;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, InputOutput};
 use tutti_units::{
-    Amplitude, Cents, Feedback, Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples,
-    Seconds, Tail,
+    Cents, Feedback, Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
+    Tail,
 };
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout, set_loop_delay};
@@ -85,7 +85,7 @@ use super::shimmer::{GAIN_BOUND, Shimmer};
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
-use crate::reverb::network::{Absorption, Band, Matrix, Network, NetworkStage, peak_bound};
+use crate::reverb::network::{Absorption, Band, Matrix, Network, NetworkStage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{DecayTime, FftFloat, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
@@ -815,31 +815,6 @@ fn set_poles<F: Float>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) 
     for ((p, c), f) in t.pole.iter_mut().zip(&mut t.complement).zip(crossover) {
         *p = cutoff_pole(f, rate);
         *c = F::from_design(cutoff_complement(f, rate));
-    }
-}
-
-/// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are `pole`
-/// (`exp(-2 pi fc / fs)` for the two crossovers), scaled so that no frequency decays slower
-/// than the slowest band: where the response between the crossovers peaks above the largest
-/// gain `M` (bands that rise with frequency, whose one-poles' phase adds to a bump), all three
-/// gains are multiplied by `M / peak`, `peak` an upper bound on the response's peak
-/// ([`peak_bound`]), so the true peak is at most `M` and the other bands decay a little faster
-/// than set. Gains that do not rise with frequency peak at the low band, which is `M`: they are
-/// returned as they are. The scaled peak is held under 1 (at 0.9999 at most). NaN, infinite or
-/// negative gains are silence.
-///
-/// The design runs it ([`FdnLayout::design_into`]) and the network carries the result, which
-/// the bank reads as it is: the gains a network has are the ones the bank runs.
-pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> [Amplitude; 3] {
-    if !g.iter().all(|x| x.get().is_finite() && x.get() >= 0.0) {
-        return [Amplitude::SILENT; 3];
-    }
-    let top = g.iter().map(|x| x.get()).fold(0.0, f64::max);
-    let peak = peak_bound(g.map(Amplitude::get), pole);
-    if peak > top {
-        g.map(|x| x * (top.min(0.9999) / peak))
-    } else {
-        g
     }
 }
 

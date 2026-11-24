@@ -2,7 +2,7 @@
 //!
 //! `N` delay lines of mutually unrelated lengths (a table of values near primes,
 //! scaled by the room size), each with a three-band absorption set from the
-//! three RT60s ([`Absorption::from_rt60`]: the loop gain that loses 60 dB in
+//! three RT60s (`Absorption::designed`: the loop gain that loses 60 dB in
 //! that time), mixed by an orthogonal reflection `A = I - 2 v v^T`, with an
 //! input pre-delay, a slow modulation of the line lengths, a stereo output
 //! (even lines left, odd right) with a width and a wet gain, and, if the design
@@ -28,7 +28,6 @@ use tutti_units::{
     StereoWidth,
 };
 
-use crate::onepole::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, NetworkOutputMap, NetworkStage, pre_delay_frames,
@@ -244,32 +243,10 @@ impl Default for FdnLayout {
     }
 }
 
-/// The absorption with its band gains scaled so its response peaks at the largest of them at
-/// most (`rescale_bands`); the bank reads the network's gains as they are.
-fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
-    let Absorption::Bands {
-        low,
-        mid,
-        high,
-        crossover,
-    } = a
-    else {
-        return a;
-    };
-    let pole = crossover.map(|f| cutoff_pole(f, rate));
-    let [low, mid, high] = crate::reverb::fdn::bank::rescale_bands([low, mid, high], pole);
-    Absorption::Bands {
-        low,
-        mid,
-        high,
-        crossover,
-    }
-}
-
 impl FdnLayout {
     /// Designs `c` into `out` in place, at `rate`: the network the bank runs, and the public
     /// entry for designing one (for its analytic queries as much as for running it). A
-    /// network is about 111 KB, so it is built where it lives and never returned by value; no
+    /// network is about 115 KB, so it is built where it lives and never returned by value; no
     /// allocation.
     pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
@@ -331,7 +308,7 @@ impl FdnLayout {
                     depth: depth_frames,
                     rate: mod_rate,
                 },
-                absorption: rescaled(Absorption::from_rt60(rt60, CROSSOVER, length, rate), rate),
+                absorption: Absorption::designed(rt60, CROSSOVER, length, rate),
                 diffuser: None,
             });
         }

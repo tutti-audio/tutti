@@ -15,7 +15,6 @@
 
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
-use super::peak_bound;
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, NetworkStage,
     energy,
@@ -54,6 +53,7 @@ impl Absorption {
                 mid,
                 high,
                 crossover,
+                ..
             } => {
                 let (low, mid, high) = (low.get(), mid.get(), high.get());
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
@@ -83,28 +83,15 @@ impl Absorption {
 
     /// A bound on the largest `|G(e^jw)|` over every frequency, which never undercuts it: the
     /// gain of a [`Gain`](Self::Gain), the exact peak of a one-pole (at DC or at Nyquist), and
-    /// for bands [`peak_bound`] (exact where the gains do not rise with frequency, a bounded
-    /// search otherwise). Infinity for gains that are not loop gains. Tighter than the
-    /// `majorant` at `r = 1` when the bands rise with frequency, where the sum of the
-    /// magnitudes of the three weights exceeds the peak.
+    /// for bands the bound stored with them ([`BandPeak`](super::BandPeak): exact where the
+    /// gains do not rise with frequency, the design's scaled peak otherwise). Infinity for gains
+    /// that are not loop gains. Tighter than the `majorant` at `r = 1` when the bands rise with
+    /// frequency, where the sum of the magnitudes of the three weights exceeds the peak.
     pub(super) fn sup(&self, rate: SampleRate) -> f64 {
-        let Absorption::Bands {
-            low,
-            mid,
-            high,
-            crossover,
-        } = *self
-        else {
-            return self.majorant(1.0, rate);
-        };
-        let (low, mid, high) = (low.get(), mid.get(), high.get());
-        let pole = crossover.map(|fc| cutoff_pole(fc, rate));
-        if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
-            || !pole.iter().all(|p| p.is_finite() && *p > 0.0 && *p < 1.0)
-        {
-            return f64::INFINITY;
+        match *self {
+            Absorption::Bands { peak, .. } => peak.get(),
+            _ => self.majorant(1.0, rate),
         }
-        peak_bound([low, mid, high], pole)
     }
 
     /// `sum |g_k| r^-k` over the impulse response of one trip, for `r` in
@@ -128,6 +115,7 @@ impl Absorption {
                 mid,
                 high,
                 crossover,
+                ..
             } => {
                 let (low, mid, high) = (low.get(), mid.get(), high.get());
                 if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0) {
