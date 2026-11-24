@@ -35,7 +35,7 @@
 //!   spread into native MIDI 2.0 per-note messages, and [`MpeTransformNode`], the same
 //!   as a node of one event stream.
 //!
-//! The MPE zone types (`MpeMode`, `MpeZoneConfig`, ...) are
+//! The MPE zone types (`MpeMode`, `Mpe11Zone`, ...) are
 //! `tutti-midi-protocol`'s; `MidiInputNode::mpe` takes a `MpeMode` from there.
 //! So are the `SmpteFrameRate` and the `SmpteTimecode` the decoders assemble.
 //!

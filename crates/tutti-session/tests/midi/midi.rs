@@ -1757,7 +1757,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_fixtures::midi::BendRanges;
     use tutti_midi_ci::{ProfileChange, ProfileState};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
-    use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
+    use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone, ProfileZones};
     use tutti_session::ListedProfile;
     use tutti_ump::{CCNumber, Message, Voice2};
 
@@ -1861,7 +1861,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .expect("the peer lists Profiles")
             .profiles()
             .mpe_zones(),
-        Some(MpeZones::single(MpeZoneConfig::profile(
+        Some(ProfileZones::single(ProfileZone::new(
             MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
             PitchBendSensitivity::MPE_PROFILE_DEFAULT
         )))

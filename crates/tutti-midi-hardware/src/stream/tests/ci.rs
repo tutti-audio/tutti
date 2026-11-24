@@ -1219,7 +1219,7 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
 /// Group are no zone.
 #[test]
 fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
-    use tutti_midi_protocol::{MpeZoneConfig, PitchBendSensitivity};
+    use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
     let zones = |wire: &Wire| wire.session.profiles(&wire.id)[0].mpe_zones();
@@ -1227,7 +1227,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     for (channels, zone) in [
         (
             5,
-            Some(MpeZoneConfig::profile(
+            Some(ProfileZone::new(
                 MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(5)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
             )),
@@ -1235,7 +1235,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         (1, None),
         (
             16,
-            Some(MpeZoneConfig::profile(
+            Some(ProfileZone::new(
                 MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(16)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
             )),
@@ -1255,7 +1255,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         let _ = polled(&mut wire, 130);
         assert_eq!(
             zones(&wire),
-            zone.map(tutti_midi_protocol::MpeZones::single),
+            zone.map(tutti_midi_protocol::ProfileZones::single),
             "{channels} channels"
         );
     }

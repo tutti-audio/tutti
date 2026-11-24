@@ -36,12 +36,12 @@
 //! # The receive rules are a value
 //!
 //! Which message a channel takes and what switches a zone's MIDI Mode is
-//! `MpeSpec`'s, one match per rule set: MPE 1.1 (M1-100 Appendix E, Table 5)
-//! or the MIDI-CI MPE Profile (M2-120 Appendix E, Table 15). A zone carries its
-//! specification ([`MpeZoneConfig::spec`]), fixed by the constructor that built
-//! it: the zones of [`MpeMode`] are usually MPE 1.1's and the zones
-//! [`set_profile`](MpeTranslator::set_profile) enables the Profile's, so no
-//! branch elsewhere asks which is in force. A message the table prohibits is
+//! `Rules`', one match per rule set: MPE 1.1 (M1-100 Appendix E, Table 5)
+//! or the MIDI-CI MPE Profile (M2-120 Appendix E, Table 15). A zone's kind
+//! picks them where its view is built: the zones of [`MpeMode`] are
+//! [`Mpe11Zone`]s and the zones [`set_profile`](MpeTranslator::set_profile)
+//! enables are [`ProfileZone`]s, so no branch elsewhere asks which is in
+//! force. A message the table prohibits is
 //! ignored (M1-100 §2.3.1). A channel in no zone is conventional and passes
 //! whole (M1-100 §2.2.1).
 //!
@@ -121,7 +121,8 @@
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
-    ChannelResponse, Mcm, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
+    ChannelResponse, Mcm, Mpe11Zone, Mpe11Zones, MpeLayout, MpeMode, PitchBendSensitivity,
+    ProfileZone, ProfileZones,
 };
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiChannelSet, MidiGroup, NoteNumber, RegisteredData,
@@ -219,7 +220,7 @@ enum Receive {
     Ignore,
 }
 
-/// What a channel of `role` does with `voice` under `spec`, in a zone that is
+/// What a channel of `role` does with `voice` under `rules`, in a zone that is
 /// monophonic when `mono` (MIDI Mode 4 under MPE 1.1, a Monophonic Channel
 /// Response under the Profile).
 ///
@@ -229,10 +230,10 @@ enum Receive {
 /// not acted on: acting on a message no conforming sender makes would only
 /// give a broken one something to break the zone with (an All Sound Off on
 /// the Manager Channel silencing every member, say).
-fn receive(spec: MpeSpec, role: Role, voice: &Voice2, mono: bool) -> Receive {
-    match spec {
-        MpeSpec::Mpe11 => mpe11_receive(role, voice, mono),
-        MpeSpec::Profile => profile_receive(role, voice, mono),
+fn receive(rules: Rules, role: Role, voice: &Voice2, mono: bool) -> Receive {
+    match rules {
+        Rules::Mpe11 => mpe11_receive(role, voice, mono),
+        Rules::Profile => profile_receive(role, voice, mono),
     }
 }
 
@@ -241,14 +242,14 @@ fn receive(spec: MpeSpec, role: Role, voice: &Voice2, mono: bool) -> Receive {
 /// On (126) is Mode 4 and Poly Mode On (127) is Mode 3 (M1-100 section
 /// 2.2.4.3). The Profile has no such switch: both are prohibited, and the
 /// receiver's Channel Response is its own (M2-120 section 3.6).
-fn mode_switch(spec: MpeSpec, controller: CCNumber) -> Option<bool> {
-    match spec {
-        MpeSpec::Mpe11 => match controller.get() {
+fn mode_switch(rules: Rules, controller: CCNumber) -> Option<bool> {
+    match rules {
+        Rules::Mpe11 => match controller.get() {
             CC_MONO_ON => Some(true),
             CC_POLY_ON => Some(false),
             _ => None,
         },
-        MpeSpec::Profile => None,
+        Rules::Profile => None,
     }
 }
 
@@ -375,9 +376,9 @@ struct GroupState {
     mode: MpeMode,
     /// The zones the MIDI-CI MPE Profile (M2-120) enabled on this Group,
     /// which replace `mode` for as long as there are any.
-    profile: Option<MpeZones>,
-    /// The note each member channel holds. The two zones share no channel
-    /// ([`MpeZones`]), so one table serves both.
+    profile: Option<ProfileZones>,
+    /// The note each member channel holds. The zones share no channel
+    /// ([`Mpe11Zones`], [`ProfileZones`]), so one table serves them all.
     held: held::HeldNotes,
     /// What each channel was last told: a member's own, which its next note
     /// starts with, and a master's, which every note of its zone combines.
@@ -423,7 +424,7 @@ impl GroupState {
     /// bit each): their notes and controls are what M1-100 section 2.2.3 and
     /// M2-120 section 3.3 have a receiver stop and reset, and their record
     /// here goes.
-    fn reconfigure(&mut self, mode: MpeMode, profile: Option<MpeZones>) -> MidiChannelSet {
+    fn reconfigure(&mut self, mode: MpeMode, profile: Option<ProfileZones>) -> MidiChannelSet {
         let mut changed = MidiChannelSet::EMPTY;
         let mut entering = [None; MidiChannel::COUNT as usize];
         for c in 0..MidiChannel::COUNT {
@@ -450,15 +451,25 @@ impl GroupState {
     }
 }
 
+/// Which receive table a zone's channels follow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rules {
+    /// MPE 1.1, Appendix E (Table 5).
+    Mpe11,
+    /// The MIDI-CI MPE Profile, Appendix E (Table 15).
+    Profile,
+}
+
 /// One zone of the layout in force, as the receive rules read it, whichever
-/// specification made it.
+/// kind of zone it came from.
 #[derive(Clone, Copy)]
 struct ZoneView {
-    spec: MpeSpec,
+    /// The table the zone's kind follows, set where the view is built from the
+    /// zone.
+    rules: Rules,
     manager: MidiChannel,
-    /// The zone's layout: the channels above or below the manager its
-    /// members occupy.
-    config: MpeZoneConfig,
+    /// The channels the zone's members occupy.
+    layout: MpeLayout,
     manager_range: PitchBendSensitivity,
     member_range: PitchBendSensitivity,
     /// How the zone's members were configured to take notes.
@@ -470,13 +481,13 @@ struct ZoneView {
 
 impl ZoneView {
     /// What identifies `channel`'s place in its zone, to tell when a change of
-    /// layout moved it: the specification, the manager and its role.
-    fn key(&self, channel: MidiChannel) -> (MpeSpec, MidiChannel, Role) {
-        (self.spec, self.manager, self.role_of(channel))
+    /// layout moved it: the rules, the manager and its role.
+    fn key(&self, channel: MidiChannel) -> (Rules, MidiChannel, Role) {
+        (self.rules, self.manager, self.role_of(channel))
     }
 
     fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
-        self.config.member_channels()
+        self.layout.member_channels()
     }
 
     fn role_of(&self, channel: MidiChannel) -> Role {
@@ -488,38 +499,45 @@ impl ZoneView {
     }
 }
 
-/// How `config` reads under `mono`, the MIDI Mode 4 switches of the MPE 1.1
-/// zones.
-fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -> ZoneView {
-    let first_member = config.first_member();
+/// How `zone` reads under `mono`, the MIDI Mode 4 switches of the MPE 1.1
+/// zones: its mode is switched by the wire, from the response it started in.
+fn mpe11_view(zone: &Mpe11Zone, mono: &[bool; MidiChannel::COUNT as usize]) -> ZoneView {
     ZoneView {
-        spec: config.spec(),
-        manager: config.master_channel(),
-        config: *config,
-        manager_range: config.pitch_bend_range_for(config.master_channel()),
-        member_range: config.pitch_bend_range_for(first_member),
-        response: config.response(),
-        // The Profile's response is the zone's; MPE 1.1's mode is switched by
-        // the wire, from the response the zone started in.
-        monophonic: match config.spec() {
-            MpeSpec::Mpe11 => mono[config.master_channel().index()],
-            MpeSpec::Profile => config.response() == ChannelResponse::Monophonic,
-        },
+        rules: Rules::Mpe11,
+        manager: zone.master_channel(),
+        layout: zone.layout(),
+        manager_range: zone.master_range(),
+        member_range: zone.member_range(),
+        response: zone.response(),
+        monophonic: mono[zone.master_channel().index()],
+    }
+}
+
+/// How `zone` reads: the Profile's response is the zone's.
+fn profile_view(zone: &ProfileZone) -> ZoneView {
+    ZoneView {
+        rules: Rules::Profile,
+        manager: zone.manager(),
+        layout: zone.layout(),
+        manager_range: zone.range(),
+        member_range: zone.range(),
+        response: zone.response(),
+        monophonic: zone.response() == ChannelResponse::Monophonic,
     }
 }
 
 /// The zone of `channel` under `profile` if it has zones, else under `mode`.
 fn zone_view(
     mode: &MpeMode,
-    profile: Option<&MpeZones>,
+    profile: Option<&ProfileZones>,
     mono: &[bool; MidiChannel::COUNT as usize],
     channel: MidiChannel,
 ) -> Option<ZoneView> {
-    let zones = match (profile, mode) {
-        (Some(zones), _) | (None, MpeMode::Zones(zones)) => zones,
-        (None, MpeMode::Disabled | MpeMode::SingleChannelRotation { .. }) => return None,
-    };
-    Some(view_of(zones.zone_of(channel)?, mono))
+    match (profile, mode) {
+        (Some(zones), _) => zones.zone_of(channel).map(profile_view),
+        (None, MpeMode::Zones(zones)) => zones.zone_of(channel).map(|z| mpe11_view(z, mono)),
+        (None, MpeMode::Disabled | MpeMode::SingleChannelRotation { .. }) => None,
+    }
 }
 
 /// A Control Change at `value` zero on `channel`, `controller`.
@@ -622,7 +640,7 @@ impl MpeTranslator {
 
     /// The MIDI-CI MPE Profile zones (M2-120) enabled on `group`, if any: the
     /// layout in force there until they are all disabled.
-    pub fn profile(&self, group: MidiGroup) -> Option<&MpeZones> {
+    pub fn profile(&self, group: MidiGroup) -> Option<&ProfileZones> {
         self.groups[group.index()].profile.as_ref()
     }
 
@@ -642,7 +660,7 @@ impl MpeTranslator {
     pub fn set_profile(
         &mut self,
         group: MidiGroup,
-        zones: Option<MpeZones>,
+        zones: Option<ProfileZones>,
         offset: Offset,
         mut out: impl FnMut(UmpAt),
     ) {
@@ -682,12 +700,8 @@ impl MpeTranslator {
         send_stops(group, offset, self.groups[group.index()].entered, &mut out);
         let state = &self.groups[group.index()];
         if let MpeMode::Zones(zones) = state.mode {
-            for config in zones.zones() {
-                if let Some(zone) =
-                    zone_view(&state.mode, None, &state.mono, config.master_channel())
-                {
-                    send_zone_defaults(&zone, group, offset, &mut out);
-                }
+            for zone in zones.zones() {
+                send_zone_defaults(&mpe11_view(zone, &state.mono), group, offset, &mut out);
             }
         }
     }
@@ -743,7 +757,7 @@ impl MpeTranslator {
         // parameter traffic too.
         let decoded = event.1.decode().ok();
         if let (Some(mcm), Some(Message::Midi2(address, _))) =
-            (MpeZoneConfig::from_mcm(&event.1), decoded)
+            (Mpe11Zone::from_mcm(&event.1), decoded)
             && self.groups[address.group.index()].profile.is_none()
         {
             let zone = match mcm {
@@ -754,17 +768,11 @@ impl MpeTranslator {
             }
             // A zone disabled has no ranges to reset.
             if let MpeMode::Zones(zones) = self.mode_of(address.group)
-                && let Some(configured) = match zone {
-                    MpeZone::Lower => zones.lower(),
-                    MpeZone::Upper => zones.upper(),
-                }
+                && let Some(configured) = zones.on(zone)
             {
                 let state = &self.groups[address.group.index()];
-                if let Some(view) =
-                    zone_view(&state.mode, None, &state.mono, configured.master_channel())
-                {
-                    send_zone_defaults(&view, address.group, event.0, out);
-                }
+                let view = mpe11_view(configured, &state.mono);
+                send_zone_defaults(&view, address.group, event.0, out);
             }
             return None;
         }
@@ -836,9 +844,9 @@ impl MpeTranslator {
                 out,
             );
         }
-        let per_note = match (zone.spec, role) {
-            (MpeSpec::Mpe11, Role::Member) | (MpeSpec::Profile, Role::Master) => true,
-            (MpeSpec::Mpe11, Role::Master) | (MpeSpec::Profile, Role::Member) => false,
+        let per_note = match (zone.rules, role) {
+            (Rules::Mpe11, Role::Member) | (Rules::Profile, Role::Master) => true,
+            (Rules::Mpe11, Role::Master) | (Rules::Profile, Role::Member) => false,
         };
         if per_note {
             send_rpns(
@@ -852,7 +860,7 @@ impl MpeTranslator {
             );
         }
         // The manager's went on above, ahead of its copies.
-        role == Role::Master || zone.spec == MpeSpec::Mpe11
+        role == Role::Master || zone.rules == Rules::Mpe11
     }
 
     /// Apply an MPE Configuration Message: it configures the zone whose master
@@ -875,34 +883,33 @@ impl MpeTranslator {
         offset: Offset,
         out: &mut impl FnMut(UmpAt),
     ) -> bool {
-        // Snapshot the current per-side configs so one MCM only touches its side.
-        let (mut lower, mut upper) = match self.mode_of(group) {
-            MpeMode::Zones(zones) => (zones.lower().copied(), zones.upper().copied()),
-            MpeMode::Disabled | MpeMode::SingleChannelRotation { .. } => (None, None),
+        let current = match self.mode_of(group) {
+            MpeMode::Zones(zones) => Some(*zones),
+            MpeMode::Disabled | MpeMode::SingleChannelRotation { .. } => None,
         };
-        let (zone, configured) = match mcm {
-            Mcm::Configure { zone, members } => (
-                zone,
-                Some(MpeZoneConfig::new(
+        // One MCM only touches its side: the zone on the other side is kept.
+        let zones = match mcm {
+            Mcm::Configure { zone, members } => {
+                let configured = Mpe11Zone::new(
                     zone,
                     members,
                     PitchBendSensitivity::MPE_MASTER_DEFAULT,
                     PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-                )),
-            ),
-            Mcm::Disable { zone } => (zone, None),
+                );
+                // `None` when the two zones would overlap.
+                match current {
+                    Some(zones) => zones.with(configured),
+                    None => Some(Mpe11Zones::single(configured)),
+                }
+                .map(Some)
+            }
+            Mcm::Disable { zone } => Some(current.and_then(|zones| zones.without(zone))),
         };
-        match zone {
-            MpeZone::Lower => lower = configured,
-            MpeZone::Upper => upper = configured,
-        }
-        let mode = match MpeZones::new(lower, upper) {
-            Some(zones) => MpeMode::Zones(zones),
-            // Both zones off: MPE is off.
-            None if lower.is_none() && upper.is_none() => MpeMode::Disabled,
-            // The two zones would overlap.
-            None => return false,
+        let Some(zones) = zones else {
+            return false;
         };
+        // Both zones off: MPE is off.
+        let mode = zones.map_or(MpeMode::Disabled, MpeMode::Zones);
         // The Group's channels that changed lose their notes and their record;
         // the other Groups, and the channels that did not change, keep theirs.
         let state = &mut self.groups[group.index()];
@@ -928,7 +935,7 @@ impl MpeTranslator {
             return Some(*event);
         };
         let role = zone.role_of(ch);
-        if receive(zone.spec, role, &voice, zone.monophonic) == Receive::Ignore {
+        if receive(zone.rules, role, &voice, zone.monophonic) == Receive::Ignore {
             return None;
         }
         let master = zone.manager;
@@ -1121,8 +1128,8 @@ impl MpeTranslator {
                 // Section 2.2.4.3: a Mode message to the lowest numbered
                 // Member Channel of a zone, not to the Manager Channel,
                 // switches the zone between Mode 3 and Mode 4.
-                if let Some(mono) = mode_switch(zone.spec, controller)
-                    && zone.config.first_member() == ch
+                if let Some(mono) = mode_switch(zone.rules, controller)
+                    && zone.layout.first_member() == ch
                 {
                     state.mono[usize::from(zone.manager.get())] = mono;
                 }

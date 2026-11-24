@@ -8,7 +8,7 @@ use tutti_ump::{
     Address, CCNumber, ExtremeValues, Midi1Bytes, MidiChannel, MidiGroup, U7, U14, Voice1, Voice2,
 };
 
-use crate::MpeZoneConfig;
+use crate::MpeLayout;
 
 /// One member channel's allocation state.
 #[derive(Clone, Copy, Debug)]
@@ -88,7 +88,7 @@ impl Members {
     /// the section leaves the choice to the sender.
     pub(super) fn route(
         &mut self,
-        zone: &MpeZoneConfig,
+        zone: &MpeLayout,
         extremes: ExtremeValues,
         address: Address,
         voice: Voice2,
