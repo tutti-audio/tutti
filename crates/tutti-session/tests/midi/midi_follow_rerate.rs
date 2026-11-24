@@ -126,7 +126,10 @@ const FOLLOWERS: [Follower; 3] = [
     },
 ];
 
-/// **A follower still hears its source after the graph is re-rated.** Each
+/// **A follower still hears its source after the graph is re-rated.** The
+/// re-open itself is pinned by the unit test
+/// `reopen_answers_unchanged_opened_and_gone`; this is the product property,
+/// with the clock case as its rate-sensitive witness. Each
 /// follower follows, the graph moves from 48 kHz to 44.1 kHz so its tap must be
 /// re-opened, and the source's next message (a Set Tempo of 90 bpm, Timing Clocks at
 /// 90 bpm, a PLAY) is followed. A tap that was not re-opened is superseded and hears

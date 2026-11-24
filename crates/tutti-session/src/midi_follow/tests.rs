@@ -251,3 +251,61 @@ fn a_reversed_source_is_reported_and_stopped() {
         })
     ));
 }
+
+/// A graph at 48 kHz with one node that has an event output, and a tap of
+/// that output's port.
+fn tapped() -> (crate::Graph, tutti_graph::NodeKey, FollowTap) {
+    let mut graph = crate::Graph::new(
+        2,
+        RATE,
+        tutti_buffers::MaxBlock::of(Samples::new(64)),
+        None,
+        #[cfg(feature = "plugin")]
+        tutti_timeline::TempoReader::fixed(map(120.0)),
+    );
+    let node = tutti_graph::NodeKey::from(graph.add(tutti_midi_runtime::MidiClipNode::new([])));
+    let reader = graph
+        .taps()
+        .open_event(
+            crate::EventOutputPort::new(node, 0),
+            tutti_graph::EventTapOptions::new(tutti_graph::EventCapacity::of(16))
+                .align(tutti_graph::TapAlign::Raw),
+        )
+        .expect("the port exists");
+    let _ = graph.commit();
+    (graph, node, FollowTap::new(reader, "test"))
+}
+
+/// **`reopen` answers for what the graph did to the tap.** At the graph's own
+/// rate the tap is `Unchanged` and the graph is not edited; after a re-rate it
+/// is `Opened` on the new rate, then `Unchanged` again; once its node is gone
+/// it is `Gone`, and asking again edits nothing.
+#[test]
+fn reopen_answers_unchanged_opened_and_gone() {
+    let (mut graph, node, mut tap) = tapped();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+    assert!(
+        !graph.has_uncommitted_edits(),
+        "nothing was asked of the graph"
+    );
+
+    graph
+        .set_sample_rate(SampleRate::SR_44K1)
+        .expect("re-rates");
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Opened);
+    assert_eq!(tap.rate(), SampleRate::SR_44K1);
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+
+    drop(graph.remove(node).expect("the node is in the graph"));
+    graph.set_sample_rate(SampleRate::SR_48K).expect("re-rates");
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    assert!(
+        !graph.has_uncommitted_edits(),
+        "a gone tap edits nothing on the second ask"
+    );
+}
