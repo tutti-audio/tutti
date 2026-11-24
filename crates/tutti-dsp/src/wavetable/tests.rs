@@ -16,13 +16,7 @@ fn table(frames: &[Vec<f64>]) -> Arc<Wavetable<f64>> {
 }
 
 fn uniform(rng: &mut SplitMix64) -> f64 {
-    f64::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0
-}
-
-/// A frame of `n` samples of white noise on `-1..1`.
-fn noise_frame(n: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..n).map(|_| uniform(&mut rng)).collect()
+    tutti_fixtures::uniform(rng, -1.0, 1.0)
 }
 
 /// A frame of harmonics `1..=10` with random amplitudes and phases.
@@ -60,7 +54,7 @@ fn play(table: &Arc<Wavetable<f64>>, hz: f64, position: f64, len: usize) -> Vec<
 #[test]
 fn each_level_has_no_energy_above_its_harmonic_limit_and_keeps_the_rest() {
     let n = 256;
-    let frame = noise_frame(n, 7);
+    let frame = tutti_fixtures::uniform_noise::<f64>(7, n);
     let t = table(std::slice::from_ref(&frame));
     assert_eq!(t.levels(), 7);
     let original = spectrum(&frame);
@@ -89,7 +83,7 @@ fn each_level_has_no_energy_above_its_harmonic_limit_and_keeps_the_rest() {
 #[test]
 fn a_level_is_never_played_above_its_alias_free_limit() {
     let n = 2048;
-    let t = table(&[noise_frame(n, 1)]);
+    let t = table(&[tutti_fixtures::uniform_noise(1, n)]);
     let limit = |m: usize| RATE.get() * f64::from(1u32 << (m + 1)) / n as f64;
     let mut f = 1.0;
     while f <= RATE.get() / 2.0 {

@@ -28,7 +28,7 @@ fn one_grain(channels: &[f32], length: usize) -> GranularNode<f32> {
 }
 
 fn hann(n: usize, length: usize) -> f32 {
-    (0.5 - 0.5 * (2.0 * core::f64::consts::PI * n as f64 / length as f64).cos()) as f32
+    tutti_fixtures::signal::hann(n, length) as f32
 }
 
 #[test]
