@@ -1016,6 +1016,11 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
         let got = rx.recv_timeout(PATIENCE).expect("the push woke the bridge");
         assert!(matches!(got, AudioCommand::Reset));
+        // The bridge parks again with nothing queued; `wake` ends that wait on
+        // the stop flag.
+        while !c.unparker.is_parked() {
+            std::thread::yield_now();
+        }
         stop.store(true, Ordering::Release);
         c.wake();
         t.join().unwrap();

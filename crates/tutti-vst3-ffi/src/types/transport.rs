@@ -310,6 +310,11 @@ mod tests {
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kRecording), 0);
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kCycleActive), 0);
 
+        // The MIDI clock grid: 4.0 quarters is on a clock, so the distance is 0
+        // and still flagged.
+        assert_eq!(ctx.samplesToNextClock, 0);
+        assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kClockValid), 0);
+
         // Fields with no producer are neither written nor flagged.
         assert_eq!(s & crate::sdk_enum_u32(StatesAndFlags_::kSmpteValid), 0);
         assert_eq!(s & crate::sdk_enum_u32(StatesAndFlags_::kChordValid), 0);
@@ -352,7 +357,7 @@ mod tests {
                 "timeSig",
                 need::NEED_TIME_SIGNATURE,
                 crate::sdk_enum_u32(StatesAndFlags_::kTimeSigValid),
-                |c| c.timeSigNumerator != 0,
+                |c| c.timeSigNumerator != 0 || c.timeSigDenominator != 0,
             ),
             (
                 "continousTimeSamples",
@@ -370,7 +375,7 @@ mod tests {
                 "cycleStartMusic",
                 need::NEED_CYCLE_MUSIC,
                 crate::sdk_enum_u32(StatesAndFlags_::kCycleValid),
-                |c| c.cycleStartMusic != 0.0,
+                |c| c.cycleStartMusic != 0.0 || c.cycleEndMusic != 0.0,
             ),
         ];
 

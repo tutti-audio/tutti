@@ -558,6 +558,7 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
     assert!(matches!(handle.presence(), Presence::Live));
 
     // A refusal leaves the node able to take a plugin that fits.
+    let before = pid_of(&s, node);
     layout("0");
     let fitting = load(&s, &catalog, &second_id());
     s.swap_plugin(node, fitting, tutti_fixtures::main_thread())
@@ -566,6 +567,7 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
     );
+    assert_ne!(pid_of(&s, node), before, "in a server of its own");
 }
 
 /// **A swap replaces the plugin at the node, at the same key.** The node is the

@@ -1366,6 +1366,59 @@ mod tests {
         ));
     }
 
+    /// **A state request opened with the state's window lives on the server's
+    /// beats, a window after the last one, and never past its ceiling.** The
+    /// window and the ceiling are the ones `Deadline::State` hands the lane;
+    /// the beats come every two seconds short of the window, so five of them
+    /// carry the request past three windows.
+    #[test]
+    fn a_state_request_lives_on_beats_past_its_window_and_stops_at_the_ceiling() {
+        let (window, ceiling) =
+            super::super::messages::Deadline::State.window(&Timeouts::default());
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let mut state = control_state();
+        let mut inbox = Unsolicited::new();
+        let id = ReqId::new(1);
+        state
+            .conv
+            .open(id, Abandoned::Discard, start, window, ceiling);
+        let beat = window.as_secs() - 2;
+        for step in 1..=5u64 {
+            let now = at(step * beat);
+            assert!(!state.conv.is_due(id, now), "beat {step} came in time");
+            let working = ControlFrame::Working {
+                id,
+                stage: crate::Working::Opening,
+            };
+            assert!(matches!(
+                state.hear(working, Some(id), now, &mut inbox),
+                Ok(None)
+            ));
+        }
+        assert!(5 * beat > 3 * window.as_secs(), "past three windows");
+        let last = at(5 * beat);
+        assert!(
+            !state
+                .conv
+                .is_due(id, last + window - Duration::from_secs(1))
+        );
+        assert!(state.conv.is_due(id, last + window));
+        let working = ControlFrame::Working {
+            id,
+            stage: crate::Working::Opening,
+        };
+        assert!(
+            state
+                .hear(working, Some(id), at(ceiling.as_secs() - 1), &mut inbox)
+                .is_ok()
+        );
+        assert!(
+            state.conv.is_due(id, at(ceiling.as_secs())),
+            "the ceiling stands"
+        );
+    }
+
     /// **The server's `Error` answers the request it names**, like any reply,
     /// and no other.
     #[test]
