@@ -58,7 +58,7 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// `stretched`).
     ///
     /// Built on the control thread, never in the callback. A vocoder is built
-    /// by `VoicePoolHandle::send` when a `VoiceCommand::AddVoice` or a
+    /// by `VoicePoolHandle::prepare` when a `VoiceCommand::AddVoice` or a
     /// `VoiceCommand::UpdateStretch` asks for stretching (or by a standalone
     /// `VoiceNode`'s constructor), and the pool's drain in `process` only
     /// moves it in; a redundant one goes back through the retirement channel

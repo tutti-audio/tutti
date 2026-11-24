@@ -101,6 +101,38 @@ use crate::MidiEvent;
 use crate::graph::Graph;
 use crate::value::{Bases, Steps};
 
+/// Which of the session's followers an event is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum FollowKind {
+    /// The Flex tempo follower ([`Midi::follow_tempo`](crate::Midi::follow_tempo)).
+    Tempo,
+    /// The MIDI clock follower ([`Midi::follow_clock`](crate::Midi::follow_clock)).
+    Clock(ClockKind),
+    /// The Machine Control follower
+    /// ([`Midi::follow_machine_control`](crate::Midi::follow_machine_control)).
+    MachineControl,
+}
+
+impl FollowKind {
+    /// Whether the follower lays steps over the base tempo and meter, which
+    /// ending it publishes again: the Flex follower and Beat Clock do, MTC and
+    /// Machine Control carry no tempo.
+    pub(crate) const fn owns_tempo(self) -> bool {
+        matches!(self, Self::Tempo | Self::Clock(ClockKind::BeatClock))
+    }
+}
+
+/// Why a follower stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum UnfollowCause {
+    /// The app called an `unfollow_*`.
+    Requested,
+    /// The input node it read was removed from the graph.
+    InputGone,
+}
+
 /// How many events the follower's tap holds between two polls. Set Tempo and
 /// Set Time Signature are rare; a source that floods them loses the oldest
 /// beyond this, counted and logged.
@@ -292,7 +324,7 @@ pub(crate) enum Reopened {
     /// A new reader is open at the graph's rate.
     Opened,
     /// The tap's node is gone: nothing can be opened and the reader hears
-    /// nothing more.
+    /// nothing more, so its follower ends.
     Gone,
 }
 
@@ -319,8 +351,8 @@ impl FollowTap {
 
     /// Re-opens the tap when the graph is prepared at another rate than its
     /// frames are on. The graph marks itself edited when it tries to open a tap
-    /// it holds; a tap it has dropped is `Gone` again at every call and edits
-    /// nothing.
+    /// it holds; a tap it has dropped is `Gone` and edits nothing, and the
+    /// follower ends there ([`FollowCx::end`]).
     pub(crate) fn reopen<F: Float>(&mut self, graph: &mut Graph<F>) -> Reopened {
         if self.rate() == graph.prepared().sample_rate() {
             return Reopened::Unchanged;
@@ -339,6 +371,22 @@ impl FollowTap {
 pub(crate) struct Follow {
     core: TempoFollower,
     pub(crate) tap: FollowTap,
+}
+
+/// The end of `follower`, for the explicit `unfollow_*` and the follower whose
+/// input is gone alike: publishes the base again when it laid steps and returns
+/// the event that says it stopped.
+pub(crate) fn ended(
+    bases: &Bases,
+    settings: &TransportSettings,
+    meter: &ProjectMeter,
+    follower: FollowKind,
+    cause: UnfollowCause,
+) -> MidiEvent {
+    if follower.owns_tempo() {
+        bases.release(settings, meter);
+    }
+    MidiEvent::Unfollowed { follower, cause }
 }
 
 /// What a `Poll` phase reads besides the follower.
@@ -371,6 +419,17 @@ impl Follow {
 }
 
 impl FollowCx<'_> {
+    /// Reports the end of `follower` into `out`, publishing the base again when
+    /// it laid steps ([`ended`]). The caller has dropped the follower.
+    pub(crate) fn end(
+        &self,
+        follower: FollowKind,
+        cause: UnfollowCause,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
+        out.push(ended(self.bases, self.settings, self.meter, follower, cause).into());
+    }
+
     /// Places what was heard at the next block start and publishes the new
     /// maps. The events say what was applied.
     pub(crate) fn apply(&self, heard: &[Followed], out: &mut Vec<crate::SessionEvent>) {
@@ -758,9 +817,17 @@ impl ClockFollow {
         }
     }
 
+    /// The clock followed.
+    pub(crate) fn kind(&self) -> ClockKind {
+        match self.core {
+            Clock::BeatClock(_) => ClockKind::BeatClock,
+            Clock::Mtc(_) => ClockKind::Mtc,
+        }
+    }
+
     /// Whether it steps the tempo, so nothing else follows one.
     pub(crate) fn owns_tempo(&self) -> bool {
-        matches!(self.core, Clock::BeatClock(_))
+        FollowKind::Clock(self.kind()).owns_tempo()
     }
 
     /// The error the follower read at the last poll

@@ -258,6 +258,22 @@ impl Bases {
             meter: Base::new(settings.project_meter().current()),
         }
     }
+
+    /// Drops the steps a follower laid and publishes the base again, for the
+    /// maps it stepped.
+    #[cfg(feature = "midi")]
+    pub(crate) fn release(
+        &self,
+        settings: &TransportSettings,
+        meter: &tutti_timeline::ProjectMeter,
+    ) {
+        if let Some(tempo) = self.tempo.release() {
+            settings.set_tempo_map(tempo);
+        }
+        if let Some(meter_map) = self.meter.release() {
+            meter.set_meter(meter_map);
+        }
+    }
 }
 
 #[cfg(all(test, feature = "midi"))]

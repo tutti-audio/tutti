@@ -34,7 +34,7 @@ use super::memory_source::VoiceWindow;
 use super::offline_read::OfflineRead;
 use super::types::PlayDirection;
 use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible_gain};
-use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamId, StreamReader};
+use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamReader};
 
 /// The streaming tier's bare reader: the streamer's ring, its control cell
 /// and its width. A [`DiskVoice`] wraps one and reads the ring by the clock.
@@ -435,13 +435,6 @@ impl<F: SamplerFloat> DiskVoice<F> {
         );
         voice.origin = Some(Origin { file, status });
         voice
-    }
-
-    /// The streamer stream this voice reads: its ring's stream, which a loop
-    /// forwarded for the voice names so the streamer ignores it once the
-    /// stream is gone.
-    pub(crate) fn stream(&self) -> StreamId {
-        self.inner.read.ring().region_id()
     }
 
     /// The voice's window on the timeline.

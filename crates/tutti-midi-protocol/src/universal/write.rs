@@ -11,30 +11,13 @@ use tutti_ump::{DeviceIdentity, U7, U14, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL
 
 use super::{Addressed, GeneralMidiMode, Universal};
 use crate::tuning::{
-    MAX_KEY_CHANGES, OctaveOffsets, Timing, TuningFrequency, TuningMessage, TuningName,
+    KeyChanges, MAX_KEY_CHANGES, OctaveOffsets, Timing, TuningFrequency, TuningMessage, TuningName,
 };
 
 /// The longest payload [`Addressed::payload`] writes: a Single Note Tuning
 /// Change of [`MAX_KEY_CHANGES`] changes with a bank (`7F dev 08 07 bank prog
 /// ll` and four bytes a change), the longest message of the grammar.
 pub const UNIVERSAL_MAX_PAYLOAD: usize = 7 + 4 * MAX_KEY_CHANGES;
-
-/// Why an [`Addressed`] message has no payload to write.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum NotWritable {
-    /// [`Universal::MachineControlTruncated`]: a command segment cut short,
-    /// which a receiver makes and no sender names (RP-013 p.40 b).
-    #[error("a truncated Machine Control command is only read, never written")]
-    MachineControlTruncated,
-    /// [`Universal::MachineControlResponse`]: a Response (`07`) comes from a
-    /// device, and is read.
-    #[error("a Machine Control response is only read, never written")]
-    MachineControlResponse,
-    /// A Non-Real Time Single Note Tuning Change names its bank (`08 07`); the
-    /// bankless form (`08 02`) is Real Time (CA-020).
-    #[error("a Non-Real Time Single Note Tuning Change names a bank")]
-    NonRealTimeNoteChangeWithoutBank,
-}
 
 /// The payload of one Universal message: the bytes between `F0` and `F7`, held
 /// inline.
@@ -130,7 +113,7 @@ impl UniversalPayload {
         self.put_u7s(identity.revision.get());
     }
 
-    fn put_tuning(&mut self, message: &TuningMessage) -> Result<(), NotWritable> {
+    fn put_tuning(&mut self, message: &TuningMessage) {
         match message {
             TuningMessage::DumpRequest {
                 bank: None,
@@ -186,30 +169,30 @@ impl UniversalPayload {
                 self.put_checksum();
             }
             TuningMessage::NoteChange {
-                timing,
                 bank,
                 program,
                 changes,
             } => {
-                match (timing, bank) {
-                    (Timing::RealTime, None) => {
+                self.put_all([0x08, 0x07]);
+                self.put_u7s([*bank, *program]);
+                self.put_key_changes(changes);
+            }
+            TuningMessage::RealTimeNoteChange {
+                bank,
+                program,
+                changes,
+            } => {
+                match bank {
+                    None => {
                         self.put_all([0x08, 0x02]);
                         self.put_u7(*program);
                     }
-                    (_, Some(bank)) => {
+                    Some(bank) => {
                         self.put_all([0x08, 0x07]);
                         self.put_u7s([*bank, *program]);
                     }
-                    (Timing::NonRealTime, None) => {
-                        return Err(NotWritable::NonRealTimeNoteChangeWithoutBank);
-                    }
                 }
-                // At most `MAX_KEY_CHANGES` (127), a data byte.
-                self.put_u7(U7::masked(changes.as_slice().len() as u8));
-                for change in changes.as_slice() {
-                    self.put_u7(U7::masked(change.key.get()));
-                    self.put_frequency(change.frequency);
-                }
+                self.put_key_changes(changes);
             }
             TuningMessage::OctaveTuning {
                 timing: _,
@@ -228,7 +211,16 @@ impl UniversalPayload {
                 self.put_offsets(offsets);
             }
         }
-        Ok(())
+    }
+
+    /// The count and the changes of a Single Note Tuning Change.
+    fn put_key_changes(&mut self, changes: &KeyChanges) {
+        // At most `MAX_KEY_CHANGES` (127), a data byte.
+        self.put_u7(U7::masked(changes.as_slice().len() as u8));
+        for change in changes.as_slice() {
+            self.put_u7(U7::masked(change.key.get()));
+            self.put_frequency(change.frequency);
+        }
     }
 }
 
@@ -252,15 +244,7 @@ impl Addressed {
     /// The payload of the message (the bytes between `F0` and `F7`), the
     /// inverse of [`read()`](fn@super::read). It goes out as SysEx7 through
     /// [`Sysex7Packets::part`](tutti_ump::Sysex7Packets::part) (`SysexPart::Only`).
-    ///
-    /// # Errors
-    ///
-    /// [`NotWritable`] for a message that is only read
-    /// ([`Universal::MachineControlTruncated`] and
-    /// [`Universal::MachineControlResponse`], which no sender names) and for a
-    /// non-real-time Single Note Tuning Change with no bank, which has no
-    /// bytes.
-    pub fn payload(&self) -> Result<UniversalPayload, NotWritable> {
+    pub fn payload(&self) -> UniversalPayload {
         let mut out = UniversalPayload::new();
         let device = self.to.device_byte();
         let header = |out: &mut UniversalPayload, timing: Timing| {
@@ -307,12 +291,12 @@ impl Addressed {
             }
             Universal::Tuning(message) => {
                 let timing = match message {
-                    TuningMessage::NoteChange { timing, .. }
-                    | TuningMessage::OctaveTuning { timing, .. } => *timing,
+                    TuningMessage::RealTimeNoteChange { .. } => Timing::RealTime,
+                    TuningMessage::OctaveTuning { timing, .. } => *timing,
                     _ => Timing::NonRealTime,
                 };
                 header(&mut out, timing);
-                out.put_tuning(message)?;
+                out.put_tuning(message);
             }
             Universal::MtcFullMessage(full) => {
                 let mut bytes = full.payload();
@@ -329,13 +313,82 @@ impl Addressed {
                         .map(U7::masked),
                 );
             }
-            Universal::MachineControlTruncated(_) => {
-                return Err(NotWritable::MachineControlTruncated);
-            }
-            Universal::MachineControlResponse(_) => {
-                return Err(NotWritable::MachineControlResponse);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MmcCommands, MtcFullMessage, MtcRate, Recipient, SysexDeviceId, read};
+    use crate::{TimecodeHours, TimecodeMinutes, TimecodeSeconds, UniversalRead};
+    use tutti_ump::{ManufacturerId, SoftwareRevision, SysexMessage};
+
+    /// A distinct index for each variant: the match is exhaustive here, so a
+    /// variant added to `Universal` fails to compile until it has a sample.
+    const fn index(message: &Universal) -> usize {
+        match message {
+            Universal::IdentityRequest => 0,
+            Universal::IdentityReply(_) => 1,
+            Universal::GeneralMidi(_) => 2,
+            Universal::MasterVolume(_) => 3,
+            Universal::MasterBalance(_) => 4,
+            Universal::MasterFineTuning(_) => 5,
+            Universal::MasterCoarseTuning(_) => 6,
+            Universal::Tuning(_) => 7,
+            Universal::MtcFullMessage(_) => 8,
+            Universal::MachineControl(_) => 9,
+        }
+    }
+
+    /// Every variant of `Universal` has a payload, and `read` gives back the
+    /// message it was written from, to each kind of recipient. The forms of
+    /// `TuningMessage` are read back one by one in the `write` module of
+    /// `tests/wire/universal.rs`; one sample of each nested kind is enough here.
+    #[test]
+    fn every_universal_message_is_written_and_read_back() {
+        let samples = [
+            Universal::IdentityRequest,
+            Universal::IdentityReply(DeviceIdentity {
+                manufacturer: ManufacturerId::of(0x41),
+                family: [U7::of(1), U7::of(2)],
+                model: [U7::of(3), U7::of(4)],
+                revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
+            }),
+            Universal::GeneralMidi(GeneralMidiMode::On),
+            Universal::MasterVolume(U14::of(0x1234)),
+            Universal::MasterBalance(U14::of(0x0102)),
+            Universal::MasterFineTuning(U14::of(0x2000)),
+            Universal::MasterCoarseTuning(U7::of(0x40)),
+            Universal::Tuning(TuningMessage::DumpRequest {
+                bank: None,
+                program: U7::of(3),
+            }),
+            Universal::MtcFullMessage(
+                MtcFullMessage::new(
+                    MtcRate::Fps30,
+                    TimecodeHours::of(1),
+                    TimecodeMinutes::of(2),
+                    TimecodeSeconds::of(3),
+                    4,
+                )
+                .unwrap(),
+            ),
+            Universal::MachineControl(MmcCommands::stop()),
+        ];
+        let mut seen = [false; 10];
+        for message in samples {
+            seen[index(&message)] = true;
+            for to in [Recipient::AllCall, Recipient::Device(SysexDeviceId::of(5))] {
+                let payload = Addressed { to, message }.payload();
+                let mut framed = alloc::vec![0xF0];
+                framed.extend(payload.as_bytes().iter().map(|b| b.get()));
+                framed.push(0xF7);
+                let read = read(SysexMessage::from_framed(&framed).unwrap());
+                assert_eq!(read, UniversalRead::Universal(Addressed { to, message }));
             }
         }
-        Ok(out)
+        assert!(seen.iter().all(|&s| s), "a variant has no sample");
     }
 }
