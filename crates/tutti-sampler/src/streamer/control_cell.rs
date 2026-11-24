@@ -74,6 +74,14 @@ impl<T> ControlCell<T> {
     }
 }
 
+/// The cell's own [`reclaim`](ControlCell::reclaim), as a published entry
+/// sweeps it.
+impl<T> tutti_rt::Reclaim for ControlCell<T> {
+    fn reclaim(&self) -> usize {
+        Self::reclaim(self)
+    }
+}
+
 /// A voice's loop or direction, read and written as the value itself: a
 /// publish that differs wakes the streamer of a streamed voice.
 impl<T: Copy + PartialEq + Send + Sync + 'static> tutti_graph::Published for ControlCell<T> {
