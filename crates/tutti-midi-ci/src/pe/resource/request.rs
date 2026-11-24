@@ -435,7 +435,13 @@ impl ResourceSet {
             SetBody::Full(data) => (PeSetScope::Whole, data.media_type()),
             SetBody::Partial(_) => (PeSetScope::Partial, None),
         };
-        check_set(entry, &self.target, scope, self.encoding, media_type)
+        SetHeader {
+            target: &self.target,
+            scope,
+            encoding: self.encoding,
+            media_type,
+        }
+        .check(entry)
     }
 
     /// The Set a `selectorAction` Link asks for once the user chose `chosen`, an
@@ -459,44 +465,48 @@ impl ResourceSet {
     }
 }
 
-/// Checks a Set of `scope` in `encoding`, with the `media_type` of its Property Data
-/// (JSON when none), against the entry of the ResourceList. A Responder that has the
-/// header of a Set and not yet its body checks with this what [`ResourceSet::check`]
-/// checks of a Set it holds.
-pub(super) fn check_set(
-    entry: &ResourceEntry,
-    target: &ResourceTarget,
-    scope: PeSetScope,
-    encoding: PeEncoding,
-    media_type: Option<&MediaType>,
-) -> Result<(), RequestRefused> {
-    let name = || target.resource().clone();
-    // `partial` includes `full` (M2-103 §14.2).
-    let allowed = matches!(
-        (entry.can_set(), scope),
-        (CanSet::Partial, _) | (CanSet::Full, PeSetScope::Whole)
-    );
-    if !allowed {
-        return Err(RequestRefused::CannotSet {
-            resource: name(),
-            scope,
-        });
+/// What a Set says of itself before its body is read: the Resource, whether it
+/// replaces the whole Property Data, the encoding and the media type of the data
+/// (JSON when none). A Responder that has only this checks with it what
+/// [`ResourceSet::check`] checks of a Set it holds.
+pub(super) struct SetHeader<'a> {
+    pub(super) target: &'a ResourceTarget,
+    pub(super) scope: PeSetScope,
+    pub(super) encoding: PeEncoding,
+    pub(super) media_type: Option<&'a MediaType>,
+}
+
+impl SetHeader<'_> {
+    /// Checks the Set against the entry of the ResourceList.
+    pub(super) fn check(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
+        let name = || self.target.resource().clone();
+        // `partial` includes `full` (M2-103 §14.2).
+        let allowed = matches!(
+            (entry.can_set(), self.scope),
+            (CanSet::Partial, _) | (CanSet::Full, PeSetScope::Whole)
+        );
+        if !allowed {
+            return Err(RequestRefused::CannotSet {
+                resource: name(),
+                scope: self.scope,
+            });
+        }
+        self.target.agrees_with(entry)?;
+        if !entry.encodings().contains(&self.encoding) {
+            return Err(RequestRefused::EncodingNotDeclared {
+                resource: name(),
+                encoding: self.encoding.as_str(),
+            });
+        }
+        let media_type = self.media_type.unwrap_or(&MediaType::JSON);
+        if !entry.media_types().contains(media_type) {
+            return Err(RequestRefused::MediaTypeNotDeclared {
+                resource: name(),
+                media_type: media_type.clone(),
+            });
+        }
+        Ok(())
     }
-    target.agrees_with(entry)?;
-    if !entry.encodings().contains(&encoding) {
-        return Err(RequestRefused::EncodingNotDeclared {
-            resource: name(),
-            encoding: encoding.as_str(),
-        });
-    }
-    let media_type = media_type.unwrap_or(&MediaType::JSON);
-    if !entry.media_types().contains(media_type) {
-        return Err(RequestRefused::MediaTypeNotDeclared {
-            resource: name(),
-            media_type: media_type.clone(),
-        });
-    }
-    Ok(())
 }
 
 /// The entry that judges an inquiry for `resource`: `held`, the one a ResourceList

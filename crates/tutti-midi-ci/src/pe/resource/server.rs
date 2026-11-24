@@ -27,7 +27,7 @@ use super::entry::ResourceEntry;
 use super::fields::PeDataError;
 use super::kind::{PeResource, StandardResource};
 use super::request::{
-    RequestRefused, ResourceGet, ResourceTarget, check_set, judging_entry, link_target,
+    RequestRefused, ResourceGet, ResourceTarget, SetHeader, judging_entry, link_target,
 };
 use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, StateVerdict};
 use super::store::{ResourceStore, StoreError};
@@ -294,6 +294,8 @@ fn refused(error: RequestRefused) -> Refusal {
         RequestRefused::FlowControlNotDeclared(_) => PeStatus::FlowControlUnsupported,
         RequestRefused::EncodingNotDeclared { .. }
         | RequestRefused::MediaTypeNotDeclared { .. } => PeStatus::UnsupportedMedia,
+        // The Initiator's `ResourceSet::full` raises DataOfAnotherResource; a Set
+        // the Responder reads is built from its own header and data.
         RequestRefused::ResIdRequired(_)
         | RequestRefused::ResIdUnused(_)
         | RequestRefused::ResIdDisagrees { .. }
@@ -995,13 +997,13 @@ impl ResourceResponder {
             return Err(refusal(PeStatus::BadRequest, "a Set takes no page"));
         }
         let encoding = request.mutual_encoding.unwrap_or(PeEncoding::Ascii);
-        check_set(
-            &entry,
-            &target,
-            request.set_scope,
+        SetHeader {
+            target: &target,
+            scope: request.set_scope,
             encoding,
-            request.media_type.as_ref(),
-        )
+            media_type: request.media_type.as_ref(),
+        }
+        .check(&entry)
         .map_err(refused)?;
         // Only a Responder can break the entry's `fcOnSet`: an Initiator takes its
         // Flow Control for a Set from the entry.
