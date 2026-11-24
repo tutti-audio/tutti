@@ -148,7 +148,6 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProces
 
 # tutti-plugin-ipc
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_render_mode
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale

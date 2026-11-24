@@ -12,4 +12,5 @@ pub(crate) mod platform;
 #[path = "lifetime/windows.rs"]
 pub(crate) mod platform;
 
-pub use platform::{has_ended, kill_group};
+pub(crate) use platform::has_ended;
+pub use platform::kill_group;

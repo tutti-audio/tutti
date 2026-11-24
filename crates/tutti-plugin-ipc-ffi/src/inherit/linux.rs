@@ -10,7 +10,7 @@ use std::process::Command;
 /// before it, a sweep of `fcntl` calls). Marking, not closing, keeps std's
 /// close-on-exec pipe open until the exec, so a failed exec is still reported
 /// by `spawn`.
-pub fn inherit_only_stdio(command: &mut Command) {
+pub(crate) fn inherit_only_stdio(command: &mut Command) {
     let bound = descriptor_bound();
     // SAFETY: the hook runs between `fork` and `exec` and calls only the raw
     // `close_range` system call and, on its failure, `mark_close_on_exec`

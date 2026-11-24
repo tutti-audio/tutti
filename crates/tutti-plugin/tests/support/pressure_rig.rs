@@ -8,20 +8,20 @@ use std::time::Duration;
 
 /// Planar scratch, `channels` × [`BLOCK`] frames: what this harness fills and
 /// measures.
-pub struct Planes(pub Vec<Vec<f32>>);
+pub(crate) struct Planes(pub Vec<Vec<f32>>);
 
 impl Planes {
-    pub fn new(channels: usize) -> Self {
+    pub(crate) fn new(channels: usize) -> Self {
         Self(vec![vec![0.0; BLOCK]; channels])
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         for c in &mut self.0 {
             c.fill(0.0);
         }
     }
 
-    pub fn at(&self, channel: usize, i: usize) -> f32 {
+    pub(crate) fn at(&self, channel: usize, i: usize) -> f32 {
         self.0[channel][i]
     }
 }
@@ -32,7 +32,7 @@ impl Planes {
 /// A block reaches the plugin node through the executor, with the `Env` the
 /// engine would give it.
 /// The main inputs feed its inputs, its outputs feed the main outputs.
-pub struct GraphUnit {
+pub(crate) struct GraphUnit {
     renderer: tutti_graph::Renderer,
     /// The plugin's controls: whether the server has answered its chunk.
     pub controls: tutti_plugin_host::PluginControls,
@@ -46,7 +46,7 @@ pub struct GraphUnit {
 }
 
 impl GraphUnit {
-    pub fn new<N: tutti_graph::IntoNode<Controls = tutti_plugin_host::PluginControls>>(
+    pub(crate) fn new<N: tutti_graph::IntoNode<Controls = tutti_plugin_host::PluginControls>>(
         node: N,
         inputs: usize,
         outputs: usize,
@@ -77,11 +77,11 @@ impl GraphUnit {
         }
     }
 
-    pub fn inputs(&self) -> usize {
+    pub(crate) fn inputs(&self) -> usize {
         self.inputs
     }
 
-    pub fn outputs(&self) -> usize {
+    pub(crate) fn outputs(&self) -> usize {
         self.outputs
     }
 
@@ -89,7 +89,7 @@ impl GraphUnit {
     /// into `output`'s first `outputs` channels. [`stage`](Self::stage),
     /// [`run`](Self::run) and [`read`](Self::read) in one, for the untimed
     /// callers.
-    pub fn process(&mut self, size: usize, input: &Planes, output: &mut Planes) {
+    pub(crate) fn process(&mut self, size: usize, input: &Planes, output: &mut Planes) {
         self.stage(size, input);
         self.run(size);
         self.read(size, output);
@@ -97,7 +97,7 @@ impl GraphUnit {
 
     /// Copy `input` into this unit's planar input buffers. Not the plugin
     /// path: outside a timed region.
-    pub fn stage(&mut self, size: usize, input: &Planes) {
+    pub(crate) fn stage(&mut self, size: usize, input: &Planes) {
         for (c, ch) in self.ins.iter_mut().enumerate() {
             for (i, s) in ch[..size].iter_mut().enumerate() {
                 *s = input.at(c, i);
@@ -107,7 +107,7 @@ impl GraphUnit {
 
     /// The plugin path, and nothing else: one executor block over the staged
     /// buffers, the port tables on the stack. What a timed region measures.
-    pub fn run(&mut self, size: usize) {
+    pub(crate) fn run(&mut self, size: usize) {
         const MAX: usize = 16;
         let mut ins: [&[f32]; MAX] = [&[]; MAX];
         for (slot, c) in ins.iter_mut().zip(&self.ins) {
@@ -128,7 +128,7 @@ impl GraphUnit {
 
     /// Copy the last block's output out, and drain what the executor sent
     /// back. Outside a timed region.
-    pub fn read(&mut self, size: usize, output: &mut Planes) {
+    pub(crate) fn read(&mut self, size: usize, output: &mut Planes) {
         self.renderer.editor_mut().collect();
         for (c, ch) in self.outs.iter().enumerate() {
             for (i, &s) in ch[..size].iter().enumerate() {
@@ -138,8 +138,8 @@ impl GraphUnit {
     }
 }
 
-pub const SAMPLE_RATE: f64 = 48_000.0;
-pub const BLOCK: usize = 64;
+pub(crate) const SAMPLE_RATE: f64 = 48_000.0;
+pub(crate) const BLOCK: usize = 64;
 
 /// `count` units of the reference CLAP probe under `env`, through the real
 /// `plugin-server` subprocess and shared-memory bridge.
@@ -188,7 +188,7 @@ fn load_units(
 /// `TAG_PASSTHROUGH` writes `in + tag`, so the output is both non-silent and
 /// *provably derived from the input* — a synth that ignored its input could
 /// not show that audio traversed the graph.
-pub fn load_n(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
+pub(crate) fn load_n(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
     load_units(
         count,
         clap_probe::ProbeEnv::new().render_mode(clap_probe::render::TAG_PASSTHROUGH),
@@ -197,7 +197,7 @@ pub fn load_n(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHan
 }
 
 /// A sine block at full-ish scale, so "audio arrived" is unambiguous.
-pub fn fill_sine(input: &mut Planes, channels: usize, block_index: usize) {
+pub(crate) fn fill_sine(input: &mut Planes, channels: usize, block_index: usize) {
     for plane in &mut input.0[..channels] {
         for (i, y) in plane[..BLOCK].iter_mut().enumerate() {
             let t = (block_index * BLOCK + i) as f32 / SAMPLE_RATE as f32;
@@ -206,7 +206,7 @@ pub fn fill_sine(input: &mut Planes, channels: usize, block_index: usize) {
     }
 }
 
-pub fn peak(buf: &Planes, channels: usize) -> f32 {
+pub(crate) fn peak(buf: &Planes, channels: usize) -> f32 {
     (0..channels)
         .map(|ch| {
             (0..BLOCK)
@@ -228,7 +228,7 @@ pub fn peak(buf: &Planes, channels: usize) -> f32 {
 /// 10 ms, bursty load on the test's core stretched the paced blocks enough
 /// that one stalled probe carried audio in 116 of 200, and a waiting design
 /// pays nothing on those.
-pub const STALL: Duration = Duration::from_millis(500);
+pub(crate) const STALL: Duration = Duration::from_millis(500);
 
 /// `count` instances of the reference CLAP probe, each stalled by [`STALL`]
 /// on every block: alive, answering, and always late.
@@ -237,7 +237,7 @@ pub const STALL: Duration = Duration::from_millis(500);
 /// a parked probe spins, `plugin-server` runs its audio thread at raised
 /// priority (nice -20 here), and eight spinning servers would take the host's
 /// cores, which is the time these tests measure.
-pub fn load_stalled(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
+pub(crate) fn load_stalled(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
     load_units(
         count,
         clap_probe::ProbeEnv::new()
@@ -249,7 +249,9 @@ pub fn load_stalled(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::Plu
 
 /// `pairs` stalled probes ([`load_stalled`]) and `pairs` answering plugins
 /// ([`load_n`]), alternating: stalled at even positions, answering at odd.
-pub fn load_half_stalled(pairs: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
+pub(crate) fn load_half_stalled(
+    pairs: usize,
+) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
     let (stalled, mut handles) = load_stalled(pairs);
     let (answering, answering_handles) = load_n(pairs);
     handles.extend(answering_handles);

@@ -12,7 +12,7 @@
 /// Encoding walks the list in place and allocates nothing. Decoding builds the
 /// inline [`MidiEventVec`](tutti_plugin_types::MidiEventVec) and rejects a list longer than
 /// [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY) instead of truncating it.
-pub mod midi {
+pub(crate) mod midi {
     use std::fmt;
 
     use serde::de::{self, SeqAccess, Visitor};
@@ -21,7 +21,7 @@ pub mod midi {
     use tutti_ump::Ump;
 
     /// Encodes each event as `(offset, packet words)`.
-    pub fn serialize<S: Serializer>(events: &MidiEventVec, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(events: &MidiEventVec, s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(events.iter().map(|e| (e.offset, e.ump.0)))
     }
 
@@ -30,7 +30,7 @@ pub mod midi {
     /// # Errors
     ///
     /// A longer list is a decode error.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<MidiEventVec, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<MidiEventVec, D::Error> {
         struct Events;
 
         impl<'de> Visitor<'de> for Events {
@@ -70,7 +70,7 @@ pub mod midi {
 /// it. A physical size is any pair of `u32`. Used as
 /// `#[serde(with = "wire::size")]`, and [`size_result`] and [`size_opt_result`]
 /// for the answers that carry one.
-pub mod size {
+pub(crate) mod size {
     use dpi::Size;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -100,18 +100,18 @@ pub mod size {
     }
 
     /// Encodes the size as `dpi` does.
-    pub fn serialize<S: Serializer>(value: &Size, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(value: &Size, s: S) -> Result<S::Ok, S::Error> {
         value.serialize(s)
     }
 
     /// Decodes a size, refusing a logical one that is not finite and non-negative.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Size, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Size, D::Error> {
         Ok(Checked::deserialize(d)?.0)
     }
 }
 
 /// A `Result<Size, EditorError>` carried as [`size`] does.
-pub mod size_result {
+pub(crate) mod size_result {
     use dpi::Size;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use tutti_plugin_types::EditorError;
@@ -119,7 +119,7 @@ pub mod size_result {
     use super::size::Checked;
 
     /// Encodes the result as it is.
-    pub fn serialize<S: Serializer>(
+    pub(crate) fn serialize<S: Serializer>(
         value: &Result<Size, EditorError>,
         s: S,
     ) -> Result<S::Ok, S::Error> {
@@ -127,7 +127,7 @@ pub mod size_result {
     }
 
     /// Decodes the result, refusing a bad size in `Ok`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         d: D,
     ) -> Result<Result<Size, EditorError>, D::Error> {
         Ok(Result::<Checked, EditorError>::deserialize(d)?.map(|c| c.0))
@@ -135,7 +135,7 @@ pub mod size_result {
 }
 
 /// A `Result<Option<Size>, EditorError>` carried as [`size`] does.
-pub mod size_opt_result {
+pub(crate) mod size_opt_result {
     use dpi::Size;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use tutti_plugin_types::EditorError;
@@ -143,7 +143,7 @@ pub mod size_opt_result {
     use super::size::Checked;
 
     /// Encodes the result as it is.
-    pub fn serialize<S: Serializer>(
+    pub(crate) fn serialize<S: Serializer>(
         value: &Result<Option<Size>, EditorError>,
         s: S,
     ) -> Result<S::Ok, S::Error> {
@@ -151,7 +151,7 @@ pub mod size_opt_result {
     }
 
     /// Decodes the result, refusing a bad size in `Ok(Some(_))`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         d: D,
     ) -> Result<Result<Option<Size>, EditorError>, D::Error> {
         Ok(Result::<Option<Checked>, EditorError>::deserialize(d)?.map(|o| o.map(|c| c.0)))

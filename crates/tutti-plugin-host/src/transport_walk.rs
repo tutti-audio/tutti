@@ -59,7 +59,7 @@ use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};
 /// What the walk reads of one call, and of the project, to place changes in
 /// the call's frames.
 #[derive(Debug)]
-pub struct Call<'a> {
+pub(crate) struct Call<'a> {
     /// The call's context: its `Env`, arrival and the transport history.
     pub cx: &'a Cx<'a>,
     /// The call's length in frames.
@@ -205,7 +205,7 @@ impl TransportWalk {
     /// `settled`): the walk is at its first frame. Not called for a plugin
     /// told no transport, which then has no walk ([`scan`](Self::scan) and
     /// [`finish`](Self::finish) do nothing).
-    pub fn begin(&mut self, first: &Snapshot, settled: Beat) {
+    pub(crate) fn begin(&mut self, first: &Snapshot, settled: Beat) {
         let start = Stretch::of(first, settled, 0);
         self.stretch = Some(start);
         self.open = Some(Open {
@@ -216,7 +216,7 @@ impl TransportWalk {
     }
 
     /// No transport for this chunk.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.stretch = None;
         self.open = None;
     }
@@ -228,7 +228,7 @@ impl TransportWalk {
         clippy::too_many_arguments,
         reason = "the walk's inputs are the call, the project and the chunk"
     )]
-    pub fn scan(
+    pub(crate) fn scan(
         &mut self,
         call: &Call<'_>,
         view: &mut TempoView<'_>,
@@ -345,7 +345,7 @@ impl TransportWalk {
     }
 
     /// The chunk of `chunk` frames is complete: write the last entry's slope.
-    pub fn finish(
+    pub(crate) fn finish(
         &mut self,
         view: &mut TempoView<'_>,
         chunk: usize,

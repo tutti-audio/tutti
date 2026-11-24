@@ -76,9 +76,6 @@ fn instance::audio::ClapProcessor::param_points_dropped
 fn instance::audio::ClapProcessor::process
 fn instance::audio::ClapProcessor::sysex_dropped
 fn instance::audio::ProcessOutputRef::into_owned
-fn instance::config::AudioScratch::new
-fn instance::config::PortLayout::input_channel_total
-fn instance::config::PortLayout::output_channel_total
 fn instance::control::ClapLoaded::layout
 fn instance::control::ClapLoaded::take_raised
 fn instance::controller::ClapController::loaded

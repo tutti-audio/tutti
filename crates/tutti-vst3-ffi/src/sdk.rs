@@ -56,7 +56,7 @@ pub const fn sdk_enum_u32(v: SdkEnum) -> u32 {
 pub(crate) trait Zeroable: private::Sealed + Sized {}
 
 mod private {
-    pub trait Sealed {}
+    pub(crate) trait Sealed {}
 }
 
 macro_rules! zeroable {
