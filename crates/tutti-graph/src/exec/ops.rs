@@ -14,6 +14,7 @@ use crate::model::gain::{self, SumLane, Weight};
 use crate::node::MAX_PORTS;
 use crate::node::param_event::ParamEvent;
 use tutti_buffers::Float;
+use tutti_units::Samples;
 
 /// An audio delay's ring.
 #[inline]
@@ -90,7 +91,8 @@ pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
 /// `dst` is the first addend's own slot in the in-place form. That addend is
 /// then not borrowed for reading: it is weighted in place (`dst = +0.0 + w *
 /// dst`, which turns a `-0.0` into `+0.0`, as `+0.0 + w * a_0` does) and the
-/// rest are added into it.
+/// rest are added into it. `declick` is the plan's declick length
+/// ([`Prepare::declick`](crate::Prepare)), which every lane's fade runs over.
 #[inline]
 pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     arena: &mut A,
@@ -101,6 +103,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     gains: &[GainPortOp],
     dst: AudioSlotId,
     frames: usize,
+    declick: Samples,
 ) {
     debug_assert!(!list.is_empty() && list.len() <= MAX_PORTS);
     debug_assert!(lanes.is_empty() || lanes.len() == list.len());
@@ -112,7 +115,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
             .iter()
             .find(|g| usize::from(g.lane) == k)
             .map(|g| (g.from, &events.pev(EventSlotId::new(g.slot))[..]));
-        *w = SumLane::weight(lane, frames, source);
+        *w = SumLane::weight(lane, frames, declick, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`
     // index, among the live addends.

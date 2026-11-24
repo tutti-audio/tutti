@@ -739,6 +739,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &[],
                     AudioSlotId::new(dst),
                     frames,
+                    fx.plan.prepare.declick(),
                 );
             }
             Op::WeightedSum {
@@ -761,6 +762,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &fx.plan.gain_ports[gains.range()],
                     AudioSlotId::new(dst),
                     frames,
+                    fx.plan.prepare.declick(),
                 );
             }
             Op::EventDelay { delay, src, dst } => {

@@ -972,17 +972,16 @@ mod tests {
             channels.readings.pool.clone(),
             channels.readings.rendered.clone(),
         );
-        let declick = tutti_curve::declick_frames(prepare.sample_rate());
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),
             delta,
             units,
-            |_, ports, max| ParamState::new(ports, max, declick, Vec::new(), Vec::new()),
+            |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
                 let cell = ModeCell::new(NodeMode::Active, Mix::WET);
                 let shape = &plan.unit(key).expect("placed").shape;
-                ModeState::new(cell, shape, 64, declick)
+                ModeState::new(cell, shape, 64)
             },
             |_| crate::Wake::default(),
             Opened::default(),
