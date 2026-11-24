@@ -133,9 +133,9 @@ where
         self.restart_selected(rerate)
     }
 
-    /// [`restart_with`](Self::restart_with) opening the device with callbacks
-    /// of exactly `quantum` frames. The request stays `quantum` from then on,
-    /// so a later restart asks for it too; a restart that fails puts back what
+    /// [`restart_with`](Self::restart_with) asking the device for callbacks of
+    /// `quantum` frames; a backend may round the size it opens at. The request
+    /// stays `quantum` from then on, so a later restart asks for it too; a restart that fails puts back what
     /// was requested before.
     ///
     /// # Errors

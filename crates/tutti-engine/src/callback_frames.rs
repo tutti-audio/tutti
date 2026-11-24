@@ -61,8 +61,9 @@ impl CallbackSpan {
 }
 
 /// The smallest and largest callback one stream ran since the last
-/// [`take`](Self::take): two atomics, each updated by one wait-free
-/// `fetch_min` or `fetch_max`.
+/// [`take`](Self::take): two atomics, each updated by one `fetch_min` or
+/// `fetch_max`, which is lock-free (one retry at most for each concurrent
+/// take or reset).
 ///
 /// A callback is one to [`MAX_FRAMES`](crate::MAX_FRAMES) frames here: the
 /// count is of what the callback rendered, and a longer buffer's tail is
@@ -90,9 +91,9 @@ impl CallbackFrames {
         }
     }
 
-    /// Records a callback of `frames`. Wait-free: callable on the audio
-    /// thread.
-    pub fn record(&self, frames: OutputQuantum) {
+    /// Records a callback of `frames`. Lock-free, one retry at most for each
+    /// concurrent take: callable on the audio thread.
+    pub(crate) fn record(&self, frames: OutputQuantum) {
         // At most `MAX_FRAMES`, far under `u32::MAX`.
         let frames = frames.max_block().get_u32();
         self.smallest.fetch_min(frames, Ordering::Relaxed);
@@ -113,7 +114,9 @@ impl CallbackFrames {
             (NO_SMALLEST, NO_LARGEST) => return None,
             // One end of a callback that landed between the swaps.
             (NO_SMALLEST, only) | (only, NO_LARGEST) => (only, only),
-            both => both,
+            // Two callbacks that each straddled a take can leave the ends
+            // crossed: ordered here, so `None` only ever means no callback ran.
+            (a, b) => (a.min(b), a.max(b)),
         };
         let size = |frames: u32| OutputQuantum::new(frames as usize);
         CallbackSpan::new(size(smallest)?, size(largest)?)
@@ -121,7 +124,7 @@ impl CallbackFrames {
 
     /// Forgets the callbacks, as a restart does: the new stream has run none
     /// yet.
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         self.smallest.store(NO_SMALLEST, Ordering::Relaxed);
         self.largest.store(NO_LARGEST, Ordering::Relaxed);
     }
