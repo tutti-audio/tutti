@@ -362,3 +362,42 @@ fn a_max_sysex_size_is_four_seven_bit_bytes_least_significant_first() {
     );
     assert_eq!(MaxSysexSize::of(MaxSysexSize::MAX).to_le7(), [0x7F; 4]);
 }
+
+// M2-101 §5.3, §5.4: a message is written in one Message Format Version, and the
+// fields of Discovery and its Reply are that version's: the Version 1 byte
+// goes with a body that ends after the receive buffer size, and no other version
+// does.
+/// Spec: m2-101/5.4#8, m2-101/5.4#9
+#[test]
+fn a_written_discovery_has_the_body_its_version_names() {
+    let v1 = |bytes: &[u8]| (bytes[4] == 1, bytes.len() == 13 + 16, bytes.len() == 13 + 17);
+    for version in [1, 2] {
+        let header = CiHeader {
+            ci_version: CiVersion::of(version),
+            ..header()
+        };
+        let mut v1_discovery = sample_discovery();
+        v1_discovery.output_path_id = None;
+        for data in [sample_discovery(), v1_discovery] {
+            let bytes = CiMessage::Discovery { header, data }.encode();
+            let (names_v1, short, _) = v1(&bytes);
+            assert_eq!(names_v1, short, "Discovery: header {version}, {data:?}");
+        }
+        let mut v1_reply = sample_reply();
+        v1_reply.version_2 = None;
+        for data in [sample_reply(), v1_reply] {
+            let bytes = CiMessage::DiscoveryReply {
+                header,
+                to: Muid::of(DST),
+                data,
+            }
+            .encode();
+            let (names_v1, _, _) = v1(&bytes);
+            assert_eq!(
+                names_v1,
+                bytes.len() == 13 + 16,
+                "Reply: header {version}, {data:?}"
+            );
+        }
+    }
+}
