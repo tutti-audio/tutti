@@ -154,9 +154,11 @@ where
         if this.owed_lost > 0 {
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
-        if this.rate_refused {
-            // The plugin was not told this node's rate (`set_rate`): silence,
-            // not audio at another rate.
+        if this.rate_refused || this.silenced.holds() {
+            // The plugin was not told this node's rate (`set_rate`), or runs at
+            // the rate it kept after refusing it: silence, not audio at another
+            // rate. A Processor the control side recalls is still handed back.
+            let _ = this.rt.poll(Processor::stop);
             return Status::Silent;
         }
         let ports = this.declared.ports;

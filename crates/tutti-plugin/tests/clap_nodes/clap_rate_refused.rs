@@ -8,10 +8,15 @@
 //! `PluginStatus::RateRefused` (not `Dead`), and every later rate change
 //! tries it again; one it takes clears the error and the plugin renders.
 //!
+//! The rollback is the lifecycle core's, so the plugin runs again at the rate
+//! it had in process and served alike: `a_refused_rate_is_rolled_back_...`
+//! runs once against each hosting.
+//!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
 #![cfg(feature = "clap")]
 
+use crate::both_hostings::in_both_hostings;
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_buffers::MaxBlock;
@@ -82,8 +87,14 @@ fn wait_for(
     }
 }
 
-fn refused_at(status: &PluginStatus, rate: f64) -> bool {
-    matches!(status, PluginStatus::RateRefused(refusal) if refusal.rate.get() == rate && matches!(refusal.cause, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. }))
+/// The status says `rate` was refused and the plugin runs again at `running`.
+fn refused_at(status: &PluginStatus, rate: f64, running: f64) -> bool {
+    matches!(status, PluginStatus::RateRefused(refusal) if refusal.rate.get() == rate && rolled_back_to(&refusal.cause, running))
+}
+
+/// The plugin runs again at the rate `running`, the one it had.
+fn rolled_back_to(cause: &RateRefusalCause, running: f64) -> bool {
+    matches!(cause, RateRefusalCause::RolledBack { running: now, .. } if now.get() == running)
 }
 
 /// Drive until two consecutive blocks are live. Blocks are submitted faster
@@ -153,7 +164,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     // The graph moves to a rate the plugin refuses.
     reprepare(&mut unit, REFUSED_RATE);
     let status = wait_for(&mut unit, &handle, |s| !s.is_alive());
-    assert!(refused_at(&status, REFUSED_RATE), "{status:?}");
+    assert!(refused_at(&status, REFUSED_RATE, LOAD_RATE), "{status:?}");
     assert!(!status.is_dead() && !handle.is_crashed());
     let missed = unit.controls.chunk_outcomes().missed;
     assert_silent(&mut unit, &handle, "refused");
@@ -181,7 +192,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     reprepare(&mut unit, REFUSED_RATE);
     let _ = wait_for(&mut unit, &handle, |_| refusals() >= 2);
     assert_eq!(refusals(), 2, "the second ask is refused and announced too");
-    assert!(refused_at(&handle.status(), REFUSED_RATE));
+    assert!(refused_at(&handle.status(), REFUSED_RATE, LOAD_RATE));
     assert_silent(&mut unit, &handle, "refused again");
 
     // A rate the plugin takes brings it back.
@@ -201,7 +212,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     // Refused once more, then dropped: the teardown returns.
     reprepare(&mut unit, REFUSED_RATE);
     let status = wait_for(&mut unit, &handle, |s| !s.is_alive());
-    assert!(refused_at(&status, REFUSED_RATE), "{status:?}");
+    assert!(refused_at(&status, REFUSED_RATE, OTHER_RATE), "{status:?}");
     // The drop returns: run on a thread, under a hang guard.
     let (done, returned) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -213,4 +224,53 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     returned
         .recv_timeout(Duration::from_secs(60))
         .expect("dropping a refused plugin never returned");
+}
+
+in_both_hostings! {
+    a_refused_rate_is_rolled_back_silent_and_the_next_rate_it_takes_is_reported_once,
+    rate = LOAD_RATE,
+    refusing = REFUSED_RATE,
+    |probe| {
+        assert!(probe.renders_live(), "the plugin renders at {LOAD_RATE}");
+
+        probe.reprepare(REFUSED_RATE);
+        let refusal = probe.wait_for_invalidation("refused rate", |e| {
+            matches!(e, PluginInvalidation::RateRefused(_))
+        });
+        let PluginInvalidation::RateRefused(refusal) = refusal else {
+            unreachable!("the filter accepts only a refused rate");
+        };
+        assert_eq!(refusal.rate.get(), REFUSED_RATE);
+        assert!(
+            rolled_back_to(&refusal.cause, LOAD_RATE),
+            "the plugin runs again at the rate it had: {:?}",
+            refusal.cause
+        );
+        // Running at the old rate under a graph at the new one would sound
+        // pitch-shifted: the node stays silent until a rate the plugin takes.
+        probe.assert_silent("refused");
+
+        probe.reprepare(OTHER_RATE);
+        probe.wait_for_invalidation("restored rate", |e| {
+            matches!(e, PluginInvalidation::RateRestored)
+        });
+        assert!(probe.renders_live(), "the plugin renders again");
+        let reports = probe.invalidations();
+        assert_eq!(
+            reports
+                .iter()
+                .filter(|e| matches!(e, PluginInvalidation::RateRefused(_)))
+                .count(),
+            1,
+            "{reports:?}"
+        );
+        assert_eq!(
+            reports
+                .iter()
+                .filter(|e| matches!(e, PluginInvalidation::RateRestored))
+                .count(),
+            1,
+            "{reports:?}"
+        );
+    }
 }

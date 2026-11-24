@@ -45,7 +45,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost};
+use super::instance::{Figures, Instance, Lost, Silenced};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -85,6 +85,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) rt: Rt<L::Processor>,
     /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
     lost: Arc<Lost>,
+    /// Whether the plugin runs at the rate it kept after refusing the graph's:
+    /// the node renders silence ([`Instance::silenced`]).
+    pub(super) silenced: Arc<Silenced>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
     /// locked or not.
@@ -587,10 +590,11 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, figures, midi_map) = {
+        let (lost, silenced, figures, midi_map) = {
             let instance = inner.lock();
             (
                 instance.lost_latch(),
+                instance.silenced(),
                 instance.figure_cell(),
                 instance.midi_map().translator(),
             )
@@ -611,6 +615,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             inner,
             rt,
             lost,
+            silenced,
             figures,
             reporting: None,
             edits: None,

@@ -21,6 +21,8 @@
 //! reply to that effect continues it. A plan parked behind a recall that found
 //! the Processor lent runs once [`Event::Returned`] arrives.
 
+use std::sync::Arc;
+
 use arrayvec::ArrayVec;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc_ffi::FdId;
@@ -390,13 +392,16 @@ pub enum Notice {
     },
     /// The plugin asked the host's transport to do something.
     Transport(TransportRequest),
-    /// The plugin refused to run at `rate`; it renders nothing until an
-    /// activation succeeds.
+    /// The plugin refused to run at `rate`. `recovery` says whether it runs
+    /// again at the setting it last accepted; when it does not, it renders
+    /// nothing until an activation succeeds.
     Refused {
         /// The rate that was refused.
         rate: SampleRate,
         /// Why.
-        reason: PluginError,
+        reason: Arc<PluginError>,
+        /// What the core did about it.
+        recovery: Recovery,
     },
     /// The plugin would not stop; it is as it was.
     Stuck {
@@ -409,6 +414,31 @@ pub enum Notice {
     Lost {
         /// Why.
         reason: PluginError,
+    },
+}
+
+/// What the core did after the plugin refused an activation: it activates
+/// again with the setting the plugin last accepted ([`State::applied`]), so a
+/// refused rate or mode never leaves a plugin that ran deactivated.
+///
+/// Exhaustive: every shell matches every variant.
+#[derive(Debug, Clone)]
+pub enum Recovery {
+    /// No other setting was run: the plugin had accepted none besides the one
+    /// refused (a first activation, or a restart at the setting it already
+    /// runs at), a rebuild was refused, or the plugin was lost before the
+    /// rollback answered. The plugin is not active.
+    Inactive,
+    /// The plugin is active again, at `running`, the setting it last accepted.
+    RolledBack {
+        /// The setting the plugin runs at.
+        running: Prepare,
+    },
+    /// The activation at the accepted setting was refused too. The plugin is
+    /// loaded and not active.
+    RollbackRefused {
+        /// Why the accepted setting was refused.
+        reason: Arc<PluginError>,
     },
 }
 
@@ -458,6 +488,15 @@ enum Wait {
     Deactivate,
     Rebuild,
     Activate,
+    /// The activation at the accepted setting that follows a refused one.
+    Rollback,
+}
+
+/// The refusal a rollback is answering.
+#[derive(Debug, Clone)]
+struct Refusal {
+    rate: SampleRate,
+    reason: Arc<PluginError>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -524,7 +563,12 @@ impl Pending {
 pub struct State {
     rules: RestartRules,
     stage: Stage,
-    prepare: Option<Prepare>,
+    /// What the plugin last accepted: set when an activation succeeds.
+    applied: Option<Prepare>,
+    /// What the activation in flight asks for.
+    trying: Option<Prepare>,
+    /// The refusal the rollback in flight answers.
+    refusal: Option<Refusal>,
     latency: Option<Samples>,
     tail: Option<PluginTail>,
     layout: Option<Layout>,
@@ -550,7 +594,9 @@ impl State {
         Self {
             rules,
             stage: Stage::Loaded,
-            prepare: None,
+            applied: None,
+            trying: None,
+            refusal: None,
             latency: None,
             tail: None,
             layout: None,
@@ -596,25 +642,49 @@ impl State {
         matches!(self.stage, Stage::Active)
     }
 
-    /// The `Prepare` of the latest activation, requested or running.
+    /// The `Prepare` the plugin last accepted: it changes only when an
+    /// activation succeeds. A refused activation leaves it, and a plugin's own
+    /// restart and every rollback activate with it.
     #[must_use]
-    pub fn prepare(&self) -> Option<Prepare> {
-        self.prepare
+    pub fn applied(&self) -> Option<Prepare> {
+        self.applied
+    }
+
+    /// The `Prepare` the plugin is being asked to run at: the activation in
+    /// flight or planned, else [`applied`](Self::applied). A request for one
+    /// setting builds on it, so it keeps what an earlier, unanswered request
+    /// asked for.
+    #[must_use]
+    pub fn wanted(&self) -> Option<Prepare> {
+        let planned = self.plan.tasks.iter().find_map(|t| match t {
+            Task::Activate(p) => Some(*p),
+            _ => None,
+        });
+        planned.or(self.trying).or(self.applied)
     }
 
     /// Records `mode` in the `Prepare` every later activation uses, without
     /// restarting anything. For a format that applies the render mode live
     /// (CLAP's `render.set`): the host sets it on the plugin itself, and this
     /// keeps a later restart or rate change from putting the old mode back.
-    /// An activation already planned takes the new mode too.
+    /// An activation already planned or in flight takes the new mode too.
     pub fn set_mode(&mut self, mode: RenderMode) {
-        if let Some(prepare) = self.prepare.as_mut() {
+        for prepare in self.applied.iter_mut().chain(self.trying.iter_mut()) {
             prepare.mode = mode;
         }
         for task in &mut self.plan.tasks {
             if let Task::Activate(prepare) = task {
                 prepare.mode = mode;
             }
+        }
+    }
+
+    /// Records `rate` as the one the plugin runs at, without restarting
+    /// anything. For a Processor retuned live: a later restart activates at
+    /// it. An activation already planned keeps the rate it asks for.
+    pub fn retuned(&mut self, rate: SampleRate) {
+        if let Some(prepare) = self.applied.as_mut() {
+            prepare.rate = rate;
         }
     }
 
@@ -684,7 +754,22 @@ impl State {
             return;
         }
         match event {
-            Event::Died => self.poison(),
+            Event::Died => {
+                // A refusal whose rollback never answered is still told.
+                let refusal = self.refusal.take();
+                self.poison();
+                if let Some(Refusal { rate, reason }) = refusal {
+                    let recovery = Recovery::Inactive;
+                    emit(
+                        out,
+                        Effect::Notify(Notice::Refused {
+                            rate,
+                            reason,
+                            recovery,
+                        }),
+                    );
+                }
+            }
             Event::Op(op) => self.on_op(op, out),
             // Not the plugin's own affair: nothing is pending, the one event
             // is the one notice.
@@ -704,6 +789,8 @@ impl State {
 
     fn poison(&mut self) {
         self.stage = Stage::Poisoned;
+        self.trying = None;
+        self.refusal = None;
         self.plan = Plan::default();
         self.pending = Pending::default();
         self.after_main = false;
@@ -715,12 +802,12 @@ impl State {
     fn on_op(&mut self, op: HostOp, out: &mut Effects) {
         // A relend asks for nothing an activation in flight does not do: it
         // lends at its end.
-        if op == HostOp::Relend && self.plan.wait == Wait::Activate {
+        if op == HostOp::Relend && self.activating() {
             return;
         }
         // An op raised while an activation is in flight cannot change the
         // plan yet: the latest one is replayed once the activation is answered.
-        if self.plan.wait == Wait::Activate {
+        if self.activating() {
             self.later = Some(merge_later(self.later, op));
             return;
         }
@@ -760,11 +847,16 @@ impl State {
         }
     }
 
+    /// Whether an activation, a rollback's included, is in flight.
+    fn activating(&self) -> bool {
+        matches!(self.plan.wait, Wait::Activate | Wait::Rollback)
+    }
+
     /// Whether the plugin is, or the plan in flight leaves it, active.
     fn leads_active(&self) -> bool {
         match self.plan.wait {
             Wait::Idle => matches!(self.stage, Stage::Active),
-            Wait::Activate => true,
+            Wait::Activate | Wait::Rollback => true,
             _ => self
                 .plan
                 .tasks
@@ -805,13 +897,7 @@ impl State {
                     return;
                 }
                 Task::Activate(p) => {
-                    if matches!(self.stage, Stage::Refused { .. }) {
-                        self.revived = true;
-                        self.stage = Stage::Loaded;
-                    }
-                    self.prepare = Some(p);
-                    emit(out, Effect::CallActivate(p));
-                    self.plan.wait = Wait::Activate;
+                    self.activate(p, Wait::Activate, out);
                     return;
                 }
                 Task::RebuildMidiMapping => {
@@ -830,6 +916,17 @@ impl State {
                 }
             }
         }
+    }
+
+    /// Asks the shell to activate at `p`, and waits on `wait`.
+    fn activate(&mut self, p: Prepare, wait: Wait, out: &mut Effects) {
+        if matches!(self.stage, Stage::Refused { .. }) {
+            self.revived = true;
+            self.stage = Stage::Loaded;
+        }
+        self.trying = Some(p);
+        emit(out, Effect::CallActivate(p));
+        self.plan.wait = wait;
     }
 
     fn on_request(&mut self, request: Request) {
@@ -961,7 +1058,7 @@ impl State {
         let p = &self.pending;
         let restart =
             p.reload || p.restart || p.all || (p.io && rules.io) || (p.latency && rules.latency);
-        let Some(prepare) = self.prepare.filter(|_| restart) else {
+        let Some(prepare) = self.applied.filter(|_| restart) else {
             return false;
         };
         let reload = p.reload;
@@ -1077,12 +1174,25 @@ impl State {
         // its answer.
         let continuing = std::mem::take(&mut self.after_main);
         match reply {
-            Reply::Activated if wait == Wait::Activate => {
+            Reply::Activated if matches!(wait, Wait::Activate | Wait::Rollback) => {
                 self.stage = Stage::Active;
+                self.applied = self.trying.take();
                 emit(out, Effect::ReadLatency);
                 emit(out, Effect::ReadTail);
                 emit(out, Effect::ReadLayout);
                 emit(out, Effect::Lend);
+                if let (Some(Refusal { rate, reason }), Some(running)) =
+                    (self.refusal.take(), self.applied)
+                {
+                    emit(
+                        out,
+                        Effect::Notify(Notice::Refused {
+                            rate,
+                            reason,
+                            recovery: Recovery::RolledBack { running },
+                        }),
+                    );
+                }
                 if std::mem::take(&mut self.reread_params) {
                     self.plan
                         .tasks
@@ -1092,19 +1202,10 @@ impl State {
                 self.advance(out);
                 self.replay(out);
             }
-            Reply::Refused(reason) if matches!(wait, Wait::Activate | Wait::Rebuild) => {
-                let Some(prepare) = self.prepare else { return };
-                let rate = prepare.rate;
-                self.stage = Stage::Refused { rate };
-                self.rebuild_pending |= wait == Wait::Rebuild;
-                self.reread_params = false;
-                self.plan = Plan::default();
-                self.pending = Pending::default();
-                self.announced_latency = false;
-                self.announced_tail = false;
-                self.revived = false;
-                emit(out, Effect::Notify(Notice::Refused { rate, reason }));
-                self.replay(out);
+            Reply::Refused(reason)
+                if matches!(wait, Wait::Activate | Wait::Rollback | Wait::Rebuild) =>
+            {
+                self.on_refused(wait, Arc::new(reason), out);
             }
             Reply::Deactivated if wait == Wait::Deactivate => {
                 self.stage = Stage::Loaded;
@@ -1159,6 +1260,68 @@ impl State {
 }
 
 impl State {
+    /// The plugin refused the activation or rebuild `wait` was on. A refused
+    /// activation with another accepted setting to go back to is followed by
+    /// an activation at it; the host is told once the plugin's standing is
+    /// known.
+    fn on_refused(&mut self, wait: Wait, reason: Arc<PluginError>, out: &mut Effects) {
+        let refused = self.trying.take();
+        let (rate, reason, recovery) = match (wait, self.refusal.take()) {
+            (
+                Wait::Rollback,
+                Some(Refusal {
+                    rate,
+                    reason: first,
+                }),
+            ) => (rate, first, Recovery::RollbackRefused { reason }),
+            (Wait::Activate, _) => {
+                let Some(rate) = refused.map(|p| p.rate) else {
+                    return;
+                };
+                (rate, reason, Recovery::Inactive)
+            }
+            (Wait::Rebuild, _) => {
+                let rate = self.plan.tasks.iter().find_map(|t| match t {
+                    Task::Activate(p) => Some(p.rate),
+                    _ => None,
+                });
+                let Some(rate) = rate.or(self.applied.map(|p| p.rate)) else {
+                    return;
+                };
+                (rate, reason, Recovery::Inactive)
+            }
+            _ => return,
+        };
+        self.rebuild_pending |= wait == Wait::Rebuild;
+        self.reread_params = false;
+        self.plan = Plan::default();
+        self.pending = Pending::default();
+        self.announced_latency = false;
+        self.announced_tail = false;
+        self.revived = false;
+        let back_to = self
+            .applied
+            .filter(|applied| wait == Wait::Activate && Some(*applied) != refused);
+        if let Some(applied) = back_to {
+            self.refusal = Some(Refusal { rate, reason });
+            // The plugin was refused and is revived, as by any activation out
+            // of `Refused`: the host is told its layout again.
+            self.revived = true;
+            self.activate(applied, Wait::Rollback, out);
+            return;
+        }
+        self.stage = Stage::Refused { rate };
+        emit(
+            out,
+            Effect::Notify(Notice::Refused {
+                rate,
+                reason,
+                recovery,
+            }),
+        );
+        self.replay(out);
+    }
+
     /// Replays the op that was raised during an activation.
     fn replay(&mut self, out: &mut Effects) {
         if let Some(op) = self.later.take() {

@@ -182,6 +182,7 @@ enum Kind {
     Request,
     Tick,
     Activated,
+    Refused,
     Reply,
     Returned,
     Died,
@@ -196,6 +197,7 @@ fn kind(event: &Event) -> Kind {
         Event::Request(_) => Kind::Request,
         Event::Tick => Kind::Tick,
         Event::Replied(Reply::Activated) => Kind::Activated,
+        Event::Replied(Reply::Refused(_)) => Kind::Refused,
         Event::Replied(_) => Kind::Reply,
         Event::Returned => Kind::Returned,
         Event::Died => Kind::Died,
@@ -566,8 +568,17 @@ proptest! {
     fn a_refused_plugin_stays_silent_until_asked_to_activate(
         rules in rules(),
         events in prop::collection::vec(any_event(), 0..32),
+        after_rollback in any::<bool>(),
     ) {
-        let mut s = refused(rules, prep(0));
+        let mut s = if after_rollback {
+            let (s, _) = refused_reconfigure(rules, prep(1), prep(2));
+            reply(s, Reply::Refused(err())).0
+        } else {
+            refused(rules, prep(0))
+        };
+        let stage = s.stage();
+        let is_refused = matches!(stage, Stage::Refused { .. });
+        prop_assert!(is_refused);
         for e in events {
             if matches!(e, Event::Op(HostOp::Activate(_) | HostOp::Reconfigure(_))) {
                 continue;
@@ -638,8 +649,8 @@ proptest! {
         }
     }
 
-    /// Activations over a sequence are at most one per activating op plus one
-    /// per tick that planned a restart.
+    /// Activations over a sequence are at most one per activating op, one per
+    /// tick that planned a restart and one per refusal that rolled back.
     #[test]
     fn activations_are_bounded_by_ops_and_planned_restarts(
         rules in rules(),
@@ -655,7 +666,11 @@ proptest! {
         let planned = shell.trace.iter()
             .filter(|r| matches!(r.kind, Kind::Tick | Kind::Reply) && r.fx.contains(&Fx::Recall))
             .count();
-        prop_assert!(activations <= ops + planned);
+        let rollbacks = shell.trace.iter()
+            .filter(|r| r.kind == Kind::Refused
+                && r.fx.iter().any(|f| matches!(f, Fx::Activate(_))))
+            .count();
+        prop_assert!(activations <= ops + planned + rollbacks);
     }
 
     /// A reload subsumes every other request: one rebuild, one rejoin, one
@@ -799,7 +814,9 @@ fn rule_1_activate_and_reconfigure() {
     assert_eq!(fx, [Fx::Deactivate]);
     let (s, fx) = reply(s, Reply::Deactivated);
     assert_eq!(fx, [Fx::Activate(q)]);
-    assert_eq!(s.prepare(), Some(q));
+    assert_eq!(s.applied(), Some(p), "accepted only when the activation is");
+    let (s, _) = reply(s, Reply::Activated);
+    assert_eq!(s.applied(), Some(q));
     // Poisoned: nothing.
     let (dead, _) = go(State::new(REST), Event::Died);
     for op in [
@@ -854,6 +871,108 @@ fn rule_3_a_refusal_reads_nothing_and_a_later_activation_retries() {
     assert_eq!(fx, [Fx::Activate(prep(4))]);
     let (s, _) = reply(s, Reply::Activated);
     assert!(s.renders());
+}
+
+/// The plugin accepted `p`; asked for `q`, it refuses, and the effects that
+/// follow are returned with the state.
+fn refused_reconfigure(rules: RestartRules, p: Prepare, q: Prepare) -> (State, Effects) {
+    let s = active(rules, p);
+    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
+    let (s, _) = reply(s, Reply::Returned);
+    let (s, _) = reply(s, Reply::Deactivated);
+    step(s, Event::Replied(Reply::Refused(err())))
+}
+
+/// **A refused reconfigure activates again at what the plugin accepted, and
+/// the refusal says the plugin runs there.**
+#[test]
+fn rule_3_a_refused_reconfigure_rolls_back_to_the_accepted_setting_and_says_so() {
+    let (p, q) = (prep(1), prep(2));
+    let (s, out) = refused_reconfigure(REST, p, q);
+    assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::Activate(p)]);
+    assert!(!s.renders(), "the rollback is in flight");
+    assert_eq!(s.applied(), Some(p));
+    let (s, out) = step(s, Event::Replied(Reply::Activated));
+    assert_eq!(
+        out.iter().map(tag).collect::<Vec<_>>(),
+        [
+            Fx::Latency,
+            Fx::Tail,
+            Fx::Layout,
+            Fx::Lend,
+            Fx::RefusedNotice
+        ]
+    );
+    assert!(matches!(
+        out.last(),
+        Some(Effect::Notify(Notice::Refused {
+            rate,
+            recovery: Recovery::RolledBack { running },
+            ..
+        })) if *rate == q.rate() && *running == p
+    ));
+    assert!(s.renders());
+    assert_eq!(s.applied(), Some(p), "the refused setting is not accepted");
+    let (_, fx) = reply(s, Reply::Layout(stereo()));
+    assert_eq!(
+        fx,
+        [Fx::IoNotice],
+        "a revived plugin tells its layout again"
+    );
+}
+
+/// **A refused rollback leaves the plugin not active, and the refusal says
+/// so.**
+#[test]
+fn rule_3_a_refused_rollback_leaves_the_plugin_inactive_and_says_so() {
+    let (p, q) = (prep(1), prep(2));
+    let (s, _) = refused_reconfigure(REST, p, q);
+    let (s, out) = step(s, Event::Replied(Reply::Refused(err())));
+    assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::RefusedNotice]);
+    assert!(matches!(
+        out.last(),
+        Some(Effect::Notify(Notice::Refused {
+            rate,
+            recovery: Recovery::RollbackRefused { .. },
+            ..
+        })) if *rate == q.rate()
+    ));
+    assert_eq!(s.stage(), Stage::Refused { rate: q.rate() });
+    assert!(!s.renders());
+    assert_eq!(s.applied(), Some(p));
+}
+
+/// **A refused first activation has nothing to go back to: it is told as
+/// inactive and nothing else is activated.**
+#[test]
+fn rule_3_a_refused_first_activation_rolls_back_to_nothing() {
+    let p = prep(3);
+    let (s, _) = go(State::new(REST), Event::Op(HostOp::Activate(p)));
+    let (s, out) = step(s, Event::Replied(Reply::Refused(err())));
+    assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::RefusedNotice]);
+    assert!(matches!(
+        out.last(),
+        Some(Effect::Notify(Notice::Refused {
+            recovery: Recovery::Inactive,
+            ..
+        }))
+    ));
+    assert_eq!(s.applied(), None);
+}
+
+/// **A plugin's own restart after a refused rate activates with the rate it
+/// accepted, not the one it refused.**
+#[test]
+fn rule_3_a_restart_after_a_refused_rate_uses_the_accepted_rate() {
+    let (p, q) = (prep(1), prep(2));
+    let (s, _) = refused_reconfigure(RESTARTS, p, q);
+    let (s, _) = step(s, Event::Replied(Reply::Activated));
+    let s = req(s, Request::Restart);
+    let (s, fx) = go(s, Event::Tick);
+    assert_eq!(fx, [Fx::Recall]);
+    let (s, _) = reply(s, Reply::Returned);
+    let (_, fx) = reply(s, Reply::Deactivated);
+    assert_eq!(fx, [Fx::Activate(p)]);
 }
 
 #[test]
@@ -1298,7 +1417,8 @@ fn an_activate_raised_while_a_plan_waits_is_the_latest_intent() {
     assert_eq!(fx, [Fx::Deactivate]);
     let (s, fx) = reply(s, Reply::Deactivated);
     assert_eq!(fx, [Fx::Activate(q)]);
-    assert_eq!(s.prepare(), Some(q));
+    let (s, _) = reply(s, Reply::Activated);
+    assert_eq!(s.applied(), Some(q));
 }
 
 #[test]
@@ -1327,7 +1447,8 @@ fn an_op_raised_during_an_activation_runs_when_it_ends() {
     let (s, _) = reply(s, Reply::Returned);
     let (s, fx) = reply(s, Reply::Deactivated);
     assert_eq!(fx, [Fx::Activate(q)]);
-    assert_eq!(s.prepare(), Some(q));
+    let (s, _) = reply(s, Reply::Activated);
+    assert_eq!(s.applied(), Some(q));
     // An activate raised during a refused activation retries it.
     let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
     let (s, _) = go(s, Event::Op(HostOp::Activate(q)));
@@ -1487,7 +1608,7 @@ proptest! {
             match want {
                 Some(p) => {
                     prop_assert_eq!(shell.state.stage(), Stage::Active);
-                    prop_assert_eq!(shell.state.prepare(), Some(p));
+                    prop_assert_eq!(shell.state.applied(), Some(p));
                 }
                 None => prop_assert_eq!(shell.state.stage(), Stage::Loaded),
             }
@@ -1645,7 +1766,7 @@ fn set_mode_changes_the_next_activation_and_restarts_nothing() {
     let p = prep(1);
     let mut s = active(RESTARTS, p);
     s.set_mode(RenderMode::Offline);
-    assert_eq!(s.prepare().map(|p| p.mode()), Some(RenderMode::Offline));
+    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
     assert_eq!(s.stage(), Stage::Active);
     assert!(
         go(s.clone(), Event::Tick).1.is_empty(),

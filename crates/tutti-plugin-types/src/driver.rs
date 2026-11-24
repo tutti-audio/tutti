@@ -643,8 +643,14 @@ impl<L: Loaded> Lifecycle<L> {
                 queue.push_front(effect);
             }
             if self.is_poisoned() && state.stage() != crate::Stage::Poisoned {
-                let (next, _dropped) = step(state, Event::Died);
+                let (next, died) = step(state, Event::Died);
                 state = next;
+                // A refusal the loss cut short is told here, before the loss.
+                for effect in died {
+                    if let Effect::Notify(notice) = effect {
+                        notify(notice);
+                    }
+                }
                 if !transition {
                     notify(Notice::Lost {
                         reason: panicked("a call into the plugin"),

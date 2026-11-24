@@ -406,7 +406,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
     );
     assert!(instance.is_active(), "the refusal was rolled back");
     assert_eq!(
-        instance.state.prepare().map(|p| p.mode()),
+        instance.state.applied().map(|p| p.mode()),
         Some(RenderMode::Realtime),
         "and the mode the core holds is the one that runs"
     );

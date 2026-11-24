@@ -829,8 +829,10 @@ mod tests {
         }
     }
 
-    /// **A plugin that refused its rate is not running: a rebind is refused
-    /// by name and nothing is rehanded,** so no node waits for a Processor.
+    /// **A plugin that refused its rate is not rebound, though it runs at the
+    /// rate it accepted: a successor would render at the wrong rate, so a
+    /// rebind is refused by name and nothing is rehanded,** and no node waits
+    /// for a Processor.
     #[test]
     fn a_refused_plugin_is_not_rebound() {
         let (fake, rebinder, mut old, inner) = rig();
@@ -841,12 +843,13 @@ mod tests {
             .lock()
             .set_sample_rate(main, SampleRate::SR_44K1, None);
         let mut frame = BLOCK as u64;
-        while inner.lock().renders() {
+        while inner.lock().ready_to_rehand() == Err(RebindError::Restarting) {
             block(&mut old, frame);
             inner.lock().pump(main);
             frame += BLOCK as u64;
-            assert!(frame < 16 * BLOCK as u64, "the plugin never refused");
+            assert!(frame < 16 * BLOCK as u64, "the change never finished");
         }
+        assert!(inner.lock().renders(), "it runs at the rate it accepted");
         assert_eq!(
             rebind(&rebinder).expect_err("refused"),
             RebindError::NotRunning

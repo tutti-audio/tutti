@@ -20,6 +20,7 @@ mod param_reads;
 #[global_allocator]
 static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
+mod both_hostings;
 mod clap_automation;
 mod clap_crash_recovery;
 mod clap_editor_transport;
