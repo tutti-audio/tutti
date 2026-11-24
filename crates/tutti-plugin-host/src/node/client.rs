@@ -769,13 +769,19 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     pub(super) fn follow(&mut self, p: &tutti_graph::Prepare) {
         self.sample_rate = p.sample_rate();
         let main = MainThreadMarker::new();
-        self.inner.lock().want(|w| {
-            let wanted = tutti_plugin_types::Prepare::new(p.sample_rate(), p.max_block())
-                .with_format(w.format())
-                .with_mode(w.mode());
-            p.quantum().map_or(wanted, |q| wanted.with_quantum(q))
-        });
-        self.inner.lock().rate_asked();
+        {
+            // One lock for both: a pump on another thread between them would
+            // reconcile the new ask, and `rate_asked` after it would reopen
+            // the refusal that pump had just told.
+            let mut instance = self.inner.lock();
+            instance.want(|w| {
+                let wanted = tutti_plugin_types::Prepare::new(p.sample_rate(), p.max_block())
+                    .with_format(w.format())
+                    .with_mode(w.mode());
+                p.quantum().map_or(wanted, |q| wanted.with_quantum(q))
+            });
+            instance.rate_asked();
+        }
         if self.retune(p) {
             // The Processor started its pipeline over: the chunk in flight is
             // dropped by the caller, and the rest of a SysEx open in it is cut,
