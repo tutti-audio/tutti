@@ -269,7 +269,22 @@ impl PeData {
         match self {
             Self::State(state) => state.body().media_type(),
             Self::Opaque(opaque) => opaque.body().media_type(),
-            _ => None,
+            Self::ResourceList(_)
+            | Self::DeviceInfo(_)
+            | Self::ChannelList(_)
+            | Self::JsonSchema(_)
+            | Self::ModeList(_)
+            | Self::CurrentMode(_)
+            | Self::ChannelMode(_)
+            | Self::BasicChannelRx(_)
+            | Self::BasicChannelTx(_)
+            | Self::ProgramList(_)
+            | Self::LocalOn(_)
+            | Self::ExternalSync(_)
+            | Self::AllCtrlList(_)
+            | Self::ChCtrlList(_)
+            | Self::CtrlMapList(_)
+            | Self::StateList(_) => None,
         }
     }
 
