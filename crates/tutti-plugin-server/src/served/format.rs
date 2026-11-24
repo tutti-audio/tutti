@@ -169,7 +169,7 @@ pub(in crate::served) mod clap {
         }
 
         /// Each is applied out of band
-        /// ([`Control::set_parameter_out_of_band`]): a `REQUIRES_PROCESS`
+        /// ([`tutti_plugin_types::Control::set_parameter_out_of_band`]): a `REQUIRES_PROCESS`
         /// parameter of the active plugin goes back to the queue for the next
         /// block. Only what was pending is flushed, at the moment it is asked
         /// for, so a value the plugin or its editor has since moved is not

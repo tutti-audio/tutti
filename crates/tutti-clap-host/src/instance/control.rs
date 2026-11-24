@@ -726,7 +726,7 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
-    /// Out of band only where CLAP allows it ([`flush_out_of_band`]).
+    /// Out of band unless the parameter requires `process` and the plugin is active.
     fn writes_out_of_band(&self, main: MainThreadMarker, id: ParamId) -> bool {
         flush_out_of_band(
             self.loaded().param_requires_process(main, id),
