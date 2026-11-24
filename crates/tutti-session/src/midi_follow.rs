@@ -313,7 +313,7 @@ pub(crate) enum Reopened {
     /// A new reader is open at the graph's rate.
     Opened,
     /// The tap's node is gone: nothing can be opened and the reader hears
-    /// nothing more.
+    /// nothing more, so its follower ends.
     Gone,
 }
 
@@ -340,8 +340,8 @@ impl FollowTap {
 
     /// Re-opens the tap when the graph is prepared at another rate than its
     /// frames are on. The graph marks itself edited when it tries to open a tap
-    /// it holds; a tap it has dropped is `Gone` again at every call and edits
-    /// nothing.
+    /// it holds; a tap it has dropped is `Gone` and edits nothing, and the
+    /// follower ends there ([`FollowCx::end`]).
     pub(crate) fn reopen<F: Float>(&mut self, graph: &mut Graph<F>) -> Reopened {
         if self.rate() == graph.prepared().sample_rate() {
             return Reopened::Unchanged;
@@ -392,6 +392,28 @@ impl Follow {
 }
 
 impl FollowCx<'_> {
+    /// Reports that the follower `follower` ended because its input is gone
+    /// ([`MidiEvent::Unfollowed`]) and, when it laid steps over the base
+    /// (`owns_maps`), publishes the base again as `unfollow_*` does. The caller
+    /// has dropped the follower.
+    pub(crate) fn end(
+        &self,
+        follower: FollowKind,
+        owns_maps: bool,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
+        if owns_maps {
+            self.bases.release(self.settings, self.meter);
+        }
+        out.push(
+            MidiEvent::Unfollowed {
+                follower,
+                cause: UnfollowCause::InputGone,
+            }
+            .into(),
+        );
+    }
+
     /// Places what was heard at the next block start and publishes the new
     /// maps. The events say what was applied.
     pub(crate) fn apply(&self, heard: &[Followed], out: &mut Vec<crate::SessionEvent>) {
@@ -776,6 +798,14 @@ impl ClockFollow {
             },
             tap: FollowTap::new(tap, "clock"),
             rolling: false,
+        }
+    }
+
+    /// The clock followed.
+    pub(crate) fn kind(&self) -> ClockKind {
+        match self.core {
+            Clock::BeatClock(_) => ClockKind::BeatClock,
+            Clock::Mtc(_) => ClockKind::Mtc,
         }
     }
 

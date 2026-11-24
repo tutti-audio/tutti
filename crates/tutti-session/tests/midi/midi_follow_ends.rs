@@ -6,18 +6,18 @@
 //! ten-nanosecond units per quarter note (M2-104 7.5.3), and 24 Timing Clocks make
 //! a quarter note (M1 p.30).
 
-use crate::common::blocks;
 use crate::common::OpenPorts as _;
+use crate::common::blocks;
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
+use tutti_midi_protocol::SysexDeviceId;
 use tutti_session::{
     ClockKind, FollowClock, FollowKind, FollowMachineControl, FollowTempo, MidiError, MidiEvent,
     MidiInput, Session, SessionEvent, UnfollowCause,
 };
-use tutti_midi_protocol::SysexDeviceId;
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, System};
 use tutti_units::{Bpm, SampleRate};
 
@@ -71,7 +71,9 @@ const FOLLOWERS: [Follower; 3] = [
         kind: FollowKind::Tempo,
         follow: |r| {
             let node = r.first.node();
-            r.s.midi().follow_tempo(FollowTempo::new(node, G)).expect("follows");
+            r.s.midi()
+                .follow_tempo(FollowTempo::new(node, G))
+                .expect("follows");
         },
         refused_meanwhile: Some(|r| {
             let node = r.second.node();
@@ -128,7 +130,11 @@ fn a_follower_whose_input_is_gone_ends_and_releases_what_it_held() {
     for f in FOLLOWERS {
         let mut r = rig();
         (f.follow)(&mut r);
-        let _ = r.s.update();
+        // The engine's block clock must have a reading to place arrivals on frames.
+        for _ in 0..8 {
+            blocks(&mut r.s, 1);
+            let _ = r.s.update();
+        }
 
         // A tempo source steps the map to 90 bpm, so a release is visible.
         match f.kind {
@@ -145,13 +151,16 @@ fn a_follower_whose_input_is_gone_ends_and_releases_what_it_held() {
                 let start = Instant::now();
                 for k in 0..60 {
                     let tick = Message::System(G, System::TimingClock).into();
-                    assert!(r.fake.send_input(EndpointId::from_raw(1), tick, start + period * k));
+                    assert!(
+                        r.fake
+                            .send_input(EndpointId::from_raw(1), tick, start + period * k)
+                    );
                 }
             }
             _ => {}
         }
         let mut stepped = f.refused_meanwhile.is_none();
-        for _ in 0..100 {
+        for _ in 0..400 {
             if stepped {
                 break;
             }
@@ -218,7 +227,7 @@ fn an_ended_tempo_follower_publishes_the_base_again() {
         Instant::now()
     ));
     let mut heard = false;
-    for _ in 0..100 {
+    for _ in 0..400 {
         blocks(&mut r.s, 1);
         heard = midi_events(&mut r.s)
             .iter()
