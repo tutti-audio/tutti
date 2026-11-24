@@ -327,8 +327,9 @@ pub(super) fn profile_body(mut body: &[u8]) -> Option<ProfileId> {
     profile_id.parse_next(&mut body).ok()
 }
 
-/// A Profile Id and its Channel count: absent for a Version 1 sender (it reads as
-/// 0, §5.3), read in full when there.
+/// A Profile Id and the Channel count after it: 0 where the body ends at the
+/// Profile Id, read in full when there. The caller keeps the count only for a
+/// version that has the field (§5.3).
 pub(super) fn profile_with_count_body(mut body: &[u8]) -> Option<(ProfileId, ProfileChannels)> {
     (
         profile_id,

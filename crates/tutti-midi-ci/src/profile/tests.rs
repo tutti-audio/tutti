@@ -246,27 +246,6 @@ fn enabled_and_disabled_reports_at_the_group_or_function_block_are_zero_count_by
     }
 }
 
-/// §5.3: a Version 1 Set Profile On has no count field, so a Group address with
-/// none is a Group target.
-#[test]
-fn a_version_1_set_on_to_the_group_has_no_count_bytes() {
-    let mut bytes = vec![0x7E, 0x7E, 0x0D, 0x22, 0x01];
-    bytes.extend(Muid::of(SRC).to_bytes());
-    bytes.extend(to_dst());
-    bytes.extend([0x7E, 1, 2, 3, 4]);
-    assert_eq!(
-        decoded(&bytes),
-        CiMessage::SetProfileOn {
-            source: Muid::of(SRC),
-            format: ProfileFormat::Version1 {
-                address: CiDeviceId::Group,
-            },
-            to: Muid::of(DST),
-            profile: piano(),
-        }
-    );
-}
-
 /// §7.8, §7.10 and §7.11 notes: the count is 0x0000 at address 0x7E or 0x7F.
 #[test]
 fn a_group_or_function_block_address_with_channels_is_not_read() {
@@ -293,24 +272,13 @@ fn a_group_or_function_block_address_with_channels_is_not_read() {
 }
 
 #[test]
-fn a_version_1_set_on_has_no_channels_field_and_reads_as_zero() {
-    // §5.3: `Number Channels Requested` was added in Version 2.
-    let mut bytes = preamble(0x7F, 0x22, to_dst());
-    bytes[4] = 0x01;
-    bytes.extend([0x7E, 1, 2, 3, 4]);
-    let CiMessage::SetProfileOn { format, .. } = decoded(&bytes) else {
-        panic!("a Set On")
-    };
-    assert_eq!(
-        format,
-        ProfileFormat::Version1 {
-            address: CiDeviceId::FunctionBlock
-        }
-    );
-    assert_eq!(format.channels(), None);
-    // One byte of the two is malformed, not absent.
-    bytes.push(0x05);
-    assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
+fn one_byte_of_the_two_count_bytes_is_malformed_at_either_version() {
+    for version in [0x01, 0x02] {
+        let mut bytes = preamble(0x7F, 0x22, to_dst());
+        bytes[4] = version;
+        bytes.extend([0x7E, 1, 2, 3, 4, 0x00]);
+        assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
+    }
 }
 
 #[test]
@@ -362,18 +330,6 @@ fn enabled_and_disabled_reports_are_tables_26_and_27_to_the_broadcast_muid() {
         unicast[9..13].copy_from_slice(&to_dst());
         assert_eq!(unread(&unicast).reason, UnreadReason::WrongDestination);
     }
-}
-
-#[test]
-fn a_version_1_report_has_no_channel_count_and_reads_as_zero() {
-    let mut bytes = preamble(0x7F, 0x24, BROADCAST);
-    bytes[4] = 0x01;
-    bytes.extend([0x7E, 1, 2, 3, 4]);
-    let CiMessage::ProfileEnabled { format, .. } = decoded(&bytes) else {
-        panic!("a report")
-    };
-    assert_eq!(format.ci_version().get(), 1);
-    assert_eq!(format.channels(), None);
 }
 
 /// Spec: m2-101/7.4#2, m2-101/7.5#2, m2-102/2.4#15, m2-102/2.4#18
@@ -674,6 +630,16 @@ fn any_target() -> impl Strategy<Value = ProfileTarget> {
     ]
 }
 
+fn any_format() -> impl Strategy<Value = ProfileFormat> {
+    prop_oneof![
+        any_address().prop_map(|address| ProfileFormat::Version1 { address }),
+        ((2u8..0x20), any_target()).prop_map(|(version, target)| ProfileFormat::Counted {
+            ci_version: CountedVersion::of(version),
+            target,
+        }),
+    ]
+}
+
 fn any_data() -> impl Strategy<Value = Vec<u8>> {
     proptest::collection::vec(0u8..0x80, 0..40)
 }
@@ -706,10 +672,10 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
                 profiles,
             }
         }),
-        (any_target(), to(), any_profile()).prop_map(|(target, to, profile)| {
+        (any_format(), to(), any_profile()).prop_map(|(format, to, profile)| {
             CiMessage::SetProfileOn {
                 source: Muid::of(SRC),
-                format: ProfileFormat::current(target),
+                format,
                 to,
                 profile,
             }
@@ -721,14 +687,14 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
                 profile,
             }
         }),
-        (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileEnabled {
+        (any_format(), any_profile()).prop_map(|(format, profile)| CiMessage::ProfileEnabled {
             source: Muid::of(SRC),
-            format: ProfileFormat::current(target),
+            format,
             profile,
         }),
-        (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileDisabled {
+        (any_format(), any_profile()).prop_map(|(format, profile)| CiMessage::ProfileDisabled {
             source: Muid::of(SRC),
-            format: ProfileFormat::current(target),
+            format,
             profile,
         }),
         (head(), any_profile())

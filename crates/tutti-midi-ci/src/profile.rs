@@ -574,17 +574,6 @@ impl DetailsData {
     }
 }
 
-/// A Profile Id and its Number of Channels as a Set Profile On, Profile Enabled
-/// or Profile Disabled message carries them (§7.8, §7.10, §7.11).
-pub(super) fn encode_with_count(
-    profile: ProfileId,
-    channels: ProfileChannels,
-    out: &mut impl Extend<u8>,
-) {
-    out.extend(profile.to_bytes());
-    out.extend(channels.to_le7());
-}
-
 /// Where a Set Profile On, Profile Enabled or Profile Disabled is aimed, and how
 /// many Channels it names (§7.8, §7.10, §7.11).
 ///
@@ -860,7 +849,7 @@ impl ProfileOnRequest {
             Destination::Broadcast,
             &mut out,
         );
-        encode_with_count(self.profile, self.target.channels(), &mut out);
+        ProfileFormat::current(self.target).encode_body(self.profile, &mut out);
         out
     }
 
