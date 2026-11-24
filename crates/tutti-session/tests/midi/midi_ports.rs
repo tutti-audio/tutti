@@ -297,9 +297,14 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     let port = input(&mut s, &keys);
 
     fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(port.presence(), Presence::Live, "reopened at once");
     assert!(!fake.connected_inputs().is_empty());
+    assert_eq!(
+        changed(&events, port.id()),
+        [],
+        "a reopen that says the same raises no change"
+    );
 
     fake.refuse_input_opens(true);
     fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);

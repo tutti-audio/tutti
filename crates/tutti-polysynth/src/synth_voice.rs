@@ -220,7 +220,9 @@ impl SynthVoice {
         unison_count: UnisonVoices,
     ) -> Self {
         let (base_filter_cutoff, base_filter_resonance) = match config.filter {
-            FilterType::Moog { cutoff, resonance } => (cutoff, resonance),
+            FilterType::Moog {
+                cutoff, resonance, ..
+            } => (cutoff, resonance),
             FilterType::Svf { cutoff, .. } => (cutoff, Resonance::NONE),
             FilterType::None => (Hz::new(20000.0), Resonance::NONE),
         };

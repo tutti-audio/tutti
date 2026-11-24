@@ -18,7 +18,7 @@ use tutti_graph::{
     ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{
-    MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
+    MpeMode, MtcRate, PitchBendSensitivity, ProfileZone, ProfileZones, Recipient, channel_voice,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, MIDI_INPUT_EVENT_CAPACITY, MachineControlEvent, MachineControlFollower,
@@ -1027,7 +1027,7 @@ fn a_devices_profile_zones_switch_its_rules() {
         &generation,
     );
     let (_ed, mut exec, controls, seen) = input(node, FIRST.count(), 512);
-    let zone = MpeZones::single(MpeZoneConfig::profile(
+    let zone = ProfileZones::single(ProfileZone::new(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
     ));
@@ -1083,7 +1083,7 @@ fn a_profile_zone_starts_once_per_request() {
         FIRST.count(),
         512,
     );
-    let zone = MpeZones::single(MpeZoneConfig::profile(
+    let zone = ProfileZones::single(ProfileZone::new(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
     ));
@@ -1127,7 +1127,7 @@ fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
         FIRST.count(),
         512,
     );
-    let zone = MpeZones::single(MpeZoneConfig::profile(
+    let zone = ProfileZones::single(ProfileZone::new(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
     ));

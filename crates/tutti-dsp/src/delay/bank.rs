@@ -8,12 +8,13 @@
 //! tap before any line is written, adds the routed taps scaled by the cross-feedback to
 //! each line's input, then reads the outputs.
 //!
-//! **Time** is channel 0's control, and the channels past the first follow it
+//! **Time**, while the delay is [`Free`](DelaySync::Free), is channel 0's control, and the
+//! channels past the first follow it
 //! ([`ChannelTimes::linked`](crate::ChannelTimes::linked)) or hold a time of their own
-//! ([`ChannelTimes`](crate::ChannelTimes) from a slice of times). A synced layout
-//! ([`DelayTiming::Synced`]) has no time control: each channel's time is its note's seconds
-//! at a tempo ([`DelayBank::retarget_tempo`]), and a tempo that moves moves the time through
-//! the same ramp. A
+//! ([`ChannelTimes`] from a slice of times). While it is
+//! [`Synced`](DelaySync::Synced) each channel's time is its note's seconds at the tempo, and
+//! a tempo that moves moves the time through the same ramp. Every channel has a time ramp of
+//! its own, so a switch between the two moves each channel from where it is. A
 //! control signal drives the time and the feedback **per frame** ([`DelaySignals`]): a delay time
 //! moved at audio rate is a flanger, a control signal frame that is not finite falls back to the
 //! ramped value, and a control signal frame is the trajectory itself, not ramped. The time ramps at
@@ -28,19 +29,23 @@ use crate::block::expect_widths;
 use tutti_buffers::{Float, InputOutput, Mono};
 use tutti_units::{Bpm, Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
-use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, DelayTiming, MAX_DELAY_CHANNELS};
+use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, DelaySync, MAX_DELAY_CHANNELS};
 use super::notes::NoteTimes;
 use super::routing::FeedbackRouting;
+use super::times::ChannelTimes;
 use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
 /// in the bank's float `F`, each retargeted by [`DelayBank::retarget`] and stepped by
 /// [`DelayBank::process`].
 ///
-/// Each channel's time ramps at [`DELAY_SLEW`] frames of delay per frame; a channel that
-/// follows channel 0 reads its ramp.
+/// Each channel's time ramps at [`DELAY_SLEW`] frames of delay per frame, on a ramp of its
+/// own: channels that follow channel 0 are aimed where it is aimed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelayRamps<F: Float> {
+    /// Where the times were last aimed from: a time signal drives the delay only while
+    /// [`Free`](DelaySync::Free).
+    sync: DelaySync,
     times: [Ramp<ReadPosition>; MAX_DELAY_CHANNELS],
     feedback: Ramp<F>,
     cross: Ramp<F>,
@@ -54,6 +59,7 @@ impl<F: Float + Lerp> DelayRamps<F> {
     #[must_use]
     pub fn new(gain_steps: u32) -> Self {
         Self {
+            sync: DelaySync::Free,
             times: [Ramp::new(ReadPosition::START); MAX_DELAY_CHANNELS],
             feedback: Ramp::new(F::ZERO),
             cross: Ramp::new(F::ZERO),
@@ -127,16 +133,15 @@ pub struct DelayBank<F: Float> {
     routing: FeedbackRouting,
     /// The routing's weights at `F`, row-major by the line fed: widened once at build.
     weights: Box<[F]>,
-    linked: bool,
-    /// The notes of a synced delay, `None` for one timed in seconds.
-    synced: Option<NoteTimes>,
+    /// The times of the channels past the first, in seconds.
+    times: ChannelTimes,
+    /// The channels' notes.
+    notes: NoteTimes,
     rate: SampleRate,
     /// The line's capacity in frames: the delay is clamped into it.
     cap: usize,
     /// The longest delay.
     max: Seconds,
-    /// The times of the channels past the first that hold their own, in seconds.
-    own: [Seconds; MAX_DELAY_CHANNELS],
 }
 
 impl<F: Float + Lerp> DelayBank<F> {
@@ -146,16 +151,6 @@ impl<F: Float + Lerp> DelayBank<F> {
     pub fn new(layout: &DelayLayout, rate: SampleRate) -> Self {
         let width = layout.width();
         let cap = layout.max_delay().frames(rate);
-        let mut own = [Seconds::ZERO; MAX_DELAY_CHANNELS];
-        let (linked, synced) = match layout.timing() {
-            DelayTiming::Free(times) => {
-                for (slot, t) in own.iter_mut().skip(1).zip(times.fixed()) {
-                    *slot = *t;
-                }
-                (times.is_linked(), None)
-            }
-            DelayTiming::Synced(notes) => (false, Some(*notes)),
-        };
         Self {
             lines: (0..width).map(|_| DelayLine::new(cap)).collect(),
             taps: vec![F::ZERO; width].into_boxed_slice(),
@@ -164,12 +159,11 @@ impl<F: Float + Lerp> DelayBank<F> {
             weights: (0..width * width)
                 .map(|k| F::from_unit(layout.routing().weight(k / width, k % width)))
                 .collect(),
-            linked,
-            synced,
+            times: *layout.times(),
+            notes: *layout.notes(),
             rate,
             cap: cap.get(),
             max: layout.max_delay().get(),
-            own,
         }
     }
 
@@ -187,21 +181,51 @@ impl<F: Float + Lerp> DelayBank<F> {
         position_of(secs.finite_or(Seconds::ZERO), self.max, self.rate, self.cap)
     }
 
-    /// Aims `ramps` at `controls`: a time past the longest reads as the longest and one that
-    /// is not finite as none, and a feedback that is not finite as none (the pair is
-    /// bounded where it is read, [`Feedback::stable_pair`]). A synced delay has no time
-    /// control: its times are aimed by [`retarget_tempo`](Self::retarget_tempo). No allocation.
-    pub fn retarget(&self, ramps: &mut DelayRamps<F>, controls: &DelayControls) {
-        if self.synced.is_none() {
-            let first = self.position(controls.time);
-            for (c, time) in ramps.times.iter_mut().enumerate().take(self.lines.len()) {
-                let to = if c == 0 || self.linked {
-                    first
-                } else {
-                    self.position(self.own[c])
-                };
-                time.retarget_position(to, Steps::Rate(DELAY_SLEW));
+    /// Aims `ramps` at `controls`, at `tempo`.
+    ///
+    /// While [`Free`](DelaySync::Free) each channel's time is aimed at its seconds: a time
+    /// past the longest reads as the longest and one that is not finite as none. While
+    /// [`Synced`](DelaySync::Synced) it is aimed at its note's seconds at `tempo`
+    /// (`beats * 60 / bpm`, clamped into the line); with no tempo yet (`None`) the times stay
+    /// where they are aimed. Either way a time reaches its target at no more than
+    /// [`DELAY_SLEW`] frames of delay per frame from where it is, so a switch of
+    /// [`DelayControls::sync`] bends the pitch and jumps nothing, and aiming again at the same
+    /// target leaves the ramp as it is.
+    ///
+    /// A feedback that is not finite reads as none (the pair is bounded where it is read,
+    /// [`Feedback::stable_pair`]). No allocation.
+    pub fn retarget(
+        &self,
+        ramps: &mut DelayRamps<F>,
+        controls: &DelayControls,
+        tempo: Option<Bpm>,
+    ) {
+        let width = self.lines.len();
+        ramps.sync = controls.sync;
+        match (controls.sync, tempo) {
+            (DelaySync::Free, _) => {
+                let first = self.position(controls.time);
+                for (c, time) in ramps.times.iter_mut().enumerate().take(width) {
+                    let to = if c == 0 || self.times.is_linked() {
+                        first
+                    } else {
+                        // The layout's `build` holds one time per channel past the first.
+                        self.position(self.times.fixed()[c - 1])
+                    };
+                    time.retarget_position(to, Steps::Rate(DELAY_SLEW));
+                }
             }
+            (DelaySync::Synced, Some(tempo)) => {
+                for (c, time) in ramps.times.iter_mut().enumerate().take(width) {
+                    let secs = self
+                        .notes
+                        .of_channel(c)
+                        .to_beat_duration()
+                        .to_seconds(tempo);
+                    time.retarget_position(self.position(secs), Steps::Rate(DELAY_SLEW));
+                }
+            }
+            (DelaySync::Synced, None) => {}
         }
         let steps = Steps::Fixed(ramps.steps);
         let fb = F::from_unit(controls.feedback.finite_or(Feedback::NONE));
@@ -212,18 +236,6 @@ impl<F: Float + Lerp> DelayBank<F> {
         };
         ramps.feedback.retarget_by(fb, steps);
         ramps.cross.retarget_by(cross, steps);
-    }
-
-    /// Aims the time of each channel of a synced delay at its note's seconds at `tempo`:
-    /// `beats * 60 / bpm`, clamped into the line, reached at no more than [`DELAY_SLEW`]
-    /// frames of delay per frame from where the time is. A delay timed in seconds is not
-    /// touched. A tempo sent again leaves the ramps as they are. No allocation.
-    pub fn retarget_tempo(&self, ramps: &mut DelayRamps<F>, tempo: Bpm) {
-        let Some(notes) = &self.synced else { return };
-        for (c, time) in ramps.times.iter_mut().enumerate().take(self.lines.len()) {
-            let secs = notes.of_channel(c).to_beat_duration().to_seconds(tempo);
-            time.retarget_position(self.position(secs), Steps::Rate(DELAY_SLEW));
-        }
     }
 
     /// Runs `input` into `output`, frame `i` at the ramps' step `taken + 1 + i`, then
@@ -261,10 +273,10 @@ impl<F: Float + Lerp> DelayBank<F> {
         });
         let g = *ramps;
         let bound = F::from_unit(Feedback::MAX_STABLE);
-        // A synced delay has no time control: a driven one is not read.
+        // A time signal drives the delay only while it is timed in seconds.
         let time = signals
             .time
-            .filter(|_| self.synced.is_none())
+            .filter(|_| g.sync == DelaySync::Free)
             .map(|l| l.samples());
         let feedback = signals.feedback.map(|l| l.samples());
         let cf = g.cross.now();
@@ -283,9 +295,8 @@ impl<F: Float + Lerp> DelayBank<F> {
         // The ramped value at frame `i` of the block.
         let at = |ramp: &Ramp<F>, i: usize| ramp.at(step(ramp.steps_taken(), i));
         let at_step = |ramp: &Ramp<ReadPosition>, i: usize| ramp.at(step(ramp.steps_taken(), i));
-        let linked = self.linked;
-        // The ramp channel `c` reads: channel 0's, for a channel that follows it.
-        let ramp_of = |c: usize| &g.times[if c == 0 || linked { 0 } else { c }];
+        // Each channel reads its own time ramp.
+        let ramp_of = |c: usize| &g.times[c];
         let rate = self.rate;
         // The rate crosses into the data's float once per block.
         let signal_rate = F::from_unit(rate);

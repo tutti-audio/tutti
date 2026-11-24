@@ -13,7 +13,7 @@ use tutti_ump::{MidiChannel, U7, Ump};
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_fixtures::midi;
+use tutti_fixtures::{cycle_blocks, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone,
@@ -424,17 +424,10 @@ fn render_stopped(
 
 /// A ragged block schedule up to `max`, summing to `total`.
 fn ragged(total: usize, max: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, max, 7, 64, max - 1, 33, 2, 100][i % 8]
-            .min(max)
-            .min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
+    cycle_blocks(
+        &[1, max, 7, 64, max - 1, 33, 2, 100].map(|n| n.min(max)),
+        total,
+    )
 }
 
 /// The host's playhead: a frame clock from beat 0 at `TEMPO`.

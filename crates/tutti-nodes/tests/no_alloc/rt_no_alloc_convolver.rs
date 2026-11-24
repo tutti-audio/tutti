@@ -2,6 +2,7 @@
 //! blocks of one frame to past a partition, a hostile wet gain (in the cell and on its param
 //! port). The output stays finite and nothing allocates.
 
+use crate::harness::unassigned_bus;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS, Mono};
 use tutti_graph::contract::Direct;
 use tutti_nodes::ConvolverNode;
@@ -163,12 +164,6 @@ fn the_convolver_corners_are_allocation_free_and_finite() {
             sweep(&name, node, &[None], true);
         }
     }
-}
-
-fn unassigned_bus(
-    width: impl Into<tutti_buffers::ChannelLayout>,
-) -> tutti_buffers::ChannelTopology {
-    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// One response per channel, at as many unassigned channels as responses.

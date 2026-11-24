@@ -92,7 +92,8 @@ fn page() -> NonZeroU32 {
 fn a_state_list_entry_has_the_properties_of_table_3() {
     let text = r#"[{"title":"User Programs","stateId":"userPrograms","stateRev":"ahd822nkdla","timestamp":1583330400,"description":"all","size":300}]"#;
     let lower = text.to_owned();
-    let PeData::StateList(list) = PeData::decode(&PeResource::StateList, &json(&lower)).unwrap()
+    let PeData::StateList(list) =
+        PeData::decode(StandardResource::StateList, &json(&lower)).unwrap()
     else {
         panic!("not a StateList");
     };
@@ -108,7 +109,7 @@ fn a_state_list_entry_has_the_properties_of_table_3() {
 // M2-111 §2.3: `title` and `stateId` are required, the rest optional.
 #[test]
 fn a_state_list_entry_requires_title_and_state_id() {
-    let decode = |t: &str| PeData::decode(&PeResource::StateList, &json(t));
+    let decode = |t: &str| PeData::decode(StandardResource::StateList, &json(t));
     assert!(decode(r#"[{"title":"A","stateId":"a"}]"#).is_ok());
     for bad in [r#"[{"stateId":"a"}]"#, r#"[{"title":"A"}]"#] {
         let error = decode(bad).unwrap_err();
@@ -127,7 +128,7 @@ fn a_state_id_is_36_of_letters_digits_and_underscore() {
         assert!(StateId::new(bad).is_none(), "{bad:?}");
     }
     let error = PeData::decode(
-        &PeResource::StateList,
+        StandardResource::StateList,
         &json(r#"[{"title":"A","stateId":"B-d"}]"#),
     )
     .unwrap_err();
@@ -146,7 +147,7 @@ fn a_state_list_entry_refuses_a_negative_time_and_size() {
         r#"[{"title":"A","stateId":"a","size":"big"}]"#,
     ] {
         assert!(
-            PeData::decode(&PeResource::StateList, &json(bad)).is_err(),
+            PeData::decode(StandardResource::StateList, &json(bad)).is_err(),
             "{bad}"
         );
     }
@@ -179,18 +180,17 @@ fn the_suggested_state_ids_are_state_ids() {
 // not subscribed to.
 #[test]
 fn the_resources_have_the_defaults_of_the_entries() {
-    let list = PeResource::StateList.defaults();
+    let list = StandardResource::StateList.defaults();
     assert!(list.can_get && !list.can_subscribe && !list.can_paginate && !list.require_res_id);
     assert_eq!(list.can_set, CanSet::None);
-    assert!(PeResource::StateList.is_list());
-    assert_eq!(PeResource::StateList.res_id_use(), ResIdUse::Unused);
+    assert!(StandardResource::StateList.is_list());
+    assert!(!StandardResource::StateList.requires_res_id());
 
-    let state = PeResource::State.defaults();
+    let state = StandardResource::State.defaults();
     assert!(state.can_get && !state.can_subscribe && state.require_res_id);
     assert_eq!(state.can_set, CanSet::Full);
-    assert!(!PeResource::State.is_list());
-    assert_eq!(PeResource::State.res_id_use(), ResIdUse::Required);
-    assert!(!PeResource::State.is_overridable() && !PeResource::StateList.is_overridable());
+    assert!(!StandardResource::State.is_list());
+    assert!(StandardResource::State.requires_res_id());
 }
 
 // M2-111 §3.4: the entry of State lists Mcoded7 and `application/octet-stream`.
@@ -202,9 +202,10 @@ fn the_state_entry_lists_mcoded7_and_octet_stream() {
     assert_eq!(entry.can_set(), CanSet::Full);
     assert!(entry.require_res_id() && entry.can_get() && !entry.can_subscribe());
     // The spec's fixed properties stay fixed.
-    let state = || ResourceEntry::builder(PeResource::State);
-    assert!(state().can_set(CanSet::Partial).build().is_err());
-    assert!(state().require_res_id(false).build().is_err());
+    assert!(ResourceEntry::from_json(&json(r#"{"resource":"State","canSet":"partial"}"#)).is_err());
+    assert!(
+        ResourceEntry::from_json(&json(r#"{"resource":"State","requireResId":false}"#)).is_err()
+    );
 }
 
 // M2-111 §2.2, §3.2, §3.3: list the states, get one, and set it back; the body is
@@ -247,7 +248,8 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     link.resp
         .publish(
             &mut link.store,
-            &ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap(),
+            &ResourceTarget::entry(StandardResource::State, state_id("buffer").resource_id())
+                .unwrap(),
             PeData::State(changed.clone()),
             link.now,
         )
@@ -262,7 +264,10 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     assert!(chunks_to_responder > 10, "{chunks_to_responder} chunks");
     let held = link
         .store
-        .get(&ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap())
+        .get(
+            &ResourceTarget::entry(StandardResource::State, state_id("buffer").resource_id())
+                .unwrap(),
+        )
         .unwrap()
         .clone();
     let PeData::State(held) = held else {
@@ -393,7 +398,7 @@ fn a_state_of_an_unlisted_media_type_is_refused_before_it_is_sent() {
 fn a_set_of_the_state_list_is_refused() {
     let mut link = Link::new(store_with(&[("buffer", stored(10))]), 256);
     let set = ResourceSet::full(
-        target(PeResource::StateList),
+        target(StandardResource::StateList),
         PeData::StateList(PeStateList::default()),
     )
     .unwrap();
@@ -469,7 +474,7 @@ fn the_store_lists_each_state_it_holds_with_its_size() {
             stored(99),
         )
         .unwrap();
-    let Some(PeData::StateList(list)) = store.get(&target(PeResource::StateList)) else {
+    let Some(PeData::StateList(list)) = store.get(&target(StandardResource::StateList)) else {
         panic!("no list");
     };
     assert_eq!(list.entries().len(), 2);
@@ -509,12 +514,17 @@ fn a_json_state_is_json_and_an_unnamed_media_type_is_refused() {
 #[test]
 fn an_inquiry_for_state_without_a_res_id_is_refused_by_the_type() {
     assert!(matches!(
-        ResourceTarget::try_from(PeResource::State),
+        ResourceTarget::try_from(StandardResource::State),
         Err(RequestRefused::ResIdRequired(_))
     ));
-    assert!(ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).is_ok());
+    assert!(
+        ResourceTarget::entry(StandardResource::State, state_id("buffer").resource_id()).is_ok()
+    );
     assert!(matches!(
-        ResourceTarget::entry(PeResource::StateList, state_id("buffer").resource_id()),
+        ResourceTarget::entry(
+            StandardResource::StateList,
+            state_id("buffer").resource_id()
+        ),
         Err(RequestRefused::ResIdUnused(_))
     ));
 }
@@ -609,7 +619,8 @@ fn terminates(link: &Link, to_responder: bool) -> bool {
 }
 
 fn stored_state(link: &Link, id: &str) -> PeState {
-    let target = ResourceTarget::entry(PeResource::State, state_id(id).resource_id()).unwrap();
+    let target =
+        ResourceTarget::entry(StandardResource::State, state_id(id).resource_id()).unwrap();
     let store = &link.store;
     let Some(PeData::State(state)) = store.get(&target) else {
         panic!("no state");
@@ -619,7 +630,7 @@ fn stored_state(link: &Link, id: &str) -> PeState {
 
 fn listed(link: &Link, id: &str) -> PeStateEntry {
     let store = &link.store;
-    let Some(PeData::StateList(list)) = store.get(&target(PeResource::StateList)) else {
+    let Some(PeData::StateList(list)) = store.get(&target(StandardResource::StateList)) else {
         panic!("no list");
     };
     list.entry(&state_id(id)).unwrap().clone()

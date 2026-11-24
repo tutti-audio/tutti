@@ -3,7 +3,8 @@
 //! and 6 for the swept delay, with the output finite and within the bound the feedback sets
 //! and no allocation on the audio thread.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use crate::harness::bus;
+use tutti_buffers::ChannelTopology;
 use tutti_graph::ParamNode;
 use tutti_nodes::{
     FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayNode,
@@ -30,10 +31,6 @@ const HOSTILE: &[f32] = &[
     0.5,
     2.0,
 ];
-
-fn bus(width: u16) -> ChannelTopology {
-    ChannelTopology::default_for(ChannelLayout::from(width)).expect("one bus")
-}
 
 /// The chorus and the flanger at every corner, at widths 1, 2 and 6: the rate from below its
 /// floor to 1 kHz, the depth from nothing to a second of delay (held to the sweep's greatest),

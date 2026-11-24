@@ -75,6 +75,8 @@ mod bounce;
 mod builder;
 #[cfg(feature = "plugin")]
 mod bypass;
+#[cfg(feature = "device")]
+mod callback_size;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
@@ -250,7 +252,10 @@ pub use midi_ci::{
     Subscribe, Subscription, SubscriptionCause, SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
-pub use midi_follow::{ClockKind, ClockOffset, FollowClock, FollowMachineControl, FollowTempo};
+pub use midi_follow::{
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
+    UnfollowCause,
+};
 #[cfg(feature = "midi")]
 pub use midi_load::{
     DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,

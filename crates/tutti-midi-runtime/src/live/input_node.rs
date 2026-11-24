@@ -81,7 +81,7 @@ use tutti_graph::{
     IntoNode, Io, Node, NodeKey, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
-use tutti_midi_protocol::{MpeMode, MpeZones};
+use tutti_midi_protocol::{MpeMode, ProfileZones};
 use tutti_rt::{Counter, CounterWriter, Mutex, Publisher, Reader, counter};
 use tutti_ump::{Held, Message, MidiChannel, MidiGroup, MidiGroupSet, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
@@ -313,7 +313,7 @@ pub struct MidiInputNode {
 }
 
 /// The MPE Profile zones of each of a device's Groups.
-type GroupProfiles = [Option<MpeZones>; MidiGroup::COUNT as usize];
+type GroupProfiles = [Option<ProfileZones>; MidiGroup::COUNT as usize];
 
 /// What the control side asks of the node, published whole.
 #[derive(Clone, Debug)]
@@ -576,7 +576,7 @@ impl MidiInputControls {
     /// takes the input starts with none, but the control side's record stays
     /// until it is set: clear it when the device goes
     /// ([`clear_mpe_profiles`](Self::clear_mpe_profiles)).
-    pub fn set_mpe_profile(&self, group: MidiGroup, zones: Option<MpeZones>) {
+    pub fn set_mpe_profile(&self, group: MidiGroup, zones: Option<ProfileZones>) {
         self.edit_profiles(|held| {
             let changed = held[group.index()] != zones;
             held[group.index()] = zones;

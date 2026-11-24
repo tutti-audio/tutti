@@ -306,7 +306,7 @@ pub mod nodes {
         ConvolverNode, CrossoverConfig, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterNode, DcBlockerConfig, DcBlockerNode, Decoding,
         DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DelayTiming, DiodeClipperConfig, DiodeClipperNode,
+        DelayLayoutError, DelayNode, DelaySync, DiodeClipperConfig, DiodeClipperNode,
         DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
         DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
         EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
@@ -530,10 +530,10 @@ pub mod session {
         SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OpenedOutput,
-        OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec,
-        OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
-        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, CallbackFrames, CallbackSpan, GraphEngineError, LOAD_MEAN_TIME_CONSTANT,
+        Lagging, OpenedOutput, OutputLevelError, OutputLevels, OutputMap, OutputMapError,
+        OutputQuantum, OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError,
+        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -944,10 +944,11 @@ pub mod midi {
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
-        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        MmcSegmentError, Mpe11Zone, Mpe11Zones, MpeFeatures, MpeLayout, MpeMode, MpeZone, MtcRate,
         NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
-        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
-        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
+        TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
@@ -1010,10 +1011,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowMachineControl,
-        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
-        NotInstrument, OpenMidiSink, Stamping, TrackError,
+        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
+        FollowMachineControl, FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi,
+        LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink,
+        NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -1160,9 +1161,10 @@ pub mod midi {
             PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
             ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
             ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId,
-            StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait,
-            TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 use tutti_midi_protocol::{
-    MemberCount, MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
+    MemberCount, Mpe11Zone, Mpe11Zones, MpeMode, MpeZone, PitchBendSensitivity,
 };
 use tutti_ump::{
     Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, DeviceIdentity,
@@ -231,21 +231,22 @@ pub fn dual_zones(lower: u8, upper: u8) -> MpeMode {
 }
 
 fn zones(lower: Option<u8>, upper: Option<u8>) -> MpeMode {
-    let config = |zone, n: u8| {
-        MpeZoneConfig::new(
-            zone,
+    let zone = |side, n: u8| {
+        Mpe11Zone::new(
+            side,
             MemberCount::new(n).unwrap_or_else(|| panic!("{n} is not an MPE member count")),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
     };
-    MpeMode::Zones(
-        MpeZones::new(
-            lower.map(|n| config(MpeZone::Lower, n)),
-            upper.map(|n| config(MpeZone::Upper, n)),
-        )
-        .expect("zones that RP-053 allows"),
-    )
+    let lower = lower.map(|n| zone(MpeZone::Lower, n));
+    let upper = upper.map(|n| zone(MpeZone::Upper, n));
+    let set = match (lower, upper) {
+        (Some(l), Some(u)) => Mpe11Zones::single(l).with(u),
+        (Some(z), None) | (None, Some(z)) => Some(Mpe11Zones::single(z)),
+        (None, None) => None,
+    };
+    MpeMode::Zones(set.expect("zones that RP-053 allows"))
 }
 
 /// The Roland GS reset as a framed SysEx message: Data Set 1 to device 0x10,

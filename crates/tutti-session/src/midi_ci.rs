@@ -49,7 +49,7 @@ use tutti_ump::MidiChannel;
 
 use crate::PeerError;
 use crate::SessionEvent;
-use crate::midi_port::{Ended, InputRequest, InputShared};
+use crate::midi_port::{InputRequest, InputShared, Shut};
 use crate::peer::{PeerResourceId, ResourceIds};
 use reply::{PeerReply, peer_future};
 pub(crate) use reply::{ReplySender, resolve};
@@ -195,12 +195,12 @@ impl PortLink {
         reply: L,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
         make: impl FnOnce(R, L) -> InputRequest,
-    ) -> Result<(), (L, Ended)> {
+    ) -> Result<(), (L, Shut)> {
         match self.shared.upgrade() {
             // The port is gone: released when every handle was dropped and the
             // session took it out, disconnected when the session itself ended.
-            None if self.session.strong_count() > 0 => Err((reply, Ended::Released)),
-            None => Err((reply, Ended::Disconnected)),
+            None if self.session.strong_count() > 0 => Err((reply, Shut::Released)),
+            None => Err((reply, Shut::Away)),
             Some(shared) => shared.push(request, reply, lists, make),
         }
     }
@@ -1327,7 +1327,7 @@ impl Pending {
     }
 
     /// Every request ends as `why`.
-    pub(crate) fn end(&mut self, why: Ended) {
+    pub(crate) fn end(&mut self, why: Shut) {
         self.subs.lose(None, SubscriptionCause::PortLost);
         for slot in self.switches.drain(..) {
             end_slot(slot, || Err(why.error()));

@@ -131,6 +131,7 @@ pub use error::{Error, Result};
 
 mod block_clock;
 mod callback;
+mod callback_frames;
 mod engine;
 mod faults;
 mod hearing;
@@ -145,6 +146,7 @@ mod stream;
 mod timer;
 pub use block_clock::{BlockClockReader, BlockDates, BlockReading, Playhead};
 pub use callback::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
+pub use callback_frames::{CallbackFrames, CallbackSpan};
 pub use engine::{DEFAULT_BLOCK_CAPACITY, Engine, GraphEngineError};
 pub use faults::{
     BackendErrorKind, Lagging, RT_TEXT_BYTES, STALL_GRACE, StreamFault, StreamFaultKind,

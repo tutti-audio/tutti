@@ -36,9 +36,12 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed, Reopened,
 };
-use crate::{ClockKind, ClockOffset, FollowClock, FollowMachineControl, FollowTempo};
+use crate::{
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
+    UnfollowCause,
+};
 use crate::{EventOutputPort, Key, MidiError, MidiEvent, MidiNodes};
 
 /// What a [`Midi`] call returns: the area's one error.
@@ -973,14 +976,17 @@ impl MidiState {
             return (Vec::new(), false);
         };
         let actions = clock.heard(cx, out);
-        let mut edited = false;
-        if clock.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(clock.tap_id()) {
-                clock.set_tap(tap);
-            }
+        let reopened = clock.tap.reopen(graph);
+        if reopened == Reopened::Gone
+            && let Some(ended) = self.clock.take()
+        {
+            cx.end(
+                FollowKind::Clock(ended.kind()),
+                UnfollowCause::InputGone,
+                out,
+            );
         }
-        (actions, edited)
+        (actions, reopened == Reopened::Opened)
     }
 
     /// `Phase::Poll`, for the Machine Control the session follows: reads its
@@ -1001,14 +1007,12 @@ impl MidiState {
             .into_iter()
             .map(ClockAction::at_next_block)
             .collect();
-        let mut edited = false;
-        if machine.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(machine.tap_id()) {
-                machine.set_tap(tap);
-            }
+        let reopened = machine.tap.reopen(graph);
+        if reopened == Reopened::Gone {
+            self.machine = None;
+            cx.end(FollowKind::MachineControl, UnfollowCause::InputGone, out);
         }
-        (actions, edited)
+        (actions, reopened == Reopened::Opened)
     }
 
     /// `Phase::Poll`, for the tempo the session follows: reports what
@@ -1029,15 +1033,13 @@ impl MidiState {
         // What the tap holds is read at the scale it was opened at, then the
         // tap is reopened if the graph has been re-prepared at another rate.
         let heard = follow.heard();
-        let mut edited = false;
-        if follow.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(follow.tap_id()) {
-                follow.set_tap(tap);
-            }
-        }
+        let reopened = follow.tap.reopen(graph);
         cx.apply(&heard, out);
-        edited
+        if reopened == Reopened::Gone {
+            self.follow = None;
+            cx.end(FollowKind::Tempo, UnfollowCause::InputGone, out);
+        }
+        reopened == Reopened::Opened
     }
 
     /// The outputs' taps are on one scale of frames, the rate they were opened
@@ -1834,6 +1836,12 @@ impl<F: Float> Midi<'_, F> {
     /// steps laid so far stay over the base, and the tempo in force stays until
     /// the new source sends one.
     ///
+    /// **A follower whose input node is removed ends** at the next
+    /// [`Poll`](crate::Phase::Poll) that finds its tap gone (when the graph's rate
+    /// changes): it is dropped, the base maps are published again as
+    /// [`unfollow_tempo`](Self::unfollow_tempo) does, and the update reports
+    /// [`MidiEvent::Unfollowed`].
+    ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node,
@@ -1860,15 +1868,15 @@ impl<F: Float> Midi<'_, F> {
     /// app's tempo map and meter as they stand now, for the ones the follower
     /// stepped. The transport takes them at the next block at its current
     /// beat, so the playhead does not jump, and the tempo from there on is the
-    /// base's. Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
+    /// base's. Reported as [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
     /// [`MidiError::NotFollowing`] when nothing is followed.
     pub fn unfollow_tempo(&mut self) -> Result<()> {
         self.state.follow.take().ok_or(MidiError::NotFollowing)?;
-        self.release_maps();
-        self.state.follow_events.push(MidiEvent::TempoUnfollowed);
+        let event = self.ended(FollowKind::Tempo);
+        self.state.follow_events.push(event);
         Ok(())
     }
 
@@ -1922,6 +1930,10 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
+    /// **A follower whose input node is removed ends** as
+    /// [`follow_tempo`](Self::follow_tempo)'s does ([`MidiEvent::Unfollowed`]); a
+    /// Beat Clock one frees the tempo for another follower.
+    ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node,
@@ -1959,7 +1971,7 @@ impl<F: Float> Midi<'_, F> {
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
     /// keeps the motion it had, and the app's tempo map and meter are
     /// published again for the ones a Beat Clock follower stepped. Reported as
-    /// [`MidiEvent::ClockUnfollowed`] by the next update.
+    /// [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -1970,22 +1982,27 @@ impl<F: Float> Midi<'_, F> {
             .clock
             .take()
             .ok_or(MidiError::NotFollowingClock)?;
-        if clock.owns_tempo() {
-            self.release_maps();
-        }
-        self.state.follow_events.push(MidiEvent::ClockUnfollowed);
+        let event = self.ended(FollowKind::Clock(clock.kind()));
+        self.state.follow_events.push(event);
         Ok(())
     }
 
     /// Drops the steps a follower laid and publishes the base again, for the
     /// maps it stepped.
     fn release_maps(&self) {
-        if let Some(tempo) = self.bases.tempo.release() {
-            self.settings.set_tempo_map(tempo);
-        }
-        if let Some(meter) = self.bases.meter.release() {
-            self.meter.set_meter(meter);
-        }
+        self.bases.release(self.settings, &self.meter);
+    }
+
+    /// An `unfollow_*` of `follower`: publishes the base again for the maps it
+    /// stepped and returns the event for the next update.
+    fn ended(&self, follower: FollowKind) -> MidiEvent {
+        crate::midi_follow::ended(
+            &self.bases,
+            self.settings,
+            &self.meter,
+            follower,
+            UnfollowCause::Requested,
+        )
     }
 
     // --- Machine Control ---
@@ -2016,6 +2033,9 @@ impl<F: Float> Midi<'_, F> {
     /// **One at a time**: following again replaces the first, forgetting the
     /// groups it was assigned to.
     ///
+    /// **A follower whose input node is removed ends**, reported as
+    /// [`MidiEvent::Unfollowed`].
+    ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node and
@@ -2033,7 +2053,7 @@ impl<F: Float> Midi<'_, F> {
 
     /// Stops following Machine Control ([`follow_machine_control`](Self::follow_machine_control)):
     /// the transport keeps the motion it had. Reported as
-    /// [`MidiEvent::MachineControlUnfollowed`] by the next update.
+    /// [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2043,9 +2063,8 @@ impl<F: Float> Midi<'_, F> {
             .machine
             .take()
             .ok_or(MidiError::NotFollowingMachineControl)?;
-        self.state
-            .follow_events
-            .push(MidiEvent::MachineControlUnfollowed);
+        let event = self.ended(FollowKind::MachineControl);
+        self.state.follow_events.push(event);
         Ok(())
     }
 

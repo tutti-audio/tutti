@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tutti_fixtures::Record;
+use tutti_fixtures::{Record, cycle_blocks};
 use tutti_rt::{Param, ParamCell};
 
 use tutti_buffers::MaxBlock;
@@ -461,21 +461,6 @@ fn render(ed: &mut Editor, exec: &mut Executor, n: usize, total: usize) -> Vec<V
         done += m;
     }
     all
-}
-
-/// A ragged block schedule up to `max`, summing to `total`.
-fn ragged(total: usize, max: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, max, 7, 64, max - 1, 33, 2, 100][i % 8]
-            .min(max)
-            .min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
 }
 
 /// `500 + 1000 · depth · sin(2π · rate · play / RATE)`: a bipolar linear
@@ -1444,7 +1429,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         c.drain(..37);
     }
     head.0.advance(Samples::new(128 - 37), None);
-    for n in ragged(total - (128 - 37), 128) {
+    for n in cycle_blocks(&[1, 128, 7, 64, 127, 33, 2, 100], total - (128 - 37)) {
         head.roll(&mut ed, &mut exec, n, &mut live);
     }
     let (mut head, mut export) = (Playhead::new(), Vec::new());
