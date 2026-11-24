@@ -282,7 +282,7 @@ pub use decorrelator::{
 pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayError, DelayLayout,
-    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelayTiming,
+    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelaySync,
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, LinePosition,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };

@@ -114,7 +114,7 @@
 //! [`song_position`](fn@song_position) converts a beat to a Song Position
 //! Pointer and [`SmpteTimecode::from_seconds`] a time to a timecode (each
 //! `None` outside its field, never clamped); [`MtcTimeCode::nibbles`] gives
-//! a timecode's Quarter Frame pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
+//! a timecode's Quarter Frame pieces; [`Mpe11Zone`], [`ProfileZone`] and [`MpeMode`] are the
 //! MPE zone layout (RP-053, and the MIDI-CI MPE Profile's, M2-120), checked
 //! at construction; and [`TuningMessage`] and
 //! its types are the MIDI Tuning Standard's wire values.
@@ -161,13 +161,13 @@ pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;
 pub use mode::{PerNoteTranslation, TranslationMode};
-#[cfg(feature = "serde")]
-pub use mpe::InvalidMpeZoneConfig;
 pub use mpe::InvalidMpeZones;
 pub use mpe::{
-    ChannelResponse, ControllerSupport, Mcm, MemberCount, MpeFeatures, MpeMode, MpeSpec, MpeZone,
-    MpeZoneConfig, MpeZones, NotMemberCount, PitchBendSupport,
+    ChannelResponse, ControllerSupport, Mcm, MemberCount, Mpe11Zone, Mpe11Zones, MpeFeatures,
+    MpeLayout, MpeMode, MpeZone, NotMemberCount, PitchBendSupport, ProfileZone, ProfileZones,
 };
+#[cfg(feature = "serde")]
+pub use mpe::{InvalidMpeLayout, InvalidProfileZone};
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
