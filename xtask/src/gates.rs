@@ -68,6 +68,7 @@ pub(crate) use public_api_counts::{
 };
 pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
+pub(crate) use unused_public::app_report as unused_public_app;
 pub(crate) use unused_public::report as unused_public;
 
 use std::fs;
