@@ -40,6 +40,21 @@
 //! interleaving hands out a value twice or drops one in the slot; a value in
 //! the slot when both ends are gone drops with the last of them.
 //!
+//! # The audio end going away
+//!
+//! The audio end never destroys the value it was lent. Dropped while it holds
+//! one, it hands the value back as it is (`last` is not run: the control end
+//! does what a returned value needs), and the control end's
+//! [`take`](Handoff::take) yields it. The slot may be busy or on offer at that
+//! moment and a drop cannot come back later, so the value goes to a second
+//! cell, the *orphan*, which only the dropping end writes, once, and only the
+//! control end reads, after the `Acquire` load that shows it written. The same
+//! drop marks the audio end gone: a later [`lend`](Handoff::lend) is refused,
+//! since nothing would take the offer, and an offer already in the slot is
+//! withdrawn by [`recall`](Handoff::recall) as any other. An orphan nobody took
+//! drops with the last end. An audio end that is leaked returns nothing: the
+//! control end must not wait for it.
+//!
 //! The model in `tests/handoff_loom.rs` runs this code.
 
 use std::mem::MaybeUninit;
@@ -62,16 +77,25 @@ const RT_BUSY: u32 = 3;
 const RETURNED: u32 = 4;
 /// The control end asked for the audio end's value back.
 const RECALL: u32 = 0b1000;
+/// The audio end was dropped. Set once, by its drop; never cleared.
+const GONE: u32 = 0b1_0000;
+/// The orphan cell holds the value the audio end held when it was dropped. Set
+/// by that drop, cleared by the control end when it takes the value.
+const ORPHAN: u32 = 0b10_0000;
 
 struct Shared<T> {
     state: AtomicU32,
     slot: UnsafeCell<MaybeUninit<T>>,
+    /// What the audio end held when it was dropped, while [`ORPHAN`] is set.
+    orphan: UnsafeCell<MaybeUninit<T>>,
 }
 
 // SAFETY: the slot is reached only by the side whose compare-exchange or
 // `Acquire` load the state word names as its owner (module docs), so no two
 // threads touch it at once, and a value crosses threads only by moving: `T:
-// Send` is all that needs.
+// Send` is all that needs. The orphan cell is written by the audio end's drop
+// alone, before it sets `ORPHAN`, and read by the control end alone, after it
+// saw the bit.
 unsafe impl<T: Send> Sync for Shared<T> {}
 
 impl<T> Drop for Shared<T> {
@@ -89,22 +113,32 @@ impl<T> Drop for Shared<T> {
                 unsafe { (*slot).assume_init_drop() }
             });
         }
+        if self.state.load(Ordering::Acquire) & ORPHAN != 0 {
+            self.orphan.with_mut(|orphan| {
+                // SAFETY: the bit is set only after the audio end's drop wrote
+                // the cell, and cleared by the control end when it moved the
+                // value out; set here, the value is initialized and untaken.
+                unsafe { (*orphan).assume_init_drop() }
+            });
+        }
     }
 }
 
 impl<T> Shared<T> {
-    /// Claims an empty slot for writing as `busy`, keeping the recall bit.
-    /// `false` if the slot is not empty, or, with `not_while_recalled`, if a
-    /// recall is raised.
-    fn claim(&self, busy: u32, not_while_recalled: bool) -> bool {
+    /// Claims an empty slot for writing as `busy`, keeping every other bit.
+    /// `false` if the slot is not empty, or, for a `lend`, if a recall is raised
+    /// or the audio end is gone. The refusal and the claim are one
+    /// compare-exchange of the whole word, so an audio end that goes between
+    /// the two is seen.
+    fn claim(&self, busy: u32, lend: bool) -> bool {
         let mut seen = self.state.load(Ordering::Relaxed);
         loop {
-            if seen & SLOT != EMPTY || (not_while_recalled && seen & RECALL != 0) {
+            if seen & SLOT != EMPTY || (lend && seen & (RECALL | GONE) != 0) {
                 return false;
             }
             match self.state.compare_exchange_weak(
                 seen,
-                (seen & RECALL) | busy,
+                (seen & !SLOT) | busy,
                 Ordering::Acquire,
                 Ordering::Relaxed,
             ) {
@@ -114,15 +148,15 @@ impl<T> Shared<T> {
         }
     }
 
-    /// Claims an offered slot as `busy`, to move its value out, keeping the
-    /// recall bit. `false` if nothing is on offer (or the other side claimed
+    /// Claims an offered slot as `busy`, to move its value out, keeping every
+    /// other bit. `false` if nothing is on offer (or the other side claimed
     /// it first).
     fn take_offer(&self, busy: u32) -> bool {
         let mut seen = self.state.load(Ordering::Relaxed);
         while seen & SLOT == OFFERED {
             match self.state.compare_exchange_weak(
                 seen,
-                (seen & RECALL) | busy,
+                (seen & !SLOT) | busy,
                 Ordering::Acquire,
                 Ordering::Relaxed,
             ) {
@@ -133,12 +167,16 @@ impl<T> Shared<T> {
         false
     }
 
-    /// Sets the slot field to `to`, keeping the recall bit, or clearing it too
-    /// with `clear_recall`: one read-modify-write, so the other side never
-    /// sees the field between this side's states. `Release` (and `Acquire`, for
-    /// the bit it keeps).
+    /// Sets the slot field to `to`, keeping every other bit, or clearing the
+    /// recall with `clear_recall`: one read-modify-write, so the other side
+    /// never sees the field between this side's states. `Release` (and
+    /// `Acquire`, for the bits it keeps).
     fn set_slot(&self, to: u32, clear_recall: bool) {
-        let keep = if clear_recall { 0 } else { RECALL };
+        let keep = if clear_recall {
+            !(SLOT | RECALL)
+        } else {
+            !SLOT
+        };
         let mut seen = self.state.load(Ordering::Relaxed);
         while let Err(now) = self.state.compare_exchange_weak(
             seen,
@@ -201,8 +239,11 @@ pub struct Handoff<T> {
 /// at [`poll`](Self::poll), between blocks.
 ///
 /// It is dropped on the control side (a graph node's retirement path does),
-/// with any value it holds: a Processor's drop must not run on the audio
-/// thread, and a debug build panics when this end drops inside an audio block.
+/// and a debug build panics when this end drops inside an audio block. A value
+/// it holds then goes back to the control end as it is, which
+/// [`Handoff::take`] yields: this end never destroys what it was lent. The
+/// holder that wants the value destroyed takes it out first
+/// ([`take_held`](Self::take_held)).
 pub struct Rt<T> {
     _control: ControlDrop<Self>,
     shared: Arc<Shared<T>>,
@@ -216,6 +257,7 @@ pub fn handoff<T: Send>() -> (Handoff<T>, Rt<T>) {
     let shared = Arc::new(Shared {
         state: AtomicU32::new(EMPTY),
         slot: UnsafeCell::new(MaybeUninit::uninit()),
+        orphan: UnsafeCell::new(MaybeUninit::uninit()),
     });
     (
         Handoff {
@@ -235,8 +277,10 @@ impl<T> Handoff<T> {
     /// # Errors
     ///
     /// `value`, back, when the slot is not empty (an earlier offer the audio
-    /// end has not taken, or a returned value not yet [`take`](Self::take)n)
-    /// or while a recall is raised. A lend never clears a recall: the audio end
+    /// end has not taken, or a returned value not yet [`take`](Self::take)n),
+    /// while a recall is raised, or once the audio end is gone
+    /// ([`borrower_gone`](Self::borrower_gone)): nothing would take the offer.
+    /// A lend never clears a recall: the audio end
     /// may still hold the value it was for, and a lend that cleared it would
     /// leave that value running with nothing asking for it. The audio end
     /// clears a recall it has nothing for at its next poll, so a refused lend
@@ -263,14 +307,36 @@ impl<T> Handoff<T> {
         None
     }
 
-    /// The value the audio end returned, if it has.
+    /// The value the audio end returned, if it has: at a poll that answered a
+    /// recall, with `last` run on it, or by being dropped while it held one,
+    /// with the value as it was.
     pub fn take(&mut self) -> Option<T> {
-        if self.shared.state.load(Ordering::Acquire) & SLOT != RETURNED {
-            return None;
+        let state = self.shared.state.load(Ordering::Acquire);
+        if state & SLOT == RETURNED {
+            let value = self.shared.read();
+            self.shared.set_slot(EMPTY, false);
+            return Some(value);
         }
-        let value = self.shared.read();
-        self.shared.set_slot(EMPTY, false);
-        Some(value)
+        if state & ORPHAN != 0 {
+            let value = self.shared.orphan.with_mut(|orphan| {
+                // SAFETY: the audio end's drop wrote the cell and then set the
+                // bit with `Release`, which the `Acquire` load above saw; that
+                // end is gone and wrote it once, and this end is the only
+                // reader, so the value is initialized and no one else reaches
+                // it. The bit is cleared below, so it is moved out once.
+                unsafe { (*orphan).assume_init_read() }
+            });
+            self.shared.state.fetch_and(!ORPHAN, Ordering::Release);
+            return Some(value);
+        }
+        None
+    }
+
+    /// Whether the audio end was dropped. A lend is refused from then on, and
+    /// what that end held, if anything, is [`take`](Self::take)n.
+    #[must_use]
+    pub fn borrower_gone(&self) -> bool {
+        self.shared.state.load(Ordering::Acquire) & GONE != 0
     }
 }
 
@@ -314,6 +380,30 @@ impl<T> Rt<T> {
     /// The value this end holds, without trading.
     pub fn held(&mut self) -> Option<&mut T> {
         self.held.as_mut()
+    }
+
+    /// Takes the value this end holds out of the handoff: it does not go back
+    /// to the control end, and dropping it destroys it. Control side.
+    pub fn take_held(&mut self) -> Option<T> {
+        self.held.take()
+    }
+}
+
+impl<T> Drop for Rt<T> {
+    fn drop(&mut self) {
+        let mut marks = GONE;
+        if let Some(value) = self.held.take() {
+            self.shared.orphan.with_mut(|orphan| {
+                // SAFETY: this drop is the cell's only writer and runs once,
+                // and the control end reads it only after it saw `ORPHAN`,
+                // which is set below: no other thread reaches the cell here,
+                // and it holds no value.
+                unsafe { (*orphan).write(value) };
+            });
+            marks |= ORPHAN;
+        }
+        // `Release`: publishes the orphan to the control end's `Acquire` load.
+        self.shared.state.fetch_or(marks, Ordering::Release);
     }
 }
 

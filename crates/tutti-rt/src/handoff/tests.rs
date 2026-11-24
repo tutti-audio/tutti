@@ -15,6 +15,7 @@ fn pair<T>() -> (Handoff<T>, Rt<T>) {
     let shared = Arc::new(Shared {
         state: AtomicU32::new(EMPTY),
         slot: UnsafeCell::new(MaybeUninit::uninit()),
+        orphan: UnsafeCell::new(MaybeUninit::uninit()),
     });
     (
         Handoff {
@@ -109,7 +110,7 @@ fn the_audio_end_clears_a_stale_recall() {
 }
 
 /// A value left in the slot drops with the last end, once; one the audio end
-/// holds drops with that end.
+/// holds outlives that end and drops with the last end too.
 #[test]
 fn a_value_in_the_slot_drops_with_the_last_end() {
     let drops = std::rc::Rc::new(std::cell::Cell::new(0));
@@ -126,7 +127,59 @@ fn a_value_in_the_slot_drops_with_the_last_end() {
     drop(hand);
     assert_eq!(drops.get(), 1, "the audio end holds it");
     drop(rt);
-    assert_eq!(drops.get(), 2);
+    assert_eq!(
+        drops.get(),
+        2,
+        "returned to nobody: freed with the last end"
+    );
+}
+
+/// The audio end dropped while it holds a value hands it back as it is: the
+/// control end takes it, `last` not run, and nothing was destroyed.
+#[test]
+fn a_dropped_audio_end_returns_what_it_holds() {
+    let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+    let (mut hand, mut rt) = pair::<(Counted, bool)>();
+    assert!(hand.lend((Counted(drops.clone()), false)).is_ok());
+    assert!(rt.poll(|v| v.1 = true).is_some());
+    assert!(!hand.borrower_gone());
+    drop(rt);
+    assert!(hand.borrower_gone());
+    assert_eq!(drops.get(), 0, "the drop destroys nothing");
+    let back = hand.take().expect("the held value came back");
+    assert!(!back.1, "as it was: `last` is the control end's to run");
+    assert!(hand.take().is_none(), "once");
+    drop(back);
+    assert_eq!(drops.get(), 1);
+    drop(hand);
+    assert_eq!(drops.get(), 1, "taken, so the last end frees nothing more");
+}
+
+/// Once the audio end is gone a lend is refused with the value, and an offer
+/// made before it went is withdrawn by a recall.
+#[test]
+fn a_lend_is_refused_once_the_audio_end_is_gone() {
+    let (mut hand, rt) = pair::<u32>();
+    assert!(hand.lend(1).is_ok());
+    drop(rt);
+    assert_eq!(hand.take(), None, "it held nothing");
+    assert_eq!(hand.recall(), Some(1), "the offer nobody took");
+    assert_eq!(hand.lend(2), Err(2));
+}
+
+/// The holder that wants the value destroyed takes it out: it does not go back.
+#[test]
+fn a_value_taken_out_of_the_audio_end_does_not_go_back() {
+    let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+    let (mut hand, mut rt) = pair::<Counted>();
+    assert!(hand.lend(Counted(drops.clone())).is_ok());
+    assert!(rt.poll(|_| {}).is_some());
+    drop(rt.take_held());
+    assert_eq!(drops.get(), 1);
+    drop(rt);
+    assert!(hand.take().is_none());
+    drop(hand);
+    assert_eq!(drops.get(), 1);
 }
 
 /// The audio end is control-side state: a debug build panics when it drops

@@ -112,11 +112,13 @@ fn gauge::tally::TallyWriter::add
 fn gauge::tally::TallyWriter::get
 fn gauge::tally::TallyWriter::tally
 fn gauge::tally::tally
+fn handoff::Handoff::borrower_gone
 fn handoff::Handoff::lend
 fn handoff::Handoff::recall
 fn handoff::Handoff::take
 fn handoff::Rt::held
 fn handoff::Rt::poll
+fn handoff::Rt::take_held
 fn handoff::handoff
 fn job_gate::JobGate::help
 fn job_gate::JobGate::new

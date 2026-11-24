@@ -19,6 +19,12 @@
 //!   lend's write, and a second lend writes only after the first was taken.
 //! - **a lend never erases a recall** for a value the audio end still holds
 //!   (Core's review of #494): the lend is refused and the value comes back.
+//! - **the audio end going away destroys nothing**: dropped at any point of a
+//!   lend, a recall and a second lend, every value lent ends in the control
+//!   end's hands (taken, withdrawn or refused), and none drops before the
+//!   control end drops it;
+//! - **the ends dropped against each other**, the audio end holding a value,
+//!   free it exactly once.
 
 #![cfg(loom)]
 
@@ -215,5 +221,81 @@ fn a_lend_never_erases_a_recall_for_a_held_value() {
         assert!(rt.held().is_none());
         drop((refused, back, hand, rt));
         assert_eq!(drops.load(Ordering::SeqCst), 2, "each dropped once");
+    });
+}
+
+/// The audio end polls up to `polls` times and is then dropped, while the
+/// control end recalls and lends a second value. Whatever the interleaving,
+/// the control end ends with both values and the primitive destroyed neither.
+fn the_audio_end_goes_after(polls: usize) {
+    loom::model(move || {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+        let (mut hand, mut rt) = handoff::<Tracked>();
+        assert!(hand.lend(Tracked::new(1, &drops)).is_ok());
+        let audio = thread::spawn(move || {
+            for _ in 0..polls {
+                let _ = rt.poll(stop);
+            }
+            drop(rt);
+        });
+        let mut mine = Vec::new();
+        mine.extend(hand.recall());
+        mine.extend(hand.lend(Tracked::new(2, &drops)).err());
+        audio.join().unwrap();
+        assert!(hand.borrower_gone());
+        // What the audio end returned at a poll or left as it went, and what
+        // is still on offer to nobody.
+        mine.extend(hand.take());
+        mine.extend(hand.recall());
+        mine.extend(hand.take());
+        assert_eq!(
+            drops.load(Ordering::SeqCst),
+            0,
+            "the audio end's drop destroys nothing"
+        );
+        let mut ids: Vec<u32> = mine.iter().map(|v| v.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2], "the control end has every value it lent");
+        let last = mine.pop().expect("two values");
+        let refused = hand.lend(last).expect_err("a lend to nobody is refused");
+        drop((mine, refused, hand));
+        assert_eq!(drops.load(Ordering::SeqCst), 2, "each dropped once");
+    });
+}
+
+/// Dropped before it ever polled: the offer is withdrawn or still on offer,
+/// never taken by a drop.
+#[test]
+fn an_audio_end_dropped_before_a_poll_destroys_nothing() {
+    the_audio_end_goes_after(0);
+}
+
+/// Dropped after a poll that may have taken the value, answered the recall,
+/// or cleared a stale one: the held value comes back as the audio end goes.
+#[test]
+fn an_audio_end_dropped_after_a_poll_returns_what_it_holds() {
+    the_audio_end_goes_after(1);
+}
+
+/// Dropped after two polls, so a value returned at the second and one held
+/// through both are covered as well.
+#[test]
+fn an_audio_end_dropped_after_two_polls_destroys_nothing() {
+    the_audio_end_goes_after(2);
+}
+
+/// The two ends dropped at once, the audio end holding a value: whichever
+/// goes last frees it, once.
+#[test]
+fn the_ends_dropped_against_each_other_free_a_held_value_once() {
+    loom::model(|| {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+        let (mut hand, mut rt) = handoff::<Tracked>();
+        assert!(hand.lend(Tracked::new(1, &drops)).is_ok());
+        assert!(rt.poll(stop).is_some(), "held");
+        let audio = thread::spawn(move || drop(rt));
+        drop(hand);
+        audio.join().unwrap();
+        assert_eq!(drops.load(Ordering::SeqCst), 1, "freed once");
     });
 }
