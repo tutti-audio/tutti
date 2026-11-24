@@ -93,7 +93,17 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "crates/tutti-midi-protocol/src/mpe/zone.rs",
-        "MpeZoneConfigRaw",
+        "MpeLayoutRaw",
+        "permanent: the persisted shape `TryFrom` reads and checks",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/mpe/zone.rs",
+        "Mpe11Zone",
+        "permanent: each field is its own checked type, so every combination is a valid zone",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/mpe/zone.rs",
+        "ProfileZoneRaw",
         "permanent: the persisted shape `TryFrom` reads and checks",
     ),
     (

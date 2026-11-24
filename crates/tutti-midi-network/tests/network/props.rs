@@ -356,8 +356,8 @@ proptest! {
         config.admission = match admission {
             0 => Admission::Open,
             1 => Admission::Confirm,
-            2 => Admission::SharedSecret("1234".to_owned()),
-            _ => Admission::Users(vec![(Username::new("Rosa").unwrap(), "pw".to_owned())]),
+            2 => Admission::SharedSecret("1234".into()),
+            _ => Admission::Users(vec![(Username::new("Rosa").unwrap(), "pw".to_owned())].into()),
         };
         let mut host = Host::new(config);
         let mut now = Instant::now();
