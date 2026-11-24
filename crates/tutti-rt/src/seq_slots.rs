@@ -48,7 +48,7 @@ use std::sync::Arc;
 use crate::sync::{AtomicU32, Ordering, fence};
 use bytemuck::{Pod, Zeroable};
 
-use crate::{SeqReader, SeqWriter};
+use crate::{Attempt, SeqReader, SeqWriter};
 
 /// A slot's cell: the value and the epoch of the write that stored it. Packed,
 /// so the cell has no padding for any `T` and is plain bytes (`Pod`).
@@ -208,16 +208,15 @@ impl<T: Pod> SeqSlotsReader<T> {
         let mut contended = false;
         for (slot, cell) in self.cells.iter().enumerate() {
             match cell.try_read() {
-                Some((sequence, stamped)) => {
+                Attempt::Stable(sequence, stamped) => {
                     if sequence != self.seen[slot] {
                         self.seen[slot] = sequence;
                         // At most one per slot, within the reserved room.
                         self.scratch.push((slot, stamped));
                     }
                 }
-                // Never written is not contention; a torn copy is. `try_read`
-                // does not say which, so a second attempt tells them apart.
-                None => contended |= !matches!(cell.read(0), Ok(None)),
+                Attempt::Never => {}
+                Attempt::Torn => contended = true,
             }
         }
         if !contended {
