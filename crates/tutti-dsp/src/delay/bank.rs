@@ -11,7 +11,7 @@
 //! **Time**, while the delay is [`Free`](DelaySync::Free), is channel 0's control, and the
 //! channels past the first follow it
 //! ([`ChannelTimes::linked`](crate::ChannelTimes::linked)) or hold a time of their own
-//! ([`ChannelTimes`](crate::ChannelTimes) from a slice of times). While it is
+//! ([`ChannelTimes`] from a slice of times). While it is
 //! [`Synced`](DelaySync::Synced) each channel's time is its note's seconds at the tempo, and
 //! a tempo that moves moves the time through the same ramp. Every channel has a time ramp of
 //! its own, so a switch between the two moves each channel from where it is. A
