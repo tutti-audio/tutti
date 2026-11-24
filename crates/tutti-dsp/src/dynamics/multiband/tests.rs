@@ -748,6 +748,27 @@ fn a_reset_bank_is_silent_with_its_targets_kept_and_ramps_at_rest() {
         "{:?}",
         &out[0][100..110]
     );
+    // The weights rest on their targets: a bypass and a solo moved 50 frames before the reset
+    // (the ramp is 5 ms, over 200 frames) are whole on frames 100 to 200 after it. DC 0.5 sits
+    // in band 0 of a 10 kHz split. Bypassed, the band passes unreduced and without its 6 dB
+    // makeup: 0.5. With band 1 soloed, band 0 is muted: 0, since band 1 holds no DC.
+    for (bypass, solo, want) in [(true, false, 0.5), (false, true, 0.0)] {
+        let mut set = unity(&[10_000.0]);
+        set.bands[0] = band(0.0, 0.0, 1.0, 0.0, 0.0, 6.0);
+        k.retarget(&set);
+        k.reset();
+        set.bands[0].bypass = bypass;
+        set.bands[1].solo = solo;
+        k.retarget(&set);
+        run(&mut k, &[&vec![0.5f64; 50]]);
+        k.reset();
+        let out = run(&mut k, &[&vec![0.5f64; 400]]);
+        assert!(
+            out[0][100..200].iter().all(|v| (v - want).abs() < 1e-3),
+            "bypass {bypass}, solo {solo}: {:?}",
+            &out[0][100..104]
+        );
+    }
 }
 
 /// A threshold control signal that ends inside a chunk drives the frames it has and no others: with
