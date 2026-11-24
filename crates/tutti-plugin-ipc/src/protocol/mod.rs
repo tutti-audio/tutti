@@ -670,8 +670,7 @@ mod tests {
         }
     }
 
-    /// **A control reply's tag is its row's place among the rows that have a reply,
-    /// and the failure is the last.**
+    /// **Each control reply's tag is pinned, and the failure is the last.**
     #[test]
     fn every_control_reply_is_pinned_to_its_row() {
         let replies = control_replies();
