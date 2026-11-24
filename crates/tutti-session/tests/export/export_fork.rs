@@ -284,36 +284,6 @@ impl Node for Late {
     }
 }
 
-/// A mono source of 0.5 for its first `loud` frames and silence after.
-#[derive(Clone)]
-struct Burst {
-    at: usize,
-    loud: usize,
-}
-
-impl Node for Burst {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let out = io.output(0);
-        for (i, x) in out.iter_mut().enumerate() {
-            *x = if self.at + i < self.loud { 0.5 } else { 0.0 };
-        }
-        let silent = self.at >= self.loud;
-        self.at += out.len();
-        if silent {
-            Status::Silent
-        } else {
-            Status::Modified
-        }
-    }
-    fn reset(&mut self) {
-        self.at = 0;
-    }
-}
-
 /// **`trim_reported_latency` and `with_reported_tail` take the figures from
 /// the graph that is rendered**: the step a `LATE`-frame source makes at its
 /// declared latency lands on frame 0, and the render runs `TAIL` frames
@@ -366,15 +336,13 @@ fn latency_and_tail_come_from_the_graph() {
 
 /// **A bounce of a reverb with live cells spends the tail the reverb reports
 /// for the room it is set to** (the node declares the largest room's, about
-/// nine seconds): a burst that ends with the programme, fed through a room of
-/// 0, the General MIDI room and a room of 0.9, ends at the programme's frames
-/// and the bank's own `tail_of` for those controls, long by at most a block
-/// (the executor counts whole quiet blocks, and a reverb whose last block ended
-/// in its ring owes its report once more). Whether that report covers the
-/// ring-out is the bank's own test. The burst owes nothing itself and the
-/// reverb is not at rest at the programme's end, so it owes its report in
-/// full, less the quiet input each block of the tail adds (a source that
-/// still sounded would keep it owing).
+/// nine seconds): a constant fed through a room of 0, the General MIDI room
+/// and a room of 0.9 ends at the programme's frames and the bank's own
+/// `tail_of` for those controls, long by under a block (the executor counts
+/// whole quiet blocks). Whether that report covers the ring-out is the
+/// bank's own test. The constant owes nothing itself and is not at rest at
+/// the programme's end, so the reverb owes its report in full (a source that
+/// still owed would make it owe its ceiling after it).
 #[test]
 fn a_bounce_ends_at_the_tail_the_reverb_reports_for_its_room() {
     let seconds = 0.2;
@@ -384,10 +352,7 @@ fn a_bounce_ends_at_the_tail_the_reverb_reports_for_its_room() {
     let mut lengths = Vec::new();
     for room in [0.0, 0.5, 0.9] {
         let mut session = session();
-        let src = session.graph().add(ForkByClone(Burst {
-            at: 0,
-            loud: frames,
-        }));
+        let src = session.graph().add(ForkByClone(Const::mono(0.5)));
         let verb = session.graph().add(tutti_nodes::FreeverbNode::<f32>::from(
             tutti_nodes::FreeverbConfig::new(),
         ));
@@ -409,7 +374,7 @@ fn a_bounce_ends_at_the_tail_the_reverb_reports_for_its_room() {
         );
         let got = planes[0].len() - frames;
         assert!(
-            (report.get()..=report.get() + block).contains(&got),
+            (report.get()..report.get() + block).contains(&got),
             "room {room}: rang {got} frames, the reverb reports {report:?}"
         );
         lengths.push(got);

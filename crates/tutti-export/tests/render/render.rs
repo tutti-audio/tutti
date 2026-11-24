@@ -1402,18 +1402,14 @@ fn frames_tail(frames: usize) -> Tail {
     Tail::Finite(Samples::new(frames))
 }
 
-/// A mono source through `nodes` in series, each with its declared ceiling and
-/// what it reports: 0.5 for the programme and silence after it (silence
-/// throughout, for a `level` of 0).
+/// A mono constant of `level` (silence, for 0) through `nodes` in series, each
+/// with its declared ceiling and what it reports.
 fn narrowing_chain(level: f32, nodes: &[(Tail, Option<Tail>)]) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let source = if level == 0.0 {
         g.add(ForkByClone(Silence))
     } else {
-        g.add(ForkByClone(Burst {
-            loud: PROGRAMME,
-            at: 0,
-        }))
+        g.add(Const::mono(level))
     };
     through(g, source, nodes)
 }
@@ -1486,6 +1482,8 @@ fn reported(ceiling: usize) -> TailPolicy {
 
 /// **An export spends the tail its nodes report at the programme's end**, not
 /// the ceiling they declare: the node declares 4,000 frames and reports 100.
+/// The source is a constant that keeps sounding past the programme, which
+/// does not lengthen the tail: every later ask bounds it by more than the first.
 #[test]
 fn export_spends_the_tail_its_nodes_report_at_the_programmes_end() {
     let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(frames_tail(100)))]);
@@ -1493,17 +1491,12 @@ fn export_spends_the_tail_its_nodes_report_at_the_programmes_end() {
     assert_eq!(tailed_frames(graph, reported(4_000)), PROGRAMME + 100);
 }
 
-/// A node fed by one that still owes is charged its ceiling while that owes:
-/// the reported figure says what its own last input left, not what the
-/// upstream's remaining output will excite. Upstream reports 300 (ceiling
-/// 5,000), the node after it declares 4,000 and reports 100. At the
-/// programme's end the first owes 300 and the second 4,000 after it: 4,300,
-/// so one block (1,024 frames) is pulled. Both inputs are then silent for it,
-/// 1,024 frames is past both reports, both are at rest and nothing is owed:
-/// the render is 8,820 + 1,024. Charged only its own report (100) the second
-/// would owe 400 at the start and end the render at 8,820 + 400.
+/// A node fed by one that still owes rings out its whole ceiling after it: the
+/// reported figure says what its own last input left, not what the upstream's
+/// remaining output will excite. Upstream reports 300 (ceiling 5,000), the
+/// node after it declares 4,000 and reports 100: 300 + 4,000.
 #[test]
-fn a_node_fed_by_one_that_still_owes_is_charged_its_ceiling_until_it_rests() {
+fn a_node_fed_by_one_that_still_owes_spends_its_ceiling_after_it() {
     let graph = narrowing_chain(
         0.5,
         &[
@@ -1512,15 +1505,16 @@ fn a_node_fed_by_one_that_still_owes_is_charged_its_ceiling_until_it_rests() {
         ],
     );
     assert_eq!(graph.declared_tail().samples(), Some(Samples::new(9_000)));
-    assert_eq!(tailed_frames(graph, reported(9_000)), PROGRAMME + 1_024);
+    assert_eq!(
+        tailed_frames(graph, reported(9_000)),
+        PROGRAMME + 300 + 4_000
+    );
 }
 
 /// A node whose input went quiet owes what its report has left: its input is
 /// silent from frame 5,120 (five 1,024-frame blocks) and the programme ends at
 /// frame 8,820, so three whole quiet blocks and the last block's 628 frames
 /// have passed (3,700) of the 5,000 it reports: 1,300 are left.
-/// They are pulled as a block (1,024) and the 276 left after it, asking
-/// again between them.
 #[test]
 fn a_node_whose_input_went_quiet_spends_what_is_left_of_its_report() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
@@ -1545,7 +1539,6 @@ impl Node for Rings {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         io.report_tail(frames_tail(self.ring));
         let (ins, mut outs) = io.split();
-        let mut sounded = false;
         for (o, &i) in outs.get(0).iter_mut().zip(ins.get(0)) {
             *o = if i != 0.0 {
                 self.left = self.ring;
@@ -1556,13 +1549,8 @@ impl Node for Rings {
             } else {
                 0.0
             };
-            sounded |= *o != 0.0;
         }
-        if sounded {
-            Status::Modified
-        } else {
-            Status::Silent
-        }
+        Status::Modified
     }
     fn reset(&mut self) {
         self.left = 0;
@@ -1599,14 +1587,11 @@ impl Node for Delay {
 /// The ring-out of a node reaches the output through the latency after it: a
 /// source ends exactly at the programme's end, a node rings 3,000 frames
 /// after it and reports so, and a node of 2,048 frames' latency follows. The
-/// ring node owes 3,000 at the programme's end and is pulled 1,024, 1,024 and
-/// 952 frames, the ring's three blocks; its last output was not silent, so it
-/// owes its report once more and is pulled 1,024, which is silent, and then
-/// rests: a tail of 4,024. The latency (2,048) is then flushed once, so the
-/// ring leaves the graph and the render keeps 8,820 + 4,024 frames, the ring
-/// in them ending at its 3,000th frame. A query taken after the latency's
-/// flush would find the ring node 1,652 quiet frames in and cut the end of
-/// the ring.
+/// ring leaves the graph 2,048 frames later than it is made, so the export
+/// pulls 2,048 + 3,000 frames past the programme, keeps the 3,000 (the
+/// latency is trimmed) and its last frame is the ring's last. A query taken
+/// after the latency's flush would find the ring node 1,652 quiet frames in
+/// and cut the end of it.
 #[test]
 fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
     const RING: usize = 3_000;
@@ -1635,9 +1620,8 @@ fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
     cfg.render.tail = reported(9_000);
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
     let plane = &out.planes()[0];
-    assert_eq!(plane.len(), PROGRAMME + RING + 1_024);
+    assert_eq!(plane.len(), PROGRAMME + RING);
     assert_eq!(plane[PROGRAMME + RING - 1], 0.25, "the last ring frame");
-    assert_eq!(plane[PROGRAMME + RING], 0.0, "silent after it");
     assert_eq!(plane[PROGRAMME - 1], 0.5, "the last frame of the programme");
 }
 
@@ -1714,13 +1698,14 @@ impl Node for Release {
 /// block after; a node after it rings 300 frames and reports so (declared
 /// tail 5,300). One ask at the programme's end charges 20,000 + 5,300 (the
 /// instrument's ceiling, then the node's, fed by one that owes): the render
-/// would be 8,820 + 25,300. Asked after each block it is: the programme; one
-/// block (1,024), the instrument's last sound, which leaves it owing its
-/// ceiling; one block (1,024) in which the instrument says idle and the node
-/// rings its 300 frames and the silence after them, which leaves the node, no
-/// longer fed, owing its report (its last block was not flagged silent); 300
-/// more, silent, after which the node is at rest and nothing is owed:
-/// 8,820 + 1,024 + 1,024 + 300.
+/// would be 8,820 + 25,300. The tail is the smallest bound seen, each ask
+/// bounding it by what is spent plus what is owed: the first gives 25,300; one
+/// block (1,024) later the instrument has just sounded its last, so the bound
+/// is 1,024 + 25,300 and the first stands; after a second block (2,048 spent)
+/// the instrument has said idle and the node after it, no longer fed, owes
+/// its report of 300 (its input has been quiet 1,024 frames, past its report,
+/// but its last block was not flagged silent, so it owes the whole report):
+/// the bound is 2,048 + 300 = 2,348. The render is 8,820 + 2,348.
 #[test]
 fn a_bounce_after_an_instrument_in_release_ends_at_the_release_and_the_reported_tail() {
     const RELEASE: usize = 1_024;

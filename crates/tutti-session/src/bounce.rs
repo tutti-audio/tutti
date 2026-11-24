@@ -171,12 +171,11 @@ pub enum BounceTail {
     /// of its report when nothing upstream still owes, and its declared
     /// ceiling after an upstream that does; one that never reports spends what
     /// it declares, and one at rest spends nothing. The graph is asked at the
-    /// programme's end and after every block of the tail, which ends at the
-    /// first of those instants at which nothing is owed: an instrument that
-    /// goes idle stops charging its ceiling, and what follows it owes its own
-    /// report. A source that still sounds past the programme keeps the nodes
-    /// it feeds owing, to the cap. The figures and progress count the bound
-    /// until the programme ends and the true total after. The default, with a cap of
+    /// programme's end and after every block of the tail, and the tail is the
+    /// smallest bound any ask gave (what is spent plus what is owed): never
+    /// longer than the first ask's, shorter when an instrument goes idle and
+    /// what follows it owes its own report. The figures and progress count the
+    /// bound until the programme ends and the true total after. The default, with a cap of
     /// [`BounceTail::CAP`].
     Graph {
         /// The most it renders.

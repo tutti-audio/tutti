@@ -493,9 +493,10 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 ///
 /// A fixed tail ([`TailPolicy::Frames`]) is pulled with the programme. A
 /// reported one ([`TailPolicy::Reported`]) is asked of the graph at the
-/// programme's last frame and again after every block pulled for it, and the
-/// render stops at the first of those instants at which nothing is owed, or
-/// when the ceiling is spent. The graph's latency is then pulled once, so a
+/// programme's last frame and again after every block pulled for it: each ask
+/// bounds the tail (what is spent plus what is owed), the tail is the
+/// smallest bound seen, so it is never longer than the first ask's and ends
+/// early when a node comes to rest. The graph's latency is then pulled once, so a
 /// ring-out inside a latency after the node that rang still reaches the
 /// output; progress counts the plan's most until then and the true total
 /// after.
@@ -545,6 +546,7 @@ where
                         ceiling,
                         kept_latency,
                         spent: Samples::ZERO,
+                        bound: ceiling,
                     },
                     plan.programme.remaining_after(pulled),
                 ),
@@ -553,18 +555,29 @@ where
                 ceiling,
                 kept_latency,
                 spent,
+                bound,
             } => {
-                // Asked at every block boundary, so the tail ends at the
-                // first instant nothing is owed and never passes `ceiling`.
+                // Every ask bounds the tail from the programme's end: what
+                // is spent plus what is owed now (which also counts what
+                // sounded after the end, so it is never too short). The tail
+                // is the smallest bound seen, and never passes `ceiling`.
                 let owed = src.reported_tail().resolve(ceiling.remaining_after(spent));
+                let bound = bound.min(spent + owed);
+                let left = bound.remaining_after(spent);
+                phase = Phase::Tail {
+                    ceiling,
+                    kept_latency,
+                    spent,
+                    bound,
+                };
                 // The graph's latency is pulled once, after the last ask, for
                 // every node; the true total is known from here.
                 let end = pulled + plan.latency + kept_latency;
-                if owed == Samples::ZERO {
+                if left == Samples::ZERO {
                     total = end;
                     control.advance(stage, pulled, total);
                 }
-                (Phase::Flush { end }, owed)
+                (Phase::Flush { end }, left)
             }
             Phase::Flush { end } => (Phase::Done, end.remaining_after(pulled)),
             Phase::Done => break,
@@ -581,17 +594,8 @@ where
         if n == 0 {
             return Ok(Outcome::Finished(()));
         }
-        if let Phase::Tail {
-            ceiling,
-            kept_latency,
-            spent,
-        } = phase
-        {
-            phase = Phase::Tail {
-                ceiling,
-                kept_latency,
-                spent: spent + Samples::new(n),
-            };
+        if let Phase::Tail { spent, .. } = &mut phase {
+            *spent += Samples::new(n);
         }
 
         let cursor = BlockCursor {
@@ -622,11 +626,13 @@ where
 enum Phase {
     /// Pulling the programme, or all of a fixed tail's frames.
     Programme,
-    /// Pulling a reported tail: `spent` frames so far, never past `ceiling`.
+    /// Pulling a reported tail: `spent` frames so far, up to `bound`, the
+    /// smallest bound any ask has given (never past `ceiling`).
     Tail {
         ceiling: Samples,
         kept_latency: Samples,
         spent: Samples,
+        bound: Samples,
     },
     /// Pulling the graph's latency (and the kept part of it), up to the
     /// frame `end`.

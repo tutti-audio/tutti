@@ -54,7 +54,7 @@ impl RenderPlan {
 
     /// The plan of `frames` already rendered: no head to trim, no tail to
     /// find.
-    pub fn of_frames(frames: Samples) -> Self {
+    pub(crate) fn of_frames(frames: Samples) -> Self {
         Self {
             total: frames,
             output_length: frames,
