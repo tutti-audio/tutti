@@ -486,6 +486,78 @@ fn a_removed_node_reads_nothing_and_a_reused_key_is_not_read() {
     assert_eq!(tap.take_lost(), 0);
 }
 
+/// An event tap says its source is gone exactly as an audio tap does: once the
+/// commit that removes the node it is on (an output's node, or an input's) has
+/// been applied, and not before. What the ring held is still read after, and a
+/// node replaced at the same key (here by one with fewer ports) never ends it.
+#[test]
+fn an_event_tap_reads_source_gone_once_its_node_is_removed() {
+    let mut r = rig(1, false, 0);
+    let s = Script::new(vec![(10, on(1)), (150, on(2))]).ports(2);
+    script(&mut r, 1, s.clone());
+    let heard = tutti_fixtures::Record::new();
+    r.ed.insert(
+        NodeKey(3),
+        "probe",
+        ForkByClone(Probe {
+            heard,
+            ports: 1,
+            capacity: 0,
+            audible: false,
+        }),
+    );
+    r.ed.connect_events(
+        EventInputPort::new(NodeKey(3), 0),
+        EventEdge::Direct(port(1, 0)),
+    )
+    .unwrap();
+    let options = || EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw);
+    let mut output =
+        r.ed.open_event_tap(EventTapId::of(1), port(1, 1), options())
+            .unwrap();
+    let input =
+        r.ed.open_event_tap(
+            EventTapId::of(2),
+            EventInputPort::new(NodeKey(3), 0),
+            options(),
+        )
+        .unwrap();
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(!output.source_gone() && !input.source_gone());
+
+    // A replacement at the same key, narrower, is not a removal.
+    script(&mut r, 1, s.clone().ports(1));
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(!output.source_gone(), "a replaced node's tap does not end");
+
+    // Output tap: removed in the editor but not committed, then committed.
+    script(&mut r, 1, s.ports(2));
+    commit(&mut r);
+    r.ed.remove(NodeKey(1));
+    render(&mut r, &[100], 100);
+    assert!(
+        !output.source_gone(),
+        "not before a commit applies the removal"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(output.source_gone(), "the node it was on is gone for good");
+    assert!(!input.source_gone(), "the input's node is still there");
+    assert_eq!(
+        drain(&mut output),
+        vec![at(10, on_port(on(1), 1))],
+        "what the ring held is read first"
+    );
+
+    // Input tap: ends when the node it is on is removed.
+    r.ed.remove(NodeKey(3));
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(input.source_gone());
+}
+
 /// A source behind a node of declared latency L = 15, beside an output path of
 /// latency M = 40: the raw tap reads the script's own frames, the aligned one
 /// the script's plus the compiler's gap (M - L = 25, an analytic figure); a

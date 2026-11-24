@@ -2,6 +2,7 @@
 //! declares (latency, tail).
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_units::{Latency, Tail};
@@ -654,10 +655,15 @@ impl<F: Float> Editor<F> {
                     }
                 }
             }
-            // And an event tap, which then reads nothing.
-            for spec in t.event_taps.values_mut() {
+            // And an event tap, which then reads nothing: it leaves the plan as
+            // an audio tap does, and its reader is told once the plan without
+            // it runs.
+            for (&id, spec) in &mut t.event_taps {
                 if spec.source.is_some_and(|s| s.node() == key) {
                     spec.source = None;
+                    if let Some(end) = self.event_taps.meta(id) {
+                        self.link.end_tap(Arc::clone(end));
+                    }
                 }
             }
             // A key is the author's and can be inserted again after a removal, so

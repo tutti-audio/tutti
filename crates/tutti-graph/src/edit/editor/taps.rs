@@ -288,11 +288,12 @@ impl<F: Float> Editor<F> {
     /// compiles to nothing. The port must exist now, in the spec as edited
     /// (uncommitted edits included): a key no node has or a port past the
     /// node's event outputs is refused with [`MissingSource`] and nothing is
-    /// opened. A port that narrows or vanishes **later** reads no events, the
-    /// commit succeeds, the reader is not told and nothing counts as lost (the
-    /// writer is kept, so the stream resumes if a node with that port
-    /// returns under the same key by [`replace`](Self::replace); a removed
-    /// node's key is not read again). A tap sees the port before the engine's
+    /// opened. A port that narrows **later** reads no events, the commit
+    /// succeeds, the reader is not told and nothing counts as lost (the writer
+    /// is kept, so the stream resumes if a node with that port returns under
+    /// the same key by [`replace`](Self::replace)). A node that is **removed**
+    /// ends the tap: its key is not read again, and once the plan without the
+    /// tap runs the reader reads [`EventTapReader::source_gone`]. A tap sees the port before the engine's
     /// declick, as an audio tap does.
     ///
     /// # Errors
@@ -328,7 +329,8 @@ impl<F: Float> Editor<F> {
             }
         }
         let (reader, writer) = EventTapReader::pair(id, capacity, self.prepare.sample_rate());
-        self.event_taps.open(id, writer, (), reader.watch());
+        self.event_taps
+            .open(id, writer, reader.end_latch(), reader.watch());
         self.spec_mut().topology.event_taps.insert(
             id,
             EventTapSpec {

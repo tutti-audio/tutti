@@ -117,7 +117,7 @@ impl Drop for RingOnDrop {
 }
 
 /// How a tap ends: the latch the editor raises when every node the tap read was
-/// removed, and the bell it rings so a reader that awaits frames sees the end.
+/// removed (an event tap's too), and the bell it rings so a reader that awaits frames sees the end.
 pub(crate) struct TapEnd {
     latch: FaultLatch,
     bell: Option<Bell>,
@@ -125,7 +125,7 @@ pub(crate) struct TapEnd {
 
 impl TapEnd {
     /// A tap end that rings `bell` when it is raised.
-    fn new(bell: Option<Bell>) -> Self {
+    pub(crate) fn new(bell: Option<Bell>) -> Self {
         Self {
             latch: FaultLatch::new(),
             bell,
@@ -141,7 +141,7 @@ impl TapEnd {
         }
     }
 
-    fn is_raised(&self) -> bool {
+    pub(crate) fn is_raised(&self) -> bool {
         self.latch.is_raised()
     }
 }
