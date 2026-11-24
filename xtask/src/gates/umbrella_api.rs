@@ -379,6 +379,14 @@ fn exports(lib: &str) -> Vec<Ty> {
 }
 
 /// The `tutti_` crates the umbrella exports from, sorted.
+/// The `(crate, name)` of each item `lib.rs` re-exports from a `tutti_` crate.
+pub(super) fn export_names(lib: &str) -> Vec<(String, String)> {
+    exports(lib)
+        .into_iter()
+        .map(|t| (t.krate, t.name))
+        .collect()
+}
+
 pub(crate) fn reexported_crates(lib: &str) -> Vec<String> {
     let set: BTreeSet<String> = exports(lib).into_iter().map(|t| t.krate).collect();
     set.into_iter().collect()
