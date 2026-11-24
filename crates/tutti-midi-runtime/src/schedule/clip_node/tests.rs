@@ -201,6 +201,23 @@ fn a_note_off_with_no_note_on_is_not_a_note() {
     assert_eq!(ClipEvents::default().notes().count(), 0);
 }
 
+/// **A note-off listed before a note-on of its key on the same beat does not
+/// end it**: it plays first, so the note-on after it is an open note.
+#[test]
+fn a_note_off_before_a_note_on_on_one_beat_does_not_end_it() {
+    let clip: ClipEvents = [note_event(1.0, false, 60, 0), note_event(1.0, true, 60, 1)]
+        .into_iter()
+        .collect();
+    let lengths: Vec<_> = clip.notes().map(|n| n.length).collect();
+    assert_eq!(lengths, [None]);
+    // The other order is a note of no length.
+    let clip: ClipEvents = [note_event(1.0, true, 60, 1), note_event(1.0, false, 60, 0)]
+        .into_iter()
+        .collect();
+    let lengths: Vec<_> = clip.notes().map(|n| n.length).collect();
+    assert_eq!(lengths, [Some(BeatDuration::new(0.0))]);
+}
+
 /// **Two overlapping notes of one key pair first on, first off**, each with
 /// its own length.
 #[test]
