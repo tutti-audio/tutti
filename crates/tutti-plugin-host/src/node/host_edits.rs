@@ -61,6 +61,7 @@ pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, E
             to_inform: Vec::new(),
             scheduled: false,
             through: Generation::new(0),
+            latest: Vec::new(),
         }),
         applied: AtomicU32::new(0),
         pulse: AtomicU64::new(0),
@@ -95,6 +96,10 @@ struct PostState {
     /// The sweep of the last out-of-band apply: what the control side itself
     /// handed to the plugin.
     through: Generation,
+    /// The newest write of each parameter, with its generation, until a state
+    /// or a preset load makes it stale: what a fork starts from when no block
+    /// has handed the write to the plugin.
+    latest: Vec<(ParamId, Normalized, Generation)>,
 }
 
 /// The control side: any thread posts, one at a time. It is not for the audio
@@ -117,6 +122,11 @@ impl EditPost {
     pub(super) fn write(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
         let mut state = self.0.state.lock();
         state.writer.write(id, value)?;
+        let generation = state.writer.written();
+        match state.latest.iter_mut().find(|(known, ..)| *known == id) {
+            Some(entry) => (entry.1, entry.2) = (value, generation),
+            None => state.latest.push((id, value, generation)),
+        }
         match state.to_inform.iter_mut().find(|(known, _)| *known == id) {
             Some(entry) => entry.1 = value,
             None => state.to_inform.push((id, value)),
@@ -130,6 +140,7 @@ impl EditPost {
         let mut state = self.0.state.lock();
         state.writer.reset();
         state.to_inform.clear();
+        state.latest.clear();
     }
 
     /// Whether a main-thread job should be queued to tell the controller: there
@@ -180,6 +191,24 @@ impl EditPost {
             pulse: self.0.pulse.load(Ordering::Relaxed),
         };
         settle.poll(shown, now)
+    }
+
+    /// The newest value of each parameter written whose write the plugin has
+    /// not been handed: host state a copy of the plugin starts from. Takes
+    /// nothing from the slots, so the node's blocks still deliver it.
+    pub(super) fn undelivered(&self) -> Vec<(ParamId, Normalized)> {
+        let (latest, through) = {
+            let state = self.0.state.lock();
+            (state.latest.clone(), state.through)
+        };
+        let applied = Generation::new(self.0.applied.load(Ordering::Acquire));
+        latest
+            .into_iter()
+            .filter(|&(.., generation)| {
+                !applied.has_reached(generation) && !through.has_reached(generation)
+            })
+            .map(|(id, value, _)| (id, value))
+            .collect()
     }
 
     /// Whether every write made so far has been handed to the plugin: what a

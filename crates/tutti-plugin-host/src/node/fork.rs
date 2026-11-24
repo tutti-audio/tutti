@@ -143,8 +143,9 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,
-    /// The host's parameter writes no block has taken: applied before the state
-    /// is read, so the fork starts from them.
+    /// The host's parameter writes the plugin has not been handed: read before
+    /// the state and written to the fork's own slots, so the fork starts from
+    /// them and the live node still delivers them.
     edits: Option<super::host_edits::EditPost>,
     /// The width the live node renders at, which the second instance is
     /// loaded for.
@@ -186,6 +187,14 @@ where
         let live = self.live.upgrade().ok_or(PluginForkError::LiveGone)?;
         // Read before the state, so every value it shows is in the state.
         let delivered = self.delivery.delivered();
+        // Likewise the host's writes the plugin has not been handed: they are
+        // host state, the fork's to start from, and none is taken from the live
+        // node, whose blocks still deliver them.
+        let undelivered = self
+            .edits
+            .as_ref()
+            .map(super::host_edits::EditPost::undelivered)
+            .unwrap_or_default();
         let snapshot = {
             let mut instance = live.lock();
             let live_mode = instance.render_mode();
@@ -265,6 +274,12 @@ where
         }
 
         fork.params.seed(&delivered);
+        if let Some(post) = fork.edits.as_ref().map(super::host_edits::EditPort::post) {
+            for (id, value) in undelivered {
+                // A parameter the fork's plugin does not declare has no slot.
+                let _ = post.write(id, value);
+            }
+        }
         fork.transport = self.transport.forked(offline);
         fork.rate_delivery = RateDelivery::InPrepare;
         Ok(fork.bind(self.tempo.clone()))
