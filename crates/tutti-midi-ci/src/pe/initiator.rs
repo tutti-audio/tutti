@@ -455,7 +455,7 @@ pub struct PeInitiator {
     pending: Vec<InFlight>,
     reassembler: PeReassembler,
     /// The Subscription Ids the Responder may address, which decide how a
-    /// Subscription message is answered; the Resource and data of each live in
+    /// Subscription message is answered; the typed target and the data of each are in
     /// [`ResourceInitiator`](crate::ResourceInitiator)'s table.
     subscriptions: Vec<(SubscribeId, PeSubscribed)>,
 }

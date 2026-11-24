@@ -1418,7 +1418,8 @@ fn the_initiator_ends_a_subscription() {
 }
 
 /// The Subscription Ids the transaction layer answers for are the ones the
-/// Resource client holds data for.
+/// Resource client holds data for, in the same order. Ids only: the Resource of
+/// each is the per-table tests'.
 fn assert_one_table(link: &Link) {
     let answered: Vec<_> = link
         .init
