@@ -287,7 +287,8 @@ impl ShapeKind {
 impl SecondOrderShape {
     /// `input` through the second-order antialiased curve at a hardness per frame, into
     /// `output`, with the contract of [`ShapeKind::first_each`]: the history is the two previous
-    /// inputs, and a non-finite sample is 0 in it for the next two frames. The curve is a constant in each arm, so the loop is compiled for it.
+    /// inputs, and a non-finite sample is 0 in it for the next two frames. The curve is a
+    /// constant in each arm, so the loop is compiled for it.
     #[inline(always)]
     pub(super) fn second_each<F: Float>(
         self,

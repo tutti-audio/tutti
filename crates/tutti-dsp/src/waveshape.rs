@@ -469,7 +469,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let blended = self.drive.blended_frames(frames);
         let taken = self.drive.steps_taken();
         let form = self.shape.form;
-        if form == Form::Memoryless(kind) && signal.is_none() && blended == 0 {
+        if matches!(form, Form::Memoryless(_)) && signal.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {
                 let mut plane = output.plane_mut(c);

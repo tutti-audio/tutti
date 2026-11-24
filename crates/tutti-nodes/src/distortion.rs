@@ -581,30 +581,10 @@ mod tests {
         }
     }
 
-    /// A config passes the shape it is given to the node: for every curve, the memoryless shape
-    /// declares no tail and its first order a tail of one frame.
-    #[test]
-    fn a_config_takes_the_shape_it_is_given() {
-        for kind in KINDS {
-            let tail = |shape| {
-                prepared(DistortionNode::<f32>::from(DistortionConfig::new(
-                    1u16, shape,
-                )))
-                .shape()
-                .tail
-            };
-            assert_eq!(tail(Waveshape::new(kind)), Tail::None, "{kind:?}");
-            assert_eq!(
-                tail(Waveshape::new(kind).first_order()),
-                Tail::Finite(Samples::new(1)),
-                "{kind:?}"
-            );
-        }
-    }
-
     /// Antialiasing declares its delay, rounded to a whole frame, and the frames the history
-    /// rings as the node's tail: first order half a frame (declared 1), second a frame; at 2x oversampling the delay is a
-    /// fraction of a base frame that rounds into the cascade's.
+    /// rings as the node's tail: none for a memoryless shape and half a frame (declared 1) at
+    /// first order, for every curve; a frame at second order; at 2x oversampling the delay is
+    /// a fraction of a base frame that rounds into the cascade's.
     #[test]
     fn antialiasing_declares_its_delay_and_tail() {
         let node = |shape| {
@@ -612,21 +592,19 @@ mod tests {
                 DistortionConfig::new(1u16, shape).drive(Drive::new(1.0)),
             ))
         };
-        let clip = Waveshape::new(ShapeKind::HardClip);
-        for (shape, latency, tail) in [
-            (clip, 0, Tail::None),
-            (clip.first_order(), 1, Tail::Finite(Samples::new(1))),
-            (
-                Waveshape::second_order(SecondOrderShape::HardClip),
-                1,
-                Tail::Finite(Samples::new(2)),
-            ),
-            (
-                Waveshape::new(ShapeKind::Tanh).first_order(),
-                1,
-                Tail::Finite(Samples::new(1)),
-            ),
-        ] {
+        let every_kind = KINDS.into_iter().flat_map(|kind| {
+            let plain = Waveshape::new(kind);
+            [
+                (plain, 0, Tail::None),
+                (plain.first_order(), 1, Tail::Finite(Samples::new(1))),
+            ]
+        });
+        let second = [(
+            Waveshape::second_order(SecondOrderShape::HardClip),
+            1,
+            Tail::Finite(Samples::new(2)),
+        )];
+        for (shape, latency, tail) in every_kind.chain(second) {
             let declared = node(shape).shape();
             assert_eq!(declared.latency.samples().get(), latency, "{shape:?}");
             assert_eq!(declared.tail, tail, "{shape:?}");
