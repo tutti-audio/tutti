@@ -131,8 +131,9 @@ impl MpeLayout {
     /// The layout of `member_count` members from `first_member` up with
     /// `master` directly below the first or directly above the last, or `None`
     /// when the members run past channel 16 or the master is anywhere else.
-    #[must_use]
-    pub const fn new(
+    /// A persisted layout is read back through it.
+    #[cfg(feature = "serde")]
+    const fn new(
         master: MidiChannel,
         first_member: MidiChannel,
         member_count: MemberCount,
@@ -238,7 +239,7 @@ impl MpeLayout {
 /// The MIDI-CI MPE Profile's zone is a [`ProfileZone`], which has no
 /// Configuration Message:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0599
 /// use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
 /// use tutti_ump::{MidiChannel, MpeChannels, MpeZoneSpan};
 ///

@@ -35,13 +35,15 @@
 //!
 //! # The receive rules are a value
 //!
-//! Which message a channel takes and what switches a zone's MIDI Mode is
-//! `Rules`', one match per rule set: MPE 1.1 (M1-100 Appendix E, Table 5)
-//! or the MIDI-CI MPE Profile (M2-120 Appendix E, Table 15). A zone's kind
-//! picks them where its view is built: the zones of [`MpeMode`] are
-//! [`Mpe11Zone`]s and the zones [`set_profile`](MpeTranslator::set_profile)
-//! enables are [`ProfileZone`]s, so no branch elsewhere asks which is in
-//! force. A message the table prohibits is
+//! Which message a channel takes, what switches a zone's MIDI Mode and how a
+//! bend range reaches the members belong to `Rules`, one `impl` for both rule sets:
+//! MPE 1.1 (M1-100 Appendix E, Table 5) or the MIDI-CI MPE Profile (M2-120
+//! Appendix E, Table 15). A zone's kind picks them where its view is built:
+//! the zones of [`MpeMode`] are [`Mpe11Zone`]s and the zones
+//! [`set_profile`](MpeTranslator::set_profile) enables are [`ProfileZone`]s.
+//! The tag is not derivable from a view's values, since a Profile zone and an
+//! MPE 1.1 zone can hold the same ones, so the receive code asks `Rules` and
+//! nothing else which table is in force. A message the table prohibits is
 //! ignored (M1-100 §2.3.1). A channel in no zone is conventional and passes
 //! whole (M1-100 §2.2.1).
 //!
@@ -218,39 +220,6 @@ enum Receive {
     Accept,
     /// The message is dropped: the instrument never sees it.
     Ignore,
-}
-
-/// What a channel of `role` does with `voice` under `rules`, in a zone that is
-/// monophonic when `mono` (MIDI Mode 4 under MPE 1.1, a Monophonic Channel
-/// Response under the Profile).
-///
-/// Each table marks a message prohibited (P) for a sender, and for a receiver
-/// on the same row. A receiver ignores a message that is not for the channel it
-/// came on (M1-100 section 2.3.1). A prohibited message is therefore ignored,
-/// not acted on: acting on a message no conforming sender makes would only
-/// give a broken one something to break the zone with (an All Sound Off on
-/// the Manager Channel silencing every member, say).
-fn receive(rules: Rules, role: Role, voice: &Voice2, mono: bool) -> Receive {
-    match rules {
-        Rules::Mpe11 => mpe11_receive(role, voice, mono),
-        Rules::Profile => profile_receive(role, voice, mono),
-    }
-}
-
-/// The MIDI Mode a Control Change names, if it is a Mode message that
-/// switches between the two the specification has: under MPE 1.1, Mono Mode
-/// On (126) is Mode 4 and Poly Mode On (127) is Mode 3 (M1-100 section
-/// 2.2.4.3). The Profile has no such switch: both are prohibited, and the
-/// receiver's Channel Response is its own (M2-120 section 3.6).
-fn mode_switch(rules: Rules, controller: CCNumber) -> Option<bool> {
-    match rules {
-        Rules::Mpe11 => match controller.get() {
-            CC_MONO_ON => Some(true),
-            CC_POLY_ON => Some(false),
-            _ => None,
-        },
-        Rules::Profile => None,
-    }
 }
 
 /// Control Change numbers of the Channel Mode messages the tables name.
@@ -458,6 +427,63 @@ enum Rules {
     Mpe11,
     /// The MIDI-CI MPE Profile, Appendix E (Table 15).
     Profile,
+}
+
+impl Rules {
+    /// What a channel of `role` does with `voice`, in a zone that is
+    /// monophonic when `mono` (MIDI Mode 4 under MPE 1.1, a Monophonic Channel
+    /// Response under the Profile).
+    ///
+    /// Each table marks a message prohibited (P) for a sender, and for a
+    /// receiver on the same row. A receiver ignores a message that is not for
+    /// the channel it came on (M1-100 section 2.3.1). A prohibited message is
+    /// therefore ignored, not acted on: acting on a message no conforming
+    /// sender makes would only give a broken one something to break the zone
+    /// with (an All Sound Off on the Manager Channel silencing every member,
+    /// say).
+    fn receive(self, role: Role, voice: &Voice2, mono: bool) -> Receive {
+        match self {
+            Self::Mpe11 => mpe11_receive(role, voice, mono),
+            Self::Profile => profile_receive(role, voice, mono),
+        }
+    }
+
+    /// The MIDI Mode a Control Change names, if it is a Mode message that
+    /// switches between the two the specification has: under MPE 1.1, Mono
+    /// Mode On (126) is Mode 4 and Poly Mode On (127) is Mode 3 (M1-100
+    /// section 2.2.4.3). The Profile has no such switch: both are prohibited,
+    /// and the receiver's Channel Response is its own (M2-120 section 3.6).
+    fn mode_switch(self, controller: CCNumber) -> Option<bool> {
+        match self {
+            Self::Mpe11 => match controller.get() {
+                CC_MONO_ON => Some(true),
+                CC_POLY_ON => Some(false),
+                _ => None,
+            },
+            Self::Profile => None,
+        }
+    }
+
+    /// Whether a bend sensitivity (RPN #00/00) on a channel of `role` also sets
+    /// the members' per-note range (RPN #00/07). Under the Profile the
+    /// Manager's sets the one range of the Manager and every Member (M2-120
+    /// section 3.5); under MPE 1.1 a Member's is the range of every Member's
+    /// own bends (M1-100 section 2.2.5) and the Manager's is the zone's own.
+    fn bend_range_sets_per_note(self, role: Role) -> bool {
+        matches!(
+            (self, role),
+            (Self::Mpe11, Role::Member) | (Self::Profile, Role::Master)
+        )
+    }
+
+    /// Whether the translator takes a bend sensitivity on a channel of `role`
+    /// itself, sending its copies instead of passing it on. The Manager's goes
+    /// on ahead of its copies under both; a MPE 1.1 Member's is replaced by the
+    /// per-note range; a Profile Member's is prohibited, so the receive table
+    /// ignores it and it is not taken here.
+    fn takes_bend_range(self, role: Role) -> bool {
+        role == Role::Master || self == Self::Mpe11
+    }
 }
 
 /// One zone of the layout in force, as the receive rules read it, whichever
@@ -844,11 +870,7 @@ impl MpeTranslator {
                 out,
             );
         }
-        let per_note = match (zone.rules, role) {
-            (Rules::Mpe11, Role::Member) | (Rules::Profile, Role::Master) => true,
-            (Rules::Mpe11, Role::Master) | (Rules::Profile, Role::Member) => false,
-        };
-        if per_note {
+        if zone.rules.bend_range_sets_per_note(role) {
             send_rpns(
                 address.group,
                 event.0,
@@ -860,7 +882,7 @@ impl MpeTranslator {
             );
         }
         // The manager's went on above, ahead of its copies.
-        role == Role::Master || zone.rules == Rules::Mpe11
+        zone.rules.takes_bend_range(role)
     }
 
     /// Apply an MPE Configuration Message: it configures the zone whose master
@@ -935,7 +957,7 @@ impl MpeTranslator {
             return Some(*event);
         };
         let role = zone.role_of(ch);
-        if receive(zone.rules, role, &voice, zone.monophonic) == Receive::Ignore {
+        if zone.rules.receive(role, &voice, zone.monophonic) == Receive::Ignore {
             return None;
         }
         let master = zone.manager;
@@ -1128,7 +1150,7 @@ impl MpeTranslator {
                 // Section 2.2.4.3: a Mode message to the lowest numbered
                 // Member Channel of a zone, not to the Manager Channel,
                 // switches the zone between Mode 3 and Mode 4.
-                if let Some(mono) = mode_switch(zone.rules, controller)
+                if let Some(mono) = zone.rules.mode_switch(controller)
                     && zone.layout.first_member() == ch
                 {
                     state.mono[usize::from(zone.manager.get())] = mono;

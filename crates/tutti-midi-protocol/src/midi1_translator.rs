@@ -162,14 +162,13 @@ impl Midi1Translator {
         let Ok(message) = packet.into().decode() else {
             return;
         };
+        let mpe = matches!(self.per_note, PerNote::Mpe { .. });
         let (address, voice) = match message {
             Message::Midi2(address, voice) => (address, voice),
             // In the MPE mode a MIDI 1.0 voice message is the MIDI 2.0 one it
             // means (M2-104 D.3) and takes the same rules; otherwise it passes
             // unchanged.
-            Message::Midi1(address, voice) if matches!(self.per_note, PerNote::Mpe { .. }) => {
-                (address, Voice2::from(voice))
-            }
+            Message::Midi1(address, voice) if mpe => (address, Voice2::from(voice)),
             Message::Midi1(..) => {
                 midi1(message).for_each(&mut out);
                 return;
@@ -180,20 +179,20 @@ impl Midi1Translator {
             }
         };
         let extremes = self.extremes;
-        if let PerNote::Mpe { layout, members } = &mut self.per_note
-            && members.route(layout, extremes, address, voice, &mut out)
-        {
-            return;
-        }
-        // The zone is the destination of every other message (M2-120 sections
-        // 4.1 to 4.6: zone-wide messages, Program Change and Bank Select are
-        // the Manager Channel's), so the source channel names no MIDI 1.0
-        // channel.
-        let address = match &self.per_note {
-            PerNote::Mpe { layout, .. } => Address {
-                channel: layout.master_channel(),
-                ..address
-            },
+        let address = match &mut self.per_note {
+            PerNote::Mpe { layout, members } => {
+                if members.route(layout, extremes, address, voice, &mut out) {
+                    return;
+                }
+                // The zone is the destination of every other message (M2-120
+                // sections 4.1 to 4.6: zone-wide messages, Program Change and
+                // Bank Select are the Manager Channel's), so the source channel
+                // names no MIDI 1.0 channel.
+                Address {
+                    channel: layout.master_channel(),
+                    ..address
+                }
+            }
             PerNote::Dropped => address,
         };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
@@ -233,8 +232,7 @@ impl Midi1Translator {
             // Omni Off, Omni On, Mono Mode On and Poly Mode On are sent on no
             // MPE Channel (M2-120 section 4.7).
             Voice2::ControlChange { controller, .. }
-                if matches!(self.per_note, PerNote::Mpe { .. })
-                    && (124..=127).contains(&controller.get()) => {}
+                if mpe && (124..=127).contains(&controller.get()) => {}
             _ => plain(&mut out),
         }
     }

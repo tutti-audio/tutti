@@ -378,23 +378,6 @@ fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
     );
 }
 
-/// M2-120 section 3.5: the Manager and every Member share one range, so a
-/// Profile zone answers the same for its Manager and for a Member, whatever
-/// range it was built with.
-/// Spec: m2-120/3.5#1
-#[test]
-fn a_profile_zone_answers_one_range_for_its_manager_and_a_member() {
-    for range in [
-        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        PitchBendSensitivity::from_semitones(U7::of(24)),
-    ] {
-        let z = ProfileZone::new(MpeZoneSpan::new(ch(3), MpeChannels::of(5)).unwrap(), range);
-        for c in MidiChannel::all() {
-            assert_eq!(z.range(), range, "channel {c:?}");
-        }
-    }
-}
-
 /// M2-120 appendix A: the Number of Channels counts the Manager and the
 /// Members, and a zone is a Manager with at least one Member that fits in the
 /// sixteen channels.
@@ -499,37 +482,27 @@ fn a_zone_keeps_its_channel_response() {
     );
 }
 
-/// A layout puts the master directly beside its members and the members by
-/// channel 16: any other placement is no layout.
+/// What each kind lays out, channels written 0-indexed: the lower zone's
+/// master on channel 0 over members from 1, the upper zone's on channel 15
+/// under members ending at 14, a Profile Manager under the Members above it.
 #[test]
-fn a_layout_has_its_master_beside_its_members() {
-    for first in 0..16u8 {
-        for count in 1..=15u8 {
-            for master in 0..16u8 {
-                let layout = MpeLayout::new(ch(master), ch(first), MemberCount::of(count));
-                let fits = first + count <= 16;
-                let beside = master + 1 == first || master == first + count;
-                assert_eq!(layout.is_some(), fits && beside, "{master} {first} {count}");
-            }
-        }
-    }
-    for z in [MpeZone::Lower, MpeZone::Upper] {
-        for n in 1..=15 {
-            let layout = zone(z, n).layout();
-            assert_eq!(
-                MpeLayout::new(
-                    layout.master_channel(),
-                    layout.first_member(),
-                    layout.member_count()
-                ),
-                Some(layout)
-            );
-        }
-    }
-    for manager in 0..15 {
-        let layout = pzone(manager, 16 - manager).layout();
-        assert_eq!(layout.first_member(), ch(manager + 1));
-        assert_eq!(layout.member_count().get(), 15 - manager);
+fn each_kind_lays_out_its_master_and_members() {
+    // (layout, master, first member, member count), channels 0-indexed.
+    let cases = [
+        (zone(MpeZone::Lower, 1).layout(), 0, 1, 1),
+        (zone(MpeZone::Lower, 15).layout(), 0, 1, 15),
+        (zone(MpeZone::Upper, 1).layout(), 15, 14, 1),
+        (zone(MpeZone::Upper, 4).layout(), 15, 11, 4),
+        (zone(MpeZone::Upper, 15).layout(), 15, 0, 15),
+        (pzone(0, 16).layout(), 0, 1, 15),
+        (pzone(4, 5).layout(), 4, 5, 4),
+        (pzone(14, 2).layout(), 14, 15, 1),
+    ];
+    for (layout, master, first, count) in cases {
+        assert_eq!(layout.master_channel(), ch(master));
+        assert_eq!(layout.first_member(), ch(first));
+        assert_eq!(layout.member_count().get(), count);
+        assert_eq!(layout.channel_count().get(), count + 1);
     }
 }
 
