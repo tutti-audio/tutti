@@ -58,9 +58,5 @@ mod checks;
 // The one platform seam: the macOS half, or nothing.
 #[cfg(target_os = "macos")]
 mod os;
-#[cfg(not(target_os = "macos"))]
-mod os {}
-
-// Empty off macOS, where `os` has nothing to export.
-#[allow(unused_imports)]
-pub(crate) use os::*;
+#[cfg(target_os = "macos")]
+pub use os::*;

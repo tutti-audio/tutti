@@ -228,6 +228,9 @@ mod platform;
 mod platform;
 // Re-exported whole, so each platform module is also a path of the crate
 // (`tutti_au_host::offline`, `crate::bus`). Off macOS there is nothing public.
+#[cfg(target_os = "macos")]
+pub use platform::*;
+#[cfg(not(target_os = "macos"))]
 #[allow(unused_imports)]
 pub(crate) use platform::*;
 
