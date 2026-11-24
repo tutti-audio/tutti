@@ -87,21 +87,20 @@ fn chunks(actions: &[PeAction]) -> Vec<(PeMessageKind, PeChunk)> {
         .collect()
 }
 
-fn finished(actions: &[PeAction]) -> Vec<(PeRequestId, PeKind, PeOutcome)> {
+fn finished(actions: &[PeAction]) -> Vec<(PeRequestId, PeOutcome)> {
     actions
         .iter()
         .filter_map(|a| match a {
             PeAction::Finished {
                 request_id,
-                kind,
                 outcome,
-            } => Some((*request_id, *kind, outcome.clone())),
+            } => Some((*request_id, outcome.clone())),
             _ => None,
         })
         .collect()
 }
 
-fn one_finished(actions: &[PeAction]) -> (PeRequestId, PeKind, PeOutcome) {
+fn one_finished(actions: &[PeAction]) -> (PeRequestId, PeOutcome) {
     let mut all = finished(actions);
     assert_eq!(all.len(), 1, "{actions:?}");
     all.remove(0)
@@ -361,8 +360,8 @@ fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
         assert!(actions.is_empty(), "no Flow Control was asked: {actions:?}");
     }
     let actions = deliver(&mut i, chunks[chunks.len() - 1..].to_vec(), now);
-    let (finished_id, kind, outcome) = one_finished(&actions);
-    assert_eq!((finished_id, kind), (request, PeKind::Get));
+    let (finished_id, outcome) = one_finished(&actions);
+    assert_eq!(finished_id, request);
     let response = success(outcome);
     assert_eq!(response.status(), PeStatus::Ok);
     assert_eq!(response.header, reply);
@@ -377,7 +376,7 @@ fn a_reply_without_an_encoding_is_ascii_and_a_zlib_reply_inflates() {
     let (mut i, now) = ready(2);
     let (request, _) = i.start(get("State"), now).unwrap();
     let chunks = reply_chunks(request, ok(PeStatus::Ok), br#"{"a":1}"#);
-    let outcome = one_finished(&deliver(&mut i, chunks, now)).2;
+    let outcome = one_finished(&deliver(&mut i, chunks, now)).1;
     assert_eq!(success(outcome).body, br#"{"a":1}"#);
 
     let (request, _) = i.start(get("State"), now).unwrap();
@@ -385,7 +384,7 @@ fn a_reply_without_an_encoding_is_ascii_and_a_zlib_reply_inflates() {
     let mut reply = ok(PeStatus::Ok);
     reply.mutual_encoding = Some(PeEncoding::ZlibMcoded7);
     let wire = encode_body(PeEncoding::ZlibMcoded7, &body).unwrap();
-    let outcome = one_finished(&deliver(&mut i, reply_chunks(request, reply, &wire), now)).2;
+    let outcome = one_finished(&deliver(&mut i, reply_chunks(request, reply, &wire), now)).1;
     assert_eq!(success(outcome).body, body);
 }
 
@@ -401,7 +400,7 @@ fn a_body_that_does_not_decode_is_unreadable() {
         reply_chunks(request, reply, b"not zlib"),
         now,
     ))
-    .2;
+    .1;
     assert!(matches!(
         outcome,
         PeOutcome::Unreadable(PeUnreadable::Body(_))
@@ -429,7 +428,7 @@ fn every_status_ends_the_request_with_its_status_and_nothing_is_retried() {
         reply.message = PeMessage::new("why");
         let actions = deliver(&mut i, reply_chunks(request, reply.clone(), b""), now);
         assert_eq!(sent(&actions).len(), 0, "{status:?} is not retried");
-        let outcome = one_finished(&actions).2;
+        let outcome = one_finished(&actions).1;
         let response = match (class, outcome) {
             ('S', PeOutcome::Success(r))
             | ('R', PeOutcome::Retry(r))
@@ -453,7 +452,7 @@ fn a_notify_status_is_not_a_reply_status() {
         reply_chunks(request, ok(PeStatus::TimedOut), b""),
         now,
     ))
-    .2;
+    .1;
     assert_eq!(
         outcome,
         PeOutcome::Unreadable(PeUnreadable::NotAReplyStatus(PeStatus::TimedOut))
@@ -508,10 +507,7 @@ fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
     assert_eq!(nak.nak_sub_id2.get(), 0x34);
     assert_eq!(nak.status, NakStatus::Timeout);
     assert_eq!(raw(&nak.details)[0], request.get());
-    assert_eq!(
-        one_finished(&actions),
-        (request, PeKind::Get, PeOutcome::TimedOut)
-    );
+    assert_eq!(one_finished(&actions), (request, PeOutcome::TimedOut));
     assert_eq!(i.in_flight(), 0);
     assert_eq!(i.deadline(), None);
     // The Transaction is concluded: a reply that comes after it is for nothing, and
@@ -548,7 +544,7 @@ fn a_get_the_initiator_terminates_is_concluded_without_a_reply() {
         panic!("one NAK, got {ended:?}");
     };
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
-    assert!(matches!(one_finished(&ended).2, PeOutcome::TooLarge(_)));
+    assert!(matches!(one_finished(&ended).1, PeOutcome::TooLarge(_)));
     assert_eq!(i.in_flight(), 0);
     assert_eq!(i.deadline(), None);
     for (kind, chunk) in chunks[at..].iter().cloned() {
@@ -576,7 +572,7 @@ fn the_time_between_chunks_counts_from_each_chunk() {
             .is_empty()
     );
     let actions = i.on_timeout(now + 5 * SECOND);
-    assert_eq!(one_finished(&actions).2, PeOutcome::TimedOut);
+    assert_eq!(one_finished(&actions).1, PeOutcome::TimedOut);
     assert_eq!(naks(&actions).len(), 1);
     // The reply's remaining chunks are for nothing now.
     let (kind, second) = chunks[1].clone();
@@ -620,7 +616,7 @@ fn a_timeout_wait_adds_its_period_to_the_deadline() {
     i.on_message(&timeout_wait(request, 0), now + 9 * SECOND);
     assert_eq!(i.deadline(), Some(now + 12 * SECOND));
     assert_eq!(
-        one_finished(&i.on_timeout(now + 12 * SECOND)).2,
+        one_finished(&i.on_timeout(now + 12 * SECOND)).1,
         PeOutcome::TimedOut
     );
 }
@@ -668,7 +664,7 @@ fn a_timeout_wait_holds_a_reply_that_has_begun() {
     assert_eq!(i.deadline(), Some(now + 9 * SECOND));
     assert!(i.on_timeout(now + 8 * SECOND).is_empty());
     let last = deliver(&mut i, chunks[1..].to_vec(), now + 8 * SECOND);
-    assert!(success(one_finished(&last).2).body.len() == 200);
+    assert!(success(one_finished(&last).1).body.len() == 200);
 }
 
 // M2-103 §12.1.1: a NAK with Terminate and status data 0 from the Responder ends
@@ -688,11 +684,7 @@ fn a_terminate_nak_ends_the_request() {
     let actions = i.on_message(&terminate, now);
     assert_eq!(
         one_finished(&actions),
-        (
-            request,
-            PeKind::Get,
-            PeOutcome::Terminated(PeTerminator::Responder)
-        )
+        (request, PeOutcome::Terminated(PeTerminator::Responder))
     );
     assert!(sent(&actions).is_empty());
     assert_eq!(i.in_flight(), 0);
@@ -712,7 +704,7 @@ fn the_other_chunk_naks_end_the_request_with_their_signal() {
         let (request, _) = i.start(get("State"), now).unwrap();
         assert_eq!(request, id(0));
         let actions = i.on_message(&signal_message(PeTransaction::Get, signal), now);
-        assert_eq!(one_finished(&actions).2, PeOutcome::Refused(signal));
+        assert_eq!(one_finished(&actions).1, PeOutcome::Refused(signal));
     }
 }
 
@@ -763,8 +755,7 @@ fn a_set_sends_every_chunk_at_once_without_flow_control() {
     // The reply is the whole answer: the status of a Set (§7.4).
     let reply = reply_chunks(request, ok(PeStatus::Accepted), b"");
     let actions = deliver(&mut i, with_kind(reply, PeMessageKind::SET_REPLY), now);
-    let (_, kind, outcome) = one_finished(&actions);
-    assert_eq!(kind, PeKind::Set);
+    let (_, outcome) = one_finished(&actions);
     assert_eq!(success(outcome).status(), PeStatus::Accepted);
 }
 
@@ -849,7 +840,7 @@ fn a_set_under_flow_control_sends_a_chunk_per_ack_and_needs_none_for_the_last() 
     );
     let reply = reply_chunks(request, ok(PeStatus::Ok), b"");
     let actions = deliver(&mut i, with_kind(reply, PeMessageKind::SET_REPLY), now);
-    assert_eq!(success(one_finished(&actions).2).status(), PeStatus::Ok);
+    assert_eq!(success(one_finished(&actions).1).status(), PeStatus::Ok);
 }
 
 // M2-103 §15.4: a NAK 0x12 asks for the most recent chunk again, and it is the
@@ -876,7 +867,7 @@ fn a_resend_nak_sends_the_chunk_again_and_the_fourth_ends_the_transaction() {
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
     assert_eq!(nak.nak_sub_id2.get(), 0x36);
     assert_eq!(
-        one_finished(&actions).2,
+        one_finished(&actions).1,
         PeOutcome::Terminated(PeTerminator::Initiator)
     );
     assert_eq!(i.in_flight(), 0);
@@ -924,10 +915,7 @@ fn a_chunk_with_no_ack_is_sent_again_after_three_seconds_and_given_up_after_thre
         panic!("one NAK, got {actions:?}");
     };
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
-    assert_eq!(
-        one_finished(&actions),
-        (request, PeKind::Set, PeOutcome::TimedOut)
-    );
+    assert_eq!(one_finished(&actions), (request, PeOutcome::TimedOut));
 }
 
 // M2-103 §12.2.1 holds for the wait on an ACK too.
@@ -1163,8 +1151,8 @@ fn start_subscription_is_a_get_shaped_header_and_the_reply_names_the_id() {
     );
     assert_eq!(i.subscriptions().count(), 0);
     let actions = deliver(&mut i, subscribe_reply(request, "sub1"), now);
-    let (finished_id, kind, outcome) = one_finished(&actions);
-    assert_eq!((finished_id, kind), (request, PeKind::Subscribe));
+    let (finished_id, outcome) = one_finished(&actions);
+    assert_eq!(finished_id, request);
     assert_eq!(
         success(outcome).header.subscribe_id,
         SubscribeId::new("sub1")
@@ -1187,7 +1175,7 @@ fn a_start_that_gives_no_id_or_fails_holds_no_subscription() {
         reply_chunks(request, ok(PeStatus::Ok), b""),
         PeMessageKind::SUBSCRIPTION_REPLY,
     );
-    let outcome = one_finished(&deliver(&mut i, no_id, now)).2;
+    let outcome = one_finished(&deliver(&mut i, no_id, now)).1;
     assert_eq!(outcome, PeOutcome::Unreadable(PeUnreadable::NoSubscribeId));
     let (request, _) = i
         .start(PeCall::Subscribe(PeGet::new(name("X"))), now)
@@ -1196,7 +1184,7 @@ fn a_start_that_gives_no_id_or_fails_holds_no_subscription() {
         reply_chunks(request, ok(PeStatus::NotFound), b""),
         PeMessageKind::SUBSCRIPTION_REPLY,
     );
-    let outcome = one_finished(&deliver(&mut i, refused, now)).2;
+    let outcome = one_finished(&deliver(&mut i, refused, now)).1;
     assert!(matches!(outcome, PeOutcome::Failed(_)));
     assert_eq!(i.subscriptions().count(), 0);
 }
@@ -1357,8 +1345,8 @@ fn the_initiator_ends_a_subscription() {
         reply_chunks(request, ok(PeStatus::Ok), b""),
         PeMessageKind::SUBSCRIPTION_REPLY,
     );
-    let (finished_id, kind, outcome) = one_finished(&deliver(&mut i, reply, now));
-    assert_eq!((finished_id, kind), (request, PeKind::Unsubscribe));
+    let (finished_id, outcome) = one_finished(&deliver(&mut i, reply, now));
+    assert_eq!(finished_id, request);
     assert_eq!(success(outcome).status(), PeStatus::Ok);
 }
 
@@ -1420,21 +1408,13 @@ fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
     let actions = i.on_message(&notify(set_id, PeStatus::Terminate), now);
     assert_eq!(
         one_finished(&actions),
-        (
-            set_id,
-            PeKind::Set,
-            PeOutcome::Terminated(PeTerminator::Responder)
-        )
+        (set_id, PeOutcome::Terminated(PeTerminator::Responder))
     );
     assert!(sent(&actions).is_empty());
     let actions = i.on_message(&notify(get_id, PeStatus::Terminate), now);
     assert_eq!(
         one_finished(&actions),
-        (
-            get_id,
-            PeKind::Get,
-            PeOutcome::Terminated(PeTerminator::Responder)
-        )
+        (get_id, PeOutcome::Terminated(PeTerminator::Responder))
     );
     assert_eq!(i.in_flight(), 0);
     // Both IDs are free again.
@@ -1453,7 +1433,6 @@ fn a_notify_timed_out_ends_the_request_as_a_timeout_nak() {
         one_finished(&actions),
         (
             request,
-            PeKind::Get,
             PeOutcome::Refused(PeSignal::TimedOut {
                 request_id: request
             })
@@ -1490,7 +1469,7 @@ fn a_notify_timeout_wait_holds_the_request_and_a_reply_that_has_begun() {
     i.on_message(&notify(request, PeStatus::TimeoutWait), now + 6 * SECOND);
     assert_eq!(i.deadline(), Some(now + 11 * SECOND));
     let last = deliver(&mut i, chunks[1..].to_vec(), now + 10 * SECOND);
-    assert_eq!(success(one_finished(&last).2).body.len(), 200);
+    assert_eq!(success(one_finished(&last).1).body.len(), 200);
 }
 
 // A Notify of another Request ID, from another device, to another device or with

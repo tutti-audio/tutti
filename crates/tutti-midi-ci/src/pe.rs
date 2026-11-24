@@ -121,8 +121,8 @@ pub use header::{
     PeSubscription, PeUpdateCommand,
 };
 pub use initiator::{
-    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeKind,
-    PeNotification, PeOutcome, PeResponse, PeSet, PeSettings, PeSubscribed, PeUnreadable,
+    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeNotification,
+    PeOutcome, PeResponse, PeSet, PeSettings, PeSubscribed, PeUnreadable,
 };
 pub use limits::{
     MediaType, PeMessage, PeTextError, PropertyName, PropertyNameError, ResourceId, ResourceName,
