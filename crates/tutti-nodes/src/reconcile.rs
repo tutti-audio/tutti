@@ -214,6 +214,8 @@ struct Bound {
 impl Bound {
     /// Whether a lane built for `self` still serves `other`.
     fn same(&self, other: &Self) -> bool {
+        // An edge's or a mix's entry makes its knob cell and range cell
+        // together, so the knob's identity names both.
         self.drive == other.drive
             && self.generation == other.generation
             && match (&self.knob, &other.knob) {
@@ -484,12 +486,11 @@ struct Memo {
 
 /// The depth of each depth route, by bits: the one depth read when compiled
 /// (a route into a param is read by its lane from the cell).
-fn scalers(decl: &Declarations<'_>) -> Vec<(RouteKey, u64)> {
+fn scalers<'a>(decl: &Declarations<'a>) -> impl Iterator<Item = (RouteKey, u64)> + 'a {
     decl.routes
         .iter()
         .filter(|(_, route)| matches!(route.to, RouteTarget::Depth(_)))
         .map(|(key, route)| (*key, route.depth.load().get().to_bits()))
-        .collect()
 }
 
 fn same_target(a: &TargetDecl, b: &TargetDecl) -> bool {
@@ -516,7 +517,7 @@ impl Memo {
             && self.epoch == editor.play_reading().epoch
             && self.sources.as_slice() == decl.sources
             && self.routes.as_slice() == decl.routes
-            && self.scalers == scalers(decl)
+            && self.scalers.iter().copied().eq(scalers(decl))
             && self.targets.len() == decl.targets.len()
             && self
                 .targets
@@ -1031,7 +1032,7 @@ impl Modulation {
             self.memo = Some(Memo {
                 sources: decl.sources.to_vec(),
                 routes: decl.routes.to_vec(),
-                scalers: scalers(decl),
+                scalers: scalers(decl).collect(),
                 targets: decl.targets.to_vec(),
                 resolved,
                 feeds,

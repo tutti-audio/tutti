@@ -197,7 +197,9 @@ pub struct RouteDecl {
     /// A fraction of the target's range (of the scale, for a depth route).
     /// The cell a route into a param binds to its layer: the lane reads it at
     /// every evaluation, so a write to it republishes no program. A depth
-    /// route's is read when compiled.
+    /// route's is read when compiled. A host keeps the cell across applies: a
+    /// route rebuilt with a new cell is a changed route (every lane it feeds
+    /// is recompiled and republished).
     pub depth: Param<Bipolar>,
     /// Both ways or one.
     pub polarity: Polarity,
@@ -209,7 +211,7 @@ impl PartialEq for RouteDecl {
     fn eq(&self, other: &Self) -> bool {
         self.source == other.source
             && self.to == other.to
-            && Arc::ptr_eq(&self.depth.as_atomic(), &other.depth.as_atomic())
+            && self.depth.ptr_eq(&other.depth)
             && self.polarity == other.polarity
             && self.curve == other.curve
     }

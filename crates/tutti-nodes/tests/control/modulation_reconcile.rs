@@ -1568,14 +1568,11 @@ fn a_steady_apply_is_skipped_and_renders_the_same() {
     }
 }
 
-/// **A depth write to a route that a depth route scales lands from the cell.**
-/// A macro of 1 at depth 0.2 on probe 1's cutoff (`0..=1000`, knob 500),
-/// scaled by a macro of 0.5 through a depth route of depth 1: the offset is
-/// `1000 * 0.2 * 1 * 0.5` = 100, so 600. Writing the scaled route's depth to
-/// 0.6 after a steady state commits and republishes nothing, and the next
-/// block reads `1000 * 0.6 * 0.5` = 300, so 800.
-#[test]
-fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
+/// The rig with a macro of 1 at depth 0.2 on probe 1's cutoff (`0..=1000`,
+/// knob 500), scaled by a macro of 0.5 through a depth route of depth 1:
+/// the offset is `1000 * 0.2 * 1 * 0.5` = 100, so 600. Steady; returns the
+/// scaled route and its depth route.
+fn scaled_rig() -> (Rig, RouteKey, RouteKey) {
     let mut r = rig(128);
     r.decl.routes.clear();
     r.decl.sources.clear();
@@ -1591,15 +1588,46 @@ fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
     render(&mut r.ed, &mut r.exec, 128, 128);
     reapply(&mut r);
     r.m.commit(&mut r.ed).expect("commits");
-    let at = |r: &mut Rig| render(&mut r.ed, &mut r.exec, 128, 1_024)[0][1_023];
-    let near = |got: f32, want: f32| assert!((got - want).abs() < 1e-3, "{got} is not {want}");
-    near(at(&mut r), 600.0);
+    near(tail(&mut r), 600.0);
     steady(&mut r);
+    (r, scaled, by)
+}
 
+/// The probe's last frame after 1024 more.
+fn tail(r: &mut Rig) -> f32 {
+    render(&mut r.ed, &mut r.exec, 128, 1_024)[0][1_023]
+}
+
+fn near(got: f32, want: f32) {
+    assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+}
+
+/// **A depth write to a route that a depth route scales lands from the cell.**
+/// In [`scaled_rig`]'s state (600), writing the scaled route's depth to 0.6
+/// after a steady state commits and republishes nothing, and the next
+/// block reads `1000 * 0.6 * 0.5` = 300, so 800.
+#[test]
+fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
+    let (mut r, scaled, _) = scaled_rig();
     r.decl.set_depth(scaled, 0.6);
     let applied = reapply(&mut r);
     assert!(!applied.commit && applied.republished.is_empty());
-    near(at(&mut r), 800.0);
+    near(tail(&mut r), 800.0);
+}
+
+/// **A depth route's own depth write is applied.** The depth route's cell is
+/// read when compiled, so only the memo's record of it makes the apply run:
+/// from [`scaled_rig`]'s state (scaled depth 0.2, scale `0.5 * 1`), writing
+/// the depth route's depth to 0.5 republishes the cutoff's program without a
+/// commit, and the next block reads `1000 * 0.2 * (0.5 * 0.5)` = 50, so 550.
+#[test]
+fn a_depth_routes_own_depth_write_is_applied() {
+    let (mut r, _, by) = scaled_rig();
+    r.decl.set_depth(by, 0.5);
+    let applied = reapply(&mut r);
+    assert!(!applied.commit);
+    assert_eq!(applied.republished, vec![cutoff_of(1)]);
+    near(tail(&mut r), 550.0);
 }
 
 /// A source edit (an LFO's rate) is republished.
