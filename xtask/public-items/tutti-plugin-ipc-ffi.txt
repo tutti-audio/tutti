@@ -28,7 +28,6 @@ fn header::SlabHeader::recheck
 fn header::SlabHeader::sequence
 fn header::SlabHeader::zeroed
 fn header::slot_for
-fn inherit::unix::inherit_only_stdio
 fn lane::unix::LaneWire::fresh
 fn lane::unix::receive_lane
 fn lane::unix::send_lane

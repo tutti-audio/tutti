@@ -19,9 +19,7 @@ enum other::discovery::AuComponentRef
 enum other::discovery::NotRegistered
 fn component::AuType::receives_midi
 fn macos::aupreset::AuPresetIdentity::matches
-fn macos::aupreset::load_preset_file
 fn macos::aupreset::read_preset_metadata
-fn macos::aupreset::save_preset_file
 fn macos::bus::AuChannelConfig::admits
 fn macos::bus::AuChannelConfig::requires_matching_counts
 fn macos::bus::AuChannelCount::admits
@@ -45,12 +43,6 @@ fn macos::handle::AuHandle::component
 fn macos::handle::AuHandle::get_name
 fn macos::handle::AuHandle::new
 fn macos::handle::AuHandle::unit
-fn macos::identity::context_name
-fn macos::identity::icon_location
-fn macos::identity::nick_name
-fn macos::identity::parameters_for_overview
-fn macos::identity::set_context_name
-fn macos::identity::set_nick_name
 fn macos::instance::AuLoaded::add_parameter_midi_mapping
 fn macos::instance::AuLoaded::add_render_notify
 fn macos::instance::AuLoaded::au_type
@@ -126,14 +118,6 @@ fn macos::midi_map::AuMidiMapping::control_change
 fn macos::midi_map::AuMidiMapping::control_change_any_channel
 fn macos::midi_map::AuMidiMapping::targets_same_parameter
 fn macos::midi_map::MidiTrigger::is_note_command
-fn macos::midi_map::add
-fn macos::midi_map::all
-fn macos::midi_map::arm_hot_map
-fn macos::midi_map::hot_map
-fn macos::midi_map::hot_map_pending
-fn macos::midi_map::remove
-fn macos::midi_map::set_all
-fn macos::midi_map::supports_parameter_midi_mapping
 fn macos::offline::process_push
 fn macos::offline::process_push_multiple
 fn macos::parameters::DisplayCurve::from_flags

@@ -2,9 +2,19 @@
 # sorted (`cargo xtask write-public-items` rewrites this file from the tree).
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
+enum checks::blocks::BlockField
+enum checks::blocks::BlockRefusal
+enum checks::find::FindError
+enum checks::notification::Notification
 enum os::error::Error
 enum os::error::Operation
 enum os::ump_endpoints::UmpEndpointsError
+fn checks::notification::Notification::changes_devices
+fn checks::notification::Notification::from_message_id
+fn checks::os_status::OsStatus::get
+fn checks::os_status::OsStatus::new
+fn checks::unique_id::UniqueId::get
+fn checks::unique_id::UniqueId::new
 fn os::client::StartClient::deadline
 fn os::client::StartClient::gave_up_at
 fn os::client::StartClient::new
@@ -43,6 +53,8 @@ fn os::ump_endpoint::UmpSender::faults
 fn os::ump_endpoint::UmpSender::send
 fn os::ump_endpoint::UmpSender::truncated
 fn os::ump_endpoints::ump_endpoints
+struct checks::os_status::OsStatus
+struct checks::unique_id::UniqueId
 struct os::client::SharedClient
 struct os::client::StartClient
 struct os::endpoint::Destination

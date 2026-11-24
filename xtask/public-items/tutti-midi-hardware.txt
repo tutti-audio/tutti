@@ -24,7 +24,6 @@ enum session::Polled
 enum stream::Basis
 enum stream::InputTiming
 enum virtual_endpoint::VirtualProtocol
-fn backend::coremidi::CoreMidiEndpoints::new
 fn ci::CiPeerInfo::group
 fn ci::CiPeerInfo::id
 fn ci::CiPeerInfo::muid
@@ -192,8 +191,6 @@ fn virtual_endpoint::VirtualSpec::name
 fn virtual_endpoint::VirtualSpec::new
 fn virtual_endpoint::VirtualSpec::protocol
 mod test_support
-struct backend::coremidi::CoreMidiEndpoints
-struct backend::coremidi::virtual_endpoint::UmpVirtualEndpoint
 struct capability::OsEndpoint
 struct ci::CiPeerInfo
 struct ci::PeerId
