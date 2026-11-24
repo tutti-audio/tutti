@@ -706,7 +706,7 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
             rate,
             tutti_units::Seconds::new(0.5).to_samples(rate),
             Samples::new(0),
-            Samples::new(0),
+            tutti_export::TailPolicy::Frames(Samples::ZERO),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -796,7 +796,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
             SampleRate::of(SAMPLE_RATE),
             tutti_units::Seconds::new(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
             Samples::new(0),
-            Samples::new(0),
+            tutti_export::TailPolicy::Frames(Samples::ZERO),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -884,7 +884,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
                 SampleRate::of(SAMPLE_RATE),
                 tutti_units::Seconds::new(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
                 Samples::new(0),
-                Samples::new(0),
+                tutti_export::TailPolicy::Frames(Samples::ZERO),
             )
             .expect("a render")
             .event_loss(policy),
@@ -1286,7 +1286,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
             rate,
             tutti_units::Seconds::new(0.1).to_samples(rate),
             latency,
-            Samples::new(0),
+            tutti_export::TailPolicy::Frames(Samples::ZERO),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -1466,7 +1466,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
                 rate,
                 tutti_units::Seconds::new(0.5).to_samples(rate),
                 Samples::new(0),
-                Samples::new(0),
+                tutti_export::TailPolicy::Frames(Samples::ZERO),
             )
             .expect("a render"),
             tutti_buffers::ChannelLayout::STEREO,

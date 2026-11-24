@@ -5,7 +5,15 @@ use tutti_units::SampleRate;
 /// The plan of a job of one second at 48 kHz, trimming `latency` and keeping
 /// `tail`.
 fn plan(latency: Samples, tail: Samples) -> RenderPlan {
-    RenderPlan::of(&Job::new(SampleRate::SR_48K, Samples::new(48_000), latency, tail).unwrap())
+    RenderPlan::of(
+        &Job::new(
+            SampleRate::SR_48K,
+            Samples::new(48_000),
+            latency,
+            TailPolicy::Frames(tail),
+        )
+        .unwrap(),
+    )
 }
 
 /// Note there is no graph in any of these: the plan is arithmetic, so it is

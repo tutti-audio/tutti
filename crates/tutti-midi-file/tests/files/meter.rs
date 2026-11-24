@@ -4,13 +4,13 @@
 
 use crate::common::read_bytes;
 use crate::common::{metrical, sequences};
-use tutti_midi_file::MidiFile;
+use tutti_midi_file::StandardMidiFile;
 use tutti_music::{BeatsPerBar, Meter, TimeSignature};
 use tutti_units::{BarNumber, Beat};
 
 /// An SMF of `format` over 480 ticks a quarter, one MTrk per `events` list,
 /// each ended by End of Track.
-fn smf(format: u16, tracks: &[&[u8]]) -> MidiFile {
+fn smf(format: u16, tracks: &[&[u8]]) -> StandardMidiFile {
     let mut bytes = b"MThd\0\0\0\x06".to_vec();
     bytes.extend(format.to_be_bytes());
     bytes.extend((tracks.len() as u16).to_be_bytes());

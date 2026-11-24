@@ -23,11 +23,10 @@
 //! - An event of several words is several messages at its tick, one a word.
 
 use tutti_ump::{
-    FlexAddress, LyricKind, MidiGroup, Syllable, SyllableBody, SyllableEnd, flex_lyric_packets,
+    FlexAddress, LyricKind, MidiGroup, Syllable, SyllableBody, SyllableEnd, Ump, flex_lyric_packets,
 };
 
-use super::{DropReason, LyricChange, event};
-use crate::FileEvent;
+use super::{DropReason, LyricChange};
 
 /// One syllable and how it ends.
 #[derive(Debug)]
@@ -81,7 +80,7 @@ impl Lyrics {
     /// reading its text changed.
     pub(super) fn into_events(
         self,
-    ) -> impl Iterator<Item = (usize, Result<Vec<FileEvent>, DropReason>, Vec<LyricChange>)> {
+    ) -> impl Iterator<Item = (usize, Result<Vec<Ump>, DropReason>, Vec<LyricChange>)> {
         self.events.into_iter().map(|(index, syllables, changes)| {
             let events = syllables.map(|syllables| {
                 syllables
@@ -93,7 +92,6 @@ impl Lyrics {
                             LyricKind::Lyrics,
                             &Syllable { body, end },
                         )
-                        .map(event)
                         .collect::<Vec<_>>()
                     })
                     .collect()

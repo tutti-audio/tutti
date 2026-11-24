@@ -17,8 +17,11 @@ use tutti_ump::{
 
 use unicode_normalization::UnicodeNormalization;
 
-use super::{Container, Lead, SysEx};
-use crate::{FileEvent, Meta, MetricalView, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
+use super::{Lead, SysEx};
+use crate::{
+    ClipFile, ClipHeader, ClipSequence, FileEvent, Meta, MetricalView, MicrosPerQuarter, TextKind,
+    Tick,
+};
 
 use lyrics::Lyrics;
 
@@ -28,11 +31,8 @@ mod lyrics;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToClipError {
-    /// The file is a Clip File already.
-    #[error("the file is a Clip File already")]
-    AlreadyClip,
     /// A gap in the file needs more Null restarts than the writer holds
-    /// ([`TracksError::TooLarge`](crate::TracksError::TooLarge)).
+    /// ([`ClipBuildError::TooLarge`](crate::ClipBuildError::TooLarge)).
     #[error("the clip is larger than the writer holds")]
     TooLarge,
 }
@@ -186,7 +186,7 @@ pub struct Moved {
 #[non_exhaustive]
 pub struct Converted {
     /// The Clip File.
-    pub clip: MidiFile,
+    pub clip: ClipFile,
     /// What has no UMP form.
     pub dropped: Vec<Dropped>,
     /// The tempo and time signature events that were off their grid and sit
@@ -256,18 +256,11 @@ enum Rank {
     Other,
 }
 
-pub(super) fn event(ump: Ump) -> FileEvent {
-    match ump.decode() {
-        Ok(message) => FileEvent::Message(message),
-        Err(unknown) => FileEvent::Unknown(unknown),
-    }
+fn flex(flex: Flex) -> Ump {
+    Message::Flex(MidiGroup::FIRST, flex).into()
 }
 
-fn flex(flex: Flex) -> FileEvent {
-    FileEvent::Message(Message::Flex(MidiGroup::FIRST, flex))
-}
-
-fn tempo(micros_per_quarter: MicrosPerQuarter) -> FileEvent {
+fn tempo(micros_per_quarter: MicrosPerQuarter) -> Ump {
     flex(Flex::SetTempo(FlexTempo::from_micros_per_quarter(
         micros_per_quarter.get(),
     )))
@@ -281,7 +274,7 @@ fn signature(
     denominator: u8,
     thirty_seconds: u8,
     clocks_per_click: u8,
-) -> [FileEvent; 2] {
+) -> [Ump; 2] {
     [
         flex(Flex::SetTimeSignature(FlexTimeSignature {
             numerator: numerator.get(),
@@ -345,15 +338,15 @@ fn message_text(bytes: &[u8]) -> std::result::Result<String, DropReason> {
 }
 
 /// A text as its Flex packets, or why it has none.
-fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>, DropReason> {
+fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<Ump>, DropReason> {
     let text = Text::try_from(&*message_text(bytes)?).map_err(|e| DropReason::Text(e.into()))?;
     let packets = flex_text_packets(MidiGroup::FIRST, FlexAddress::Group, kind, &text);
-    Ok(packets.map(event).collect())
+    Ok(packets.collect())
 }
 
 /// What one of a track's [`Lead`]s becomes: its clip events, or the reason it
 /// has none.
-fn convert_lead(track: usize, lead: &Lead) -> std::result::Result<Vec<FileEvent>, DropReason> {
+fn convert_lead(track: usize, lead: &Lead) -> std::result::Result<Vec<Ump>, DropReason> {
     match lead {
         // SMF 1.0 section 3.3: in a format 0 track, or the first track of a
         // format 1 file, the name is the sequence's, otherwise the track's. The
@@ -368,11 +361,11 @@ fn convert_lead(track: usize, lead: &Lead) -> std::result::Result<Vec<FileEvent>
 
 /// What one SMF event becomes: its clip events (in order) and where among its
 /// tick's they go, or the reason it has none.
-fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropReason> {
+fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<Ump>), DropReason> {
     let other = |events| Ok((Rank::Other, events));
     match ev {
         // Already a UMP: a MIDI 1.0 channel message on the first Group.
-        FileEvent::Message(_) | FileEvent::Unknown(_) => other(vec![ev.clone()]),
+        FileEvent::Message(message) => other(vec![Ump::from(*message)]),
         // A divided message's first packet is not one complete message.
         FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),
         FileEvent::SysEx(SysEx::Complete(body)) => {
@@ -383,7 +376,7 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropRe
             let whole: Vec<u8> = std::iter::once(0xF0).chain(body).chain([0xF7]).collect();
             let message =
                 SysexMessage::from_framed(&whole).map_err(|_| DropReason::SysexNotComplete)?;
-            other(message.packets(MidiGroup::FIRST).map(event).collect())
+            other(message.packets(MidiGroup::FIRST).collect())
         }
         FileEvent::Escape(_) => Err(DropReason::NoSuccessor),
         FileEvent::Meta(meta) => match meta {
@@ -446,10 +439,7 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropRe
 /// clip events read with the lyrics around it.
 enum Source {
     Event,
-    Lyric(
-        std::result::Result<Vec<FileEvent>, DropReason>,
-        Vec<LyricChange>,
-    ),
+    Lyric(std::result::Result<Vec<Ump>, DropReason>, Vec<LyricChange>),
 }
 
 impl MetricalView<'_> {
@@ -531,36 +521,31 @@ impl MetricalView<'_> {
     /// file, or before one it followed, by less than the grid step. The notes
     /// keep their own ticks and their order among themselves.
     ///
-    /// The [header](Track::header) is empty: the sequence data carries the
+    /// The [header](ClipFile::header) is empty: the sequence data carries the
     /// tempo, which the spec's section 7.1.1 asks.
     ///
     /// # Errors
     ///
-    /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::TooLarge`]
-    /// if the writer cannot hold the clip.
+    /// [`ToClipError::TooLarge`] if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
     pub fn to_clip(self) -> Result<Converted, ToClipError> {
         let Self {
             file,
             ticks_per_quarter: tpq,
         } = self;
-        if matches!(file.container, Container::Clip(_)) {
-            return Err(ToClipError::AlreadyClip);
-        }
-
         // Track order, then the track's own: the stable sort by tick keeps it.
         let mut all: Vec<(Tick, usize, &FileEvent)> = file
             .tracks()
             .iter()
             .enumerate()
-            .flat_map(|(i, t)| t.events.iter().map(move |(tick, ev)| (*tick, i, ev)))
+            .flat_map(|(i, t)| t.events().iter().map(move |(tick, ev)| (*tick, i, ev)))
             .collect();
         all.sort_by_key(|&(tick, ..)| tick);
 
         let end = file
             .tracks()
             .iter()
-            .map(|t| t.end)
+            .map(|t| t.end())
             .max()
             .unwrap_or_default();
         let tempo_step = whole_tick_step(u64::from(tpq.get()), 24);
@@ -634,7 +619,7 @@ impl MetricalView<'_> {
                     && matches!(l.event, FileEvent::Meta(m) if wanted(m))
             })
         };
-        let mut placed: Vec<(Tick, Rank, FileEvent)> = Vec::new();
+        let mut placed: Vec<(Tick, Rank, Ump)> = Vec::new();
         if !live_at_start(|m| m.bpm().is_some()) {
             placed.push((Tick(0), Rank::Tempo, tempo(MicrosPerQuarter::of(500_000))));
         }
@@ -736,15 +721,14 @@ impl MetricalView<'_> {
         // Stable: within a tick and rank, the merge order.
         placed.sort_by_key(|&(tick, rank, _)| (tick, rank));
 
-        let sequence = Track::from_read(
-            Vec::new(),
-            Tick(0),
+        let sequence = ClipSequence::from_read(
             placed.into_iter().map(|(tick, _, e)| (tick, e)).collect(),
             end,
         );
-        // The sequence is ordered, holds packets only and has no header, so
-        // the one rule it can break is the writer's size.
-        let clip = MidiFile::clip(tpq, sequence).map_err(|_| ToClipError::TooLarge)?;
+        // The sequence is ordered, holds packets only and the header is empty,
+        // so the one rule it can break is the writer's size.
+        let clip =
+            ClipFile::new(tpq, ClipHeader::new(), sequence).map_err(|_| ToClipError::TooLarge)?;
         Ok(Converted {
             clip,
             dropped,
