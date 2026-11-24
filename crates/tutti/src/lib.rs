@@ -380,7 +380,7 @@ pub mod dsp {
     pub use tutti_dsp::{
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
-        BandPeak, Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth,
+        BandAbsorption, Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth,
         ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, ClipperDrive,
         ClipperDriveError, CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm,
         Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator, Distance, DistanceControls,

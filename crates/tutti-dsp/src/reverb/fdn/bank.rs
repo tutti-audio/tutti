@@ -532,8 +532,8 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
             }
         }
 
-        if let Some(Absorption::Bands { crossover, .. }) = f.lines.first().map(|l| l.absorption) {
-            set_poles(t, crossover, self.rate);
+        if let Some(Absorption::Bands(b)) = f.lines.first().map(|l| l.absorption) {
+            set_poles(t, b.crossover(), self.rate);
         }
         let flat = F::from_design(1.0 / (n as f64).sqrt());
         for j in 0..n {

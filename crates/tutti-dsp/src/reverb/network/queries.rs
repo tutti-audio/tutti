@@ -316,6 +316,17 @@ impl Fdn {
             .fold(1.0, f64::max)
     }
 
+    /// Whether no two lines have the same centre length: the echoes of lines of different
+    /// lengths coincide only at a common multiple of the lengths. Pairwise, so quadratic in the
+    /// line count (at most 64 lines).
+    fn lengths_distinct(&self) -> bool {
+        let lines = self.lines.as_slice();
+        lines
+            .iter()
+            .enumerate()
+            .all(|(i, a)| lines[i + 1..].iter().all(|b| a.length != b.length))
+    }
+
     /// Whether every gain is 1 (within a tolerance), `A` is orthogonal and the
     /// lines can be analysed: a loop that loses nothing. Marginal by
     /// construction: the tolerances allow a growth of at most
@@ -523,7 +534,8 @@ impl System for Network {
     /// late one is the sum of two that coincide: a margin for two echoes (6 dB when two or
     /// more lines can sum, none for one), checked against the floor tests of the reverbs, not
     /// a proof. More than two lines' echoes coincide only at a common multiple of their
-    /// lengths, which the designs keep mutually prime and far past any tail. It uses the bound, not the estimate, so it never
+    /// lengths, far past any tail while the lengths are pairwise distinct (the designs keep
+    /// them mutually prime); a network with two equal lengths takes the full `n`. It uses the bound, not the estimate, so it never
     /// undercuts a mixing network whose lines differ or an absorption that rises between
     /// its bands.
     ///
@@ -554,8 +566,13 @@ impl System for Network {
                     if f.is_lossless() {
                         return DecayTime::Unbounded;
                     }
-                    let depth =
-                        depth + 20.0 * libm::log10(f.coincident_lines(self.width.get()).min(2.0));
+                    let lines = f.coincident_lines(self.width.get());
+                    let lines = if f.lengths_distinct() {
+                        lines.min(2.0)
+                    } else {
+                        lines
+                    };
+                    let depth = depth + 20.0 * libm::log10(lines);
                     let seconds = f.rt60_bound(self.rate).get() * depth / 60.0
                         + f.lag_extra_frames(self.rate) / self.rate.get();
                     decay = decay.max(seconds);

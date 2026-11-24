@@ -394,32 +394,54 @@ pub enum Absorption {
         damp: f64,
     },
     /// A gain per band.
-    Bands {
-        /// The low band's gain.
-        low: Amplitude,
-        /// The middle band's gain.
-        mid: Amplitude,
-        /// The high band's gain.
-        high: Amplitude,
-        /// Where the bands meet.
-        crossover: [Hz; 2],
-        /// An upper bound of the response's peak, set where the absorption is made
-        /// ([`Absorption::bands`], or the design's scaling) and read by every decay query.
-        peak: BandPeak,
-    },
+    Bands(BandAbsorption),
 }
 
-/// An upper bound of the largest magnitude response of a [`Absorption::Bands`] over every
-/// frequency. It is made with the absorption and cannot be written outside this crate, so it is
-/// never below the response's true peak.
+/// A three-band absorption: a gain per band, the crossovers where the bands meet and an upper
+/// bound of the response's largest magnitude over every frequency.
+///
+/// Its fields are private: it is made by [`Absorption::bands`], which bounds the peak of the
+/// gains it is given, and by the design, which scales the gains first, so the bound is never
+/// below the response's true peak (up to floating-point rounding) and every decay query can read it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BandPeak(f64);
+pub struct BandAbsorption {
+    low: Amplitude,
+    mid: Amplitude,
+    high: Amplitude,
+    crossover: [Hz; 2],
+    peak: Amplitude,
+}
 
-impl BandPeak {
-    /// The bound.
+impl BandAbsorption {
+    /// The low band's gain.
     #[must_use]
-    pub const fn get(self) -> f64 {
-        self.0
+    pub const fn low(&self) -> Amplitude {
+        self.low
+    }
+
+    /// The middle band's gain.
+    #[must_use]
+    pub const fn mid(&self) -> Amplitude {
+        self.mid
+    }
+
+    /// The high band's gain.
+    #[must_use]
+    pub const fn high(&self) -> Amplitude {
+        self.high
+    }
+
+    /// Where the bands meet.
+    #[must_use]
+    pub const fn crossover(&self) -> [Hz; 2] {
+        self.crossover
+    }
+
+    /// An upper bound of the response's largest magnitude over every frequency: the loop gain
+    /// per trip at the frequency that decays slowest. Infinite for gains that are not loop gains.
+    #[must_use]
+    pub const fn peak(&self) -> Amplitude {
+        self.peak
     }
 }
 
@@ -448,10 +470,10 @@ impl Absorption {
                 };
                 Amplitude::new(gain.get() * response)
             }
-            Absorption::Bands { low, mid, high, .. } => match band {
-                Band::Low => low,
-                Band::Mid => mid,
-                Band::High => high,
+            Absorption::Bands(b) => match band {
+                Band::Low => b.low,
+                Band::Mid => b.mid,
+                Band::High => b.high,
             },
         }
     }
@@ -491,13 +513,13 @@ impl Absorption {
         } else {
             f64::INFINITY
         };
-        Absorption::Bands {
+        Absorption::Bands(BandAbsorption {
             low,
             mid,
             high,
             crossover,
-            peak: BandPeak(peak),
-        }
+            peak: Amplitude::new(peak),
+        })
     }
 
     /// Bands that give a loop of `length` frames the three RT60s `rt60 = [low, mid, high]`
@@ -514,13 +536,13 @@ impl Absorption {
         let g = rt60.map(|t| loop_gain(length, t, rate));
         let pole = crossover.map(|fc| cutoff_pole(fc, rate));
         let ([low, mid, high], peak) = rescale_bands(g, pole);
-        Absorption::Bands {
+        Absorption::Bands(BandAbsorption {
             low,
             mid,
             high,
             crossover,
-            peak: BandPeak(peak),
-        }
+            peak: Amplitude::new(peak),
+        })
     }
 }
 

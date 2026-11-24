@@ -1555,17 +1555,10 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
                 ))
             });
             let top = set.iter().copied().fold(0.0, f64::max);
-            let Absorption::Bands {
-                low,
-                mid,
-                high,
-                peak: stored,
-                ..
-            } = line.absorption
-            else {
+            let Absorption::Bands(bands) = line.absorption else {
                 panic!("bands")
             };
-            let got = [low.get(), mid.get(), high.get()];
+            let got = [bands.low().get(), bands.mid().get(), bands.high().get()];
             let peak = dense_peak(got, rate, points);
             assert!(
                 peak <= top * (1.0 + 1e-9) && peak < 1.0,
@@ -1573,7 +1566,7 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
             );
             // The stored peak is a bound of the true one (never under it) and at most the
             // longest band's gain.
-            let stored = stored.get();
+            let stored = bands.peak().get();
             assert!(
                 stored >= peak * (1.0 - 1e-12) && stored <= top.min(0.9999) * (1.0 + 1e-12),
                 "{rate:?} size {size} {d:?}: stored {stored}, true {peak}, set {top}"
@@ -1667,12 +1660,14 @@ fn a_profile_that_rises_decays_no_slower_at_its_peak_than_its_longest_band() {
         .collect();
     let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
     let rt60 = rt60_of_trip_gain(mean, length, RATE);
-    let Absorption::Bands { low, mid, high, .. } =
-        fdn_of(&design(&l, RATE, &c)).lines[0].absorption
-    else {
+    let Absorption::Bands(bands) = fdn_of(&design(&l, RATE, &c)).lines[0].absorption else {
         panic!("bands")
     };
-    let scaled = absorption_at([low.get(), mid.get(), high.get()], w_peak, RATE);
+    let scaled = absorption_at(
+        [bands.low().get(), bands.mid().get(), bands.high().get()],
+        w_peak,
+        RATE,
+    );
     for ratio in &ratios {
         assert!(
             (ratio / scaled - 1.0).abs() < 1e-6,

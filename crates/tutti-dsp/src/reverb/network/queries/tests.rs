@@ -756,13 +756,18 @@ fn the_decay_bound_reads_the_peak_response_of_a_band_profile() {
 /// widest row. Four identical lines of 1 000 frames at RT60 2 s, the row `[1, 1, 1, 1]` (4
 /// lines, still 6.02 dB) over the row `[1, 0, 0, 0]`: the tail to -60 dB is
 /// `1000 / fs + 2 (60 + 20 log10 2) / 60` seconds; a row of unequal gains `[1, 0.5, 0.5, 0]` is
-/// 2 lines, the same; one line in every row is no margin.
+/// 2 lines, the same; one line in every row is no margin. Lines of equal length coincide in
+/// all their echoes, and the margin is for all of them.
 #[test]
 fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() {
-    let g = loop_gain(SampleSpan::of(1_000.0), Seconds::new(2.0), RATE);
-    let lines = [line(1_000.0, Absorption::Gain(g)); 4];
-    let tail_with = |rows: &[&[f64]]| {
-        let mut f = fdn(&lines, Matrix::Diagonal);
+    // Lengths 1000 to 1003 (pairwise distinct), each at the loop gain of RT60 2 s.
+    let lengths = [1_000.0, 1_001.0, 1_002.0, 1_003.0];
+    let lines = lengths.map(|m| {
+        let g = loop_gain(SampleSpan::of(m), Seconds::new(2.0), RATE);
+        line(m, Absorption::Gain(g))
+    });
+    let tail_of_lines = |lines: &[Line], rows: &[&[f64]]| {
+        let mut f = fdn(lines, Matrix::Diagonal);
         let rows: Vec<Gains> = rows.iter().map(|r| gain_row(r)).collect();
         f.output = NetworkOutputMap {
             rows: Inline::from_slice(&rows).unwrap(),
@@ -773,7 +778,8 @@ fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() 
         };
         (counted, t.get())
     };
-    let transit = 1_000.0 / RATE.get();
+    let tail_with = |rows: &[&[f64]]| tail_of_lines(&lines, rows);
+    let transit = 1_003.0 / RATE.get();
     let at = |lines: f64| transit + 2.0 * (60.0 + 20.0 * lines.min(2.0).log10()) / 60.0;
     let (n, t) = tail_with(&[&[1.0, 1.0, 1.0, 1.0], &[1.0, 0.0, 0.0, 0.0]]);
     assert_eq!(n, 4.0);
@@ -785,6 +791,14 @@ fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() 
     let (n, t) = tail_with(&[&[0.0, 0.0, 1.0, 0.0], &[0.5, 0.0, 0.0, 0.0]]);
     assert_eq!(n, 1.0);
     assert!((t - at(1.0)).abs() < 1e-6, "{t}");
+
+    // Equal lengths coincide in every echo: the margin is for the four, 20 log10 4.
+    let g = loop_gain(SampleSpan::of(1_000.0), Seconds::new(2.0), RATE);
+    let equal = [line(1_000.0, Absorption::Gain(g)); 4];
+    let (n, t) = tail_of_lines(&equal, &[&[1.0, 1.0, 1.0, 1.0]]);
+    assert_eq!(n, 4.0);
+    let want = 1_000.0 / RATE.get() + 2.0 * (60.0 + 20.0 * 4.0f64.log10()) / 60.0;
+    assert!((t - want).abs() < 1e-6, "{t} against {want}");
 }
 
 /// The width stage `(M + wS, M - wS)` mixes the output rows into each channel, and a mixing

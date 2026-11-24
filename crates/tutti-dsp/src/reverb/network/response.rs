@@ -48,14 +48,9 @@ impl Absorption {
                 }
                 gain.get() * (1.0 - d) / (ONE - delay(w, 1.0) * d)
             }
-            Absorption::Bands {
-                low,
-                mid,
-                high,
-                crossover,
-                ..
-            } => {
-                let (low, mid, high) = (low.get(), mid.get(), high.get());
+            Absorption::Bands(b) => {
+                let (low, mid, high) = (b.low().get(), b.mid().get(), b.high().get());
+                let crossover = b.crossover();
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
                 // one-poles; `L1` at the lower crossover, `L2` at the upper.
                 let l = |fc: Hz| {
@@ -83,13 +78,13 @@ impl Absorption {
 
     /// A bound on the largest `|G(e^jw)|` over every frequency, which never undercuts it: the
     /// gain of a [`Gain`](Self::Gain), the exact peak of a one-pole (at DC or at Nyquist), and
-    /// for bands the bound stored with them ([`BandPeak`](super::BandPeak): exact where the
+    /// for bands the bound stored with them (`BandAbsorption::peak`: exact where the
     /// gains do not rise with frequency, the design's scaled peak otherwise). Infinity for gains
     /// that are not loop gains. Tighter than the `majorant` at `r = 1` when the bands rise with
     /// frequency, where the sum of the magnitudes of the three weights exceeds the peak.
     pub(super) fn sup(&self, rate: SampleRate) -> f64 {
         match *self {
-            Absorption::Bands { peak, .. } => peak.get(),
+            Absorption::Bands(b) => b.peak().get(),
             _ => self.majorant(1.0, rate),
         }
     }
@@ -110,14 +105,9 @@ impl Absorption {
                 // The impulse response is `g (1 - d) d^k`.
                 g * (1.0 - d).abs() / (1.0 - d.abs() / r)
             }
-            Absorption::Bands {
-                low,
-                mid,
-                high,
-                crossover,
-                ..
-            } => {
-                let (low, mid, high) = (low.get(), mid.get(), high.get());
+            Absorption::Bands(b) => {
+                let (low, mid, high) = (b.low().get(), b.mid().get(), b.high().get());
+                let crossover = b.crossover();
                 if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0) {
                     return f64::INFINITY;
                 }

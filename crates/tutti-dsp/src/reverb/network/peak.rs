@@ -87,10 +87,14 @@ struct Search {
     best: f64,
     /// How far an interval's bound may exceed `best` before it is split.
     tol: f64,
+    /// The samples taken, and the most a search may take before it stops splitting.
+    evals: u32,
+    budget: u32,
 }
 
 impl Search {
     fn eval(&mut self, w: f64) -> Point {
+        self.evals += 1;
         let p = response(self.c, self.pole, w);
         self.best = self.best.max(norm(p.r));
         p
@@ -98,7 +102,9 @@ impl Search {
 
     /// A bound on `|R|` over `[w0, w1]`, from the Taylor expansion with the second-derivative
     /// bound at either end (`|R(w)| <= max |R0 + R0' t| + D2 t^2 / 2`, the linear part convex
-    /// in `t`), bisected while it exceeds `best + tol`.
+    /// in `t`), bisected while it exceeds `best + tol`, to the depth limit and while the
+    /// budget of samples lasts: an interval met after that returns its bound as it is, which is
+    /// still an upper bound, only looser.
     fn bound(&mut self, w0: f64, w1: f64, e0: Point, e1: Point, depth: u32) -> f64 {
         let step = w1 - w0;
         let slack = second_derivative(self.c, self.pole, e0.cos) * step * step / 2.0;
@@ -111,7 +117,7 @@ impl Search {
             e1.r.1 - e1.r_prime.1 * step,
         )));
         let ub = left.min(right) + slack;
-        if ub <= self.best + self.tol || depth >= MAX_DEPTH {
+        if ub <= self.best + self.tol || depth >= MAX_DEPTH || self.evals >= self.budget {
             return ub;
         }
         let mid = 0.5 * (w0 + w1);
@@ -121,16 +127,38 @@ impl Search {
     }
 }
 
+/// The most samples a search takes before it stops splitting intervals. The search is data
+/// dependent (a tolerance down to `1e-7` at a largest gain of 0.9999, or a second-derivative
+/// bound of order `1 / (1 - p)^2` near DC for a low crossover at a high rate, refine more), and
+/// it runs in a retarget on the audio thread: this caps its work at `BUDGET` samples a line.
+/// The design's rising profiles take at most 72 of them (every rate of 44.1 to 192 kHz, size,
+/// line length and profile of five decays a band), the off-design extremes tried (a 20 Hz
+/// crossover at 192 kHz, a largest gain of 0.99999) 94: the cap holds with headroom of 1.4.
+const BUDGET: u32 = 128;
+
 /// An upper bound on the largest `|R(w)|` for `w` in `[0, PI]` of the absorption with gains `g =
 /// [low, mid, high]` and crossover poles `pole`: exactly `low` where the gains do not rise with
 /// frequency, otherwise at most a thousandth of `1 - max(g)` (a millionth when that gain is 1
-/// or more) above the sampled peak. The gains are finite and nonnegative and the poles in
-/// `(0, 1)`. No allocation: a first pass of 64 intervals, bisected where the bound exceeds the
-/// largest sample.
+/// or more) above the sampled peak, while the [`BUDGET`] of samples lasts and looser after it.
+/// The gains are finite and nonnegative and the poles in `(0, 1)`. No allocation: a first pass
+/// of [`FIRST_PASS`] intervals, bisected where the bound exceeds the largest sample.
+///
+/// A bound up to floating-point rounding: the Taylor bounds are evaluated in `f64`, which
+/// rounds them by a few units of `1e-16` relative.
 pub(crate) fn peak_bound(g: [f64; 3], pole: [f64; 2]) -> f64 {
+    search(g, pole, BUDGET)
+}
+
+/// [`peak_bound`] with the budget of samples a parameter, so a test can spend it.
+fn search(g: [f64; 3], pole: [f64; 2], budget: u32) -> f64 {
+    searched(g, pole, budget).0
+}
+
+/// The bound and the samples taken.
+fn searched(g: [f64; 3], pole: [f64; 2], budget: u32) -> (f64, u32) {
     let (low, mid, high) = (g[0], g[1], g[2]);
     if low >= mid && mid >= high {
-        return low;
+        return (low, 0);
     }
     let top = low.max(mid).max(high);
     let tol = if top < 1.0 { 1e-3 * (1.0 - top) } else { 1e-6 }.max(1e-12);
@@ -139,6 +167,8 @@ pub(crate) fn peak_bound(g: [f64; 3], pole: [f64; 2]) -> f64 {
         pole,
         best: 0.0,
         tol,
+        evals: 0,
+        budget,
     };
     let angle = |k: usize| PI * (k as f64 / FIRST_PASS as f64).powi(2);
     let mut points = [search.eval(0.0); FIRST_PASS + 1];
@@ -150,7 +180,7 @@ pub(crate) fn peak_bound(g: [f64; 3], pole: [f64; 2]) -> f64 {
     for k in 0..FIRST_PASS {
         bound = bound.max(search.bound(angle(k), angle(k + 1), points[k], points[k + 1], 0));
     }
-    bound
+    (bound, search.evals)
 }
 
 /// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are `pole`
@@ -167,11 +197,16 @@ pub(crate) fn peak_bound(g: [f64; 3], pole: [f64; 2]) -> f64 {
 /// The design runs it ([`Absorption::designed`](super::Absorption)) and the network carries the
 /// result, which the bank reads as it is: the gains a network has are the ones the bank runs.
 pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> ([Amplitude; 3], f64) {
+    rescale_within(g, pole, BUDGET)
+}
+
+/// [`rescale_bands`] with the search's budget a parameter.
+fn rescale_within(g: [Amplitude; 3], pole: [f64; 2], budget: u32) -> ([Amplitude; 3], f64) {
     if !g.iter().all(|x| x.get().is_finite() && x.get() >= 0.0) {
         return ([Amplitude::SILENT; 3], 0.0);
     }
     let top = g.iter().map(|x| x.get()).fold(0.0, f64::max);
-    let peak = peak_bound(g.map(Amplitude::get), pole);
+    let peak = search(g.map(Amplitude::get), pole, budget);
     if peak > top {
         let held = top.min(0.9999);
         (g.map(|x| x * (held / peak)), held)
@@ -179,3 +214,6 @@ pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> ([Amplitude; 3
         (g, peak)
     }
 }
+
+#[cfg(test)]
+mod tests;
