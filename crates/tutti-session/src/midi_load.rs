@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    ClipFile, FileEvent, MidiFile, ReadRepair, RefusedTimeSignature, SmfTimeline, StandardMidiFile,
+    ClipFile, MidiFile, ReadRepair, RefusedTimeSignature, SmfEvent, SmfTimeline, StandardMidiFile,
     Tick, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
@@ -158,7 +158,7 @@ pub enum Unplayed {
         /// Where the event lands.
         beat: Beat,
         /// The event.
-        event: FileEvent,
+        event: SmfEvent,
         /// Why it has no packet.
         why: TimelineDrop,
     },

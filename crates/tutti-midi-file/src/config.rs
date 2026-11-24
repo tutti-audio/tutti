@@ -79,14 +79,6 @@ pub enum TracksError {
         /// The tick of the event.
         at: Tick,
     },
-    /// An SMF cannot hold an event.
-    #[error("track {track}: {refusal}")]
-    Refused {
-        /// The track.
-        track: usize,
-        /// Which rule it broke.
-        refusal: Refusal,
-    },
     /// A count or length the writer cannot hold: an event past 2^28 bytes or
     /// a chunk past 4 GB is past the format's fields (SMF 1.0 section 1.1).
     #[error("the file is larger than the writer holds")]
@@ -94,18 +86,6 @@ pub enum TracksError {
     /// The tempo events do not make a tempo map.
     #[error("the file's tempo events do not make a tempo map")]
     Tempo(#[from] tutti_tempo::TempoError),
-}
-
-/// Why an SMF cannot hold an event ([`TracksError::Refused`]).
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Refusal {
-    /// An SMF holds the first Group only.
-    #[error("an SMF holds the first group only")]
-    SmfGroup,
-    /// An SMF holds MIDI 1.0 channel messages, not packets.
-    #[error("an SMF holds MIDI 1.0 channel messages, not packets")]
-    SmfPacket,
 }
 
 /// An event pushed before the last one of a track, a header or a sequence
