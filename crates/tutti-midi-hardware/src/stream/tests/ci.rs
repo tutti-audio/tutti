@@ -1689,10 +1689,8 @@ fn answer_capabilities(wire: &mut Wire, ours: Muid, features: ProcessFeatures) {
         wire,
         GROUP_0,
         &CiMessage::ProcessCapabilitiesReply {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             features,
         },
@@ -1819,10 +1817,8 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
         &wire,
         GROUP_0,
         &CiMessage::MessageReportReply {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             scope: declared,
         },
@@ -1971,10 +1967,8 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         &wire,
         GROUP_0,
         &CiMessage::ProcessCapabilitiesInquiry {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
         },
         40,
@@ -1983,10 +1977,8 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         &wire,
         GROUP_0,
         &CiMessage::MessageReportInquiry {
-            header: CiHeader {
-                device_id: CiDeviceId::Group,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             control: DataControl::Full,
             scope: ReportScope::Group {

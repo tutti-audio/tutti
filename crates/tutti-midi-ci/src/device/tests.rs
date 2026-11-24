@@ -686,7 +686,8 @@ fn process_device() -> (CiDevice<impl FnMut() -> u32>, Instant) {
 fn report_inquiry(scope: ReportScope, to: u32) -> Decoded {
     on(scope.address(), PEER, to, |header, to| {
         CiMessage::MessageReportInquiry {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
             to,
             control: DataControl::Full,
             scope,
@@ -700,19 +701,18 @@ fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
     // §9.3, Table 42: D0, MIDI Message Report, which the empty report below is.
     let (mut device, now) = process_device();
     let inquiry = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
-        CiMessage::ProcessCapabilitiesInquiry { header, to }
+        CiMessage::ProcessCapabilitiesInquiry {
+            source: header.source,
+            ci_version: header.ci_version,
+            to,
+        }
     });
     let actions = device.on_message(&inquiry, now);
-    let [
-        CiMessage::ProcessCapabilitiesReply {
-            header,
-            to,
-            features,
-        },
-    ] = sent(&actions)[..]
+    let [reply @ CiMessage::ProcessCapabilitiesReply { to, features, .. }] = sent(&actions)[..]
     else {
         panic!("one Reply, got {actions:?}");
     };
+    let header = reply.header();
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
@@ -729,10 +729,10 @@ fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that
         let scope = ReportScope::from_wire(address, 0, 0x3F, 0x1F).unwrap();
         let actions = device.on_message(&report_inquiry(scope, OURS), now);
         let [
-            CiMessage::MessageReportReply {
-                header: begin,
+            begin @ CiMessage::MessageReportReply {
                 to,
                 scope: declared,
+                ..
             },
             CiMessage::MessageReportEnd {
                 header: end,
@@ -742,7 +742,10 @@ fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that
         else {
             panic!("a Reply and an End, got {actions:?}");
         };
-        assert_eq!((begin.device_id, end.device_id), (address, address));
+        assert_eq!(
+            (begin.header().device_id, end.device_id),
+            (address, address)
+        );
         assert_eq!((*to, *to_end), (Muid::of(PEER), Muid::of(PEER)));
         assert_eq!(*declared, ReportScope::none(address));
         assert!(declared.is_empty());
@@ -780,7 +783,11 @@ fn a_process_inquiry_for_another_muid_is_not_answered() {
 fn a_device_not_declaring_process_inquiry_nakks_both_inquiries_0x01() {
     let (mut device, _, now) = device([OURS]);
     let capabilities = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
-        CiMessage::ProcessCapabilitiesInquiry { header, to }
+        CiMessage::ProcessCapabilitiesInquiry {
+            source: header.source,
+            ci_version: header.ci_version,
+            to,
+        }
     });
     let report = report_inquiry(ReportScope::none(CiDeviceId::Group), OURS);
     for (inquiry, original) in [
@@ -802,7 +809,8 @@ fn a_process_reply_or_end_is_the_initiators_and_is_not_answered() {
     let (mut device, now) = process_device();
     let reply = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
         CiMessage::ProcessCapabilitiesReply {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
             to,
             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
         }

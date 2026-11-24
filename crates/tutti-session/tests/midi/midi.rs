@@ -1685,22 +1685,25 @@ impl MpePeer {
                     ),
                     Reply::Silent => {}
                 },
-                Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => answers
+                Decoded::Message(inquiry @ CiMessage::ProcessCapabilitiesInquiry { .. }) => answers
                     .extend(
                         CiMessage::ProcessCapabilitiesReply {
-                            header: at(CiDeviceId::FunctionBlock),
-                            to: header.source,
+                            source: self.muid,
+                            ci_version: CI_VERSION,
+                            to: inquiry.header().source,
                             features: tutti_midi_ci::ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
                     ),
-                Decoded::Message(CiMessage::MessageReportInquiry { header, scope, .. }) => {
+                Decoded::Message(inquiry @ CiMessage::MessageReportInquiry { scope, .. }) => {
+                    let header = inquiry.header();
                     match self.report {
                         Reply::Answer => {
                             answers.extend(
                                 CiMessage::MessageReportReply {
-                                    header: at(header.device_id),
+                                    source: self.muid,
+                                    ci_version: CI_VERSION,
                                     to: header.source,
                                     scope,
                                 }
@@ -2027,27 +2030,27 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                         .unwrap(),
                     );
                 }
-                Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => {
+                Decoded::Message(inquiry @ CiMessage::ProcessCapabilitiesInquiry { .. }) => {
                     answers.extend(
                         CiMessage::ProcessCapabilitiesReply {
-                            header: at(CiDeviceId::FunctionBlock),
-                            to: header.source,
+                            source: peer,
+                            ci_version: CI_VERSION,
+                            to: inquiry.header().source,
                             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
                     );
                 }
-                Decoded::Message(CiMessage::MessageReportInquiry {
-                    header,
-                    control,
-                    scope,
-                    ..
-                }) => {
+                Decoded::Message(
+                    inquiry @ CiMessage::MessageReportInquiry { control, scope, .. },
+                ) => {
+                    let header = inquiry.header();
                     inquiries.push((header.device_id, control, scope));
                     answers.extend(
                         CiMessage::MessageReportReply {
-                            header: at(header.device_id),
+                            source: peer,
+                            ci_version: CI_VERSION,
                             to: header.source,
                             scope,
                         }

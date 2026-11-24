@@ -378,10 +378,47 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     }));
                 }
             }
-            CiMessage::ProcessCapabilitiesInquiry { header, to }
-            | CiMessage::MessageReportInquiry { header, to, .. } => {
+            CiMessage::ProcessCapabilitiesInquiry { source, to, .. } => {
                 if *to == self.muid {
-                    self.answer_process(message, header, actions);
+                    actions.push(match self.process_refusal(message) {
+                        Some(refusal) => refusal,
+                        None => CiAction::Send(CiMessage::ProcessCapabilitiesReply {
+                            source: self.muid,
+                            ci_version: CI_VERSION,
+                            to: *source,
+                            features: ProcessFeatures::MIDI_MESSAGE_REPORT,
+                        }),
+                    });
+                }
+            }
+            CiMessage::MessageReportInquiry {
+                source, to, scope, ..
+            } => {
+                if *to == self.muid {
+                    match (self.process_refusal(message), scope.address()) {
+                        (Some(refusal), _) => actions.push(refusal),
+                        // Tutti has no Channel in use (§9.5).
+                        (None, address @ CiDeviceId::Channel(_)) => {
+                            actions.push(self.nak_on(
+                                address,
+                                *source,
+                                message.sub_id2(),
+                                NakStatus::NotInUse,
+                            ));
+                        }
+                        (None, address) => {
+                            actions.push(CiAction::Send(CiMessage::MessageReportReply {
+                                source: self.muid,
+                                ci_version: CI_VERSION,
+                                to: *source,
+                                scope: ReportScope::none(address),
+                            }));
+                            actions.push(CiAction::Send(CiMessage::MessageReportEnd {
+                                header: self.header_on(address),
+                                to: *source,
+                            }));
+                        }
+                    }
                 }
             }
             // A Property Exchange Responder is not the Management core's: a device
@@ -423,44 +460,30 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }
     }
 
-    /// An Inquiry: Process Inquiry Capabilities or Inquiry: MIDI Message Report
-    /// addressed to this device (§9).
-    fn answer_process(&self, message: &CiMessage, asked: &CiHeader, actions: &mut Vec<CiAction>) {
-        let nak_on = |address, status| {
-            CiAction::Send(CiMessage::Nak {
-                header: self.header_on(address),
-                to: asked.source,
-                nak: Nak::new(U7::new(message.sub_id2()).unwrap_or_default(), status),
-            })
-        };
-        if !self.own.categories.contains(CiCategories::PROCESS_INQUIRY) {
-            actions.push(nak_on(asked.device_id, NakStatus::MessageNotSupported));
-            return;
+    /// The NAK a Process Inquiry Capabilities or MIDI Message Report inquiry
+    /// addressed to this device is refused with, on the address it used, when
+    /// the device does not declare Process Inquiry (§9), or `None`.
+    fn process_refusal(&self, inquiry: &CiMessage) -> Option<CiAction> {
+        if self.own.categories.contains(CiCategories::PROCESS_INQUIRY) {
+            return None;
         }
-        match message {
-            CiMessage::MessageReportInquiry { scope, .. } => match scope.address() {
-                // Tutti has no Channel in use (§9.5).
-                address @ CiDeviceId::Channel(_) => {
-                    actions.push(nak_on(address, NakStatus::NotInUse));
-                }
-                address => {
-                    actions.push(CiAction::Send(CiMessage::MessageReportReply {
-                        header: self.header_on(address),
-                        to: asked.source,
-                        scope: ReportScope::none(address),
-                    }));
-                    actions.push(CiAction::Send(CiMessage::MessageReportEnd {
-                        header: self.header_on(address),
-                        to: asked.source,
-                    }));
-                }
-            },
-            _ => actions.push(CiAction::Send(CiMessage::ProcessCapabilitiesReply {
-                header: self.header_on(CiDeviceId::FunctionBlock),
-                to: asked.source,
-                features: ProcessFeatures::MIDI_MESSAGE_REPORT,
-            })),
-        }
+        let asked = inquiry.header();
+        Some(self.nak_on(
+            asked.device_id,
+            asked.source,
+            inquiry.sub_id2(),
+            NakStatus::MessageNotSupported,
+        ))
+    }
+
+    /// A NAK of `original` to `to`, on `address`.
+    fn nak_on(&self, address: CiDeviceId, to: Muid, original: u8, status: NakStatus) -> CiAction {
+        CiAction::Send(CiMessage::Nak {
+            header: self.header_on(address),
+            to,
+            // A sub-ID#2 is seven bits wherever it was read from.
+            nak: Nak::new(U7::new(original).unwrap_or_default(), status),
+        })
     }
 
     fn on_reply(&mut self, source: Muid, data: ReplyData, actions: &mut Vec<CiAction>) {
