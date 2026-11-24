@@ -49,7 +49,7 @@ use tutti_midi_runtime::{
 };
 use tutti_rt::{Bell, Counter, Gauge, Mutex};
 use tutti_ump::StreamConfig;
-use tutti_units::Losses;
+use tutti_units::{Frame, Losses};
 use tutti_units::{Resyncs, Seconds};
 
 use crate::apply::{Cut, Sealed};
@@ -61,6 +61,7 @@ use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
     Subscription, at_peer, resolve,
 };
+use crate::midi_record::Record;
 use crate::{
     EventInputPort, EventOutputPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId,
     Presence, Resource, ResourceFact, Session, SessionEvent,
@@ -1156,6 +1157,9 @@ struct OutputPort {
     /// Whether each device output the port opens sends Active Sensing.
     active_sensing: bool,
     losses: LossWriters,
+    /// What the port has been sent, whether its device is open or away: a
+    /// device that returns is caught up from it.
+    record: Record,
     /// The port's link to its device.
     link: OutLink,
     /// The proof the open brought, which every reopen of the port's device takes.
@@ -1602,18 +1606,14 @@ impl Ports {
             }
             port.link = match open_device_output(io, port.started, &arrived.id, port.active_sensing)
             {
-                Ok(device) => {
-                    // The device lost its setup: the clips feeding the port
-                    // send it again, from blocks the `MidiOut` phase drains
-                    // into the link opened here.
-                    graph.receiver_replaced(port.node);
-                    OutLink::open(device, stream)
-                }
+                Ok(device) => OutLink::open(device, stream),
                 Err(_) => OutLink::Away {
                     stream,
                     cause: PortCause::ReopenFailed,
                 },
             };
+            // The device lost its setup: it hears what the port said.
+            port.catch_up();
             port.refresh(out);
             port.publish(out);
         }
@@ -1785,10 +1785,28 @@ impl OutputPort {
         crate::midi::drain_events(
             &mut self.tap,
             self.link.open_mut(),
+            &mut self.record,
             &mut self.losses,
             timing,
         );
         self.link.fold_losses(&mut self.losses);
+    }
+
+    /// Sends the open device what the port has said, all at once and before any
+    /// later event: the record ([`Record::catch_up`]) is the state of every
+    /// event drained so far, and the next drain follows it.
+    fn catch_up(&mut self) {
+        let Some(out) = self.link.open_mut() else {
+            return;
+        };
+        let events: Vec<_> = self
+            .record
+            .catch_up()
+            .into_iter()
+            .map(|ump| (Frame::ZERO, ump))
+            .collect();
+        let refused = out.send_frames(&events, None) as u64;
+        self.losses.refused(refused);
     }
 
     /// Takes in the output's Protocol and JR Timestamps as they are now.
@@ -1991,6 +2009,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             saved,
             active_sensing,
             losses,
+            record: Record::default(),
             link,
             started,
         });
@@ -2019,6 +2038,7 @@ impl Ports {
                 crate::midi::drain_events(
                     &mut port.tap,
                     port.link.open_mut(),
+                    &mut port.record,
                     &mut port.losses,
                     timing,
                 );

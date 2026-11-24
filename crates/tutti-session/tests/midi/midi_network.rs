@@ -18,7 +18,10 @@ use tutti_session::{
     MidiEvent, MidiNetwork, MidiRouteRule, NetworkError, NetworkEvent, OpenClient, OpenHost,
     Session, SessionEvent, Stamp,
 };
-use tutti_ump::{EndpointName, Message, MidiChannel, NoteNumber, NoteVelocity, ProductInstanceId};
+use tutti_ump::{
+    Address, CCNumber, ControlValue, EndpointName, Message, MidiChannel, MidiGroup, NoteNumber,
+    NoteVelocity, ProductInstanceId, Sysex7Packet, SysexStatus, U7,
+};
 use tutti_ump::{Ump, Voice2};
 
 /// A hang guard, never reached by a wait that ends.
@@ -143,6 +146,17 @@ impl Peer {
             } => Some((*ended_by, *reason)),
             _ => None,
         })
+    }
+
+    /// The UMP the Host has sent so far that the Client has read, once a barrier
+    /// has taken the datagrams: in the order they came.
+    fn received(&mut self) -> Vec<Ump> {
+        std::iter::from_fn(|| self.client.poll_event())
+            .filter_map(|event| match event {
+                Event::Ump { packet, .. } => Some(packet),
+                _ => None,
+            })
+            .collect()
     }
 
     fn send(&mut self, packets: &[Ump]) {
@@ -297,6 +311,73 @@ fn a_graph_event_reaches_the_peer() {
     });
     assert_eq!(got, note_on(72));
     assert_eq!(net.losses().refused, 0, "a Session took it");
+}
+
+/// **A peer that joins an output that has been playing is caught up, and it
+/// alone**: the setup the output sent (SysEx, then the channel's program, then
+/// its controllers), whatever order it was sent in; the peer already listening
+/// hears nothing more.
+#[test]
+fn a_peer_that_joins_is_caught_up_to_what_the_output_said_and_the_others_hear_nothing() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut keys = s
+        .midi()
+        .input(net.output_node())
+        .expect("the output takes MIDI");
+    let _ = s.update();
+    let mut a = Peer::new("Laptop", port);
+    a.join();
+    let _ = s.update();
+
+    let address = Address::first(MidiChannel::FIRST);
+    let volume: Ump = Message::midi2(
+        address,
+        Voice2::ControlChange {
+            controller: CCNumber::VOLUME,
+            value: ControlValue::new(1 << 30),
+        },
+    )
+    .into();
+    let program: Ump = Message::midi2(
+        address,
+        Voice2::ProgramChange {
+            program: U7::of(5),
+            bank: None,
+        },
+    )
+    .into();
+    let reset: Ump = Message::Sysex7(
+        MidiGroup::FIRST,
+        Sysex7Packet::new(SysexStatus::Complete, &[0x7E, 0x7F, 0x09, 0x01]).unwrap(),
+    )
+    .into();
+    for ump in [volume, program, reset] {
+        keys.push(Stamp::NextBlock, ump).unwrap();
+    }
+    blocks(&mut s, 2);
+    let _ = s.update();
+    a.barrier(2);
+    assert_eq!(
+        a.received(),
+        [volume, program, reset],
+        "heard as it was sent"
+    );
+
+    let mut b = Peer::new("Tablet", port);
+    b.join();
+    let _ = s.update();
+    b.barrier(2);
+    assert_eq!(
+        b.received(),
+        [reset, program, volume],
+        "SysEx, then the program, then the controllers"
+    );
+    a.barrier(3);
+    assert_eq!(
+        a.received(),
+        [],
+        "a peer already listening hears nothing more"
+    );
 }
 
 /// With no Session the output has nowhere to send: events are counted refused.
