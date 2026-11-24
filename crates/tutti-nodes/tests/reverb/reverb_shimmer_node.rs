@@ -5,7 +5,9 @@
 use tutti_buffers::Planes;
 use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, NetworkStage, System};
 use tutti_graph::contract::{assert_declared_tail, drive_input, prepared};
-use tutti_graph::{Env, Node, ParamNode, PlayClock, TransportChanges, TransportPosition};
+use tutti_graph::{
+    Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, TransportChanges, TransportPosition,
+};
 use tutti_nodes::{ShimmerConfig, ShimmerNode};
 use tutti_units::{
     Cents, Db, Feedback, Frame, Latency, SampleRate, SampleSpan, Samples, Seconds, Tail, UnitParam,
@@ -134,5 +136,49 @@ fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
             "decay {decay}, send {send}"
         );
         assert_declared_tail(&mut node(config), SR);
+    }
+}
+
+/// The declared tail is a figure the graph takes or it is unbounded: the default 8 s room at
+/// 192 kHz and at 48 kHz declares a finite ceiling within `MAX_NODE_TAIL` (sixty seconds,
+/// converted at the rate), a 12 s room at 96 kHz too, past the 2.88 million frames that bounded
+/// a tail at 48 kHz; the ceiling is the decay stretched by the shifter's delay in every trip, so
+/// a 19 s room at 48 kHz and the longest room the type allows (60 s at 192 kHz) declare
+/// `Tail::Unbounded` and not a finite figure the graph would refuse or count as never decaying.
+#[test]
+fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
+    let at = |max: MaxDecay, rate: SampleRate| {
+        prepared(
+            ShimmerNode::<f32>::from(ShimmerConfig::new().max_decay(max)),
+            rate,
+            BLOCK,
+        )
+        .shape()
+        .tail
+    };
+    for (max, rate) in [
+        (MaxDecay::DEFAULT, SampleRate::SR_192K),
+        (MaxDecay::DEFAULT, SampleRate::SR_48K),
+    ] {
+        let Tail::Finite(t) = at(max, rate) else {
+            panic!("a finite ceiling")
+        };
+        assert!(
+            t <= MAX_NODE_TAIL.to_samples_ceil(rate) && t.get() as f64 > 8.0 * rate.get(),
+            "{t:?} at {rate:?}"
+        );
+    }
+    let Tail::Finite(room) = at(MaxDecay::of(Seconds::new(12.0)), SampleRate::SR_96K) else {
+        panic!("a finite ceiling")
+    };
+    assert!(
+        room.get() > 2_880_000 && room <= MAX_NODE_TAIL.to_samples_ceil(SampleRate::SR_96K),
+        "{room:?}"
+    );
+    for (max, rate) in [
+        (MaxDecay::of(Seconds::new(19.0)), SampleRate::SR_48K),
+        (MaxDecay::new(MaxDecay::CAP).unwrap(), SampleRate::SR_192K),
+    ] {
+        assert_eq!(at(max, rate), Tail::Unbounded, "{max:?} at {rate:?}");
     }
 }

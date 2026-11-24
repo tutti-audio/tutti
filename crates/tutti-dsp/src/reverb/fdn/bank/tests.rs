@@ -6,10 +6,10 @@ use tutti_units::{
 };
 
 use super::*;
+use crate::MaxDecay;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{Fdn, Network, NetworkStage};
 use crate::tail_probe;
-use crate::{FreezeMode, MaxDecay};
 use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
@@ -30,8 +30,8 @@ fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
     })
 }
 
-fn layout(lines: usize, freeze: FreezeMode) -> FdnLayout {
-    FdnLayout::new(lines, MaxDecay::DEFAULT, freeze).unwrap()
+fn layout(lines: usize) -> FdnLayout {
+    FdnLayout::new(lines, MaxDecay::DEFAULT).unwrap()
 }
 
 /// A bank of `layout` at `rate`, at rest on `c`.
@@ -131,7 +131,7 @@ fn trip_gain(length: f64, rt60: f64, rate: SampleRate) -> f64 {
 /// 60 dB in the designed RT60, from parallel combs (diffusion 0) to the Householder matrix.
 #[test]
 fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     for rt60 in [0.5, 1.0, 2.0] {
         for diffusion in [0.0, 1.0] {
             let c = still(|c| {
@@ -195,7 +195,7 @@ fn dtft(block: &[f32], w: f64) -> f64 {
 /// from the one-poles. The decay falls with the frequency as the bands say (3 s, 1.5 s, 0.6 s).
 #[test]
 fn each_band_decays_at_its_designed_rt60() {
-    let l = layout(2, FreezeMode::Decaying);
+    let l = layout(2);
     let c = still(|c| {
         c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
         c.diffusion = Mix::new(0.0);
@@ -253,7 +253,7 @@ fn each_band_decays_at_its_designed_rt60() {
 /// vector to `f32` moves it 1e-4 dB at most.
 #[test]
 fn a_frozen_network_keeps_its_energy() {
-    let l = layout(8, FreezeMode::Freezable);
+    let l = layout(8);
     let c = controls(|c| c.diffusion = Mix::new(1.0));
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     run(&mut bank, &mut ramps, &noise(1, 24_000), 64);
@@ -280,7 +280,7 @@ fn a_frozen_network_keeps_its_energy() {
 /// and mixing moves energy between lines of different length.)
 #[test]
 fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
-    let l = layout(8, FreezeMode::Freezable);
+    let l = layout(8);
     let at = |diffusion: f64, freeze: bool| {
         still(|c| {
             c.diffusion = Mix::new(diffusion);
@@ -307,7 +307,7 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
 /// fraction of the figure at a long decay.
 #[test]
 fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
-    let l = layout(8, FreezeMode::Freezable);
+    let l = layout(8);
     let c = still(|c| {
         c.decay = [Seconds::new(2.0); 3];
         c.diffusion = Mix::new(0.0);
@@ -346,7 +346,7 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
 #[test]
 fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
     let n = 8;
-    let l = layout(n, FreezeMode::Decaying);
+    let l = layout(n);
     let echo = |wet: Db, width: f64| {
         let c = still(|c| {
             c.pre_delay = Seconds::new(0.1);
@@ -392,7 +392,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
 /// from the last reset and not from a call's edge.
 #[test]
 fn any_split_of_the_stream_gives_the_same_bits() {
-    let l = layout(8, FreezeMode::Freezable);
+    let l = layout(8);
     let a = controls(|_| {});
     let b = controls(|c| {
         c.decay = [Seconds::new(4.0), Seconds::new(5.0), Seconds::new(2.0)];
@@ -428,7 +428,7 @@ fn any_split_of_the_stream_gives_the_same_bits() {
 /// start over with the lines).
 #[test]
 fn a_reset_bank_renders_as_a_fresh_one() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let c = controls(|c| c.modulation = Bipolar::of(0.8));
     let (mut used, mut used_ramps) = at_rest(&l, RATE, &c);
     run(&mut used, &mut used_ramps, &noise(3, 5_001), 64);
@@ -445,7 +445,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
 /// continue to the same bits, and one running on does not move the other.
 #[test]
 fn a_clone_continues_where_the_original_was_and_shares_nothing() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let c = controls(|_| {});
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let x = noise(9, 4_000);
@@ -462,7 +462,7 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
 /// one: a channel and its negation cancel, and two copies of a signal render as the signal.
 #[test]
 fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let mut bank = FdnBank::<f32>::new(&l, RATE);
     let mut ramps = bank.ramps();
     let before = run(&mut bank, &mut ramps, &noise(2, 256), 64);
@@ -492,40 +492,31 @@ fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
     assert_eq!(render(&[&y, &y]), one);
 }
 
-/// The tail a bank declares is its ceiling: the longest decay's network tail, unbounded for
-/// a layout that can freeze; the tail of controls is the
-/// network's own, no longer than the ceiling, and at least the decay in every band (the time
-/// to fall 60 dB).
+/// The tail a bank declares is its ceiling: unbounded, since the freeze holds the tail, and for a
+/// shimmering layout, which cannot freeze, the longest decay's network tail; the tail of
+/// controls is the network's own, no longer than the ceiling, and at least the decay in every
+/// band (the time to fall 60 dB).
 #[test]
 fn the_tail_is_the_networks_under_the_ceiling() {
-    let plain = FdnBank::<f32>::new(&layout(8, FreezeMode::Decaying), RATE);
-    let freezable = FdnBank::<f32>::new(&layout(8, FreezeMode::Freezable), RATE);
-    assert_eq!(freezable.tail(), Tail::Unbounded);
-    let Tail::Finite(ceiling) = plain.tail() else {
+    let mut plain = FdnBank::<f32>::new(&layout(8), RATE);
+    let mut shimmer = FdnBank::<f32>::new(&shimmering(8), RATE);
+    assert_eq!(plain.tail(), Tail::Unbounded);
+    let Tail::Finite(ceiling) = shimmer.tail() else {
         panic!("a finite ceiling")
     };
     assert!(ceiling.get() as f64 >= 8.0 * RATE.get(), "{ceiling:?}");
-    let (mut plain, mut freezable) = (plain, freezable);
-    let (ramps_p, ramps_f) = (plain.ramps(), freezable.ramps());
+    let (ramps_p, ramps_s) = (plain.ramps(), shimmer.ramps());
     for rt60 in [0.3, 1.0, 2.5] {
         let c = still(|c| c.decay = [Seconds::new(rt60); 3]);
-        let Tail::Finite(t) = plain.tail_of(&ramps_p, &c) else {
+        let Tail::Finite(t) = shimmer.tail_of(&ramps_s, &c) else {
             panic!("finite")
         };
         assert!(
             t <= ceiling && t.get() as f64 >= rt60 * RATE.get(),
             "{t:?} at {rt60}"
         );
-        assert_eq!(freezable.tail_of(&ramps_f, &c), plain.tail_of(&ramps_p, &c));
+        assert_eq!(plain.tail_of(&ramps_p, &c), Tail::Finite(t));
     }
-    assert_eq!(
-        freezable.tail_of(&ramps_f, &controls(|c| c.freeze = true)),
-        Tail::Unbounded
-    );
-    assert!(matches!(
-        plain.tail_of(&ramps_p, &controls(|c| c.freeze = true)),
-        Tail::Finite(_)
-    ));
 }
 
 /// The frames of the longest line of `layout` at `rate` (size 1, the table's longest entry
@@ -688,8 +679,7 @@ type Case<'a> = (&'a str, usize, Seconds, FdnControls, &'a [SampleRate]);
 /// full-scale step (see [`tail_probe`]).
 fn assert_tails_cover(cases: Vec<Case>) {
     for (name, lines, max, c, rates) in cases {
-        let layout =
-            FdnLayout::new(lines, MaxDecay::new(max).unwrap(), FreezeMode::Decaying).unwrap();
+        let layout = FdnLayout::new(lines, MaxDecay::new(max).unwrap()).unwrap();
         for &rate in rates {
             let period = longest_line(rate);
             let (mut bank, mut ramps) = at_rest(&layout, rate, &c);
@@ -768,7 +758,7 @@ fn the_reported_tail_of_a_band_profile_that_is_not_monotone_covers_it_and_is_the
     ];
     for (name, max, decay) in &cases {
         let longest = decay.iter().copied().fold(Seconds::ZERO, Seconds::max);
-        let layout = FdnLayout::new(8, MaxDecay::new(*max).unwrap(), FreezeMode::Decaying).unwrap();
+        let layout = FdnLayout::new(8, MaxDecay::new(*max).unwrap()).unwrap();
         let tail_at = |decay: [Seconds; 3]| {
             let c = controls(|c| c.decay = decay);
             let (mut bank, ramps) = at_rest(&layout, rate[0], &c);
@@ -802,12 +792,15 @@ fn raised<'a>(
     period: usize,
 ) -> impl Iterator<Item = (String, usize, usize, [Vec<f32>; 2], [Vec<f32>; 2])> + 'a {
     let (mut bank, mut ramps) = at_rest(layout, rate, short);
-    let (Tail::Finite(was), Tail::Finite(now), Tail::Finite(ceiling)) = (
-        bank.tail_of(&ramps, short),
-        bank.tail_of(&ramps, long),
-        bank.tail(),
-    ) else {
+    let (Tail::Finite(was), Tail::Finite(now)) =
+        (bank.tail_of(&ramps, short), bank.tail_of(&ramps, long))
+    else {
         panic!("finite tails")
+    };
+    // An unbounded ceiling holds nothing under it.
+    let ceiling = match bank.tail() {
+        Tail::Finite(ceiling) => ceiling.get(),
+        _ => usize::MAX,
     };
     [0, was.get() / 3]
         .into_iter()
@@ -821,7 +814,7 @@ fn raised<'a>(
             bank.retarget(&mut ramps, short);
             ramps.jump_to_target();
             let head = input.len() + moved_at;
-            let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling.get());
+            let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling);
             let first = run(
                 &mut bank,
                 &mut ramps,
@@ -849,12 +842,7 @@ fn raised<'a>(
 /// the lines at the move decays at the new, slower rate from the move on.
 #[test]
 fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
-    let l = FdnLayout::new(
-        8,
-        MaxDecay::new(Seconds::new(2.0)).unwrap(),
-        FreezeMode::Decaying,
-    )
-    .unwrap();
+    let l = FdnLayout::new(8, MaxDecay::new(Seconds::new(2.0)).unwrap()).unwrap();
     let short = controls(|c| c.decay = [Seconds::new(0.3); 3]);
     let long = controls(|c| c.decay = [Seconds::new(2.0); 3]);
     for (name, input, reported, first, second) in
@@ -870,25 +858,37 @@ fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input
     }
 }
 
-/// A freezable layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its
-/// input shut: nothing ever falls to the floor), both for the setting and as the ceiling it
-/// declares; the same layout with `freeze` off, and a layout that is not freezable with it on,
-/// report a finite tail.
+/// A layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its input shut:
+/// nothing ever falls to the floor), both for the setting and as the ceiling it declares; the same
+/// bank asked with `freeze` off after that reports the decay's finite tail, and a shimmering
+/// layout with it on a finite one.
 #[test]
 fn a_frozen_network_reports_an_unbounded_tail() {
     for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
-        let mut freezable = FdnBank::<f32>::new(&layout(8, FreezeMode::Freezable), rate);
-        let mut decaying = FdnBank::<f32>::new(&layout(8, FreezeMode::Decaying), rate);
-        let (ramps_f, ramps_d) = (freezable.ramps(), decaying.ramps());
+        let mut plain = FdnBank::<f32>::new(&layout(8), rate);
+        let mut shimmer = FdnBank::<f32>::new(&shimmering(8), rate);
+        let (ramps_p, ramps_s) = (plain.ramps(), shimmer.ramps());
         let frozen = controls(|c| c.freeze = true);
-        assert_eq!(freezable.tail_of(&ramps_f, &frozen), Tail::Unbounded);
-        assert_eq!(freezable.tail(), Tail::Unbounded, "the ceiling");
+        assert_eq!(plain.tail_of(&ramps_p, &frozen), Tail::Unbounded);
+        assert_eq!(plain.tail(), Tail::Unbounded, "the ceiling");
+        // Released, the tail is the decay's again: at least the longest band's RT60 (the tail
+        // is 66 dB deep, 6 dB past it) and under 66/60 of it plus a quarter for the lines, the
+        // pre-delay and the modulation.
+        let longest = FdnControls::DEFAULT
+            .decay
+            .iter()
+            .map(|d| d.get())
+            .fold(0.0, f64::max);
+        let Tail::Finite(n) = plain.tail_of(&ramps_p, &FdnControls::DEFAULT) else {
+            panic!("a finite tail once the freeze is released")
+        };
+        let seconds = n.get() as f64 / rate.get();
+        assert!(
+            seconds >= longest && seconds <= longest * 1.35,
+            "{seconds} s for a {longest} s decay"
+        );
         assert!(matches!(
-            freezable.tail_of(&ramps_f, &FdnControls::DEFAULT),
-            Tail::Finite(_)
-        ));
-        assert!(matches!(
-            decaying.tail_of(&ramps_d, &frozen),
+            shimmer.tail_of(&ramps_s, &frozen),
             Tail::Finite(_)
         ));
     }
@@ -910,7 +910,7 @@ fn a_frozen_network_reports_an_unbounded_tail() {
 /// which costs a trip's high frequencies as much as any gain does.
 #[test]
 fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let bands = |size: f64| {
         still(|c| {
             c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
@@ -958,10 +958,11 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 
 /// The pre-delay that has not yet fallen is owed too, up to the longest one: from 0.4 s down
 /// to none, 19 200 frames more than the same controls at rest, and the tail of the longest
-/// decay with the longest pre-delay in flight still fits the ceiling.
+/// decay with the longest pre-delay in flight still fits the ceiling of a layout that has a
+/// finite one (a shimmering layout).
 #[test]
 fn the_tail_owes_the_pre_delay_still_to_fall() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
     bank.retarget(&mut ramps, &still(|_| {}));
     let Tail::Finite(owed) = bank.tail_of(&ramps, &still(|_| {})) else {
@@ -977,7 +978,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
     );
     let longest = still(|c| c.decay = [Seconds::new(8.0); 3]);
     let (mut worst, mut worst_ramps) = at_rest(
-        &l,
+        &shimmering(8),
         RATE,
         &still(|c| {
             c.decay = [Seconds::new(8.0); 3];
@@ -998,7 +999,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
 /// `ceil(delta / 0.5)` steps of the ramp, one a chunk, and no step is longer than 0.5.
 #[test]
 fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let (a, b) = (
         still(|c| c.size = Mix::new(0.2)),
         still(|c| c.size = Mix::new(0.3)),
@@ -1036,7 +1037,7 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 /// frames, 2400 chunks.
 #[test]
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
     bank.retarget(&mut ramps, &still(|c| c.pre_delay = Seconds::new(0.1)));
     let mut last = ReadPosition::START;
@@ -1067,7 +1068,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     let wanted = (0.020 * RATE.get() / FdnBank::<f32>::CHUNK as f64).ceil() as u32;
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
     bank.retarget(&mut ramps, &still(|c| c.wet = Db::new(-6.0206)));
     let target = ramps.wet.target();
@@ -1089,19 +1090,19 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 #[test]
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let c = still(|c| c.pre_delay = Seconds::new(0.0));
-    let (mut bank, mut ramps) = at_rest(&layout(8, FreezeMode::Decaying), RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&layout(8), RATE, &c);
     run(&mut bank, &mut ramps, &impulse(Samples::new(1)), 1);
     let held = bank.state.lines[7].back(1);
     assert_ne!(held, 0.0, "the impulse reached the last line");
 
     let m = 100;
-    bank.layout = layout(4, FreezeMode::Decaying);
+    bank.layout = layout(4);
     bank.designed = None;
     bank.retarget(&mut ramps, &c);
     run(&mut bank, &mut ramps, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
 
-    bank.layout = layout(8, FreezeMode::Decaying);
+    bank.layout = layout(8);
     bank.designed = None;
     bank.retarget(&mut ramps, &c);
     run(&mut bank, &mut ramps, &vec![0.0; m], 7);
@@ -1120,7 +1121,7 @@ fn an_f64_fdn_is_linear() {
     let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
     let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
     let c = still(|c| c.diffusion = Mix::new(0.6));
-    let l = layout(8, FreezeMode::Decaying);
+    let l = layout(8);
     let render = |input: &[f64]| {
         let mut bank = FdnBank::<f64>::new(&l, RATE);
         let mut ramps = bank.ramps();
@@ -1196,7 +1197,7 @@ fn the_absorption_complements_keep_their_relative_precision_where_one_minus_the_
 fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_in_f32() {
     let rate = SampleRate::SR_192K;
     let decay = MaxDecay::new(MaxDecay::CAP).unwrap();
-    let l = FdnLayout::new(2, decay, FreezeMode::Decaying).unwrap();
+    let l = FdnLayout::new(2, decay).unwrap();
     let c = still(|c| {
         c.decay = [decay.get(); 3];
         c.size = Mix::new(0.0);
@@ -1325,10 +1326,7 @@ fn a_send_is_held_under_the_stable_bound() {
     assert_eq!(target(&shimmering(8), Feedback::new(f64::NAN)), 0.0);
     assert_eq!(target(&shimmering(8), Feedback::new(-1.0)), 0.0);
     assert_eq!(target(&shimmering(8), Feedback::new(0.5)), 0.5);
-    assert_eq!(
-        target(&layout(8, FreezeMode::Decaying), Feedback::new(0.9)),
-        0.0
-    );
+    assert_eq!(target(&layout(8), Feedback::new(0.9)), 0.0);
     let gain = 1.0 - Feedback::MAX_STABLE.get() * (1.0 - 1.0 / b);
     assert!(gain < 1.0, "{gain}");
 }
@@ -1531,12 +1529,7 @@ fn dense_peak(g: [f64; 3], rate: SampleRate, points: u32) -> f64 {
 /// at 96 kHz and size 1. The sweep reads 20 000 points of the grid, the last case 100 000.
 #[test]
 fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
-    let layout = FdnLayout::new(
-        2,
-        MaxDecay::new(Seconds::new(8.0)).unwrap(),
-        FreezeMode::Decaying,
-    )
-    .unwrap();
+    let layout = FdnLayout::new(2, MaxDecay::new(Seconds::new(8.0)).unwrap()).unwrap();
     let decays = [0.05, 0.3, 1.0, 2.0, 8.0];
     let mut worst_short = 0.0f64;
     let mut check = |rate: SampleRate, size: f64, d: [f64; 3], points: u32| {
@@ -1621,12 +1614,7 @@ fn the_design_holds_each_lines_peak_response_to_its_longest_band() {
 /// moves the RT60 by that over `ln(1/M)`, `m`.
 #[test]
 fn a_profile_that_rises_decays_no_slower_at_its_peak_than_its_longest_band() {
-    let l = FdnLayout::new(
-        2,
-        MaxDecay::new(Seconds::new(2.0)).unwrap(),
-        FreezeMode::Decaying,
-    )
-    .unwrap();
+    let l = FdnLayout::new(2, MaxDecay::new(Seconds::new(2.0)).unwrap()).unwrap();
     let c = still(|c| {
         c.decay = [Seconds::new(2.0), Seconds::new(0.05), Seconds::new(2.0)];
         c.diffusion = Mix::new(0.0);
@@ -1689,8 +1677,9 @@ fn a_profile_that_rises_decays_no_slower_at_its_peak_than_its_longest_band() {
 
 /// The ceiling holds every control: the tail of any controls in the box (every decay of five
 /// per band up to the layout's longest, three sizes, diffusion, modulation and pre-delay at
-/// their worst) is at most the tail the layout declares, non-monotone profiles included. 0.3 s,
-/// 2 s and 8 s layouts at 48 kHz and the 8 s layout at 192 kHz.
+/// their worst) is at most the tail a shimmering layout declares (a plain one declares unbounded,
+/// since the freeze holds the tail), non-monotone profiles included. 0.3 s, 2 s and 8 s layouts
+/// at 48 kHz and the 8 s layout at 192 kHz.
 #[test]
 fn the_tail_of_any_controls_is_under_the_layouts_ceiling() {
     let decays = [0.05, 0.3, 1.0, 2.0, 8.0];
@@ -1700,12 +1689,7 @@ fn the_tail_of_any_controls_is_under_the_layouts_ceiling() {
         (8.0, SampleRate::SR_48K),
         (8.0, SampleRate::SR_192K),
     ] {
-        let layout = FdnLayout::new(
-            8,
-            MaxDecay::new(Seconds::new(max)).unwrap(),
-            FreezeMode::Decaying,
-        )
-        .unwrap();
+        let layout = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(max)).unwrap()).unwrap();
         let mut bank = FdnBank::<f32>::new(&layout, rate);
         let ramps = bank.ramps();
         let Tail::Finite(ceiling) = bank.tail() else {

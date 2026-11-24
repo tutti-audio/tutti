@@ -311,7 +311,7 @@ pub mod nodes {
         EarlyReflectionsNode, EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig,
         EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode,
         FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
-        FmConfig, FmNode, FreeverbConfig, FreeverbNode, FreezeMode, FrequencyShifterConfig,
+        FmConfig, FmNode, FreeverbConfig, FreeverbNode, FrequencyShifterConfig,
         FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
         GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode,
         HysteresisConfig, HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig,

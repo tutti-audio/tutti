@@ -22,8 +22,8 @@ use crate::{
 };
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{
-    DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, LadderSaturation,
-    LadderType, ShapeKind, Stages, SvfType, Waveshape,
+    DelayControls, DelayLayout, FdnLayout, FreeverbControls, LadderSaturation, LadderType,
+    ShapeKind, Stages, SvfType, Waveshape,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close, wide_signal};
@@ -397,9 +397,9 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            FdnNode::<f64>::from(FdnConfig::new().layout(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-            ))
+            FdnNode::<f64>::from(
+                FdnConfig::new().layout(FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT).unwrap()),
+            )
         },
         SampleRate::SR_44K1,
         1,
