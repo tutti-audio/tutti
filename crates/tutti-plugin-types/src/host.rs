@@ -604,6 +604,12 @@ pub trait Processor: Send {
         Samples::new(0)
     }
 
+    /// Whether [`retune`](Self::retune) takes the block ceiling and the device
+    /// quantum live: the same fact, so an implementation that overrides
+    /// `retune` sets it `true` and one on the default does not. A plugin whose
+    /// Processor does not is not restarted for a change of the quantum.
+    const FOLLOWS_QUANTUM: bool = false;
+
     /// Follows the graph's rate, block ceiling and device quantum without a
     /// restart, for a Processor that can (the served pipeline: it tells its
     /// server the rate by a queued command and settles its chunk from the

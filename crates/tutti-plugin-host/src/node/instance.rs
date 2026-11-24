@@ -739,14 +739,6 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// Whether the Processor's pipeline follows the device's callback size
-    /// ([`Processor::retune`] takes it): a plugin its shell activated itself
-    /// is a served one, whose pipeline does; an in-process one is not restarted
-    /// for a change of it.
-    fn follows_quantum(&self) -> bool {
-        self.origin.is_none()
-    }
-
     /// Whether the plugin runs at less than the host wants: another rate, a
     /// block ceiling above the one it was told, or (for a format that follows
     /// it) another callback size.
@@ -756,7 +748,8 @@ impl<L: Loaded> Instance<L> {
         };
         wanted.rate() != applied.rate()
             || wanted.max_block().get() > applied.max_block().get()
-            || (self.follows_quantum() && wanted.quantum() != applied.quantum())
+            || (<L::Processor as Processor>::FOLLOWS_QUANTUM
+                && wanted.quantum() != applied.quantum())
     }
 
     /// Activates the plugin again at what the host wants, when it runs at less

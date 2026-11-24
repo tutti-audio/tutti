@@ -142,6 +142,8 @@ impl Processor for IpcProcessor {
         Samples::new(self.batcher.chunk())
     }
 
+    const FOLLOWS_QUANTUM: bool = true;
+
     /// The rate by a queued command, the chunk from the block and quantum,
     /// the bridge's parameter buffers for it. Starts the pipeline over.
     fn retune(&mut self, rate: SampleRate, max_block: Samples, quantum: Option<Samples>) -> bool {
