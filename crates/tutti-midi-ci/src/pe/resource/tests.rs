@@ -1139,7 +1139,7 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
 // Flow Control, no Set and no Subscription, and an Initiator that does not know the
 // peer's ResourceList yet refuses what the Responder refuses with 400, 406 and 405.
 #[test]
-fn an_inquiry_for_resource_list_is_refused_what_it_does_not_declare() {
+fn the_initiator_refuses_resource_list_what_it_does_not_declare() {
     let now = Instant::now();
     let (mut init, _) =
         ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);

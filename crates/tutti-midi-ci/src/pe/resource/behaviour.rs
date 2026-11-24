@@ -1396,9 +1396,9 @@ fn reply_status(actions: &[ResponderAction]) -> PeStatus {
     reply.status
 }
 
-// M2-103 §8.6.2: `offset` and `limit` are the Get of a List Resource's; a Set that
-// carries them is refused, as is a Start Subscription, whether or not the entry
-// paginates, and nothing is set.
+// M2-103 §8.6.2 gives `offset` and `limit` to the Get of a List Resource. A Set
+// that carries them is refused whether or not the entry paginates, and nothing is
+// set.
 #[test]
 fn a_set_with_a_page_is_refused_whether_or_not_the_entry_paginates() {
     let mut store = store();
@@ -1441,7 +1441,7 @@ fn a_set_with_a_page_is_refused_whether_or_not_the_entry_paginates() {
 // Subscription, so a Get of it with a page is 400, with Flow Control 406, and a
 // Start Subscription to it 405.
 #[test]
-fn an_inquiry_for_resource_list_is_refused_what_it_does_not_declare() {
+fn the_responder_refuses_resource_list_what_it_does_not_declare() {
     let mut raw = Raw::new();
     let mut paged = pe_get("ResourceList");
     paged.page = Some(PePage {
