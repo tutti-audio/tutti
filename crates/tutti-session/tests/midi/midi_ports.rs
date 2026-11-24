@@ -328,7 +328,7 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    let before = s.graph_ref().testing().sent_plan().map(|p| p.order().len());
+    let before = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
     let mut nodes = Vec::new();
     for _ in 0..3 {
         let port = input(&mut s, &keys);
@@ -344,7 +344,7 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     for node in nodes {
         assert!(!s.graph_ref().contains(node), "{node:?} left");
     }
-    let after = s.graph_ref().testing().sent_plan().map(|p| p.order().len());
+    let after = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
     assert_eq!(before, after, "nothing was left in the plan");
 }
 

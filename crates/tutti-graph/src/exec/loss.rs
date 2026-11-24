@@ -160,6 +160,7 @@ impl Dropped {
     pub(crate) fn charge_delay(&mut self, plan: &Plan, delay: u32, count: u64) {
         // A tap of an input merges several sources, so its loss is nobody's.
         let from = match plan
+            .program
             .delays
             .get(DelayId::new(delay))
             .and_then(|d| d.key.event_origin())
@@ -174,6 +175,7 @@ impl Dropped {
     /// `feedback`.
     pub(crate) fn charge_feedback(&mut self, plan: &Plan, feedback: u32, count: u64) {
         let from = match plan
+            .program
             .event_feedback
             .get(EventFeedbackId::new(feedback))
             .map(|f| f.key)

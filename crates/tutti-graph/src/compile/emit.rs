@@ -1,225 +1,40 @@
 //! Compiler pass 5: the ops, in the serial order, before slots exist.
 //!
 //! Every value is written by one op and read by the ops that name it; each op
-//! records its predecessors. The delay rings of latency compensation, the sums
-//! of fan-in and the merges of event fan-in are ops of their own.
+//! records its dependencies. The delay rings of latency compensation, the sums
+//! of fan-in and the merges of event fan-in are ops of their own. Each event
+//! value is priced where its ports are known: what the value can hold is part
+//! of the program `colour` lowers.
 
 use std::collections::BTreeSet;
 
 use crate::NodeMix;
 use crate::compile::ids::{
-    AudioFeedbackId, AudioValueId, DelayId, EventFeedbackId, EventValueId, Id, OpId,
-    PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
+    AudioFeedbackId, AudioValueId, EventFeedbackId, EventValueId, Id, OpId, PlanUnitId, Table,
+    TableSlice,
 };
-use crate::compile::plan::{DelayKey, DelaySpec, FeedbackKey, InputBound, ParamPortOp};
+use crate::compile::plan::{
+    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, InputBound,
+    Op, ParamPortOp, Span, Value,
+};
+use crate::compile::program::{ARef, ByValue, Capacities, ERef, Program};
 use crate::compile::shapes::Units;
 use crate::compile::timing::Timing;
 use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
-use crate::node::MAX_PORTS;
 use crate::node::param::ParamIn;
 use crate::node::shape::Shape;
+use crate::node::{InPlaceMask, MAX_PORTS, Prepare};
 use crate::{Edge, EdgeId, FeedbackFrom, InputPort, NodeKey, OutputPort, PortSink, PortSource};
 use tutti_units::{Latency, Samples};
 
-/// Where an audio input reads from, before colouring.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ARef {
-    Val(AudioValueId),
-    Zero,
-    Fb(AudioFeedbackId),
-}
+/// The ops, in emission order, with the values they write and read.
+type Ops = Op<ARef, ERef>;
 
-/// Where an event input reads from, before colouring.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ERef {
-    Val(EventValueId),
-    Empty,
-    Fb(EventFeedbackId),
-}
-
-/// An op before colouring: the same shape as [`Op`](crate::Op) with value ids
-/// where slots will go.
-pub(super) enum Pre {
-    MainInput {
-        channel: u16,
-        dst: AudioValueId,
-    },
-    Delay {
-        delay: DelayId,
-        src: AudioValueId,
-        dst: AudioValueId,
-    },
-    Sum {
-        srcs: Vec<ARef>,
-        dst: AudioValueId,
-    },
-    /// A `Sum` with a weighted lane: `lanes` is one entry per addend.
-    WeightedSum {
-        srcs: Vec<ARef>,
-        lanes: Vec<Option<EdgeId>>,
-        /// The driven lanes among them.
-        gains: Vec<GPort>,
-        dst: AudioValueId,
-    },
-    EventDelay {
-        delay: DelayId,
-        src: EventValueId,
-        dst: EventValueId,
-    },
-    EventMerge {
-        srcs: Vec<ERef>,
-        dst: EventValueId,
-        bound: Option<InputBound>,
-    },
-    Node {
-        unit: PlanUnitId,
-        ain: Vec<ARef>,
-        aout: Vec<AudioValueId>,
-        ein: Vec<ERef>,
-        eout: Vec<EventValueId>,
-        params: Vec<PPort>,
-    },
-    Output {
-        channel: u16,
-        src: ARef,
-        delay: Option<DelayId>,
-    },
-    Tap {
-        tap: PlanTapId,
-        srcs: Vec<ARef>,
-    },
-    EventTap {
-        tap: PlanEventTapId,
-        src: ERef,
-    },
-    Meter {
-        meter: PlanMeterId,
-        srcs: Vec<ARef>,
-    },
-    Capture {
-        feedback: AudioFeedbackId,
-        src: AudioValueId,
-    },
-    EventCapture {
-        feedback: EventFeedbackId,
-        src: EventValueId,
-    },
-}
-
-/// A driven param port before colouring: its event source, and the event
-/// value it reads.
-pub(super) struct PPort {
-    pub(super) port: u16,
-    pub(super) param: tutti_units::UnitAddr,
-    pub(super) from: EventOutputPort,
-    pub(super) value: EventValueId,
-}
-
-/// A driven lane of a weighted sum before colouring: which addend it is, its
-/// event source, and the event value it reads (the sibling of [`PPort`]).
-#[derive(Clone, Copy)]
-pub(super) struct GPort {
-    pub(super) lane: u16,
-    pub(super) from: EventOutputPort,
-    pub(super) value: EventValueId,
-}
-
-/// A value under construction.
-pub(crate) struct Val {
-    pub(crate) writer: OpId,
-    pub(crate) readers: Vec<OpId>,
-}
-
-/// What the op-emission pass hands on: the ops in emission order, the values
-/// they write and read, and the tables ops name by id.
-///
-/// Every op's predecessors precede it (`preds[op]` holds smaller ids only),
-/// every value's writer precedes its readers, and each feedback and tap table
-/// is the one its ops index.
-pub(super) struct Emitted {
-    pub(super) pre: Table<OpId, Pre>,
-    pub(super) audio: Table<AudioValueId, Val>,
-    pub(super) event: Table<EventValueId, Val>,
-    pub(super) preds: Table<OpId, BTreeSet<OpId>>,
-    pub(super) delays: Table<DelayId, DelaySpec>,
-    /// The audio feedback edges, ascending: the slots after the null slot.
-    pub(super) audio_feedback: Table<AudioFeedbackId, FeedbackKey>,
-    /// The event feedback edges, ascending.
-    pub(super) event_feedback: Table<EventFeedbackId, FeedbackKey>,
-    pub(super) taps: Table<PlanTapId, crate::TapId>,
-    pub(super) event_taps: Table<PlanEventTapId, crate::EventTapId>,
-    pub(super) meters: Table<PlanMeterId, (crate::MeterId, usize)>,
-}
-
-impl Emitted {
-    /// The id the next op pushed gets.
-    fn next_op(&self) -> OpId {
-        OpId::from_index(self.pre.len())
-    }
-
-    fn push(&mut self, op: Pre) -> OpId {
-        self.preds.push(BTreeSet::new());
-        self.pre.push(op)
-    }
-
-    fn audio_value(&mut self, writer: OpId) -> AudioValueId {
-        self.audio.push(Val {
-            writer,
-            readers: Vec::new(),
-        })
-    }
-
-    fn event_value(&mut self, writer: OpId) -> EventValueId {
-        self.event.push(Val {
-            writer,
-            readers: Vec::new(),
-        })
-    }
-
-    /// Pushes the op that writes a new audio value, built from that value.
-    fn push_audio(&mut self, op: impl FnOnce(AudioValueId) -> Pre) -> (OpId, AudioValueId) {
-        let value = self.audio_value(self.next_op());
-        (self.push(op(value)), value)
-    }
-
-    /// Pushes the op that writes a new event value, built from that value.
-    fn push_event(&mut self, op: impl FnOnce(EventValueId) -> Pre) -> (OpId, EventValueId) {
-        let value = self.event_value(self.next_op());
-        (self.push(op(value)), value)
-    }
-
-    fn read_audio(&mut self, v: AudioValueId, op: OpId) {
-        let w = self.audio[v].writer;
-        self.audio[v].readers.push(op);
-        self.preds[op].insert(w);
-    }
-
-    fn read_event(&mut self, v: EventValueId, op: OpId) {
-        let w = self.event[v].writer;
-        self.event[v].readers.push(op);
-        self.preds[op].insert(w);
-    }
-
-    fn read_aref(&mut self, r: ARef, op: OpId) {
-        if let ARef::Val(v) = r {
-            self.read_audio(v, op);
-        }
-    }
-
-    fn read_eref(&mut self, r: ERef, op: OpId) {
-        if let ERef::Val(v) = r {
-            self.read_event(v, op);
-        }
-    }
-
-    /// Pushes `op` and records that it reads each of `srcs`.
-    fn push_reading(&mut self, op: Pre, srcs: &[ARef]) -> OpId {
-        let id = self.push(op);
-        for &src in srcs {
-            self.read_aref(src, id);
-        }
-        id
-    }
+/// A value under construction: its writer, once the op is pushed, and the ops
+/// that read it.
+struct Written {
+    writer: Option<OpId>,
+    readers: Vec<OpId>,
 }
 
 /// The audio feedback key of `f`: the edge, and the generation of its source.
@@ -246,94 +61,29 @@ fn event_feedback_key(
     }
 }
 
-/// The position of `key` in the sorted feedback `list`.
-fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
-    F::from_index(
-        list.as_slice()
-            .binary_search(&key)
-            .expect("feedback keys are collected before they are read"),
-    )
+/// The id of the feedback keyed `key` among the sorted feedback `list`.
+fn feedback_in<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackSpec>) -> F {
+    list.search_by_key(&key, |f| f.key)
+        .expect("feedback keys are collected before they are read")
 }
 
-/// Emits every op of `graph`: the nodes in `order`, then the main outputs,
-/// taps, event taps and meters, then the feedback captures.
+/// Emits the whole graph into a program: the main inputs and every node's ops
+/// in `order`, then the main outputs, taps, event taps, meters and feedback
+/// captures.
 ///
-/// Takes the checked `units`, the serial `order` and the `timing`; returns the
-/// [`Emitted`] ops. A source is delayed to its sink's arrival (or to the output
-/// time) by a ring of its own when the two differ; a fan-in is summed or merged
-/// in source order, so two specs that list the same sources differently emit
-/// the same ops.
+/// A source is delayed to its sink's arrival (or to the output time) by a ring
+/// of its own when the two differ; a fan-in is summed or merged in source
+/// order, so two specs that list the same sources differently emit the same
+/// ops. The result's dependencies are sorted rows of earlier ops, and every
+/// event value carries the capacity its writer's ports give it.
 pub(super) fn emit(
     graph: &ValidGraph,
     units: &Units,
     order: &[PlanUnitId],
     timing: &Timing,
-) -> Emitted {
-    let topology = graph.topology();
-    let audio_feedback: Table<AudioFeedbackId, FeedbackKey> = topology
-        .edges
-        .values()
-        .flatten()
-        .filter_map(|e| match *e {
-            Edge::Feedback(f) => Some(audio_feedback_key(graph, f)),
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let event_feedback: Table<EventFeedbackId, FeedbackKey> = graph
-        .events()
-        .iter()
-        .flat_map(|(&at, sources)| {
-            sources.iter().filter_map(move |e| match *e {
-                EventEdge::Feedback { from, delay } => Some((at, from, delay)),
-                EventEdge::Direct(_) => None,
-            })
-        })
-        .map(|(at, from, delay)| event_feedback_key(graph, at, from, delay))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-
-    // Main inputs actually read, each copied into a slot once: the first audio
-    // values, in channel order.
-    let main_inputs: Vec<u16> = topology
-        .edges
-        .values()
-        .flatten()
-        .filter_map(|e| match *e {
-            Edge::Direct(PortSource::MainInput(ch)) => Some(ch),
-            _ => None,
-        })
-        .chain(topology.outputs.iter().flatten().filter_map(|s| match *s {
-            PortSource::MainInput(ch) => Some(ch),
-            _ => None,
-        }))
-        .collect::<BTreeSet<u16>>()
-        .into_iter()
-        .collect();
-    let mut emitter = Emitter {
-        graph,
-        units,
-        timing,
-        em: Emitted {
-            pre: Table::default(),
-            audio: Table::default(),
-            event: Table::default(),
-            preds: Table::default(),
-            delays: Table::default(),
-            audio_feedback,
-            event_feedback,
-            taps: Table::default(),
-            event_taps: Table::default(),
-            meters: Table::default(),
-        },
-        main_inputs,
-        node_ops: Table::filled(units.keys.len(), None),
-    };
-    for channel in emitter.main_inputs.clone() {
-        emitter.em.push_audio(|dst| Pre::MainInput { channel, dst });
-    }
+    prepare: &Prepare,
+) -> Program<ByValue> {
+    let mut emitter = Emitter::new(graph, units, timing, prepare);
     for &n in order {
         emitter.node(n);
     }
@@ -342,59 +92,322 @@ pub(super) fn emit(
     emitter.event_taps();
     emitter.meters(&output_refs);
     emitter.captures();
-    emitter.em
+    emitter.finish()
 }
 
-/// The emission in progress: the read-only graph, and the ops so far.
+/// One addend of a sum: the value, and the edge whose gain weights it when
+/// the edge has an entry.
+#[derive(Clone, Copy)]
+struct Addend {
+    r: ARef,
+    lane: Option<EdgeId>,
+    /// The event source that drives the lane's gain, and the event value
+    /// that carries it to the sum (through its PDC delay when it needs one).
+    drive: Option<GainDrive>,
+}
+
+/// The event source that drives an addend's lane, and the event value that
+/// carries it to the sum.
+#[derive(Clone, Copy)]
+struct GainDrive {
+    from: EventOutputPort,
+    value: EventValueId,
+}
+
+/// The emission in progress: the read-only graph, the program so far, and
+/// what the program holds only once emission ends (each value's writer and
+/// readers, each op's dependencies as a set).
 struct Emitter<'a> {
     graph: &'a ValidGraph,
     units: &'a Units,
     timing: &'a Timing,
-    em: Emitted,
-    /// The main input channels read, ascending: channel `main_inputs[i]` is
-    /// the audio value `i`.
-    main_inputs: Vec<u16>,
-    /// The `Pre::Node` op of each unit already emitted.
+    /// The largest block, which sizes the FIFO of every event delay.
+    block: usize,
+    program: Program<ByValue>,
+    audio: Table<AudioValueId, Written>,
+    event: Table<EventValueId, Written>,
+    /// The ops each op waits for.
+    deps: Table<OpId, BTreeSet<OpId>>,
+    /// The main input channels read, ascending, each with the value it is
+    /// copied into.
+    main_inputs: Vec<(u16, AudioValueId)>,
+    /// The node op of each unit already emitted.
     node_ops: Table<PlanUnitId, Option<OpId>>,
 }
 
-impl Emitter<'_> {
-    /// The ports of the emitted node `key`: its audio outputs, event outputs
-    /// and event inputs; `None` for a node not emitted.
-    fn node_ports(&self, key: NodeKey) -> Option<(&[AudioValueId], &[EventValueId], &[ERef])> {
-        let op = self.node_ops[self.units.get(key)?]?;
-        match &self.em.pre[op] {
-            Pre::Node {
-                aout, eout, ein, ..
-            } => Some((aout, eout, ein)),
-            _ => unreachable!("a unit's op is its node"),
+impl<'a> Emitter<'a> {
+    /// An emitter holding the main inputs the graph reads, each copied into a
+    /// value once, in channel order.
+    fn new(graph: &'a ValidGraph, units: &'a Units, timing: &'a Timing, prepare: &Prepare) -> Self {
+        let topology = graph.topology();
+        // Feedback slots follow the null slot, in key order.
+        let audio_feedback: Table<AudioFeedbackId, FeedbackSpec> = topology
+            .edges
+            .values()
+            .flatten()
+            .filter_map(|e| match *e {
+                Edge::Feedback(f) => Some(audio_feedback_key(graph, f)),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(i, key)| FeedbackSpec {
+                key,
+                slot: 1 + i as u32,
+            })
+            .collect();
+        let event_feedback: Table<EventFeedbackId, FeedbackSpec> = graph
+            .events()
+            .iter()
+            .flat_map(|(&at, sources)| {
+                sources.iter().filter_map(move |e| match *e {
+                    EventEdge::Feedback { from, delay } => Some((at, from, delay)),
+                    EventEdge::Direct(_) => None,
+                })
+            })
+            .map(|(at, from, delay)| event_feedback_key(graph, at, from, delay))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(i, key)| FeedbackSpec {
+                key,
+                slot: 1 + i as u32,
+            })
+            .collect();
+        let channels: Vec<u16> = topology
+            .edges
+            .values()
+            .flatten()
+            .filter_map(|e| match *e {
+                Edge::Direct(PortSource::MainInput(ch)) => Some(ch),
+                _ => None,
+            })
+            .chain(topology.outputs.iter().flatten().filter_map(|s| match *s {
+                PortSource::MainInput(ch) => Some(ch),
+                _ => None,
+            }))
+            .collect::<BTreeSet<u16>>()
+            .into_iter()
+            .collect();
+        let mut emitter = Self {
+            graph,
+            units,
+            timing,
+            block: prepare.max_block().get(),
+            program: Program {
+                ops: Table::default(),
+                audio_list: Vec::new(),
+                event_list: Vec::new(),
+                param_ports: Vec::new(),
+                gain_ports: Vec::new(),
+                sum_lanes: Vec::new(),
+                audio_values: Table::default(),
+                event_values: Table::default(),
+                value_readers: Vec::new(),
+                deps: Csr::default(),
+                delays: Table::default(),
+                audio_feedback,
+                event_feedback,
+                taps: Table::default(),
+                event_taps: Table::default(),
+                meters: Table::default(),
+                sizing: Capacities {
+                    values: Table::default(),
+                    feedback: Table::default(),
+                },
+            },
+            audio: Table::default(),
+            event: Table::default(),
+            deps: Table::default(),
+            main_inputs: Vec::new(),
+            node_ops: Table::filled(units.keys.len(), None),
+        };
+        for channel in channels {
+            let dst = emitter.new_audio();
+            emitter.push(Op::MainInput {
+                channel,
+                dst: dst.into(),
+            });
+            emitter.main_inputs.push((channel, dst));
         }
+        emitter
+    }
+
+    /// The program: values flattened with their readers, dependencies as
+    /// rows, and every event feedback priced.
+    fn finish(mut self) -> Program<ByValue> {
+        let feedback = self
+            .program
+            .event_feedback
+            .iter()
+            .map(|f| self.feedback_capacity(&f.key))
+            .collect();
+        let mut value_readers: Vec<OpId> = Vec::new();
+        let mut values = |written: Vec<Written>| -> Vec<Value<()>> {
+            written
+                .into_iter()
+                .map(|w| Value {
+                    slot: (),
+                    writer: w.writer.expect("every value is written").get(),
+                    readers: Span::extend(&mut value_readers, w.readers),
+                })
+                .collect()
+        };
+        self.program.audio_values = Table::from(values(self.audio.into_iter().collect()));
+        self.program.event_values = Table::from(values(self.event.into_iter().collect()));
+        self.program.value_readers = value_readers;
+        self.program.deps = Csr::from_table(
+            &self
+                .deps
+                .into_iter()
+                .map(|row| row.into_iter().collect::<Vec<OpId>>())
+                .collect::<Table<OpId, Vec<OpId>>>(),
+        );
+        self.program.sizing.feedback = feedback;
+        self.program
+    }
+
+    /// What an event feedback slot holds: all its FIFO can hold at its
+    /// source's declared rate.
+    fn feedback_capacity(&self, key: &FeedbackKey) -> EventSlotCapacity {
+        match *key {
+            FeedbackKey::Event { from, delay, .. } => EventSlotCapacity::fifo(
+                self.units.shape_of(from.node).event_capacity,
+                delay,
+                self.block,
+            ),
+            FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
+        }
+    }
+
+    // ---- values and ops ------------------------------------------------------
+
+    fn new_audio(&mut self) -> AudioValueId {
+        self.audio.push(Written {
+            writer: None,
+            readers: Vec::new(),
+        })
+    }
+
+    fn new_event(&mut self, capacity: EventSlotCapacity) -> EventValueId {
+        self.program.sizing.values.push(capacity);
+        self.event.push(Written {
+            writer: None,
+            readers: Vec::new(),
+        })
+    }
+
+    /// Appends `op`, which becomes the writer of the values it writes.
+    fn push(&mut self, op: Ops) -> OpId {
+        let id = self.program.ops.push(op);
+        self.deps.push(BTreeSet::new());
+        let (audio, event): (Vec<ARef>, Vec<ERef>) = match op {
+            Op::MainInput { dst, .. }
+            | Op::Delay { dst, .. }
+            | Op::Sum { dst, .. }
+            | Op::WeightedSum { dst, .. } => (vec![dst], Vec::new()),
+            Op::EventDelay { dst, .. } | Op::EventMerge { dst, .. } => (Vec::new(), vec![dst]),
+            Op::Node {
+                audio_out,
+                event_out,
+                ..
+            } => (
+                self.program.audio_list[audio_out.range()].to_vec(),
+                self.program.event_list[event_out.range()].to_vec(),
+            ),
+            _ => (Vec::new(), Vec::new()),
+        };
+        for v in audio.into_iter().filter_map(ARef::value) {
+            self.audio[v].writer = Some(id);
+        }
+        for v in event.into_iter().filter_map(ERef::value) {
+            self.event[v].writer = Some(id);
+        }
+        id
+    }
+
+    fn read_audio(&mut self, v: AudioValueId, op: OpId) {
+        let w = self.audio[v]
+            .writer
+            .expect("a value is written before it is read");
+        self.audio[v].readers.push(op);
+        self.deps[op].insert(w);
+    }
+
+    fn read_event(&mut self, v: EventValueId, op: OpId) {
+        let w = self.event[v]
+            .writer
+            .expect("a value is written before it is read");
+        self.event[v].readers.push(op);
+        self.deps[op].insert(w);
+    }
+
+    fn read_aref(&mut self, r: ARef, op: OpId) {
+        if let ARef::Val(v) = r {
+            self.read_audio(v, op);
+        }
+    }
+
+    fn read_eref(&mut self, r: ERef, op: OpId) {
+        if let ERef::Val(v) = r {
+            self.read_event(v, op);
+        }
+    }
+
+    /// Pushes `op` and records that it reads each of `srcs`.
+    fn push_reading(&mut self, op: Ops, srcs: &[ARef]) -> OpId {
+        let id = self.push(op);
+        for &src in srcs {
+            self.read_aref(src, id);
+        }
+        id
+    }
+
+    // ---- what the emitted nodes name ----------------------------------------
+
+    /// The ops of the emitted node `key`: its node op, if it was emitted.
+    fn node_op(&self, key: NodeKey) -> Option<Ops> {
+        let op = self.node_ops[self.units.get(key)?]?;
+        Some(self.program.ops[op])
     }
 
     /// The value an audio output port writes, if the node and port exist.
     fn audio_out(&self, port: OutputPort) -> Option<AudioValueId> {
-        let (aout, _, _) = self.node_ports(port.node)?;
-        aout.get(usize::from(port.port)).copied()
+        let Op::Node { audio_out, .. } = self.node_op(port.node)? else {
+            unreachable!("a unit's op is its node")
+        };
+        self.program.audio_list[audio_out.range()]
+            .get(usize::from(port.port))?
+            .value()
     }
 
     /// The value an event output port writes, if the node and port exist.
     fn event_out(&self, port: EventOutputPort) -> Option<EventValueId> {
-        let (_, eout, _) = self.node_ports(port.node)?;
-        eout.get(usize::from(port.port)).copied()
+        let Op::Node { event_out, .. } = self.node_op(port.node)? else {
+            unreachable!("a unit's op is its node")
+        };
+        self.program.event_list[event_out.range()]
+            .get(usize::from(port.port))?
+            .value()
     }
 
     /// What an event input reads, after its sources' delays and merge.
     fn event_in(&self, at: EventInputPort) -> Option<ERef> {
-        let (_, _, ein) = self.node_ports(at.node)?;
-        ein.get(usize::from(at.port)).copied()
+        let Op::Node { event_in, .. } = self.node_op(at.node)? else {
+            unreachable!("a unit's op is its node")
+        };
+        self.program.event_list[event_in.range()]
+            .get(usize::from(at.port))
+            .copied()
     }
 
     /// The value a main input channel is copied into, if it is read.
     fn main_input(&self, channel: u16) -> Option<AudioValueId> {
         self.main_inputs
-            .binary_search(&channel)
+            .binary_search_by_key(&channel, |&(ch, _)| ch)
             .ok()
-            .map(AudioValueId::from_index)
+            .map(|i| self.main_inputs[i].1)
     }
 
     /// When the node `key` departs.
@@ -424,7 +437,7 @@ impl Emitter<'_> {
         let (v, dep) = self
             .source(source)
             .expect("a validated edge reads a port of its source");
-        align_audio(&mut self.em, v, dep.gap_to(to), key)
+        self.align_audio(v, dep.gap_to(to), key)
     }
 
     /// The event value of `from` through its PDC delay to the time `to`,
@@ -437,8 +450,65 @@ impl Emitter<'_> {
     ) -> EventValueId {
         let v = self.event_source(from);
         let by = self.departure(from.node).gap_to(to);
-        align_event(&mut self.em, v, by, key)
+        self.align_event(v, by, key)
     }
+
+    /// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
+    /// when `by` is zero (no op), else the output of a `Delay` ring.
+    fn align_audio(&mut self, v: AudioValueId, by: Samples, key: DelayKey) -> ARef {
+        if by.is_zero() {
+            return ARef::Val(v);
+        }
+        let delay = self.program.delays.push(DelaySpec { key, len: by });
+        let dst = self.new_audio();
+        let op = self.push(Op::Delay {
+            delay: delay.get(),
+            src: v.into(),
+            dst: dst.into(),
+        });
+        self.read_audio(v, op);
+        ARef::Val(dst)
+    }
+
+    /// Event value `v`, delayed by `by` through a ring keyed `key` when `by` is
+    /// not zero (the value itself otherwise). The delayed value holds all its
+    /// FIFO can: what can fall due in one block, from every port that writes
+    /// the stream.
+    fn align_event(&mut self, v: EventValueId, by: Samples, key: DelayKey) -> EventValueId {
+        if by.is_zero() {
+            return v;
+        }
+        let Some(from) = key.event_origin() else {
+            unreachable!("an event delay is keyed as events")
+        };
+        let ports: Vec<EventOutputPort> = match from {
+            crate::EventTapPort::Out(port) => vec![port],
+            crate::EventTapPort::In(at) => self
+                .graph
+                .events()
+                .get(&at)
+                .map(|edges| edges.iter().map(|e| e.from()).collect())
+                .unwrap_or_default(),
+        };
+        let capacity = EventSlotCapacity::fifo_sum(
+            ports
+                .iter()
+                .map(|p| self.units.shape_of(p.node).event_capacity),
+            by,
+            self.block,
+        );
+        let delay = self.program.delays.push(DelaySpec { key, len: by });
+        let dst = self.new_event(capacity);
+        let op = self.push(Op::EventDelay {
+            delay: delay.get(),
+            src: v.into(),
+            dst: dst.into(),
+        });
+        self.read_event(v, op);
+        dst
+    }
+
+    // ---- nodes -----------------------------------------------------------------
 
     /// The node `n`: its inputs (sums, merges, the delays they need), its
     /// driven params, then the op itself.
@@ -448,33 +518,34 @@ impl Emitter<'_> {
         let ain = self.audio_inputs(n, key, &shape);
         let ein = self.event_inputs(n, key, &shape);
         let params = self.params(n, key, &shape);
-        let reads: Vec<EventValueId> = params.iter().map(|p| p.value).collect();
+        let reads: Vec<EventValueId> = params.iter().filter_map(|p| p.slot.value()).collect();
 
-        let at = self.em.next_op();
-        let aout: Vec<AudioValueId> = (0..shape.audio_out().count())
-            .map(|_| self.em.audio_value(at))
+        let aout: Vec<ARef> = (0..shape.audio_out().count())
+            .map(|_| self.new_audio().into())
             .collect();
-        let eout: Vec<EventValueId> = (0..shape.event_out)
-            .map(|_| self.em.event_value(at))
+        let port = EventSlotCapacity::port(shape.event_capacity);
+        let eout: Vec<ERef> = (0..shape.event_out)
+            .map(|_| self.new_event(port).into())
             .collect();
-        let op = self.em.push(Pre::Node {
-            unit: n,
-            ain: ain.clone(),
-            aout,
-            ein: ein.clone(),
-            eout,
-            params,
-        });
-        debug_assert_eq!(op, at);
+        let node = Op::Node {
+            unit: n.get(),
+            audio_in: Span::extend(&mut self.program.audio_list, ain.iter().copied()),
+            audio_out: Span::extend(&mut self.program.audio_list, aout),
+            event_in: Span::extend(&mut self.program.event_list, ein.iter().copied()),
+            event_out: Span::extend(&mut self.program.event_list, eout),
+            in_place: InPlaceMask::NONE,
+            params: Span::extend(&mut self.program.param_ports, params),
+        };
+        let op = self.push(node);
         self.node_ops[n] = Some(op);
         for r in ain {
-            self.em.read_aref(r, op);
+            self.read_aref(r, op);
         }
         for r in ein {
-            self.em.read_eref(r, op);
+            self.read_eref(r, op);
         }
         for v in reads {
-            self.em.read_event(v, op);
+            self.read_event(v, op);
         }
     }
 
@@ -484,8 +555,8 @@ impl Emitter<'_> {
     /// differently render alike. One source is the value itself, none is
     /// silence.
     fn audio_inputs(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<ARef> {
-        let (graph, timing) = (self.graph, self.timing);
-        let arrival = timing.arrival[n];
+        let graph = self.graph;
+        let arrival = self.timing.arrival[n];
         (0..shape.audio_in().count())
             .map(|port| {
                 let at = InputPort::new(key, port);
@@ -505,9 +576,9 @@ impl Emitter<'_> {
                         Edge::Direct(from) => {
                             self.align_source(from, arrival, DelayKey::Audio { at, from })
                         }
-                        Edge::Feedback(f) => ARef::Fb(fb_index(
+                        Edge::Feedback(f) => ARef::Fb(feedback_in(
                             audio_feedback_key(graph, f),
-                            &self.em.audio_feedback,
+                            &self.program.audio_feedback,
                         )),
                     };
                     // An edge with a gain entry is a weighted lane.
@@ -536,7 +607,7 @@ impl Emitter<'_> {
                         drive,
                     });
                 }
-                sum_chain(&mut self.em, refs)
+                self.sum_chain(refs)
             })
             .collect()
     }
@@ -549,8 +620,8 @@ impl Emitter<'_> {
     /// (the ECS) cannot reorder a chord by accident. Sources are distinct
     /// (`GraphSpec::validate`), so the order is total.
     fn event_inputs(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<ERef> {
-        let (graph, units, timing) = (self.graph, self.units, self.timing);
-        let arrival = timing.arrival[n];
+        let (graph, units) = (self.graph, self.units);
+        let arrival = self.timing.arrival[n];
         (0..shape.event_in)
             .map(|port| {
                 let at = EventInputPort::new(key, port);
@@ -560,9 +631,9 @@ impl Emitter<'_> {
                 let refs: Vec<ERef> = sources
                     .iter()
                     .map(|e| match *e {
-                        EventEdge::Feedback { from, delay } => ERef::Fb(fb_index(
+                        EventEdge::Feedback { from, delay } => ERef::Fb(feedback_in(
                             event_feedback_key(graph, at, from, delay),
-                            &self.em.event_feedback,
+                            &self.program.event_feedback,
                         )),
                         EventEdge::Direct(from) => ERef::Val(self.align_event_source(
                             from,
@@ -588,13 +659,12 @@ impl Emitter<'_> {
                 let bound = shape
                     .event_input_capacity
                     .filter(|_| !lone_within_bound)
-                    // The public bound names its unit by raw index until the
-                    // plan is narrowed.
+                    // The public bound names its unit by raw index.
                     .map(|capacity| InputBound {
                         capacity,
                         unit: n.get(),
                     });
-                merge_tree(&mut self.em, refs, bound)
+                self.merge_tree(refs, bound)
             })
             .collect()
     }
@@ -602,7 +672,7 @@ impl Emitter<'_> {
     /// Driven params, in port order, then the node's mix (its port is past
     /// every declared index): each source through its PDC delay when it needs
     /// one, exactly as an input is (see the `param` module docs).
-    fn params(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<PPort> {
+    fn params(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<ParamPortOp<ERef>> {
         let graph = self.graph;
         let arrival = self.timing.arrival[n];
         let declared = shape
@@ -619,15 +689,42 @@ impl Emitter<'_> {
                 let from = graph.params().get(&at).copied()?;
                 let value =
                     self.align_event_source(from, arrival, DelayKey::ParamEvent { at, from });
-                Some(PPort {
+                Some(ParamPortOp {
                     port,
                     param,
                     from,
-                    value,
+                    slot: value.into(),
                 })
             })
             .collect()
     }
+
+    /// The lanes of a tap or meter: one per source, silence for a port that
+    /// does not exist (a node replaced by a narrower one, a removed node, a
+    /// main input past the declared width). An aligned lane is delayed to the
+    /// graph's output time by a ring keyed `key(lane, source)`; a raw one
+    /// reads the source as it leaves its node.
+    fn lanes(
+        &mut self,
+        sources: &[PortSource],
+        align: crate::TapAlign,
+        key: impl Fn(usize, PortSource) -> DelayKey,
+    ) -> Vec<ARef> {
+        let total = self.timing.total;
+        sources
+            .iter()
+            .enumerate()
+            .map(|(lane, &source)| match self.source(source) {
+                Some((v, dep)) if align == crate::TapAlign::ToOutput => {
+                    self.align_audio(v, dep.gap_to(total), key(lane, source))
+                }
+                Some((v, _)) => ARef::Val(v),
+                None => ARef::Zero,
+            })
+            .collect()
+    }
+
+    // ---- the graph's edges to the outside -------------------------------------
 
     /// The main output channels: each channel's sources through the delays
     /// that align them, summed when there are several. A main output meter or
@@ -694,10 +791,10 @@ impl Emitter<'_> {
                         Addend { r, lane, drive }
                     })
                     .collect();
-                let src = sum_chain(&mut self.em, refs);
+                let src = self.sum_chain(refs);
                 output_refs.push(src);
-                self.em.push_reading(
-                    Pre::Output {
+                self.push_reading(
+                    Op::Output {
                         channel,
                         src,
                         delay: None,
@@ -735,16 +832,16 @@ impl Emitter<'_> {
                 match src {
                     ARef::Zero => {}
                     ARef::Val(v) if main_output_meter => {
-                        src = align_audio(&mut self.em, v, d, key);
+                        src = self.align_audio(v, d, key);
                     }
                     _ => {
-                        delay = Some(self.em.delays.push(DelaySpec { key, len: d }));
+                        delay = Some(self.program.delays.push(DelaySpec { key, len: d }).get());
                     }
                 }
             }
             output_refs.push(src);
-            self.em.push_reading(
-                Pre::Output {
+            self.push_reading(
+                Op::Output {
                     channel,
                     src,
                     delay,
@@ -755,31 +852,6 @@ impl Emitter<'_> {
         output_refs
     }
 
-    /// The lanes of a tap or meter: one per source, silence for a port that
-    /// does not exist (a node replaced by a narrower one, a removed node, a
-    /// main input past the declared width). An aligned lane is delayed to the
-    /// graph's output time by a ring keyed `key(lane, source)`; a raw one
-    /// reads the source as it leaves its node.
-    fn lanes(
-        &mut self,
-        sources: &[PortSource],
-        align: crate::TapAlign,
-        key: impl Fn(usize, PortSource) -> DelayKey,
-    ) -> Vec<ARef> {
-        let total = self.timing.total;
-        sources
-            .iter()
-            .enumerate()
-            .map(|(lane, &source)| match self.source(source) {
-                Some((v, dep)) if align == crate::TapAlign::ToOutput => {
-                    align_audio(&mut self.em, v, dep.gap_to(total), key(lane, source))
-                }
-                Some((v, _)) => ARef::Val(v),
-                None => ARef::Zero,
-            })
-            .collect()
-    }
-
     /// Taps: one lane per source, any ports. A lane whose port does not exist
     /// reads silence rather than failing the commit, as a meter's does; it
     /// gets no delay ring, and the other lanes' rings are keyed by their own
@@ -787,7 +859,7 @@ impl Emitter<'_> {
     /// emitted for it. One op a tap, after every lane's delay: it writes the
     /// lanes together.
     fn taps(&mut self, output_refs: &[ARef]) {
-        let (graph, timing) = (self.graph, self.timing);
+        let graph = self.graph;
         for (&tap, spec) in &graph.topology().taps {
             let srcs: Vec<ARef> = match spec {
                 // What each output channel carries, post-sum and aligned; a
@@ -796,7 +868,7 @@ impl Emitter<'_> {
                     .map(|c| {
                         output_refs
                             .get(c)
-                            .filter(|_| c < timing.main_output_width)
+                            .filter(|_| c < self.timing.main_output_width)
                             .copied()
                             .unwrap_or(ARef::Zero)
                     })
@@ -809,11 +881,12 @@ impl Emitter<'_> {
                     })
                 }
             };
-            let tap = self.em.taps.push(tap);
-            self.em.push_reading(
-                Pre::Tap {
-                    tap,
-                    srcs: srcs.clone(),
+            let tap = self.program.taps.push(tap);
+            let srcs_span = Span::extend(&mut self.program.audio_list, srcs.iter().copied());
+            self.push_reading(
+                Op::Tap {
+                    tap: tap.get(),
+                    srcs: srcs_span,
                 },
                 &srcs,
             );
@@ -830,9 +903,9 @@ impl Emitter<'_> {
     /// ring: it reads nothing and the commit succeeds. One op a tap, after its
     /// delay.
     fn event_taps(&mut self) {
-        let (graph, units, timing) = (self.graph, self.units, self.timing);
+        let (graph, timing) = (self.graph, self.timing);
         for (&tap, spec) in &graph.topology().event_taps {
-            let index = self.em.event_taps.push(tap);
+            let index = self.program.event_taps.push(tap);
             let Some(from) = spec.source else {
                 continue;
             };
@@ -841,13 +914,14 @@ impl Emitter<'_> {
             // time too).
             let (carried, at_time) = match from {
                 crate::EventTapPort::Out(port) => {
-                    let (Some(v), Some(n)) = (self.event_out(port), units.get(port.node)) else {
+                    let (Some(v), Some(n)) = (self.event_out(port), self.units.get(port.node))
+                    else {
                         continue;
                     };
                     (ERef::Val(v), timing.departure[n])
                 }
                 crate::EventTapPort::In(at) => {
-                    let (Some(r), Some(n)) = (self.event_in(at), units.get(at.node)) else {
+                    let (Some(r), Some(n)) = (self.event_in(at), self.units.get(at.node)) else {
                         continue;
                     };
                     (r, timing.arrival[n])
@@ -859,16 +933,18 @@ impl Emitter<'_> {
             // A feedback edge's slot is read as the node reads it: it has no
             // value to delay.
             let src = match (spec.align, carried) {
-                (crate::TapAlign::ToOutput, ERef::Val(v)) => ERef::Val(align_event(
-                    &mut self.em,
+                (crate::TapAlign::ToOutput, ERef::Val(v)) => ERef::Val(self.align_event(
                     v,
                     at_time.gap_to(timing.total),
                     DelayKey::EventTap { tap, from },
                 )),
                 _ => carried,
             };
-            let op = self.em.push(Pre::EventTap { tap: index, src });
-            self.em.read_eref(src, op);
+            let op = self.push(Op::EventTap {
+                tap: index.get(),
+                src,
+            });
+            self.read_eref(src, op);
         }
     }
 
@@ -891,27 +967,29 @@ impl Emitter<'_> {
                     })
                 }
             };
-            let meter = self.em.meters.push((meter, srcs.len()));
-            self.em.push_reading(
-                Pre::Meter {
-                    meter,
-                    srcs: srcs.clone(),
+            let meter = self.program.meters.push((meter, srcs.len()));
+            let srcs_span = Span::extend(&mut self.program.audio_list, srcs.iter().copied());
+            self.push_reading(
+                Op::Meter {
+                    meter: meter.get(),
+                    srcs: srcs_span,
                 },
                 &srcs,
             );
         }
     }
 
-    /// Captures run last. They feed the feedback delays, which the executor
-    /// reads from *before* the block (into the feedback slots), so a capture
-    /// needs no ordering against the feedback's readers: with a delay of a
-    /// whole `MaxBlock`, nothing it queues is due this block.
+    /// Captures run last, one per feedback delay. They feed the feedback
+    /// delays, which the executor reads from *before* the block (into the
+    /// feedback slots), so a capture needs no ordering against the feedback's
+    /// readers: with a delay of a whole `MaxBlock`, nothing it queues is due
+    /// this block.
     fn captures(&mut self) {
         let audio: Vec<(AudioFeedbackId, OutputPort)> = self
-            .em
+            .program
             .audio_feedback
             .iter_enumerated()
-            .map(|(feedback, key)| match *key {
+            .map(|(feedback, spec)| match spec.key {
                 FeedbackKey::Audio { from, .. } => (feedback, from),
                 FeedbackKey::Event { .. } => unreachable!("audio feedback keys are audio"),
             })
@@ -920,181 +998,163 @@ impl Emitter<'_> {
             let src = self
                 .audio_out(from)
                 .expect("a feedback source is emitted before its capture");
-            let op = self.em.push(Pre::Capture { feedback, src });
-            self.em.read_audio(src, op);
+            let op = self.push(Op::Capture {
+                feedback: feedback.get(),
+                src: src.into(),
+            });
+            self.read_audio(src, op);
         }
         let events: Vec<(EventFeedbackId, EventOutputPort)> = self
-            .em
+            .program
             .event_feedback
             .iter_enumerated()
-            .map(|(feedback, key)| match *key {
+            .map(|(feedback, spec)| match spec.key {
                 FeedbackKey::Event { from, .. } => (feedback, from),
                 FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
             })
             .collect();
         for (feedback, from) in events {
             let src = self.event_source(from);
-            let op = self.em.push(Pre::EventCapture { feedback, src });
-            self.em.read_event(src, op);
+            let op = self.push(Op::EventCapture {
+                feedback: feedback.get(),
+                src: src.into(),
+            });
+            self.read_event(src, op);
         }
     }
-}
 
-/// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
-/// when `by` is zero (no op), else the output of a `Pre::Delay` ring.
-fn align_audio(em: &mut Emitted, v: AudioValueId, by: Samples, key: DelayKey) -> ARef {
-    if by.is_zero() {
-        return ARef::Val(v);
+    // ---- fan-in ----------------------------------------------------------------
+
+    /// Sum `refs` (already in source order) into one audio value: the left fold
+    /// `((+0.0 + a_0) + a_1) + ..`, each weighted addend `acc + w * a`.
+    ///
+    /// Silence (`ARef::Zero`) adds nothing and is dropped; none left is
+    /// silence, one plain one is itself (an alias, no op). A weighted one is an
+    /// op even alone (`+0.0 + w * a`: a plain alias keeps a `-0.0` and a weight
+    /// does not). Up to [`MAX_PORTS`] addends are one op. A wider fan-in is a
+    /// **chain, not a tree**: a float sum is not associative, so the first op
+    /// folds the first `MAX_PORTS` and each next one reads the last result as
+    /// its first addend (plain: its weight is `1.0`) and adds the following
+    /// `MAX_PORTS - 1`. The accumulator is never `-0.0`, so adding it to `+0.0`
+    /// again changes no bit: the chain is one flat fold, wherever it is cut. An
+    /// op with no weighted lane is a plain `Op::Sum`.
+    fn sum_chain(&mut self, refs: Vec<Addend>) -> ARef {
+        let refs: Vec<Addend> = refs.into_iter().filter(|a| a.r != ARef::Zero).collect();
+        match refs.len() {
+            0 => ARef::Zero,
+            1 if refs[0].lane.is_none() => refs[0].r,
+            len => {
+                let first = len.min(MAX_PORTS);
+                let mut acc = self.sum(&refs[..first]);
+                for run in refs[first..].chunks(MAX_PORTS - 1) {
+                    let mut addends = Vec::with_capacity(run.len() + 1);
+                    addends.push(Addend {
+                        r: acc,
+                        lane: None,
+                        drive: None,
+                    });
+                    addends.extend_from_slice(run);
+                    acc = self.sum(&addends);
+                }
+                acc
+            }
+        }
     }
-    let delay = em.delays.push(DelaySpec { key, len: by });
-    let (op, dv) = em.push_audio(|dst| Pre::Delay { delay, src: v, dst });
-    em.read_audio(v, op);
-    ARef::Val(dv)
-}
 
-/// Event value `v`, delayed by `by` through a ring keyed `key` when `by` is
-/// not zero (the value itself otherwise).
-fn align_event(em: &mut Emitted, v: EventValueId, by: Samples, key: DelayKey) -> EventValueId {
-    if by.is_zero() {
-        return v;
-    }
-    let delay = em.delays.push(DelaySpec { key, len: by });
-    let (op, dv) = em.push_event(|dst| Pre::EventDelay { delay, src: v, dst });
-    em.read_event(v, op);
-    dv
-}
-
-/// One addend of a sum: the value, and the edge whose gain weights it when
-/// the edge has an entry.
-#[derive(Clone, Copy)]
-struct Addend {
-    r: ARef,
-    lane: Option<EdgeId>,
-    /// The event source that drives the lane's gain, and the event value
-    /// that carries it to the sum (through its PDC delay when it needs one).
-    drive: Option<GainDrive>,
-}
-
-/// The event source that drives an addend's lane, and the event value that
-/// carries it to the sum.
-#[derive(Clone, Copy)]
-struct GainDrive {
-    from: EventOutputPort,
-    value: EventValueId,
-}
-
-/// Sum `refs` (already in source order) into one audio value: the left fold
-/// `((+0.0 + a_0) + a_1) + ..`, each
-/// weighted addend `acc + w * a`.
-///
-/// Silence (`ARef::Zero`) adds nothing and is dropped; none left is silence,
-/// one plain one is itself (an alias, no op). A weighted one is an op even
-/// alone (`+0.0 + w * a`: a plain alias keeps a `-0.0` and a weight does not).
-/// Up to [`MAX_PORTS`] addends are one op. A wider fan-in is a **chain, not a
-/// tree**: a float sum is not associative, so the first op folds the first
-/// `MAX_PORTS` and each next one reads the last result as its first addend
-/// (plain: its weight is `1.0`) and adds the following `MAX_PORTS - 1`. The
-/// accumulator is never `-0.0`, so adding it to `+0.0` again changes no bit:
-/// the chain is one flat fold, wherever it is cut. An op with no weighted
-/// lane is a plain `Op::Sum`.
-fn sum_chain(em: &mut Emitted, refs: Vec<Addend>) -> ARef {
-    let refs: Vec<Addend> = refs.into_iter().filter(|a| a.r != ARef::Zero).collect();
-    let emit = |em: &mut Emitted, addends: Vec<Addend>| -> ARef {
+    /// One sum op over `addends`.
+    fn sum(&mut self, addends: &[Addend]) -> ARef {
         let srcs: Vec<ARef> = addends.iter().map(|a| a.r).collect();
         let lanes: Vec<Option<EdgeId>> = addends.iter().map(|a| a.lane).collect();
-        let gains: Vec<GPort> = addends
+        let gains: Vec<GainPortOp<ERef>> = addends
             .iter()
             .enumerate()
             .filter_map(|(lane, a)| {
-                a.drive.map(|d| GPort {
+                a.drive.map(|d| GainPortOp {
                     lane: lane as u16,
                     from: d.from,
-                    value: d.value,
+                    slot: d.value.into(),
                 })
             })
             .collect();
-        let weighted = lanes.iter().any(Option::is_some);
-        let (op, v) = em.push_audio(|dst| {
-            if weighted {
-                Pre::WeightedSum {
-                    srcs: srcs.clone(),
-                    lanes,
-                    gains: gains.clone(),
-                    dst,
-                }
-            } else {
-                Pre::Sum {
-                    srcs: srcs.clone(),
-                    dst,
-                }
+        let dst = self.new_audio();
+        let op = if lanes.iter().any(Option::is_some) {
+            Op::WeightedSum {
+                srcs: Span::extend(&mut self.program.audio_list, srcs.iter().copied()),
+                dst: dst.into(),
+                lanes: Span::extend(&mut self.program.sum_lanes, lanes),
+                gains: Span::extend(&mut self.program.gain_ports, gains.iter().copied()),
             }
-        });
+        } else {
+            Op::Sum {
+                srcs: Span::extend(&mut self.program.audio_list, srcs.iter().copied()),
+                dst: dst.into(),
+            }
+        };
+        let op = self.push(op);
         for &r in &srcs {
-            em.read_aref(r, op);
+            self.read_aref(r, op);
         }
         // The sum reads each driving lane's events: a read of the op, so the
         // colouring and the verifier cover it.
         for g in &gains {
-            em.read_event(g.value, op);
-        }
-        ARef::Val(v)
-    };
-    match refs.len() {
-        0 => ARef::Zero,
-        1 if refs[0].lane.is_none() => refs[0].r,
-        len => {
-            let first = len.min(MAX_PORTS);
-            let mut acc = emit(em, refs[..first].to_vec());
-            for run in refs[first..].chunks(MAX_PORTS - 1) {
-                let mut addends = Vec::with_capacity(run.len() + 1);
-                addends.push(Addend {
-                    r: acc,
-                    lane: None,
-                    drive: None,
-                });
-                addends.extend_from_slice(run);
-                acc = emit(em, addends);
+            if let Some(v) = g.slot.value() {
+                self.read_event(v, op);
             }
-            acc
         }
+        ARef::Val(dst)
     }
-}
 
-/// Merge `refs` (already in source order) into one event stream, in
-/// `(offset, source order)`.
-///
-/// Up to [`MAX_PORTS`] sources is one `EventMerge` op. Wider fan-in becomes a
-/// tree: contiguous runs of at most `MAX_PORTS` sources merge first, and the
-/// run results merge in run order. Because each merge breaks ties toward the
-/// lower input and the runs are contiguous and in order, a tie between
-/// sources in different runs still goes to the earlier source — the tree
-/// delivers exactly what one flat merge would.
-///
-/// With a `bound` (the node's `Shape::event_input_capacity`) the last merge
-/// keeps at most that many events, and a single source goes through it too:
-/// the bound holds whatever the edges are. The runs below it hold all their
-/// sources.
-fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
-    match refs.len() {
-        0 => ERef::Empty,
-        1 if bound.is_none() || refs[0] == ERef::Empty => refs[0],
-        n if n <= MAX_PORTS => {
-            let (op, mv) = em.push_event(|dst| Pre::EventMerge {
-                srcs: refs.clone(),
-                dst,
-                bound,
-            });
-            for &r in &refs {
-                em.read_eref(r, op);
+    /// Merge `refs` (already in source order) into one event stream, in
+    /// `(offset, source order)`.
+    ///
+    /// Up to [`MAX_PORTS`] sources is one `EventMerge` op. Wider fan-in becomes
+    /// a tree: contiguous runs of at most `MAX_PORTS` sources merge first, and
+    /// the run results merge in run order. Because each merge breaks ties
+    /// toward the lower input and the runs are contiguous and in order, a tie
+    /// between sources in different runs still goes to the earlier source — the
+    /// tree delivers exactly what one flat merge would.
+    ///
+    /// With a `bound` (the node's `Shape::event_input_capacity`) the last merge
+    /// keeps at most that many events, and a single source goes through it too:
+    /// the bound holds whatever the edges are. The runs below it hold all their
+    /// sources. A merge holds all its inputs together, so it can never drop an
+    /// event (a note-off least of all) short of its bound.
+    fn merge_tree(&mut self, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
+        match refs.len() {
+            0 => ERef::Empty,
+            1 if bound.is_none() || refs[0] == ERef::Empty => refs[0],
+            n if n <= MAX_PORTS => {
+                let capacity = refs
+                    .iter()
+                    .fold(EventSlotCapacity::NONE, |acc, r| {
+                        acc.plus(match *r {
+                            ERef::Val(v) => self.program.sizing.values[v],
+                            ERef::Fb(f) => {
+                                self.feedback_capacity(&self.program.event_feedback[f].key)
+                            }
+                            ERef::Empty => EventSlotCapacity::NONE,
+                        })
+                    })
+                    .bounded(bound.map(|b| b.capacity));
+                let dst = self.new_event(capacity);
+                let merge = Op::EventMerge {
+                    srcs: Span::extend(&mut self.program.event_list, refs.iter().copied()),
+                    dst: dst.into(),
+                    bound,
+                };
+                let op = self.push(merge);
+                for &r in &refs {
+                    self.read_eref(r, op);
+                }
+                ERef::Val(dst)
             }
-            ERef::Val(mv)
-        }
-        _ => {
-            let runs: Vec<ERef> = refs
-                .chunks(MAX_PORTS)
-                .map(|run| merge_tree(em, run.to_vec(), None))
-                .collect();
-            merge_tree(em, runs, bound)
+            _ => {
+                let runs: Vec<ERef> = refs
+                    .chunks(MAX_PORTS)
+                    .map(|run| self.merge_tree(run.to_vec(), None))
+                    .collect();
+                self.merge_tree(runs, bound)
+            }
         }
     }
 }

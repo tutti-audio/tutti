@@ -98,7 +98,8 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
             .chain([a(dst, true)])
             // The driven lanes' event sources: reads of the op.
             .chain(
-                plan.gain_ports
+                plan.program
+                    .gain_ports
                     .get(gains.range())
                     .unwrap_or(&[])
                     .iter()
@@ -149,7 +150,8 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
 /// Every event slot a node op's driven params read. Out-of-range spans read
 /// nothing here; [`verify_params`] reports them.
 fn param_reads(plan: &Plan, params: crate::compile::plan::Span) -> impl Iterator<Item = u32> + '_ {
-    plan.param_ports
+    plan.program
+        .param_ports
         .get(params.range())
         .unwrap_or(&[])
         .iter()
@@ -167,7 +169,7 @@ fn param_reads(plan: &Plan, params: crate::compile::plan::Span) -> impl Iterator
 fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
     // Driven lanes the ops name; every entry of `gain_ports` must be one.
     let mut covered = 0usize;
-    for (i, op) in plan.ops.iter().enumerate() {
+    for (i, op) in plan.program.ops.iter().enumerate() {
         match *op {
             Op::Sum { srcs, .. } if !(2..=MAX_PORTS).contains(&(srcs.len as usize)) => {
                 return Err(VerifyError(format!(
@@ -190,10 +192,10 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
                         lanes.len, srcs.len
                     )));
                 }
-                let Some(list) = plan.sum_lanes.get(lanes.range()) else {
+                let Some(list) = plan.program.sum_lanes.get(lanes.range()) else {
                     return Err(VerifyError(format!(
                         "weighted sum op {i} names lanes past the {} the plan lists",
-                        plan.sum_lanes.len()
+                        plan.program.sum_lanes.len()
                     )));
                 };
                 if list.iter().all(Option::is_none) {
@@ -201,10 +203,10 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
                         "weighted sum op {i} has no weighted lane (a plain sum is `Op::Sum`)"
                     )));
                 }
-                let Some(driven) = plan.gain_ports.get(gains.range()) else {
+                let Some(driven) = plan.program.gain_ports.get(gains.range()) else {
                     return Err(VerifyError(format!(
                         "weighted sum op {i} names driven lanes past the {} the plan lists",
-                        plan.gain_ports.len()
+                        plan.program.gain_ports.len()
                     )));
                 };
                 for (n, g) in driven.iter().enumerate() {
@@ -225,7 +227,7 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
             _ => {}
         }
     }
-    if covered != plan.gain_ports.len() {
+    if covered != plan.program.gain_ports.len() {
         return Err(VerifyError("gain ports no weighted sum names".into()));
     }
     Ok(())
@@ -234,12 +236,13 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
 /// Rule 7: each node op's driven params.
 fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
     let mut covered = 0usize;
-    for op in &plan.ops {
+    for op in &plan.program.ops {
         let Op::Node { unit, params, .. } = *op else {
             continue;
         };
         let bad = |what: String| VerifyError(format!("unit {unit}'s params {what}"));
         let ports = plan
+            .program
             .param_ports
             .get(params.range())
             .ok_or_else(|| bad("name ports past the table".into()))?;
@@ -276,7 +279,7 @@ fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
             }
         }
     }
-    if covered != plan.param_ports.len() {
+    if covered != plan.program.param_ports.len() {
         return Err(VerifyError("param ports no node op names".into()));
     }
     Ok(())
@@ -285,27 +288,27 @@ fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
 /// Checks `plan` (see the [module docs](self) for the rules).
 pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
     verify_sums(plan)?;
-    let rows: Table<OpId, Vec<OpId>> = plan
-        .ops
-        .ids()
-        .map(|i| plan.op_succ.ids::<OpId, OpId>(i).to_vec())
-        .collect();
-    for (a, row) in rows.iter_enumerated() {
-        if row.iter().any(|&b| b <= a) {
+    for (b, row) in plan.program.deps.to_table::<OpId>().iter_enumerated() {
+        if row.iter().any(|&a| a >= b) {
             return Err(VerifyError(format!(
-                "op {a} has a successor that does not follow it in the serial order"
+                "op {b} has a dependency that does not precede it in the serial order"
             )));
         }
     }
-    let reach = Reach::new(&rows);
+    let reach = Reach::new(&plan.program.deps);
     let ordered = |a: OpId, b: OpId| a == b || reach.before(a, b) || reach.before(b, a);
 
-    let acc: Vec<Vec<Access>> = plan.ops.iter().map(|op| accesses(plan, op)).collect();
-    let audio_fixed = 1 + plan.audio_feedback.len() as u32;
-    let event_fixed = 1 + plan.event_feedback.len() as u32;
+    let acc: Vec<Vec<Access>> = plan
+        .program
+        .ops
+        .iter()
+        .map(|op| accesses(plan, op))
+        .collect();
+    let audio_fixed = 1 + plan.program.audio_feedback.len() as u32;
+    let event_fixed = 1 + plan.program.event_feedback.len() as u32;
 
     // Rule 1 and rule 4.
-    for (i, (op, list)) in plan.ops.iter().zip(&acc).enumerate() {
+    for (i, (op, list)) in plan.program.ops.iter().zip(&acc).enumerate() {
         for x in list.iter().filter(|x| x.write) {
             let reserved = match x.kind {
                 PortKind::Audio => x.slot == ZERO_SLOT.get(),
@@ -377,8 +380,8 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
     // Rule 2: per slot, every pair (a writer, any toucher) is ordered.
     for kind in [PortKind::Audio, PortKind::Event] {
         let slots = match kind {
-            PortKind::Audio => plan.audio_slots,
-            PortKind::Event => plan.event_slots,
+            PortKind::Audio => plan.slots(PortKind::Audio),
+            PortKind::Event => plan.slots(PortKind::Event),
         } as usize;
         let mut touch: Vec<Vec<(OpId, bool)>> = vec![Vec::new(); slots];
         for (i, list) in acc.iter().enumerate() {
@@ -406,13 +409,13 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
 
         // Rule 3: every read of a coloured slot reads its intended value.
         let (values, fixed) = match kind {
-            PortKind::Audio => (plan.audio_values.as_slice(), audio_fixed),
-            PortKind::Event => (plan.event_values.as_slice(), event_fixed),
+            PortKind::Audio => (plan.program.audio_values.as_slice(), audio_fixed),
+            PortKind::Event => (plan.program.event_values.as_slice(), event_fixed),
         };
         let mut covered: Vec<(OpId, u32)> = Vec::new();
         for v in values.iter() {
             let writer = OpId::new(v.writer);
-            for &r in &plan.value_readers[v.readers.range()] {
+            for &r in &plan.program.value_readers[v.readers.range()] {
                 covered.push((r, v.slot));
                 if !reach.before(writer, r) {
                     return Err(VerifyError(format!(
@@ -452,11 +455,11 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
 
     // Rule 1, second half: one capture per feedback delay.
     for (kind, fb_len) in [
-        (PortKind::Audio, plan.audio_feedback.len()),
-        (PortKind::Event, plan.event_feedback.len()),
+        (PortKind::Audio, plan.program.audio_feedback.len()),
+        (PortKind::Event, plan.program.event_feedback.len()),
     ] {
         let mut captures = vec![0usize; fb_len];
-        for op in &plan.ops {
+        for op in &plan.program.ops {
             match (kind, op) {
                 (PortKind::Audio, Op::Capture { feedback, .. })
                 | (PortKind::Event, Op::EventCapture { feedback, .. }) => {
@@ -489,7 +492,7 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
 
 /// Rule 4, second half: an in-place bit means one slot.
 fn verify_in_place(plan: &Plan) -> Result<(), VerifyError> {
-    for (i, op) in plan.ops.iter().enumerate() {
+    for (i, op) in plan.program.ops.iter().enumerate() {
         if let Op::Node {
             audio_in,
             audio_out,
@@ -513,7 +516,7 @@ fn verify_in_place(plan: &Plan) -> Result<(), VerifyError> {
 
 /// Rule 5: the task structure a parallel executor will run.
 fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
-    let n = plan.ops.len();
+    let n = plan.program.ops.len();
     let tasks = plan.tasks.len();
     let mut found: Table<OpId, Option<TaskId>> = Table::filled(n, None);
     for (t, span) in plan.tasks.iter_enumerated() {
@@ -548,10 +551,10 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     if plan.task_succ.rows() != tasks || plan.task_activation.len() != tasks {
         return Err(VerifyError("task tables have the wrong length".into()));
     }
-    for a in plan.ops.ids() {
-        for &b in plan.op_succ.ids::<OpId, OpId>(a) {
+    for b in plan.program.ops.ids() {
+        for &a in plan.program.deps.of(b) {
             let (ta, tb) = (task_of[a], task_of[b]);
-            if ta != tb && !plan.task_succ.ids::<TaskId, TaskId>(ta).contains(&tb) {
+            if ta != tb && !plan.task_succ.of(ta).contains(&tb) {
                 return Err(VerifyError(format!(
                     "op edge {a} → {b} crosses task {ta} → {tb}, which task_succ lacks"
                 )));
@@ -561,7 +564,7 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     let mut indeg: Table<TaskId, u32> = Table::filled(tasks, 0);
     for t in plan.tasks.ids() {
         let mut seen = std::collections::BTreeSet::new();
-        for &u in plan.task_succ.ids::<TaskId, TaskId>(t) {
+        for &u in plan.task_succ.of(t) {
             if u.index() >= tasks || !seen.insert(u) || u == t {
                 return Err(VerifyError(format!("task {t} has a bad successor {u}")));
             }
@@ -579,7 +582,7 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     let mut out = 0;
     while let Some(t) = ready.pop() {
         out += 1;
-        for &u in plan.task_succ.ids::<TaskId, TaskId>(t) {
+        for &u in plan.task_succ.of(t) {
             left[u] -= 1;
             if left[u] == 0 {
                 ready.push(u);
@@ -596,26 +599,31 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
 fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // The public ops name delays, taps, meters and units by raw index; each
     // is checked against its table here.
-    let mut delay_uses: Table<DelayId, usize> = Table::filled(plan.delays.len(), 0);
+    let mut delay_uses: Table<DelayId, usize> = Table::filled(plan.program.delays.len(), 0);
     let mut unit_uses: Table<PlanUnitId, usize> = Table::filled(plan.units.len(), 0);
-    for op in &plan.ops {
+    for op in &plan.program.ops {
         let d = match *op {
             Op::Delay { delay, .. } | Op::EventDelay { delay, .. } => Some(delay),
             Op::Output { delay, .. } => delay,
             Op::Tap { tap, .. } => {
-                if plan.taps.get(PlanTapId::new(tap)).is_none() {
+                if plan.program.taps.get(PlanTapId::new(tap)).is_none() {
                     return Err(VerifyError(format!("a tap op names tap {tap}")));
                 }
                 None
             }
             Op::EventTap { tap, .. } => {
-                if plan.event_taps.get(PlanEventTapId::new(tap)).is_none() {
+                if plan
+                    .program
+                    .event_taps
+                    .get(PlanEventTapId::new(tap))
+                    .is_none()
+                {
                     return Err(VerifyError(format!("an event tap op names tap {tap}")));
                 }
                 None
             }
             Op::Meter { meter, .. } => {
-                if plan.meters.get(PlanMeterId::new(meter)).is_none() {
+                if plan.program.meters.get(PlanMeterId::new(meter)).is_none() {
                     return Err(VerifyError(format!("a meter op names meter {meter}")));
                 }
                 None
@@ -649,12 +657,14 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // the sum of its inputs.
     let block = plan.prepare.max_block().get();
     let slot_cap = |s: u32| {
-        plan.event_slot_capacity
+        plan.program
+            .sizing
+            .events
             .get(EventSlotId::new(s))
             .copied()
             .unwrap_or_default()
     };
-    for (f, spec) in plan.event_feedback.iter_enumerated() {
+    for (f, spec) in plan.program.event_feedback.iter_enumerated() {
         let crate::compile::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
             return Err(VerifyError(format!(
                 "event feedback {f} is not keyed as events"
@@ -670,15 +680,15 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
         }
     }
     let mut op_need: Table<OpId, EventSlotCapacity> =
-        Table::filled(plan.ops.len(), EventSlotCapacity::NONE);
-    for (m, op) in plan.ops.iter_enumerated() {
+        Table::filled(plan.program.ops.len(), EventSlotCapacity::NONE);
+    for (m, op) in plan.program.ops.iter_enumerated() {
         // What op `m` reads from slot `s`, priced by its writer.
         let read_need = |s: u32, op_need: &TableSlice<OpId, EventSlotCapacity>| {
             if s == EMPTY_SLOT.get() {
                 return Ok(EventSlotCapacity::NONE);
             }
-            if let Some(f) = EventSlotId::new(s).feedback(plan.event_feedback.len()) {
-                let spec = &plan.event_feedback[f];
+            if let Some(f) = EventSlotId::new(s).feedback(plan.program.event_feedback.len()) {
+                let spec = &plan.program.event_feedback[f];
                 return match spec.key {
                     crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(
                         EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block),
@@ -686,9 +696,10 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                     _ => Err(VerifyError(format!("event slot {s} is not event feedback"))),
                 };
             }
-            plan.event_values
+            plan.program
+                .event_values
                 .iter()
-                .find(|v| v.slot == s && plan.value_readers[v.readers.range()].contains(&m))
+                .find(|v| v.slot == s && plan.program.value_readers[v.readers.range()].contains(&m))
                 .map(|v| op_need[OpId::new(v.writer)])
                 .ok_or_else(|| VerifyError(format!("op {m} reads event slot {s} of no value")))
         };
@@ -701,6 +712,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 }),
             Op::EventDelay { delay, .. } => {
                 let d = plan
+                    .program
                     .delays
                     .get(DelayId::new(delay))
                     .ok_or_else(|| VerifyError(format!("op {m} names delay {delay}")))?;
@@ -721,7 +733,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             _ => EventSlotCapacity::NONE,
         };
     }
-    for v in &plan.event_values {
+    for v in &plan.program.event_values {
         let need = op_need[OpId::new(v.writer)];
         if !slot_cap(v.slot).holds(need) {
             return Err(VerifyError(format!(
@@ -814,6 +826,12 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
 mod tests {
     use super::*;
     use crate::compile::ids::{AudioSlotId, AudioValueId, EventSlotId, PlanUnitId, TaskId};
+    use crate::compile::plan::Csr;
+
+    /// Task rows with no successors, `tasks` of them.
+    fn no_successors(tasks: usize) -> Csr<TaskId> {
+        Csr::from_table(&Table::<TaskId, Vec<TaskId>>::filled(tasks, Vec::new()))
+    }
     use crate::compile::{Shapes, compile};
     use crate::model::spec::GraphSpec;
     use crate::node::shape::Shape;
@@ -907,6 +925,7 @@ mod tests {
         .0;
         let u = plan.units.iter().position(|u| u.key == NodeKey(2)).unwrap() as u32;
         let op = plan
+            .program
             .ops
             .iter()
             .position(|op| matches!(*op, Op::Node { unit, .. } if unit == u))
@@ -924,12 +943,12 @@ mod tests {
 
         // A port the unit does not declare there.
         let mut bad = good.clone();
-        bad.param_ports[0].param = tutti_units::UnitParam::Q.into();
+        bad.program.param_ports[0].param = tutti_units::UnitParam::Q.into();
         assert!(err(&bad).contains("does not declare"), "{}", err(&bad));
 
         // A port no node op names.
         let mut bad = good.clone();
-        for o in &mut bad.ops {
+        for o in &mut bad.program.ops {
             if let Op::Node { params, .. } = o {
                 *params = crate::compile::plan::Span { start: 0, len: 0 };
             }
@@ -948,18 +967,19 @@ mod tests {
         // node 2: a read of a value that may not be written yet.
         let u4 = good.units.iter().position(|u| u.key == NodeKey(4)).unwrap() as u32;
         let other = good
+            .program
             .ops
             .iter()
             .find_map(|o| match *o {
                 Op::Node {
                     unit, event_out, ..
-                } if unit == u4 => Some(good.event_list[event_out.start as usize].get()),
+                } if unit == u4 => Some(good.program.event_list[event_out.start as usize].get()),
                 _ => None,
             })
             .expect("node 4 sends events");
-        assert_ne!(other, good.param_ports[0].slot);
+        assert_ne!(other, good.program.param_ports[0].slot);
         let mut bad = good.clone();
-        bad.param_ports[0].slot = other;
+        bad.program.param_ports[0].slot = other;
         assert!(verify(&bad).is_err(), "an unordered param read passed");
     }
 
@@ -972,22 +992,22 @@ mod tests {
         verify(&good).expect("the compiler's own plan is sound");
 
         let mut bad = good.clone();
-        let a = bad.audio_values[AudioValueId::new(0)].slot;
-        let b = bad.audio_values[AudioValueId::new(1)].slot;
+        let a = bad.program.audio_values[AudioValueId::new(0)].slot;
+        let b = bad.program.audio_values[AudioValueId::new(1)].slot;
         assert_ne!(a, b);
-        for s in &mut bad.audio_list {
+        for s in &mut bad.program.audio_list {
             if s.get() == b {
                 *s = AudioSlotId::new(a);
             }
         }
-        for op in &mut bad.ops {
+        for op in &mut bad.program.ops {
             if let Op::Output { src, .. } = op
                 && *src == b
             {
                 *src = a;
             }
         }
-        bad.audio_values[AudioValueId::new(1)].slot = a;
+        bad.program.audio_values[AudioValueId::new(1)].slot = a;
         let err = verify(&bad).expect_err("two concurrent writers share a slot");
         assert!(err.0.contains("concurrently"), "{err}");
     }
@@ -1050,7 +1070,8 @@ mod tests {
         // Move W's output into A's slot.
         let unit = |k| good.units.iter().position(|u| u.key == k).unwrap() as u32;
         let out_slot = |p: &Plan, k| {
-            p.ops
+            p.program
+                .ops
                 .iter()
                 .find_map(|op| match *op {
                     Op::Node {
@@ -1062,17 +1083,17 @@ mod tests {
         };
         let mut bad = good.clone();
         let (ia, iw) = (out_slot(&bad, a), out_slot(&bad, w));
-        let (sa, sw) = (bad.audio_list[ia], bad.audio_list[iw]);
+        let (sa, sw) = (bad.program.audio_list[ia], bad.program.audio_list[iw]);
         assert_ne!(sa, sw);
-        bad.audio_list[iw] = sa;
-        for op in &mut bad.ops {
+        bad.program.audio_list[iw] = sa;
+        for op in &mut bad.program.ops {
             if let Op::Output { src, .. } = op
                 && *src == sw.get()
             {
                 *src = sa.get();
             }
         }
-        for v in &mut bad.audio_values {
+        for v in &mut bad.program.audio_values {
             if v.slot == sw.get() {
                 v.slot = sa.get();
             }
@@ -1122,20 +1143,25 @@ mod tests {
         let good = summed_pair();
         verify(&good).expect("sound");
         let i = good
+            .program
             .ops
             .iter_enumerated()
             .find(|(_, o)| matches!(o, Op::Sum { .. }))
             .map(|(i, _)| i)
             .expect("a sum");
-        let Op::Sum { srcs, dst } = good.ops[i] else {
+        let Op::Sum { srcs, dst } = good.program.ops[i] else {
             unreachable!()
         };
         assert_eq!(srcs.len, 2);
-        assert_eq!(dst, good.audio_list[srcs.start as usize].get(), "in place");
+        assert_eq!(
+            dst,
+            good.program.audio_list[srcs.start as usize].get(),
+            "in place"
+        );
 
         // One addend is an alias, never an op.
         let mut bad = good.clone();
-        bad.ops[i] = Op::Sum {
+        bad.program.ops[i] = Op::Sum {
             srcs: crate::compile::plan::Span {
                 start: srcs.start,
                 len: 1,
@@ -1146,10 +1172,12 @@ mod tests {
 
         // 65 addends: more than the executor's table holds.
         let mut bad = good.clone();
-        let start = bad.audio_list.len() as u32;
-        let first = good.audio_list[srcs.start as usize];
-        bad.audio_list.extend(std::iter::repeat_n(first, 65));
-        bad.ops[i] = Op::Sum {
+        let start = bad.program.audio_list.len() as u32;
+        let first = good.program.audio_list[srcs.start as usize];
+        bad.program
+            .audio_list
+            .extend(std::iter::repeat_n(first, 65));
+        bad.program.ops[i] = Op::Sum {
             srcs: crate::compile::plan::Span { start, len: 65 },
             dst,
         };
@@ -1157,8 +1185,8 @@ mod tests {
 
         // A write that aliases the second read, not the first.
         let mut bad = good.clone();
-        let second = good.audio_list[srcs.start as usize + 1].get();
-        bad.ops[i] = Op::Sum { srcs, dst: second };
+        let second = good.program.audio_list[srcs.start as usize + 1].get();
+        bad.program.ops[i] = Op::Sum { srcs, dst: second };
         assert!(verify(&bad).unwrap_err().0.contains("without declaring"));
     }
 
@@ -1167,8 +1195,10 @@ mod tests {
     fn the_verifier_rejects_a_read_before_its_write() {
         let mut bad = independent_pair();
         // Cut every edge: the outputs no longer follow their generators.
-        let rows = bad.op_succ.rows();
-        bad.op_succ = crate::compile::plan::Csr::from_rows(&vec![Vec::new(); rows]);
+        bad.program.deps = Csr::from_table(&Table::<OpId, Vec<OpId>>::filled(
+            bad.program.ops.len(),
+            Vec::new(),
+        ));
         assert!(verify(&bad).is_err());
     }
 
@@ -1179,7 +1209,7 @@ mod tests {
 
         // An in-place bit where the slots differ.
         let mut bad = good.clone();
-        for op in &mut bad.ops {
+        for op in &mut bad.program.ops {
             if let Op::Node {
                 in_place, audio_in, ..
             } = op
@@ -1199,22 +1229,17 @@ mod tests {
         let start = bad.task_ops.len() as u32;
         bad.task_ops.push(dup);
         bad.tasks.push(crate::compile::plan::Span { start, len: 1 });
-        let rows: Vec<Vec<u32>> = (0..bad.tasks.len() - 1)
-            .map(|t| bad.task_succ.row(t).to_vec())
-            .chain([Vec::new()])
-            .collect();
-        bad.task_succ = crate::compile::plan::Csr::from_rows(&rows);
+        let mut rows = bad.task_succ.to_table::<TaskId>();
+        rows.push(Vec::new());
+        bad.task_succ = Csr::from_table(&rows);
         bad.task_activation.push(0);
         assert!(verify(&bad).unwrap_err().0.contains("two tasks"));
 
         // A cross-task edge missing from task_succ (needs two tasks).
         let mut bad = good.clone();
         assert!(bad.tasks.len() >= 2, "the pair has independent tasks");
-        let edges: Vec<(usize, u32)> = (0..bad.ops.len())
-            .flat_map(|a| bad.op_succ.row(a).iter().map(move |&b| (a, b)))
-            .collect();
-        assert!(!edges.is_empty());
-        bad.task_succ = crate::compile::plan::Csr::from_rows(&vec![Vec::new(); bad.tasks.len()]);
+        assert!(!bad.program.deps.targets.is_empty());
+        bad.task_succ = no_successors(bad.tasks.len());
         bad.task_activation = Table::filled(bad.tasks.len(), 0);
         // Only fails if some edge crossed tasks; the pair's generator → output
         // edges are fused, so add a cross edge by splitting a task.
@@ -1232,8 +1257,7 @@ mod tests {
                     },
                 );
                 t.tasks = spans.into();
-                t.task_succ =
-                    crate::compile::plan::Csr::from_rows(&vec![Vec::new(); t.tasks.len()]);
+                t.task_succ = no_successors(t.tasks.len());
                 t.task_activation = Table::filled(t.tasks.len(), 0);
             }
             t
@@ -1263,7 +1287,7 @@ mod tests {
 
         // A delay no op uses.
         let mut bad = good.clone();
-        bad.delays.push(crate::compile::plan::DelaySpec {
+        bad.program.delays.push(crate::compile::plan::DelaySpec {
             key: crate::compile::plan::DelayKey::Output {
                 channel: 0,
                 from: PortSource::Zero,
@@ -1276,6 +1300,7 @@ mod tests {
         // unit, so one unit is run twice and the other not at all).
         let mut bad = good.clone();
         let first = bad
+            .program
             .ops
             .iter()
             .find_map(|op| match *op {
@@ -1284,6 +1309,7 @@ mod tests {
             })
             .expect("the pair has node ops");
         let second = bad
+            .program
             .ops
             .iter_mut()
             .filter_map(|op| match op {
@@ -1312,6 +1338,7 @@ mod tests {
         verify(&good).expect("sound");
         let err = |p: &Plan| verify(p).expect_err("corrupt").0;
         let out = good
+            .program
             .ops
             .iter_enumerated()
             .find(|(_, o)| matches!(o, Op::Output { .. }))
@@ -1338,13 +1365,13 @@ mod tests {
             ),
         ] {
             let mut bad = good.clone();
-            bad.ops[out] = op;
+            bad.program.ops[out] = op;
             assert!(err(&bad).contains(want), "{}", err(&bad));
         }
 
         // A node op past the units, and an output past the delays.
         let mut bad = good.clone();
-        for op in &mut bad.ops {
+        for op in &mut bad.program.ops {
             if let Op::Node { unit, .. } = op {
                 *unit = 99;
                 break;
@@ -1352,10 +1379,10 @@ mod tests {
         }
         assert!(err(&bad).contains("names unit 99"), "{}", err(&bad));
         let mut bad = good.clone();
-        let Op::Output { channel, src, .. } = good.ops[out] else {
+        let Op::Output { channel, src, .. } = good.program.ops[out] else {
             unreachable!()
         };
-        bad.ops[out] = Op::Output {
+        bad.program.ops[out] = Op::Output {
             channel,
             src,
             delay: Some(99),
@@ -1371,26 +1398,26 @@ mod tests {
         bad.task_activation.push(0);
         assert!(err(&bad).contains("wrong length"), "{}", err(&bad));
         let mut bad = good.clone();
-        let mut rows: Vec<Vec<u32>> = (0..bad.tasks.len())
-            .map(|t| bad.task_succ.row(t).to_vec())
-            .collect();
-        rows[0].push(99);
-        bad.task_succ = crate::compile::plan::Csr::from_rows(&rows);
+        let mut rows = bad.task_succ.to_table::<TaskId>();
+        let past = TaskId::new(99);
+        rows[TaskId::new(0)].push(past);
+        bad.task_succ = Csr::from_table(&rows);
         assert!(err(&bad).contains("bad successor"), "{}", err(&bad));
 
         // A weighted sum's lanes and driven lanes past their lists.
         let sums = summed_pair();
         let i = sums
+            .program
             .ops
             .iter_enumerated()
             .find(|(_, o)| matches!(o, Op::Sum { .. }))
             .map(|(i, _)| i)
             .expect("a sum");
-        let Op::Sum { srcs, dst } = sums.ops[i] else {
+        let Op::Sum { srcs, dst } = sums.program.ops[i] else {
             unreachable!()
         };
         let mut bad = sums.clone();
-        bad.ops[i] = Op::WeightedSum {
+        bad.program.ops[i] = Op::WeightedSum {
             srcs,
             dst,
             lanes: Span { start: 0, len: 2 },
@@ -1398,14 +1425,14 @@ mod tests {
         };
         assert!(err(&bad).contains("names lanes past"), "{}", err(&bad));
         let mut bad = sums.clone();
-        bad.sum_lanes.extend([
+        bad.program.sum_lanes.extend([
             None,
             Some(crate::EdgeId {
                 sink: crate::PortSink::Port(crate::InputPort::new(NodeKey(1), 0)),
                 from: crate::Edge::Direct(PortSource::Zero),
             }),
         ]);
-        bad.ops[i] = Op::WeightedSum {
+        bad.program.ops[i] = Op::WeightedSum {
             srcs,
             dst,
             lanes: Span { start: 0, len: 2 },
@@ -1416,7 +1443,7 @@ mod tests {
         // A node's driven ports past the param table.
         let (driven, _) = modulated_plan();
         let mut bad = driven.clone();
-        for op in &mut bad.ops {
+        for op in &mut bad.program.ops {
             if let Op::Node { params, .. } = op
                 && params.len > 0
             {
@@ -1458,6 +1485,7 @@ mod tests {
             .0;
         verify(&good).expect("sound");
         let dst = good
+            .program
             .ops
             .iter()
             .find_map(|op| match *op {
@@ -1469,7 +1497,7 @@ mod tests {
         // them (`note_off_room`), which is what a merge of it must hold.
         let room = crate::note_off_room(5) as u32;
         assert_eq!(
-            good.event_slot_capacity[EventSlotId::new(dst)],
+            good.program.sizing.events[EventSlotId::new(dst)],
             EventSlotCapacity {
                 declared: room,
                 defaults: 1
@@ -1487,7 +1515,7 @@ mod tests {
             },
         ] {
             let mut bad = good.clone();
-            bad.event_slot_capacity[EventSlotId::new(dst)] = short;
+            bad.program.sizing.events[EventSlotId::new(dst)] = short;
             let err = verify(&bad).unwrap_err().0;
             assert!(err.contains("writes"), "{short:?}: {err}");
         }
