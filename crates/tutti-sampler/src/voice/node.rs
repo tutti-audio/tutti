@@ -619,7 +619,9 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             Box::new(node),
             handle.clone(),
             Some(Box::new(fork)),
-            Some(Box::new(handle)),
+            // The cells that are not published entries; the session sweeps
+            // the four entries below.
+            Some(Box::new(handle.steering.clone())),
         )
         .params(params)
         .published::<Self, WindowKind>(Arc::new(window))

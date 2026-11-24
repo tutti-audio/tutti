@@ -48,9 +48,8 @@
 //! The ring has one `PosReader`, and the voice that took it owns it, by
 //! value. A clone of the voice has no reader, and renders silence: the
 //! graph renders the unit it was given, never a clone of it. The one copy
-//! the graph takes, a fork, never reads the live ring anyway: it severs
-//! itself (`DiskVoice::fork_copy` → [`LiveRead::sever`]) and reads the file
-//! instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
+//! the graph takes, a fork, never reads the live ring anyway: it is built
+//! without the ring (`DiskVoice::fork_copy`) and reads the file instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
 //! paused voice holds no refill back.
 
 use crate::SamplerFloat;
@@ -136,7 +135,7 @@ struct State<F: Float> {
 pub(crate) struct LiveRead<F: SamplerFloat> {
     ring: SharedReader<F>,
     /// The ring's one reader, this voice's alone (see the module docs);
-    /// `None` once severed, in a clone, or for a ring whose reader was taken.
+    /// `None` in a clone, or for a ring whose reader was taken.
     ///
     /// It holds the reader of the ring's published control (the map, and the
     /// direction and applied loop beside it) too, registered beside the
@@ -150,7 +149,7 @@ pub(crate) struct LiveRead<F: SamplerFloat> {
 
 impl<F: SamplerFloat> Clone for LiveRead<F> {
     /// The same ring and read state, without the reader: a clone renders
-    /// silence until it is severed and handed a file (see the module docs).
+    /// silence (see the module docs).
     fn clone(&self) -> Self {
         Self {
             ring: self.ring.clone(),
@@ -210,7 +209,7 @@ impl<F: SamplerFloat> LiveRead<F> {
     }
 
     /// The control as the voice's reader lends it (tests): the value one
-    /// block's lend would hold now. `None` severed.
+    /// block's lend would hold now. `None` in a clone.
     #[cfg(test)]
     pub(crate) fn lent_control(&mut self) -> Option<crate::streamer::RingControl<F>> {
         self.reader.as_mut().map(|reader| {
@@ -260,7 +259,7 @@ impl<F: SamplerFloat> LiveRead<F> {
     /// What a block with no frame to play does to the reader, without
     /// writing the (all +0.0) frames: [`render`](Self::render)'s all-`None`
     /// path. The last position and the fade are forgotten and the ring's
-    /// reader claims no range. A severed reader or a clone changes nothing,
+    /// reader claims no range. A clone changes nothing,
     /// as there.
     pub(crate) fn silence(&mut self) {
         if let Some(reader) = self.reader.as_mut() {
@@ -268,12 +267,6 @@ impl<F: SamplerFloat> LiveRead<F> {
             self.st.fade = None;
             reader.idle();
         }
-    }
-
-    /// Let go of the live reader: this copy (a fork) never touches the live
-    /// ring again, and renders silence through it.
-    pub(crate) fn sever(&mut self) {
-        self.reader = None;
     }
 
     /// Render a block: frame `i` plays straight position `positions[i]`
