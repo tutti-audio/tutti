@@ -585,18 +585,6 @@ impl<F: Float> Editor<F> {
         self.link.take_unreported()
     }
 
-    /// Owned items the executor's apply had no room to hand back, since the
-    /// editor was built: each was leaked rather than freed on the audio
-    /// thread. Control thread; cumulative, read when [`collect`](Self::collect)
-    /// has taken back what the executor returned.
-    ///
-    /// A nonzero count is a tutti bug worth reporting: the lists an apply
-    /// fills are sized with the commit, so none should ever be too small.
-    #[must_use]
-    pub fn leaked_items(&self) -> u64 {
-        self.link.leaked()
-    }
-
     /// The graph value.
     pub fn spec(&self) -> &GraphSpec {
         &self.spec

@@ -380,7 +380,6 @@ fn edit::editor::Editor::first_unsupported_rate
 fn edit::editor::Editor::in_flight
 fn edit::editor::Editor::is_paired_with
 fn edit::editor::Editor::is_repreparing
-fn edit::editor::Editor::leaked_items
 fn edit::editor::Editor::limits
 fn edit::editor::Editor::lowered
 fn edit::editor::Editor::new
