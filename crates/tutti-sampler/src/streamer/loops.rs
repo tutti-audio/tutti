@@ -1163,8 +1163,8 @@ mod tests {
             ),
             Some(Samples::new(LEN)),
             Samples::new(0),
+            super::super::decode::Source::Whole(Arc::clone(&wave)),
         );
-        writer.set_resident(Arc::clone(&wave));
         let mut held = vec![0.0f32; 10_000];
         let view = InterleavedMut::new(&mut held, ChannelLayout::MONO).expect("whole frames");
         writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, view);

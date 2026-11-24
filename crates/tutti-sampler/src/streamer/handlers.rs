@@ -146,13 +146,6 @@ pub(super) fn handle_command<F: RingFloat>(
     }
 }
 
-/// The incremental decoder a seekable stream reads through; none without a
-/// codec.
-#[cfg(codec)]
-type Decoder<F> = tutti_codec::FileIn<F>;
-#[cfg(not(codec))]
-type Decoder<F> = (std::convert::Infallible, std::marker::PhantomData<F>);
-
 /// Build the stream `id` on `asset` from frame `start`: its record and
 /// what its reader is made of. Control thread: it allocates the ring.
 ///
@@ -168,25 +161,24 @@ pub(super) fn build_stream<F: RingFloat>(
     shared: &Handles<F>,
     config: &BufferConfig,
 ) -> Result<(Record<F>, Opened<F>), PlaceError> {
-    let (file_length, file_sr, file_channels, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
-        match source {
-            // Decoder metadata carries the header's integer rate.
-            #[cfg(codec)]
-            Source::Stream(meta, decoder) => (
-                meta.total_frames.unwrap_or(0),
-                meta.sample_rate,
-                meta.channel_set,
-                Some(*decoder),
-                None,
-            ),
-            Source::Whole(wave) => (
-                wave.len().get() as u64,
-                wave.sample_rate(),
-                wave.channel_set(),
-                None,
-                Some(wave),
-            ),
-        };
+    // The file's length, rate and channels, and the wave when the source
+    // holds the file whole (a fork plays it).
+    let (file_length, file_sr, file_channels, whole) = match &source {
+        // Decoder metadata carries the header's integer rate.
+        #[cfg(codec)]
+        Source::Stream(meta, _) => (
+            meta.total_frames.unwrap_or(0),
+            meta.sample_rate,
+            meta.channel_set,
+            None,
+        ),
+        Source::Whole(wave) => (
+            wave.len().get() as u64,
+            wave.sample_rate(),
+            wave.channel_set(),
+            Some(Arc::clone(wave)),
+        ),
+    };
 
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
@@ -209,26 +201,11 @@ pub(super) fn build_stream<F: RingFloat>(
         file_channels,
         Some(Samples::new(file_length as usize)),
         config.seek_crossfade_frames,
+        source,
     );
-
-    // `mut` is used by the `set_decoder` call, which every codec feature
-    // gates — so a build with none of them on sees an unused `mut` rather than
-    // a dead binding.
-    #[cfg(codec)]
-    if let Some(decoder) = decoder {
-        producer.set_decoder(decoder);
-    }
-    #[cfg(not(codec))]
-    let _ = decoder;
     #[cfg(test)]
     if let Some(hook) = &shared.seams.read_hook {
         producer.set_read_hook(Arc::clone(hook));
-    }
-    // A file that cannot seek is held whole by its writer, not only by the
-    // cache: a file too large for the cache still streams.
-    let whole = resident.clone();
-    if let Some(wave) = resident {
-        producer.set_resident(wave);
     }
 
     // The window starts where the reader will play: the offset. A placed
