@@ -573,8 +573,11 @@ impl MidiClipControls {
     /// The receiver the node feeds changed (it gained a sink, or its sink was
     /// replaced): the node sends the clip's header again, then the state the
     /// clip holds at the playhead, from its next block, and goes on with the
-    /// events. Playback that is stopped sends both at its next start anyway,
-    /// so this adds nothing then. Several calls before a block make one send.
+    /// events. The notes it holds keep sounding: they are this clip's, and
+    /// only the listener is new (a replaced clip's notes are ended, since they
+    /// are not the new clip's). Playback that is stopped sends both at its
+    /// next start anyway, so this adds nothing then. Several calls before a
+    /// block make one send.
     /// Control thread; the node reads it without a lock.
     pub fn receiver_changed(&self) {
         self.receiver.raise(RECEIVER_CHANGED);
