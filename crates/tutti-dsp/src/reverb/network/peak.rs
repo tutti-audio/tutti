@@ -194,7 +194,10 @@ fn searched(g: [f64; 3], pole: [f64; 2], budget: u32) -> (f64, u32) {
 /// than set. Gains whose response stays at or under `M` are returned as they are with `M`
 /// (gains that do not rise with frequency peak at the low band, which is `M`). The bound is
 /// so the largest gain alone, whatever the profile's shape: it does not fall as any one band's
-/// gain rises. NaN, infinite or negative gains are silence.
+/// gain rises, for gains up to 0.9999: past it the scaled branch caps at 0.9999 and the other
+/// returns `M`. A design's gains stay under that (its shortest line is 11.7 ms and its longest
+/// decay 60 s, a gain of `10^(-3 * 0.0117 / 60)`, about 0.99866; 0.9999 needs a line under
+/// 0.87 ms at 60 s). NaN, infinite or negative gains are silence.
 ///
 /// The design runs it ([`Absorption::designed`](super::Absorption)) and the network carries the
 /// result, which the bank reads as it is: the gains a network has are the ones the bank runs.
