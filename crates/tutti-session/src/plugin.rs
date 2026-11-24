@@ -1030,12 +1030,33 @@ pub(crate) enum RebindState {
         rebinder: tutti_plugin::catalog::PluginRebinder,
         laid_out: tutti_plugin_types::Layout,
     },
-    /// A node over `laid_out` was swapped in and the plugin's Processor has not
-    /// reached it yet: no second rebuild starts before it does.
+    /// A node over `laid_out` is staged in the graph and no commit that
+    /// carries it has been sent: the node it replaces still holds the
+    /// plugin's Processor and renders it.
+    Staged(Staged),
+    /// A node over `laid_out` was swapped in, its commit was sent and the
+    /// plugin's Processor has not reached it yet: no second rebuild starts
+    /// before it does.
     Settling {
         rebinder: tutti_plugin::catalog::PluginRebinder,
         laid_out: tutti_plugin_types::Layout,
     },
+}
+
+/// The node a rebuild staged and what moves the plugin to it once a commit has
+/// carried it to the executor.
+#[derive(Debug)]
+pub(crate) struct Staged {
+    pub(crate) rebinder: tutti_plugin::catalog::PluginRebinder,
+    /// The ports the staged node declares.
+    pub(crate) laid_out: tutti_plugin_types::Layout,
+    /// Moves the Processor to the staged node.
+    pub(crate) commit: tutti_plugin_host::Commit,
+    /// The staged node's controls, which the record follows from the move.
+    pub(crate) controls: Option<NodeControls>,
+    /// The graph's commits sent when the node was staged: a later count means
+    /// a commit carried it.
+    pub(crate) commits: u64,
 }
 
 impl RebindState {
@@ -1049,25 +1070,23 @@ impl RebindState {
     /// Whether a rebuilt node's Processor has not arrived.
     #[cfg(feature = "testing")]
     pub(crate) fn is_settling(&self) -> bool {
-        matches!(self, Self::Settling { .. })
+        matches!(self, Self::Staged(_) | Self::Settling { .. })
     }
 
     pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {
         match self {
             Self::Idle { laid_out, .. } | Self::Settling { laid_out, .. } => laid_out,
+            Self::Staged(staged) => &staged.laid_out,
         }
     }
 
-    /// The same builder, over the ports `laid_out`, settling when `settling`.
-    pub(crate) fn with(self, laid_out: tutti_plugin_types::Layout, settling: bool) -> Self {
+    /// The same builder, idle over the ports `laid_out`.
+    pub(crate) fn idle(self, laid_out: tutti_plugin_types::Layout) -> Self {
         let rebinder = match self {
             Self::Idle { rebinder, .. } | Self::Settling { rebinder, .. } => rebinder,
+            Self::Staged(staged) => staged.rebinder,
         };
-        if settling {
-            Self::Settling { rebinder, laid_out }
-        } else {
-            Self::Idle { rebinder, laid_out }
-        }
+        Self::Idle { rebinder, laid_out }
     }
 }
 

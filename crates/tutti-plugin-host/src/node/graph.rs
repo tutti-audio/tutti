@@ -613,9 +613,14 @@ where
     /// Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
         let mut instance = self.client.inner.lock();
-        *self.client.wake.lock() = Some(wake.clone());
+        self.client.wake.bind(wake);
+        // The plugin's request raises the wake of the node that holds the
+        // Processor, whichever node that is when it asks.
+        let holder = instance.wake_slot();
         if let Some(control) = instance.control() {
-            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
+            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || {
+                holder.request();
+            }));
         }
     }
 }

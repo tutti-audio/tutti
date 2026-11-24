@@ -4,18 +4,23 @@
 //! `Phase::Plugins` compares the ports such a plugin has now with the ones
 //! its node declares. When they differ it asks the plugin's
 //! [`PluginRebinder`](tutti_plugin::catalog::PluginRebinder) to **prepare** a
-//! node over the same plugin, which changes nothing in the plugin, swaps it in
-//! at the same key (`Graph::replace_rebound`), and only when the swap was made
-//! **commits** the move of the plugin's Processor to it. A swap that is refused
-//! leaves the plugin as it was and is reported
-//! ([`PluginChange::PortsRefused`]), once: the ports count as handled.
+//! node over the same plugin, which changes nothing in the plugin, and stages it
+//! at the same key (`Graph::replace_rebound`). A swap that is refused leaves the
+//! plugin as it was and is reported ([`PluginChange::PortsRefused`]), once: the
+//! ports count as handled.
+//!
+//! The record is `Staged` until a commit has been sent: the executor runs the
+//! node it replaces, which keeps the plugin's Processor and renders it, and a
+//! commit the app's graph refuses leaves the plugin sounding. The update after
+//! the first commit sent then **commits** the move of the plugin's Processor to
+//! the new node, and the record follows the new node's controls.
 //!
 //! The wiring to the ports the new shape keeps stays, and the wiring to the
 //! ports it lacks is reported as [`SessionEvent::Unwired`] by the update that
 //! commits the swap. The plugin keeps running. Its Processor is recalled at the
-//! commit, returned by the node it replaces at that node's next block (or when
+//! move, returned by the node it replaces at that node's next block (or when
 //! the node is dropped, since the recall is raised), and lent to the new node at
-//! the next update's pump: the plugin is silent from the swap to then, at least
+//! the next update's pump: the plugin is silent from the move to then, at least
 //! one block and one update.
 //!
 //! A [`Bypassed`](crate::NodeMode::Bypassed) node is parked and not rendered,
@@ -25,11 +30,11 @@
 //! bypass lasts. A plugin with a bypass of its own keeps running and is not
 //! affected.
 //!
-//! The record is `Settling` until the rebinder says
+//! Then the record is `Settling` until the rebinder says
 //! [`Moved`](tutti_plugin_host::Settlement::Moved), or
 //! [`Lost`](tutti_plugin_host::Settlement::Lost) when the plugin died (which the
 //! plugin's own path reports, and both nodes then render silence); no second
-//! rebuild starts before. A plugin that is deactivated when the commit lands
+//! rebuild starts before. A plugin that is deactivated when the move lands
 //! keeps the record `Settling`, and holds off further port changes, until it is
 //! activated again and lends its Processor to the new node.
 //!
@@ -45,7 +50,7 @@ use thiserror::Error;
 use tutti_plugin_host::{RebindError, Settlement};
 use tutti_plugin_types::MainThreadMarker;
 
-use super::{PluginChange, PluginEvent, RebindState, Silence};
+use super::{PluginChange, PluginEvent, RebindState, Silence, Staged};
 use crate::graph::SwapRefused;
 use crate::{Clock, ReplaceRefused, Session, SessionEvent};
 use tutti_graph::NodeKey;
@@ -62,7 +67,7 @@ pub enum PortsRefusal {
     Ports(#[from] RebindError),
     /// The graph refused the swap (a poisoned graph, a node that is gone, an
     /// editor that refuses it); the plugin is untouched, since it is touched only
-    /// once the node is in.
+    /// once a commit has carried the node.
     #[error("the graph refused the node over the new ports: {0}")]
     Swap(ReplaceRefused),
 }
@@ -112,6 +117,12 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
         out: &mut Vec<SessionEvent>,
     ) -> RebindState {
         let (rebinder, laid_out) = match &state {
+            RebindState::Staged(_) => {
+                let RebindState::Staged(staged) = state else {
+                    unreachable!("matched above")
+                };
+                return self.hand_over(node, staged, main);
+            }
             RebindState::Settling { rebinder, .. } => match rebinder.settled() {
                 Settlement::Pending => return state,
                 // Moved: the Processor is in the new node. Lost: the plugin
@@ -127,50 +138,73 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
             rebinder.tick(main);
         }
         let Some(now) = rebinder.layout() else {
-            return state.with(laid_out, false);
+            return state.idle(laid_out);
         };
         if now == laid_out {
-            return state.with(laid_out, false);
+            return state.idle(laid_out);
         }
         match rebinder.prepare() {
             Ok(rebuilt) => {
-                // The swap commits on the main thread; an update that is not on
-                // it asks again, the unplaced node dropped.
-                let Some(main) = main else {
-                    return state.with(laid_out, false);
-                };
                 let (bound, controls, commit) = rebuilt.into_parts();
                 if let Some(controls) = &controls {
                     controls.set_meter(self.transport.settings().project_meter().clone());
                 }
                 match self.graph.replace_rebound(node, bound) {
-                    Ok(()) => {
-                        // The plugin is touched only now the node is in place.
-                        commit.commit(main);
-                        if let (Some(hosted), Some(controls)) =
-                            (self.graph.plugins.get_mut(&node), controls)
-                        {
-                            hosted.set_node(controls);
-                        }
-                        state.with(now, true)
-                    }
+                    // Staged: the executor runs the node it replaces until a
+                    // commit sends the plan that carries this one.
+                    Ok(()) => RebindState::Staged(Staged {
+                        rebinder,
+                        laid_out: now,
+                        commit,
+                        controls,
+                        commits: self.graph.commits(),
+                    }),
                     // Between a re-prepare's two commits: asked again next update.
-                    Err(SwapRefused::Busy(_)) => state.with(laid_out, false),
+                    Err(SwapRefused::Busy(_)) => state.idle(laid_out),
                     Err(SwapRefused::Failed(why)) => {
                         out.push(refused(node, PortsRefusal::Swap(why)));
-                        state.with(now, false)
+                        state.idle(now)
                     }
                 }
             }
             // Its own restart is not over: asked again at the next update.
             Err(RebindError::Restarting | RebindError::NotRunning | RebindError::NoPorts) => {
-                state.with(laid_out, false)
+                state.idle(laid_out)
             }
             Err(why) => {
                 out.push(refused(node, PortsRefusal::Ports(why)));
-                state.with(now, false)
+                state.idle(now)
             }
         }
+    }
+
+    /// One update of a staged node: once a commit has been sent since it was
+    /// staged, the plan that carries it is with the executor and the node it
+    /// replaces gives the Processor back, so the plugin is touched now. Until
+    /// then the node it replaces keeps rendering it. An update that is not on
+    /// the main thread waits.
+    fn hand_over(
+        &mut self,
+        node: NodeKey,
+        staged: Staged,
+        main: Option<MainThreadMarker>,
+    ) -> RebindState {
+        let Some(main) = main.filter(|_| self.graph.commits() != staged.commits) else {
+            return RebindState::Staged(staged);
+        };
+        let Staged {
+            rebinder,
+            laid_out,
+            commit,
+            controls,
+            ..
+        } = staged;
+        commit.commit(main);
+        // The record follows the node that holds the Processor.
+        if let (Some(hosted), Some(controls)) = (self.graph.plugins.get_mut(&node), controls) {
+            hosted.set_node(controls);
+        }
+        RebindState::Settling { rebinder, laid_out }
     }
 }
 

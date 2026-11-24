@@ -149,8 +149,64 @@ impl Silence {
 }
 
 /// Where a node binds its [`Wake`](tutti_graph::Wake): the instance raises it
-/// to call the node that holds the Processor when a recall waits.
-pub(super) type WakeSlot = Mutex<Option<tutti_graph::Wake>>;
+/// to call the node that holds the Processor when a recall waits, and the
+/// plugin raises it when it asks to be processed again.
+///
+/// The instance's slot is the one the plugin's request is bound to for good: it
+/// holds the wake of the node that holds the Processor, which
+/// [`adopt`](Self::adopt) takes from a successor's slot when the Processor
+/// moves to it.
+#[derive(Default)]
+pub(super) struct WakeSlot {
+    wake: Mutex<Option<tutti_graph::Wake>>,
+    /// A [`request`](Self::request) found the slot busy: the control side
+    /// raises it ([`settle`](Self::settle)).
+    missed: AtomicBool,
+}
+
+impl WakeSlot {
+    /// The wake of the node this slot belongs to. Control thread.
+    pub(super) fn bind(&self, wake: tutti_graph::Wake) {
+        *self.wake.lock() = Some(wake);
+    }
+
+    /// Takes the wake `from` holds, as the node that holds the Processor now.
+    /// Control thread.
+    pub(super) fn adopt(&self, from: &Self) {
+        let wake = from.wake.lock().clone();
+        if wake.is_some() {
+            *self.wake.lock() = wake;
+        }
+    }
+
+    /// Calls the node that holds the Processor. Control thread.
+    pub(super) fn notify(&self) {
+        if let Some(wake) = &*self.wake.lock() {
+            wake.notify();
+        }
+    }
+
+    /// The plugin asks to be processed again. Any thread, and never waits: a
+    /// slot the control side holds at that moment is raised by the control
+    /// side's next [`settle`](Self::settle).
+    pub(super) fn request(&self) {
+        match self.wake.try_lock() {
+            Some(wake) => {
+                if let Some(wake) = &*wake {
+                    wake.notify();
+                }
+            }
+            None => self.missed.store(true, Ordering::Release),
+        }
+    }
+
+    /// Raises a request that found the slot busy. Control thread.
+    pub(super) fn settle(&self) {
+        if self.missed.swap(false, Ordering::AcqRel) {
+            self.notify();
+        }
+    }
+}
 
 /// Whether the plugin runs at a rate other than the graph's, because it
 /// did not take the graph's: published by the instance with its refusal
@@ -243,9 +299,9 @@ pub(super) struct Instance<L: Loaded> {
     /// The nodes over this instance render silence while a refusal stands.
     silenced: Arc<Silenced>,
     /// The wake of the node whose realtime end holds the Processor: raised
-    /// after a recall, which only that node's next call answers. A successor
-    /// node binds its own slot, which becomes this one when the Processor
-    /// moves to its end.
+    /// after a recall, which only that node's next call answers, and by the
+    /// plugin's own request to be processed. A successor node binds its own
+    /// slot, whose wake this one adopts when the Processor moves to its end.
     wake: Arc<WakeSlot>,
     /// The slot of the successor [`commit`](Self::commit) named, until the
     /// Processor has moved to its end.
@@ -468,14 +524,15 @@ impl<L: Loaded> Instance<L> {
         // A plan parked for the Processor has raised its recall; the realtime
         // end hands it back at the node's next call, which a parked node does
         // not get unless woken. Raised after the recall, never before.
-        if self.incoming_wake.is_some() && !self.hand.pending() {
-            self.wake = self.incoming_wake.take().unwrap_or_default();
-        }
-        if self.state.is_parked()
-            && let Some(wake) = &*self.wake.lock()
+        if !self.hand.pending()
+            && let Some(incoming) = self.incoming_wake.take()
         {
-            wake.notify();
+            self.wake.adopt(&incoming);
         }
+        if self.state.is_parked() {
+            self.wake.notify();
+        }
+        self.wake.settle();
         if std::mem::take(&mut self.midi_map_stale) {
             self.declare_midi_map(main);
             self.reports.push(PluginInvalidation::MidiMap);
