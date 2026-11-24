@@ -1,10 +1,16 @@
 //! One endpoint's relationship with one peer: the session state machine of
-//! M2-124 section 6, for either role, over no socket and no clock of its own.
+//! M2-124 section 6, over no socket and no clock of its own.
+//!
+//! [`Session<R>`] holds what both roles share: the link, ping and liveness, the
+//! established, resetting and closing life, the queued commands and events. A
+//! [`Role`] holds what only one role has: its data, the states before a Session
+//! is established and the commands addressed to it.
+
+mod client;
+mod host;
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_ump::Ump;
@@ -13,22 +19,17 @@ use tutti_units::Losses;
 use crate::command::code;
 use crate::link::{Link, Loss};
 use crate::{
-    Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command,
-    Credentials, Digest, EndedBy, EndpointIdentity, Event, Header, Invitation, Nak, NakReason,
-    Nonce, PingId, Retransmit, SendError, SessionConfig, SessionState, UserAuthChallenge,
-    UserAuthState, UserAuthentication,
+    AuthChallenge, AuthFailure, Bye, ByeReason, Command, Digest, EndedBy, EndpointIdentity, Event,
+    Header, Invitation, Nak, NakReason, PingId, Retransmit, RetransmitRefusal, RetransmitRequest,
+    SendError, SessionConfig, SessionState, UmpData, UserAuthChallenge, UserAuthentication,
 };
 
-/// Failed authentications a Host tolerates before it ends the invitation.
-const MAX_AUTH_FAILURES: u8 = 5;
-
-/// The delay before a Host answers the first failed authentication; each
-/// further failure doubles it (M2-124 section 6.7).
-const AUTH_FAILURE_DELAY: Duration = Duration::from_millis(100);
+pub(crate) use client::ClientRole;
+pub(crate) use host::{Capacity, HostRole};
 
 /// A command sent again until it is answered or `command_timeout` passes.
 #[derive(Clone, Debug)]
-struct Repeat {
+pub(crate) struct Repeat {
     command: Command,
     started: Instant,
     next: Instant,
@@ -38,39 +39,23 @@ impl Repeat {
     fn deadline(&self, cfg: &SessionConfig) -> Instant {
         self.next.min(self.started + cfg.command_timeout.get())
     }
+
+    /// Sends the command again when its repeat is due.
+    fn repeat_due(&mut self, now: Instant, cfg: &SessionConfig, out: &mut Vec<Command>) {
+        if now >= self.next {
+            self.next = now + cfg.repeat_interval.get();
+            out.push(self.command.clone());
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Challenge {
-    SharedSecret,
-    User,
-}
-
+/// Where a Session stands: the states of its life, and the role's own states
+/// before it is established.
 #[derive(Clone, Debug)]
-struct Challenged {
-    nonce: Nonce,
-    kind: Challenge,
-    since: Instant,
-    failures: u8,
-    /// A reply held back so a guessing peer is slowed.
-    delayed: Option<(Instant, Command)>,
-}
-
-#[derive(Clone, Debug)]
-enum Phase {
+enum Phase<Opening> {
     Idle,
-    /// A Client's Invitation, or its answer to a challenge, is repeated.
-    Inviting(Repeat),
-    /// A Client waits for a Host that said Pending, repeating nothing.
-    AwaitingAcceptance {
-        until: Instant,
-    },
-    /// A Host waits for its application to accept or decline.
-    Confirming {
-        since: Instant,
-    },
-    /// A Host waits for the answer to its challenge.
-    Challenged(Challenged),
+    /// A state only the role has, between the first Invitation and the Session.
+    Opening(Opening),
     Established,
     Resetting(Repeat),
     Closing {
@@ -79,31 +64,93 @@ enum Phase {
     },
 }
 
-/// How a Host admits, and the one thing a Host needs that is not data.
-#[derive(Clone, Debug)]
-pub(crate) enum Role {
-    Client(Box<Credentials>),
-    Host {
-        admission: Arc<Admission>,
-        nonce_source: fn() -> Result<Nonce, getrandom::Error>,
-    },
+/// What one of the two roles has that the other has not.
+///
+/// A command the role is not the addressee of is answered with a NAK, Command
+/// Not Expected (M2-124 sections 6.4 to 6.10).
+pub(crate) trait Role: Sized {
+    /// The states before the Session is established.
+    type Opening: std::fmt::Debug;
+
+    fn opening_state(opening: &Self::Opening) -> SessionState;
+
+    fn opening_deadline(opening: &Self::Opening, cfg: &SessionConfig) -> Instant;
+
+    /// Does the work due at `now` in an opening state.
+    fn tick_opening(&mut self, core: &mut Core<Self>, now: Instant);
+
+    fn on_invitation(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _invitation: Invitation,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_auth(&mut self, core: &mut Core<Self>, _now: Instant, header: Header, _digest: &Digest) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_user_auth(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _auth: &UserAuthentication,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_accepted(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _identity: EndpointIdentity,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_pending(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _identity: EndpointIdentity,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_challenge(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _challenge: &AuthChallenge,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
+
+    fn on_user_challenge(
+        &mut self,
+        core: &mut Core<Self>,
+        _now: Instant,
+        header: Header,
+        _challenge: &UserAuthChallenge,
+    ) {
+        core.nak(NakReason::NotExpected, header);
+    }
 }
 
-/// Whether a Host has room for another Client.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Capacity {
-    Available,
-    Full,
-}
-
+/// What both roles of a Session hold.
 #[derive(Debug)]
-pub(crate) struct Session {
-    role: Role,
-    capacity: Capacity,
+pub(crate) struct Core<R: Role> {
     cfg: SessionConfig,
     local: EndpointIdentity,
     peer: SocketAddr,
-    phase: Phase,
+    phase: Phase<R::Opening>,
     remote: Option<EndpointIdentity>,
     link: Link,
     last_heard: Instant,
@@ -116,71 +163,191 @@ pub(crate) struct Session {
     losses: Losses,
 }
 
+/// A Session in one role.
+#[derive(Debug)]
+pub(crate) struct Session<R: Role> {
+    core: Core<R>,
+    role: R,
+}
+
 /// The most Pings that may be unanswered at once before the oldest is dropped.
 const OUTSTANDING_PINGS: usize = 8;
 
-impl Session {
-    pub(crate) fn new(
-        role: Role,
+impl<R: Role> Session<R> {
+    fn new(
+        role: R,
         cfg: SessionConfig,
         local: EndpointIdentity,
         peer: SocketAddr,
         now: Instant,
     ) -> Self {
         Self {
+            core: Core {
+                cfg,
+                local,
+                peer,
+                phase: Phase::Idle,
+                remote: None,
+                link: Link::new(),
+                last_heard: now,
+                last_ping: None,
+                ping_id: PingId::new(0),
+                outstanding_pings: VecDeque::new(),
+                out: Vec::new(),
+                events: Vec::new(),
+                losses: Losses::NONE,
+            },
             role,
-            capacity: Capacity::Available,
-            cfg,
-            local,
-            peer,
-            phase: Phase::Idle,
-            remote: None,
-            link: Link::new(),
-            last_heard: now,
-            last_ping: None,
-            ping_id: PingId::new(0),
-            outstanding_pings: VecDeque::new(),
-            out: Vec::new(),
-            events: Vec::new(),
-            losses: Losses::NONE,
         }
-    }
-
-    pub(crate) fn set_capacity(&mut self, capacity: Capacity) {
-        self.capacity = capacity;
-    }
-
-    /// Whether the peer is in a Session, or an Invitation or challenge is
-    /// open with it: what a Host keeps an entry for.
-    pub(crate) fn holds_session(&self) -> bool {
-        matches!(
-            self.state(),
-            SessionState::PendingInvitation
-                | SessionState::AuthenticationRequired
-                | SessionState::Established
-        )
     }
 
     pub(crate) fn state(&self) -> SessionState {
-        match self.phase {
-            Phase::Idle => SessionState::Idle,
-            Phase::Inviting(_) | Phase::AwaitingAcceptance { .. } | Phase::Confirming { .. } => {
-                SessionState::PendingInvitation
-            }
-            Phase::Challenged(_) => SessionState::AuthenticationRequired,
-            Phase::Established => SessionState::Established,
-            Phase::Resetting(_) => SessionState::PendingSessionReset,
-            Phase::Closing { .. } => SessionState::PendingBye,
-        }
+        self.core.state()
     }
 
     /// The commands and events the last calls produced, and what they lost.
     pub(crate) fn take_output(&mut self) -> (Vec<Command>, Vec<Event>, Losses) {
+        let core = &mut self.core;
         (
-            std::mem::take(&mut self.out),
-            std::mem::take(&mut self.events),
-            std::mem::take(&mut self.losses),
+            std::mem::take(&mut core.out),
+            std::mem::take(&mut core.events),
+            std::mem::take(&mut core.losses),
         )
+    }
+
+    pub(crate) fn remote(&self) -> Option<EndpointIdentity> {
+        self.core.remote
+    }
+
+    /// Ends the Session or the invitation with a Bye that is repeated until
+    /// answered.
+    pub(crate) fn close(&mut self, now: Instant, reason: ByeReason) {
+        self.core.close(now, reason);
+    }
+
+    /// Starts a Session Reset (M2-124 section 6.11).
+    pub(crate) fn reset(&mut self, now: Instant) {
+        self.core.reset(now);
+    }
+
+    /// Queues UMP for the peer.
+    pub(crate) fn send_ump(&mut self, now: Instant, packets: &[Ump]) -> Result<(), SendError> {
+        let core = &mut self.core;
+        if !matches!(core.phase, Phase::Established) {
+            return Err(SendError::NotEstablished {
+                state: core.state(),
+            });
+        }
+        core.link.send(now, &core.cfg, packets, &mut core.out);
+        Ok(())
+    }
+
+    /// Takes one command of a received datagram, with the header it arrived
+    /// under: a NAK of the command quotes that header.
+    pub(crate) fn on_message(&mut self, header: Header, command: Command, now: Instant) {
+        let (core, role) = (&mut self.core, &mut self.role);
+        core.last_heard = now;
+        match command {
+            Command::Ping(id) => core.out.push(Command::PingReply(id)),
+            Command::PingReply(id) => core.on_ping_reply(id, header),
+            Command::Nak(nak) => core.on_nak(now, &nak),
+            Command::Bye(bye) => core.on_bye(&bye),
+            Command::ByeReply => {
+                if let Phase::Closing { reason, .. } = core.phase {
+                    core.finish(EndedBy::Local, reason);
+                }
+            }
+            Command::Invitation(inv) => role.on_invitation(core, now, header, inv),
+            Command::InvitationWithAuth(digest) => role.on_auth(core, now, header, &digest),
+            Command::InvitationWithUserAuth(auth) => role.on_user_auth(core, now, header, &auth),
+            Command::Accepted(identity) => role.on_accepted(core, now, header, identity),
+            Command::Pending(identity) => role.on_pending(core, now, header, identity),
+            Command::AuthRequired(challenge) => role.on_challenge(core, now, header, &challenge),
+            Command::UserAuthRequired(challenge) => {
+                role.on_user_challenge(core, now, header, &challenge);
+            }
+            Command::UmpData(data) => core.on_ump_data(now, data),
+            Command::RetransmitRequest(request) => core.on_retransmit_request(now, header, request),
+            Command::RetransmitError(error) => core.on_retransmit_error(now, error),
+            Command::SessionReset => core.on_session_reset(now),
+            Command::SessionResetReply => core.on_session_reset_reply(now),
+        }
+    }
+
+    /// Takes a command that could not be read: unknown codes are NAKed as
+    /// unsupported, anything else as malformed. A malformed Invitation is a
+    /// protocol error that ends the exchange.
+    pub(crate) fn refuse_command(
+        &mut self,
+        now: Instant,
+        header: Header,
+        error: crate::ParseError,
+    ) {
+        let core = &mut self.core;
+        core.last_heard = now;
+        match error {
+            crate::ParseError::UnknownCode(_) => core.nak(NakReason::NotSupported, header),
+            crate::ParseError::Truncated => {}
+            _ if header.code() == code::INVITATION => {
+                if matches!(core.phase, Phase::Idle) {
+                    core.refuse(now, ByeReason::ProtocolError);
+                }
+            }
+            _ => core.nak(NakReason::Malformed, header),
+        }
+    }
+
+    /// The next instant `on_timeout` has work at.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        let core = &self.core;
+        let cfg = &core.cfg;
+        let earliest = |times: &[Option<Instant>]| times.iter().flatten().copied().min();
+        match &core.phase {
+            Phase::Idle => None,
+            Phase::Opening(opening) => Some(R::opening_deadline(opening, cfg)),
+            Phase::Resetting(r) | Phase::Closing { repeat: r, .. } => Some(r.deadline(cfg)),
+            Phase::Established => earliest(&[
+                Some(core.last_heard + cfg.liveness_timeout.get()),
+                Some(core.next_ping()),
+                core.link.idle_deadline(),
+                core.link.rx_deadline(),
+            ]),
+        }
+    }
+
+    pub(crate) fn on_timeout(&mut self, now: Instant) {
+        let (core, role) = (&mut self.core, &mut self.role);
+        let cfg = core.cfg;
+        match &mut core.phase {
+            Phase::Idle => {}
+            Phase::Opening(_) => role.tick_opening(core, now),
+            Phase::Resetting(r) => {
+                if now >= r.started + cfg.command_timeout.get() {
+                    return core.close(now, ByeReason::Timeout);
+                }
+                r.repeat_due(now, &cfg, &mut core.out);
+            }
+            Phase::Closing { repeat, reason } => {
+                let reason = *reason;
+                if now >= repeat.started + cfg.command_timeout.get() {
+                    return core.finish(EndedBy::Local, reason);
+                }
+                repeat.repeat_due(now, &cfg, &mut core.out);
+            }
+            Phase::Established => core.tick_established(now),
+        }
+    }
+}
+
+impl<R: Role> Core<R> {
+    fn state(&self) -> SessionState {
+        match &self.phase {
+            Phase::Idle => SessionState::Idle,
+            Phase::Opening(opening) => R::opening_state(opening),
+            Phase::Established => SessionState::Established,
+            Phase::Resetting(_) => SessionState::PendingSessionReset,
+            Phase::Closing { .. } => SessionState::PendingBye,
+        }
     }
 
     fn start_repeat(&mut self, now: Instant, command: Command) -> Repeat {
@@ -201,14 +368,11 @@ impl Session {
         })));
     }
 
-    /// Ends the Session or the invitation with a Bye that is repeated until
-    /// answered.
-    pub(crate) fn close(&mut self, now: Instant, reason: ByeReason) {
+    fn close(&mut self, now: Instant, reason: ByeReason) {
         if matches!(self.phase, Phase::Closing { .. } | Phase::Idle) {
             return;
         }
-        let repeat = self.start_repeat(now, Command::Bye(Box::new(Bye::new(reason))));
-        self.phase = Phase::Closing { repeat, reason };
+        self.refuse(now, reason);
     }
 
     /// Ends the exchange with a peer that was never in a Session: a Bye
@@ -231,181 +395,24 @@ impl Session {
         });
     }
 
-    /// A Client's first move: the Invitation.
-    pub(crate) fn invite(&mut self, now: Instant) {
-        let Role::Client(credentials) = &self.role else {
-            return;
-        };
-        if !matches!(self.phase, Phase::Idle) {
-            return;
-        }
-        let invitation = Command::Invitation(Invitation {
-            methods: credentials.methods(),
-            identity: self.local,
-        });
-        self.last_heard = now;
-        let repeat = self.start_repeat(now, invitation);
-        self.phase = Phase::Inviting(repeat);
-    }
-
-    /// Begins the Host's side of a Session after its application accepted
-    /// the Invitation it was asked about.
-    pub(crate) fn accept(&mut self, now: Instant) {
-        if matches!(self.phase, Phase::Confirming { .. }) {
-            self.establish(now);
-        }
-    }
-
-    pub(crate) fn decline(&mut self, now: Instant) {
-        if matches!(self.phase, Phase::Confirming { .. }) {
-            self.refuse(now, ByeReason::UserDeclined);
-        }
-    }
-
-    pub(crate) fn remote(&self) -> Option<EndpointIdentity> {
-        self.remote
-    }
-
-    /// Starts a Session Reset (M2-124 section 6.11).
-    pub(crate) fn reset(&mut self, now: Instant) {
+    fn reset(&mut self, now: Instant) {
         if matches!(self.phase, Phase::Established) {
             let repeat = self.start_repeat(now, Command::SessionReset);
             self.phase = Phase::Resetting(repeat);
         }
     }
 
-    /// Queues UMP for the peer.
-    pub(crate) fn send_ump(&mut self, now: Instant, packets: &[Ump]) -> Result<(), SendError> {
-        if !matches!(self.phase, Phase::Established) {
-            return Err(SendError::NotEstablished {
-                state: self.state(),
-            });
-        }
-        self.link.send(now, &self.cfg, packets, &mut self.out);
-        Ok(())
-    }
-
+    /// Begins the Session. A Host's Accepted is queued by the Host.
     fn establish(&mut self, now: Instant) {
         self.link.reset();
         self.last_heard = now;
         self.last_ping = None;
         self.phase = Phase::Established;
-        // A Host tells its Client; a Client is told.
-        if matches!(self.role, Role::Host { .. }) {
-            self.out.push(Command::Accepted(self.local));
-        }
-        self.report_established();
-    }
-
-    fn report_established(&mut self) {
         if let Some(remote) = self.remote {
             self.events.push(Event::Established {
                 peer: self.peer,
                 remote,
             });
-        }
-    }
-
-    /// Takes one command of a received datagram, with the header it arrived
-    /// under: a NAK of the command quotes that header.
-    pub(crate) fn on_message(&mut self, header: Header, command: Command, now: Instant) {
-        self.last_heard = now;
-        match command {
-            Command::Ping(id) => self.out.push(Command::PingReply(id)),
-            Command::PingReply(id) => {
-                if let Some(at) = self.outstanding_pings.iter().position(|&p| p == id) {
-                    self.outstanding_pings.remove(at);
-                } else {
-                    self.nak(NakReason::BadPingReply, header);
-                }
-            }
-            Command::Nak(nak) => self.on_nak(now, &nak),
-            Command::Bye(bye) => self.on_bye(&bye),
-            Command::ByeReply => {
-                if let Phase::Closing { reason, .. } = self.phase {
-                    self.finish(EndedBy::Local, reason);
-                }
-            }
-            Command::Invitation(inv) => self.on_invitation(now, header, inv),
-            Command::InvitationWithAuth(digest) => self.on_auth(now, header, &digest),
-            Command::InvitationWithUserAuth(auth) => self.on_user_auth(now, header, &auth),
-            Command::Accepted(identity) => self.on_accepted(now, header, identity),
-            Command::Pending(identity) => self.on_pending(now, header, identity),
-            Command::AuthRequired(challenge) => self.on_challenge(now, header, &challenge),
-            Command::UserAuthRequired(challenge) => {
-                self.on_user_challenge(now, header, &challenge);
-            }
-            Command::UmpData(data) => match self.phase {
-                Phase::Established => {
-                    let mut delivered = Vec::new();
-                    let mut lost = Vec::new();
-                    self.link
-                        .receive(now, &self.cfg, data, &mut delivered, &mut lost);
-                    self.report(delivered, lost);
-                }
-                Phase::Resetting(_) => {}
-                _ => self.not_established(now),
-            },
-            Command::RetransmitRequest(request) => match self.phase {
-                Phase::Established | Phase::Resetting(_)
-                    if self.cfg.retransmit == Retransmit::Unsupported =>
-                {
-                    self.nak(NakReason::NotSupported, header);
-                }
-                Phase::Established => self.link.retransmit(request, &mut self.out),
-                Phase::Resetting(_) => {}
-                _ => self.not_established(now),
-            },
-            Command::RetransmitError(error) => match self.phase {
-                Phase::Established => {
-                    let mut delivered = Vec::new();
-                    let mut lost = Vec::new();
-                    self.link
-                        .on_retransmit_error(error, &mut delivered, &mut lost);
-                    self.report(delivered, lost);
-                }
-                Phase::Resetting(_) => {}
-                _ => self.not_established(now),
-            },
-            Command::SessionReset => match self.phase {
-                Phase::Established | Phase::Resetting(_) => {
-                    self.out.push(Command::SessionResetReply);
-                    self.link.reset();
-                    self.events.push(Event::Reset { peer: self.peer });
-                }
-                _ => self.not_established(now),
-            },
-            Command::SessionResetReply => match self.phase {
-                Phase::Resetting(_) => {
-                    self.link.reset();
-                    self.phase = Phase::Established;
-                    self.events.push(Event::Reset { peer: self.peer });
-                }
-                Phase::Established => self.reset(now),
-                _ => self.not_established(now),
-            },
-        }
-    }
-
-    /// Takes a command that could not be read: unknown codes are NAKed as
-    /// unsupported, anything else as malformed. A malformed Invitation is a
-    /// protocol error that ends the exchange.
-    pub(crate) fn refuse_command(
-        &mut self,
-        now: Instant,
-        header: Header,
-        error: crate::ParseError,
-    ) {
-        self.last_heard = now;
-        match error {
-            crate::ParseError::UnknownCode(_) => self.nak(NakReason::NotSupported, header),
-            crate::ParseError::Truncated => {}
-            _ if header.code() == code::INVITATION => {
-                if matches!(self.phase, Phase::Idle) {
-                    self.refuse(now, ByeReason::ProtocolError);
-                }
-            }
-            _ => self.nak(NakReason::Malformed, header),
         }
     }
 
@@ -428,6 +435,78 @@ impl Session {
                 .into_iter()
                 .map(|packet| Event::Ump { peer, packet }),
         );
+    }
+
+    fn on_ping_reply(&mut self, id: PingId, header: Header) {
+        if let Some(at) = self.outstanding_pings.iter().position(|&p| p == id) {
+            self.outstanding_pings.remove(at);
+        } else {
+            self.nak(NakReason::BadPingReply, header);
+        }
+    }
+
+    fn on_ump_data(&mut self, now: Instant, data: UmpData) {
+        match self.phase {
+            Phase::Established => {
+                let mut delivered = Vec::new();
+                let mut lost = Vec::new();
+                self.link
+                    .receive(now, &self.cfg, data, &mut delivered, &mut lost);
+                self.report(delivered, lost);
+            }
+            Phase::Resetting(_) => {}
+            _ => self.not_established(now),
+        }
+    }
+
+    fn on_retransmit_request(&mut self, now: Instant, header: Header, request: RetransmitRequest) {
+        match self.phase {
+            Phase::Established | Phase::Resetting(_)
+                if self.cfg.retransmit == Retransmit::Unsupported =>
+            {
+                self.nak(NakReason::NotSupported, header);
+            }
+            Phase::Established => self.link.retransmit(request, &mut self.out),
+            Phase::Resetting(_) => {}
+            _ => self.not_established(now),
+        }
+    }
+
+    fn on_retransmit_error(&mut self, now: Instant, error: RetransmitRefusal) {
+        match self.phase {
+            Phase::Established => {
+                let mut delivered = Vec::new();
+                let mut lost = Vec::new();
+                self.link
+                    .on_retransmit_error(error, &mut delivered, &mut lost);
+                self.report(delivered, lost);
+            }
+            Phase::Resetting(_) => {}
+            _ => self.not_established(now),
+        }
+    }
+
+    fn on_session_reset(&mut self, now: Instant) {
+        match self.phase {
+            Phase::Established | Phase::Resetting(_) => {
+                self.out.push(Command::SessionResetReply);
+                self.link.reset();
+                self.events.push(Event::Reset { peer: self.peer });
+            }
+            _ => self.not_established(now),
+        }
+    }
+
+    fn on_session_reset_reply(&mut self, now: Instant) {
+        match self.phase {
+            Phase::Resetting(_) => {
+                self.link.reset();
+                self.phase = Phase::Established;
+                self.events.push(Event::Reset { peer: self.peer });
+            }
+            Phase::Established => self.reset(now),
+            _ => self.not_established(now),
+        }
     }
 
     fn on_nak(&mut self, now: Instant, nak: &Nak) {
@@ -464,47 +543,6 @@ impl Session {
         }
     }
 
-    // ---- Client replies ----
-
-    fn on_accepted(&mut self, now: Instant, header: Header, identity: EndpointIdentity) {
-        match (&self.role, &self.phase) {
-            (Role::Host { .. }, _) => self.nak(NakReason::NotExpected, header),
-            (Role::Client(_), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
-                self.remote = Some(identity);
-                self.establish(now);
-            }
-            (Role::Client(_), Phase::Established | Phase::Resetting(_)) => {}
-            (Role::Client(_), _) => self.refuse(now, ByeReason::NoPendingInvitation),
-        }
-    }
-
-    fn on_pending(&mut self, now: Instant, header: Header, identity: EndpointIdentity) {
-        match (&self.role, &self.phase) {
-            (Role::Host { .. }, _) => self.nak(NakReason::NotExpected, header),
-            (Role::Client(_), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
-                self.remote = Some(identity);
-                self.phase = Phase::AwaitingAcceptance {
-                    until: now + self.cfg.pending_timeout.get(),
-                };
-            }
-            (Role::Client(_), Phase::Established | Phase::Resetting(_)) => {}
-            (Role::Client(_), _) => self.refuse(now, ByeReason::NoPendingInvitation),
-        }
-    }
-
-    /// The credentials of a Client whose Invitation is out and unanswered.
-    /// A challenge is expected only then (M2-124 sections 6.7 and 6.8), and only
-    /// for a method the Invitation advertised, which is the method these
-    /// credentials hold.
-    fn inviting_credentials(&self) -> Option<&Credentials> {
-        match (&self.role, &self.phase) {
-            (Role::Client(credentials), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
-                Some(credentials)
-            }
-            _ => None,
-        }
-    }
-
     fn authentication_failed(&mut self, now: Instant, cause: AuthFailure) {
         self.events.push(Event::AuthenticationFailed {
             peer: self.peer,
@@ -513,305 +551,11 @@ impl Session {
         self.close(now, ByeReason::InvitationCanceled);
     }
 
-    fn on_challenge(&mut self, now: Instant, header: Header, challenge: &AuthChallenge) {
-        let digest = self
-            .inviting_credentials()
-            .and_then(|credentials| credentials.secret.as_deref())
-            .map(|secret| Digest::of_secret(&challenge.nonce, secret));
-        let Some(digest) = digest else {
-            return self.nak(NakReason::NotExpected, header);
-        };
-        if challenge.state == AuthState::DigestWrong {
-            return self.authentication_failed(now, AuthFailure::DigestWrong);
-        }
-        self.remote = Some(challenge.identity);
-        let repeat = self.start_repeat(now, Command::InvitationWithAuth(digest));
-        self.phase = Phase::Inviting(repeat);
-    }
-
-    fn on_user_challenge(&mut self, now: Instant, header: Header, challenge: &UserAuthChallenge) {
-        let answer = self
-            .inviting_credentials()
-            .and_then(|credentials| credentials.user.as_ref())
-            .map(|(username, password)| {
-                Box::new(UserAuthentication {
-                    digest: Digest::of_user(&challenge.nonce, username, password),
-                    username: *username,
-                })
-            });
-        let Some(answer) = answer else {
-            return self.nak(NakReason::NotExpected, header);
-        };
-        match challenge.state {
-            UserAuthState::DigestWrong => {
-                return self.authentication_failed(now, AuthFailure::DigestWrong);
-            }
-            UserAuthState::UserNotFound => {
-                return self.authentication_failed(now, AuthFailure::UserNotFound);
-            }
-            UserAuthState::First => {}
-        }
-        self.remote = Some(challenge.identity);
-        let repeat = self.start_repeat(now, Command::InvitationWithUserAuth(answer));
-        self.phase = Phase::Inviting(repeat);
-    }
-
-    // ---- Host side of the Invitation ----
-
-    fn on_invitation(&mut self, now: Instant, header: Header, invitation: Invitation) {
-        let Role::Host {
-            admission,
-            nonce_source,
-        } = &self.role
-        else {
-            // A Client with no Host behind this port.
-            return self.nak(NakReason::NotExpected, header);
-        };
-        let (admission, nonce_source) = (Arc::clone(admission), *nonce_source);
-        match &self.phase {
-            // A peer the Host already admitted asks again: it missed the reply.
-            Phase::Established | Phase::Resetting(_) => {
-                return self.out.push(Command::Accepted(self.local));
-            }
-            Phase::Confirming { .. } => {
-                return self.out.push(Command::Pending(self.local));
-            }
-            Phase::Challenged(c) => {
-                let (nonce, kind) = (c.nonce, c.kind);
-                return self
-                    .out
-                    .push(challenge_command(kind, nonce, Because::Invited, self.local));
-            }
-            Phase::Closing { .. } => return,
-            Phase::Idle | Phase::Inviting(_) | Phase::AwaitingAcceptance { .. } => {}
-        }
-        if self.capacity == Capacity::Full {
-            return self.refuse(now, ByeReason::TooManySessions);
-        }
-        self.remote = Some(invitation.identity);
-        let needed = admission.required();
-        match &*admission {
-            Admission::Open => self.establish(now),
-            Admission::Confirm => {
-                self.out.push(Command::Pending(self.local));
-                self.phase = Phase::Confirming { since: now };
-                self.events.push(Event::Confirm {
-                    peer: self.peer,
-                    remote: invitation.identity,
-                });
-            }
-            Admission::SharedSecret(_) | Admission::Users(_) => {
-                if !invitation.methods.contains(needed) {
-                    return self.refuse(now, ByeReason::NoMatchingAuthentication);
-                }
-                let kind = if needed == AuthMethods::USER {
-                    Challenge::User
-                } else {
-                    Challenge::SharedSecret
-                };
-                let nonce = match nonce_source() {
-                    Ok(nonce) => nonce,
-                    Err(error) => {
-                        self.events.push(Event::NonceUnavailable {
-                            peer: self.peer,
-                            error,
-                        });
-                        return self.refuse(now, ByeReason::Unknown);
-                    }
-                };
-                self.out
-                    .push(challenge_command(kind, nonce, Because::Invited, self.local));
-                self.phase = Phase::Challenged(Challenged {
-                    nonce,
-                    kind,
-                    since: now,
-                    failures: 0,
-                    delayed: None,
-                });
-            }
-        }
-    }
-
-    fn on_auth(&mut self, now: Instant, header: Header, digest: &Digest) {
-        let verdict =
-            self.verify(
-                Challenge::SharedSecret,
-                header,
-                |admission, nonce| match admission {
-                    Admission::SharedSecret(secret) => {
-                        verdict(&Digest::of_secret(nonce, secret), digest)
-                    }
-                    _ => Verdict::Wrong,
-                },
-            );
-        self.conclude(now, verdict);
-    }
-
-    fn on_user_auth(&mut self, now: Instant, header: Header, auth: &UserAuthentication) {
-        let verdict = self.verify(
-            Challenge::User,
-            header,
-            |admission, nonce| match admission {
-                Admission::Users(users) => users
-                    .iter()
-                    .find(|(name, _)| name == &auth.username)
-                    .map_or(Verdict::UnknownUser, |(name, password)| {
-                        verdict(&Digest::of_user(nonce, name, password), &auth.digest)
-                    }),
-                _ => Verdict::Wrong,
-            },
-        );
-        self.conclude(now, verdict);
-    }
-
-    /// Checks an authenticated Invitation against the challenge in hand.
-    fn verify(
-        &mut self,
-        kind: Challenge,
-        header: Header,
-        check: impl FnOnce(&Admission, &Nonce) -> Verdict,
-    ) -> Verdict {
-        let Role::Host { admission, .. } = &self.role else {
-            self.nak(NakReason::NotExpected, header);
-            return Verdict::Ignored;
-        };
-        match &self.phase {
-            Phase::Challenged(c) if c.kind == kind => check(admission.as_ref(), &c.nonce),
-            Phase::Challenged(_) => {
-                self.nak(NakReason::NotExpected, header);
-                Verdict::Ignored
-            }
-            Phase::Established | Phase::Resetting(_) => {
-                self.out.push(Command::Accepted(self.local));
-                Verdict::Ignored
-            }
-            Phase::Closing { .. } | Phase::Confirming { .. } => Verdict::Ignored,
-            Phase::Idle | Phase::Inviting(_) | Phase::AwaitingAcceptance { .. } => {
-                Verdict::NoInvitation
-            }
-        }
-    }
-
-    fn conclude(&mut self, now: Instant, verdict: Verdict) {
-        match verdict {
-            Verdict::Ignored => {}
-            Verdict::NoInvitation => self.refuse(now, ByeReason::NoPriorInvitation),
-            Verdict::Right => self.establish(now),
-            Verdict::Wrong | Verdict::UnknownUser => {
-                let local = self.local;
-                let Phase::Challenged(c) = &mut self.phase else {
-                    return;
-                };
-                c.failures += 1;
-                if c.failures >= MAX_AUTH_FAILURES {
-                    let reason = if verdict == Verdict::UnknownUser {
-                        ByeReason::UsernameNotFound
-                    } else {
-                        ByeReason::AuthenticationFailed
-                    };
-                    return self.refuse(now, reason);
-                }
-                let because = if verdict == Verdict::UnknownUser {
-                    Because::UserNotFound
-                } else {
-                    Because::DigestWrong
-                };
-                let again = challenge_command(c.kind, c.nonce, because, local);
-                let delay = AUTH_FAILURE_DELAY * 2u32.pow(u32::from(c.failures) - 1);
-                c.delayed = Some((now + delay, again));
-            }
-        }
-    }
-
-    // ---- Time ----
-
-    /// The next instant `on_timeout` has work at.
-    pub(crate) fn deadline(&self) -> Option<Instant> {
-        let cfg = &self.cfg;
-        let earliest = |times: &[Option<Instant>]| times.iter().flatten().copied().min();
-        match &self.phase {
-            Phase::Idle => None,
-            Phase::Inviting(r) | Phase::Resetting(r) | Phase::Closing { repeat: r, .. } => {
-                Some(r.deadline(cfg))
-            }
-            Phase::AwaitingAcceptance { until } => Some(*until),
-            Phase::Confirming { since } => Some(*since + cfg.pending_timeout.get()),
-            Phase::Challenged(c) => earliest(&[
-                Some(c.since + cfg.pending_timeout.get()),
-                c.delayed.as_ref().map(|(at, _)| *at),
-            ]),
-            Phase::Established => earliest(&[
-                Some(self.last_heard + cfg.liveness_timeout.get()),
-                Some(self.next_ping()),
-                self.link.idle_deadline(),
-                self.link.rx_deadline(),
-            ]),
-        }
-    }
-
     fn next_ping(&self) -> Instant {
         let quiet_until = self.last_heard + self.cfg.ping_interval.get();
         match self.last_ping {
             Some(sent) => quiet_until.max(sent + self.cfg.ping_interval.get()),
             None => quiet_until,
-        }
-    }
-
-    pub(crate) fn on_timeout(&mut self, now: Instant) {
-        let cfg = self.cfg;
-        match &mut self.phase {
-            Phase::Idle => {}
-            Phase::Inviting(r) => {
-                if now >= r.started + cfg.command_timeout.get() {
-                    return self.close(now, ByeReason::InvitationCanceled);
-                }
-                if now >= r.next {
-                    r.next = now + cfg.repeat_interval.get();
-                    self.out.push(r.command.clone());
-                }
-            }
-            Phase::Resetting(r) => {
-                if now >= r.started + cfg.command_timeout.get() {
-                    return self.close(now, ByeReason::Timeout);
-                }
-                if now >= r.next {
-                    r.next = now + cfg.repeat_interval.get();
-                    self.out.push(r.command.clone());
-                }
-            }
-            Phase::Closing { repeat, reason } => {
-                let reason = *reason;
-                if now >= repeat.started + cfg.command_timeout.get() {
-                    return self.finish(EndedBy::Local, reason);
-                }
-                if now >= repeat.next {
-                    repeat.next = now + cfg.repeat_interval.get();
-                    self.out.push(repeat.command.clone());
-                }
-            }
-            Phase::AwaitingAcceptance { until } => {
-                if now >= *until {
-                    self.close(now, ByeReason::InvitationCanceled);
-                }
-            }
-            Phase::Confirming { since } => {
-                if now >= *since + cfg.pending_timeout.get() {
-                    self.refuse(now, ByeReason::UserDeclined);
-                }
-            }
-            Phase::Challenged(c) => {
-                if let Some((at, _)) = &c.delayed
-                    && now >= *at
-                    && let Some((_, command)) = c.delayed.take()
-                {
-                    self.out.push(command);
-                }
-                if now >= c.since + cfg.pending_timeout.get() {
-                    self.phase = Phase::Idle;
-                    self.remote = None;
-                }
-            }
-            Phase::Established => self.tick_established(now),
         }
     }
 
@@ -836,65 +580,5 @@ impl Session {
         self.link
             .on_rx_timeout(now, &cfg, &mut self.out, &mut delivered, &mut lost);
         self.report(delivered, lost);
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Verdict {
-    /// The digest is right.
-    Right,
-    /// The digest is wrong.
-    Wrong,
-    /// The user name is not known.
-    UnknownUser,
-    /// The Invitation came with no Invitation before it.
-    NoInvitation,
-    /// Nothing more to do: the command was answered where it was matched.
-    Ignored,
-}
-
-/// The verdict on a digest: right when it is the one the Host computes.
-fn verdict(expected: &Digest, got: &Digest) -> Verdict {
-    if expected.matches(got) {
-        Verdict::Right
-    } else {
-        Verdict::Wrong
-    }
-}
-
-/// Why a challenge is issued.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Because {
-    /// The first challenge, in answer to an Invitation.
-    Invited,
-    DigestWrong,
-    UserNotFound,
-}
-
-/// The challenge command of a kind, with the state the reason maps to.
-fn challenge_command(
-    kind: Challenge,
-    nonce: Nonce,
-    because: Because,
-    identity: EndpointIdentity,
-) -> Command {
-    match kind {
-        Challenge::SharedSecret => Command::AuthRequired(Box::new(AuthChallenge {
-            state: match because {
-                Because::Invited => AuthState::First,
-                Because::DigestWrong | Because::UserNotFound => AuthState::DigestWrong,
-            },
-            nonce,
-            identity,
-        })),
-        Challenge::User => Command::UserAuthRequired(Box::new(UserAuthChallenge {
-            state: match because {
-                Because::Invited => UserAuthState::First,
-                Because::DigestWrong => UserAuthState::DigestWrong,
-                Because::UserNotFound => UserAuthState::UserNotFound,
-            },
-            nonce,
-            identity,
-        })),
     }
 }
