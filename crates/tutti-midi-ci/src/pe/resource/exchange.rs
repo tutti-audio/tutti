@@ -38,19 +38,28 @@ pub(super) fn text(text: &str) -> PeText {
     PeText::new(text).unwrap()
 }
 
+pub(super) fn custom_name(name: &str) -> CustomResource {
+    CustomResource::new(name).unwrap()
+}
+
+/// The entry of the manufacturer Resource `name` with the schema `schema`.
+pub(super) fn custom_entry(name: &str, schema: &str) -> ResourceEntryBuilder<UntypedResource> {
+    ResourceEntry::custom(custom_name(name), json(schema))
+}
+
 pub(super) fn custom(name: &str) -> PeResource {
-    PeResource::Custom(CustomResource::new(name).unwrap())
+    custom_name(name).into()
 }
 
-pub(super) fn target(resource: PeResource) -> ResourceTarget {
-    ResourceTarget::try_from(resource).unwrap()
+pub(super) fn target(resource: impl Into<PeResource>) -> ResourceTarget {
+    ResourceTarget::try_from(resource.into()).unwrap()
 }
 
-pub(super) fn entry_target(resource: PeResource, res_id: &str) -> ResourceTarget {
+pub(super) fn entry_target(resource: impl Into<PeResource>, res_id: &str) -> ResourceTarget {
     ResourceTarget::entry(resource, id(res_id)).unwrap()
 }
 
-pub(super) fn get(resource: PeResource) -> ResourceGet {
+pub(super) fn get(resource: impl Into<PeResource>) -> ResourceGet {
     ResourceGet::new(target(resource))
 }
 
@@ -87,7 +96,7 @@ impl PeDeviceInfo {
             "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"MIDI-CI Test Workbench",
             "versionId":[0,0,1,0],"links":[{"resource":"X-SystemSettings"}]}"#,
         );
-        match PeData::decode(&PeResource::DeviceInfo, &table_6) {
+        match PeData::decode(StandardResource::DeviceInfo, &table_6) {
             Ok(PeData::DeviceInfo(info)) => info,
             other => panic!("{other:?}"),
         }
@@ -97,7 +106,7 @@ impl PeDeviceInfo {
 pub(super) fn program_edit() -> PeData {
     // M2-103 Table 32.
     PeData::decode(
-        &custom("X-ProgramEdit"),
+        custom("X-ProgramEdit"),
         &json(
             r#"{"name":"PIANO 4","lfoSpeed":30,"lfoWaveform":"triangle",
             "pitchEnvelope":{"rates":[94,67,95,60],"levels":[50,50,50,50]}}"#,
@@ -110,13 +119,13 @@ pub(super) fn program_edit() -> PeData {
 pub(super) fn store() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::DeviceInfo)
+        ResourceEntry::standard(StandardResource::DeviceInfo)
             .build()
             .unwrap(),
     );
     store.put(None, PeData::DeviceInfo(device_info())).unwrap();
     store.declare(
-        ResourceEntry::builder(PeResource::ChannelList)
+        ResourceEntry::standard(StandardResource::ChannelList)
             .can_subscribe(true)
             .fc_on_get(true)
             .encodings(vec![
@@ -137,7 +146,7 @@ pub(super) fn store() -> ResourceStore {
         )
         .unwrap();
     store.declare(
-        ResourceEntry::builder(PeResource::ProgramList)
+        ResourceEntry::standard(StandardResource::ProgramList)
             .build()
             .unwrap(),
     );
@@ -147,10 +156,14 @@ pub(super) fn store() -> ResourceStore {
             PeData::ProgramList(PeProgramList::new((0..7).map(program).collect())),
         )
         .unwrap();
-    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
+    store.declare(
+        ResourceEntry::standard(StandardResource::LocalOn)
+            .build()
+            .unwrap(),
+    );
     store.put(None, PeData::LocalOn(PeLocalOn(false))).unwrap();
     store.declare(
-        ResourceEntry::builder(PeResource::ChannelMode)
+        ResourceEntry::standard(StandardResource::ChannelMode)
             .build()
             .unwrap(),
     );
@@ -161,18 +174,19 @@ pub(super) fn store() -> ResourceStore {
         )
         .unwrap();
     store.declare(
-        ResourceEntry::builder(custom("X-ProgramEdit"))
-            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
-            .can_set(CanSet::Partial)
-            .require_res_id(true)
-            .can_subscribe(true)
-            .build()
-            .unwrap(),
+        custom_entry(
+            "X-ProgramEdit",
+            r#"{"title":"Program Edit","type":"object"}"#,
+        )
+        .can_set(CanSet::Partial)
+        .require_res_id(true)
+        .can_subscribe(true)
+        .build()
+        .unwrap(),
     );
     store.put(Some(id("abcd")), program_edit()).unwrap();
     for (name, flow) in [("X-Blob", false), ("X-BigBlob", true)] {
-        let blob = ResourceEntry::builder(custom(name))
-            .schema(json(r#"{"title":"Blob"}"#))
+        let blob = custom_entry(name, r#"{"title":"Blob"}"#)
             .can_set(CanSet::Full)
             .fc_on_set(flow)
             .can_subscribe(true)
@@ -196,7 +210,10 @@ pub(super) fn blob_bytes(len: usize) -> Vec<u8> {
 }
 
 pub(super) fn blob_data(name: &str, bytes: &[u8]) -> PeData {
-    PeData::Opaque(PeOpaque::binary(custom(name), octets(), bytes.to_vec()).unwrap())
+    PeData::Opaque(PeOpaque::binary(
+        custom_name(name),
+        PeBinary::new(octets(), bytes.to_vec()).unwrap(),
+    ))
 }
 
 pub(super) fn initiator_settings(max: u32) -> PeSettings {
@@ -427,8 +444,8 @@ fn the_resource_list_is_got_after_the_capabilities() {
     };
     assert_eq!(*list, link.store.resource_list());
     assert_eq!(link.init.resource_list(), Some(list));
-    assert!(list.entry(&PeResource::ResourceList).is_none());
-    assert!(list.entry(&PeResource::DeviceInfo).is_some());
+    assert!(list.entry(&StandardResource::ResourceList).is_none());
+    assert!(list.entry(&StandardResource::DeviceInfo).is_some());
     assert!(
         list.entry(&custom("X-ProgramEdit"))
             .unwrap()
@@ -441,7 +458,7 @@ fn the_resource_list_is_got_after_the_capabilities() {
 #[test]
 fn get_returns_the_data_of_the_resource() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.get(&get(PeResource::DeviceInfo), link.now);
+    let made = link.init.get(&get(StandardResource::DeviceInfo), link.now);
     let call = link.call(made);
     assert_eq!(link.got(call), Ok(PeData::DeviceInfo(device_info())));
 }
@@ -456,9 +473,10 @@ fn get_returns_the_data_in_each_encoding_the_entry_lists() {
         PeEncoding::Mcoded7,
         PeEncoding::ZlibMcoded7,
     ] {
-        let made = link
-            .init
-            .get(&get(PeResource::ChannelList).encoded(encoding), link.now);
+        let made = link.init.get(
+            &get(StandardResource::ChannelList).encoded(encoding),
+            link.now,
+        );
         let call = link.call(made);
         let Ok(PeData::ChannelList(list)) = link.got(call) else {
             panic!("{encoding:?}: {:?}", link.events);
@@ -493,8 +511,16 @@ fn the_encodings_of_a_resource_are_those_the_resource_list_gave() {
     assert_eq!(encodings("X-Blob"), [PeEncoding::Mcoded7]);
     // Each one the list gives is used; the ones it does not give are not.
     for (resource, encoding, listed) in [
-        (PeResource::ChannelList, PeEncoding::ZlibMcoded7, true),
-        (PeResource::DeviceInfo, PeEncoding::ZlibMcoded7, false),
+        (
+            PeResource::from(StandardResource::ChannelList),
+            PeEncoding::ZlibMcoded7,
+            true,
+        ),
+        (
+            StandardResource::DeviceInfo.into(),
+            PeEncoding::ZlibMcoded7,
+            false,
+        ),
         (custom("X-Blob"), PeEncoding::Ascii, false),
     ] {
         let made = link.init.get(&get(resource).encoded(encoding), link.now);
@@ -520,7 +546,7 @@ fn an_unlisted_encoding_is_refused_by_the_initiator() {
     let mut link = Link::new(store(), 256);
     let sent = link.wire.len();
     let made = link.init.get(
-        &get(PeResource::DeviceInfo).encoded(PeEncoding::Mcoded7),
+        &get(StandardResource::DeviceInfo).encoded(PeEncoding::Mcoded7),
         link.now,
     );
     assert!(matches!(
@@ -536,7 +562,7 @@ fn an_unlisted_encoding_is_refused_by_the_initiator() {
 #[test]
 fn a_resource_not_in_the_list_is_refused_by_the_initiator() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.get(&get(PeResource::ModeList), link.now);
+    let made = link.init.get(&get(StandardResource::ModeList), link.now);
     assert!(matches!(
         made,
         Err(CallError::Refused(RequestRefused::NotListed(_)))
@@ -760,7 +786,7 @@ fn a_page_is_a_slice_of_the_list_with_its_total_count() {
 #[test]
 fn the_walk_gathers_the_pages_of_a_list() {
     let mut link = Link::new(store(), 256);
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "general"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "general"));
     let made = link
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), link.now);
@@ -800,7 +826,7 @@ fn the_walk_gathers_the_pages_of_a_list() {
 fn a_list_that_does_not_paginate_is_got_whole() {
     let mut link = Link::new(store(), 256);
     let made = link.init.get_list(
-        &get(PeResource::ChannelList),
+        &get(StandardResource::ChannelList),
         NonZeroU32::new(1).unwrap(),
         link.now,
     );
@@ -819,7 +845,7 @@ fn a_list_that_does_not_paginate_is_got_whole() {
     // A Resource that is no list is not walked.
     assert!(matches!(
         link.init.get_list(
-            &get(PeResource::LocalOn),
+            &get(StandardResource::LocalOn),
             NonZeroU32::new(1).unwrap(),
             link.now
         ),
@@ -972,7 +998,7 @@ impl Script {
 
 pub(super) fn paginating_list() -> PeResourceList {
     PeResourceList::new().with(
-        ResourceEntry::builder(PeResource::ProgramList)
+        ResourceEntry::standard(StandardResource::ProgramList)
             .build()
             .unwrap(),
     )
@@ -989,7 +1015,7 @@ pub(super) fn program_page(from: u8, to: u8) -> PeJson {
 #[test]
 fn a_page_without_a_total_count_fails_the_walk() {
     let mut script = Script::new(&paginating_list());
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let (call, actions) = script
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
@@ -1009,7 +1035,7 @@ fn a_page_without_a_total_count_fails_the_walk() {
 #[test]
 fn an_empty_page_before_the_end_fails_the_walk() {
     let mut script = Script::new(&paginating_list());
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let (_, actions) = script
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
@@ -1036,7 +1062,7 @@ fn an_empty_page_before_the_end_fails_the_walk() {
 #[test]
 fn a_failed_page_fails_the_walk_with_its_status() {
     let mut script = Script::new(&paginating_list());
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let (_, actions) = script
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
@@ -1062,7 +1088,7 @@ fn a_failed_page_fails_the_walk_with_its_status() {
 fn set_replaces_the_data_and_get_reads_it_back() {
     let mut link = Link::new(store(), 256);
     let set = ResourceSet::full(
-        target(PeResource::LocalOn),
+        target(StandardResource::LocalOn),
         PeData::LocalOn(PeLocalOn(true)),
     )
     .unwrap();
@@ -1076,7 +1102,7 @@ fn set_replaces_the_data_and_get_reads_it_back() {
             ..
         })
     ));
-    let made = link.init.get(&get(PeResource::LocalOn), link.now);
+    let made = link.init.get(&get(StandardResource::LocalOn), link.now);
     let call = link.call(made);
     assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(true))));
 }
@@ -1086,7 +1112,7 @@ fn set_replaces_the_data_and_get_reads_it_back() {
 #[test]
 fn a_get_is_answered_from_the_store_the_responder_is_handed() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.get(&get(PeResource::LocalOn), link.now);
+    let made = link.init.get(&get(StandardResource::LocalOn), link.now);
     let call = link.call(made);
     assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(false))));
 
@@ -1095,7 +1121,7 @@ fn a_get_is_answered_from_the_store_the_responder_is_handed() {
         .put(None, PeData::LocalOn(PeLocalOn(true)))
         .expect("declared");
     link.store = other;
-    let made = link.init.get(&get(PeResource::LocalOn), link.now);
+    let made = link.init.get(&get(StandardResource::LocalOn), link.now);
     let call = link.call(made);
     assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(true))));
 }
@@ -1128,7 +1154,7 @@ fn a_partial_set_changes_what_a_later_get_returns() {
     let made = link.init.get(&ResourceGet::new(program), link.now);
     let call = link.call(made);
     let expected = PeData::decode(
-        &custom("X-ProgramEdit"),
+        custom("X-ProgramEdit"),
         &json(
             r#"{"name":"PIANO 4","lfoSpeed":30,"lfoWaveform":"triangle",
             "pitchEnvelope":{"rates":[80,67,95,60],"levels":[60,50,50,50]}}"#,
@@ -1145,7 +1171,7 @@ fn a_set_the_entry_does_not_allow_is_refused_before_it_is_sent() {
     let mut link = Link::new(store(), 256);
     let sent = link.wire.len();
     let set = ResourceSet::full(
-        target(PeResource::ChannelMode),
+        target(StandardResource::ChannelMode),
         PeData::ChannelMode(PeChannelMode(PeMidiMode::OmniOnPoly)),
     )
     .unwrap();
@@ -1162,7 +1188,9 @@ fn a_set_the_entry_does_not_allow_is_refused_before_it_is_sent() {
 #[test]
 fn serving_a_peer_again_keeps_its_subscriptions() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     let _ = link.call(made);
     let peer = Muid::of(OURS);
     assert_eq!(link.resp.subscriptions().count(), 1);
@@ -1180,7 +1208,9 @@ fn serving_a_peer_again_keeps_its_subscriptions() {
 #[test]
 fn a_full_update_replaces_the_data_of_a_subscription() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     let call = link.call(made);
     let Some(ResourceEvent::Subscribed { subscribe_id, .. }) = link
         .events
@@ -1201,7 +1231,7 @@ fn a_full_update_replaces_the_data_of_a_subscription() {
         .resp
         .publish(
             &mut link.store,
-            &target(PeResource::ChannelList),
+            &target(StandardResource::ChannelList),
             channels.clone(),
             link.now,
         )
@@ -1243,7 +1273,7 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
     let (_, data, how) = updates.last().unwrap();
     assert_eq!(*how, UpdateKind::Partial);
     let expected = PeData::decode(
-        &custom("X-ProgramEdit"),
+        custom("X-ProgramEdit"),
         &json(
             r#"{"name":"PIANO 4","lfoSpeed":10,"lfoWaveform":"triangle",
             "pitchEnvelope":{"rates":[94,67,95,60],"levels":[50,50,50,50]}}"#,
@@ -1298,7 +1328,9 @@ fn a_set_is_announced_to_the_subscribers() {
 #[test]
 fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
     let mut link = Link::new(store(), 128);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     link.call(made);
     let big: Vec<PeChannelEntry> = (1..=12)
         .map(|n| channel(n, &format!("Channel number {n}")))
@@ -1308,7 +1340,7 @@ fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
         .resp
         .publish(
             &mut link.store,
-            &target(PeResource::ChannelList),
+            &target(StandardResource::ChannelList),
             data.clone(),
             link.now,
         )
@@ -1340,7 +1372,9 @@ fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
 #[test]
 fn the_initiator_ends_a_subscription() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     link.call(made);
     let (subscribe_id, _, _) = link
         .init
@@ -1369,7 +1403,7 @@ fn the_initiator_ends_a_subscription() {
         .resp
         .publish(
             &mut link.store,
-            &target(PeResource::ChannelList),
+            &target(StandardResource::ChannelList),
             PeData::ChannelList(PeChannelList::default()),
             link.now,
         )
@@ -1387,7 +1421,9 @@ fn the_initiator_ends_a_subscription() {
 #[test]
 fn the_responder_ends_a_subscription() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     link.call(made);
     let subscribe_id = link.init.subscriptions().next().unwrap().0.clone();
     let actions = link
@@ -1418,14 +1454,15 @@ fn the_responder_ends_a_subscription() {
 fn a_subscription_the_entry_does_not_allow_is_refused() {
     let mut link = Link::new(store(), 256);
     assert!(matches!(
-        link.init.subscribe(&get(PeResource::DeviceInfo), link.now),
+        link.init
+            .subscribe(&get(StandardResource::DeviceInfo), link.now),
         Err(CallError::Refused(RequestRefused::CannotSubscribe(_)))
     ));
 }
 
 pub(super) fn subscribed_script() -> (Script, SubscribeId) {
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(PeResource::LocalOn)
+        ResourceEntry::standard(StandardResource::LocalOn)
             .can_subscribe(true)
             .build()
             .unwrap(),
@@ -1433,7 +1470,7 @@ pub(super) fn subscribed_script() -> (Script, SubscribeId) {
     let mut script = Script::new(&list);
     let (_, actions) = script
         .init
-        .subscribe(&get(PeResource::LocalOn), script.now)
+        .subscribe(&get(StandardResource::LocalOn), script.now)
         .unwrap();
     script.take(actions);
     let start = script.last_request_id();
@@ -1605,14 +1642,16 @@ fn an_update_for_an_unknown_subscription_is_answered_with_400() {
 #[test]
 fn a_failed_reply_to_an_update_ends_the_subscription() {
     let mut link = Link::new(store(), 256);
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     link.call(made);
     let data = PeData::ChannelList(PeChannelList::new(vec![channel(2, "Next")]));
     let actions = link
         .resp
         .publish(
             &mut link.store,
-            &target(PeResource::ChannelList),
+            &target(StandardResource::ChannelList),
             data,
             link.now,
         )
@@ -1676,7 +1715,9 @@ fn a_responder_serves_only_the_peers_it_accepted() {
             .on_message(&mut link.store, &Decoded::Message(stranger), link.now)
             .is_empty()
     );
-    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
     link.call(made);
     assert_eq!(link.resp.subscriptions().count(), 1);
     link.resp.forget(Muid::of(OURS));
@@ -1708,7 +1749,7 @@ fn resource_list_on_the_wire(raw: &mut Raw) -> PeResourceList {
         panic!("ResourceList was not answered");
     };
     let body = PeJson::try_from(response.body.as_slice()).unwrap();
-    match PeData::decode(&PeResource::ResourceList, &body) {
+    match PeData::decode(StandardResource::ResourceList, &body) {
         Ok(PeData::ResourceList(list)) => list,
         other => panic!("{other:?}"),
     }
@@ -1861,9 +1902,10 @@ fn the_reply_is_in_the_mutual_encoding_the_get_asked_for() {
         PeEncoding::Ascii,
     ] {
         let mark = link.wire.len();
-        let made = link
-            .init
-            .get(&get(PeResource::ChannelList).encoded(encoding), link.now);
+        let made = link.init.get(
+            &get(StandardResource::ChannelList).encoded(encoding),
+            link.now,
+        );
         let call = link.call(made);
         assert!(link.got(call).is_ok(), "{encoding:?}");
         // What the Responder put on the wire: the header's reply and the data of its

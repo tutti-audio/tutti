@@ -1161,9 +1161,10 @@ pub mod midi {
             PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
             ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
             ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId,
-            StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait,
-            TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

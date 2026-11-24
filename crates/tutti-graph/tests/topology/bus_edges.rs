@@ -176,27 +176,12 @@ impl Rig {
             harness.start_edge_gain(id, weight);
         }
         harness.switch(&lowering.spec.validate().expect("valid"), &self.kinds);
-        let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
-        for b in 0..blocks {
-            let input = input_signal((b * BLOCK) as u64, BLOCK);
-            let a = harness.block(BLOCK, &input);
-            for (g, a) in got.iter_mut().zip(a) {
-                g.extend(a);
-            }
-        }
-        got
+        harness.run(&vec![BLOCK; blocks], 0)
     }
 
     /// One-participant and parallel renders, which must be bit for bit the same.
     fn render_both(&self, blocks: usize) -> Vec<Vec<f32>> {
-        let serial = self.render(1, blocks);
-        let parallel = self.render(4, blocks);
-        assert_eq!(
-            bits(&serial),
-            bits(&parallel),
-            "parallel differs from serial"
-        );
-        serial
+        common::agree_across_workers([4], |workers| self.render(workers, blocks), |r| bits(r))
     }
 }
 
@@ -329,7 +314,7 @@ fn mono_into_stereo_copies_to_both_sides() {
 
     let blocks = 4;
     let got = rig.render_both(blocks);
-    let x: Vec<u32> = main_input(0, blocks).iter().map(|v| v.to_bits()).collect();
+    let x = common::bits_of(&main_input(0, blocks));
     assert_eq!(bits(&got), [x.clone(), x]);
 }
 
