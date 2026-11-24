@@ -6,7 +6,7 @@ use tutti_ump::{Message, Midi1Parser, MidiGroup, SysexMessage, Ump, parse_exact}
 ///
 /// Every message the parser yields re-encodes to a packet that decodes to
 /// itself, and a framed SysEx reads as a Universal one or as none.
-pub fn midi1_parse(data: &[u8]) {
+pub(crate) fn midi1_parse(data: &[u8]) {
     let group = MidiGroup::FIRST;
     let mut parser = Midi1Parser::new(group);
     for (n, &byte) in data.iter().enumerate() {

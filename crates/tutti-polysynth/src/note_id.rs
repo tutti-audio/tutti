@@ -27,7 +27,7 @@ impl<T: Copy + Default, const N: usize> PerNoteMap<T, N> {
     /// usable on the audio thread.
     #[inline]
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             ids: [None; N],
             vals: [T::default(); N],
@@ -55,13 +55,13 @@ impl<T: Copy + Default, const N: usize> PerNoteMap<T, N> {
     /// A linear scan of at most `N` slots — cheap for the small `N` a voice map
     /// uses, and the reason this is not a hash map.
     #[inline]
-    pub fn get(&self, id: NoteId) -> Option<&T> {
+    pub(crate) fn get(&self, id: NoteId) -> Option<&T> {
         self.slot(id).map(|s| &self.vals[s])
     }
 
     /// Inserts or overwrites. Returns `false` if the map is full and `id` is new.
     #[inline]
-    pub fn insert(&mut self, id: NoteId, value: T) -> bool {
+    pub(crate) fn insert(&mut self, id: NoteId, value: T) -> bool {
         match self.entry(id) {
             Some(v) => {
                 *v = value;
@@ -73,7 +73,7 @@ impl<T: Copy + Default, const N: usize> PerNoteMap<T, N> {
 
     /// Removes `id`, returning its value if present.
     #[inline]
-    pub fn remove(&mut self, id: NoteId) -> Option<T> {
+    pub(crate) fn remove(&mut self, id: NoteId) -> Option<T> {
         let slot = self.slot(id)?;
         self.ids[slot] = None;
         Some(core::mem::take(&mut self.vals[slot]))

@@ -21,6 +21,6 @@ pub(crate) fn reset() {}
 
 /// Nothing is registered.
 #[unsafe(no_mangle)]
-pub extern "C" fn tutti_test_plugin_fd_poke() -> bool {
+pub(super) extern "C" fn tutti_test_plugin_fd_poke() -> bool {
     false
 }

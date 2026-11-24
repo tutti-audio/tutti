@@ -316,9 +316,6 @@ fn wavetable::WavetableNode::frequency
 fn wavetable::WavetableNode::level
 fn wavetable::WavetableNode::position
 mod automation
-mod filter::eq_band
-mod filter::ladder
-mod filter::svf
 mod testing
 struct additive::AdditiveConfig
 struct additive::AdditiveKernel
@@ -567,7 +564,6 @@ type signal::note_envelope::NoteEnvelopeNode
 type spatial::ambisonic::AmbisonicDecoderNode
 type spatial::ambisonic::AmbisonicEncoderNode
 type spatial::ambisonic::AmbisonicRotatorNode
-type spatial::vbap::error::Result
 type stereo_width::StereoWidthNode
 type tremolo::TremoloNode
 type tube_stage::TubeStageNode

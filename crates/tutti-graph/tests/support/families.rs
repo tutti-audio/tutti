@@ -23,7 +23,7 @@ use crate::generator::{Desc, Rng, mutate, random_kind, shape, spec_for};
 impl Desc {
     /// Starts `harness`'s lanes and mix ports at the values this description
     /// holds, for the entries and nodes the spec has.
-    pub fn start<F: Float>(&self, harness: &mut Harness<F>) {
+    pub(crate) fn start<F: Float>(&self, harness: &mut Harness<F>) {
         for id in self.spec.gains.keys() {
             if let Some(&base) = self.bases.get(id) {
                 harness.start_edge_gain(*id, base);
@@ -45,7 +45,7 @@ impl Desc {
 /// Whether a unit of `b` may crossfade from one of `a`: the same shape in
 /// everything but the tail (`Editor::replace`'s rule, spelled out so the
 /// generator does not borrow the editor's).
-pub fn fits(a: &Kind, b: &Kind) -> bool {
+pub(crate) fn fits(a: &Kind, b: &Kind) -> bool {
     let (a, b) = (shape(a), shape(b));
     (
         a.audio_in(),
@@ -81,7 +81,7 @@ fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {
 /// same kind with fresh state, or another kind that fits — sometimes on top
 /// of an ordinary `mutate`, which can remove, rewire or regenerate (without a
 /// fade, latency and all) a node that is fading.
-pub fn mutate_with_fades(
+pub(crate) fn mutate_with_fades(
     desc: &Desc,
     rng: &mut Rng,
 ) -> (Desc, BTreeMap<NodeKey, tutti_graph::Fade>) {
@@ -173,10 +173,10 @@ pub fn mutate_with_fades(
 /// The weights the generator picks from: unity (the plain add), zero (never
 /// skipped by value), negative (polarity), and fractions that do not round
 /// exactly.
-pub const WEIGHTS: [f64; 9] = [1.0, 0.5, -0.75, 0.0, 1.5, 0.3, 0.1, -1.0, 2.0];
+pub(crate) const WEIGHTS: [f64; 9] = [1.0, 0.5, -0.75, 0.0, 1.5, 0.3, 0.1, -1.0, 2.0];
 
 /// Whether `id` names an edge of `t`.
-pub fn has_edge(t: &Topology, id: EdgeId) -> bool {
+pub(crate) fn has_edge(t: &Topology, id: EdgeId) -> bool {
     match id.sink {
         PortSink::Port(at) => t.edges.get(&at).is_some_and(|e| e.contains(&id.from)),
         PortSink::Output(ch) => match id.from {
@@ -190,13 +190,13 @@ pub fn has_edge(t: &Topology, id: EdgeId) -> bool {
 }
 
 /// Drops the entries of edges `mutate` removed or rewired.
-pub fn prune_gains(desc: &mut Desc) {
+pub(crate) fn prune_gains(desc: &mut Desc) {
     let t = &desc.spec.topology;
     desc.spec.gains.retain(|id, _| has_edge(t, *id));
 }
 
 /// Gives about a third of the edges without an entry one.
-pub fn weigh(desc: &mut Desc, rng: &mut Rng) {
+pub(crate) fn weigh(desc: &mut Desc, rng: &mut Rng) {
     let t = &desc.spec.topology;
     let mut ids: Vec<EdgeId> = t
         .edges
@@ -235,11 +235,12 @@ const LANE_KEYS: u64 = 1_000_000;
 const LANE_LATENCIES: [usize; 4] = [0, 16, 40, 150];
 
 /// The ranges a driven lane is clamped to.
-pub const LANE_RANGES: [(f64, f64); 4] = [(-8.0, 8.0), (-1.0, 1.0), (0.0, 0.5), (0.5, -0.25)];
+pub(crate) const LANE_RANGES: [(f64, f64); 4] =
+    [(-8.0, 8.0), (-1.0, 1.0), (0.0, 0.5), (0.5, -0.25)];
 
 /// Adds lane nodes (once) and, for about half the entries, a source among
 /// them (or none: a source that goes, declicked) and a range.
-pub fn drive(desc: &mut Desc, rng: &mut Rng) {
+pub(crate) fn drive(desc: &mut Desc, rng: &mut Rng) {
     if !desc.kinds.contains_key(&NodeKey(LANE_KEYS)) {
         for (i, &latency) in LANE_LATENCIES.iter().enumerate() {
             let key = NodeKey(LANE_KEYS + i as u64);
@@ -274,7 +275,7 @@ pub fn drive(desc: &mut Desc, rng: &mut Rng) {
 
 /// A node and a mode for it. A third of the draws are `Active`, so a toggle
 /// back is as common as a toggle away.
-pub fn pick_mode(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_graph::NodeMode)> {
+pub(crate) fn pick_mode(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_graph::NodeMode)> {
     use tutti_graph::NodeMode;
     let key = rng.pick(&desc.order)?;
     let mode = match rng.below(3) {
@@ -289,7 +290,7 @@ pub fn pick_mode(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_graph::No
 
 /// A node and a mix for it. Half the draws are an end (steady WET or DRY, the
 /// cases that copy or leave), the rest are between.
-pub fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix)> {
+pub(crate) fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix)> {
     let key = rng.pick(&desc.order)?;
     let mix = match rng.below(8) {
         0 | 1 => 1.0,
@@ -309,7 +310,7 @@ pub fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix
 const MIX_LANE_KEYS: u64 = 2_000_000;
 
 /// The address of `key`'s mix.
-pub fn mix_port(key: NodeKey) -> tutti_graph::ParamIn {
+pub(crate) fn mix_port(key: NodeKey) -> tutti_graph::ParamIn {
     tutti_graph::ParamIn {
         node: key,
         param: tutti_graph::NodeMix::ADDR,
@@ -318,7 +319,7 @@ pub fn mix_port(key: NodeKey) -> tutti_graph::ParamIn {
 
 /// Adds the mix lane nodes (once) and, for about a third of the nodes, a
 /// source among them (or none: a source that goes, declicked) and a range.
-pub fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
+pub(crate) fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
     if !desc.kinds.contains_key(&NodeKey(MIX_LANE_KEYS)) {
         for (i, &latency) in LANE_LATENCIES.iter().enumerate() {
             let key = NodeKey(MIX_LANE_KEYS + i as u64);
@@ -354,7 +355,7 @@ pub fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
 }
 
 /// Drops the lanes of nodes `mutate` removed.
-pub fn prune_mix_lanes(desc: &mut Desc) {
+pub(crate) fn prune_mix_lanes(desc: &mut Desc) {
     let nodes = &desc.spec.topology.nodes;
     desc.spec
         .params
@@ -366,7 +367,7 @@ pub fn prune_mix_lanes(desc: &mut Desc) {
 /// A graph of nodes declaring buses, wired by bus edges (and some plain
 /// ones). Every bus edge kept lowers, so the value a test renders is the
 /// lowered spec's.
-pub struct BusGraph {
+pub(crate) struct BusGraph {
     pub spec: GraphSpec,
     pub kinds: BTreeMap<NodeKey, Kind>,
 }
@@ -381,7 +382,7 @@ fn bus_of(width: usize, named: bool) -> Bus {
     Bus::new(topology, BusRole::Main)
 }
 
-pub fn bus_graph(seed: u64) -> BusGraph {
+pub(crate) fn bus_graph(seed: u64) -> BusGraph {
     bus_graph_from(&mut Rng::new(seed))
 }
 
@@ -468,7 +469,7 @@ fn bus_graph_from(rng: &mut Rng) -> BusGraph {
 /// main output is 1, 2 or 6 channels, named or unassigned; its ordinary output sources past its width
 /// are dropped, and a main output edge is kept when the spec still lowers (an
 /// unfoldable pair, or a lane on an ordinary output source, is not).
-pub fn main_output_bus_graph(seed: u64) -> BusGraph {
+pub(crate) fn main_output_bus_graph(seed: u64) -> BusGraph {
     let mut rng = Rng::new(seed);
     let mut graph = bus_graph_from(&mut rng);
     let width = rng.pick(&[1usize, 2, 2, 6]).expect("a width");
@@ -493,16 +494,16 @@ pub fn main_output_bus_graph(seed: u64) -> BusGraph {
 
 /// What generated cases hold, by name: how many cases drew each feature.
 #[derive(Debug, Default)]
-pub struct Features(pub BTreeMap<&'static str, usize>);
+pub(crate) struct Features(pub BTreeMap<&'static str, usize>);
 
 impl Features {
     /// Counts `name` once when `held`; an unheld feature is still listed.
-    pub fn note(&mut self, name: &'static str, held: bool) {
+    pub(crate) fn note(&mut self, name: &'static str, held: bool) {
         *self.0.entry(name).or_default() += usize::from(held);
     }
 
     /// Adds `other`'s counts to these.
-    pub fn add(&mut self, other: Self) {
+    pub(crate) fn add(&mut self, other: Self) {
         for (name, n) in other.0 {
             *self.0.entry(name).or_default() += n;
         }
@@ -511,7 +512,7 @@ impl Features {
 
 impl Desc {
     /// What this graph holds: wiring, node kinds, weights, lanes and ranges.
-    pub fn features(&self) -> Features {
+    pub(crate) fn features(&self) -> Features {
         let mut f = Features::default();
         let t = &self.spec.topology;
         let shapes: Vec<tutti_graph::Shape> = self.kinds.values().map(shape).collect();
@@ -615,7 +616,7 @@ impl Desc {
 
 /// What an edit that crossfades `fades` changed in `before`: kinds swapped,
 /// event and in-place nodes faded, a declared latency set.
-pub fn fade_features(
+pub(crate) fn fade_features(
     before: &Desc,
     after: &Desc,
     fades: &BTreeMap<NodeKey, tutti_graph::Fade>,
@@ -644,7 +645,7 @@ pub fn fade_features(
 }
 
 /// Gives about a third of the nodes their own bypass.
-pub fn own_bypass(desc: &mut Desc, rng: &mut Rng) {
+pub(crate) fn own_bypass(desc: &mut Desc, rng: &mut Rng) {
     for key in desc.order.clone() {
         if rng.chance(34) {
             let inner = desc.kinds.remove(&key).expect("a kind");
@@ -661,7 +662,7 @@ pub fn own_bypass(desc: &mut Desc, rng: &mut Rng) {
 impl BusGraph {
     /// What the graph's bus edges lower to: weighted folds, unity copies, and
     /// lanes beside ordinary edges, between nodes and into the main output.
-    pub fn features(&self) -> Features {
+    pub(crate) fn features(&self) -> Features {
         let lowering = self
             .spec
             .lowered(&common::shapes_of(&self.kinds))

@@ -6,7 +6,7 @@ use tutti_graph::NodeKey;
 use tutti_session::{AppKey, Bounce, BounceError, Bounced, Clock, MainOutputKind, Session};
 
 /// `bounce` rendered on the session's executor and applied to `session`.
-pub fn bounced<K: AppKey, C: Clock, M: MainOutputKind>(
+pub(crate) fn bounced<K: AppKey, C: Clock, M: MainOutputKind>(
     session: &mut Session<K, C>,
     bounce: Bounce<NodeKey, M, C::Float>,
 ) -> Result<Bounced<M, C::Float>, BounceError>

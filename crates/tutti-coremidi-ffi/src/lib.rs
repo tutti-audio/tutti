@@ -63,4 +63,4 @@ mod os {}
 
 // Empty off macOS, where `os` has nothing to export.
 #[allow(unused_imports)]
-pub use os::*;
+pub(crate) use os::*;

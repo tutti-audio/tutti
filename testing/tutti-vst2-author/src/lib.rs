@@ -88,7 +88,7 @@ macro_rules! plugin_main {
     ($t:ty) => {
         #[cfg(target_os = "macos")]
         #[unsafe(no_mangle)]
-        pub extern "system" fn main_macho(
+        extern "system" fn main_macho(
             callback: $crate::api::HostCallbackProc,
         ) -> *mut $crate::api::AEffect {
             VSTPluginMain(callback)
@@ -97,7 +97,7 @@ macro_rules! plugin_main {
         #[cfg(target_os = "windows")]
         #[allow(non_snake_case)]
         #[unsafe(no_mangle)]
-        pub extern "system" fn MAIN(
+        extern "system" fn MAIN(
             callback: $crate::api::HostCallbackProc,
         ) -> *mut $crate::api::AEffect {
             VSTPluginMain(callback)
@@ -105,7 +105,7 @@ macro_rules! plugin_main {
 
         #[allow(non_snake_case)]
         #[unsafe(no_mangle)]
-        pub extern "C" fn VSTPluginMain(
+        extern "C" fn VSTPluginMain(
             callback: $crate::api::HostCallbackProc,
         ) -> *mut $crate::api::AEffect {
             $crate::main::<$t>(callback)

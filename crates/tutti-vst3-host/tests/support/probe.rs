@@ -11,7 +11,7 @@ const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
 /// is absent: the probe is built from in-repo sources by this very `cargo test`,
 /// so its absence is a build failure, not an environmental one.
 #[track_caller]
-pub fn probe_path() -> PathBuf {
+pub(crate) fn probe_path() -> PathBuf {
     let bundle = Path::new(PROBE_DIR_BUILT).join("audio-probe.vst3");
     tutti_plugin_types::bundle::any_module_in_bundle(
         &bundle,

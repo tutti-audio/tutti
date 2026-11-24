@@ -20,7 +20,7 @@ pub fn kill_group(_leader: u32) {}
 
 /// Never known without reaping on Windows; a group is the job's, not a signal's.
 #[must_use]
-pub fn has_ended(_leader: u32) -> bool {
+pub(crate) fn has_ended(_leader: u32) -> bool {
     false
 }
 

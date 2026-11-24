@@ -229,7 +229,7 @@ mod platform;
 // Re-exported whole, so each platform module is also a path of the crate
 // (`tutti_au_host::offline`, `crate::bus`). Off macOS there is nothing public.
 #[allow(unused_imports)]
-pub use platform::*;
+pub(crate) use platform::*;
 
 pub use component::{AuComponentInfo, AuType};
 pub use error::{AuError, LoadFailure, LoadStage, PresetFileFailure, PresetMismatch, Result};

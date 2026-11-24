@@ -29,38 +29,38 @@ use std::os::raw::{c_char, c_int, c_short, c_uchar, c_uint, c_void};
 
 /// Opaque sequencer handle.
 #[derive(Debug)]
-pub enum snd_seq_t {}
+pub(crate) enum snd_seq_t {}
 
 /// Opaque `snd_ump_block_info_t`. Accessed only through its getters, so the
 /// layout never needs to be declared — the reason those are preferred over
 /// declaring the struct.
 #[derive(Debug)]
-pub enum snd_ump_block_info_t {}
+pub(crate) enum snd_ump_block_info_t {}
 
 /// Opaque `snd_ump_endpoint_info_t`, by its getters like the block record.
 #[derive(Debug)]
-pub enum snd_ump_endpoint_info_t {}
+pub(crate) enum snd_ump_endpoint_info_t {}
 
 /// Opaque `snd_seq_client_info_t`.
 #[derive(Debug)]
-pub enum snd_seq_client_info_t {}
+pub(crate) enum snd_seq_client_info_t {}
 
 /// Opaque `snd_seq_port_info_t`.
 #[derive(Debug)]
-pub enum snd_seq_port_info_t {}
+pub(crate) enum snd_seq_port_info_t {}
 
 /// Opaque `snd_seq_queue_status_t`.
 #[derive(Debug)]
-pub enum snd_seq_queue_status_t {}
+pub(crate) enum snd_seq_queue_status_t {}
 
 /// Opaque `snd_seq_client_pool_t`.
 #[derive(Debug)]
-pub enum snd_seq_client_pool_t {}
+pub(crate) enum snd_seq_client_pool_t {}
 
 /// `snd_seq_real_time_t`: a time on a queue's real-time clock.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct snd_seq_real_time_t {
+pub(crate) struct snd_seq_real_time_t {
     /// Whole seconds.
     pub tv_sec: c_uint,
     /// Nanoseconds past the second.
@@ -70,7 +70,7 @@ pub struct snd_seq_real_time_t {
 /// A sequencer address: `(client, port)`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct snd_seq_addr_t {
+pub(crate) struct snd_seq_addr_t {
     /// Sequencer client id.
     pub client: u8,
     /// Port number within the client.
@@ -95,7 +95,7 @@ pub struct snd_seq_addr_t {
 /// time. Declaring the union would be layout risk for nothing.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct snd_seq_ump_event_t {
+pub(crate) struct snd_seq_ump_event_t {
     /// Event type (`SND_SEQ_EVENT_*`).
     pub type_: u8,
     /// Event flags; timestamp and queue modes.
@@ -119,7 +119,7 @@ impl snd_seq_ump_event_t {
     /// The event's timestamp on its queue's real-time clock, when `flags` mark
     /// it as one (`SND_SEQ_TIME_STAMP_REAL`; a tick stamp, or none, is `None`).
     #[must_use]
-    pub fn real_time(&self) -> Option<snd_seq_real_time_t> {
+    pub(crate) fn real_time(&self) -> Option<snd_seq_real_time_t> {
         if self.flags & SND_SEQ_TIME_STAMP_MASK != SND_SEQ_TIME_STAMP_REAL {
             return None;
         }
@@ -160,7 +160,7 @@ impl Default for snd_seq_ump_event_t {
 #[cfg(feature = "testing")]
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct snd_seq_event_t {
+pub(crate) struct snd_seq_event_t {
     /// Event type (`SND_SEQ_EVENT_*`).
     pub type_: u8,
     /// Event flags.
@@ -182,48 +182,48 @@ pub struct snd_seq_event_t {
 
 #[cfg(any(test, feature = "testing"))]
 /// `SND_SEQ_EVENT_NOTEON`.
-pub const SND_SEQ_EVENT_NOTEON: u8 = 6;
+pub(crate) const SND_SEQ_EVENT_NOTEON: u8 = 6;
 /// `SND_SEQ_EVENT_CONTROLLER`.
 #[cfg(feature = "testing")]
-pub const SND_SEQ_EVENT_CONTROLLER: u8 = 10;
+pub(crate) const SND_SEQ_EVENT_CONTROLLER: u8 = 10;
 
 // --- Constants -------------------------------------------------------------
 
 /// `SND_SEQ_OPEN_DUPLEX` — read and write.
-pub const SND_SEQ_OPEN_DUPLEX: c_int = 3;
+pub(crate) const SND_SEQ_OPEN_DUPLEX: c_int = 3;
 /// Non-blocking open.
-pub const SND_SEQ_NONBLOCK: c_int = 1;
+pub(crate) const SND_SEQ_NONBLOCK: c_int = 1;
 
 /// `SND_SEQ_CLIENT_UMP_MIDI_1_0` — the client speaks UMP with MIDI 1.0 protocol.
-pub const SND_SEQ_CLIENT_UMP_MIDI_1_0: c_int = 1;
+pub(crate) const SND_SEQ_CLIENT_UMP_MIDI_1_0: c_int = 1;
 /// `SND_SEQ_CLIENT_UMP_MIDI_2_0` — the client speaks UMP with MIDI 2.0 protocol.
-pub const SND_SEQ_CLIENT_UMP_MIDI_2_0: c_int = 2;
+pub(crate) const SND_SEQ_CLIENT_UMP_MIDI_2_0: c_int = 2;
 
 /// `SND_SEQ_CLIENT_SYSTEM` — the kernel's own client, which owns the announce
 /// port.
-pub const SND_SEQ_CLIENT_SYSTEM: c_int = 0;
+pub(crate) const SND_SEQ_CLIENT_SYSTEM: c_int = 0;
 
 /// `SND_SEQ_EVENT_START` — start a queue.
-pub const SND_SEQ_EVENT_START: c_int = 30;
+pub(crate) const SND_SEQ_EVENT_START: c_int = 30;
 
 /// `SND_SEQ_EVENT_CLIENT_START` — announced when a client opens; the event's data
 /// begins with its `snd_seq_addr_t`.
-pub const SND_SEQ_EVENT_CLIENT_START: u8 = 60;
+pub(crate) const SND_SEQ_EVENT_CLIENT_START: u8 = 60;
 /// `SND_SEQ_EVENT_CLIENT_EXIT` — announced when a client closes; the event's data
 /// begins with its `snd_seq_addr_t`.
-pub const SND_SEQ_EVENT_CLIENT_EXIT: u8 = 61;
+pub(crate) const SND_SEQ_EVENT_CLIENT_EXIT: u8 = 61;
 /// `SND_SEQ_EVENT_CLIENT_CHANGE` — announced when a client sets its info (its
 /// name among it); the data begins with its address.
-pub const SND_SEQ_EVENT_CLIENT_CHANGE: u8 = 62;
+pub(crate) const SND_SEQ_EVENT_CLIENT_CHANGE: u8 = 62;
 /// `SND_SEQ_EVENT_PORT_START` — announced when a port is created; the data begins
 /// with its address.
-pub const SND_SEQ_EVENT_PORT_START: u8 = 63;
+pub(crate) const SND_SEQ_EVENT_PORT_START: u8 = 63;
 /// `SND_SEQ_EVENT_PORT_EXIT` — announced when a port is deleted; the data begins
 /// with its address.
-pub const SND_SEQ_EVENT_PORT_EXIT: u8 = 64;
+pub(crate) const SND_SEQ_EVENT_PORT_EXIT: u8 = 64;
 /// `SND_SEQ_EVENT_PORT_CHANGE` — announced when a port's info is set (its name or
 /// capabilities); the data begins with its address.
-pub const SND_SEQ_EVENT_PORT_CHANGE: u8 = 65;
+pub(crate) const SND_SEQ_EVENT_PORT_CHANGE: u8 = 65;
 
 /// `SND_SEQ_ADDRESS_SUBSCRIBERS` — deliver to everything subscribed to the
 /// sending port, rather than to one named address.
@@ -231,38 +231,38 @@ pub const SND_SEQ_EVENT_PORT_CHANGE: u8 = 65;
 /// This is the correct `dest` for a port that used `snd_seq_connect_to`: naming
 /// the destination explicitly *on top of* a subscription is rejected with
 /// `-EINVAL`.
-pub const SND_SEQ_ADDRESS_SUBSCRIBERS: u8 = 254;
+pub(crate) const SND_SEQ_ADDRESS_SUBSCRIBERS: u8 = 254;
 
 /// The type a UMP packet is delivered as (`SND_SEQ_EVENT_SYSTEM`, 0): every
 /// other event a UMP client reads (a subscription notice, an Endpoint change)
 /// has a type of its own and its data in the words.
-pub const SND_SEQ_EVENT_UMP_PACKET: u8 = 0;
+pub(crate) const SND_SEQ_EVENT_UMP_PACKET: u8 = 0;
 /// `SND_SEQ_TIME_STAMP_MASK`: the bit of an event's `flags` that says whether
 /// `time` is a tick or a real time.
-pub const SND_SEQ_TIME_STAMP_MASK: u8 = 1 << 0;
+pub(crate) const SND_SEQ_TIME_STAMP_MASK: u8 = 1 << 0;
 
 /// `SND_SEQ_TIME_STAMP_REAL`: `time` is a [`snd_seq_real_time_t`].
-pub const SND_SEQ_TIME_STAMP_REAL: u8 = 1 << 0;
+pub(crate) const SND_SEQ_TIME_STAMP_REAL: u8 = 1 << 0;
 
 /// `SND_SEQ_QUEUE_DIRECT` — dispatch immediately instead of scheduling.
 ///
 /// Must be set explicitly: a zeroed `queue` field means queue 0, a real queue
 /// this client never created, and the send fails.
-pub const SND_SEQ_QUEUE_DIRECT: u8 = 253;
+pub(crate) const SND_SEQ_QUEUE_DIRECT: u8 = 253;
 
 /// Port capabilities.
-pub const SND_SEQ_PORT_CAP_READ: c_uint = 1 << 0;
+pub(crate) const SND_SEQ_PORT_CAP_READ: c_uint = 1 << 0;
 /// Other clients may write events to the port.
-pub const SND_SEQ_PORT_CAP_WRITE: c_uint = 1 << 1;
+pub(crate) const SND_SEQ_PORT_CAP_WRITE: c_uint = 1 << 1;
 /// Other clients may subscribe to read from the port.
-pub const SND_SEQ_PORT_CAP_SUBS_READ: c_uint = 1 << 5;
+pub(crate) const SND_SEQ_PORT_CAP_SUBS_READ: c_uint = 1 << 5;
 /// Other clients may subscribe to write to the port.
-pub const SND_SEQ_PORT_CAP_SUBS_WRITE: c_uint = 1 << 6;
+pub(crate) const SND_SEQ_PORT_CAP_SUBS_WRITE: c_uint = 1 << 6;
 
 /// Port types.
-pub const SND_SEQ_PORT_TYPE_MIDI_GENERIC: c_uint = 1 << 1;
+pub(crate) const SND_SEQ_PORT_TYPE_MIDI_GENERIC: c_uint = 1 << 1;
 /// A port owned by an application.
-pub const SND_SEQ_PORT_TYPE_APPLICATION: c_uint = 1 << 20;
+pub(crate) const SND_SEQ_PORT_TYPE_APPLICATION: c_uint = 1 << 20;
 
 // --- Functions -------------------------------------------------------------
 
@@ -272,46 +272,49 @@ pub const SND_SEQ_PORT_TYPE_APPLICATION: c_uint = 1 << 20;
 unsafe extern "C" {
     // Client lifecycle.
     /// Open a sequencer client handle; `streams` and `mode` are alsa-lib's `SND_SEQ_OPEN_*` / `SND_SEQ_NONBLOCK` flags.
-    pub fn snd_seq_open(
+    pub(crate) fn snd_seq_open(
         seq: *mut *mut snd_seq_t,
         name: *const c_char,
         streams: c_int,
         mode: c_int,
     ) -> c_int;
     /// Close a client opened by `snd_seq_open`.
-    pub fn snd_seq_close(seq: *mut snd_seq_t) -> c_int;
+    pub(crate) fn snd_seq_close(seq: *mut snd_seq_t) -> c_int;
     /// This client's id on the sequencer.
-    pub fn snd_seq_client_id(seq: *mut snd_seq_t) -> c_int;
+    pub(crate) fn snd_seq_client_id(seq: *mut snd_seq_t) -> c_int;
     /// Set the name other clients see for this client.
-    pub fn snd_seq_set_client_name(seq: *mut snd_seq_t, name: *const c_char) -> c_int;
+    pub(crate) fn snd_seq_set_client_name(seq: *mut snd_seq_t, name: *const c_char) -> c_int;
 
     /// Declare this client's MIDI version — `SND_SEQ_CLIENT_UMP_MIDI_2_0` here.
     /// **This is what makes the client a UMP client** rather than a legacy one.
     /// @@ALSA_1.2.10
-    pub fn snd_seq_set_client_midi_version(seq: *mut snd_seq_t, midi_version: c_int) -> c_int;
+    pub(crate) fn snd_seq_set_client_midi_version(
+        seq: *mut snd_seq_t,
+        midi_version: c_int,
+    ) -> c_int;
 
     /// Enable kernel UMP↔legacy conversion, so a UMP client can talk to legacy
     /// ports (and vice versa) without either side knowing. Kernel ≥ 6.5.
     /// @@ALSA_1.2.10
-    pub fn snd_seq_set_client_ump_conversion(seq: *mut snd_seq_t, enable: c_int) -> c_int;
+    pub(crate) fn snd_seq_set_client_ump_conversion(seq: *mut snd_seq_t, enable: c_int) -> c_int;
 
     // Ports.
     /// Create a port with `caps` (`SND_SEQ_PORT_CAP_*`) and `type_` (`SND_SEQ_PORT_TYPE_*`); returns the port number or a negative error.
-    pub fn snd_seq_create_simple_port(
+    pub(crate) fn snd_seq_create_simple_port(
         seq: *mut snd_seq_t,
         name: *const c_char,
         caps: c_uint,
         type_: c_uint,
     ) -> c_int;
     /// Subscribe `my_port` to events sent by `src_client:src_port`.
-    pub fn snd_seq_connect_from(
+    pub(crate) fn snd_seq_connect_from(
         seq: *mut snd_seq_t,
         my_port: c_int,
         src_client: c_int,
         src_port: c_int,
     ) -> c_int;
     /// Subscribe `dest_client:dest_port` to events sent by `my_port`.
-    pub fn snd_seq_connect_to(
+    pub(crate) fn snd_seq_connect_to(
         seq: *mut snd_seq_t,
         my_port: c_int,
         dest_client: c_int,
@@ -324,87 +327,95 @@ unsafe extern "C" {
     ///
     /// The event is owned by alsa-lib and valid only until the next call — it
     /// must be copied out, never retained.
-    pub fn snd_seq_ump_event_input(seq: *mut snd_seq_t, ev: *mut *mut snd_seq_ump_event_t)
-    -> c_int;
+    pub(crate) fn snd_seq_ump_event_input(
+        seq: *mut snd_seq_t,
+        ev: *mut *mut snd_seq_ump_event_t,
+    ) -> c_int;
     /// How many poll descriptors the client needs for `events` (`POLLIN`).
-    pub fn snd_seq_poll_descriptors_count(seq: *mut snd_seq_t, events: c_short) -> c_int;
+    pub(crate) fn snd_seq_poll_descriptors_count(seq: *mut snd_seq_t, events: c_short) -> c_int;
     /// Fill `pfds` (an array of `struct pollfd`, `space` long) for `events`;
     /// returns how many it filled.
-    pub fn snd_seq_poll_descriptors(
+    pub(crate) fn snd_seq_poll_descriptors(
         seq: *mut snd_seq_t,
         pfds: *mut c_void,
         space: c_uint,
         events: c_short,
     ) -> c_int;
     /// Send one UMP event immediately, bypassing the queue.
-    pub fn snd_seq_ump_event_output_direct(
+    pub(crate) fn snd_seq_ump_event_output_direct(
         seq: *mut snd_seq_t,
         ev: *mut snd_seq_ump_event_t,
     ) -> c_int;
 
     /// Send one legacy event immediately, bypassing the queue.
     #[cfg(feature = "testing")]
-    pub fn snd_seq_event_output_direct(seq: *mut snd_seq_t, ev: *mut snd_seq_event_t) -> c_int;
+    pub(crate) fn snd_seq_event_output_direct(
+        seq: *mut snd_seq_t,
+        ev: *mut snd_seq_event_t,
+    ) -> c_int;
 
     // Client enumeration.
     /// Allocate a client-info record; free it with `snd_seq_client_info_free`.
-    pub fn snd_seq_client_info_malloc(ptr: *mut *mut snd_seq_client_info_t) -> c_int;
+    pub(crate) fn snd_seq_client_info_malloc(ptr: *mut *mut snd_seq_client_info_t) -> c_int;
     /// Free a record from `snd_seq_client_info_malloc`.
-    pub fn snd_seq_client_info_free(ptr: *mut snd_seq_client_info_t);
+    pub(crate) fn snd_seq_client_info_free(ptr: *mut snd_seq_client_info_t);
     /// Set the client id a query starts from (`-1` for the first).
-    pub fn snd_seq_client_info_set_client(info: *mut snd_seq_client_info_t, client: c_int);
+    pub(crate) fn snd_seq_client_info_set_client(info: *mut snd_seq_client_info_t, client: c_int);
     /// The client id in the record.
-    pub fn snd_seq_client_info_get_client(info: *const snd_seq_client_info_t) -> c_int;
+    pub(crate) fn snd_seq_client_info_get_client(info: *const snd_seq_client_info_t) -> c_int;
     /// The client name in the record; valid while the record lives.
-    pub fn snd_seq_client_info_get_name(info: *mut snd_seq_client_info_t) -> *const c_char;
+    pub(crate) fn snd_seq_client_info_get_name(info: *mut snd_seq_client_info_t) -> *const c_char;
     /// Advance `info` to the next client; negative when there is none.
-    pub fn snd_seq_query_next_client(
+    pub(crate) fn snd_seq_query_next_client(
         seq: *mut snd_seq_t,
         info: *mut snd_seq_client_info_t,
     ) -> c_int;
 
     // Port enumeration.
     /// Allocate a port-info record; free it with `snd_seq_port_info_free`.
-    pub fn snd_seq_port_info_malloc(ptr: *mut *mut snd_seq_port_info_t) -> c_int;
+    pub(crate) fn snd_seq_port_info_malloc(ptr: *mut *mut snd_seq_port_info_t) -> c_int;
     /// Free a record from `snd_seq_port_info_malloc`.
-    pub fn snd_seq_port_info_free(ptr: *mut snd_seq_port_info_t);
+    pub(crate) fn snd_seq_port_info_free(ptr: *mut snd_seq_port_info_t);
     /// Set the client whose ports a query walks.
-    pub fn snd_seq_port_info_set_client(info: *mut snd_seq_port_info_t, client: c_int);
+    pub(crate) fn snd_seq_port_info_set_client(info: *mut snd_seq_port_info_t, client: c_int);
     /// Set the port a query starts from (`-1` for the first).
-    pub fn snd_seq_port_info_set_port(info: *mut snd_seq_port_info_t, port: c_int);
+    pub(crate) fn snd_seq_port_info_set_port(info: *mut snd_seq_port_info_t, port: c_int);
     /// The port number in the record.
-    pub fn snd_seq_port_info_get_port(info: *const snd_seq_port_info_t) -> c_int;
+    pub(crate) fn snd_seq_port_info_get_port(info: *const snd_seq_port_info_t) -> c_int;
     /// The port name in the record; valid while the record lives.
-    pub fn snd_seq_port_info_get_name(info: *const snd_seq_port_info_t) -> *const c_char;
+    pub(crate) fn snd_seq_port_info_get_name(info: *const snd_seq_port_info_t) -> *const c_char;
     /// The port's `SND_SEQ_PORT_CAP_*` bits.
-    pub fn snd_seq_port_info_get_capability(info: *const snd_seq_port_info_t) -> c_uint;
+    pub(crate) fn snd_seq_port_info_get_capability(info: *const snd_seq_port_info_t) -> c_uint;
     /// Fill `info` from one of `seq`'s own ports.
-    pub fn snd_seq_get_port_info(
+    pub(crate) fn snd_seq_get_port_info(
         seq: *mut snd_seq_t,
         port: c_int,
         info: *mut snd_seq_port_info_t,
     ) -> c_int;
     /// Change one of `seq`'s own ports to `info`; the sequencer announces it.
-    pub fn snd_seq_set_port_info(
+    pub(crate) fn snd_seq_set_port_info(
         seq: *mut snd_seq_t,
         port: c_int,
         info: *mut snd_seq_port_info_t,
     ) -> c_int;
     /// Whether events delivered to the port carry a timestamp.
-    pub fn snd_seq_port_info_set_timestamping(info: *mut snd_seq_port_info_t, enable: c_int);
+    pub(crate) fn snd_seq_port_info_set_timestamping(info: *mut snd_seq_port_info_t, enable: c_int);
     /// Whether that timestamp is real time (not ticks).
-    pub fn snd_seq_port_info_set_timestamp_real(info: *mut snd_seq_port_info_t, real: c_int);
+    pub(crate) fn snd_seq_port_info_set_timestamp_real(info: *mut snd_seq_port_info_t, real: c_int);
     /// The queue the timestamp is read from.
-    pub fn snd_seq_port_info_set_timestamp_queue(info: *mut snd_seq_port_info_t, queue: c_int);
+    pub(crate) fn snd_seq_port_info_set_timestamp_queue(
+        info: *mut snd_seq_port_info_t,
+        queue: c_int,
+    );
 
     // Queues.
     /// Create a queue owned by `seq`; its id, or negative. The sequencer frees
     /// it when the client closes.
-    pub fn snd_seq_alloc_queue(seq: *mut snd_seq_t) -> c_int;
+    pub(crate) fn snd_seq_alloc_queue(seq: *mut snd_seq_t) -> c_int;
     /// Send queue `q` the control event `type_` (`SND_SEQ_EVENT_START`...) with
     /// `value`. `ev` may be NULL, which sends it directly. (`snd_seq_start_queue`
     /// is a header macro over this, so it is not a symbol.)
-    pub fn snd_seq_control_queue(
+    pub(crate) fn snd_seq_control_queue(
         seq: *mut snd_seq_t,
         q: c_int,
         type_: c_int,
@@ -413,142 +424,201 @@ unsafe extern "C" {
     ) -> c_int;
     /// Send what `snd_seq_control_queue` and other buffered output left in the
     /// client's output buffer; the count still buffered, or negative.
-    pub fn snd_seq_drain_output(seq: *mut snd_seq_t) -> c_int;
+    pub(crate) fn snd_seq_drain_output(seq: *mut snd_seq_t) -> c_int;
     /// Allocate a client-pool record; free it with `snd_seq_client_pool_free`.
-    pub fn snd_seq_client_pool_malloc(ptr: *mut *mut snd_seq_client_pool_t) -> c_int;
+    pub(crate) fn snd_seq_client_pool_malloc(ptr: *mut *mut snd_seq_client_pool_t) -> c_int;
     /// Free a record from `snd_seq_client_pool_malloc`.
-    pub fn snd_seq_client_pool_free(ptr: *mut snd_seq_client_pool_t);
+    pub(crate) fn snd_seq_client_pool_free(ptr: *mut snd_seq_client_pool_t);
     /// Fill `info` with this client's pool sizes and free cells now.
-    pub fn snd_seq_get_client_pool(seq: *mut snd_seq_t, info: *mut snd_seq_client_pool_t) -> c_int;
+    pub(crate) fn snd_seq_get_client_pool(
+        seq: *mut snd_seq_t,
+        info: *mut snd_seq_client_pool_t,
+    ) -> c_int;
     /// The free cells of the output pool in `info`.
-    pub fn snd_seq_client_pool_get_output_free(info: *const snd_seq_client_pool_t) -> usize;
+    pub(crate) fn snd_seq_client_pool_get_output_free(info: *const snd_seq_client_pool_t) -> usize;
     /// Allocate a queue-status record; free it with `snd_seq_queue_status_free`.
-    pub fn snd_seq_queue_status_malloc(ptr: *mut *mut snd_seq_queue_status_t) -> c_int;
+    pub(crate) fn snd_seq_queue_status_malloc(ptr: *mut *mut snd_seq_queue_status_t) -> c_int;
     /// Free a record from `snd_seq_queue_status_malloc`.
-    pub fn snd_seq_queue_status_free(ptr: *mut snd_seq_queue_status_t);
+    pub(crate) fn snd_seq_queue_status_free(ptr: *mut snd_seq_queue_status_t);
     /// Fill `status` with queue `q`'s state now.
-    pub fn snd_seq_get_queue_status(
+    pub(crate) fn snd_seq_get_queue_status(
         seq: *mut snd_seq_t,
         q: c_int,
         status: *mut snd_seq_queue_status_t,
     ) -> c_int;
     /// The queue's real time in `status`: a pointer into `status`, valid until
     /// it is freed.
-    pub fn snd_seq_queue_status_get_real_time(
+    pub(crate) fn snd_seq_queue_status_get_real_time(
         status: *const snd_seq_queue_status_t,
     ) -> *const snd_seq_real_time_t;
 
     /// Advance `info` to the client's next port; negative when there is none.
-    pub fn snd_seq_query_next_port(seq: *mut snd_seq_t, info: *mut snd_seq_port_info_t) -> c_int;
+    pub(crate) fn snd_seq_query_next_port(
+        seq: *mut snd_seq_t,
+        info: *mut snd_seq_port_info_t,
+    ) -> c_int;
 
     // Function blocks. Opaque + getters, so no struct layout to get wrong.
     // @@ALSA_1.2.10
     /// Allocate a function-block record; free it with `snd_ump_block_info_free`.
-    pub fn snd_ump_block_info_malloc(ptr: *mut *mut snd_ump_block_info_t) -> c_int;
+    pub(crate) fn snd_ump_block_info_malloc(ptr: *mut *mut snd_ump_block_info_t) -> c_int;
     /// Free a record from `snd_ump_block_info_malloc`.
-    pub fn snd_ump_block_info_free(ptr: *mut snd_ump_block_info_t);
+    pub(crate) fn snd_ump_block_info_free(ptr: *mut snd_ump_block_info_t);
     /// @@ALSA_1.2.10
-    pub fn snd_seq_get_ump_block_info(
+    pub(crate) fn snd_seq_get_ump_block_info(
         seq: *mut snd_seq_t,
         client: c_int,
         blk: c_int,
         info: *mut c_void,
     ) -> c_int;
-    pub fn snd_ump_block_info_get_block_id(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_active(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_flags(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_direction(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_first_group(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_num_groups(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_midi_ci_version(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_sysex8_streams(info: *const snd_ump_block_info_t) -> c_uint;
-    pub fn snd_ump_block_info_get_ui_hint(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_block_id(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_active(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_flags(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_direction(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_first_group(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_num_groups(info: *const snd_ump_block_info_t) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_midi_ci_version(
+        info: *const snd_ump_block_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_sysex8_streams(
+        info: *const snd_ump_block_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_block_info_get_ui_hint(info: *const snd_ump_block_info_t) -> c_uint;
     /// The block's name: a pointer into `info`, valid until it is freed.
-    pub fn snd_ump_block_info_get_name(info: *const snd_ump_block_info_t) -> *const c_char;
+    pub(crate) fn snd_ump_block_info_get_name(info: *const snd_ump_block_info_t) -> *const c_char;
 
     // The endpoint record. @@ALSA_1.2.10
     /// Allocate an endpoint record; free it with `snd_ump_endpoint_info_free`.
-    pub fn snd_ump_endpoint_info_malloc(ptr: *mut *mut snd_ump_endpoint_info_t) -> c_int;
+    pub(crate) fn snd_ump_endpoint_info_malloc(ptr: *mut *mut snd_ump_endpoint_info_t) -> c_int;
     /// Free a record from `snd_ump_endpoint_info_malloc`.
-    pub fn snd_ump_endpoint_info_free(ptr: *mut snd_ump_endpoint_info_t);
+    pub(crate) fn snd_ump_endpoint_info_free(ptr: *mut snd_ump_endpoint_info_t);
     /// @@ALSA_1.2.10
-    pub fn snd_seq_get_ump_endpoint_info(
+    pub(crate) fn snd_seq_get_ump_endpoint_info(
         seq: *mut snd_seq_t,
         client: c_int,
         info: *mut c_void,
     ) -> c_int;
-    pub fn snd_ump_endpoint_info_get_protocol_caps(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_protocol(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_num_blocks(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_version(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_flags(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_manufacturer_id(
+    pub(crate) fn snd_ump_endpoint_info_get_protocol_caps(
         info: *const snd_ump_endpoint_info_t,
     ) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_family_id(info: *const snd_ump_endpoint_info_t) -> c_uint;
-    pub fn snd_ump_endpoint_info_get_model_id(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_protocol(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_num_blocks(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_version(info: *const snd_ump_endpoint_info_t)
+    -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_flags(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_manufacturer_id(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_family_id(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
+    pub(crate) fn snd_ump_endpoint_info_get_model_id(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
     /// The four software revision bytes: a pointer into `info`, valid until it is freed.
-    pub fn snd_ump_endpoint_info_get_sw_revision(
+    pub(crate) fn snd_ump_endpoint_info_get_sw_revision(
         info: *const snd_ump_endpoint_info_t,
     ) -> *const c_uchar;
     /// The product instance id: a pointer into `info`, valid until it is freed.
-    pub fn snd_ump_endpoint_info_get_product_id(
+    pub(crate) fn snd_ump_endpoint_info_get_product_id(
         info: *const snd_ump_endpoint_info_t,
     ) -> *const c_char;
     /// The endpoint's name: a pointer into `info`, valid until it is freed.
-    pub fn snd_ump_endpoint_info_get_name(info: *const snd_ump_endpoint_info_t) -> *const c_char;
+    pub(crate) fn snd_ump_endpoint_info_get_name(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> *const c_char;
 }
 
 #[cfg(all(alsa_ump, feature = "testing"))]
 unsafe extern "C" {
     /// Set the port's `SND_SEQ_PORT_CAP_*` bits.
-    pub fn snd_seq_port_info_set_capability(info: *mut snd_seq_port_info_t, capability: c_uint);
+    pub(crate) fn snd_seq_port_info_set_capability(
+        info: *mut snd_seq_port_info_t,
+        capability: c_uint,
+    );
 }
 
 unsafe extern "C" {
     /// Publish this client's endpoint record.
-    pub fn snd_seq_set_ump_endpoint_info(seq: *mut snd_seq_t, info: *const c_void) -> c_int;
+    pub(crate) fn snd_seq_set_ump_endpoint_info(seq: *mut snd_seq_t, info: *const c_void) -> c_int;
     /// Publish this client's block `blk`.
-    pub fn snd_seq_set_ump_block_info(
+    pub(crate) fn snd_seq_set_ump_block_info(
         seq: *mut snd_seq_t,
         blk: c_int,
         info: *const c_void,
     ) -> c_int;
-    pub fn snd_ump_endpoint_info_set_protocol_caps(
+    pub(crate) fn snd_ump_endpoint_info_set_protocol_caps(
         info: *mut snd_ump_endpoint_info_t,
         caps: c_uint,
     );
-    pub fn snd_ump_endpoint_info_set_protocol(info: *mut snd_ump_endpoint_info_t, protocol: c_uint);
-    pub fn snd_ump_endpoint_info_set_version(info: *mut snd_ump_endpoint_info_t, version: c_uint);
-    pub fn snd_ump_endpoint_info_set_flags(info: *mut snd_ump_endpoint_info_t, flags: c_uint);
-    pub fn snd_ump_endpoint_info_set_num_blocks(info: *mut snd_ump_endpoint_info_t, n: c_uint);
-    pub fn snd_ump_endpoint_info_set_name(info: *mut snd_ump_endpoint_info_t, name: *const c_char);
-    pub fn snd_ump_endpoint_info_set_manufacturer_id(
+    pub(crate) fn snd_ump_endpoint_info_set_protocol(
+        info: *mut snd_ump_endpoint_info_t,
+        protocol: c_uint,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_version(
+        info: *mut snd_ump_endpoint_info_t,
+        version: c_uint,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_flags(
+        info: *mut snd_ump_endpoint_info_t,
+        flags: c_uint,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_num_blocks(
+        info: *mut snd_ump_endpoint_info_t,
+        n: c_uint,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_name(
+        info: *mut snd_ump_endpoint_info_t,
+        name: *const c_char,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_manufacturer_id(
         info: *mut snd_ump_endpoint_info_t,
         id: c_uint,
     );
-    pub fn snd_ump_endpoint_info_set_family_id(info: *mut snd_ump_endpoint_info_t, id: c_uint);
-    pub fn snd_ump_endpoint_info_set_model_id(info: *mut snd_ump_endpoint_info_t, id: c_uint);
+    pub(crate) fn snd_ump_endpoint_info_set_family_id(
+        info: *mut snd_ump_endpoint_info_t,
+        id: c_uint,
+    );
+    pub(crate) fn snd_ump_endpoint_info_set_model_id(
+        info: *mut snd_ump_endpoint_info_t,
+        id: c_uint,
+    );
     /// Copies four bytes from `revision`.
-    pub fn snd_ump_endpoint_info_set_sw_revision(
+    pub(crate) fn snd_ump_endpoint_info_set_sw_revision(
         info: *mut snd_ump_endpoint_info_t,
         revision: *const c_uchar,
     );
     /// Copies the string, truncated to the record's 128 bytes.
-    pub fn snd_ump_endpoint_info_set_product_id(
+    pub(crate) fn snd_ump_endpoint_info_set_product_id(
         info: *mut snd_ump_endpoint_info_t,
         id: *const c_char,
     );
-    pub fn snd_ump_block_info_set_block_id(info: *mut snd_ump_block_info_t, id: c_uint);
-    pub fn snd_ump_block_info_set_active(info: *mut snd_ump_block_info_t, active: c_uint);
-    pub fn snd_ump_block_info_set_direction(info: *mut snd_ump_block_info_t, direction: c_uint);
-    pub fn snd_ump_block_info_set_first_group(info: *mut snd_ump_block_info_t, group: c_uint);
-    pub fn snd_ump_block_info_set_num_groups(info: *mut snd_ump_block_info_t, n: c_uint);
-    pub fn snd_ump_block_info_set_ui_hint(info: *mut snd_ump_block_info_t, hint: c_uint);
-    pub fn snd_ump_block_info_set_flags(info: *mut snd_ump_block_info_t, flags: c_uint);
-    pub fn snd_ump_block_info_set_midi_ci_version(info: *mut snd_ump_block_info_t, version: c_uint);
-    pub fn snd_ump_block_info_set_sysex8_streams(info: *mut snd_ump_block_info_t, streams: c_uint);
-    pub fn snd_ump_block_info_set_name(info: *mut snd_ump_block_info_t, name: *const c_char);
+    pub(crate) fn snd_ump_block_info_set_block_id(info: *mut snd_ump_block_info_t, id: c_uint);
+    pub(crate) fn snd_ump_block_info_set_active(info: *mut snd_ump_block_info_t, active: c_uint);
+    pub(crate) fn snd_ump_block_info_set_direction(
+        info: *mut snd_ump_block_info_t,
+        direction: c_uint,
+    );
+    pub(crate) fn snd_ump_block_info_set_first_group(
+        info: *mut snd_ump_block_info_t,
+        group: c_uint,
+    );
+    pub(crate) fn snd_ump_block_info_set_num_groups(info: *mut snd_ump_block_info_t, n: c_uint);
+    pub(crate) fn snd_ump_block_info_set_ui_hint(info: *mut snd_ump_block_info_t, hint: c_uint);
+    pub(crate) fn snd_ump_block_info_set_flags(info: *mut snd_ump_block_info_t, flags: c_uint);
+    pub(crate) fn snd_ump_block_info_set_midi_ci_version(
+        info: *mut snd_ump_block_info_t,
+        version: c_uint,
+    );
+    pub(crate) fn snd_ump_block_info_set_sysex8_streams(
+        info: *mut snd_ump_block_info_t,
+        streams: c_uint,
+    );
+    pub(crate) fn snd_ump_block_info_set_name(info: *mut snd_ump_block_info_t, name: *const c_char);
 }
 
 /// The measured `snd_seq_ump_event_t` size, alignment and field offsets, checked

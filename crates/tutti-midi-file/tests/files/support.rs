@@ -3,7 +3,7 @@
 
 /// The variable-length quantity: 7 bits per byte, big-endian, continuation bit
 /// set on every byte but the last (SMF 1.0 section 1.1).
-pub fn write_vlq(out: &mut Vec<u8>, mut value: u32) {
+pub(crate) fn write_vlq(out: &mut Vec<u8>, mut value: u32) {
     let mut buf = [0u8; 4];
     let mut n = 0;
     loop {
@@ -21,7 +21,7 @@ pub fn write_vlq(out: &mut Vec<u8>, mut value: u32) {
 }
 
 /// One event to encode, as a delta plus raw status/data bytes.
-pub struct RawEvent {
+pub(crate) struct RawEvent {
     pub delta: u32,
     /// The full event, status byte first. Meta events start `0xFF`, sysex
     /// `0xF0`; channel messages carry their own status.
@@ -29,28 +29,28 @@ pub struct RawEvent {
 }
 
 impl RawEvent {
-    pub fn new(delta: u32, bytes: impl Into<Vec<u8>>) -> Self {
+    pub(crate) fn new(delta: u32, bytes: impl Into<Vec<u8>>) -> Self {
         Self {
             delta,
             bytes: bytes.into(),
         }
     }
 
-    pub fn note_on(delta: u32, channel: u8, key: u8, vel: u8) -> Self {
+    pub(crate) fn note_on(delta: u32, channel: u8, key: u8, vel: u8) -> Self {
         Self::new(delta, vec![0x90 | (channel & 0x0F), key, vel])
     }
 
-    pub fn note_off(delta: u32, channel: u8, key: u8, vel: u8) -> Self {
+    pub(crate) fn note_off(delta: u32, channel: u8, key: u8, vel: u8) -> Self {
         Self::new(delta, vec![0x80 | (channel & 0x0F), key, vel])
     }
 
     /// Set Tempo, microseconds per quarter note.
-    pub fn tempo(delta: u32, us_per_quarter: u32) -> Self {
+    pub(crate) fn tempo(delta: u32, us_per_quarter: u32) -> Self {
         let b = us_per_quarter.to_be_bytes();
         Self::new(delta, vec![0xFF, 0x51, 0x03, b[1], b[2], b[3]])
     }
 
-    pub fn track_name(delta: u32, name: &str) -> Self {
+    pub(crate) fn track_name(delta: u32, name: &str) -> Self {
         let mut v = vec![0xFF, 0x03];
         write_vlq(&mut v, name.len() as u32);
         v.extend_from_slice(name.as_bytes());
@@ -58,7 +58,7 @@ impl RawEvent {
     }
 
     /// `numerator`/`2^denominator_pow`, with the usual 24/8 clock defaults.
-    pub fn time_signature(delta: u32, numerator: u8, denominator_pow: u8) -> Self {
+    pub(crate) fn time_signature(delta: u32, numerator: u8, denominator_pow: u8) -> Self {
         Self::new(
             delta,
             vec![0xFF, 0x58, 0x04, numerator, denominator_pow, 24, 8],
@@ -66,7 +66,7 @@ impl RawEvent {
     }
 
     /// An F0 sysex with a length-prefixed payload, terminated 0xF7.
-    pub fn sysex(delta: u32, payload: &[u8]) -> Self {
+    pub(crate) fn sysex(delta: u32, payload: &[u8]) -> Self {
         let mut v = vec![0xF0];
         write_vlq(&mut v, payload.len() as u32 + 1);
         v.extend_from_slice(payload);
@@ -76,14 +76,14 @@ impl RawEvent {
 
     /// A channel message with its status byte omitted — legal when the
     /// previous event carried the same status. a reader must reinstate it.
-    pub fn running_status(delta: u32, data: impl Into<Vec<u8>>) -> Self {
+    pub(crate) fn running_status(delta: u32, data: impl Into<Vec<u8>>) -> Self {
         Self::new(delta, data)
     }
 }
 
 /// How the header declares its time division.
 #[derive(Clone, Copy)]
-pub enum Division {
+pub(crate) enum Division {
     /// Ticks per quarter note. Zero is representable and must be rejected by
     /// any reader that divides by it.
     Metrical(u16),
@@ -104,7 +104,7 @@ impl Division {
 }
 
 /// Build a complete SMF byte stream. `format` is 0, 1 or 2.
-pub fn build_smf(format: u16, division: Division, tracks: &[Vec<RawEvent>]) -> Vec<u8> {
+pub(crate) fn build_smf(format: u16, division: Division, tracks: &[Vec<RawEvent>]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(b"MThd");
     out.extend_from_slice(&6u32.to_be_bytes());

@@ -5,18 +5,18 @@ use std::fmt;
 /// A CoreMIDI object's `kMIDIPropertyUniqueID`: an `SInt32` that persists across
 /// restarts and device list refreshes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct UniqueId(i32);
+pub(crate) struct UniqueId(i32);
 
 impl UniqueId {
     /// The id with value `raw`.
     #[must_use]
-    pub const fn new(raw: i32) -> Self {
+    pub(crate) const fn new(raw: i32) -> Self {
         Self(raw)
     }
 
     /// The value.
     #[must_use]
-    pub const fn get(self) -> i32 {
+    pub(crate) const fn get(self) -> i32 {
         self.0
     }
 }

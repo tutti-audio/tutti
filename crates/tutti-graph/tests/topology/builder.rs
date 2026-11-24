@@ -144,7 +144,7 @@ mod net_rule {
     use super::*;
 
     /// A node: its output width and what feeds each of its inputs.
-    pub struct Node {
+    pub(super) struct Node {
         pub outs: usize,
         pub sources: Vec<PortSource>,
     }
@@ -155,7 +155,7 @@ mod net_rule {
 
     /// `pipe(a, b)`: input `c` of `b` reads `a`'s port
     /// `c % a_outs`; silence when `a` has no outputs.
-    pub fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<PortSource> {
         (0..b_ins)
             .map(|c| {
                 if a_outs > 0 {
@@ -169,7 +169,7 @@ mod net_rule {
 
     /// `pipe_output(n)`: main output `c` reads `n`'s port
     /// `c % n_outs`; silence when `n` has no outputs.
-    pub fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
         (0..outputs)
             .map(|c| {
                 if n_outs > 0 {
@@ -183,7 +183,7 @@ mod net_rule {
 
     /// `pipe_input(n)`: input `c` reads main input `c % main_inputs`;
     /// silence when there are none.
-    pub fn pipe_input(main_inputs: usize, ins: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_input(main_inputs: usize, ins: usize) -> Vec<PortSource> {
         (0..ins)
             .map(|c| {
                 if main_inputs > 0 {
@@ -199,7 +199,7 @@ mod net_rule {
     /// there are main inputs; otherwise its inputs stay silent), each later
     /// one reads what fed main output `i % outputs` (silence with no
     /// outputs), and each takes over the outputs with `pipe_output`.
-    pub fn chain(
+    pub(super) fn chain(
         main_inputs: usize,
         outputs: usize,
         widths: &[(usize, usize)],
@@ -235,7 +235,7 @@ mod net_rule {
     /// [`Width`] node's output `c` is `c + 1` plus the sum of its inputs,
     /// evaluated in the order the nodes were added (every source precedes
     /// the node it feeds in these graphs).
-    pub fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
+    pub(super) fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
         let mut value: Vec<(NodeKey, Vec<f32>)> = Vec::new();
         let read = |value: &[(NodeKey, Vec<f32>)], s: &PortSource| match s {
             PortSource::Node(from) => {

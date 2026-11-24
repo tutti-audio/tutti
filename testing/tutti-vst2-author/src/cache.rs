@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::editor::Editor;
 use crate::plugin::{Info, PluginParameters};
 
-pub struct PluginCache {
+pub(crate) struct PluginCache {
     pub info: Info,
     pub params: Arc<dyn PluginParameters>,
     pub editor: Option<Box<dyn Editor>>,
@@ -13,7 +13,7 @@ pub struct PluginCache {
 }
 
 impl PluginCache {
-    pub fn new(
+    pub(crate) fn new(
         info: &Info,
         params: Arc<dyn PluginParameters>,
         editor: Option<Box<dyn Editor>>,

@@ -28,7 +28,6 @@ fn header::SlabHeader::recheck
 fn header::SlabHeader::sequence
 fn header::SlabHeader::zeroed
 fn header::slot_for
-fn inherit::linux::inherit_only_stdio
 fn inherit::unix::inherit_only_stdio
 fn lane::unix::LaneWire::fresh
 fn lane::unix::receive_lane
@@ -36,10 +35,7 @@ fn lane::unix::send_lane
 fn lane::windows::LaneWire::fresh
 fn lane::windows::LaneWire::name
 fn lane::windows::unique_name
-fn lifetime::unix::has_ended
 fn lifetime::unix::kill_group
-fn lifetime::unix::own_group
-fn lifetime::windows::has_ended
 fn lifetime::windows::kill_group
 fn mapping::MappingWriter::create
 fn mapping::MappingWriter::mapping

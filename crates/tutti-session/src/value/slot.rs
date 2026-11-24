@@ -190,7 +190,7 @@ pub trait Slot<V>: Send + Sync + 'static {
 }
 
 /// The cell a slot target lands through.
-pub type SlotCell<V> = Arc<dyn Slot<V>>;
+pub(crate) type SlotCell<V> = Arc<dyn Slot<V>>;
 
 /// What a slot is registered as: the type-erased [`SlotCell`] of its value,
 /// and, for a staging slot, the handle the update publishes it through.

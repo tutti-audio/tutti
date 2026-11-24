@@ -153,7 +153,7 @@ impl Scheduled {
 
 /// Both sides of the queue. Clone shares every field.
 #[derive(Clone)]
-pub struct CommandQueue {
+pub(crate) struct CommandQueue {
     queue: Arc<ArrayQueue<Scheduled>>,
     /// Commands in flight: sent, not yet applied or cancelled.
     credit: Arc<AtomicUsize>,

@@ -17,10 +17,10 @@ use tutti_graph::{
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
-pub const SAMPLE_RATE: f64 = 48_000.0;
+pub(crate) const SAMPLE_RATE: f64 = 48_000.0;
 
 /// A graph emitting a constant `level` on **every** one of `outputs` channels.
-pub fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>> {
+pub(crate) fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>> {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let (mut ed, exec) = Editor::<F>::with_format(Prepare::new(
         SampleRate::of(SAMPLE_RATE),

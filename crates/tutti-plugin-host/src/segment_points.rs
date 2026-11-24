@@ -80,7 +80,7 @@ struct Track {
 /// The segments in flight on a plugin node's event input. See the module
 /// docs.
 #[derive(Debug, Default)]
-pub struct SegmentPoints {
+pub(crate) struct SegmentPoints {
     /// The slots, sized by [`prepare`](Self::prepare); live ones first.
     tracks: CappedVec<Track>,
     /// The current chunk's length: where its last frame is.
@@ -90,7 +90,7 @@ pub struct SegmentPoints {
 impl SegmentPoints {
     /// Size the slots for `slots` segments and drop any in flight. Control
     /// thread: allocates (once; a later call with the same size reuses).
-    pub fn prepare(&mut self, slots: usize) {
+    pub(crate) fn prepare(&mut self, slots: usize) {
         if self.tracks.capacity() == slots {
             self.tracks.clear();
         } else {
@@ -99,12 +99,12 @@ impl SegmentPoints {
     }
 
     /// Drop every segment in flight (a reset). Allocation-free.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.tracks.clear();
     }
 
     /// A chunk of `chunk` frames begins.
-    pub fn begin(&mut self, chunk: usize) {
+    pub(crate) fn begin(&mut self, chunk: usize) {
         self.chunk = chunk;
     }
 

@@ -175,7 +175,7 @@ pub(crate) struct PitchResult {
 impl PitchResult {
     /// Whether this reading is a real pitch: both a positive frequency and a
     /// non-zero [`Confidence`]. A default (unvoiced) result is neither.
-    pub fn is_voiced(&self) -> bool {
+    pub(crate) fn is_voiced(&self) -> bool {
         self.frequency > Hz::new(0.0) && self.confidence > Confidence::new(0.0)
     }
 }
@@ -200,7 +200,7 @@ pub(crate) struct PitchDetector {
 }
 
 impl PitchDetector {
-    pub fn new(cfg: YinPlan) -> Self {
+    pub(crate) fn new(cfg: YinPlan) -> Self {
         let max_period = cfg.max_period().get();
         let fft_size = (max_period * 2).next_power_of_two();
         let mut detector = Self {

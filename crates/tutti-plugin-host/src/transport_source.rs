@@ -44,7 +44,7 @@ use tutti_timeline::TimeSignatureSlotReader;
 /// Engine types throughout, the same units [`TransportInfo`] carries:
 /// [`transport_info`] only adds the meter's signature and bar.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Snapshot {
+pub(crate) struct Snapshot {
     pub(crate) playing: bool,
     pub(crate) recording: bool,
     pub(crate) tempo: Bpm,
@@ -113,7 +113,7 @@ impl HostClock {
 /// `continousTimeSamples`) must never jump. A node keeps one and advances it by
 /// every block it renders.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SteadyTime(u64);
+pub(crate) struct SteadyTime(u64);
 
 impl SteadyTime {
     /// Count `frames` more rendered frames.
@@ -124,7 +124,7 @@ impl SteadyTime {
     /// The counter `at` frames past this one, as the ABIs carry it: an
     /// `i64`. 2^63 frames is three million years at 96 kHz, so the saturation
     /// is unreachable.
-    pub fn at(self, at: usize) -> i64 {
+    pub(crate) fn at(self, at: usize) -> i64 {
         i64::try_from(self.0.saturating_add(at as u64)).unwrap_or(i64::MAX)
     }
 }
@@ -186,7 +186,7 @@ impl SteadyTime {
 /// engine block carries, and none when walked on to a frame) is read by the
 /// playhead's rule instead (`continued_without_origin`).
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ProjectTime {
+pub(crate) struct ProjectTime {
     last: Option<ProjectRead>,
 }
 
@@ -394,7 +394,7 @@ impl Snapshot {
     ///   tempo (not a chord across it), a ramp's curve at that beat.
     ///
     /// A beat that is not finite keeps the transport's tempo.
-    pub fn settle(&mut self, view: &mut TempoView<'_>) -> Beat {
+    pub(crate) fn settle(&mut self, view: &mut TempoView<'_>) -> Beat {
         self.tempo_inc = 0.0;
         self.loop_seconds = self
             .looping
@@ -438,7 +438,7 @@ impl Snapshot {
     /// free-running counter ([`SteadyTime`]), `project` the node's project
     /// time (advanced to this read) and `block_ns` the `HostClock` read
     /// at the block's first frame (`None` offline).
-    pub fn at(
+    pub(crate) fn at(
         cx: &Cx<'_>,
         offset: Offset,
         continuous: i64,
@@ -492,7 +492,7 @@ pub(crate) fn from_cx(
 
 /// Map `s` onto the snapshot the plugin ABIs read, with `meter`'s signature
 /// and bar at the playhead.
-pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
+pub(crate) fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
     let position = meter.bar_at(s.beat);
 
     // CLAP's seconds position is project time (`ProjectTime`), or zero
@@ -563,7 +563,7 @@ impl std::fmt::Debug for TransportSource {
 
 impl TransportSource {
     /// A source reading `meter`, nothing rendered, on the host clock.
-    pub fn new(meter: TimeSignatureSlotReader) -> Self {
+    pub(crate) fn new(meter: TimeSignatureSlotReader) -> Self {
         Self {
             meter,
             default_meter: MeterMap::default(),
@@ -574,7 +574,7 @@ impl TransportSource {
     }
 
     /// Makes this an offline render's source: no host clock.
-    pub fn go_offline(&mut self) {
+    pub(crate) fn go_offline(&mut self) {
         self.host_clock = None;
     }
 
@@ -582,7 +582,7 @@ impl TransportSource {
     /// cell), the steady counter at the block's first frame, project time,
     /// and the host clock read once, `None` offline or for a plugin told no
     /// transport. Audio thread: no allocation, no free.
-    pub fn block(&mut self, features: Features) -> BlockTransport<'_> {
+    pub(crate) fn block(&mut self, features: Features) -> BlockTransport<'_> {
         let block_ns = self
             .host_clock
             .filter(|_| features.contains(Features::TRANSPORT))
@@ -598,7 +598,7 @@ impl TransportSource {
 
     /// Count `frames` rendered. Never reset, not even by `prepare`: see
     /// [`SteadyTime`].
-    pub fn advance(&mut self, frames: usize) {
+    pub(crate) fn advance(&mut self, frames: usize) {
         self.steady.advance(frames);
     }
 }
@@ -606,7 +606,7 @@ impl TransportSource {
 /// One block's lend of a `TransportSource`. Dropped before the block ends:
 /// it holds the meter's loan.
 #[derive(Debug)]
-pub struct BlockTransport<'a> {
+pub(crate) struct BlockTransport<'a> {
     meter: Loan<'a, Option<Arc<MeterMap>>>,
     default_meter: &'a MeterMap,
     steady: SteadyTime,
@@ -618,7 +618,7 @@ impl BlockTransport<'_> {
     /// The block's pieces, borrowed apart: the meter at the playhead's
     /// signature (the installed one, or 4/4), the steady counter at the
     /// block's first frame, project time, and the host clock there.
-    pub fn parts(&mut self) -> (&MeterMap, SteadyTime, &mut ProjectTime, Option<i64>) {
+    pub(crate) fn parts(&mut self) -> (&MeterMap, SteadyTime, &mut ProjectTime, Option<i64>) {
         let meter = self.meter.as_deref().unwrap_or(self.default_meter);
         (meter, self.steady, self.project, self.block_ns)
     }

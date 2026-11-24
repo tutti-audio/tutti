@@ -69,7 +69,7 @@ impl JrStamper {
     /// There is no group: JR Timestamps are utility messages, which M2-104-UM
     /// §2.1.2 defines as groupless — a stamp applies to the stream, not to one
     /// group within it.
-    pub fn new(sample_rate: SampleRate) -> Self {
+    pub(crate) fn new(sample_rate: SampleRate) -> Self {
         Self {
             clock: JrClock::new(sample_rate),
         }
@@ -154,7 +154,7 @@ pub(crate) struct JrClockEmitter {
 
 impl JrClockEmitter {
     /// An emitter at `sample_rate` Hz using [`JR_CLOCK_INTERVAL`].
-    pub fn new(sample_rate: SampleRate) -> Self {
+    pub(crate) fn new(sample_rate: SampleRate) -> Self {
         Self::with_interval(sample_rate, JR_CLOCK_INTERVAL)
     }
 
@@ -184,7 +184,7 @@ impl JrClockEmitter {
     /// Call once per block with the block's starting frame. The first call
     /// always yields a clock, and so does one whose `origin` is before the last
     /// (the stream restarted).
-    pub fn due(&mut self, origin: Frame) -> Option<Ump> {
+    pub(crate) fn due(&mut self, origin: Frame) -> Option<Ump> {
         let owed = match self.last_emit {
             None => true,
             Some(last) => origin.since(last).is_none_or(|gap| gap >= self.interval),

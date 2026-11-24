@@ -56,17 +56,17 @@ use tutti_vst3_host::{
     host::conformance,
 };
 #[path = "active.rs"]
-pub mod active;
+pub(crate) mod active;
 #[allow(unused_imports)]
-pub use active::{Activate, Active, ActiveExt, LoadError, ParamExt, StateExt};
+pub(crate) use active::{Activate, Active, ActiveExt, LoadError, ParamExt, StateExt};
 
 // ── HostCheck C ABI (tests/support/hostcheck_shim.cpp) ───────────────────────
 
 unsafe extern "C" {
-    pub fn hc_num_log_events() -> c_int;
-    pub fn hc_log_description(id: c_int) -> *const c_char;
-    pub fn hc_log_severity(id: c_int) -> *const c_char;
-    pub fn hc_configure(
+    pub(crate) fn hc_num_log_events() -> c_int;
+    pub(crate) fn hc_log_description(id: c_int) -> *const c_char;
+    pub(crate) fn hc_log_severity(id: c_int) -> *const c_char;
+    pub(crate) fn hc_configure(
         sample_rate: c_double,
         max_block: c_int,
         sample_size: c_int,
@@ -78,8 +78,8 @@ unsafe extern "C" {
         event_in: c_int,
         event_out: c_int,
     );
-    pub fn hc_add_parameter(param_id: c_uint);
-    pub fn hc_validate(
+    pub(crate) fn hc_add_parameter(param_id: c_uint);
+    pub(crate) fn hc_validate(
         data: *const c_void,
         min_in: c_int,
         min_out: c_int,
@@ -101,7 +101,7 @@ unsafe extern "C" {
 static HOSTCHECK: Mutex<()> = Mutex::new(());
 
 /// Acquire the `HostCheck` lock, ignoring poisoning.
-pub fn hostcheck_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn hostcheck_lock() -> std::sync::MutexGuard<'static, ()> {
     HOSTCHECK.lock()
 }
 
@@ -109,34 +109,34 @@ pub fn hostcheck_lock() -> std::sync::MutexGuard<'static, ()> {
 /// binary that still holds it: with the `HostCheck` lock alone it failed once
 /// in 5,400 runs, and the cause is not found. Not a module-lifecycle guard;
 /// `Module::open` and teardown serialise themselves.
-pub static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
 
 /// Acquire [`PLUGIN_LOCK`], ignoring poisoning (a failed test elsewhere must
 /// not cascade into spurious failures here).
-pub fn plugin_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn plugin_guard() -> std::sync::MutexGuard<'static, ()> {
     PLUGIN_LOCK.lock()
 }
 
-pub const AVAILABLE: &str = env!("VST3_HOSTCHECK_AVAILABLE");
+pub(crate) const AVAILABLE: &str = env!("VST3_HOSTCHECK_AVAILABLE");
 
 /// The bundles `build.rs` builds from the vendored SDK — `audio-probe` and
 /// `multiple-program-changes`. Present on any recursive checkout, because they
 /// are compiled by this very `cargo test` invocation.
-pub const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
+pub(crate) const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
 
 /// `ProcessModes_::kOffline`. Lets tests assert the plugin observed the mode we
 /// asked for, independent of the enum's Rust-side representation.
-pub const K_OFFLINE: c_int = 2;
+pub(crate) const K_OFFLINE: c_int = 2;
 
 /// `kParamObservedProcessMode` in `audio-probe/source/probeids.h`: the process
 /// mode the plugin saw, as `processMode * 0.5`.
-pub const K_PARAM_OBSERVED_PROCESS_MODE: u32 = 106;
+pub(crate) const K_PARAM_OBSERVED_PROCESS_MODE: u32 = 106;
 
 // ── Findings ─────────────────────────────────────────────────────────────────
 
 /// One spec violation: which check fired, how often, and its severity.
 #[derive(Debug, Clone)]
-pub struct Finding {
+pub(crate) struct Finding {
     pub severity: String,
     pub description: String,
     pub count: i64,
@@ -152,7 +152,7 @@ impl std::fmt::Display for Finding {
     }
 }
 
-pub fn findings_from(counts: &[i64]) -> Vec<Finding> {
+pub(crate) fn findings_from(counts: &[i64]) -> Vec<Finding> {
     counts
         .iter()
         .enumerate()
@@ -174,7 +174,7 @@ pub fn findings_from(counts: &[i64]) -> Vec<Finding> {
 /// Matched on description text rather than log-id index so an SDK update that
 /// reorders `LOG_EVENT_LIST` can't silently redirect the suppression onto an
 /// unrelated check — it would stop matching and the finding would resurface.
-pub const KNOWN_FALSE_POSITIVES: &[(&str, &str)] = &[(
+pub(crate) const KNOWN_FALSE_POSITIVES: &[(&str, &str)] = &[(
     "A parameter ID is more than 1 time in the IParameterChanges list.",
     // `ParameterChangesCheck::updateParameterIDs` does
     // `mTempUsedId.resize(mParameterIds->size())`, which value-initializes the
@@ -190,7 +190,7 @@ pub const KNOWN_FALSE_POSITIVES: &[(&str, &str)] = &[(
 /// several are advisory (e.g. a null `inputParameterChanges` pointer, which is
 /// legal when there is no automation) or informational feature probes.
 /// Known-bad checks (see [`KNOWN_FALSE_POSITIVES`]) are dropped too.
-pub fn errors(findings: &[Finding]) -> Vec<&Finding> {
+pub(crate) fn errors(findings: &[Finding]) -> Vec<&Finding> {
     findings
         .iter()
         .filter(|f| f.severity == "Error")
@@ -205,7 +205,7 @@ pub fn errors(findings: &[Finding]) -> Vec<&Finding> {
 // ── Plugin discovery ─────────────────────────────────────────────────────────
 
 /// Resolve a `.vst3` bundle to the loadable binary inside it.
-pub fn resolve_bundle(path: &Path) -> PathBuf {
+pub(crate) fn resolve_bundle(path: &Path) -> PathBuf {
     tutti_plugin_types::bundle::any_module_in_bundle(
         path,
         tutti_plugin_types::bundle::ModuleKind::Vst3,
@@ -214,7 +214,7 @@ pub fn resolve_bundle(path: &Path) -> PathBuf {
 }
 
 /// Every sample plugin in [`PROBE_DIR_BUILT`], as (name, resolved binary path).
-pub fn sample_plugins() -> Vec<(String, PathBuf)> {
+pub(crate) fn sample_plugins() -> Vec<(String, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(Path::new(PROBE_DIR_BUILT)) else {
         return Vec::new();
     };
@@ -240,14 +240,14 @@ pub fn sample_plugins() -> Vec<(String, PathBuf)> {
 
 /// Whether the plugin declares at least one event input bus, i.e. whether it
 /// is legal for a host to send it MIDI at all.
-pub fn accepts_midi(path: &Path) -> bool {
+pub(crate) fn accepts_midi(path: &Path) -> bool {
     Active::<f32>::load(path, 48_000.0, 512)
         .map(|i| i.loaded().plugin_info().has_midi_input)
         .unwrap_or(false)
 }
 
 /// The plugin's first declared ParamID, if it has any parameters.
-pub fn first_parameter_id(path: &Path) -> Option<u32> {
+pub(crate) fn first_parameter_id(path: &Path) -> Option<u32> {
     let inst = Active::<f32>::load(path, 48_000.0, 512).ok()?;
     inst.loaded()
         .parameter_ids(main_thread())
@@ -275,7 +275,7 @@ pub fn first_parameter_id(path: &Path) -> Option<u32> {
 /// handles: without it, the file does not compile in and nothing claims to
 /// have run.
 #[track_caller]
-pub fn require_harness() {
+pub(crate) fn require_harness() {
     assert_eq!(
         AVAILABLE, "1",
         "the HostChecker sources are missing, so this suite cannot validate \
@@ -298,7 +298,7 @@ pub fn require_harness() {
 /// Reaching this panic means a plugin `build.rs` produces went missing, which is
 /// a build failure and not an environment.
 #[track_caller]
-pub fn require_sample(bundle: &str) -> Vst3Loaded {
+pub(crate) fn require_sample(bundle: &str) -> Vst3Loaded {
     let path = sample_path(bundle).unwrap_or_else(|| {
         panic!(
             "{bundle} is not present. `build.rs` builds audio-probe, \
@@ -324,7 +324,7 @@ pub fn require_sample(bundle: &str) -> Vst3Loaded {
 
 /// One `process` call's worth of host input.
 #[derive(Default, Clone, Copy)]
-pub struct Block<'a> {
+pub(crate) struct Block<'a> {
     pub frames: usize,
     pub midi: &'a [UmpAt],
     pub params: Option<&'a ParameterChanges>,
@@ -332,17 +332,17 @@ pub struct Block<'a> {
 }
 
 impl<'a> Block<'a> {
-    pub fn of(frames: usize) -> Self {
+    pub(crate) fn of(frames: usize) -> Self {
         Self {
             frames,
             ..Default::default()
         }
     }
-    pub fn midi(mut self, midi: &'a [UmpAt]) -> Self {
+    pub(crate) fn midi(mut self, midi: &'a [UmpAt]) -> Self {
         self.midi = midi;
         self
     }
-    pub fn transport(mut self, t: &'a TransportInfo) -> Self {
+    pub(crate) fn transport(mut self, t: &'a TransportInfo) -> Self {
         self.transport = Some(t);
         self
     }
@@ -350,7 +350,7 @@ impl<'a> Block<'a> {
 
 /// Load `path`, activate it as `T` (f32 or f64), and run one `process` block,
 /// validating the `ProcessData` our host built.
-pub fn drive_block<T: Vst3Sample + Default + Copy>(
+pub(crate) fn drive_block<T: Vst3Sample + Default + Copy>(
     path: &Path,
     frames: usize,
     sample_rate: f64,
@@ -369,7 +369,7 @@ pub fn drive_block<T: Vst3Sample + Default + Copy>(
 }
 
 impl<'a> Block<'a> {
-    pub fn maybe_params(mut self, params: Option<&'a ParameterChanges>) -> Self {
+    pub(crate) fn maybe_params(mut self, params: Option<&'a ParameterChanges>) -> Self {
         self.params = params;
         self
     }
@@ -381,7 +381,7 @@ impl<'a> Block<'a> {
 /// *stateful* checks reachable: note-on/note-off pairing across blocks, and
 /// `ProcessContext::systemTime` monotonicity, which by definition needs more
 /// than one sample.
-pub fn drive_blocks<T: Vst3Sample + Default + Copy>(
+pub(crate) fn drive_blocks<T: Vst3Sample + Default + Copy>(
     path: &Path,
     sample_rate: f64,
     block_size: usize,
@@ -398,7 +398,7 @@ pub fn drive_blocks<T: Vst3Sample + Default + Copy>(
 /// tautological on the very field under test: it would compare the test's
 /// intent against the host's `ProcessData` and pass even if the host had
 /// silently never delivered that mode to `setupProcessing`.
-pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
+pub(crate) fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
     path: &Path,
     sample_rate: f64,
     block_size: usize,
@@ -520,7 +520,7 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
 ///
 /// VST3 ids are opaque: the format hands out numbers whose meaning only the
 /// plugin knows.
-pub fn param_address(tag: u32) -> ParamId {
+pub(crate) fn param_address(tag: u32) -> ParamId {
     ParamId::new(tag)
 }
 
@@ -528,17 +528,17 @@ pub fn param_address(tag: u32) -> ParamId {
 /// `tests/support/audio-probe` on every `conformance` build, panicking with the
 /// build command when it is absent.
 #[track_caller]
-pub fn require_probe() -> Vst3Loaded {
+pub(crate) fn require_probe() -> Vst3Loaded {
     require_sample("audio-probe.vst3")
 }
 
-pub use crate::probe::probe_path;
+pub(crate) use crate::probe::probe_path;
 
 /// Loads the C++ twin of the shared test plugin (`testing/tutti-shared-plugin-vst3-cpp`).
 /// Cargo builds it with the tests, through `tutti-fixtures`' `vst3-cpp` feature,
 /// so an absent module is a failed build, and the panic names the command.
 #[track_caller]
-pub fn require_twin() -> Vst3Loaded {
+pub(crate) fn require_twin() -> Vst3Loaded {
     let module = tutti_fixtures::vst3_cpp_module();
     Vst3Loaded::load(
         main_thread(),
@@ -556,7 +556,7 @@ pub fn require_twin() -> Vst3Loaded {
 }
 
 /// Whether the plugin advertises `kSample64` processing.
-pub fn supports_f64(path: &Path) -> bool {
+pub(crate) fn supports_f64(path: &Path) -> bool {
     Active::<f32>::load(path, 48_000.0, 512)
         .map(|i| i.loaded().plugin_info().supports_f64)
         .unwrap_or(false)
@@ -569,7 +569,7 @@ pub fn supports_f64(path: &Path) -> bool {
 // returned a constant, or ignored its arguments, cannot satisfy both.
 
 /// Locate a sample bundle by file name in [`PROBE_DIR_BUILT`].
-pub fn sample_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn sample_path(name: &str) -> Option<PathBuf> {
     (!PROBE_DIR_BUILT.is_empty())
         .then(|| resolve_bundle(&Path::new(PROBE_DIR_BUILT).join(name)))
         .filter(|p| p.is_file())

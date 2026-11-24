@@ -96,7 +96,7 @@ pub use alloc_count::{ThreadCounting, allocations};
     unused_imports,
     reason = "the Audio Unit fixtures exist on macOS; `au` is empty elsewhere"
 )]
-pub use au::*;
+pub(crate) use au::*;
 pub use block_on::{block_on, block_on_within};
 pub use blocks::{cycle_blocks, fixed_blocks};
 pub use digest::{Fnv, Noise, noise, uniform, uniform_noise};

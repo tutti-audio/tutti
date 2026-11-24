@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 /// `w` pushed into the valid range of the family `sel` selects.
-pub fn shape(mut w: [u32; 4], sel: u8) -> [u32; 4] {
+pub(crate) fn shape(mut w: [u32; 4], sel: u8) -> [u32; 4] {
     let g = (w[0] >> 24) & 0xf;
     let ch = (w[0] >> 16) & 0xf;
     match sel % 12 {
@@ -121,7 +121,7 @@ pub fn shape(mut w: [u32; 4], sel: u8) -> [u32; 4] {
 
 /// `default`, or `PROPTEST_CASES` when it is set and larger; panics on a value
 /// that is not a `u32`. `tutti-fixtures::cases` is this, but `tutti-ump` may not depend on it.
-pub fn cases(default: u32) -> u32 {
+pub(crate) fn cases(default: u32) -> u32 {
     match std::env::var("PROPTEST_CASES") {
         Ok(v) => v
             .trim()

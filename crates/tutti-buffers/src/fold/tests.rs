@@ -1249,7 +1249,7 @@ mod harmonics {
         pmmp1
     }
 
-    pub fn sn3d(n: usize, azimuth: f64, sin_elevation: f64) -> f64 {
+    pub(super) fn sn3d(n: usize, azimuth: f64, sin_elevation: f64) -> f64 {
         let (l, m) = degree_and_order(n);
         let am = m.unsigned_abs() as usize;
         let norm =
@@ -1264,7 +1264,7 @@ mod harmonics {
 
     /// Mean square over the sphere of an SN3D harmonic, by the midpoint rule on
     /// an equal-area grid (uniform in azimuth and in the sine of elevation).
-    pub fn mean_square(n: usize) -> f64 {
+    pub(super) fn mean_square(n: usize) -> f64 {
         const AZ: usize = 720;
         const EL: usize = 360;
         let mut sum = 0.0;
@@ -1279,7 +1279,7 @@ mod harmonics {
     }
 
     /// Peak magnitude of an SN3D harmonic over a grid that includes the poles.
-    pub fn peak(n: usize) -> f64 {
+    pub(super) fn peak(n: usize) -> f64 {
         const AZ: usize = 720;
         const EL: usize = 361;
         let mut peak = 0.0f64;

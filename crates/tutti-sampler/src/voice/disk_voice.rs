@@ -45,7 +45,7 @@ use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamReader}
 ///
 /// It is not a graph node: it knows neither where on the timeline it plays
 /// nor its file. A [`DiskVoice`] is, and forks.
-pub struct DiskSource<F: SamplerFloat> {
+pub(crate) struct DiskSource<F: SamplerFloat> {
     /// Boxed: a voice in a pool should not carry the reader's jump state
     /// inline (it is built on the control thread, where the box is).
     read: Box<LiveRead<F>>,
@@ -127,12 +127,12 @@ impl<F: SamplerFloat> DiskSource<F> {
     }
 
     /// Output width — this unit's `outputs()`.
-    pub fn channels(&self) -> ChannelLayout {
+    pub(crate) fn channels(&self) -> ChannelLayout {
         self.channels
     }
 
     /// Forgets the position and any fade: the next block starts afresh.
-    pub fn reset_interpolation(&mut self) {
+    pub(crate) fn reset_interpolation(&mut self) {
         self.read.reset();
     }
 }
@@ -168,7 +168,7 @@ impl<F: SamplerFloat> DiskSource<F> {
 /// the `inner` unit holds). The transport is not wiring: a voice reads it
 /// from each block's `Env`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiskVoiceConfig {
+pub(crate) struct DiskVoiceConfig {
     /// Span of timeline this voice occupies. Mirrors `MemorySource` — see
     /// [`VoiceWindow`].
     pub window: VoiceWindow,

@@ -7,7 +7,7 @@
 /// A `MIDINotification` of a CoreMIDI client, by its `messageID`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Notification {
+pub(crate) enum Notification {
     /// `kMIDIMsgSetupChanged`: some aspect of the MIDI setup changed.
     SetupChanged,
     /// `kMIDIMsgObjectAdded`: a device, entity or endpoint was added.
@@ -29,7 +29,7 @@ pub enum Notification {
 impl Notification {
     /// The notification with `MIDINotificationMessageID` `id`.
     #[must_use]
-    pub const fn from_message_id(id: i32) -> Self {
+    pub(crate) const fn from_message_id(id: i32) -> Self {
         match id {
             1 => Self::SetupChanged,
             2 => Self::ObjectAdded,
@@ -46,7 +46,7 @@ impl Notification {
     /// may have changed: a watch lists again on such a notification and reports
     /// the difference.
     #[must_use]
-    pub const fn changes_devices(self) -> bool {
+    pub(crate) const fn changes_devices(self) -> bool {
         matches!(
             self,
             Self::SetupChanged | Self::ObjectAdded | Self::ObjectRemoved | Self::PropertyChanged

@@ -275,7 +275,7 @@ fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
 }
 
 /// Checks `plan` (see the [module docs](self) for the rules).
-pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
+pub(crate) fn verify(plan: &Plan) -> Result<(), VerifyError> {
     verify_sums(plan)?;
     for (b, row) in plan.program.deps.to_table::<OpId>().iter_enumerated() {
         if row.iter().any(|&a| a >= b) {
@@ -740,7 +740,11 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
 /// Written against the two plans' units directly — not through
 /// `Editor::replace`'s check — so a delta built by hand (through
 /// `Editor::package`) gets the same scrutiny as one the editor built.
-pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(), VerifyError> {
+pub(crate) fn verify_fades(
+    prev: Option<&Plan>,
+    plan: &Plan,
+    delta: &Delta,
+) -> Result<(), VerifyError> {
     // A cut names a unit both plans hold at one generation and index: a
     // kept unit, not one the delta places or retires.
     for c in &delta.cuts {

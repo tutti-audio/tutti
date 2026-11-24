@@ -12,7 +12,7 @@ use tutti_nodes::{
 use tutti_units::{Hz, UnitAddr, UnitParam};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[crossover, multiband];
+pub(crate) const ROWS: &[fn()] = &[crossover, multiband];
 
 fn crossover() {
     let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();

@@ -132,6 +132,13 @@ impl PendingLane {
 ///
 /// The OS refuses the socket pair.
 #[cfg(any(test, feature = "testing"))]
+#[cfg_attr(
+    not(feature = "testing"),
+    expect(
+        unreachable_pub,
+        reason = "exported with feature `testing`; the crate's tests use it too"
+    )
+)]
 pub fn broker_pair() -> (ControlStream, ControlStream) {
     let (host, server) = UnixStream::pair().expect("a socket pair");
     let host = Stream::UdSocket(OwnedFd::from(host).into());
@@ -146,7 +153,7 @@ pub fn broker_pair() -> (ControlStream, ControlStream) {
 /// The duplicated descriptor is `poll`ed, so the wait ends the instant a byte
 /// (or a hang-up) arrives. Holding it keeps the socket open: drop it promptly
 /// when the stream's owner is done.
-pub struct Watch {
+pub(crate) struct Watch {
     fd: OwnedFd,
 }
 
@@ -156,7 +163,7 @@ impl Watch {
     /// # Errors
     ///
     /// The OS refuses to duplicate the descriptor.
-    pub fn of(stream: &ControlStream) -> std::io::Result<Self> {
+    pub(crate) fn of(stream: &ControlStream) -> std::io::Result<Self> {
         let Stream::UdSocket(socket) = stream;
         Ok(Self {
             fd: socket.as_fd().try_clone_to_owned()?,
@@ -166,7 +173,7 @@ impl Watch {
     /// Waits up to `timeout` for the stream to have something to read.
     /// `true` when it has, or when asking fails (a read is the authority on a
     /// closed or broken stream); `false` on a timeout.
-    pub fn wait_readable(&self, timeout: Duration) -> bool {
+    pub(crate) fn wait_readable(&self, timeout: Duration) -> bool {
         tutti_plugin_ipc_ffi::wait_readable(self.fd.as_fd(), Some(timeout)).unwrap_or(true)
     }
 }
@@ -178,13 +185,13 @@ impl Watch {
 /// stream; an unpark writes one byte, so the wait ends at once. It takes no lock and
 /// allocates nothing.
 #[derive(Clone)]
-pub struct ControlUnparker {
+pub(crate) struct ControlUnparker {
     tx: Arc<UnixStream>,
 }
 
 impl ControlUnparker {
     /// Ends the control thread's wait now, or its next one.
-    pub fn unpark(&self) {
+    pub(crate) fn unpark(&self) {
         // A full socket already holds a byte the thread has not read: its wait
         // ends either way.
         let _ = (&*self.tx).write(&[1]);
@@ -192,13 +199,13 @@ impl ControlUnparker {
 }
 
 /// The waiting side of a control thread's wait ([`control_unparker`]).
-pub struct ControlWait {
+pub(crate) struct ControlWait {
     rx: UnixStream,
 }
 
 /// What ended a [`ControlWait::wait`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Woken {
+pub(crate) struct Woken {
     /// The control stream has something to read (or hung up: the read says).
     pub stream: bool,
     /// The bell rang.
@@ -210,7 +217,7 @@ pub struct Woken {
 /// # Errors
 ///
 /// The OS refused the socket pair.
-pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
+pub(crate) fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
     let (tx, rx) = pair()?;
     tx.set_nonblocking(true)?;
     rx.set_nonblocking(true)?;
@@ -225,7 +232,7 @@ impl ControlWait {
     /// # Errors
     ///
     /// The OS refused the wait.
-    pub fn wait(
+    pub(crate) fn wait(
         &self,
         stream: &ControlStream,
         timeout: Option<Duration>,

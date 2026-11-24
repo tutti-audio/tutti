@@ -4,7 +4,7 @@ use std::fmt;
 
 /// A CoreMIDI `OSStatus`: the code a call returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct OsStatus(i32);
+pub(crate) struct OsStatus(i32);
 
 impl OsStatus {
     /// The status `MIDIClientCreate` returns while the MIDI server is exiting.
@@ -19,13 +19,13 @@ impl OsStatus {
 
     /// The status with code `raw`.
     #[must_use]
-    pub const fn new(raw: i32) -> Self {
+    pub(crate) const fn new(raw: i32) -> Self {
         Self(raw)
     }
 
     /// The code.
     #[must_use]
-    pub const fn get(self) -> i32 {
+    pub(crate) const fn get(self) -> i32 {
         self.0
     }
 
