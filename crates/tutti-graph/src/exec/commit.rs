@@ -198,7 +198,7 @@ pub(crate) struct Commit<F: Float = f32> {
 
 /// What the editor hands the executor with a commit: what it opened since its
 /// last one (a tap's producers and a meter's cells), and the cell of every
-/// weighted lane the plan lists (`Plan::sum_lanes`).
+/// weighted lane the plan lists (the plan's sum lanes).
 #[derive(Debug)]
 pub(crate) struct Opened<F: Float = f32> {
     /// The live base of each weighted lane of the plan, by edge. The editor

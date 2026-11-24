@@ -499,7 +499,7 @@ impl SetHeader<'_> {
             });
         }
         let media_type = self.media_type.unwrap_or(&MediaType::JSON);
-        if !entry.media_types().contains(media_type) {
+        if !entry.media_types().iter().any(|t| t.same_type(media_type)) {
             return Err(RequestRefused::MediaTypeNotDeclared {
                 resource: name(),
                 media_type: media_type.clone(),

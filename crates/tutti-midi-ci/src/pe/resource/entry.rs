@@ -529,7 +529,7 @@ impl ResourceEntry {
         let json = self
             .media_types
             .as_ref()
-            .is_none_or(|types| types.contains(&MediaType::JSON));
+            .is_none_or(|types| types.iter().any(MediaType::is_json));
         let name = || self.resource.as_str().to_owned();
         let typed = member("type");
         if !titled {

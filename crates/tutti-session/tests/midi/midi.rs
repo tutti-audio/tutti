@@ -1066,7 +1066,7 @@ fn a_port_that_loses_events_is_reported() {
 fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
-        CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
+        CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::BlockName;
@@ -1141,16 +1141,17 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
             let SysexStep::Complete(done) = assembler.push(ump) else {
                 continue;
             };
-            if let Decoded::Message(CiMessage::Discovery { header, .. }) =
+            if let Decoded::Message(CiMessage::Discovery { source: from, .. }) =
                 CiMessage::decode(assembler.message(done).payload())
                 && !replied
             {
                 replied = true;
-                source = Some(header.source);
+                source = Some(from);
                 // The later MUID answers first: the list is still by MUID.
                 let reply = CiMessage::DiscoveryReply {
-                    header: CiHeader::new(later),
-                    to: header.source,
+                    device_id: CiDeviceId::FunctionBlock,
+                    source: later,
+                    to: from,
                     data,
                 };
                 answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
@@ -1163,7 +1164,8 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                 .first()
                 .map(|p| (p.peer_id().muid, p.id()));
             let reply = CiMessage::DiscoveryReply {
-                header: CiHeader::new(peer),
+                device_id: CiDeviceId::FunctionBlock,
+                source: peer,
                 to: source.expect("the session sent a Discovery"),
                 data,
             };
@@ -1310,7 +1312,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                 continue;
             };
             match CiMessage::decode(assembler.message(done).payload()) {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROFILE_CONFIGURATION,
@@ -1318,8 +1320,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(peer),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: peer,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1583,7 +1586,7 @@ impl MpePeer {
                 _ => {}
             }
             match decoded {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         DeviceIdentity {
                             manufacturer: ManufacturerId::of(0x41),
@@ -1596,8 +1599,9 @@ impl MpePeer {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(self.muid),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: self.muid,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)
@@ -2014,7 +2018,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                 continue;
             };
             match CiMessage::decode(assembler.message(done).payload()) {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROCESS_INQUIRY,
@@ -2022,8 +2026,9 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(peer),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: peer,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)

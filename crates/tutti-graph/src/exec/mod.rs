@@ -645,11 +645,6 @@ impl<F: Float> Executor<F> {
         self.logs.take_readers()
     }
 
-    /// The pool blocks run on, if any.
-    pub fn pool(&self) -> Option<&Arc<dyn Pool>> {
-        self.pool.as_ref()
-    }
-
     /// Whether the running plan's blocks are spread across the pool: a pool
     /// of more than one participant is set and the plan has more than one
     /// task. Otherwise every block runs on the calling thread alone.

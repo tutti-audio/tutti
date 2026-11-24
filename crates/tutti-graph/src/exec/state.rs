@@ -220,7 +220,7 @@ pub(super) struct State<F: Float = f32> {
     pub(super) event_taps: Vec<Option<EventTapWriter>>,
     /// One set of cells per planned meter (`None`: nobody opened it).
     pub(super) meters: Vec<Option<MeterWriter>>,
-    /// One state per entry of `Plan::sum_lanes`: a weighted lane's weight
+    /// One state per entry of the plan's sum lanes: a weighted lane's weight
     /// across blocks, or a plain addend's none.
     pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,

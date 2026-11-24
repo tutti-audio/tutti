@@ -114,15 +114,15 @@ pub use pe::{
     PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError,
     PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions,
     PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeGet, PeHeader, PeHeaderError,
-    PeHeaderTooLong, PeHeld, PeInitiator, PeJson, PeJsonError, PeJsonSchema, PeKind, PeLink,
-    PeLocalOn, PeMessage, PeMessageKind, PeMidiMode, PeModeEntry, PeModeList, PeNotification,
-    PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList, PeReassembler,
-    PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId,
-    PeResource, PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState,
-    PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion,
-    Place, Priority, PropertyName, PropertyNameError, PublishError, RefusedAt, RequestRefused,
-    ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+    PeHeaderTooLong, PeHeld, PeInitiator, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
+    PeMessage, PeMessageKind, PeMidiMode, PeModeEntry, PeModeList, PeNotification, PeObject,
+    PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList, PeReassembler, PeReassemblyError,
+    PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId, PeResource,
+    PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState, PeStateEntry,
+    PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription, PeTerminator,
+    PeText, PeTextError, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Place, Priority,
+    PropertyName, PropertyNameError, PublishError, RefusedAt, RequestRefused, ResIdUse,
+    ResourceAction, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
     ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder,
     ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
     RestoreError, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY,
@@ -445,17 +445,24 @@ fn encode_preamble(
 #[non_exhaustive]
 pub enum CiMessage {
     /// Discovery, the opening handshake advertising identity and capabilities
-    /// (M2-101 §5.5). Always to the Broadcast MUID.
+    /// (M2-101 §5.5). Always to the Broadcast MUID. Its Message Format Version is
+    /// the one its `data` has ([`DiscoveryData::output_path_id`]).
     Discovery {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// The Device ID.
+        device_id: CiDeviceId,
+        /// MUID of the sender.
+        source: Muid,
         /// Advertised identity and capabilities, and the initiator's Output Path ID.
         data: DiscoveryData,
     },
     /// Reply to Discovery (M2-101 §5.6): the same device body, to the initiator.
+    /// Its Message Format Version is the one its `data` has
+    /// ([`ReplyData::version_2`]).
     DiscoveryReply {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// The Device ID.
+        device_id: CiDeviceId,
+        /// MUID of the sender.
+        source: Muid,
         /// The initiator, whose MUID the Discovery came from.
         to: Muid,
         /// Advertised identity and capabilities, the echoed Output Path ID and
@@ -743,9 +750,26 @@ impl CiMessage {
                 ci_version: *ci_version,
                 source: *source,
             },
-            CiMessage::Discovery { header, .. }
-            | CiMessage::DiscoveryReply { header, .. }
-            | CiMessage::InvalidateMuid { header, .. }
+            CiMessage::Discovery {
+                device_id,
+                source,
+                data,
+            } => CiHeader {
+                device_id: *device_id,
+                ci_version: data.ci_version(),
+                source: *source,
+            },
+            CiMessage::DiscoveryReply {
+                device_id,
+                source,
+                data,
+                ..
+            } => CiHeader {
+                device_id: *device_id,
+                ci_version: data.ci_version(),
+                source: *source,
+            },
+            CiMessage::InvalidateMuid { header, .. }
             | CiMessage::EndpointInquiry { header, .. }
             | CiMessage::EndpointReply { header, .. }
             | CiMessage::Ack { header, .. }
@@ -981,13 +1005,23 @@ impl CiMessage {
         };
         let message = match (sub_id2, unicast) {
             (SUB_ID2_DISCOVERY, None) => {
-                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery { header, data })
+                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery {
+                    device_id: header.device_id,
+                    source: header.source,
+                    data,
+                })
             }
             (SUB_ID2_INVALIDATE_MUID, None) => {
                 read::target_body(body).map(|target| CiMessage::InvalidateMuid { header, target })
             }
-            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => ReplyData::decode_body(body)
-                .map(|data| CiMessage::DiscoveryReply { header, to, data }),
+            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => {
+                ReplyData::decode_body(body).map(|data| CiMessage::DiscoveryReply {
+                    device_id: header.device_id,
+                    source: header.source,
+                    to,
+                    data,
+                })
+            }
             (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
                 None => None,
                 Some(raw) => match EndpointStatus::new(raw) {

@@ -364,9 +364,10 @@ pub use tube_stage::{TubeStageConfig, TubeStageKernel, TubeStageNode, TubeStageS
 pub use tutti_dsp::{ClipperDrive, ClipperDriveError, DiodeClipperControls};
 pub use tutti_dsp::{HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use tutti_dsp::{TubeDrive, TubeDriveError, TubeStageControls};
-// `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
+// `Waveshape` (with `ShapeKind`, `SecondOrderShape` and `Antialiasing`) and `OversamplingFactor`
+// are in `DistortionConfig`'s signatures; what is behind
 // them is `tutti-dsp`'s.
-pub use tutti_dsp::{Antialiasing, AntialiasingError, OversamplingFactor, ShapeKind};
+pub use tutti_dsp::{Antialiasing, OversamplingFactor, SecondOrderShape, ShapeKind, Waveshape};
 
 // A sample-and-hold and a quantizer.
 mod bit_crusher;

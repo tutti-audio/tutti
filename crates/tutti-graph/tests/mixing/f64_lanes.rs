@@ -11,7 +11,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, Executor, ForkByClone, Io, Node, NodeKey, OutputPort, ParamEvent,
     ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare,
-    Shape, Status, TransportPosition, declare_params,
+    Shape, Status, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
@@ -123,13 +123,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     }
     ed.commit().expect("commits");
     exec.apply_pending();
-    let mut out = vec![0.0f64; FRAMES];
-    exec.process(
-        FRAMES,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut out[..]],
-    );
+    let out = common::block(&mut exec, FRAMES, 1).remove(0);
     ed.collect();
     out
 }
@@ -249,13 +243,7 @@ fn a_range_change_lands_on_the_next_block() {
     ed.commit().expect("commits");
     exec.apply_pending();
     let mut block = |ed: &mut Editor<f64>| {
-        let mut out = vec![0.0f64; FRAMES];
-        exec.process(
-            FRAMES,
-            &TransportPosition::default(),
-            &[],
-            &mut [&mut out[..]],
-        );
+        let out = common::block(&mut exec, FRAMES, 1).remove(0);
         ed.collect();
         out
     };
@@ -309,13 +297,7 @@ impl<F: Float> Node<F> for Double {
 }
 
 fn block(exec: &mut Executor<f64>, ed: &mut Editor<f64>) -> Vec<f64> {
-    let mut out = vec![0.0f64; FRAMES];
-    exec.process(
-        FRAMES,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut out[..]],
-    );
+    let out = common::block(exec, FRAMES, 1).remove(0);
     ed.collect();
     out
 }

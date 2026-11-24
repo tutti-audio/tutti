@@ -21,7 +21,6 @@ pub(super) const FFI: &str = "crates/*-ffi/";
 const GRAPH: &str = "crates/tutti-graph/";
 
 pub(super) const CTOR: &[Rule] = &[Rule::CtorResult];
-const CHAIN: &[Rule] = &[Rule::ChainResult];
 const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 pub(super) const WIDTH: &[Rule] = &[Rule::ConfigWidth];
@@ -109,18 +108,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "Decorrelator::new",
         CTOR,
         "builds `VelvetNoise::new` per channel: the same density-against-rate validity",
-    ),
-    ty(
-        "crates/tutti-dsp/src/waveshape.rs",
-        "Waveshape::antialiasing",
-        CHAIN,
-        "an antialiasing order is valid for a curve: validity of the kind and the order together, which neither type can carry",
-    ),
-    ty(
-        "crates/tutti-nodes/src/distortion.rs",
-        "DistortionConfig::antialiasing",
-        CHAIN,
-        "the same validity as `Waveshape::antialiasing`: the config holds the kind the order must be valid for",
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",

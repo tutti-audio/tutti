@@ -30,7 +30,7 @@ use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Statu
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
-    SvfFilterConfig, SvfFilterNode, SvfType,
+    SvfFilterConfig, SvfFilterNode, SvfType, Waveshape,
 };
 use tutti_session::{
     AudioSide, DetachedSession, InputPort, Key, MainOutput, OutputPort, Replacement, Session,
@@ -52,7 +52,8 @@ fn low_pass(cutoff: f64) -> SvfFilterNode<f32> {
 }
 fn shaper(drive: f64) -> DistortionNode<f32> {
     DistortionNode::from(
-        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(drive)),
+        DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
+            .drive(Drive::new(drive)),
     )
 }
 fn limiter() -> LimiterNode<f32> {

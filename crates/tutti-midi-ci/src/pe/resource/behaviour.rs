@@ -869,6 +869,47 @@ fn only_an_untyped_resource_holds_binary_data() {
     assert_eq!(json_bytes, PeData::LocalOn(PeLocalOn(true)));
 }
 
+// M2-103 §8.3: a media type is declared by type and subtype; the parameters and the
+// case of a request's media type do not make it another type.
+/// Spec: m2-103/8.1#2
+#[test]
+fn a_media_type_is_matched_by_type_and_subtype() {
+    let entry = custom_entry("X-Blob", r#"{"title":"Blob"}"#)
+        .can_set(CanSet::Full)
+        .media_types(vec![MediaType::OCTET_STREAM])
+        .build()
+        .unwrap();
+    let set_of = |text: &str| {
+        let binary = PeBinary::new(MediaType::new(text).unwrap(), vec![1]).unwrap();
+        let data = PeData::Opaque(PeOpaque::binary(custom_name("X-Blob"), binary));
+        ResourceSet::full(super::exchange::target(custom("X-Blob")), data).unwrap()
+    };
+    assert_eq!(
+        set_of("Application/Octet-Stream; x=1").check(&entry),
+        Ok(())
+    );
+    assert!(matches!(
+        set_of("application/x-other; application/octet-stream").check(&entry),
+        Err(RequestRefused::MediaTypeNotDeclared { .. })
+    ));
+    // What is written is the type as it was made.
+    let (written, _) = blob_data("X-Blob", &[1]).to_wire();
+    assert_eq!(written, Some(octets()));
+    assert_eq!(PeData::LocalOn(PeLocalOn(true)).to_wire().0, None);
+}
+
+// M2-103 §6.1.6: Property Data is JSON unless `mediaType` declares another type; a
+// parameter of `application/json` does not make the data another type.
+/// Spec: m2-103/6.1.6#1
+#[test]
+fn json_with_parameters_decodes_as_a_typed_value() {
+    let media = MediaType::new("application/json; charset=utf-8").unwrap();
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&media), b"true"),
+        Ok(PeData::LocalOn(PeLocalOn(true)))
+    );
+}
+
 // M2-103 §10: a Partial Set is for JSON; binary data has no pointers.
 #[test]
 fn a_partial_change_does_not_apply_to_binary_data() {
