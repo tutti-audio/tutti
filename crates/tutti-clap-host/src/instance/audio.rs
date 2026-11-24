@@ -410,9 +410,9 @@ impl ClapProcessor {
             let carried = &mut self.carried;
             let epoch = drain.epoch();
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(|id, value| {
+                drain.drain_in_epoch(|id, value, observed| {
                     if ParamBounds::find(&table.ranges, id).is_some_and(|b| b.requires_process) {
-                        refused += u64::from(!carry(carried, id, value, epoch));
+                        refused += u64::from(!carry(carried, id, value, observed));
                     } else {
                         each(id, value);
                     }
@@ -639,6 +639,13 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 /// that adds or removes one reactivates the plugin and builds a new Processor).
 /// The scan is over the held parameters, which are those that require
 /// `process`: few.
+///
+/// `epoch` is the one the value was last checked against. An edit from the
+/// Controller's slots takes the epoch its drain observed, so a write made right
+/// after a load keeps the load's epoch and is delivered. A point from a block's
+/// changes was checked by the node against the host's slots and takes the
+/// Controller's epoch read here, later: a load that lands between the two gives
+/// a stale point a current stamp.
 fn carry(
     carried: &mut CappedVec<(ParamId, Normalized, u32)>,
     id: ParamId,
