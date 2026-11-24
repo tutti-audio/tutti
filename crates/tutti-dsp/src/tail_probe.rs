@@ -1,5 +1,5 @@
-//! Test support for the reverbs' `tail_of`: the stimuli a ring-out is measured from and the
-//! check that a reported tail covers it.
+//! Test support for a bank's `tail_of` (the reverbs' and the delay's): the stimuli a ring-out
+//! is measured from and the check that a reported tail covers it.
 //!
 //! The reference is the render's **own peak**: [`TAIL_FLOOR`] is the reverberation time's -60 dB,
 //! "floor below what it carried" ([`System::tail`](crate::System::tail)), and what a reverb

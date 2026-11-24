@@ -5,7 +5,7 @@ use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 use crate::reverb::network::NetworkStage;
-use crate::reverb::tail_probe;
+use crate::tail_probe;
 use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
