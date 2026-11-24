@@ -670,9 +670,7 @@ mod tests {
         }
     }
 
-    /// **A control reply's tag is its row's place among the rows that have a reply,
-    /// and the failure is the last.** The pairing is by name: the `n`th request that
-    /// is answered is answered by the `n`th reply.
+    /// **Each control reply's tag is pinned, and the failure is the last.**
     #[test]
     fn every_control_reply_is_pinned_to_its_row() {
         let replies = control_replies();
@@ -681,14 +679,26 @@ mod tests {
             let bytes = postcard::to_allocvec(msg).expect("serialize");
             assert_eq!(usize::from(bytes[0]), tag, "{name}");
         }
-        let answered: Vec<_> = control_requests()
-            .into_iter()
-            .filter(|(_, request)| request.expects_reply())
-            .map(|(name, _)| name)
-            .collect();
-        let names: Vec<_> = replies.iter().map(|(name, _)| *name).collect();
-        assert_eq!(names[..names.len() - 1], answered[..]);
-        assert_eq!(names.last(), Some(&"Error"));
+        assert_eq!(replies.last().map(|(name, _)| *name), Some("Error"));
+    }
+
+    /// **A frame that lost its last byte is refused**: no field is made up for a
+    /// peer that did not send it.
+    #[test]
+    fn a_truncated_control_frame_is_refused() {
+        for (name, request) in control_requests() {
+            let bytes = postcard::to_allocvec(&request).expect("serialize");
+            let cut = &bytes[..bytes.len() - 1];
+            assert!(
+                postcard::from_bytes::<ControlRequest>(cut).is_err(),
+                "{name}"
+            );
+        }
+        for (name, reply) in control_replies() {
+            let bytes = postcard::to_allocvec(&reply).expect("serialize");
+            let cut = &bytes[..bytes.len() - 1];
+            assert!(postcard::from_bytes::<ControlReply>(cut).is_err(), "{name}");
+        }
     }
 
     /// **A request is its tag, then its fields as postcard writes them, in the order

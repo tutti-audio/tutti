@@ -197,9 +197,11 @@ fn a_latency_change_moves_the_other_paths_compensation() {
     );
     let plan = exec.plan().expect("applied");
     assert!(
-        plan.delays()
+        plan.audio_delays()
             .iter()
-            .any(|d| d.len == Samples::new(TRUE_LATENCY)),
+            .map(|d| d.len)
+            .chain(plan.event_delays().iter().map(|d| d.len))
+            .any(|len| len == Samples::new(TRUE_LATENCY)),
         "a PDC delay of the new latency"
     );
 }

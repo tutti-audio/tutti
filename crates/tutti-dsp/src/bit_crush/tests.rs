@@ -344,12 +344,12 @@ fn a_shorter_hold_and_a_reset_capture_at_once() {
 /// exactly: `x q` is an integer and `round(x q) / q` returns `x`.
 #[test]
 fn an_f64_crusher_at_thirty_two_bits_passes_a_twenty_nine_bit_signal_exactly() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(300);
     assert!(
         x.iter().any(|&v| v != f64::from(v as f32)),
         "the signal needs more than f32 holds"
     );
     let y = run(&mut crusher(32.0, 1.0), std::slice::from_ref(&x)).remove(0);
-    assert_close_f64(&y, &x, 0.0);
+    assert_close(&y, &x, 0.0);
 }

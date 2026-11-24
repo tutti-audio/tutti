@@ -30,9 +30,7 @@ fn render(spring: &mut SpringReverb<f64>, x: &[&[f64]]) -> Vec<Vec<f64>> {
 
 /// A unit impulse followed by silence, `frames` long.
 fn impulse(frames: usize) -> Vec<f64> {
-    let mut x = vec![0.0; frames];
-    x[0] = 1.0;
-    x
+    tutti_fixtures::signal::impulse(Samples::new(frames))
 }
 
 fn layout(stages: u16, length: f64) -> SpringLayout {

@@ -16,8 +16,8 @@ use tutti_buffers::{BufferError, Float, FoldError};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
-    Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses, CommitError,
-    CompileError, DelayKey, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, GraphSpec, InputPort,
+    AudioDelayKey, Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses,
+    CommitError, CompileError, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, GraphSpec, InputPort,
     Lowering, NodeBus, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition,
     Unforkable, ValidGraph, compile,
 };
@@ -836,8 +836,9 @@ fn latent(n: usize, latency: usize, out: Bus) -> Kind {
     )
 }
 
-fn delays(plan: &Plan) -> BTreeMap<DelayKey, Samples> {
-    plan.delays().iter().map(|d| (d.key, d.len)).collect()
+fn delays(plan: &Plan) -> BTreeMap<AudioDelayKey, Samples> {
+    assert!(plan.event_delays().is_empty(), "no event is delayed");
+    plan.audio_delays().iter().map(|d| (d.key, d.len)).collect()
 }
 
 /// A bus edge's sources align like any edges, lane by lane: a stereo source of
@@ -866,7 +867,7 @@ fn a_bus_edges_lanes_align_like_any_edges() {
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
     rig.output_all(2, 1);
     let got = delays(&rig.plan());
-    let ring = |from: PortSource| DelayKey::Audio { at: at(2, 0), from };
+    let ring = |from: PortSource| AudioDelayKey::Edge { at: at(2, 0), from };
     let expected = BTreeMap::from([
         (ring(out_port(1, 0)), Samples::new(5)),
         (ring(out_port(1, 1)), Samples::new(5)),

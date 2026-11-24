@@ -696,7 +696,7 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, mean, prepared, render_chunked, render_f64, sine, wide_sine};
+    use crate::test_support::{RATE, mean, prepared, render_chunked, render_f64, sine};
     use core::f64::consts::PI;
     use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::contract::{Direct, drive};
@@ -865,7 +865,7 @@ mod tests {
                     MultibandBands::new(bands).unwrap(),
                 ));
                 unity(&Ctl::new(&n));
-                let x = wide_sine(hz, FS, SETTLE + WINDOW);
+                let x: Vec<f64> = sine(hz, FS, SETTLE + WINDOW);
                 let out = render_f64(n, RATE, &[&x], x.len());
                 let a = amplitude_at(&out[0][SETTLE..], Hz::new(hz), SampleRate::of(FS));
                 assert!((a - 1.0).abs() < bound, "{bands} bands at {hz} Hz: {a}");
@@ -876,7 +876,7 @@ mod tests {
     /// The signal of the static-curve tests: a loud DC level (the band-0
     /// content with an exact detector reading) and a quiet 3 kHz tone (band 2).
     fn dc_and_tone(dc: f32, tone: f32) -> Vec<f32> {
-        sine(3_000.0, FS, SETTLE + WINDOW)
+        sine::<f32>(3_000.0, FS, SETTLE + WINDOW)
             .into_iter()
             .map(|s| dc + tone * s)
             .collect()
@@ -952,7 +952,7 @@ mod tests {
         c.band(0).set_makeup(-3.0);
         c.band(1).set_makeup(6.0);
         let mut n = prepared(n);
-        let tone: Vec<f32> = sine(10_000.0, FS, SETTLE + WINDOW)
+        let tone: Vec<f32> = sine::<f32>(10_000.0, FS, SETTLE + WINDOW)
             .into_iter()
             .map(|s| 0.5 + 0.1 * s)
             .collect();
@@ -1504,7 +1504,7 @@ mod tests {
             c.band(b).set_release(0.001);
         }
         let mut n = prepared(n);
-        let tone: Vec<f32> = sine(10_000.0, FS, 8_192)
+        let tone: Vec<f32> = sine::<f32>(10_000.0, FS, 8_192)
             .into_iter()
             .map(|s| 0.5 * s)
             .collect();

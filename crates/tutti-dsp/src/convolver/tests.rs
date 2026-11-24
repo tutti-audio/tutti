@@ -508,7 +508,7 @@ fn reset_clears_the_convolution_tail() {
 
 /// A noise-like signal in `-1..=1`, not periodic in any block length used here.
 fn noise(len: usize) -> Vec<f32> {
-    tutti_fixtures::noise(0x2545_f491, len)
+    tutti_fixtures::noise::<f32>(0x2545_f491, len)
 }
 
 /// An IR of `len` taps that does not decay, so a late partition carries
@@ -1137,9 +1137,9 @@ fn the_f32_fft_error_of_a_ten_second_ir_is_under_sqrt_partitions_times_u_of_the_
     let p = L.div_ceil(B);
     assert_eq!(p, 938);
     let u = f64::from(f32::EPSILON) / 2.0;
-    let ir = tutti_fixtures::noise(41, L);
+    let ir = tutti_fixtures::noise::<f32>(41, L);
     let frames = L + 2 * B + 4096;
-    let x = tutti_fixtures::noise(42, frames);
+    let x = tutti_fixtures::noise::<f32>(42, frames);
     let mut c = Convolver::<f32>::new(Mono::new(&ir), Samples::new(B));
     let lat = c.latency().get();
     assert_eq!(lat, B);

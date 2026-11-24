@@ -141,7 +141,7 @@ pub struct ModInput<'a> {
     /// The declarations, as `tutti_modulation` takes them.
     pub declarations: Declarations<'a>,
     /// The host's keys, resolved.
-    pub keys: &'a dyn crate::ModKeys,
+    pub keys: &'a dyn tutti_nodes::ModHost,
 }
 
 impl Debug for ModInput<'_> {

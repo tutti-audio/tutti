@@ -2,7 +2,8 @@ use std::f64::consts::PI;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Drive, Hz, Resonance, SampleRate};
+use tutti_fixtures::signal::impulse;
+use tutti_units::{Drive, Hz, Resonance, SampleRate, Samples};
 
 use super::*;
 use crate::Complex64;
@@ -59,25 +60,14 @@ fn run<F: Float + SimdLanes>(
     out
 }
 
-/// A unit impulse of `amplitude` and then `frames - 1` zeros.
-fn impulse(amplitude: f64, frames: usize) -> Vec<f64> {
-    let mut x = vec![0.0; frames];
-    x[0] = amplitude;
-    x
-}
-
 /// The ladder held at `ty`, `fc`, `res` (unity drive): the impulse response of a mono `f64`
 /// bank in `f64` audio.
 fn held_response(ty: LadderType, fc: f64, res: f64, amplitude: f64, frames: usize) -> Vec<f64> {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
     let mut ramp = Ramp::new(design(ty, fc, res, 1.0));
-    run(
-        &mut bank,
-        &mut ramp,
-        &[impulse(amplitude, frames)],
-        &[frames],
-    )
-    .remove(0)
+    let unit: Vec<f64> = impulse(Samples::new(frames));
+    let x: Vec<f64> = unit.iter().map(|v| amplitude * v).collect();
+    run(&mut bank, &mut ramp, &[x], &[frames]).remove(0)
 }
 
 /// The DTFT of `y` at `hz`.
@@ -503,7 +493,13 @@ fn a_ramps_midpoint_is_stable() {
         let mid = a.lerp(&b, 8, 16);
         let mut ramp = Ramp::new(mid);
         let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-        let y = run(&mut bank, &mut ramp, &[impulse(1.0, FRAMES)], &[FRAMES]).remove(0);
+        let y = run(
+            &mut bank,
+            &mut ramp,
+            &[impulse(Samples::new(FRAMES))],
+            &[FRAMES],
+        )
+        .remove(0);
         let peak = |r: core::ops::Range<usize>| y[r].iter().fold(0.0f64, |m, v| m.max(v.abs()));
         let (first, last) = (peak(0..1_000), peak(FRAMES - 1_000..FRAMES));
         assert!(

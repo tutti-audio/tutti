@@ -103,9 +103,12 @@ fn mean<F: Float>(x: &[F]) -> f64 {
 }
 
 fn tone(freq: f64, amplitude: f32, len: usize) -> Vec<f32> {
-    (0..len)
-        .map(|n| amplitude * libm::sin(2.0 * PI * freq * n as f64 / RATE.get()) as f32)
-        .collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(freq),
+        tutti_units::Amplitude::new(f64::from(amplitude)),
+        RATE,
+        tutti_units::Samples::new(len),
+    )
 }
 
 /// The reduction in dB of the static curve at a hard knee, from its definition.
@@ -128,11 +131,11 @@ fn curve(level: f64, threshold: f64, ratio: f64, knee: f64) -> f64 {
 }
 
 fn db(amplitude: f64) -> f64 {
-    20.0 * libm::log10(amplitude)
+    tutti_units::Amplitude::new(amplitude).to_db().get()
 }
 
 fn linear(db: f64) -> f64 {
-    libm::pow(10.0, db / 20.0)
+    tutti_units::Db::new(db).to_amplitude().get()
 }
 
 /// The warped frequency ratio `tan(pi f / fs) / tan(pi fc / fs)` of the bilinear transform.
@@ -851,7 +854,7 @@ fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
 #[test]
 fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     use crate::testing::butterworth_all_pass;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let n = 4_800;
     let x = wide_signal(n);
     let mut k = MultibandBank::<f64>::new(
@@ -874,7 +877,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
         .unwrap(),
     )
     .unwrap();
-    assert_close_f64(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
+    assert_close(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
 }
 
 /// A fresh settings value is the do-nothing multiband: the default compressor in every band,

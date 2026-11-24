@@ -256,13 +256,12 @@ pub(crate) use commit::{
 pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
 use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
-    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
-    output_op, sum_op,
+    capture_op, delay_op, event_delay_op, event_merge_op, main_input, output_op, sum_op,
 };
 pub(crate) use stage::{StageIn, Stager};
 
 use state::State;
-pub(crate) use state::{Inject, Ring, Unit};
+pub(crate) use state::{Inject, Unit};
 
 /// Events per block an event output port holds when its node declares no
 /// [`Shape::event_capacity`](crate::Shape::event_capacity), unless
@@ -972,17 +971,16 @@ mod tests {
             channels.readings.pool.clone(),
             channels.readings.rendered.clone(),
         );
-        let declick = tutti_curve::declick_frames(prepare.sample_rate());
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),
             delta,
             units,
-            |_, ports, max| ParamState::new(ports, max, declick, Vec::new(), Vec::new()),
+            |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
                 let cell = ModeCell::new(NodeMode::Active, Mix::WET);
                 let shape = &plan.unit(key).expect("placed").shape;
-                ModeState::new(cell, shape, 64, declick)
+                ModeState::new(cell, shape, 64)
             },
             |_| crate::Wake::default(),
             Opened::default(),

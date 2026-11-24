@@ -1,5 +1,6 @@
-//! Coarsening (compiler step 7): the ops grouped into **tasks**, the units
-//! a parallel executor dispatches.
+//! Grouping (compiler step 6): the ops grouped into **tasks**, the units
+//! a parallel executor dispatches. It prices the ops and reads their
+//! dependencies; no slot exists yet.
 //!
 //! Three passes, each keeping the task graph acyclic and every op
 //! dependency:
@@ -31,44 +32,40 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tutti_units::Samples;
 
-use crate::compile::ids::{Id, OpId, PlanUnitId, Table, TableSlice, TaskId};
-use crate::compile::lower::Lowered;
+use crate::compile::ids::{Id, OpId, Table, TableSlice, TaskId};
 use crate::compile::plan::{Csr, Span};
-use crate::node::Prepare;
-use crate::node::cost::{GRAIN, TASK_DISPATCH, Work};
-use crate::node::shape::Shape;
+use crate::compile::program::{ByValue, Program};
+use crate::compile::shapes::Units;
+use crate::node::cost::{GRAIN, TASK_DISPATCH, Work, op_work};
 
 /// The task tables.
 pub(super) struct Tasks {
-    pub(super) tasks: Table<TaskId, Span>,
+    pub(super) tasks: Table<TaskId, Span<OpId>>,
     pub(super) task_ops: Vec<OpId>,
-    pub(super) succ: Csr,
+    pub(super) succ: Csr<TaskId>,
     pub(super) activation: Table<TaskId, u32>,
-}
-
-/// Prices every lowered op and groups the op DAG into tasks.
-///
-/// Takes the [`Lowered`] ops, the emitted predecessors, the op successors of
-/// the colouring, the units' shapes and the `Prepare` the plan is for;
-/// returns the [`Tasks`]. Every op is in exactly one task and every op
-/// dependency is a task dependency.
-pub(super) fn price_and_group(
-    lowered: &Lowered,
-    preds: &TableSlice<OpId, BTreeSet<OpId>>,
-    succ: &TableSlice<OpId, Vec<OpId>>,
-    shapes: &TableSlice<PlanUnitId, Shape>,
-    prepare: &Prepare,
-) -> Tasks {
-    let work: Table<OpId, Work> = lowered
-        .ops
-        .iter()
-        .map(|op| crate::node::cost::op_work(op, shapes, &lowered.sum_lanes))
-        .collect();
-    coarsen(preds, succ, &work, prepare.max_block().samples())
 }
 
 /// The ops of each group, in ascending op order, and each op's group.
 type Grouping = (Table<TaskId, Vec<OpId>>, Table<OpId, TaskId>);
+
+/// Groups the ops of `program` into tasks, each op priced by its work over
+/// `units`' shapes and packed at the program's `max_block`.
+pub(super) fn group(program: &Program<ByValue>, units: &Units, max_block: Samples) -> Tasks {
+    let work: Table<OpId, Work> = program
+        .ops
+        .iter()
+        .map(|op| op_work(op, &units.shapes, &program.sum_lanes))
+        .collect();
+    let preds: Table<OpId, BTreeSet<OpId>> = program
+        .deps
+        .to_table::<OpId>()
+        .into_iter()
+        .map(|row| row.into_iter().collect())
+        .collect();
+    let succ = program.deps.inverse().to_table::<OpId>();
+    coarsen(&preds, &succ, &work, max_block)
+}
 
 /// Group the op DAG (`preds` / `succ` by op, ops numbered topologically)
 /// into tasks, pricing op `i` at `work[i]` and packing at `max_block`.
@@ -375,14 +372,14 @@ fn finish(
         }
     }
     let mut task_ops = Vec::with_capacity(of.len());
-    let tasks: Table<TaskId, Span> = groups
+    let tasks: Table<TaskId, Span<OpId>> = groups
         .iter()
         .map(|ops| Span::extend(&mut task_ops, ops.iter().copied()))
         .collect();
     Tasks {
         tasks,
         task_ops,
-        succ: Csr::from_ids(&rows),
+        succ: Csr::from_table(&rows),
         activation,
     }
 }
@@ -390,7 +387,6 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::raw;
     use proptest::prelude::*;
 
     const MAX: Samples = Samples::new(256);
@@ -414,10 +410,11 @@ mod tests {
     fn dag(n: usize, edges: &[(u32, u32)]) -> (Preds, Succ) {
         let mut preds: Preds = Table::filled(n, BTreeSet::new());
         let mut succ: Succ = Table::filled(n, Vec::new());
+        let ops: Vec<OpId> = preds.ids().collect();
         for &(a, b) in edges {
             assert!(a < b);
-            preds[OpId::new(b)].insert(OpId::new(a));
-            succ[OpId::new(a)].push(OpId::new(b));
+            preds[ops[b as usize]].insert(ops[a as usize]);
+            succ[ops[a as usize]].push(ops[b as usize]);
         }
         (preds, succ)
     }
@@ -449,7 +446,11 @@ mod tests {
     fn task_of(t: &Tasks, op: u32) -> TaskId {
         t.tasks
             .iter_enumerated()
-            .find(|(_, s)| t.task_ops[s.range()].contains(&OpId::new(op)))
+            .find(|(_, s)| {
+                t.task_ops[s.range()]
+                    .iter()
+                    .any(|o| o.index() == op as usize)
+            })
             .map(|(task, _)| task)
             .expect("every op has a task")
     }
@@ -462,7 +463,7 @@ mod tests {
                 return true;
             }
             if seen.insert(x) {
-                stack.extend(t.succ.ids::<TaskId, TaskId>(x));
+                stack.extend(t.succ.of(x).iter().copied());
             }
         }
         false
@@ -580,7 +581,7 @@ mod tests {
                 .collect();
             let t = run(&preds, &succ, &work);
             prop_assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
-            let mut seen: Vec<u32> = raw(&t.task_ops).to_vec();
+            let mut seen: Vec<u32> = t.task_ops.iter().map(|o| o.get()).collect();
             seen.sort_unstable();
             prop_assert_eq!(seen, (0..n as u32).collect::<Vec<_>>());
             for s in &t.tasks {

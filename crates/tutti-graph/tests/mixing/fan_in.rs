@@ -252,10 +252,7 @@ fn the_first_addend_is_aliased_unless_it_fans_out() {
         else {
             panic!("a sum op");
         };
-        (
-            plan.audio_list()[srcs.start as usize..(srcs.start + srcs.len) as usize].to_vec(),
-            dst,
-        )
+        (plan.audio_list()[srcs.range()].to_vec(), dst)
     };
     let (t, kinds) = fan_in(&[0.25, 0.5, 0.125], false);
     let (srcs, dst) = sum_slots(&plan_of(&t, &kinds));

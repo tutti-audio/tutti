@@ -8,6 +8,7 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 use super::*;
 use crate::dynamics::curves::upward_gain_lift;
 use tutti_buffers::InputOutput;
+use tutti_fixtures::signal::rms;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -20,11 +21,7 @@ const SETTLE: usize = 12_000;
 const MEASURE: usize = 2_400;
 
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
-}
-
-fn rms(x: &[f32]) -> f64 {
-    (x.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / x.len() as f64).sqrt()
+    Db::new(db).to_amplitude().get()
 }
 
 /// The compressor's static curve from its definition (Giannoulis, Massberg and Reiss, 2012,
@@ -465,7 +462,7 @@ fn the_render_is_the_same_bits_in_any_blocks() {
 /// passes the input (`m0 = 1`, `m1 = m2 = 0`) and nothing in the path narrows it.
 #[test]
 fn an_f64_band_with_zero_range_is_the_identity() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(4_800);
     for mode in [DynamicMode::Downward, DynamicMode::Upward] {
         let mut b = DynamicEqBank::<f64>::new(ChannelLayout::MONO, RATE).mode(mode);
@@ -481,6 +478,6 @@ fn an_f64_band_with_zero_range_is_the_identity() {
             .unwrap(),
         )
         .unwrap();
-        assert_close_f64(&out, &x, 0.0);
+        assert_close(&out, &x, 0.0);
     }
 }

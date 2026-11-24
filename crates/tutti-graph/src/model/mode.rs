@@ -110,10 +110,9 @@ use tutti_rt::{AtomicCell, CappedVec, ParamCell, atomic_word};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
-use crate::compile::ids::{AudioSlotId, Id};
 use crate::exec::arena::Arena;
 use crate::exec::held::Held;
-use crate::exec::lane::{Declick, ramp_in};
+use crate::exec::lane::{Progress, declick_gains, ramp_in};
 use crate::exec::rings::AudioRing;
 use crate::model::pass::Pass;
 use crate::model::spec::EventOutputPort;
@@ -372,7 +371,7 @@ impl<F: Float> Weights<F> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Ramp<F: Float> {
     from: Weights<F>,
-    declick: Declick,
+    progress: Progress,
 }
 
 /// What a block makes of one unit, in order: `warm` frames of the aligned
@@ -392,9 +391,11 @@ pub(crate) struct Segments<F: Float> {
 pub(crate) struct RampRun<F: Float> {
     from: Weights<F>,
     heading: NodeMode,
-    /// The fade as the block starts it: its `done` is the fade's frame the
-    /// block's first ramp frame is.
-    declick: Declick,
+    /// The fade's progress as the block starts it: its `done` is the fade's
+    /// frame the block's first ramp frame is.
+    progress: Progress,
+    /// The fade's length ([`Prepare::declick`](crate::Prepare)).
+    declick: Samples,
     /// The ramp frames this block runs.
     len: usize,
 }
@@ -510,7 +511,7 @@ impl<F: Float> Segments<F> {
                 let to = r.heading.weights(self.mix.at(i, lane));
                 let w = r.from.toward(
                     to,
-                    r.declick.gains::<F>(r.declick.done() + Samples::new(j)).1,
+                    declick_gains::<F>(r.progress.done(r.declick) + Samples::new(j), r.declick).1,
                 );
                 let node_on = r.from.node != F::ZERO || to.node != F::ZERO;
                 let input_on = input && (r.from.input != F::ZERO || to.input != F::ZERO);
@@ -625,19 +626,16 @@ struct ModeFade<F: Float> {
     ramp: Option<Ramp<F>>,
     /// Frames of the aligned input left to hear before the fade in.
     warm: usize,
-    /// The fade's length: [`DECLICK`](crate::DECLICK) at the graph's rate.
-    declick: Samples,
 }
 
 impl<F: Float> ModeFade<F> {
     /// Steady in `mode` at `mix`, with no ramp.
-    fn steady(mode: NodeMode, mix: F, declick: Samples) -> Self {
+    fn steady(mode: NodeMode, mix: F) -> Self {
         Self {
             heading: mode,
             weights: mode.weights(mix),
             ramp: None,
             warm: 0,
-            declick,
         }
     }
 
@@ -647,12 +645,12 @@ impl<F: Float> ModeFade<F> {
     }
 
     /// Head for `want` at a mix of `mix_to`, after `warm` frames of the
-    /// aligned input.
-    fn retarget(&mut self, want: NodeMode, mix_to: F, warm: usize) {
+    /// aligned input; the ramp runs over `declick` frames.
+    fn retarget(&mut self, want: NodeMode, mix_to: F, warm: usize, declick: Samples) {
         self.warm = warm;
         self.ramp = (self.weights != want.weights(mix_to)).then_some(Ramp {
             from: self.weights,
-            declick: Declick::started(self.declick),
+            progress: Progress::started(declick),
         });
         self.heading = want;
     }
@@ -669,8 +667,9 @@ impl<F: Float> ModeFade<F> {
     }
 
     /// This block's segments against `mix` (`lane`: the driving lane's
-    /// values), and advance the fade past them.
-    fn step(&mut self, frames: usize, mix: MixRun<F>, lane: &[F]) -> Segments<F> {
+    /// values), and advance the fade past them, over a ramp of `declick`
+    /// frames.
+    fn step(&mut self, frames: usize, declick: Samples, mix: MixRun<F>, lane: &[F]) -> Segments<F> {
         let warm = self.warm.min(frames);
         self.warm -= warm;
         let mut seg = Segments {
@@ -683,19 +682,21 @@ impl<F: Float> ModeFade<F> {
             return seg;
         }
         if let Some(r) = &mut self.ramp {
-            let len = r.declick.remaining().get().min(frames - warm);
+            let len = r.progress.remaining(declick).get().min(frames - warm);
             seg.ramp = Some(RampRun {
                 from: r.from,
                 heading: self.heading,
-                declick: r.declick,
+                progress: r.progress,
+                declick,
                 len,
             });
-            r.declick.advance(Samples::new(len));
+            r.progress.advance(Samples::new(len), declick);
             let to = self.heading.weights(mix.at(warm + len - 1, lane));
-            self.weights = r
-                .from
-                .toward(to, r.declick.gains::<F>(r.declick.last_frame()).1);
-            if !r.declick.running() {
+            self.weights = r.from.toward(
+                to,
+                declick_gains::<F>(r.progress.last_frame(declick), declick).1,
+            );
+            if !r.progress.running() {
                 self.ramp = None;
             }
         }
@@ -789,18 +790,20 @@ impl<F: Float> MixTrack<F> {
     /// the block's mix. When it delivers frames they are the block's mix at
     /// each frame ([`lane`](Self::lane)), clamped to the port's range, and
     /// the next block ramps from the last of them; otherwise the base, the
-    /// cell's snapshot, ramps as it does undriven.
+    /// cell's snapshot, ramps as it does undriven. A change of source fades
+    /// over `declick` frames.
     #[inline]
     pub(crate) fn drive_step(
         &mut self,
         frames: usize,
+        declick: Samples,
         source: Option<(EventOutputPort, &[ParamEvent])>,
     ) {
         let Some(drive) = &mut self.drive else {
             return;
         };
         drive.begin();
-        drive.port(0, NodeMix::ADDR, frames, source, Some(self.to));
+        drive.port(0, NodeMix::ADDR, frames, declick, source, Some(self.to));
         if let Some(f) = drive.frames(0, frames) {
             self.lane_on = true;
             self.to = f[frames - 1];
@@ -896,11 +899,7 @@ impl<F: Float> Alignment<F> {
         } = self;
         if let (Some(src), Some(dst)) = (scratch.as_ref(), folded.as_mut()) {
             for c in 0..pass.outputs() {
-                pass.fold_into(
-                    |i| src.slot(AudioSlotId::from_index(i), frames),
-                    c,
-                    dst.slot_mut(AudioSlotId::from_index(c), frames),
-                );
+                pass.fold_into(|i| src.channel(i, frames), c, dst.channel_mut(c, frames));
             }
         }
     }
@@ -912,8 +911,7 @@ impl<F: Float> Alignment<F> {
             .scratch
             .as_ref()
             .expect("a node with a channel to pass has a scratch");
-        self.pass
-            .fold_into(|i| src.slot(AudioSlotId::from_index(i), frames), c, out);
+        self.pass.fold_into(|i| src.channel(i, frames), c, out);
     }
 
     /// Whether the pass folds channels (it is not output `c` = input `c`).
@@ -953,7 +951,7 @@ impl<F: Float> Alignment<F> {
         scratch
             .as_mut()
             .expect("a node with a channel to pass has a scratch")
-            .slot_mut(AudioSlotId::from_index(c), frames)
+            .channel_mut(c, frames)
     }
 
     /// Output channel `c`'s aligned input, as [`align`](Self::align) (and
@@ -963,7 +961,7 @@ impl<F: Float> Alignment<F> {
             .as_ref()
             .or(self.scratch.as_ref())
             .expect("a node with a channel to pass has a scratch")
-            .slot(AudioSlotId::from_index(c), frames)
+            .channel(c, frames)
     }
 
     /// Channel `c`'s ring of the bypass line, for a parked node's output.
@@ -976,7 +974,7 @@ impl<F: Float> ModeState<F> {
     /// The state of a unit about to be placed: steady in `cell`'s mode, with
     /// no fade (a fork, a new unit). Control side: allocates its line, its
     /// scratch and its tables.
-    pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: Samples) -> Self {
+    pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize) -> Self {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
         let mix = F::from_unit(cell.load_mix());
@@ -985,7 +983,7 @@ impl<F: Float> ModeState<F> {
             own_bypass,
             seen: mode,
             plain: false,
-            fade: ModeFade::steady(mode, mix, declick),
+            fade: ModeFade::steady(mode, mix),
             mix: MixTrack::steady(mix),
             aligned: Alignment::new(shape, max_block),
             // A unit that begins bypassed has not run: un-bypassing resets it.
@@ -1051,9 +1049,10 @@ impl<F: Float> ModeState<F> {
         self.stale = true;
     }
 
-    /// Move to `want`. Returns whether the node must be reset before it is
-    /// called (it was parked, and will be called again).
-    pub(crate) fn toggle(&mut self, want: NodeMode) -> bool {
+    /// Move to `want`, fading over `declick` frames. Returns whether the node
+    /// must be reset before it is called (it was parked, and will be called
+    /// again).
+    pub(crate) fn toggle(&mut self, want: NodeMode, declick: Samples) -> bool {
         let reset = self.stale;
         let mut warm = 0;
         if reset {
@@ -1062,7 +1061,7 @@ impl<F: Float> ModeState<F> {
                 warm = self.aligned.latency;
             }
         }
-        self.fade.retarget(want, self.mix.to, warm);
+        self.fade.retarget(want, self.mix.to, warm, declick);
         reset
     }
 
@@ -1094,10 +1093,11 @@ impl<F: Float> ModeState<F> {
         &mut self.held_in
     }
 
-    /// This block's segments, and advance the state past them.
-    pub(crate) fn step(&mut self, frames: usize) -> Segments<F> {
+    /// This block's segments, and advance the state past them, a ramp running
+    /// over `declick` frames.
+    pub(crate) fn step(&mut self, frames: usize, declick: Samples) -> Segments<F> {
         self.fade
-            .step(frames, self.mix.run(frames), self.mix.lane(frames))
+            .step(frames, declick, self.mix.run(frames), self.mix.lane(frames))
     }
 }
 
@@ -1117,7 +1117,7 @@ mod tests {
     /// A unit of `shape` at `mix`, steady Active, after the block's snapshot.
     fn at(shape: &Shape, mix: f64) -> (ModeCell, ModeState<f32>) {
         let cell = ModeCell::new(NodeMode::Active, Mix::new(mix));
-        let mut state = ModeState::new(cell.clone(), shape, 64, DECLICK_FRAMES);
+        let mut state = ModeState::new(cell.clone(), shape, 64);
         state.snapshot();
         (cell, state)
     }
@@ -1151,7 +1151,7 @@ mod tests {
         state.snapshot();
         assert!(!state.is_plain(), "the ramp block back at WET");
         assert!(state.needs_input());
-        state.step(64);
+        state.step(64, DECLICK_FRAMES);
         state.snapshot();
         assert!(state.is_plain(), "and the block after it");
         assert!(!state.needs_input());
@@ -1169,12 +1169,12 @@ mod tests {
         let (cell, mut state) = at(&shape(0), 1.0);
         assert!(state.is_plain(), "never driven");
 
-        let lane = ParamState::lane(64, DECLICK_FRAMES, cell.ranges());
+        let lane = ParamState::lane(64, cell.ranges());
         state.mix.drive_with(lane, &mut CappedVec::with_capacity(1));
         state.snapshot();
         assert!(!state.is_plain(), "driven");
-        state.mix.drive_step(64, Some((from, &[])));
-        state.step(64);
+        state.mix.drive_step(64, DECLICK_FRAMES, Some((from, &[])));
+        state.step(64, DECLICK_FRAMES);
 
         // Let go of the source: its lane fades to the base, blended, for the
         // declick and the block that sees it done.
@@ -1182,8 +1182,8 @@ mod tests {
         for block in 0..fade {
             state.snapshot();
             assert!(!state.is_plain(), "fading, block {block}");
-            state.mix.drive_step(64, None);
-            state.step(64);
+            state.mix.drive_step(64, DECLICK_FRAMES, None);
+            state.step(64, DECLICK_FRAMES);
         }
         state.snapshot();
         assert!(state.is_plain(), "faded: the plain op again");
@@ -1199,6 +1199,9 @@ mod tests {
         cell.store_mix(Mix::new(0.25));
         state.snapshot();
         state.snapshot(); // a block the node was not called in
-        assert_eq!(state.step(64).mix.state(), MixState::Between);
+        assert_eq!(
+            state.step(64, DECLICK_FRAMES).mix.state(),
+            MixState::Between
+        );
     }
 }

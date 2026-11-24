@@ -354,7 +354,7 @@ fn run_wide(bank: &mut PlateBank<f64>, ramps: &mut PlateRamps<f64>, x: &[f64]) -
 /// hold, to 2^-45; an `f32` state is off by 1e-8.
 #[test]
 fn an_f64_lattice_is_the_all_pass_equation() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (11usize, 300usize);
     let g = 0.618_033_988_749_894_9_f64;
     let x = wide_signal(len);
@@ -373,7 +373,7 @@ fn an_f64_lattice_is_the_all_pass_equation() {
             y
         })
         .collect();
-    assert_close_f64(&got, &want, 2.0f64.powi(-45));
+    assert_close(&got, &want, 2.0f64.powi(-45));
 }
 
 /// An `f64` plate with modulation off is linear: `R(a x + b y) = a R(x) + b R(y)` to 2^-40

@@ -49,14 +49,9 @@ const SPECIALS: [f32; 9] = [
 
 /// A deterministic spread of finite samples, signs and magnitudes.
 fn noise(n: usize, seed: u32) -> Vec<f32> {
-    let mut x = seed | 1;
-    (0..n)
-        .map(|_| {
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            (x as f32 / u32::MAX as f32 - 0.5) * 3.0
-        })
+    tutti_fixtures::noise::<f32>(seed, n)
+        .iter()
+        .map(|v| 1.5 * v)
         .collect()
 }
 

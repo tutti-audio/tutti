@@ -369,7 +369,7 @@ mod tests {
         let noise: Vec<f32> = (0..2048)
             .map(|i| ((i * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
-        let run = |cutoff: f32| -> f32 {
+        let run = |cutoff: f32| -> f64 {
             let mut f = prepared_at(
                 LadderFilterNode::<f32>::from(
                     LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
@@ -483,9 +483,9 @@ mod tests {
         };
         // The tone is steady-state at each block's design, so the ramp's lag in the stages
         // costs a few percent; a cutoff that never moved or jumped is off by tens.
-        let near = |got: f32, want: f64, what: &str| {
+        let near = |got: f64, want: f64, what: &str| {
             assert!(
-                (f64::from(got) - want).abs() < 0.10 * want,
+                (got - want).abs() < 0.10 * want,
                 "{what}: {got} against {want}"
             );
         };
@@ -500,10 +500,7 @@ mod tests {
         // A cutoff that jumped would put block 0 at the final gain, three times the
         // held one; the ramp's first block is well under it.
         let arrived = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
-        assert!(
-            f64::from(blocks[0]) < 0.8 * arrived,
-            "block 0 is not yet arrived"
-        );
+        assert!(blocks[0] < 0.8 * arrived, "block 0 is not yet arrived");
     }
 
     /// Drive multiplies straight into the saturator, so a step would click: a drive
@@ -550,9 +547,9 @@ mod tests {
         change: impl Fn(&LadderFilterNode<f32>),
         hz: f64,
         amplitude: f32,
-    ) -> (f32, Vec<f32>) {
+    ) -> (f64, Vec<f64>) {
         use crate::test_support::{assert_cell_ramps, drive_block, prepared, render_change, sine};
-        let x: Vec<f32> = sine(hz, 48_000.0, 256 + 512)
+        let x: Vec<f32> = sine::<f32>(hz, 48_000.0, 256 + 512)
             .into_iter()
             .map(|s| amplitude * s)
             .collect();

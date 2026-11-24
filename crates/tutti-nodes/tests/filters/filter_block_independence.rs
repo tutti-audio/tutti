@@ -27,7 +27,7 @@ const FRAMES: usize = 2_048;
 const BLOCKS: [usize; 4] = [1, 17, 64, 512];
 
 fn noise(seed: u32) -> Vec<f32> {
-    tutti_fixtures::noise(seed, FRAMES)
+    tutti_fixtures::noise::<f32>(seed, FRAMES)
         .into_iter()
         .map(|x| 0.8 * x)
         .collect()

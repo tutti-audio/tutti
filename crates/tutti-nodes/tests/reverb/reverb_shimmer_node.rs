@@ -82,7 +82,7 @@ fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        let impulse = tutti_fixtures::signal::impulse(Samples::new(BLOCK));
+        let impulse = tutti_fixtures::signal::impulse::<f32>(Samples::new(BLOCK));
         let reported = drive_input(
             &mut n,
             &env,

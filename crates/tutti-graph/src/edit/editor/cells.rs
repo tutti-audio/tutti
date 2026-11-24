@@ -12,9 +12,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use tutti_curve::declick_frames;
-use tutti_units::Samples;
-
 use super::BusLanes;
 use crate::compile::plan::Plan;
 use crate::model::gain::{EdgeFade, EdgeGain, GainCell};
@@ -153,15 +150,12 @@ impl RangeCells {
         key: NodeKey,
         ports: usize,
         max: usize,
-        declick: Samples,
         declared: Option<ParamPorts>,
         values: &GraphValues,
     ) -> ParamState<F> {
         self.declare(key, declared.unwrap_or(ParamPorts::NONE), values);
         match self.0.get(&key) {
-            Some(cells) if ports > 0 => {
-                ParamState::new(ports, max, declick, cells.readers(), cells.lanes())
-            }
+            Some(cells) if ports > 0 => ParamState::new(ports, max, cells.readers(), cells.lanes()),
             _ => ParamState::default(),
         }
     }
@@ -223,7 +217,7 @@ impl GainCells {
         values: &GraphValues,
         bus_weights: &BusLanes,
     ) -> BTreeMap<EdgeId, GainCell> {
-        let lanes: BTreeSet<EdgeId> = plan.sum_lanes.iter().flatten().copied().collect();
+        let lanes: BTreeSet<EdgeId> = plan.program.sum_lanes.iter().flatten().copied().collect();
         self.0.retain(|id, _| lanes.contains(id));
         lanes
             .into_iter()
@@ -303,12 +297,7 @@ impl ModeCells {
         cell.store(values.mode(key));
         cell.store_range(values.range(mix_at(key)));
         let shape = &plan.unit(key).expect("a placed unit is in its plan").shape;
-        ModeState::new(
-            cell.clone(),
-            shape,
-            plan.prepare.max_block().get(),
-            declick_frames(plan.prepare.sample_rate()),
-        )
+        ModeState::new(cell.clone(), shape, plan.prepare.max_block().get())
     }
 }
 

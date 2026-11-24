@@ -112,32 +112,22 @@ pub(super) struct Channels {
     host_edits: Arc<AudioThreadCell<Option<EditReader>>>,
     /// How many chunks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
-    abandoned: Tally<Chunks>,
-    /// The bridge thread's writer of `abandoned`, minted in `new`.
-    abandoned_writer: TallyWriter<Chunks>,
+    abandoned: TallyWriter<Chunks>,
     /// How many owed replies the bridge thread collected after abandoning the
     /// chunks that asked for them, ever: the other half of `abandoned`.
-    late: Tally<Chunks>,
-    /// The bridge thread's writer of `late`, minted in `new`.
-    late_writer: TallyWriter<Chunks>,
+    late: TallyWriter<Chunks>,
     /// Commands the audio side could not hand to the bridge thread, ever: a
     /// full command queue refused one, the payload pool had no payload for a
     /// block, or a parameter buffer had no room to come back to. Written
     /// through any clone of the channels, read by the plugin node's controls.
-    commands_refused: Tally<u64>,
-    /// The writer of `commands_refused`, minted in `new`.
-    commands_refused_writer: TallyWriter<u64>,
+    commands_refused: TallyWriter<u64>,
     /// Render-mode and rate changes the audio lane gave up on, ever: the plugin
     /// did not apply the change within the fence deadline. The change may still
     /// land; the blocks after it were not held for it.
-    unapplied: Tally<u64>,
-    /// The audio lane's writer of `unapplied`, minted in `new`.
-    unapplied_writer: TallyWriter<u64>,
+    unapplied: TallyWriter<u64>,
     /// Parameter buffers the audio thread leaked rather than free, ever: the
     /// free list had no room for one it returned (a broken sizing bound).
-    leaked_buffers: Tally<u64>,
-    /// The writer of `leaked_buffers`, minted in `new`.
-    leaked_writer: TallyWriter<u64>,
+    leaked_buffers: TallyWriter<u64>,
     /// How many replies the bridge thread has taken from the plugin, ever,
     /// on time or owed. With [`abandoned`](Self::abandoned) the hang
     /// verdict's input (`PluginHandle::block_counts`): a hang is abandoned
@@ -149,22 +139,16 @@ pub(super) struct Channels {
     /// How many unsolicited parameter events the bridge thread dropped
     /// because more arrived during one command than its inbox holds, ever.
     /// Each drop also raises a `Resync(ParamValues)`, so the host re-reads.
-    dropped_param_events: Tally<u64>,
-    /// The bridge thread's writer of `dropped_param_events`, minted in `new`.
-    param_events_writer: TallyWriter<u64>,
+    dropped_param_events: TallyWriter<u64>,
     /// MIDI events the bridge thread did not send, ever: a stale block's,
     /// and the rest of a SysEx that lost packets with it. Shared with the
     /// plugin node's controls, which add it to the node's own count.
-    dropped_midi: Tally<u64>,
-    /// The bridge thread's writer of `dropped_midi`, minted in `new`.
-    midi_writer: TallyWriter<u64>,
+    dropped_midi: TallyWriter<u64>,
     /// Chunks the bridge thread skipped as stale, ever: more than
     /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
     /// host's again. Shared with the pipeline's counters
     /// (`ChunkCounters::attach_skipped`).
-    skipped: Tally<Chunks>,
-    /// The bridge thread's writer of `skipped`, minted in `new`.
-    skipped_writer: TallyWriter<Chunks>,
+    skipped: TallyWriter<Chunks>,
     /// What became of each of the last [`BATCH_OUTCOMES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
     fates: Arc<BatchOutcomes>,
@@ -331,23 +315,15 @@ impl Channels {
             sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
-            abandoned_writer: abandoned.writer(),
-            abandoned,
-            late_writer: late.writer(),
-            late,
-            commands_refused_writer: commands_refused.writer(),
-            commands_refused,
-            unapplied_writer: unapplied.writer(),
-            unapplied,
-            leaked_writer: leaked_buffers.writer(),
-            leaked_buffers,
+            abandoned: abandoned.writer(),
+            late: late.writer(),
+            commands_refused: commands_refused.writer(),
+            unapplied: unapplied.writer(),
+            leaked_buffers: leaked_buffers.writer(),
             replies: Arc::new(AtomicU64::new(0)),
-            param_events_writer: dropped_param_events.writer(),
-            dropped_param_events,
-            midi_writer: dropped_midi.writer(),
-            dropped_midi,
-            skipped_writer: skipped.writer(),
-            skipped,
+            dropped_param_events: dropped_param_events.writer(),
+            dropped_midi: dropped_midi.writer(),
+            skipped: skipped.writer(),
             fates: Arc::new(BatchOutcomes::new()),
             news: Arc::default(),
             probe: Arc::default(),
@@ -574,14 +550,14 @@ impl Channels {
     /// reply that came after its abandonment, which is also a reply the plugin
     /// gave. Called by the bridge thread only.
     pub(super) fn note_late(&self) {
-        self.late_writer.add(Chunks::new(1));
+        self.late.add(Chunks::new(1));
         self.replies.fetch_add(1, Ordering::Release);
     }
 
     /// Record that a block's reply missed its budget and is now owed. Called
     /// by the bridge thread only, before any settle of that reply.
     pub(super) fn note_abandoned(&self) {
-        self.abandoned_writer.add(Chunks::new(1));
+        self.abandoned.add(Chunks::new(1));
     }
 
     /// Record that the plugin answered (a reply for a block, on time or
@@ -604,35 +580,35 @@ impl Channels {
     /// Record one command the audio side could not hand over. Wait-free, any
     /// thread.
     pub(super) fn note_command_refused(&self) {
-        self.commands_refused_writer.add(1);
+        self.commands_refused.add(1);
     }
 
     /// A writer of the cell [`note_command_refused`](Self::note_command_refused)
     /// counts into, for the pools that refuse beside the queue.
     pub(super) fn refusal_writer(&self) -> TallyWriter<u64> {
-        self.commands_refused_writer.clone()
+        self.commands_refused.clone()
     }
 
     /// The cell [`note_command_refused`](Self::note_command_refused) counts into.
     pub(super) fn commands_refused_cell(&self) -> Tally<u64> {
-        self.commands_refused.clone()
+        self.commands_refused.tally()
     }
 
     /// A writer of the cell the payload pool counts leaked buffers into.
     pub(super) fn leak_writer(&self) -> TallyWriter<u64> {
-        self.leaked_writer.clone()
+        self.leaked_buffers.clone()
     }
 
     /// The cell of parameter buffers the audio thread leaked.
     pub(super) fn leaked_buffers_cell(&self) -> Tally<u64> {
-        self.leaked_buffers.clone()
+        self.leaked_buffers.tally()
     }
 
     /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
     /// count nothing branches on.
     pub(super) fn note_dropped_param_events(&self, n: u64) {
         if n > 0 {
-            self.param_events_writer.add(n);
+            self.dropped_param_events.add(n);
         }
     }
 
@@ -640,14 +616,14 @@ impl Channels {
     /// branches on.
     pub(super) fn note_dropped_midi(&self, n: u64) {
         if n > 0 {
-            self.midi_writer.add(n);
+            self.dropped_midi.add(n);
         }
     }
 
     /// Record a chunk skipped as stale. Bridge thread only; a count nothing
     /// branches on.
     pub(super) fn note_skipped(&self) {
-        self.skipped_writer.add(Chunks::new(1));
+        self.skipped.add(Chunks::new(1));
     }
 
     /// Record what became of chunk `seq`. Bridge thread only. A chunk not
@@ -666,12 +642,12 @@ impl Channels {
 
     /// The cell [`note_skipped`](Self::note_skipped) counts into.
     pub(super) fn skipped_cell(&self) -> Tally<Chunks> {
-        self.skipped.clone()
+        self.skipped.tally()
     }
 
     /// The cell [`note_dropped_midi`](Self::note_dropped_midi) counts into.
     pub(super) fn dropped_midi_cell(&self) -> Tally<u64> {
-        self.dropped_midi.clone()
+        self.dropped_midi.tally()
     }
 
     /// How many unsolicited parameter events were dropped, over the life of
@@ -824,12 +800,12 @@ impl Channels {
     /// Record a render-mode or rate change the audio lane gave up on. Audio
     /// lane's thread only.
     pub(super) fn note_unapplied(&self) {
-        self.unapplied_writer.add(1);
+        self.unapplied.add(1);
     }
 
     /// The cell [`note_unapplied`](Self::note_unapplied) counts into.
     pub(super) fn unapplied_cell(&self) -> Tally<u64> {
-        self.unapplied.clone()
+        self.unapplied.tally()
     }
 
     pub(super) fn pop_control(&self) -> Option<Sequenced<ControlCommand>> {

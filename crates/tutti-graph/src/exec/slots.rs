@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
 use tutti_rt::{CappedVec, RwView};
 
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::{AudioSlotId, EventSlotId};
 use crate::compile::plan::{Direct, DirectRole, ZERO_SLOT};
 use crate::event::types::Event;
 use crate::exec::arena::{Arena, Line, Role, borrow_sorted};

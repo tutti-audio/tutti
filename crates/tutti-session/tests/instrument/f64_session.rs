@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_fixtures::signal::peak;
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::{InstrumentHandle, MainOutput, OfflineSession, OutputPort, Session, Stamp};
@@ -36,10 +37,6 @@ fn render(session: &mut OfflineSession<&'static str, f64>, blocks: usize) -> Vec
         left.extend(buf.chunks(2).map(|frame| frame[0]));
     }
     left
-}
-
-fn peak(samples: &[f64]) -> f64 {
-    samples.iter().fold(0.0, |m, s| m.max(s.abs()))
 }
 
 fn sine_synth() -> PolySynth<f64> {

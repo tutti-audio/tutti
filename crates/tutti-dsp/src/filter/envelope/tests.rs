@@ -294,7 +294,7 @@ fn the_attack_and_the_release_are_told_apart() {
 fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
     use crate::filter::svf::model::tests::rbj;
     use crate::testing::direct_form;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(4_800);
     for ty in [SvfType::LowPass, SvfType::BandPass] {
         let mut b = EnvelopeFilterBank::<f64>::new(ChannelLayout::MONO, ty, RATE);
@@ -310,6 +310,6 @@ fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
         )
         .unwrap();
         let want = direct_form(&rbj(ty, 1_000.0, 0.707, 0.0, RATE.get()), &x);
-        assert_close_f64(&out, &want, 1e-12);
+        assert_close(&out, &want, 1e-12);
     }
 }

@@ -3,6 +3,7 @@
 //! figure is from the definition of the effect (a wet-only line is a delayed
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
+use crate::reported_latency::impulse_response;
 use tutti_buffers::Planes;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::assert_declared_tail;
@@ -13,29 +14,6 @@ use tutti_units::{SampleRate, Tail, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
-
-/// `node` driven over `frames` frames of a unit impulse at frame 0 on every
-/// input, one `Vec` per output.
-fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
-    let mut node = prepared(node, SR, BLOCK);
-    let ins = usize::from(node.shape().audio_in().count());
-    let mut out: Vec<Vec<f32>> = Vec::new();
-    let mut done = 0;
-    while done < frames {
-        let n = BLOCK.min(frames - done);
-        let chunk: Vec<f32> = (done..done + n)
-            .map(|i| if i == 0 { 1.0 } else { 0.0 })
-            .collect();
-        let inputs: Vec<&[f32]> = (0..ins).map(|_| &chunk[..]).collect();
-        let block = drive(&mut node, SR, Planes::new(&inputs).unwrap(), &[]);
-        out.resize(block.len(), Vec::with_capacity(frames));
-        for (ch, b) in out.iter_mut().zip(block) {
-            ch.extend(b);
-        }
-        done += n;
-    }
-    out
-}
 
 fn chorus() -> ModDelayNode<f32> {
     ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO))

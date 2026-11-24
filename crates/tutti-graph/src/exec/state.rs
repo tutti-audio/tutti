@@ -107,11 +107,6 @@ impl Gone {
     }
 }
 
-pub(crate) enum Ring<F: Float = f32> {
-    Audio(AudioRing<F>),
-    Event(EventFifo),
-}
-
 /// Events flushed from a delay that went away, waiting for their sink's next
 /// call, at their offsets relative to the earliest (see the module docs).
 /// Built on the control side with room for everything that can flow in
@@ -217,7 +212,10 @@ pub(super) struct State<F: Float = f32> {
     /// Per audio slot, what is known about its block: [`Flags`]. The parallel executor runs on a shared atomic copy (`par.rs`).
     pub(super) flags: Vec<Flags>,
     pub(super) events: Vec<EventSlot>,
-    pub(super) rings: Vec<Option<Ring<F>>>,
+    /// The PDC rings, by [`AudioDelayId`](crate::compile::ids::AudioDelayId).
+    pub(super) audio_delays: Vec<Option<AudioRing<F>>>,
+    /// The PDC FIFOs, by [`EventDelayId`](crate::compile::ids::EventDelayId).
+    pub(super) event_delays: Vec<Option<EventFifo>>,
     pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
     pub(super) event_fb: Vec<Option<EventFifo>>,
     /// One producer per planned tap lane (`None`: nobody opened it).
@@ -247,7 +245,8 @@ impl<F: Float> State<F> {
             arena: Arena::new(1, max_block),
             flags: vec![Flags::SILENCE],
             events: Vec::new(),
-            rings: Vec::new(),
+            audio_delays: Vec::new(),
+            event_delays: Vec::new(),
             audio_fb: Vec::new(),
             event_fb: Vec::new(),
             taps: Vec::new(),
@@ -266,7 +265,7 @@ impl<F: Float> State<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Id;
+    use crate::compile::ids::id_at;
     use crate::event::types::Event;
     use crate::exec::held::Held;
     use crate::node::time::Offset;
@@ -282,7 +281,7 @@ mod tests {
 
     fn inject(room: usize) -> Inject {
         Inject {
-            unit: PlanUnitId::new(0),
+            unit: id_at(0),
             port: 0,
             events: CappedVec::default(),
             merged: CappedVec::default(),
