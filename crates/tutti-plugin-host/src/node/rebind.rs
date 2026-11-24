@@ -554,13 +554,13 @@ mod tests {
         let Ok((_processor, controller)) = loaded.activate(main_thread(), prepare) else {
             panic!("the fake activates");
         };
-        let controller = std::sync::Mutex::new(controller);
+        let controller = tutti_rt::AudioThreadCell::new(controller);
         let (refused, applied) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
         {
             let post = post.clone();
             let (refused, applied) = (Arc::clone(&refused), Arc::clone(&applied));
             fake.during_process(move || {
-                let mut control = controller.lock().expect("one thread");
+                let mut control = controller.borrow_mut();
                 let took = post.apply_idle(main_thread(), &mut *control);
                 let counter = if took { &applied } else { &refused };
                 counter.fetch_add(1, Ordering::Relaxed);
