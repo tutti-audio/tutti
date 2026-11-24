@@ -136,8 +136,21 @@ fn selecting_another_device_keeps_the_chosen_sample_format() {
     );
 }
 
+/// **A switch onto a supplied driver names no device** while it runs there.
+#[test]
+fn a_switch_to_a_supplied_driver_names_no_device() {
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
+    let (manual, _stream) = ManualStreamDriver::new();
+    driver
+        .switch(manual_spec(), manual, |_, _| {
+            Ok::<(), crate::DeviceError>(())
+        })
+        .unwrap();
+    assert_eq!(driver.opened_name().unwrap(), None);
+}
+
 /// **Supplying a driver keeps the device on record**, so a restart can open it
-/// again, and names none meanwhile.
+/// again, and names none meanwhile (`switch` supplies through this).
 #[test]
 fn supplying_a_driver_keeps_the_device_to_restart_onto() {
     let mut engine = on_device(Opened::Named("Card".into()));
