@@ -40,7 +40,8 @@ use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 /// Writes the two tests of a gate body `fn body(workers: usize, ..)`: `$serial`
 /// runs it on one participant and `$parallel` on four, each its own test so an
 /// aborting allocation names the one that allocated. Arguments after the body
-/// name follow `workers`.
+/// name follow `workers`. Attributes written before `$parallel` (a doc that says
+/// what four participants add) go on the parallel test only.
 macro_rules! on_workers {
     ($serial:ident, $(#[$meta:meta])* $parallel:ident => $body:ident $(, $arg:expr)*) => {
         #[test]
