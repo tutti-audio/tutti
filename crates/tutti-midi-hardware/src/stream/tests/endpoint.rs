@@ -667,3 +667,16 @@ fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
         "the stream has settled"
     );
 }
+
+/// A MIDI 1.0 port is asked for its identity, not for a UMP Stream, and answers
+/// no Stream message either.
+#[test]
+fn a_midi1_port_answers_no_stream_message() {
+    let mut wire = session_over(legacy(), PortDirection::Duplex, midi2());
+    wire.session.present(Some(presented(identity())));
+    wire.open();
+    let _ = wire.poll(0);
+    let _ = received(&wire);
+    let sent = answered(&mut wire, ask_everything(), 100);
+    assert!(sent.is_empty(), "{sent:?}");
+}
