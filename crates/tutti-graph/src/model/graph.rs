@@ -153,6 +153,26 @@ pub struct EdgeId {
     pub from: Edge,
 }
 
+impl EdgeId {
+    /// The edge `from` into input port `at`.
+    #[must_use]
+    pub const fn into_port(at: InputPort, from: Edge) -> Self {
+        Self {
+            sink: PortSink::Port(at),
+            from,
+        }
+    }
+
+    /// The edge from `source` into main output `channel`.
+    #[must_use]
+    pub const fn into_output(channel: u16, source: PortSource) -> Self {
+        Self {
+            sink: PortSink::Output(channel),
+            from: Edge::Direct(source),
+        }
+    }
+}
+
 /// What feeds one sink port.
 ///
 /// An [`InputPort`] is a map *key* and its value is a list of sources

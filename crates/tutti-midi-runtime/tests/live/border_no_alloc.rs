@@ -34,10 +34,11 @@ fn note_on(ch: u8, note: u8) -> Ump {
 fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
     let (node, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(inlet), "device", node);
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(1), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(inlet), 0)),
-    );
+    )
+    .unwrap();
     writer
 }
 

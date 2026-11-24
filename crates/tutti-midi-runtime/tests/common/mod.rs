@@ -43,10 +43,11 @@ pub fn off(n: u8) -> Ump {
 
 /// Wires event output 0 of node `from` to event input 0 of node `to`.
 pub fn connect(ed: &mut Editor, from: u64, to: u64) {
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(to), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
-    );
+    )
+    .unwrap();
 }
 
 /// The ring's capacity the deleted node had, in events.

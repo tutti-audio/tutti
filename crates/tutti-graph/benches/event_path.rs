@@ -120,10 +120,11 @@ fn rig(source: Source) -> Executor {
     ));
     ed.insert(NodeKey(1), "source", Unforkable(source));
     ed.insert(NodeKey(2), "sink", Unforkable(Sink::new()));
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let mut exec = exec;
     exec.apply_pending();
@@ -197,10 +198,11 @@ fn bench(c: &mut Criterion) {
                 "source",
                 Unforkable(Source::new(n * 2, n, 0)),
             );
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 EventInputPort::new(NodeKey(100), 0),
                 EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
-            );
+            )
+            .unwrap();
         }
         ed.commit().expect("commits");
         exec.apply_pending();

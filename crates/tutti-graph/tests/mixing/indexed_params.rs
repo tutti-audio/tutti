@@ -172,9 +172,7 @@ fn graph(to: &[(UnitAddr, f64)]) -> (Editor, tutti_graph::Executor, ParamSet) {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);
+    ed.wire_outputs(vec![out(BANDS, 0), out(BANDS, 1)]).unwrap();
     (ed, exec, controls)
 }
 
@@ -323,8 +321,8 @@ fn param_ports_key_on_the_full_address() {
 #[test]
 fn a_lane_for_index_1_does_not_touch_index_0() {
     let (mut ed, mut exec, _) = graph(&[(BAND1, -3.0)]);
-    ed.spec_mut().connect_param(param(BAND0), src_out());
-    ed.spec_mut().connect_param(param(BAND1), src_out());
+    ed.connect_param(param(BAND0), src_out()).unwrap();
+    ed.connect_param(param(BAND1), src_out()).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     // The first block is not declicked (a fresh unit), so the source's step is
@@ -342,8 +340,8 @@ fn a_lane_for_index_1_does_not_touch_index_0() {
 #[test]
 fn a_lane_for_index_0_does_not_touch_index_1() {
     let (mut ed, mut exec, _) = graph(&[(BAND0, -3.0)]);
-    ed.spec_mut().connect_param(param(BAND0), src_out());
-    ed.spec_mut().connect_param(param(BAND1), src_out());
+    ed.connect_param(param(BAND0), src_out()).unwrap();
+    ed.connect_param(param(BAND1), src_out()).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let [b0, b1] = render(&mut ed, &mut exec, 64);
@@ -357,8 +355,8 @@ fn a_lane_for_index_0_does_not_touch_index_1() {
 #[test]
 fn each_index_reads_its_own_base_and_its_own_source_value() {
     let (mut ed, mut exec, controls) = graph(&[(BAND0, -1.0), (BAND1, -2.0)]);
-    ed.spec_mut().connect_param(param(BAND0), src_out());
-    ed.spec_mut().connect_param(param(BAND1), src_out());
+    ed.connect_param(param(BAND0), src_out()).unwrap();
+    ed.connect_param(param(BAND1), src_out()).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let [b0, b1] = render(&mut ed, &mut exec, 64);
@@ -368,7 +366,7 @@ fn each_index_reads_its_own_base_and_its_own_source_value() {
     // Disconnect band 1: it reads its base again (declicked), and the base
     // is its own cell's.
     assert!(controls.set(BAND1, -44.0));
-    assert!(ed.spec_mut().disconnect_param(param(BAND1), src_out()));
+    assert!(ed.disconnect_param(param(BAND1), src_out()));
     ed.commit().expect("commits");
     exec.apply_pending();
     for _ in 0..8 {
@@ -440,10 +438,8 @@ fn a_node_declares_up_to_the_cap_and_no_more() {
             to: vec![(last, -7.0)],
         }),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);
-    ed.spec_mut().connect_param(param(last), src_out());
+    ed.wire_outputs(vec![out(BANDS, 0), out(BANDS, 1)]).unwrap();
+    ed.connect_param(param(last), src_out()).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let [first, driven] = render(&mut ed, &mut exec, 64);

@@ -80,16 +80,16 @@ fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
-    let s = ed.spec_mut();
-    s.topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
-    s.connect_param(
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .unwrap();
+    ed.connect_param(
         ParamIn {
             node: NodeKey(2),
             param: UnitParam::Cutoff.into(),
         },
         EventOutputPort::new(NodeKey(1), 0),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

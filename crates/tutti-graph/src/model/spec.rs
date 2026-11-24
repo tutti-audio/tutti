@@ -139,7 +139,8 @@ impl EventEdge {
 /// and outputs) plus event edges, param modulation and unit generations.
 ///
 /// Plain data — `Clone`, `Eq` and `Hash` — built and edited on the control
-/// thread, usually through [`Editor::spec_mut`](crate::Editor::spec_mut).
+/// thread, by hand or through the editor's wiring calls
+/// ([`Editor::connect_edge`](crate::Editor::connect_edge) and the calls beside it).
 /// [`validate`](Self::validate) checks what can be checked without the
 /// nodes' shapes and returns a [`ValidGraph`], which is what
 /// [`compile`](fn@crate::compile) takes.

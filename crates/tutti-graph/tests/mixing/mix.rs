@@ -14,6 +14,7 @@
 
 use crate::rendezvous::Rendezvous;
 use common::spec_of;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -231,7 +232,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
     let calls = Arc::new(AtomicUsize::new(0));
     let resets = Arc::new(AtomicUsize::new(0));
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(
         key(1),
         "probe",
@@ -240,10 +241,12 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
             resets: Arc::clone(&resets),
         }),
     );
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -518,10 +521,9 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
         let (hook, handle) = Rendezvous::new();
         ed.insert(key(1), "hook", Unforkable(hook));
         ed.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
-        ed.spec_mut()
-            .topology
-            .connect(at(2, 0), Edge::Direct(out(1, 0)));
-        ed.spec_mut().topology.set_outputs(vec![out(2, 0)]);
+        ed.connect_edge(EdgeId::into_port(at(2, 0), Edge::Direct(out(1, 0))))
+            .unwrap();
+        ed.wire_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -578,12 +580,14 @@ impl Node for Triple {
 /// An editor and executor over one `Triple` node, fed by main input 0.
 fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     if let Some(m) = mix {
         ed.set_mix(key(1), m).expect("a node");
     }
@@ -668,10 +672,12 @@ fn a_node_inserted_at_a_removed_nodes_key_starts_active_and_wet() {
     ed.collect();
 
     ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     assert_eq!(ed.mix(key(1)), Mix::WET);
     assert_eq!(ed.mode(key(1)), NodeMode::Active);
     ed.commit().expect("commits");
@@ -698,12 +704,14 @@ fn a_node_inserted_at_a_removed_nodes_key_starts_active_and_wet() {
 #[test]
 fn a_mix_set_while_a_commit_is_in_flight_is_read_back_and_lands_on_the_unit() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     ed.set_mix(key(1), Mix::new(0.5)).expect("a node");
     assert_eq!(ed.mix(key(1)), Mix::new(0.5));
@@ -794,7 +802,7 @@ fn a_fork_copies_the_mix() {
 #[test]
 fn a_mix_of_a_node_with_no_pass_is_refused() {
     let (mut ed, _exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(
         key(1),
         "split",
@@ -814,12 +822,12 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
             latency: 0,
         })),
     );
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(1, 0), out(1, 1)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0), out(1, 1)]).unwrap();
     ed.commit().expect("nothing hears its pass yet");
 
     let no_pass = PassError::Unplaced {
@@ -875,9 +883,9 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         param: NodeMix::ADDR,
     };
     let lane = EventOutputPort::new(key(2), 0);
-    ed.spec_mut().connect_param(mix, lane);
+    ed.connect_param(mix, lane).unwrap();
     assert_eq!(ed.commit(), refused, "a lane on the mix");
-    ed.spec_mut().disconnect_param(mix, lane);
+    ed.disconnect_param(mix, lane);
 
     ed.commit().expect("nothing hears its pass again");
 }

@@ -2,6 +2,7 @@
 //! moved) recompiles at the next commit, moves the silence skip's park time,
 //! and touches neither the unit nor a running crossfade.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -74,13 +75,13 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
             calls: Arc::clone(&calls),
         }),
     );
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0)))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+        Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0))),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -200,15 +201,15 @@ fn set_tail_does_not_cut_a_fade() {
     let gain = |g: f32| TestNode::new(Kind::Gain { gain: g, width: 1 });
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(NodeKey(2), "gain", Unforkable(gain(1.0)));
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NodeKey(2), 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

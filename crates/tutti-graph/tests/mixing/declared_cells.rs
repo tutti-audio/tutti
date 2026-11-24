@@ -167,19 +167,21 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
-    );
+    )
+    .unwrap();
     for &(addr, _) in to {
-        ed.spec_mut().connect_param(
+        ed.connect_param(
             ParamIn {
                 node: NODE,
                 param: addr,
             },
             EventOutputPort::new(SRC, 0),
-        );
+        )
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -301,11 +303,12 @@ fn the_contract_fork_check_covers_each_declared_param() {
 fn a_fork_starts_from_each_indexs_value() {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
     let controls = ed.insert(NODE, "bank", bank()).controls;
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let band1 = UnitAddr::new(UnitParam::Threshold, 1);
@@ -343,27 +346,30 @@ fn an_old_form_node_and_a_new_form_node_share_a_graph() {
     ];
     ed.insert(SRC, "steps", tutti_graph::ForkByClone(Steps { to }));
     // Outputs: the old node's read, then the bank's cutoff, band 1 and q.
-    ed.spec_mut().topology.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(OLD, 0)),
         PortSource::Node(OutputPort::new(NODE, 0)),
         PortSource::Node(OutputPort::new(NODE, 2)),
         PortSource::Node(OutputPort::new(NODE, 1)),
-    ]);
+    ])
+    .unwrap();
     // `Cutoff` drives the old node only; band 1 drives the bank only.
-    ed.spec_mut().connect_param(
+    ed.connect_param(
         ParamIn {
             node: OLD,
             param: UnitAddr::from(UnitParam::Cutoff),
         },
         EventOutputPort::new(SRC, 0),
-    );
-    ed.spec_mut().connect_param(
+    )
+    .unwrap();
+    ed.connect_param(
         ParamIn {
             node: NODE,
             param: UnitAddr::new(UnitParam::Threshold, 1),
         },
         EventOutputPort::new(SRC, 0),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     let [old_cutoff, bank_cutoff, band1, q]: [Vec<f32>; 4] =

@@ -42,6 +42,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::{cycle_blocks, fixed_blocks};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
 
@@ -49,9 +50,9 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node,
-    ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare,
-    Shape, Status, Unforkable,
+    Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node, ParamEvent,
+    ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape,
+    Status, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -433,9 +434,8 @@ const PROBE: u64 = 10;
 fn probe_graph(max: usize, cutoff: &Cell, q: &Cell) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepare(max));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe::new(cutoff, q)));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
+    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+        .unwrap();
     (ed, exec)
 }
 
@@ -483,9 +483,9 @@ fn an_event_sources_value_is_clamped_to_the_range() {
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 7 }));
     {
-        let s = ed.spec_mut();
-        s.connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
-        s.connect_param(param(PROBE, UnitParam::Q), ev(1));
+        ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+            .unwrap();
+        ed.connect_param(param(PROBE, UnitParam::Q), ev(1)).unwrap();
     }
     ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::of(-0.5, 0.5))
         .expect("a range");
@@ -512,8 +512,8 @@ fn a_base_move_under_modulation_ramps_across_the_block() {
     let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "quiet", Unforkable(Ramps::steps(&[])));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
     cutoff.set(200.0);
@@ -541,13 +541,13 @@ fn connecting_and_disconnecting_at_runtime_does_not_click() {
     let mut all = render(&mut exec, &mut ed, 128, 64)[0].clone();
 
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.commit().expect("connects");
     let on = render(&mut exec, &mut ed, 1024, 64);
     assert_eq!(*on[0].last().expect("rendered"), 1.0, "fully driven");
     all.extend(&on[0]);
 
-    assert!(ed.spec_mut().disconnect_param(at, ev(1)));
+    assert!(ed.disconnect_param(at, ev(1)));
     ed.commit().expect("disconnects");
     let off = render(&mut exec, &mut ed, 1024, 64);
     assert_eq!(*off[0].last().expect("rendered"), 0.0, "back on the base");
@@ -590,9 +590,9 @@ fn a_modulation_step_lands_on_its_frame() {
                 }),
             );
             {
-                let s = ed.spec_mut();
-                s.connect_param(param(PROBE, UnitParam::Cutoff), ev(2));
-                s.connect_param(param(PROBE, UnitParam::Q), ev(2));
+                ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(2))
+                    .unwrap();
+                ed.connect_param(param(PROBE, UnitParam::Q), ev(2)).unwrap();
             }
             ed.commit().expect("commits");
             let out = render(&mut exec, &mut ed, 512, block);
@@ -622,12 +622,11 @@ fn a_node_without_a_base_is_never_modulated() {
     let mut probe = Probe::new(&cutoff, &q);
     probe.answers = false;
     ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
+    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+        .unwrap();
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 256, 64);
     assert!(out[0].iter().all(|&x| x == 440.0));
@@ -635,29 +634,37 @@ fn a_node_without_a_base_is_never_modulated() {
 }
 
 /// A param the node does not declare, or a source port the node does not
-/// have, is refused at compile, naming it.
+/// have, is refused at the call, naming it.
 #[test]
 fn undeclared_params_and_missing_sources_are_refused() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, _exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 1 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Drive), ev(1));
-    let err = ed.commit().expect_err("Drive is not declared");
-    assert!(format!("{err}").contains("Drive"), "{err}");
-    ed.spec_mut().params.clear();
-    ed.spec_mut().connect_param(
-        param(PROBE, UnitParam::Cutoff),
-        EventOutputPort::new(NodeKey(1), 3),
+    // An undeclared param is refused at the call (the compile-level
+    // `UnknownParam` is pinned over a hand-built spec in
+    // `mix_driven::the_mix_port_is_refused_as_a_param_is`).
+    assert_eq!(
+        ed.connect_param(param(PROBE, UnitParam::Drive), ev(1)),
+        Err(tutti_graph::WireError::Missing(
+            tutti_graph::MissingSource::Param {
+                node: NodeKey(PROBE),
+                param: UnitParam::Drive.into(),
+            }
+        )),
     );
-    assert!(
-        matches!(
-            ed.commit(),
-            Err(CommitError::Compile(
-                tutti_graph::CompileError::ParamSourceOutOfRange { .. }
-            ))
+    // A source port the node does not have is refused at the call.
+    assert_eq!(
+        ed.connect_param(
+            param(PROBE, UnitParam::Cutoff),
+            EventOutputPort::new(NodeKey(1), 3),
         ),
-        "the signal has no event output 3"
+        Err(tutti_graph::WireError::Missing(
+            tutti_graph::MissingSource::EventPort {
+                node: NodeKey(1),
+                port: 3,
+                width: 1,
+            }
+        )),
     );
 }
 
@@ -670,10 +677,9 @@ fn removing_a_node_drops_its_param_edges() {
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "a", Unforkable(Signal { seed: 3 }));
     ed.insert(NodeKey(2), "b", Unforkable(Signal { seed: 5 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Q), ev(2));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
+    ed.connect_param(param(PROBE, UnitParam::Q), ev(2)).unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 64, 64);
 
@@ -726,8 +732,8 @@ fn a_fade_keeps_the_params_it_declares() {
         "once",
         Unforkable(Ramps::steps(&[(0, UnitParam::Cutoff, 1.0)])),
     );
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
 
@@ -765,8 +771,8 @@ fn a_parked_nodes_params_keep_stepping() {
         "once",
         Unforkable(Ramps::steps(&[(300, UnitParam::Cutoff, 7.0)])),
     );
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.set_mode(NodeKey(PROBE), tutti_graph::NodeMode::Bypassed)
         .expect("a node");
     ed.commit().expect("commits");
@@ -790,8 +796,8 @@ fn a_units_first_block_is_not_declicked() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 128, 64);
     assert!(
@@ -824,13 +830,13 @@ fn an_event_sources_held_value_survives_an_edit_to_its_node() {
     );
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 9 }));
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(at, ev(2));
+    assert!(!ed.spec().params.contains_key(&at));
+    ed.connect_param(at, ev(2)).unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 512, 64);
     assert_eq!(out[0][511], 500.0, "holding the step's value");
 
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Q), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Q), ev(1)).unwrap();
     ed.commit().expect("Q gains a source");
     let out = render(&mut exec, &mut ed, 512, 64);
     assert!(
@@ -872,7 +878,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
         }),
     );
     for p in [UnitParam::Cutoff, UnitParam::Q] {
-        ed.spec_mut().connect_param(param(PROBE, p), ev(2));
+        ed.connect_param(param(PROBE, p), ev(2)).unwrap();
     }
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 128, 64);
@@ -895,10 +901,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
         "a knob move is overridden"
     );
 
-    assert!(
-        ed.spec_mut()
-            .disconnect_param(param(PROBE, UnitParam::Cutoff), ev(2))
-    );
+    assert!(ed.disconnect_param(param(PROBE, UnitParam::Cutoff), ev(2)));
     ed.commit().expect("disconnects");
     let d = declick();
     let out = render(&mut exec, &mut ed, 2 * d, 64);
@@ -928,18 +931,19 @@ fn a_second_event_source_replaces_the_first() {
     ed.insert(NodeKey(2), "two", Unforkable(Hold { value: 2.0 }));
     ed.insert(NodeKey(3), "three", Unforkable(Hold { value: 3.0 }));
     let at = param(PROBE, UnitParam::Cutoff);
-    assert_eq!(ed.spec_mut().connect_param(at, ev(2)), None);
+    ed.connect_param(at, ev(2)).unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 64, 64);
     assert!(out[0].iter().all(|&x| x == 2.0));
 
+    ed.connect_param(at, ev(3)).unwrap();
     assert_eq!(
-        ed.spec_mut().connect_param(at, ev(3)),
-        Some(ev(2)),
-        "the first is handed back"
+        ed.spec().params[&at],
+        ev(3),
+        "the second replaces the first"
     );
     assert!(
-        !ed.spec_mut().disconnect_param(at, ev(2)),
+        !ed.disconnect_param(at, ev(2)),
         "node 2 no longer drives the port"
     );
     assert_eq!(ed.spec().params.get(&at).copied(), Some(ev(3)));
@@ -966,21 +970,23 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
         Unforkable(Ramps::steps(&[(0, UnitParam::Cutoff, 1.0)])),
     );
     ed.insert(NodeKey(4), "feed", Unforkable(Signal { seed: 2 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 256, 64);
 
     for lag in [100, 150] {
         ed.insert(NodeKey(3), "lag", Unforkable(Lag::new(lag)));
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(3), 0),
-            vec![Edge::Direct(PortSource::Node(port(4, 0)))],
-        );
-        ed.spec_mut().topology.edges.insert(
+            Edge::Direct(PortSource::Node(port(4, 0))),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(PROBE), 0),
-            vec![Edge::Direct(PortSource::Node(port(3, 0)))],
-        );
+            Edge::Direct(PortSource::Node(port(3, 0))),
+        ))
+        .unwrap();
         ed.commit().expect("the sibling moves the arrival");
         let delay = ed
             .base()
@@ -1043,8 +1049,8 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
             latency: 37,
         }),
     );
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let plan = ed.base().expect("a plan");
     assert_eq!(plan.total_latency(), Latency::new(Samples::new(37)));
@@ -1124,9 +1130,8 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
         "probe",
         ForkByClone(Probe::new(&cutoff, &q)),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
+    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+        .unwrap();
     ed.insert(
         NodeKey(2),
         "lane",
@@ -1137,7 +1142,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
         }),
     );
     for p in [UnitParam::Cutoff, UnitParam::Q] {
-        ed.spec_mut().connect_param(param(PROBE, p), ev(2));
+        ed.connect_param(param(PROBE, p), ev(2)).unwrap();
     }
     ed.commit().expect("commits");
     let live = render(&mut exec, &mut ed, 600, 64);
@@ -1162,8 +1167,8 @@ fn removing_a_modulated_target_leaves_the_graph_committable() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 3 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::of(0.0, 1.0))
         .expect("a range");
     ed.commit().expect("commits");
@@ -1188,8 +1193,8 @@ fn a_reprepare_hands_param_state_back() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 128, 64);
     ed.reprepare(prepare(128)).expect("reprepares");
@@ -1245,10 +1250,11 @@ fn render_moves(
             events: Vec::new(),
         }),
     );
-    ed.spec_mut().connect_param(
+    ed.connect_param(
         param(PROBE, UnitParam::Cutoff),
         EventOutputPort::new(NodeKey(1), 0),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let mut out = Vec::new();
     for &n in blocks {
@@ -1543,8 +1549,8 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
+    ed.connect_param(at, EventOutputPort::new(NodeKey(1), 0))
+        .unwrap();
     ed.commit().expect("commits");
     let curve = |f: u64| analytic(0.0, 2.0, shape, 1.0, 640.0, f);
     let mut frame = 0u64;
@@ -1651,8 +1657,8 @@ fn segment_then_ramp(at: u64, step_at: Option<u64>) -> (Vec<f32>, Vec<f32>) {
         "src",
         Unforkable(SegmentThenRamp { at, step_at }),
     );
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let mut run = |n: usize| -> Vec<f32> {
         let out = common::block(&mut exec, n, 3);
@@ -1754,8 +1760,8 @@ fn a_segment_replaces_the_base() {
             events: Vec::new(),
         }),
     );
-    ed.spec_mut()
-        .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 300, 37);
     for (f, &v) in out[0].iter().enumerate() {
@@ -1792,7 +1798,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: SEED }));
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.set_param_range(at, ParamRange::of(-2.0, 2.0))
         .expect("a range");
     ed.commit().expect("commits");
@@ -1865,7 +1871,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
         Unforkable(Ramps::steps(&[(0, UnitParam::Cutoff, 1.0)])),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 128, 64);
 
@@ -1903,7 +1909,7 @@ fn a_reordered_param_list_clamps_each_port_to_its_own_range() {
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
     let (cut_at, q_at) = (param(PROBE, UnitParam::Cutoff), param(PROBE, UnitParam::Q));
     for at in [cut_at, q_at] {
-        ed.spec_mut().connect_param(at, ev(1));
+        ed.connect_param(at, ev(1)).unwrap();
     }
     ed.set_param_range(cut_at, ParamRange::of(-1.0, 0.25))
         .expect("a range");
@@ -1979,8 +1985,8 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
+    ed.connect_param(at, EventOutputPort::new(NodeKey(1), 0))
+        .unwrap();
     ed.commit().expect("commits");
     // The ramp's value at absolute frame `f`: `Ramp::step`'s arithmetic in
     // `f64`, from the base (the port's value before its first event),
@@ -2273,19 +2279,18 @@ fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
         let s = NodeKey(400 + i as u64);
         ed.insert(s, "lag", Unforkable(Lag::new(lag)));
         // Fed by the first signal, so the sibling carries something.
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(s, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                NodeKey(100),
-                0,
-            )))],
-        );
-        ed.spec_mut().topology.edges.insert(
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(100), 0))),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(k, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(s, 0)))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(s, 0))),
+        ))
+        .unwrap();
     }
-    ed.spec_mut().topology.set_outputs(outputs.clone());
+    ed.wire_outputs(outputs.clone()).unwrap();
 
     let width = outputs.len();
     let mut rendered = Vec::new();
@@ -2302,14 +2307,14 @@ fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
             if e.when == step {
                 // One source per port: a later edge on the
                 // port replaces whichever it had.
-                ed.spec_mut().connect_param(at, from);
+                ed.connect_param(at, from).unwrap();
                 if let Some((lo, hi)) = e.range {
                     ed.set_param_range(at, ParamRange::of(lo, hi))
                         .expect("a range");
                 }
             }
             if e.until == step && e.until > e.when {
-                ed.spec_mut().disconnect_param(at, from);
+                ed.disconnect_param(at, from);
             }
         }
         for &(s, p, k, v) in &g.moves {
@@ -2403,7 +2408,7 @@ fn a_range_cell_handle_is_the_ports_own() {
         .param_range_cell(at)
         .expect("a staged node's port has its cell");
     for p in [at, q_at] {
-        ed.spec_mut().connect_param(p, ev(1));
+        ed.connect_param(p, ev(1)).unwrap();
     }
     ed.commit().expect("commits");
     assert!(ed.param_range_cell(param(PROBE, UnitParam::Wet)).is_none());
@@ -2477,11 +2482,10 @@ fn corners_skip_a_resend_at_any_block_size() {
         let probe = Probe::new(&cutoff, &q).with_corners();
         ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
         ed.insert(NodeKey(1), "src", Unforkable(source()));
-        ed.spec_mut()
-            .topology
-            .set_outputs((0..4).map(|c| PortSource::Node(port(PROBE, c))));
-        ed.spec_mut()
-            .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
+        ed.wire_outputs((0..4).map(|c| PortSource::Node(port(PROBE, c))))
+            .unwrap();
+        ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+            .unwrap();
         ed.commit().expect("commits");
         let mut corners = Vec::new();
         let mut done = 0;
@@ -2529,7 +2533,7 @@ fn an_effective_cell_reads_the_lane_and_then_no_lane() {
     let _ = render(&mut exec, &mut ed, 128, 64);
     assert_eq!(cell.current(), None, "nothing drives the port");
 
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.commit().expect("connects");
     let _ = render(&mut exec, &mut ed, 1024, 64);
     assert_eq!(cell.current(), Some(1.0), "the lane's last frame");
@@ -2545,7 +2549,7 @@ fn an_effective_cell_reads_the_lane_and_then_no_lane() {
     assert_eq!(cell.current(), Some(0.5), "held to the range");
     assert_eq!(cutoff.get(), 0.25);
 
-    assert!(ed.spec_mut().disconnect_param(at, ev(1)));
+    assert!(ed.disconnect_param(at, ev(1)));
     ed.commit().expect("disconnects");
     let _ = render(&mut exec, &mut ed, 1024, 64);
     assert_eq!(cell.current(), None, "the lane is gone");
@@ -2575,7 +2579,7 @@ fn a_nan_lane_is_never_latched_in_the_effective_cell() {
     );
     let at = param(PROBE, UnitParam::Cutoff);
     let cell = ed.param_effective_cell(at).expect("a staged node's port");
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.commit().expect("commits");
     let mut seen = Vec::new();
     for _ in 0..4 {
@@ -2593,7 +2597,7 @@ fn driven_probe(value: f64) -> (Editor, Executor, tutti_graph::EffectiveCell, Ce
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value }));
     let at = param(PROBE, UnitParam::Cutoff);
     let cell = ed.param_effective_cell(at).expect("a staged port");
-    ed.spec_mut().connect_param(at, ev(1));
+    ed.connect_param(at, ev(1)).unwrap();
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 1024, 64);
     assert_eq!(cell.current(), Some(value as f32 as f64), "driven");
@@ -2614,10 +2618,7 @@ fn a_driven_unit_replaced_by_an_undriven_one_reads_the_base() {
         let (c2, q2) = (Cell::new(0.5), Cell::new(0.5));
         ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
             .expect("replaces");
-        assert!(
-            ed.spec_mut()
-                .disconnect_param(param(PROBE, UnitParam::Cutoff), ev(1))
-        );
+        assert!(ed.disconnect_param(param(PROBE, UnitParam::Cutoff), ev(1)));
         ed.commit().expect("commits");
         let _ = render(&mut exec, &mut ed, 1024, 64);
         assert_eq!(cell.current(), None, "no lane after {fade:?}");

@@ -7,6 +7,7 @@
 //! The renders are not compared: the figures are `bus_edges.rs`'s and
 //! `mode.rs`'s. This pins the cost.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -75,7 +76,7 @@ impl Node for Downmixer {
 fn rig(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     common::pooled_fresh(&mut exec, workers);
-    ed.spec_mut().topology.inputs = ChannelLayout::from_count(6);
+    ed.resize_inputs(ChannelLayout::from_count(6));
     let kinds = [
         (
             1,
@@ -97,10 +98,11 @@ fn rig(workers: usize) -> (Editor, Executor) {
     ed.insert(key(4), "down", Unforkable(Downmixer { latency: 0 }));
     for n in [1, 3, 4] {
         for c in 0..6 {
-            ed.spec_mut().topology.connect(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(key(n), c),
                 Edge::Direct(PortSource::MainInput(c)),
-            );
+            ))
+            .unwrap();
         }
     }
     ed.connect_bus(
@@ -111,14 +113,15 @@ fn rig(workers: usize) -> (Editor, Executor) {
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");
     ed.set_mix(key(4), Mix::DRY).expect("a mix");
     let out = |n: u64, port: u16| PortSource::Node(OutputPort::new(key(n), port));
-    ed.spec_mut().topology.set_outputs(vec![
+    ed.wire_outputs(vec![
         out(2, 0),
         out(2, 1),
         out(3, 0),
         out(3, 1),
         out(4, 0),
         out(4, 1),
-    ]);
+    ])
+    .unwrap();
     ed.commit().expect("compiles");
     exec.apply_pending();
     (ed, exec)

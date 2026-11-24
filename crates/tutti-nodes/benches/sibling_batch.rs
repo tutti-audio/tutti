@@ -36,6 +36,7 @@
 
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::NodeKey;
@@ -344,13 +345,14 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
         MaxBlock::of(Samples::new(frames)),
     ));
     let w = kind.width();
-    ed.spec_mut().topology.inputs = ChannelLayout::try_from(w).expect("a test width is small");
+    ed.resize_inputs(ChannelLayout::try_from(w).expect("a test width is small"));
     let mut outputs = Vec::with_capacity(members * w);
     let feed = |ed: &mut Editor, node: NodeKey, port: u16, c: usize| {
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(node, port),
-            vec![Edge::Direct(PortSource::MainInput(c as u16))],
-        );
+            Edge::Direct(PortSource::MainInput(c as u16)),
+        ))
+        .unwrap();
     };
     match variant {
         Variant::None => {
@@ -411,7 +413,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
             }
         }
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
