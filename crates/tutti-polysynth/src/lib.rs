@@ -55,7 +55,7 @@
 //! );
 //!
 //! // Into the graph: no audio input, stereo out, one MIDI event input (wire a
-//! // clip or a keyboard's queue node to it with `GraphSpec::connect_events`).
+//! // clip or a keyboard's queue node to it with `Editor::connect_events`).
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;

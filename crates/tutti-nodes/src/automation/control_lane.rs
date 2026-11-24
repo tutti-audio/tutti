@@ -505,7 +505,7 @@ impl ForeignLaneControls {
 /// program, and the cells of the target it reads.
 ///
 /// The lane sends `param` (a [`UnitParam`], which is its index-0 address, a [`UnitAddr`], or a
-/// `ParamKey::addr()`) to its param port, wired with `GraphSpec::connect_param`:
+/// `ParamKey::addr()`) to its param port, wired with `Editor::connect_param`:
 /// the program's values are the param's raw values ([`ParamSegment::unit`]).
 #[derive(Debug)]
 pub struct UnitLaneConfig {
