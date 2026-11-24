@@ -14,8 +14,8 @@ use crate::compile::ids::{
     TableSlice,
 };
 use crate::compile::plan::{
-    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, InputBound,
-    Op, ParamPortOp, Span, Value,
+    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, GainPortOp, InputBound, Op,
+    ParamPortOp, Span, Value,
 };
 use crate::compile::program::{ARef, ByValue, Capacities, ERef, Program};
 use crate::compile::shapes::Units;
@@ -62,8 +62,8 @@ fn event_feedback_key(
 }
 
 /// The id of the feedback keyed `key` among the sorted feedback `list`.
-fn feedback_in<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackSpec>) -> F {
-    list.search_by_key(&key, |f| f.key)
+fn feedback_in<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
+    list.search_by_key(&key, |k| *k)
         .expect("feedback keys are collected before they are read")
 }
 
@@ -140,8 +140,7 @@ impl<'a> Emitter<'a> {
     /// value once, in channel order.
     fn new(graph: &'a ValidGraph, units: &'a Units, timing: &'a Timing, prepare: &Prepare) -> Self {
         let topology = graph.topology();
-        // Feedback slots follow the null slot, in key order.
-        let audio_feedback: Table<AudioFeedbackId, FeedbackSpec> = topology
+        let audio_feedback: Table<AudioFeedbackId, FeedbackKey> = topology
             .edges
             .values()
             .flatten()
@@ -151,13 +150,8 @@ impl<'a> Emitter<'a> {
             })
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .enumerate()
-            .map(|(i, key)| FeedbackSpec {
-                key,
-                slot: 1 + i as u32,
-            })
             .collect();
-        let event_feedback: Table<EventFeedbackId, FeedbackSpec> = graph
+        let event_feedback: Table<EventFeedbackId, FeedbackKey> = graph
             .events()
             .iter()
             .flat_map(|(&at, sources)| {
@@ -169,11 +163,6 @@ impl<'a> Emitter<'a> {
             .map(|(at, from, delay)| event_feedback_key(graph, at, from, delay))
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .enumerate()
-            .map(|(i, key)| FeedbackSpec {
-                key,
-                slot: 1 + i as u32,
-            })
             .collect();
         let channels: Vec<u16> = topology
             .edges
@@ -241,7 +230,7 @@ impl<'a> Emitter<'a> {
             .program
             .event_feedback
             .iter()
-            .map(|f| self.feedback_capacity(&f.key))
+            .map(|key| self.feedback_capacity(key))
             .collect();
         let mut value_readers: Vec<OpId> = Vec::new();
         let mut values = |written: Vec<Written>| -> Vec<Value<()>> {
@@ -249,7 +238,7 @@ impl<'a> Emitter<'a> {
                 .into_iter()
                 .map(|w| Value {
                     slot: (),
-                    writer: w.writer.expect("every value is written").get(),
+                    writer: w.writer.expect("every value is written"),
                     readers: Span::extend(&mut value_readers, w.readers),
                 })
                 .collect()
@@ -462,7 +451,7 @@ impl<'a> Emitter<'a> {
         let delay = self.program.delays.push(DelaySpec { key, len: by });
         let dst = self.new_audio();
         let op = self.push(Op::Delay {
-            delay: delay.get(),
+            delay,
             src: v.into(),
             dst: dst.into(),
         });
@@ -500,7 +489,7 @@ impl<'a> Emitter<'a> {
         let delay = self.program.delays.push(DelaySpec { key, len: by });
         let dst = self.new_event(capacity);
         let op = self.push(Op::EventDelay {
-            delay: delay.get(),
+            delay,
             src: v.into(),
             dst: dst.into(),
         });
@@ -528,7 +517,7 @@ impl<'a> Emitter<'a> {
             .map(|_| self.new_event(port).into())
             .collect();
         let node = Op::Node {
-            unit: n.get(),
+            unit: n,
             audio_in: Span::extend(&mut self.program.audio_list, ain.iter().copied()),
             audio_out: Span::extend(&mut self.program.audio_list, aout),
             event_in: Span::extend(&mut self.program.event_list, ein.iter().copied()),
@@ -659,11 +648,7 @@ impl<'a> Emitter<'a> {
                 let bound = shape
                     .event_input_capacity
                     .filter(|_| !lone_within_bound)
-                    // The public bound names its unit by raw index.
-                    .map(|capacity| InputBound {
-                        capacity,
-                        unit: n.get(),
-                    });
+                    .map(|capacity| InputBound { capacity, unit: n });
                 self.merge_tree(refs, bound)
             })
             .collect()
@@ -681,7 +666,7 @@ impl<'a> Emitter<'a> {
             .iter()
             .enumerate()
             .map(|(k, &param)| (k as u16, param));
-        let mix = std::iter::once((ParamPortOp::MIX_PORT, NodeMix::ADDR));
+        let mix = std::iter::once((ParamPortOp::<ERef>::MIX_PORT, NodeMix::ADDR));
         declared
             .chain(mix)
             .filter_map(|(port, param)| {
@@ -835,7 +820,7 @@ impl<'a> Emitter<'a> {
                         src = self.align_audio(v, d, key);
                     }
                     _ => {
-                        delay = Some(self.program.delays.push(DelaySpec { key, len: d }).get());
+                        delay = Some(self.program.delays.push(DelaySpec { key, len: d }));
                     }
                 }
             }
@@ -885,7 +870,7 @@ impl<'a> Emitter<'a> {
             let srcs_span = Span::extend(&mut self.program.audio_list, srcs.iter().copied());
             self.push_reading(
                 Op::Tap {
-                    tap: tap.get(),
+                    tap,
                     srcs: srcs_span,
                 },
                 &srcs,
@@ -940,10 +925,7 @@ impl<'a> Emitter<'a> {
                 )),
                 _ => carried,
             };
-            let op = self.push(Op::EventTap {
-                tap: index.get(),
-                src,
-            });
+            let op = self.push(Op::EventTap { tap: index, src });
             self.read_eref(src, op);
         }
     }
@@ -971,7 +953,7 @@ impl<'a> Emitter<'a> {
             let srcs_span = Span::extend(&mut self.program.audio_list, srcs.iter().copied());
             self.push_reading(
                 Op::Meter {
-                    meter: meter.get(),
+                    meter,
                     srcs: srcs_span,
                 },
                 &srcs,
@@ -989,7 +971,7 @@ impl<'a> Emitter<'a> {
             .program
             .audio_feedback
             .iter_enumerated()
-            .map(|(feedback, spec)| match spec.key {
+            .map(|(feedback, key)| match *key {
                 FeedbackKey::Audio { from, .. } => (feedback, from),
                 FeedbackKey::Event { .. } => unreachable!("audio feedback keys are audio"),
             })
@@ -999,7 +981,7 @@ impl<'a> Emitter<'a> {
                 .audio_out(from)
                 .expect("a feedback source is emitted before its capture");
             let op = self.push(Op::Capture {
-                feedback: feedback.get(),
+                feedback,
                 src: src.into(),
             });
             self.read_audio(src, op);
@@ -1008,7 +990,7 @@ impl<'a> Emitter<'a> {
             .program
             .event_feedback
             .iter_enumerated()
-            .map(|(feedback, spec)| match spec.key {
+            .map(|(feedback, key)| match *key {
                 FeedbackKey::Event { from, .. } => (feedback, from),
                 FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
             })
@@ -1016,7 +998,7 @@ impl<'a> Emitter<'a> {
         for (feedback, from) in events {
             let src = self.event_source(from);
             let op = self.push(Op::EventCapture {
-                feedback: feedback.get(),
+                feedback,
                 src: src.into(),
             });
             self.read_event(src, op);
@@ -1129,9 +1111,7 @@ impl<'a> Emitter<'a> {
                     .fold(EventSlotCapacity::NONE, |acc, r| {
                         acc.plus(match *r {
                             ERef::Val(v) => self.program.sizing.values[v],
-                            ERef::Fb(f) => {
-                                self.feedback_capacity(&self.program.event_feedback[f].key)
-                            }
+                            ERef::Fb(f) => self.feedback_capacity(&self.program.event_feedback[f]),
                             ERef::Empty => EventSlotCapacity::NONE,
                         })
                     })

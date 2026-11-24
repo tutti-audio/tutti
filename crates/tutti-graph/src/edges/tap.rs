@@ -729,7 +729,6 @@ impl<F: Float> Source for TapReader<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Id;
     use crate::exec::arena::Arena;
 
     /// **A closed writer ends its reader**: the reader drains what was
@@ -867,13 +866,13 @@ mod tests {
         // Not representable in `f32`: a narrowing would be visible.
         let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
         arena
-            .slot_mut(AudioSlotId::new(0), FRAMES)
+            .slot_mut(AudioSlotId::ZERO, FRAMES)
             .copy_from_slice(&block);
         let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples::new(1024));
         tap_op::<f64, _>(
             &mut writer,
             &arena,
-            &[AudioSlotId::new(0)],
+            &[AudioSlotId::ZERO],
             Frame::ZERO,
             FRAMES,
         );

@@ -42,6 +42,23 @@ pub fn noise<F: Float>(seed: u32, len: usize) -> Vec<F> {
         .collect()
 }
 
+/// The next value of `rng`, uniform over `[lo, hi)` on the `2^-MANTISSA_DIGITS` grid of `F`.
+///
+/// A draw keeps the generator's whole 64-bit word, so an `f64` figure has 53 random bits
+/// where [`Noise`] has 24.
+pub fn uniform<F: Float>(rng: &mut SplitMix64, lo: F, hi: F) -> F {
+    lo + (hi - lo) * F::from_fraction_bits(rng.next_u64())
+}
+
+/// `len` samples of [`uniform`]`(-1, 1)` from [`SplitMix64::new`]`(seed)`: white noise of
+/// variance 1/3 at the full precision of `F`.
+pub fn uniform_noise<F: Float>(seed: u64, len: usize) -> Vec<F> {
+    let mut rng = SplitMix64::new(seed);
+    (0..len)
+        .map(|_| uniform(&mut rng, F::from_f64(-1.0), F::ONE))
+        .collect()
+}
+
 /// A 64-bit FNV-1a hash, fed bytes or the little-endian bits of a number.
 ///
 /// Feeding is order-sensitive and chunk-insensitive: `f32s(&[a, b])` is

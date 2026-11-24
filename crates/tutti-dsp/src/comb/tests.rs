@@ -6,11 +6,7 @@ use tutti_units::Seconds;
 /// The magnitude of the DTFT `sum h[n] e^{-j w n}` of an impulse response at the angular
 /// frequency `w`, in radians a frame.
 fn magnitude(h: &[f64], w: f64) -> f64 {
-    let (re, im) = h.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &x)| {
-        let a = w * n as f64;
-        (re + x * a.cos(), im - x * a.sin())
-    });
-    re.hypot(im)
+    tutti_fixtures::signal::dtft_magnitude(h, w)
 }
 
 fn impulse_response(form: CombForm, delay: usize, gain: f64, len: usize) -> Vec<f64> {
