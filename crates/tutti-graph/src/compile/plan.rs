@@ -600,7 +600,7 @@ pub enum Op<A, E> {
         /// form, as for `Sum`.
         dst: A,
         /// One entry per addend, in the same order (into
-        /// [`Plan::sum_lanes`]): the edge whose gain weights it, or `None`
+        /// the plan's sum lanes): the edge whose gain weights it, or `None`
         /// for a plain addend (an edge with no entry, or the previous result
         /// of a chain).
         lanes: Span<Option<EdgeId>>,
@@ -1485,12 +1485,6 @@ impl Plan {
         &self.program.event_list[span.range()]
     }
 
-    /// What this plan was compiled for. An executor refuses a plan prepared
-    /// for anything else.
-    pub fn prepare(&self) -> &Prepare {
-        &self.prepare
-    }
-
     /// The ops, in serial order.
     pub fn ops(&self) -> &[Op<AudioSlotId, EventSlotId>] {
         self.program.ops.as_slice()
@@ -1504,12 +1498,6 @@ impl Plan {
     /// The flattened event slot lists [`Op`] spans index.
     pub fn event_list(&self) -> &[EventSlotId] {
         &self.program.event_list
-    }
-
-    /// The flattened lane lists of [`Op::WeightedSum`]: per addend, the edge
-    /// whose gain weights it, or `None` for a plain addend.
-    pub fn sum_lanes(&self) -> &[Option<EdgeId>] {
-        &self.program.sum_lanes
     }
 
     /// The ops each op waits for: the dependency DAG, each edge from an
@@ -1558,15 +1546,6 @@ impl Plan {
         self.unit(port.node)
             .filter(|u| port.port < u.shape.event_out)
             .and_then(|u| u.shape.event_capacity)
-    }
-
-    /// What the node of event input `port` declared it accepts per block
-    /// ([`Shape::event_input_capacity`]): `None` for unbounded, or for an input
-    /// this plan does not have.
-    pub fn event_input_capacity(&self, port: EventInputPort) -> Option<NonZeroU32> {
-        self.unit(port.node)
-            .filter(|u| port.port < u.shape.event_in)
-            .and_then(|u| u.shape.event_input_capacity)
     }
 
     /// Whether event output port `port` writes param events
@@ -1667,11 +1646,6 @@ impl Plan {
         self.units.as_slice()
     }
 
-    /// The unit store length this plan needs.
-    pub fn store_len(&self) -> u32 {
-        self.store_len
-    }
-
     /// Main input width.
     pub fn main_inputs(&self) -> u16 {
         self.main_inputs
@@ -1761,15 +1735,6 @@ impl Plan {
             .map_or(Samples::ZERO, |d| d.len)
     }
 
-    /// The PDC delay of events on `key`, or zero.
-    pub fn event_delay(&self, key: EventDelayKey) -> Samples {
-        self.program
-            .event_delays
-            .iter()
-            .find(|d| d.key == key)
-            .map_or(Samples::ZERO, |d| d.len)
-    }
-
     /// Which channels of `key` were aliased in place.
     pub fn in_place(&self, key: NodeKey) -> InPlaceMask {
         let Some((pos, _)) = self.units.iter_enumerated().find(|(_, u)| u.key == key) else {
@@ -1825,14 +1790,6 @@ pub struct Delta {
     pub cuts: Vec<Placement>,
     /// The store length the new plan needs.
     pub store_len: u32,
-}
-
-impl Delta {
-    /// Whether no unit changes.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.insert.is_empty() && self.retire.is_empty() && self.replace.is_empty()
-    }
 }
 
 #[cfg(test)]
