@@ -37,7 +37,7 @@
 //! `cargo xtask write-public-items` rewrites them from the tree. A crate with no file has
 //! no rows.
 
-mod scan;
+pub(in crate::gates) mod scan;
 #[cfg(test)]
 mod tests;
 

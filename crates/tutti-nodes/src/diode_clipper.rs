@@ -103,7 +103,7 @@ control_set! {
     DiodeClipperSet(_s): DiodeClipperControls = DiodeClipperControls::DEFAULT;
     live: (all);
     Cutoff => Hz = cutoff,
-    GainDb => Db = drive via ClipperDrive;
+    GainDb => Db = drive via ClipperDrive { no_ring };
 
     fn defaults(&self) -> DiodeClipperControls {
         DiodeClipperControls::DEFAULT
@@ -234,6 +234,26 @@ mod tests {
                 .cutoff(Hz::new(cutoff))
                 .drive(ClipperDrive::of(Db::new(drive))),
         ))
+    }
+
+    /// The tail reads the cutoff and not the drive: moving the drive alone leaves the reported
+    /// tail, which is what the drive's `no_ring` flag promises.
+    #[test]
+    fn the_drive_does_not_change_the_reported_tail() {
+        let impulse = tutti_fixtures::signal::impulse::<f32>(tutti_units::Samples::new(64));
+        let reported = |drive: f64| {
+            let mut n = node(1_000.0, drive);
+            crate::test_support::reported_tail(&mut n, &[&impulse])
+        };
+        assert_eq!(
+            crate::test_support::non_ringing(&DiodeClipperSet),
+            [tutti_units::UnitAddr::first(UnitParam::GainDb)]
+        );
+        let base = reported(0.0);
+        assert!(matches!(base, Some(Tail::Finite(_))), "{base:?}");
+        for drive in [-40.0, -6.0, 6.0, 24.0] {
+            assert_eq!(reported(drive), base, "{drive} dB");
+        }
     }
 
     /// The impulse of a linear-range input, at the highest cutoff, peaks at the oversampler's
