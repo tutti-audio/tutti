@@ -71,12 +71,15 @@ fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> LayerClock {
 fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
     let (mut s, mut side) = rig(1);
     let (cutoff, _, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
-    // The route's depth is an `f32` in the program: its offsets carry that
-    // rounding.
+    // The route's depth is the lane's cell, an `f32` in the program: its
+    // offsets carry that rounding.
     let offset = |s: &tutti_session::DetachedSession| {
-        program(s, cutoff).layers()[0]
-            .amount
-            .offset(0.5f32, 1_000.0)
+        let amount = program(s, cutoff).layers()[0].amount;
+        tutti_modulation::Amount {
+            depth: s.mods().route(route).expect("the route").depth,
+            ..amount
+        }
+        .offset(0.5f32, 1_000.0)
     };
     // The depth is stored as an `f32`: a few ulps of the figure's own size.
     let near = |got: f64, want: f64| {

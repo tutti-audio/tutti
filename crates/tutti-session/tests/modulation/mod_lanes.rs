@@ -30,9 +30,9 @@ use tutti_modulation::{
     RouteKey, RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
+use tutti_nodes::{Feed, ModDelayConfig, ModHost, PhaserConfig, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput, ModKeys,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput,
     ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort,
     PHASES, ParamRef, ParamTarget, PhaseCx, Problem, Replacement, RouteSpec, Session, SessionEvent,
     TargetName, declare_targets,
@@ -630,7 +630,7 @@ struct HostKeys {
     node: Cell<Option<NodeKey>>,
 }
 
-impl ModKeys for HostKeys {
+impl ModHost for HostKeys {
     fn node(&self, target: u64) -> Option<NodeKey> {
         (target == self.bits).then(|| self.node.get()).flatten()
     }
@@ -654,7 +654,7 @@ fn host_update(
         RouteDecl {
             source: SourceKey(1),
             to: RouteTarget::Param(target),
-            depth: Bipolar::of(0.1),
+            depth: tutti_rt::Param::new(Bipolar::of(0.1)),
             polarity: tutti_modulation::Polarity::Bipolar,
             curve: tutti_modulation::Law::Linear,
         },

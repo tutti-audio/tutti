@@ -18,16 +18,16 @@ use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort,
-    ForkByClone, NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
+    ForkByClone, NodeMix, ParamIn, ParamRange, PassError, PortSink, ScheduleError,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
-    Compiled, ControlProgram, Declarations, LayerId, ProgramCompileError, RouteDecl, RouteKey,
-    RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
-    TargetKey, compile, layer_id,
+    Compiled, ControlProgram, Declarations, ProgramCompileError, RouteDecl, RouteKey, RouteTarget,
+    SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey,
+    compile,
 };
-use tutti_rt::{Param, ParamCell};
-use tutti_units::{At, Bipolar, ParamAddr, ParamId};
+use tutti_rt::ParamCell;
+use tutti_units::{At, ParamAddr, ParamId};
 
 use crate::automation::{
     ControlLaneNode, ForeignLaneConfig, ForeignLaneControls, LaneControls, UnitLaneConfig,
@@ -36,93 +36,78 @@ use crate::signal::{
     EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
 };
 
-/// A `ModHost` resolves the host's modulation keys to graph nodes.
+/// What the host's keys name: the one question the reconciler asks of a host.
 ///
 /// The keys in [`Declarations`] are the host's (an entity's bits, a hash);
-/// the graph's are [`NodeKey`]s, and a native target's knob is a cell the
-/// host holds (its node's `ParamSet`). [`Modulation::apply`] asks on every
-/// call, so a key that names another node than last time (a rebind) is
+/// the graph's are [`NodeKey`]s and [`EdgeId`]s. [`Modulation::apply`] asks on
+/// every call, so a key that names another node than last time (a rebind) is
 /// followed: its lane, or its source's input, is rebuilt.
 pub trait ModHost {
-    /// Where `target`'s lane delivers. `None` while the target's node is not
-    /// in the graph: the target gets no lane yet (and loses one it had), and
-    /// [`Applied::unresolved_targets`] lists it.
-    fn target(&self, target: TargetKey) -> Option<Target>;
+    /// The node a target's key names (`TargetKey::Param`, `TargetKey::Mix`).
+    /// `None` while the target's node is not in the graph: the target gets no
+    /// lane yet (and loses one it had), and [`Applied::unresolved_targets`]
+    /// lists it.
+    fn node(&self, target: u64) -> Option<NodeKey>;
+
+    /// The edge a target's key names (`TargetKey::Edge`), whose gain the
+    /// target modulates. A host with no edge targets leaves the default,
+    /// which names none.
+    fn edge(&self, target: u64) -> Option<EdgeId> {
+        let _ = target;
+        None
+    }
 
     /// What feeds signal source `source`'s node. `None`, or a feed naming a
     /// node not in the graph (removed since): a follower gets no node yet
     /// ([`Applied::unresolved_sources`]); a note envelope gets one with
     /// nothing on its MIDI input.
     fn feed(&self, source: SourceKey) -> Option<Feed>;
-
-    /// The cell holding route `route`'s depth, when the host moves it
-    /// between applies: the lane reads the depth from it at every
-    /// evaluation, so a depth edit republishes no program. `None`, the
-    /// default: the depth the route was declared with is the compiled one.
-    /// Only a route into a target (not a depth route) takes a cell.
-    fn depth(&self, route: RouteKey) -> Option<Param<Bipolar>> {
-        let _ = route;
-        None
-    }
 }
 
-/// Where a target's lane delivers ([`ModHost::target`]).
-#[derive(Clone, Debug)]
-pub enum Target {
-    /// A native param port (`TargetKey::param` a `ParamAddr::Unit` or
-    /// `ParamAddr::Indexed`; a host resolves both, `ParamAddr::as_unit`): the
-    /// node, and its own `Param` cell for the param (`ParamSet::cell`), the
-    /// lane's knob. `None`: no knob, the base is automation
-    /// alone.
-    Native {
-        /// The node the param is on.
-        node: NodeKey,
-        /// The node's cell for the param.
-        knob: Option<ParamCell>,
-    },
-    /// A foreign parameter (`TargetKey::param` a `ParamAddr::Id`, a hosted
-    /// plugin's): the event input of `node` the lane feeds, and the knob the
-    /// lane's own cell starts at (the plugin's value as the host mirrors
-    /// it). Later writes go through the lane's
-    /// [`LaneControls::store`] ([`Modulation::lane`]).
-    Foreign {
-        /// The node hosting the parameter.
-        node: NodeKey,
-        /// Which of its event inputs takes parameter events.
-        port: u16,
-        /// The knob's first value.
-        knob: Option<f64>,
-    },
-    /// The gain of a graph edge (`TargetKey::Edge`): the edge the host's key
-    /// names. The lane drives it through
+/// What a target's lane drives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Drive {
+    /// A param port: a native param of a node, or the node's mix at
+    /// [`NodeMix::ADDR`], whose lane clamps to the port's range (narrowed to
+    /// `0..=1` for a mix). The knob is the node's own cell for the param (the
+    /// host's, [`Modulation::apply`]'s `cell`), as the mix's is the node's mix
+    /// cell ([`Editor::mix_cell`]): the base the lane's offsets add to,
+    /// written by whoever sets the param, so one cell has one writer. A route
+    /// modulates around the base and its removal returns to it.
+    Port(ParamIn),
+    /// The gain of a graph edge: the lane drives it through
     /// [`GraphSpec::connect_edge_gain`](tutti_graph::GraphSpec::connect_edge_gain)
     /// and clamps to the entry's range. Its knob is the edge's own gain cell
-    /// ([`Editor::edge_gain_cell`]), as a native target's is the node's
-    /// `Param`: the base the lane's offsets add to, in the gain's own units
-    /// (`1.0` is unity), written by whoever sets the edge's gain
-    /// (`Editor::set_edge_gain`, [`LaneControls::store`]: one cell, so one
-    /// writer). A route modulates around the base and its removal returns to
-    /// it. The edge's entry is made when the target first resolves (an edge
-    /// with none is a plain addend), and the lane binds to the cells the entry
-    /// made.
-    Edge {
-        /// The edge.
-        id: EdgeId,
+    /// ([`Editor::edge_gain_cell`]), in the gain's own units (`1.0` is
+    /// unity). The edge's entry is made when the target first resolves (an
+    /// edge with none is a plain addend), and the lane binds to the cells the
+    /// entry made.
+    Gain(EdgeId),
+    /// A hosted plugin's parameter: the event input of its node the lane
+    /// feeds. The lane's own cell starts at the plugin's value; later writes
+    /// go through the lane's [`LaneControls::store`] ([`Modulation::lane`]).
+    Plugin {
+        /// The event input of the node hosting the parameter.
+        input: EventInputPort,
+        /// The parameter.
+        id: ParamId,
     },
-    /// The mix of a node (`TargetKey::Mix`): the node's blend with its aligned
-    /// input. The lane drives it
-    /// through [`GraphSpec::connect_param`](tutti_graph::GraphSpec::connect_param)
-    /// at [`NodeMix::ADDR`] and clamps to the port's range (narrowed to
-    /// `0..=1`). Its knob is the node's own mix cell
-    /// ([`Editor::mix_cell`]), as an edge's is its gain cell: the base the
-    /// lane's offsets add to, written by whoever sets the mix
-    /// ([`Editor::set_mix`], [`LaneControls::store`]: one cell, so one
-    /// writer). A route modulates around the base and its removal returns to
-    /// it. The lane binds to the cell the node made when it was staged.
-    Mix {
-        /// The node.
-        node: NodeKey,
-    },
+}
+
+impl Drive {
+    /// The node whose input the lane's value reaches: the param's node, the
+    /// node of the port an edge goes into, and none for an edge into a main
+    /// output channel (nothing a node reads).
+    fn node(&self) -> Option<NodeKey> {
+        match self {
+            Self::Port(at) => Some(at.node),
+            Self::Plugin { input, .. } => Some(input.node()),
+            Self::Gain(id) => match id.sink {
+                PortSink::Port(at) => Some(at.node()),
+                PortSink::Output(_) => None,
+            },
+        }
+    }
 }
 
 /// What feeds a signal source's node ([`ModHost::feed`]).
@@ -150,11 +135,6 @@ pub enum ReconcileError {
         /// The route.
         route: RouteKey,
     },
-    /// The host resolved a native (`Unit` or `Indexed`) target to a foreign parameter,
-    /// or a `ParamAddr::Id` one to a native port, or an edge key to a node's
-    /// param, or a mix key to anything but a mix (or the other way round).
-    #[error("target {0:?}: resolved to the other kind")]
-    WrongTarget(TargetKey),
     /// A native target whose node does not declare the param.
     #[error("target {0:?}: its node does not declare it")]
     NoSuchParam(TargetKey),
@@ -217,124 +197,30 @@ pub struct Applied {
     pub resync: bool,
 }
 
-/// A target resolved and checked: what its lane is built from.
+/// A target resolved: what its lane drives and the cells it starts from.
 #[derive(Clone, Debug)]
-enum Bind {
-    Native {
-        at: ParamIn,
-        knob: Option<ParamCell>,
-        /// The node's unit generation: a new unit has new cells.
-        generation: u32,
-    },
-    Foreign {
-        to: EventInputPort,
-        id: ParamId,
-        knob: Option<f64>,
-        generation: u32,
-    },
-    Edge {
-        id: EdgeId,
-        /// The edge's live cells, `None` while the apply has yet to declare
-        /// its entry: it does, before it builds the lane.
-        cells: Option<EdgeCells>,
-    },
-    Mix {
-        /// The node's mix port.
-        at: ParamIn,
-        /// The unit's live mix cell: a node removed and inserted again has
-        /// a new one.
-        knob: ParamCell,
-        /// Its live range cell.
-        range: ParamRangeCell,
-    },
+struct Bound {
+    drive: Drive,
+    /// The node's unit generation (a new unit has new cells); 0 until the
+    /// editor has been asked.
+    generation: u32,
+    /// The lane's base: the param's own cell, the node's mix cell, or the
+    /// edge's gain cell. `None`: no knob, the base is automation alone.
+    knob: Option<ParamCell>,
+    /// A plugin lane's first value.
+    seed: Option<f64>,
 }
 
-/// An edge's live gain cell and range cell: a new entry has new ones.
-#[derive(Clone, Debug)]
-struct EdgeCells {
-    knob: ParamCell,
-    range: ParamRangeCell,
-}
-
-impl EdgeCells {
-    /// `id`'s cells, once its entry is declared.
-    fn of<F: Float>(editor: &Editor<F>, id: EdgeId) -> Option<Self> {
-        Some(Self {
-            knob: editor.edge_gain_cell(id)?,
-            range: editor.edge_gain_range_cell(id)?,
-        })
-    }
-}
-
-impl Bind {
+impl Bound {
     /// Whether a lane built for `self` still serves `other`.
     fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Native {
-                    at,
-                    knob,
-                    generation,
-                },
-                Self::Native {
-                    at: a2,
-                    knob: k2,
-                    generation: g2,
-                },
-            ) => {
-                at == a2
-                    && generation == g2
-                    && match (knob, k2) {
-                        (Some(a), Some(b)) => a.ptr_eq(b),
-                        (None, None) => true,
-                        _ => false,
-                    }
+        self.drive == other.drive
+            && self.generation == other.generation
+            && match (&self.knob, &other.knob) {
+                (Some(a), Some(b)) => a.ptr_eq(b),
+                (None, None) => true,
+                _ => false,
             }
-            (
-                Self::Foreign {
-                    to, id, generation, ..
-                },
-                Self::Foreign {
-                    to: t2,
-                    id: i2,
-                    generation: g2,
-                    ..
-                },
-            ) => to == t2 && id == i2 && generation == g2,
-            (
-                Self::Edge {
-                    id,
-                    cells: Some(cells),
-                },
-                Self::Edge {
-                    id: i2,
-                    cells: Some(c2),
-                },
-            ) => id == i2 && cells.range.same_cell(&c2.range),
-            (
-                Self::Mix { at, knob, range },
-                Self::Mix {
-                    at: a2,
-                    knob: k2,
-                    range: r2,
-                },
-            ) => at == a2 && knob.ptr_eq(k2) && range.same_cell(r2),
-            _ => false,
-        }
-    }
-
-    /// The node whose input the lane's value reaches: the param's node, the
-    /// node of the port an edge goes into, and none for an edge into a
-    /// main output channel (nothing a node reads).
-    fn node(&self) -> Option<NodeKey> {
-        match self {
-            Self::Native { at, .. } | Self::Mix { at, .. } => Some(at.node),
-            Self::Foreign { to, .. } => Some(to.node()),
-            Self::Edge { id, .. } => match id.sink {
-                PortSink::Port(at) => Some(at.node()),
-                PortSink::Output(_) => None,
-            },
-        }
     }
 }
 
@@ -362,7 +248,7 @@ struct Lane {
     /// replaced (or removed) it at its key.
     generation: u32,
     controls: Controls,
-    bind: Bind,
+    bound: Bound,
     /// The program last published to it.
     program: ControlProgram,
     /// The range last stored, as bits.
@@ -458,10 +344,10 @@ struct SourcePlan {
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
 /// use tutti_buffers::ChannelLayout;
-/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
-/// use tutti_graph::NodeKey;
-/// use tutti_units::{Bipolar, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
-/// use tutti_rt::{Param, ParamCell};
+/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType};
+/// use tutti_graph::{NodeKey, ParamIn};
+/// use tutti_units::{Bipolar, Hz, ParamAddr, ParamId, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
+/// use tutti_rt::Param;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let filter = NodeKey(1);
@@ -476,16 +362,19 @@ struct SourcePlan {
 /// )
 /// .controls;
 ///
-/// struct Host(NodeKey, Option<ParamCell>);
+/// struct Host(NodeKey);
 /// impl ModHost for Host {
-///     fn target(&self, t: TargetKey) -> Option<Target> {
-///         (t.node() == Some(1)).then(|| Target::Native { node: self.0, knob: self.1.clone() })
+///     fn node(&self, target: u64) -> Option<NodeKey> {
+///         (target == 1).then_some(self.0)
 ///     }
 ///     fn feed(&self, _: SourceKey) -> Option<Feed> {
 ///         None
 ///     }
 /// }
-/// let host = Host(filter, params.cell(UnitParam::Cutoff));
+/// let host = Host(filter);
+/// // The node's own cell is the lane's knob; no plugin is hosted.
+/// let cell = |at: ParamIn| params.cell(at.param);
+/// let mirror = |_: NodeKey, _: ParamId| None;
 ///
 /// let cutoff = TargetKey::param(1, ParamAddr::Unit(UnitParam::Cutoff));
 /// let sources = [(
@@ -495,12 +384,12 @@ struct SourcePlan {
 ///         clock: LayerClock::Seconds { rate: Hz::new(2.0), phase: PhaseIncrement::new(0.0), anchor: None },
 ///     },
 /// )];
-/// let mut routes = [(
+/// let routes = [(
 ///     RouteKey(1),
 ///     RouteDecl {
 ///         source: SourceKey(1),
 ///         to: RouteTarget::Param(cutoff),
-///         depth: Bipolar::of(0.3),
+///         depth: Param::new(Bipolar::of(0.3)),
 ///         polarity: Polarity::Bipolar,
 ///         curve: Law::Linear,
 ///     },
@@ -509,17 +398,19 @@ struct SourcePlan {
 ///
 /// let mut modulation = Modulation::new();
 /// let decl = Declarations { sources: &sources, routes: &routes, targets: &targets };
-/// let applied = modulation.apply(&decl, &mut editor, &host).expect("applies");
+/// let applied = modulation.apply(&decl, &mut editor, &host, &cell, &mirror).expect("applies");
 /// assert!(applied.commit, "a new lane is a commit");
 /// // (The executor would adopt the first commit before this one is sent.)
 /// # editor.collect();
 ///
-/// // A depth edit republishes the lane's program: no commit.
-/// routes[0].1.depth = Bipolar::of(0.5);
+/// // A depth write is the lane's to read from the route's cell: the apply
+/// // finds nothing changed.
+/// routes[0].1.depth.store(Bipolar::of(0.5));
 /// let decl = Declarations { sources: &sources, routes: &routes, targets: &targets };
-/// let applied = modulation.apply(&decl, &mut editor, &host).expect("applies");
+/// let applied = modulation.apply(&decl, &mut editor, &host, &cell, &mirror).expect("applies");
 /// assert!(!applied.commit);
-/// assert_eq!(applied.republished, vec![cutoff]);
+/// assert!(applied.republished.is_empty());
+/// assert_eq!(modulation.skipped(), 1);
 /// ```
 #[derive(Default, Debug)]
 pub struct Modulation {
@@ -548,8 +439,8 @@ pub struct Modulation {
 ///
 /// - **The declarations**, by value: every source (an LFO's rate, wave and
 ///   phase, a macro's value, a follower's times, an envelope's ADSR), every
-///   route (source, target, depth, polarity, curve; a route added, removed
-///   or moved), every target (its range, by bits, and its automation curve,
+///   route (source, target, depth cell, polarity, curve; a route added, removed
+///   or moved; a depth route's depth, by bits, which is read when compiled), every target (its range, by bits, and its automation curve,
 ///   by identity as a program holds it; a take opened or closed).
 /// - **The host's resolutions**, by value, for the targets with a program
 ///   and the signal sources: which node a key names now (a node added,
@@ -583,72 +474,22 @@ pub struct Modulation {
 struct Memo {
     sources: Vec<(SourceKey, ModSource)>,
     routes: Vec<(RouteKey, RouteDecl)>,
+    scalers: Vec<(RouteKey, u64)>,
     targets: Vec<(TargetKey, TargetDecl)>,
-    resolved: Vec<(TargetKey, Resolved)>,
+    resolved: Vec<(TargetKey, Option<Bound>)>,
     feeds: Vec<(SourceKey, Option<Feed>)>,
     revision: u64,
     epoch: u32,
 }
 
-/// A host's [`Target`], as far as a lane built on it depends on it.
-#[derive(Clone, Debug)]
-enum Resolved {
-    None,
-    Native {
-        node: NodeKey,
-        knob: Option<ParamCell>,
-    },
-    Foreign {
-        node: NodeKey,
-        port: u16,
-    },
-    Edge {
-        id: EdgeId,
-    },
-    Mix {
-        node: NodeKey,
-    },
-}
-
-impl Resolved {
-    fn of(target: &Option<Target>) -> Self {
-        match target {
-            None => Self::None,
-            Some(Target::Native { node, knob }) => Self::Native {
-                node: *node,
-                knob: knob.clone(),
-            },
-            Some(Target::Foreign { node, port, .. }) => Self::Foreign {
-                node: *node,
-                port: *port,
-            },
-            Some(Target::Edge { id, .. }) => Self::Edge { id: *id },
-            Some(Target::Mix { node }) => Self::Mix { node: *node },
-        }
-    }
-
-    fn same(&self, target: &Option<Target>) -> bool {
-        match (self, target) {
-            (Self::None, None) => true,
-            (Self::Native { node, knob }, Some(Target::Native { node: n2, knob: k2 })) => {
-                node == n2
-                    && match (knob, k2) {
-                        (Some(a), Some(b)) => a.ptr_eq(b),
-                        (None, None) => true,
-                        _ => false,
-                    }
-            }
-            (
-                Self::Foreign { node, port },
-                Some(Target::Foreign {
-                    node: n2, port: p2, ..
-                }),
-            ) => node == n2 && port == p2,
-            (Self::Edge { id }, Some(Target::Edge { id: i2, .. })) => id == i2,
-            (Self::Mix { node }, Some(Target::Mix { node: n2 })) => node == n2,
-            _ => false,
-        }
-    }
+/// The depth of each depth route, by bits: the one depth read when compiled
+/// (a route into a param is read by its lane from the cell).
+fn scalers(decl: &Declarations<'_>) -> Vec<(RouteKey, u64)> {
+    decl.routes
+        .iter()
+        .filter(|(_, route)| matches!(route.to, RouteTarget::Depth(_)))
+        .map(|(key, route)| (*key, route.depth.load().get().to_bits()))
+        .collect()
 }
 
 fn same_target(a: &TargetDecl, b: &TargetDecl) -> bool {
@@ -668,11 +509,14 @@ impl Memo {
         decl: &Declarations<'_>,
         editor: &Editor<F>,
         host: &dyn ModHost,
+        cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
+        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
     ) -> bool {
         self.revision == editor.revision()
             && self.epoch == editor.play_reading().epoch
             && self.sources.as_slice() == decl.sources
             && self.routes.as_slice() == decl.routes
+            && self.scalers == scalers(decl)
             && self.targets.len() == decl.targets.len()
             && self
                 .targets
@@ -683,7 +527,11 @@ impl Memo {
             && self
                 .resolved
                 .iter()
-                .all(|(t, resolved)| resolved.same(&host.target(*t)))
+                .all(|(t, was)| match (was, ask(*t, host, cell, mirror)) {
+                    (None, None) => true,
+                    (Some(was), Some(now)) => was.same(&now),
+                    _ => false,
+                })
     }
 }
 
@@ -698,6 +546,20 @@ impl Modulation {
     /// the counters). `None` while it has none.
     pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
         self.lanes.get(&target).map(|l| (l.key, l.controls.lane()))
+    }
+
+    /// The lanes with a knob that drive the plugin parameters of `node`, by
+    /// parameter id.
+    pub fn plugin_lanes(&self, node: NodeKey) -> impl Iterator<Item = (ParamId, &LaneControls)> {
+        self.lanes
+            .values()
+            .filter_map(move |lane| match lane.bound.drive {
+                Drive::Plugin { input, id } if input.node() == node => {
+                    let controls = lane.controls.lane();
+                    controls.value().is_some().then_some((id, controls))
+                }
+                _ => None,
+            })
     }
 
     /// Frees, on this thread, the programs every lane has let go of since
@@ -739,7 +601,13 @@ impl Modulation {
     }
 
     /// Compiles `decl` and applies the difference to `editor`, resolving
-    /// keys through `host`. Control thread; it may allocate. Commit
+    /// keys through `host`. A native target's knob is `cell(at)`, the node's
+    /// own cell for the param (`None`: no knob, the base is automation
+    /// alone). A plugin target's lane starts at `mirror(node, id)`, the
+    /// plugin's value: `None` while it is not read (the target stays
+    /// unresolved, since a lane built without a knob could not take one
+    /// later), `Some(None)` for a parameter the node does not list. Control
+    /// thread; it may allocate. Commit
     /// afterwards when [`Applied::commit`] or [`Applied::resync`] says so,
     /// through [`commit`](Self::commit), or through `editor.commit()`
     /// followed by [`send_resyncs`](Self::send_resyncs). A lane and its
@@ -757,11 +625,13 @@ impl Modulation {
         decl: &Declarations<'_>,
         editor: &mut Editor<F>,
         host: &dyn ModHost,
+        cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
+        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
     ) -> Result<Applied, ReconcileError> {
         if self
             .memo
             .as_ref()
-            .is_some_and(|m| m.holds(decl, editor, host))
+            .is_some_and(|m| m.holds(decl, editor, host, cell, mirror))
         {
             self.skipped += 1;
             return Ok(Applied {
@@ -771,13 +641,12 @@ impl Modulation {
         }
         self.memo = None;
         let now = editor.play_reading();
-        let mut compiled = compile(
+        let compiled = compile(
             decl,
             self.prev.as_ref(),
             now,
             editor.prepare().sample_rate(),
         )?;
-        attach_depths(&mut compiled, decl, host)?;
         let mut applied = Applied::default();
         let mut resolved = Vec::with_capacity(compiled.programs.len());
         let mut feeds = Vec::with_capacity(compiled.nodes.len());
@@ -807,56 +676,62 @@ impl Modulation {
         let own: BTreeSet<(ParamIn, NodeKey)> = self
             .lanes
             .values()
-            .filter_map(|l| match l.bind {
-                Bind::Native { at, .. } | Bind::Mix { at, .. } => Some((at, l.key)),
-                Bind::Foreign { .. } | Bind::Edge { .. } => None,
+            .filter_map(|l| match l.bound.drive {
+                Drive::Port(at) => Some((at, l.key)),
+                Drive::Plugin { .. } | Drive::Gain(_) => None,
             })
             .collect();
         // The same for the lanes wired into an edge's gain.
         let own_edges: BTreeSet<(EdgeId, NodeKey)> = self
             .lanes
             .values()
-            .filter_map(|l| match &l.bind {
-                Bind::Edge { id, .. } => Some((*id, l.key)),
+            .filter_map(|l| match l.bound.drive {
+                Drive::Gain(id) => Some((id, l.key)),
                 _ => None,
             })
             .collect();
-        let mut binds: BTreeMap<TargetKey, Bind> = BTreeMap::new();
+        let mut bounds: BTreeMap<TargetKey, Bound> = BTreeMap::new();
         let mut claimed: BTreeMap<ParamIn, TargetKey> = BTreeMap::new();
         let mut claimed_edges: BTreeMap<EdgeId, TargetKey> = BTreeMap::new();
         // Edges that have no entry yet: it is made below, once the apply has
         // checked out, and the target binds to its cells there.
         let mut to_enter: Vec<(EdgeId, TargetKey)> = Vec::new();
         for &target in compiled.programs.keys() {
-            let to = host.target(target);
-            resolved.push((target, Resolved::of(&to)));
-            if let Some(Target::Edge { id, .. }) = &to
+            let asked = ask(target, host, cell, mirror);
+            resolved.push((target, asked.clone()));
+            if let Some(Bound {
+                drive: Drive::Gain(id),
+                ..
+            }) = &asked
                 && editor.spec().has_edge(*id)
                 && editor.edge_gain_cell(*id).is_none()
             {
                 to_enter.push((*id, target));
             }
-            match self.resolve_target(target, to, &own, &own_edges, editor)? {
-                Some(bind) => {
-                    if let Bind::Native { at, .. } | Bind::Mix { at, .. } = bind {
-                        if let Some(&first) = claimed.get(&at) {
-                            return Err(ReconcileError::SharedPort {
-                                first,
-                                second: target,
-                            });
+            match self.resolve_target(target, asked, &own, &own_edges, editor)? {
+                Some(bound) => {
+                    match bound.drive {
+                        Drive::Port(at) => {
+                            if let Some(&first) = claimed.get(&at) {
+                                return Err(ReconcileError::SharedPort {
+                                    first,
+                                    second: target,
+                                });
+                            }
+                            claimed.insert(at, target);
                         }
-                        claimed.insert(at, target);
-                    }
-                    if let Bind::Edge { id, .. } = &bind {
-                        if let Some(&first) = claimed_edges.get(id) {
-                            return Err(ReconcileError::SharedPort {
-                                first,
-                                second: target,
-                            });
+                        Drive::Gain(id) => {
+                            if let Some(&first) = claimed_edges.get(&id) {
+                                return Err(ReconcileError::SharedPort {
+                                    first,
+                                    second: target,
+                                });
+                            }
+                            claimed_edges.insert(id, target);
                         }
-                        claimed_edges.insert(*id, target);
+                        Drive::Plugin { .. } => {}
                     }
-                    binds.insert(target, bind);
+                    bounds.insert(target, bound);
                 }
                 None => applied.unresolved_targets.push(target),
             }
@@ -877,14 +752,14 @@ impl Modulation {
             .edges
             .iter()
             .copied()
-            .filter(|(s, t)| plans.contains_key(s) && binds.contains_key(t))
+            .filter(|(s, t)| plans.contains_key(s) && bounds.contains_key(t))
             .collect();
         let taken_keys: BTreeSet<NodeKey> = taken_lanes
             .iter()
             .map(|t| self.lanes[t].key)
             .chain(taken_sources.iter().map(|s| self.sources[s].key))
             .collect();
-        self.check_cycles(decl, editor, &binds, &plans, &edges, &taken_keys)?;
+        self.check_cycles(decl, editor, &bounds, &plans, &edges, &taken_keys)?;
 
         // Apply.
         let targets: BTreeMap<TargetKey, (f64, f64)> = decl
@@ -900,8 +775,8 @@ impl Modulation {
             editor
                 .set_edge_gain_range(id, declared_range(min, max))
                 .expect("checked: the edge exists");
-            if let Some(Bind::Edge { cells, .. }) = binds.get_mut(&target) {
-                *cells = EdgeCells::of(editor, id);
+            if let Some(bound) = bounds.get_mut(&target) {
+                bound.knob = editor.edge_gain_cell(id);
             }
             *commit = true;
         }
@@ -922,14 +797,14 @@ impl Modulation {
         for t in &taken_lanes {
             let lane = self.lanes.remove(t).expect("listed");
             let out = EventOutputPort::new(lane.key, 0);
-            match lane.bind {
-                Bind::Native { at, .. } | Bind::Mix { at, .. } => {
+            match lane.bound.drive {
+                Drive::Port(at) => {
                     // Only the source it wired: a port another source has
                     // taken since is left alone.
                     editor.spec_mut().disconnect_param(at, out);
                 }
-                Bind::Foreign { to, .. } => remove_event_edge(editor, to, out),
-                Bind::Edge { id, .. } => {
+                Drive::Plugin { input, .. } => remove_event_edge(editor, input, out),
+                Drive::Gain(id) => {
                     editor.spec_mut().disconnect_edge_gain(id, out);
                 }
             }
@@ -950,7 +825,7 @@ impl Modulation {
         let gone: Vec<TargetKey> = self
             .lanes
             .iter()
-            .filter(|(t, lane)| binds.get(t).is_none_or(|b| !lane.bind.same(b)))
+            .filter(|(t, lane)| bounds.get(t).is_none_or(|b| !lane.bound.same(b)))
             .map(|(&t, _)| t)
             .collect();
         for t in gone {
@@ -1045,10 +920,10 @@ impl Modulation {
             *commit = true;
         }
 
-        for (target, bind) in binds {
+        for (target, bound) in bounds {
             let program = &compiled.programs[&target];
             let (min, max) = targets[&target];
-            let bounds = declared_range(min, max);
+            let range_bounds = declared_range(min, max);
             let range = (min.to_bits(), max.to_bits());
             if let Some(lane) = self.lanes.get_mut(&target) {
                 // Sources the new program reads that the published one did
@@ -1061,72 +936,60 @@ impl Modulation {
                     applied.republished.push(target);
                 }
                 if lane.range != range {
-                    store_range(editor, &lane.bind, &lane.controls, bounds);
+                    store_range(editor, &lane.bound, &lane.controls, range_bounds);
                     lane.range = range;
                 }
                 continue;
             }
             owe_resyncs(&mut self.resync, &compiled, None, program);
             let key = unused_key(editor);
-            let lane = match &bind {
-                Bind::Native { at, knob, .. } => {
+            let lane = match bound.drive {
+                Drive::Port(at) => {
                     editor
-                        .set_param_range(*at, bounds)
+                        .set_param_range(at, range_bounds)
                         .expect("checked: a node, and compile refuses a crossed arc");
-                    let cell = editor.param_range_cell(*at);
+                    let cell = editor.param_range_cell(at);
                     let mut config = UnitLaneConfig::new(at.param, program.clone())
                         .range(cell.expect("a bound param has its range cell from its staging"));
-                    if let Some(knob) = knob.clone() {
+                    if let Some(knob) = bound.knob.clone() {
                         config = config.knob(knob);
                     }
                     let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
-                        .connect_param(*at, EventOutputPort::new(key, 0));
+                        .connect_param(at, EventOutputPort::new(key, 0));
                     Controls::Unit(controls)
                 }
-                Bind::Edge { id, cells } => {
+                Drive::Gain(id) => {
                     editor
-                        .set_edge_gain_range(*id, bounds)
+                        .set_edge_gain_range(id, range_bounds)
                         .expect("checked: the edge");
-                    let cells = cells.as_ref().expect("declared above");
+                    let (knob, range) = editor
+                        .edge_gain_cell(id)
+                        .zip(editor.edge_gain_range_cell(id))
+                        .expect("declared above");
                     let node = ControlLaneNode::from(
                         UnitLaneConfig::new(EdgeGain::ADDR, program.clone())
-                            .knob(cells.knob.clone())
-                            .range(cells.range.clone()),
+                            .knob(knob)
+                            .range(range),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
-                        .connect_edge_gain(*id, EventOutputPort::new(key, 0));
+                        .connect_edge_gain(id, EventOutputPort::new(key, 0));
                     Controls::Unit(controls)
                 }
-                Bind::Mix { at, knob, range } => {
-                    editor
-                        .set_param_range(*at, bounds)
-                        .expect("checked: the node");
-                    let node = ControlLaneNode::from(
-                        UnitLaneConfig::new(NodeMix::ADDR, program.clone())
-                            .knob(knob.clone())
-                            .range(range.clone()),
-                    );
-                    let controls = editor.insert(key, "control-lane", node).controls;
-                    editor
-                        .spec_mut()
-                        .connect_param(*at, EventOutputPort::new(key, 0));
-                    Controls::Unit(controls)
-                }
-                Bind::Foreign { to, id, knob, .. } => {
-                    let mut config = ForeignLaneConfig::new(*id, program.clone(), bounds);
-                    if let Some(knob) = *knob {
+                Drive::Plugin { input, id } => {
+                    let mut config = ForeignLaneConfig::new(id, program.clone(), range_bounds);
+                    if let Some(knob) = bound.seed {
                         config = config.knob(knob);
                     }
                     let (node, controls) = config.build();
                     editor.insert(key, "control-lane", node);
                     editor
                         .spec_mut()
-                        .connect_events(*to, EventEdge::Direct(EventOutputPort::new(key, 0)));
+                        .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
                     Controls::Foreign(controls)
                 }
             };
@@ -1136,7 +999,7 @@ impl Modulation {
                     key,
                     generation: editor.spec().generation(key),
                     controls: lane,
-                    bind,
+                    bound,
                     program: program.clone(),
                     range,
                 },
@@ -1168,6 +1031,7 @@ impl Modulation {
             self.memo = Some(Memo {
                 sources: decl.sources.to_vec(),
                 routes: decl.routes.to_vec(),
+                scalers: scalers(decl),
                 targets: decl.targets.to_vec(),
                 resolved,
                 feeds,
@@ -1230,38 +1094,44 @@ impl Modulation {
         first
     }
 
-    /// `target`, as the host resolved it (`to`), checked against `editor`.
+    /// `target`, as asked of the host (`asked`), checked against `editor`.
     fn resolve_target<F: Float>(
         &self,
         target: TargetKey,
-        to: Option<Target>,
+        asked: Option<Bound>,
         own: &BTreeSet<(ParamIn, NodeKey)>,
         own_edges: &BTreeSet<(EdgeId, NodeKey)>,
         editor: &Editor<F>,
-    ) -> Result<Option<Bind>, ReconcileError> {
-        let Some(resolved) = to else {
+    ) -> Result<Option<Bound>, ReconcileError> {
+        let Some(mut bound) = asked else {
             return Ok(None);
         };
-        let shape = |node: NodeKey| editor.shapes().get(&node).copied();
-        let param = match target {
-            TargetKey::Param { param, .. } => Some(param),
-            TargetKey::Edge(_) | TargetKey::Mix(_) => None,
-        };
-        match (resolved, param) {
-            (Target::Mix { node }, None) if matches!(target, TargetKey::Mix(_)) => {
-                // A node that is not in the graph (yet): no lane.
-                if !editor.spec().topology.nodes.contains_key(&node) {
-                    return Ok(None);
+        match bound.drive {
+            Drive::Port(at) => {
+                if at.param == NodeMix::ADDR {
+                    // A node that is not in the graph (yet): no lane.
+                    if !editor.spec().topology.nodes.contains_key(&at.node) {
+                        return Ok(None);
+                    }
+                    editor
+                        .check_pass(at.node)
+                        .map_err(|error| ReconcileError::Unplaced { target, error })?;
+                    bound.knob = Some(
+                        editor
+                            .mix_cell(at.node)
+                            .expect("a node in the spec has its mix cell from its staging"),
+                    );
+                } else {
+                    let Some(shape) = editor.shapes().get(&at.node) else {
+                        return Ok(None);
+                    };
+                    if shape.params.index_of(at.param).is_none() {
+                        return Err(ReconcileError::NoSuchParam(target));
+                    }
+                    bound.generation = editor.spec().generation(at.node);
                 }
-                editor
-                    .check_pass(node)
-                    .map_err(|error| ReconcileError::Unplaced { target, error })?;
-                let at = ParamIn {
-                    node,
-                    param: NodeMix::ADDR,
-                };
-                // One event source per mix: connecting a lane would replace
-                // another's (a host's own), silently.
+                // One event source per param port: connecting a lane would
+                // replace another's (a host's own), silently.
                 let other = editor
                     .spec()
                     .params
@@ -1270,13 +1140,8 @@ impl Modulation {
                 if other {
                     return Err(ReconcileError::PortTaken(target));
                 }
-                let (knob, range) = editor
-                    .mix_cell(node)
-                    .zip(editor.param_range_cell(at))
-                    .expect("a node in the spec has its mix cells from its staging");
-                Ok(Some(Bind::Mix { at, knob, range }))
             }
-            (Target::Edge { id }, None) if matches!(target, TargetKey::Edge(_)) => {
+            Drive::Gain(id) => {
                 // An edge that is not in the graph (yet): no lane.
                 if !editor.spec().has_edge(id) {
                     return Ok(None);
@@ -1294,53 +1159,19 @@ impl Modulation {
                 }
                 // An edge with no entry has no cells: the apply declares the
                 // entry before it builds the lane.
-                let cells = EdgeCells::of(editor, id);
-                Ok(Some(Bind::Edge { id, cells }))
+                bound.knob = editor.edge_gain_cell(id);
             }
-            (Target::Native { node, knob }, Some(addr)) => {
-                // A foreign id is no native param, whatever the host resolved.
-                let Some(param) = addr.as_unit() else {
-                    return Err(ReconcileError::WrongTarget(target));
-                };
-                let Some(shape) = shape(node) else {
+            Drive::Plugin { input, .. } => {
+                let Some(shape) = editor.shapes().get(&input.node()) else {
                     return Ok(None);
                 };
-                if shape.params.index_of(param).is_none() {
-                    return Err(ReconcileError::NoSuchParam(target));
-                }
-                let at = ParamIn { node, param };
-                // One event source per param port: connecting a lane would
-                // replace another's (a host's own), silently.
-                let other = editor
-                    .spec()
-                    .params
-                    .get(&at)
-                    .is_some_and(|out| !own.contains(&(at, out.node())));
-                if other {
-                    return Err(ReconcileError::PortTaken(target));
-                }
-                Ok(Some(Bind::Native {
-                    at,
-                    knob,
-                    generation: editor.spec().generation(node),
-                }))
-            }
-            (Target::Foreign { node, port, knob }, Some(ParamAddr::Id(id))) => {
-                let Some(shape) = shape(node) else {
-                    return Ok(None);
-                };
-                if port >= shape.event_in {
+                if input.port() >= shape.event_in {
                     return Err(ReconcileError::NoSuchEventInput(target));
                 }
-                Ok(Some(Bind::Foreign {
-                    to: EventInputPort::new(node, port),
-                    id,
-                    knob,
-                    generation: editor.spec().generation(node),
-                }))
+                bound.generation = editor.spec().generation(input.node());
             }
-            _ => Err(ReconcileError::WrongTarget(target)),
         }
+        Ok(Some(bound))
     }
 
     /// `source`'s node, fed by what the host resolved (`feed`), checked
@@ -1401,7 +1232,7 @@ impl Modulation {
         &self,
         decl: &Declarations<'_>,
         editor: &Editor<F>,
-        binds: &BTreeMap<TargetKey, Bind>,
+        bounds: &BTreeMap<TargetKey, Bound>,
         plans: &BTreeMap<SourceKey, SourcePlan>,
         edges: &BTreeSet<(SourceKey, TargetKey)>,
         taken: &BTreeSet<NodeKey>,
@@ -1464,7 +1295,7 @@ impl Modulation {
             next.entry(from).or_default().insert(plan.key);
         }
         for (s, t) in edges {
-            if let Some(node) = binds[t].node() {
+            if let Some(node) = bounds[t].drive.node() {
                 next.entry(plans[s].key).or_default().insert(node);
             }
         }
@@ -1491,7 +1322,8 @@ impl Modulation {
             if !edges.contains(&(route.source, t)) {
                 continue;
             }
-            if binds[&t]
+            if bounds[&t]
+                .drive
                 .node()
                 .is_some_and(|node| reaches(node, plans[&route.source].key))
             {
@@ -1500,6 +1332,51 @@ impl Modulation {
         }
         Ok(())
     }
+}
+
+/// What the host's keys name for `target`, and the cells its lane starts from:
+/// a native param's own cell (`cell`), a plugin parameter's first value
+/// (`mirror`, `None` while it is not read, `Some(None)` for one the node does
+/// not list). `None` while the key names nothing, or the plugin's value is not
+/// read: a lane built without a knob could not take one later.
+fn ask(
+    target: TargetKey,
+    host: &dyn ModHost,
+    cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
+    mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<f64>>,
+) -> Option<Bound> {
+    let (drive, knob, seed) = match target {
+        TargetKey::Param { node, param } => {
+            let node = host.node(node)?;
+            match param.as_unit() {
+                Some(param) => {
+                    let at = ParamIn { node, param };
+                    (Drive::Port(at), cell(at), None)
+                }
+                None => {
+                    let ParamAddr::Id(id) = param else {
+                        return None;
+                    };
+                    let input = EventInputPort::new(node, 0);
+                    (Drive::Plugin { input, id }, None, mirror(node, id)?)
+                }
+            }
+        }
+        TargetKey::Mix(node) => {
+            let at = ParamIn {
+                node: host.node(node)?,
+                param: NodeMix::ADDR,
+            };
+            (Drive::Port(at), None, None)
+        }
+        TargetKey::Edge(edge) => (Drive::Gain(host.edge(edge)?), None, None),
+    };
+    Some(Bound {
+        drive,
+        generation: 0,
+        knob,
+        seed,
+    })
 }
 
 /// Queues a resync for every note envelope `now` reads that `was` did not
@@ -1535,7 +1412,7 @@ fn declared_range(min: f64, max: f64) -> ParamRange {
 /// commit), the lane's own for a plugin lane.
 fn store_range<F: Float>(
     editor: &mut Editor<F>,
-    bind: &Bind,
+    bound: &Bound,
     controls: &Controls,
     range: ParamRange,
 ) {
@@ -1543,18 +1420,18 @@ fn store_range<F: Float>(
         c.publish_range(range);
         return;
     }
-    match bind {
-        Bind::Native { at, .. } | Bind::Mix { at, .. } => {
+    match bound.drive {
+        Drive::Port(at) => {
             editor
-                .set_param_range(*at, range)
+                .set_param_range(at, range)
                 .expect("checked: a node, and compile refuses a crossed arc");
         }
-        Bind::Edge { id, .. } => {
+        Drive::Gain(id) => {
             editor
-                .set_edge_gain_range(*id, range)
+                .set_edge_gain_range(id, range)
                 .expect("checked: the edge");
         }
-        Bind::Foreign { .. } => {
+        Drive::Plugin { .. } => {
             unreachable!("a plugin target's lane is built with ForeignLaneControls")
         }
     }
@@ -1623,35 +1500,6 @@ fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
             return key;
         }
     }
-}
-
-/// Gives each compiled program the depth cells the host holds for its routes
-/// ([`ModHost::depth`]).
-fn attach_depths(
-    compiled: &mut Compiled,
-    decl: &Declarations<'_>,
-    host: &dyn ModHost,
-) -> Result<(), ProgramCompileError> {
-    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Bipolar>)>> = BTreeMap::new();
-    for (key, route) in decl.routes {
-        if let RouteTarget::Param(target) = route.to
-            && let Some(cell) = host.depth(*key)
-        {
-            cells
-                .entry(target)
-                .or_default()
-                .push((layer_id(*key, None), cell));
-        }
-    }
-    for (target, cells) in cells {
-        if let Some(program) = compiled.programs.get_mut(&target) {
-            let count = cells.len();
-            program
-                .bind_depths(cells)
-                .map_err(|_| ProgramCompileError::TooManyLayers { target, count })?;
-        }
-    }
-    Ok(())
 }
 
 /// Whether the node the reconciler built at `key` (generation `generation` at its

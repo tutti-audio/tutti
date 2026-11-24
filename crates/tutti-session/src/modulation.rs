@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_graph::{EventOutputPort, NodeKey};
+use tutti_graph::{EdgeId, EventOutputPort, NodeKey};
 use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
@@ -46,7 +46,6 @@ use tutti_units::{Bipolar, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::ChannelEdge;
 use crate::DeclarationError;
-use crate::ModKeys;
 use crate::ParamValue;
 use tutti_buffers::Float;
 
@@ -377,8 +376,7 @@ impl ModRefusal {
         use tutti_modulation::ProgramCompileError as C;
         match self {
             Self::Apply(
-                ReconcileError::WrongTarget(t)
-                | ReconcileError::Unplaced { target: t, .. }
+                ReconcileError::Unplaced { target: t, .. }
                 | ReconcileError::NoSuchParam(t)
                 | ReconcileError::NoSuchEventInput(t)
                 | ReconcileError::PortTaken(t)
@@ -723,9 +721,6 @@ pub struct ModState {
     /// An apply has run: from then on every modulation phase applies, so
     /// taking every declaration away tears down what they built.
     applied: bool,
-    /// The plugin targets the last successful apply resolved, by node and
-    /// parameter: where a plugin's GUI edit goes (`Phase::Plugins`).
-    plugin_targets: crate::graph::PluginTargets,
 }
 
 impl ModState {
@@ -737,7 +732,6 @@ impl ModState {
             unresolved_since: BTreeMap::new(),
             warn_after,
             applied: false,
-            plugin_targets: BTreeMap::new(),
         }
     }
 
@@ -762,12 +756,9 @@ impl ModState {
     /// The lanes with a knob that drive `node`'s plugin parameters, by id.
     #[cfg(feature = "plugin")]
     pub(crate) fn plugin_lanes(&self, node: NodeKey) -> crate::plugin_params::Knobs {
-        self.plugin_targets
-            .range((node, ParamId::new(0))..=(node, ParamId::new(u32::MAX)))
-            .filter_map(|(&(_, id), &target)| {
-                let (_, lane) = self.lane(target)?;
-                lane.value().is_some().then(|| (id, lane.clone()))
-            })
+        self.modulation
+            .plugin_lanes(node)
+            .map(|(id, lane)| (id, lane.clone()))
             .collect()
     }
 
@@ -789,15 +780,14 @@ impl ModState {
     /// Records an apply's outcome.
     fn applied(
         &mut self,
-        applied: Result<(tutti_nodes::Applied, crate::graph::PluginTargets), ReconcileError>,
+        applied: Result<tutti_nodes::Applied, ReconcileError>,
         names: Names<'_>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) {
         self.applied = true;
         match applied {
-            Ok((applied, plugin_targets)) => {
-                self.plugin_targets = plugin_targets;
+            Ok(applied) => {
                 self.refusal = None;
                 let warn_after = self.warn_after;
                 let mut since = std::mem::take(&mut self.unresolved_since);
@@ -863,17 +853,15 @@ struct OwnSource {
 /// A route the session declared: the reconciler's declaration, and the target
 /// the caller named (the declaration has only its key). Its polarity and
 /// curve are the targets' (`ModRouteId::polarity`, `curve`): `decl` holds
-/// their values as declared, and [`decl`](Self::decl) the ones in force.
+/// their values as declared, and [`decl`](Self::decl) the ones in force. Its
+/// depth is `decl.depth`, the cell the route's lane reads
+/// ([`DepthTarget`](crate::DepthTarget)).
 #[derive(Debug)]
 struct OwnRoute {
     decl: RouteDecl,
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
-    /// The depth in force, in the cell the route's lane reads
-    /// ([`DepthTarget`](crate::DepthTarget)): `decl.depth` is the one the
-    /// route was declared with.
-    depth: Param<Bipolar>,
 }
 
 impl OwnRoute {
@@ -882,7 +870,7 @@ impl OwnRoute {
         RouteDecl {
             polarity: self.polarity.get(),
             curve: self.curve.get(),
-            ..self.decl
+            ..self.decl.clone()
         }
     }
 }
@@ -975,7 +963,7 @@ impl OwnMods {
         );
         self.table.provide(
             Self::depth_slot(route),
-            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Bipolar>,
+            Arc::new(DepthSlot(route.decl.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
     }
 
@@ -1189,15 +1177,15 @@ impl OwnMods {
 /// follower's feed is the node it was declared with.
 struct OwnKeys<'a>(&'a OwnMods);
 
-impl ModKeys for OwnKeys<'_> {
+impl tutti_nodes::ModHost for OwnKeys<'_> {
     fn node(&self, target: u64) -> Option<NodeKey> {
         // A key no node has any more names one the editor does not hold:
         // the reconciler leaves its target unresolved.
         Some(NodeKey(target))
     }
 
-    fn edge(&self, target: u64) -> Option<ChannelEdge> {
-        self.0.edge_refs.get(&target).copied()
+    fn edge(&self, target: u64) -> Option<EdgeId> {
+        crate::Graph::<f32>::edge_id(self.0.edge_refs.get(&target).copied()?)
     }
 
     fn feed(&self, source: SourceKey) -> Option<Feed> {
@@ -1205,10 +1193,6 @@ impl ModKeys for OwnKeys<'_> {
             OwnFeed::Audio(node) => Feed::Audio(node),
             OwnFeed::Events(node, port) => Feed::Events(EventOutputPort::new(node, port)),
         })
-    }
-
-    fn depth(&self, route: RouteKey) -> Option<Param<Bipolar>> {
-        Some(self.0.routes.get(&route)?.depth.handle())
     }
 }
 
@@ -1460,7 +1444,7 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
-            depth: self.depth.load(),
+            depth: self.decl.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
         }
@@ -1634,14 +1618,13 @@ impl Mods<'_> {
             decl: RouteDecl {
                 source,
                 to: RouteTarget::Param(target_key),
-                depth: spec.depth,
+                depth: Param::new(spec.depth),
                 polarity: spec.polarity,
                 curve: spec.curve,
             },
             target: spec.target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
-            depth: Param::new(spec.depth),
         };
         self.own.provide_route(route_id(key), &route);
         self.own.routes.insert(key, route);
