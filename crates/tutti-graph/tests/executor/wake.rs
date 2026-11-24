@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_rt::Mutex;
 
-use common::{Burst, WORKERS, bits, prepare, test_pool};
+use common::{Burst, WORKERS, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, NodeKey, OutputPort, PortSource,
-    Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
+    Prepare, Shape, Status, Unforkable, Wake,
 };
 
 /// Every `Wake` a placement of a [`Napper`] was given, with that placement's
@@ -65,9 +65,7 @@ fn placed(placements: &Placements, n: usize) -> (Wake, Arc<AtomicUsize>) {
 }
 
 fn render(exec: &mut Executor, outs: usize) {
-    let mut bufs = vec![vec![0.0f32; BLOCK]; outs];
-    let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
+    common::block(exec, BLOCK, outs);
 }
 
 /// One napper, wired to the main output.
@@ -197,9 +195,7 @@ const BLOCKS: usize = 14;
 fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     let placements = Placements::default();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let keys = [NodeKey(10), NodeKey(11), NodeKey(12)];
     for key in keys {
         ed.insert(key, "napper", Unforkable(Napper::new(&placements)));
@@ -226,10 +222,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
                 wake.notify();
             }
         }
-        let mut bufs = vec![vec![0.0f32; BLOCK]; 4];
-        let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
-        for (a, b) in audio.iter_mut().zip(bufs) {
+        for (a, b) in audio.iter_mut().zip(common::block(&mut exec, BLOCK, 4)) {
             a.extend(b);
         }
         let now: [usize; 3] = std::array::from_fn(|n| nappers[n].1.load(Ordering::Relaxed));
@@ -244,7 +237,8 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
 /// the render is bit for bit the same.
 #[test]
 fn one_participant_and_parallel_renders_with_raises_between_blocks_are_bit_identical() {
-    let (serial_audio, serial_calls) = run(1);
+    let (serial_audio, serial_calls) =
+        common::agree_across_workers(WORKERS, run, |(audio, calls)| (bits(audio), calls.clone()));
     // Block 0 calls every napper; then only a raised one, on the block
     // after its notify.
     let expect: Vec<[usize; 3]> = (0..BLOCKS)
@@ -255,9 +249,4 @@ fn one_participant_and_parallel_renders_with_raises_between_blocks_are_bit_ident
         serial_audio[3].iter().any(|&x| x != 0.0),
         "the render is not silent"
     );
-    for workers in WORKERS {
-        let (audio, calls) = run(workers);
-        assert_eq!(calls, serial_calls, "{workers} workers: calls per block");
-        assert_eq!(bits(&audio), bits(&serial_audio), "{workers} workers");
-    }
 }

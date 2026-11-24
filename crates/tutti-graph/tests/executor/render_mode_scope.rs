@@ -42,9 +42,7 @@ impl Node for Allocating {
 /// pool of `participants` (`1`: one-participant), rendered for a few blocks.
 fn render(mode: RenderMode, participants: usize) {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(BLOCK).with_render_mode(mode));
-    if participants > 1 {
-        exec.set_pool(Some(common::test_pool(participants)));
-    }
+    common::pooled(&mut exec, participants);
     for k in 0..SOURCES as u64 {
         ed.insert(NodeKey(k), "alloc", Unforkable(Allocating));
     }

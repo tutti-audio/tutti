@@ -22,9 +22,7 @@ fn inlet() -> (InletNode, tutti_graph::TapWriter) {
 fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     for _ in 0..blocks {
-        let mut chans = vec![vec![0.0f32; 64]; 2];
-        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(64, &t, &[], &mut outs);
+        tutti_graph::testing::block_in(exec, 64, &[], 2, &t);
     }
 }
 

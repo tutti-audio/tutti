@@ -1037,6 +1037,28 @@ pub fn pooled_fresh<F: Float>(exec: &mut Executor<F>, workers: usize) {
     }
 }
 
+/// One raw block of `frames` on `exec`: the default (stopped) transport, no
+/// input, `outs` zero-filled output channels, returned. It calls
+/// `Executor::process` once and does not apply pending commits or collect.
+pub fn block<F: Float>(exec: &mut Executor<F>, frames: usize, outs: usize) -> Vec<Vec<F>> {
+    block_in(exec, frames, &[], outs, &TransportPosition::default())
+}
+
+/// [`block`] over `inputs` (each `frames` long) and `transport`. Asserts
+/// nothing; the buffers are allocated outside the executor's own gate.
+pub fn block_in<F: Float>(
+    exec: &mut Executor<F>,
+    frames: usize,
+    inputs: &[&[F]],
+    outs: usize,
+    transport: &TransportPosition,
+) -> Vec<Vec<F>> {
+    let mut chans = vec![vec![F::ZERO; frames]; outs];
+    let mut refs: Vec<&mut [F]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
+    exec.process(frames, transport, inputs, &mut refs);
+    chans
+}
+
 /// Call `render(1)`, the serial render, then `render(w)` for each `w` of
 /// `workers`, and assert `same` of each equals `same` of the serial one (the
 /// panic names the worker count). `same` says what must be equal: the
