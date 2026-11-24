@@ -47,11 +47,13 @@ pub const MAX_FRAMES: Samples = Samples::new(u32::MAX as usize);
 pub enum TailPolicy {
     /// Exactly this many frames past the end.
     Frames(Samples),
-    /// The tail the graph's nodes owe once the last frame of the programme
-    /// has rendered ([`tutti_graph::Executor::reported_tail`]), spent under
-    /// `ceiling`: a node owes what is left of its report when nothing upstream
-    /// still owes, and its declared ceiling after an upstream that does. A graph
-    /// that never decays, or whose nodes decline to say, is spent as
+    /// The tail the graph's nodes owe ([`tutti_graph::Executor::reported_tail`]),
+    /// asked at the programme's last frame and again after every block of the
+    /// tail, spent under `ceiling` in all: the render ends at the first of
+    /// those instants at which nothing is owed. A node owes what is left of its
+    /// report when nothing upstream still owes, and its declared ceiling after
+    /// an upstream that does. A graph that never decays, or whose nodes decline
+    /// to say, is spent as
     /// [`GraphTail::resolve`](tutti_graph::GraphTail::resolve) does.
     Reported {
         /// The most frames of tail kept past the end.

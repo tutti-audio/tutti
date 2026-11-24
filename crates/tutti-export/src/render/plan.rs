@@ -21,8 +21,9 @@ pub(crate) struct RenderPlan {
     /// bound.
     pub output_length: Samples,
     /// The programme's length at the graph's input side, latency not
-    /// counted: the frames pulled before a reported tail is asked for, so
-    /// every node's figure is measured from the instant the declared tail is.
+    /// counted: the frames pulled before a reported tail is first asked for,
+    /// so every node's figure is measured from the instant the declared tail
+    /// is.
     pub programme: Samples,
     /// What is pulled past `programme`.
     pub tail: TailPolicy,
