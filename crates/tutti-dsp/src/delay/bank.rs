@@ -266,13 +266,17 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// first echo and the passes to fall to [`TAIL_FLOOR`], each as long as the delay and the
     /// spread of its read, taken at the larger of the loop gain and of the longest delay over
     /// the ramps where they are, where they are aimed and `controls`: a ramp in flight is
-    /// between its two ends, and a pair's sum is too, so the ends bound it.
+    /// has each of its two feedbacks between its own ends, so the larger end of each bounds
+    /// the pair.
     ///
     /// A [`Synced`](DelaySync::Synced) delay is the longest the line holds. The tempo is not
     /// an argument: it moves between blocks without a control moving, so a figure taken at one
     /// would be stale at the next. A time or feedback a control signal drives is a control
     /// whose highest value in the block the caller passes: the delay clamps a driven time into
-    /// the line and a driven feedback into the stable range, as the controls are here.
+    /// the line and a driven feedback into the stable range, as the controls are here. The
+    /// highest value is the longest ring only because the figure rises with the time and with
+    /// each feedback, neither of which is negative: a control the figure falls with needs its
+    /// own extreme passed.
     #[must_use]
     pub fn tail_of(&self, ramps: &DelayRamps<F>, controls: &DelayControls) -> Tail {
         let width = self.lines.len();
