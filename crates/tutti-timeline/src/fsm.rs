@@ -293,8 +293,8 @@ impl TransportFsm {
                 fade,
                 then,
             } => {
-                // `Keep` resolves against where the machine is heading, so a
-                // locate during a fade lands stopped, not "mid-fade".
+                // `Keep` during a fade lands stopped; from a scrub it lands
+                // rolling.
                 let landing = match then {
                     AfterLocate::Play => Settled::Rolling,
                     AfterLocate::Stop => Settled::Stopped,
@@ -422,7 +422,8 @@ mod tests {
     }
 
     /// The result a transition publishes is the projection of the state it
-    /// left the machine in, over every (state, command) pair.
+    /// left the machine in, over every (state, command) pair: a `Located`
+    /// landing and a fade's outcome project to the motion the machine holds.
     #[test]
     fn every_accepted_transition_publishes_the_state_it_entered() {
         let commands = [
