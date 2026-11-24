@@ -483,8 +483,9 @@ fn the_served_processor_takes_what_a_chunks_midi_holds() {
     }
 }
 
-/// **`IpcProcessor::chunk()` is its configured chunk**: the block the plugin
-/// was activated for, never past the slab's ceiling. It is what the graph
+/// **`IpcProcessor::chunk()` is its configured chunk**: the device's callback
+/// size when the activation carries one, else the block the plugin was
+/// activated for, never past the slab's ceiling. It is what the graph
 /// node cuts a block by, so a Processor that answered the trait's default
 /// (`None`) would be handed whole blocks that span chunks.
 #[test]
@@ -500,6 +501,15 @@ fn the_processor_chunk_is_its_configured_chunk() {
         NonZeroUsize::new(CEILING),
         "the slab's ceiling"
     );
+    // A fresh activation takes the device's callback size, as a retune does.
+    let (ipc, _server) = mock();
+    let quantum = Some(MaxBlock::of(Samples::new(40)));
+    let (fresh, _controller) = match ipc.activate(main_thread(), prepare(48).with_quantum(quantum))
+    {
+        Ok(halves) => halves,
+        Err(refused) => panic!("{}", refused.reason),
+    };
+    assert_eq!(fresh.chunk(), NonZeroUsize::new(40), "the quantum");
 }
 
 /// **A Processor follows the graph without a restart**: `retune` settles the

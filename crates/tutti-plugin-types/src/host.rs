@@ -444,6 +444,11 @@ pub trait Loaded: Control + Sized + Send {
     /// What this format needs a restart for. A reload restarts on every format.
     const RESTARTS: RestartRules;
 
+    /// Whether the Processor's pipeline follows the device's callback size
+    /// ([`Prepare::quantum`](crate::Prepare::quantum)): a format that does not
+    /// is not restarted for a change of it.
+    const FOLLOWS_QUANTUM: bool = false;
+
     /// The float widths the plugin processes audio in, as of now. An
     /// activation at a width outside it is refused, and
     /// [`Widths::negotiate`] turns a request into the width one accepts.

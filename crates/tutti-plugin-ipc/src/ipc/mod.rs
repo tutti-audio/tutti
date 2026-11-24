@@ -946,7 +946,10 @@ impl Ipc {
         )
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
-        batcher.prepare(Samples::new(prepare.max_block().get()), None);
+        batcher.prepare(
+            Samples::new(prepare.max_block().get()),
+            prepare.quantum().map(tutti_plugin_types::MaxBlock::samples),
+        );
         if let Some(Watch { wait }) = link.watch() {
             // A wait already latched (a reactivation after a give-up or a
             // death) stays on the live bound: the batcher collects at once, and
@@ -980,6 +983,9 @@ impl Loaded for Ipc {
         io: true,
         latency: false,
     };
+
+    /// The pipeline's chunk follows the device's callback.
+    const FOLLOWS_QUANTUM: bool = true;
 
     /// The width the load settled on. The slab and the server's pipeline run
     /// that width and cannot run the other without a reload, and the load reply

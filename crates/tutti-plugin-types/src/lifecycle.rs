@@ -85,6 +85,7 @@ pub struct Prepare {
     max_block: MaxBlock,
     format: FloatWidth,
     mode: RenderMode,
+    quantum: Option<MaxBlock>,
 }
 
 impl Prepare {
@@ -97,7 +98,25 @@ impl Prepare {
             max_block,
             format: FloatWidth::F32,
             mode: RenderMode::default(),
+            quantum: None,
         }
+    }
+
+    /// This activation, with blocks of up to `max_block` frames.
+    #[must_use]
+    pub const fn with_max_block(mut self, max_block: MaxBlock) -> Self {
+        self.max_block = max_block;
+        self
+    }
+
+    /// This activation, for a device whose callbacks carry `quantum` frames
+    /// (`None`: no callback is known): what a format that follows the device's
+    /// callback ([`Loaded::FOLLOWS_QUANTUM`](crate::Loaded::FOLLOWS_QUANTUM))
+    /// sizes its pipeline by.
+    #[must_use]
+    pub const fn with_quantum(mut self, quantum: Option<MaxBlock>) -> Self {
+        self.quantum = quantum;
+        self
     }
 
     /// This activation, at `rate`.
@@ -131,6 +150,12 @@ impl Prepare {
     #[must_use]
     pub const fn max_block(&self) -> MaxBlock {
         self.max_block
+    }
+
+    /// The device's callback size, when one is known.
+    #[must_use]
+    pub const fn quantum(&self) -> Option<MaxBlock> {
+        self.quantum
     }
 
     /// The sample width audio is exchanged in.
@@ -573,6 +598,9 @@ pub struct State {
     applied: Option<Prepare>,
     /// What the activation in flight asks for.
     trying: Option<Prepare>,
+    /// What the host wants the plugin to run at: the latest `Prepare` it asked
+    /// for, applied or not. A refusal gives it up (the host asks again).
+    wanted: Option<Prepare>,
     /// The refusal the rollback in flight answers.
     refusal: Option<Refusal>,
     latency: Option<Samples>,
@@ -602,6 +630,7 @@ impl State {
             stage: Stage::Loaded,
             applied: None,
             trying: None,
+            wanted: None,
             refusal: None,
             latency: None,
             tail: None,
@@ -656,17 +685,19 @@ impl State {
         self.applied
     }
 
-    /// The `Prepare` the plugin is being asked to run at: the activation in
-    /// flight or planned, else [`applied`](Self::applied). A request for one
-    /// setting builds on it, so it keeps what an earlier, unanswered request
-    /// asked for.
+    /// The `Prepare` the host wants the plugin to run at: the latest it asked
+    /// for ([`want`](Self::want), or an activation op), else
+    /// [`applied`](Self::applied). A request for one setting builds on it, so
+    /// it keeps what an earlier, unanswered request asked for.
     #[must_use]
     pub fn wanted(&self) -> Option<Prepare> {
-        let planned = self.plan.tasks.iter().find_map(|t| match t {
-            Task::Activate(p) => Some(*p),
-            _ => None,
-        });
-        planned.or(self.trying).or(self.applied)
+        self.wanted.or(self.applied)
+    }
+
+    /// Records what the host wants, without activating anything: the shell
+    /// compares it with [`applied`](Self::applied) and reconfigures.
+    pub fn want(&mut self, wanted: Prepare) {
+        self.wanted = Some(wanted);
     }
 
     /// Records `mode` in the `Prepare` every later activation uses, without
@@ -675,7 +706,12 @@ impl State {
     /// keeps a later restart or rate change from putting the old mode back.
     /// An activation already planned or in flight takes the new mode too.
     pub fn set_mode(&mut self, mode: RenderMode) {
-        for prepare in self.applied.iter_mut().chain(self.trying.iter_mut()) {
+        for prepare in self
+            .applied
+            .iter_mut()
+            .chain(self.trying.iter_mut())
+            .chain(self.wanted.iter_mut())
+        {
             prepare.mode = mode;
         }
         for task in &mut self.plan.tasks {
@@ -685,13 +721,11 @@ impl State {
         }
     }
 
-    /// Records `rate` as the one the plugin runs at, without restarting
-    /// anything. For a Processor retuned live: a later restart activates at
-    /// it. An activation already planned keeps the rate it asks for.
-    pub fn retuned(&mut self, rate: SampleRate) {
-        if let Some(prepare) = self.applied.as_mut() {
-            prepare.rate = rate;
-        }
+    /// Records that the Processor took what the host wants without
+    /// restarting: a later restart activates at it. For a Processor retuned
+    /// live.
+    pub fn retuned(&mut self) {
+        self.applied = self.wanted();
     }
 
     /// The latency last reported.
@@ -806,6 +840,9 @@ impl State {
     }
 
     fn on_op(&mut self, op: HostOp, out: &mut Effects) {
+        if let HostOp::Activate(p) | HostOp::Reconfigure(p) = op {
+            self.wanted = Some(p);
+        }
         // A relend asks for nothing an activation in flight does not do: it
         // lends at its end.
         if op == HostOp::Relend && self.activating() {
@@ -1300,6 +1337,7 @@ impl State {
         };
         self.rebuild_pending |= wait == Wait::Rebuild;
         self.reread_params = false;
+        self.wanted = self.applied;
         self.plan = Plan::default();
         self.pending = Pending::default();
         self.announced_latency = false;

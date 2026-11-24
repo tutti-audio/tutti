@@ -666,6 +666,18 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-plugin-types/src/lifecycle.rs",
+        "Prepare::with_max_block",
+        &[Rule::WithPrefix],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/lifecycle.rs",
+        "Prepare::with_quantum",
+        &[Rule::WithPrefix, Rule::OptionArg],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/lifecycle.rs",
         "Prepare::with_mode",
         &[Rule::WithPrefix],
         COPY_WITH_ONE_FIELD,

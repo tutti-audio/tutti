@@ -107,22 +107,7 @@ where
         // prepare, whether or not the Processor is in hand: the node's only
         // say over it.
         this.drive_wait(p);
-        // A Processor that follows the graph takes its rate, block and
-        // quantum live (no restart, no main thread); one that does not is
-        // told the rate by the lifecycle.
-        if this.retune(p) {
-            // The Processor started its pipeline over: the chunk in flight is
-            // dropped (`drop_chunk` below), and the rest of a SysEx open in it
-            // is cut, as at a reset. Its far end keeps its reassembler's open
-            // message across the retune (a served server does nothing for a
-            // rate it already has), so a tail taken now would complete the
-            // message with a gap.
-            this.intake.lost();
-        } else {
-            this.set_rate(p.sample_rate());
-        }
-        // The session's mode, at configure time beside the rate.
-        this.set_render_mode_from(p);
+        this.follow(p);
         // A chunked Processor's delivery chunk is its own (`Processor::chunk`),
         // and it starts counting from here.
         this.phase = Samples::new(0);
@@ -155,7 +140,7 @@ where
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
         if this.silenced.holds() {
-            // The plugin was not told this node's rate (`set_rate`), or runs at
+            // The plugin was not told this node's rate (`Instance::reconcile`), or runs at
             // the rate it kept after refusing it: silence, not audio at another
             // rate. A Processor the control side recalls is still handed back.
             // The node returns `Silent`, never `Idle`, and has an event input,
@@ -788,6 +773,14 @@ mod owed_tests {
             .map(|v| v.get())
     }
 
+    /// A graph prepare at `rate`.
+    fn at(rate: SampleRate) -> tutti_graph::Prepare {
+        tutti_graph::Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::new(tutti_units::Samples::new(BLOCK)).expect("a block"),
+        )
+    }
+
     /// **A fork told its rate off the main thread is refused, not left at the
     /// wrong rate.** A fork's `prepare` dispatches the rate under the main
     /// thread's proof; off that thread it cannot, so the node records the
@@ -805,7 +798,7 @@ mod owed_tests {
             .expect("the fork loads on the main thread");
         let (fork, refused) = std::thread::spawn(move || {
             let mut fork = fork;
-            fork.set_rate(SampleRate::SR_96K);
+            fork.follow(&at(SampleRate::SR_96K));
             let refused = fork.silenced.holds();
             (fork, refused)
         })
@@ -815,7 +808,7 @@ mod owed_tests {
         // The harness thread is not the process's main thread either, so a second
         // `prepare` is refused too: only the main thread's clears the refusal.
         let mut fork = fork;
-        fork.set_rate(SampleRate::SR_96K);
+        fork.follow(&at(SampleRate::SR_96K));
         assert!(
             fork.silenced.holds(),
             "a prepare off the main thread cannot clear it"
@@ -842,7 +835,7 @@ mod owed_tests {
         .with_render_mode(tutti_graph::RenderMode::Offline);
         let fork = std::thread::spawn(move || {
             let mut fork = fork;
-            fork.set_render_mode_from(&prepare);
+            fork.follow(&prepare);
             fork
         })
         .join()
