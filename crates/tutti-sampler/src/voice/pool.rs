@@ -6,12 +6,11 @@
 //! of a graph edit, which is what keeps voice churn off the commit path.
 
 use crate::PlaceError;
-use crate::streamer::StreamId;
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
-    COMMAND_CAPACITY, GainError, Live, LoopFeed, MAX_RESIDENT_VOICES, Queued, Tier, VoiceCommand,
+    COMMAND_CAPACITY, GainError, Inner, Live, LoopFeed, MAX_RESIDENT_VOICES, Queued, VoiceCommand,
     VoicePoolHandle,
 };
 use super::loop_span::Loop;
@@ -114,20 +113,6 @@ pub(crate) enum Retired<F: SamplerFloat> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct PoolDrops {
-    /// Loop commands (set or cleared) the drain found aimed at a streaming
-    /// slot whose stream the handle had not passed them to: a slot the
-    /// handle's stream no longer belongs to. Not recorded, since the stream
-    /// was not told.
-    pub loops_not_forwarded: u64,
-    /// Streaming directions (reverse, or back to forward) the drain found
-    /// aimed at a slot whose stream the handle had not passed them to. Not
-    /// recorded in the voice's `Playback`.
-    pub directions_dropped: u64,
-    /// [`replace_wave`](VoicePoolHandle::replace_wave) calls the drain found
-    /// aimed at a streaming voice: one that took the slot after the handle
-    /// read its tier. A streaming voice changes source by a fresh
-    /// [`add_streaming`](VoicePoolHandle::add_streaming) instead.
-    pub wave_swaps_ignored: u64,
     /// Adds for a new slot refused because the pool already held
     /// `MAX_RESIDENT_VOICES` (64) slots. The voice goes back through
     /// the retirement ring to be freed by
@@ -183,9 +168,6 @@ impl RetireRoom {
 /// thread.
 #[derive(Debug, Default)]
 pub(crate) struct DrainCounters {
-    pub(crate) loops_not_forwarded: AtomicU64,
-    pub(crate) directions_dropped: AtomicU64,
-    wave_swaps_ignored: AtomicU64,
     voices_refused: AtomicU64,
     leaked: AtomicU64,
     pub(crate) spares_deferred: AtomicU64,
@@ -213,24 +195,9 @@ impl DrainCounters {
     pub(crate) fn snapshot(&self) -> PoolDrops {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
         PoolDrops {
-            loops_not_forwarded: load(&self.loops_not_forwarded),
-            directions_dropped: load(&self.directions_dropped),
-            wave_swaps_ignored: load(&self.wave_swaps_ignored),
             voices_refused: load(&self.voices_refused),
             leaked: load(&self.leaked),
             spares_deferred: load(&self.spares_deferred),
-        }
-    }
-}
-
-impl<F: SamplerFloat> Voice<F> {
-    /// The streamer stream this voice reads, whose loop and direction are set
-    /// on it through the handle; `None` for an in-memory voice, whose drain
-    /// applies them itself.
-    pub(crate) fn stream_id(&self) -> Option<StreamId> {
-        match &self.source {
-            VoiceSource::Memory(_) => None,
-            VoiceSource::Disk(disk) => Some(disk.stream()),
         }
     }
 }
@@ -245,7 +212,7 @@ impl<F: SamplerFloat> Voice<F> {
 /// command queue, reads the transport from the block's `Env`, then reads and
 /// sums its slots — all of it on the audio thread, and all of it
 /// allocation-free provided the control side did its share:
-/// `VoicePoolHandle::send` builds any vocoder a command implies, and
+/// the handle builds any vocoder a command implies, and
 /// [`VoicePoolHandle::collect_retired`] frees what the drain hands back.
 ///
 /// # As a graph node
@@ -452,9 +419,14 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// the node by hand. A handle taken before goes dead
     /// ([`SendError::Disconnected`](super::command::SendError::Disconnected)).
     ///
-    /// The handle holds the [`StreamHandle`](crate::StreamHandle) of every streaming voice
-    /// added through it ([`add_streaming`](VoicePoolHandle::add_streaming)): a
-    /// loop or a direction set for one is set on its stream.
+    /// The handle records the memory voices the pool already holds, and holds the
+    /// [`StreamHandle`](crate::StreamHandle) of every streaming voice added
+    /// through it ([`add_streaming`](VoicePoolHandle::add_streaming)): a loop or a
+    /// direction set for one is set on its stream. A streaming voice already in
+    /// the pool has no stream to record (shipped code cannot put one there:
+    /// [`insert`](Self::insert) takes a memory voice), so the handle leaves its
+    /// slot out and answers [`NoSuchSlot`](super::command::SendError::NoSuchSlot)
+    /// for it.
     #[must_use]
     pub fn with_handle(mut self) -> (Self, VoicePoolHandle<F>) {
         let (tx, rx) = ring(COMMAND_CAPACITY, Overflow::Refuse);
@@ -463,37 +435,30 @@ impl<F: SamplerFloat> VoicePool<F> {
         self.retired = retired_tx;
         self.stranded = CappedVec::with_capacity(COMMAND_CAPACITY);
         self.room = Arc::default();
-        // The handle mirrors the reader's width and shares its rate so `send`
+        // Stamp 0: no add of the handle's, never refused.
+        let slots = self
+            .voices
+            .iter()
+            .filter_map(|s| match &s.voice.source {
+                VoiceSource::Memory(source) => Some((
+                    s.id,
+                    Live::memory(0, source.window(), s.stretch.is_some(), s.has_spare()),
+                )),
+                VoiceSource::Disk(_) => None,
+            })
+            .collect();
+        // The handle mirrors the reader's width and shares its rate so it
         // can build a vocoder that matches it, on the control thread.
         let handle = VoicePoolHandle {
-            tx: Arc::new(Mutex::new(tx)),
+            inner: Arc::new(Mutex::new(Inner {
+                slots,
+                commands: tx,
+            })),
             retired: Arc::new(Mutex::new(retired)),
             channels: self.channels,
             counters: Arc::clone(&self.counters),
             room: Arc::clone(&self.room),
-            streams: Arc::default(),
-            free: Arc::default(),
-            // Voices inserted before the handle was made are live too.
             loops: Arc::clone(&self.loops),
-            live: Arc::new(Mutex::new(
-                self.voices
-                    .iter()
-                    .map(|s| {
-                        let tier = match s.voice.source {
-                            VoiceSource::Memory(_) => Tier::Memory,
-                            VoiceSource::Disk(_) => Tier::Disk,
-                        };
-                        // Stamp 0: no add of the handle's, never refused.
-                        let window = match &s.voice.source {
-                            VoiceSource::Memory(source) => source.window(),
-                            VoiceSource::Disk(_) => None,
-                        };
-                        let mut live = Live::added(tier, 0, window, s.stretch.is_some());
-                        live.spare = s.has_spare();
-                        (s.id, live)
-                    })
-                    .collect(),
-            )),
             stamps: Arc::default(),
         };
         (self, handle)
@@ -575,13 +540,12 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// - Streaming: the loop is the stream's — the streamer reads the loop's
     ///   fade lead-in off disk and publishes the loop as applied, neither
     ///   reachable from the reader — and the control thread has already set it
-    ///   on the stream's handle ([`VoicePoolHandle::send`]), so here it is
+    ///   on the stream's handle ([`VoicePoolHandle::set_loop`]), so here it is
     ///   only recorded. Its callers are `insert_voice_inner`, whose voice
     ///   carries a loop only once its stream took it (its sender set it `Off`
-    ///   otherwise), and [`apply_queued_loop`](Self::apply_queued_loop), which
-    ///   calls it for a streaming slot only when the command named that
-    ///   slot's stream; so the record never claims a loop no stream was
-    ///   given.
+    ///   otherwise), and the drain's loop command, which the handle queues
+    ///   under the lock that holds the stream it publishes to; so the record
+    ///   never claims a loop no stream was given.
     ///
     /// Allocation-free and send-free: the drain runs it.
     fn apply_loop(&mut self, id: SlotId, setting: Option<Loop>) {
@@ -592,54 +556,6 @@ impl<F: SamplerFloat> VoicePool<F> {
             sampler.set_loop(setting);
         }
         slot.voice.play.loop_ = setting;
-    }
-
-    /// A queued loop command's setting, applied as
-    /// [`apply_loop`](Self::apply_loop) does, except that a streaming slot
-    /// records it only when `forwarded` names that slot's own stream: the
-    /// handle holds that stream and sets the loop on it. Otherwise (the handle
-    /// did not hold the slot's stream) it is counted
-    /// ([`PoolDrops::loops_not_forwarded`]) and the slot keeps its loop, so
-    /// the decision rests on the command, not on the handle's table.
-    ///
-    /// Allocation-free and send-free: the drain runs it.
-    fn apply_queued_loop(
-        &mut self,
-        id: SlotId,
-        setting: Option<Loop>,
-        forwarded: Option<StreamId>,
-    ) {
-        let Some(slot) = self.voices.iter().find(|s| s.id == id) else {
-            return;
-        };
-        if slot.voice.stream_id().is_some_and(|s| forwarded != Some(s)) {
-            DrainCounters::bump(&self.counters.loops_not_forwarded);
-            return;
-        }
-        self.apply_loop(id, setting);
-    }
-
-    /// A queued direction command, recorded in the slot's `Playback`. A streaming
-    /// slot records it only when `forwarded` names its own stream, as a loop is
-    /// ([`apply_queued_loop`](Self::apply_queued_loop)); otherwise it is counted
-    /// ([`PoolDrops::directions_dropped`]) and the slot keeps its direction.
-    /// In-memory: `play.direction` is what the hot read reverses by.
-    ///
-    /// Allocation-free and send-free: the drain runs it.
-    fn apply_queued_direction(
-        &mut self,
-        id: SlotId,
-        direction: super::types::PlayDirection,
-        forwarded: Option<StreamId>,
-    ) {
-        let Some(slot) = self.slot_mut(id) else {
-            return;
-        };
-        if slot.voice.stream_id().is_some_and(|s| forwarded != Some(s)) {
-            DrainCounters::bump(&self.counters.directions_dropped);
-            return;
-        }
-        slot.voice.play.direction = direction;
     }
 
     /// Inserts an in-memory voice as a new slot, `source` played as `play`
@@ -718,7 +634,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         // The slot is built at THIS READER's width: a slot narrower than the
         // reader would truncate on the stretch path only, which no stereo test
         // can observe. Its vocoder, if any, was built by the sender on
-        // the control thread (`VoicePoolHandle::send`) and only moves in here.
+        // the control thread (`VoicePoolHandle::prepare`) and only moves in here.
         let mut slot = PlaybackSlot::with_channels(id, voice, self.channels);
         slot.stretch = stretch;
         // The source runs at the pool's rate (the memory tier's conversion,
@@ -746,7 +662,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// Hands a value the drain let go of to the control thread.
     ///
     /// The ring always has room: the handle reserved a slot for the command
-    /// being drained before queueing it (`VoicePoolHandle::send`), a command
+    /// being drained before queueing it (`VoicePoolHandle::queue`), a command
     /// retires at most one value, and `drain_commands` stops while the ring
     /// is full. A push the ring refuses can only be a disconnected ring
     /// (every handle dropped, so nothing will collect): the value is parked
@@ -780,12 +696,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                 debug_assert!(false, "a reservation keeps room in the retirement ring");
                 break;
             }
-            let Some(Queued {
-                cmd,
-                forwarded,
-                generation,
-            }) = self.rx.pop()
-            else {
+            let Some(Queued { cmd, generation }) = self.rx.pop() else {
                 break;
             };
             let reserved = cmd.may_retire();
@@ -806,7 +717,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                         });
                         continue;
                     }
-                    // The vocoder arrives prebuilt from `send` (control thread);
+                    // The vocoder arrives prebuilt from the handle (control thread);
                     // this only moves it into the slot.
                     if let Some(old) = self.insert_voice_inner(id, voice, stretch) {
                         self.retire(Retired::Slot(old));
@@ -830,16 +741,19 @@ impl<F: SamplerFloat> VoicePool<F> {
                     // would free that buffer in the callback. It leaves
                     // through the retirement ring instead.
                     let shed = match self.slot_mut(id).map(|s| &mut s.voice.source) {
-                        // Match the tier explicitly rather than calling through
-                        // a shared setter: the streaming half has nothing to
-                        // do, and a shared setter would make a `ReplaceWave`
-                        // aimed at a disk voice do nothing and say nothing.
-                        // Swapping a streaming source means re-registering the
-                        // streamer stream on a different file, which is a
-                        // control-thread op issued as a fresh `AddVoice`.
+                        // The tiers are matched explicitly, not through a shared
+                        // setter. Swapping a streaming source means
+                        // re-registering the streamer stream on a different
+                        // file, a control-thread op issued as a fresh
+                        // `AddVoice`: the handle refuses the swap at the call,
+                        // and a streaming slot here keeps its source while the
+                        // wave retires.
                         Some(VoiceSource::Memory(sampler)) => sampler.replace_wave(wave),
                         Some(VoiceSource::Disk(_)) => {
-                            DrainCounters::bump(&self.counters.wave_swaps_ignored);
+                            debug_assert!(
+                                false,
+                                "the handle refuses a disk voice's wave swap at the call"
+                            );
                             wave
                         }
                         None => wave,
@@ -873,9 +787,9 @@ impl<F: SamplerFloat> VoicePool<F> {
                     }
                 }
                 VoiceCommand::UpdateLoop { id, setting } => {
-                    // A streaming slot's loop is set on its stream by the handle
-                    // (`VoicePoolHandle::send`) if `forwarded` names it.
-                    self.apply_queued_loop(id, setting, forwarded);
+                    // A streaming slot's loop is set on its stream by the handle,
+                    // under the lock that queued this command.
+                    self.apply_loop(id, setting);
                 }
                 VoiceCommand::UpdateReverse { id, direction } => {
                     // In-memory: `voice.play.direction` drives the reversed index
@@ -883,7 +797,9 @@ impl<F: SamplerFloat> VoicePool<F> {
                     // ring's (the handle set it on the stream), and
                     // `voice.play.direction` only records it. One command reaches
                     // both, so a host sends reverse ONCE.
-                    self.apply_queued_direction(id, direction, forwarded);
+                    if let Some(slot) = self.slot_mut(id) {
+                        slot.voice.play.direction = direction;
+                    }
                 }
                 VoiceCommand::SetSpare { id, spare } => {
                     // Whatever the slot does not keep is retired, never dropped here.

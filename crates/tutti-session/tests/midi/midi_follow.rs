@@ -11,7 +11,9 @@ use tutti_platform::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_session::{FollowTempo, MidiError, MidiEvent, Session, SessionEvent};
+use tutti_session::{
+    FollowKind, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, UnfollowCause,
+};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
@@ -195,9 +197,13 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     );
     let events = s.update();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoUnfollowed))),
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Midi(MidiEvent::Unfollowed {
+                follower: FollowKind::Tempo,
+                cause: UnfollowCause::Requested
+            })
+        )),
         "the update reports it"
     );
     let restored = crate::tempo::effective(&s);
