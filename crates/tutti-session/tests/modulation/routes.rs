@@ -8,7 +8,7 @@ use tutti_modulation::{Law, Lfo, Polarity, Source};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
     DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
-    ValueErrorKind,
+    SourceError, ValueErrorKind,
 };
 use tutti_units::{Bipolar, Hz, Q};
 
@@ -97,7 +97,7 @@ fn routes_and_sources_are_found_again() {
     );
     assert_eq!(
         s.mods_mut().set_source(knob, Lfo::sine()),
-        Err(NoSuchModSource(knob))
+        Err(SourceError::NoSuchSource(NoSuchModSource(knob)))
     );
 }
 
