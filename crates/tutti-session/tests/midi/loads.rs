@@ -107,6 +107,38 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
     assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
 }
 
+/// A Clip File's configuration header (M2-116 section 6) is not on the sequence's
+/// timeline, so a load does not play it.
+#[test]
+fn a_clip_files_header_is_not_reported_by_a_load() {
+    use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
+
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
+    let track = Track::new()
+        .profile_on(on)
+        .note(
+            Tick(0),
+            Tick(96),
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            U7::of(100),
+        )
+        .ending_at(Tick(96));
+    let mut bytes = Vec::new();
+    MidiFile::clip(TicksPerQuarterNote::of(96), track)
+        .expect("a clip")
+        .write(&mut bytes)
+        .expect("a Vec takes the write");
+
+    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
+
+    assert_eq!(loaded.track(0).unwrap().events.len(), 2);
+    assert!(loaded.report().is_clean());
+}
+
 /// A MIDI 2.0 Clip File (M2-116) loads as its notes over its Flex Data tempo: at
 /// 96 ticks a quarter, a note from tick 0 to 96 is beat 0 to 1, one from tick 192
 /// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a

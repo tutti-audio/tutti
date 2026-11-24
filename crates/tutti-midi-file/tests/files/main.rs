@@ -19,3 +19,4 @@ mod to_clip;
 #[cfg(unix)]
 mod write_mode;
 mod writing;
+mod wrong_programs;
