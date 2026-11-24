@@ -43,7 +43,7 @@ const REPORT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How the plugin is hosted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hosting {
+pub(crate) enum Hosting {
     /// Loaded into this process.
     InProcess,
     /// Served by a `plugin-server` process.
@@ -63,7 +63,7 @@ enum Stage {
 
 /// The reference plugin loaded one way, as the only node of a graph, with its
 /// handle's invalidations collected.
-pub struct HostedProbe {
+pub(crate) struct HostedProbe {
     stage: Stage,
     handle: PluginHandle,
     seen: Arc<Mutex<Vec<PluginInvalidation>>>,
@@ -83,7 +83,7 @@ impl HostedProbe {
     /// at `refused_hz` and writing its tag to every output. The caller holds
     /// `machine_lock`: the refusal is process-wide, and the served one rides in
     /// the environment.
-    pub fn load(hosting: Hosting, rate: f64, refused_hz: f64) -> Self {
+    pub(crate) fn load(hosting: Hosting, rate: f64, refused_hz: f64) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let record = {
             let seen = Arc::clone(&seen);
@@ -138,7 +138,7 @@ impl HostedProbe {
     }
 
     /// The graph moves to `rate`; the node hears of it at the next block.
-    pub fn reprepare(&mut self, rate: f64) {
+    pub(crate) fn reprepare(&mut self, rate: f64) {
         let editor = match &mut self.stage {
             Stage::Local { renderer, .. } => renderer.editor_mut(),
             Stage::Served { rig, .. } => rig.renderer().editor_mut(),
