@@ -16,11 +16,27 @@ use crate::graph::Graph;
     not(feature = "midi-network"),
     expect(
         dead_code,
+        unreachable_pub,
         reason = "named by `MidiEvent::Network`, a feature `midi-network` variant"
     )
 )]
 #[derive(Debug)]
 pub enum NetworkEvent {}
+
+/// A peer that joined a network's output: none does.
+pub(crate) enum Joined {}
+
+impl Joined {
+    /// The output node the peer listens to.
+    pub(crate) fn sink(&self) -> NodeKey {
+        match *self {}
+    }
+
+    /// Sends `packets` to the peer alone.
+    pub(crate) fn send(&self, _: &[tutti_ump::Ump]) -> bool {
+        match *self {}
+    }
+}
 
 /// No network is open.
 #[derive(Debug, Default)]
@@ -35,6 +51,11 @@ impl Networks {
     /// No node is a network peer's input node.
     pub(crate) fn is_input_node(&self, _node: NodeKey) -> bool {
         false
+    }
+
+    /// No peer joins.
+    pub(crate) fn take_joined(&mut self) -> Vec<Joined> {
+        Vec::new()
     }
 
     /// No network to poll: the graph is not edited.

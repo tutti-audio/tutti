@@ -168,10 +168,9 @@ const RAMP_STEPS: u32 = 16;
 pub struct SvfKernel<F: Float + SimdLanes> {
     input: ChannelTopology,
     bank: SvfBank<F>,
-    /// The coefficients in flight; the first design after `prepare` lands at once.
+    /// The coefficients in flight.
     coefficients: Ramp<SvfCoefficients<F>>,
     rate: SampleRate,
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes> SvfKernel<F> {
@@ -185,7 +184,6 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
             bank: SvfBank::new(input.width()),
             coefficients: Ramp::new(Self::design(&SvfControls::DEFAULT, rate)),
             rate,
-            applied: false,
         }
     }
 
@@ -208,21 +206,19 @@ impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.coefficients = Ramp::new(Self::design(&SvfControls::DEFAULT, rate)).steps(RAMP_STEPS);
-        self.applied = false;
     }
 
     fn reset(&mut self) {
-        self.coefficients.jump_to_target();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &SvfControls) {
         self.coefficients
             .retarget(Self::design(controls, self.rate));
-        if !self.applied {
-            self.coefficients.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.coefficients.jump_to_target();
     }
 
     fn render(

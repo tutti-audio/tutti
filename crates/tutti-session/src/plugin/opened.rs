@@ -202,7 +202,7 @@ pub enum PluginCause {
 
 /// What a [`PluginInstance`](crate::PluginInstance) shares: the readings of one
 /// opened plugin.
-pub struct Shared {
+pub(super) struct Shared {
     pub(super) id: PeerResourceId,
     pub(super) stamp: Stamp,
     pub(super) info: Arc<PluginInfo>,

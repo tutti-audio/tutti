@@ -1006,6 +1006,38 @@ fn rule_3_a_plugin_lost_during_a_rollback_tells_the_refusal_as_inactive() {
     assert_eq!(s.stage(), Stage::Poisoned);
 }
 
+/// **A live retune applies the fields it takes, and a difference in another
+/// field survives it**: the rate, block ceiling and callback size are applied
+/// by `retuned`, the width is not, so the plugin is still behind and an
+/// activation follows.
+#[test]
+fn rule_3_a_retune_applies_what_it_takes_and_a_difference_in_another_field_remains() {
+    let p = prep(1);
+    let live = p
+        .with_rate(SampleRate::SR_96K)
+        .with_quantum(MaxBlock::of(Samples::new(32)));
+    let mut s = active(REST, p);
+    s.want(live);
+    assert!(s.behind(true));
+    s.retuned();
+    assert_eq!(s.applied(), Some(live));
+    assert!(!s.behind(true), "everything a retune takes is applied");
+
+    let other_width = live.with_format(match p.format() {
+        FloatWidth::F32 => FloatWidth::F64,
+        FloatWidth::F64 => FloatWidth::F32,
+    });
+    s.want(other_width.with_rate(SampleRate::SR_48K));
+    s.retuned();
+    assert_eq!(s.applied().map(|a| a.rate()), Some(SampleRate::SR_48K));
+    assert_eq!(
+        s.applied().map(|a| a.format()),
+        Some(p.format()),
+        "not taken"
+    );
+    assert!(s.behind(true), "the width still needs an activation");
+}
+
 /// **A plugin's own restart after a refused rate activates with the rate it
 /// accepted, not the one it refused.**
 #[test]

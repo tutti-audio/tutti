@@ -54,6 +54,8 @@ bytemuck = { version = "1.16", features = ["derive"] }
 libm = { version = "0.2.15", optional = true }
 # `RenderMode`'s wire form, with `serde`.
 serde = { version = "1", features = ["derive"], optional = true }
+# `tracing::error!` when an executor apply leaks items, from the control side.
+tracing = { workspace = true }
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true, features = ["std"] }
 

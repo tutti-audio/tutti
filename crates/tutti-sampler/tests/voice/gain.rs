@@ -16,7 +16,7 @@
 //! unity, subtle at 0.9, and 12 dB down at 0.25.
 //!
 //! The two tiers also reach it differently: the memory tier is scaled at the
-//! slot, while the streaming tier applies its own gain inside `DiskSource` and
+//! slot, while the streaming tier applies its own gain inside `DiskVoice` and
 //! ignores `Playback::gain` entirely. That asymmetry is deliberate and
 //! documented, but it means "same clip, same gain, same level" is a claim worth
 //! checking rather than assuming.

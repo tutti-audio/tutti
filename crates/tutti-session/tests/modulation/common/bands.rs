@@ -15,18 +15,18 @@ use tutti_units::Db;
 use tutti_units::{UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1.
-pub const BAND0: UnitAddr = UnitAddr::new(UnitParam::Threshold, 0);
-pub const BAND1: UnitAddr = UnitAddr::new(UnitParam::Threshold, 1);
+pub(crate) const BAND0: UnitAddr = UnitAddr::new(UnitParam::Threshold, 0);
+pub(crate) const BAND1: UnitAddr = UnitAddr::new(UnitParam::Threshold, 1);
 
 /// Two thresholds, as above. `Clone` shares the cells.
 #[derive(Clone)]
-pub struct Bands {
+pub(crate) struct Bands {
     knobs: [Arc<AtomicF64>; 2],
 }
 
 impl Bands {
     /// Band 0 at `t0`, band 1 at `t1`.
-    pub fn new(t0: f64, t1: f64) -> Self {
+    pub(crate) fn new(t0: f64, t1: f64) -> Self {
         Self {
             knobs: [Arc::new(AtomicF64::new(t0)), Arc::new(AtomicF64::new(t1))],
         }

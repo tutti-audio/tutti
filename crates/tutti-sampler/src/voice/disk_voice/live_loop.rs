@@ -1100,15 +1100,14 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         a.shared_state.stretch_rate(),
         tutti_units::ReadRate::new(0.5)
     );
-    let direction =
-        |voice: &mut DiskVoice<f32>| voice.live_mut().lent_control().map(|c| c.direction);
-    assert_eq!(direction(&mut a), Some(crate::PlayDirection::Reverse));
+    let direction = |voice: &mut DiskVoice<f32>| voice.live_mut().lent_control().direction;
+    assert_eq!(direction(&mut a), crate::PlayDirection::Reverse);
 
     // And nothing of it on the other.
     assert_eq!(b.gain(), tutti_units::Amplitude::new(1.0));
     assert_eq!(b.shared_state.speed(), PlaybackRate::UNITY);
     assert_eq!(b.shared_state.stretch_rate(), tutti_units::ReadRate::UNITY);
-    assert_eq!(direction(&mut b), Some(crate::PlayDirection::Forward));
+    assert_eq!(direction(&mut b), crate::PlayDirection::Forward);
     assert!(
         !Arc::ptr_eq(&a.shared_state, &b.shared_state),
         "the two voices hold one cell"
@@ -1129,7 +1128,7 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, LEN);
     let mut live = Live::new(&path, None, 1.0);
-    let lent = |live: &mut Live| live.voice.live_mut().lent_control().expect("a live voice");
+    let lent = |live: &mut Live| live.voice.live_mut().lent_control();
 
     let forward = lent(&mut live);
     assert_eq!(forward.direction, crate::PlayDirection::Forward);

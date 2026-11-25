@@ -127,12 +127,10 @@ fn analyses::xcorr::CrossCorrelation::values
 fn analyses::xcorr::cross_correlate
 fn analyses::yin::Pitch::note_name
 fn analyses::yin::Pitch::note_name_flat
-fn analyses::yin::PitchDetector::new
 fn analyses::yin::PitchEstimate::confidence
 fn analyses::yin::PitchEstimate::frequency
 fn analyses::yin::PitchEstimate::is_voiced
 fn analyses::yin::PitchEstimate::pitch
-fn analyses::yin::PitchResult::is_voiced
 fn analyses::yin::YinConfig::band
 fn analyses::yin::YinConfig::buffer_size
 fn analyses::yin::YinConfig::new

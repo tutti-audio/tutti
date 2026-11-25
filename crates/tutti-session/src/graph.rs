@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written through the editor's `connect_edge` and `disconnect_edge` (a port holds a set of sources, which the graph sums) |
-//! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
+//! | `replace` | `Editor::replace` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
@@ -562,12 +562,12 @@ pub(crate) struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
 
 impl RenderWorkerStart {
     /// Wrap `hook`.
-    pub fn new(hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
         Self(Arc::new(hook))
     }
 
     /// Run the hook for helper `index`.
-    pub fn call(&self, index: usize) {
+    pub(crate) fn call(&self, index: usize) {
         (self.0)(index);
     }
 }
@@ -1698,7 +1698,7 @@ impl<F: Float> Graph<F> {
             OnShape::Refuse => {
                 let placed = self
                     .editor
-                    .replace_or_swap(node, incoming, fade)
+                    .replace(node, incoming, fade)
                     .map_err(|e| SwapRefused::Failed(e.into()))?;
                 (placed.controls, placed.unwired)
             }
@@ -1716,7 +1716,7 @@ impl<F: Float> Graph<F> {
                 let fade = if fits { fade } else { Fade::new(Samples::ZERO) };
                 let inserted = self
                     .editor
-                    .replace_or_swap(node, unit, fade)
+                    .replace(node, unit, fade)
                     .map_err(|e| SwapRefused::Failed(e.into()))?;
                 (placed.controls, inserted.unwired)
             }
@@ -1724,7 +1724,15 @@ impl<F: Float> Graph<F> {
         self.note_unwired(node, &unwired);
         // The unit at `node` is new: whatever feeds it feeds a receiver that
         // has not heard it before.
-        for from in self.event_feeders(node) {
+        let feeding: Vec<NodeKey> = self
+            .editor
+            .spec()
+            .events
+            .iter()
+            .filter(|(at, _)| at.node() == node)
+            .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()))
+            .collect();
+        for from in feeding {
             self.note_gained(from);
         }
         self.note_pass(node);
@@ -2042,31 +2050,6 @@ impl<F: Float> Graph<F> {
             .connect_events(at, EventEdge::Direct(from))
             .expect("checked: both ends exist");
         self.note_gained(from.node());
-    }
-
-    /// The nodes feeding `node` over event edges, as the spec holds them. A
-    /// node that is not in the graph has none: nothing feeds a removed node.
-    fn event_feeders(&self, node: NodeKey) -> Vec<NodeKey> {
-        self.editor
-            .spec()
-            .events
-            .iter()
-            .filter(|(at, _)| at.node() == node)
-            .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()))
-            .collect()
-    }
-
-    /// `node`'s receiver changed with no edit (a device that came back): the
-    /// nodes feeding it over event edges wait for the next
-    /// [`take_applied_receivers`](Self::take_applied_receivers) that finds
-    /// nothing in flight. No commit is sent, so `gained` is not touched.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn receiver_replaced(&mut self, node: NodeKey) {
-        for from in self.event_feeders(node) {
-            if !self.unapplied.contains(&from) {
-                self.unapplied.push(from);
-            }
-        }
     }
 
     fn note_gained(&mut self, node: NodeKey) {
@@ -3945,9 +3928,9 @@ impl<F: Float> Graph<F> {
             return false;
         }
         // Clamped to what PDC compensates, as the editor clamps a latency it
-        // probes at insert: `set_latency` refuses a figure past it, and a
-        // refused one would never be retried (the poll only fires again when
-        // the plugin's figure moves).
+        // probes at insert: `set_latency` refuses a figure past it. Every
+        // update hands the plugin's figure again until the editor holds it,
+        // so a refusal between a re-prepare's two commits is retried.
         let latency = clamp_latency(latency, self.editor.prepare().sample_rate());
         if self.node_latency(node) == Ok(latency.samples()) {
             return false;
@@ -3957,6 +3940,7 @@ impl<F: Float> Graph<F> {
                 self.edited = true;
                 true
             }
+            Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: latency of {node:?} refused: {e}");
                 false
@@ -3981,7 +3965,9 @@ impl<F: Float> Graph<F> {
         }
         // A finite figure past what a node may declare is `Unbounded`, never
         // clamped (a clamp would declare a ceiling shorter than the plugin
-        // rings), and so never refused: nothing retries it.
+        // rings), and so never refused for its length. Every update hands the
+        // plugin's figure again until the editor holds it, so a refusal
+        // between a re-prepare's two commits is retried.
         let rate = self.editor.prepare().sample_rate();
         let tail = tutti_plugin_types::Processing::new(tail).ceiling(rate);
         if self.node_tail(node) == Ok(tail) {
@@ -3992,6 +3978,7 @@ impl<F: Float> Graph<F> {
                 self.edited = true;
                 true
             }
+            Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: tail of {node:?} refused: {e}");
                 false

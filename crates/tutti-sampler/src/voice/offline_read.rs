@@ -44,7 +44,7 @@ use super::types::PlayDirection;
 use crate::streamer::StreamFile;
 
 // A read is placed by the `Place` the voice built from its file's topology
-// (`DiskSource::with_reader`), the same one its live read uses: the caller
+// (`DiskVoice::new`), the same one its live read uses: the caller
 // passes it, so a fork plays the channels where the live voice does.
 
 /// Frames per page. Two pages are resident; see [`Pages`].

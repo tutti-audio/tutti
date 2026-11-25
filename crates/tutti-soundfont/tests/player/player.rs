@@ -378,18 +378,42 @@ fn cc_11_and_43_set_the_expression() {
 
 // Arm 0x0A (pan coarse) and 0x2A (fine), by RP-036: values 0 and 1 both pan hard
 // left, 64 is center.
+//
+// The voice pans at the sum of the channel's pan and the zone's (voice.rs, the
+// `pan_gains` call over `Pan::new(pan + instrument_pan)`), and RP-036's law gives
+// `left = cos a`, `right = sin a` for `a = pi/4 (1 + sum)`. The violin's zone at
+// key 69 has generator 17 (pan) at 4 tenths of a percent, 4/500 of the range
+// (SF2 2.04 section 8.1.2), so a channel hard left sums to -1 + 4/500 and the
+// right is not silent: `right / left = tan(a)`, 0.00628.
+const VIOLIN_ZONE_PAN: f64 = 4.0 / 500.0;
+
+/// The right over the left gain of the violin at key 69 with the channel's pan at
+/// `channel`, from RP-036's law. Both channels carry the same source and ramp, so
+/// the ratio of their summed magnitudes is the ratio of the gains, to the float
+/// rounding of 2048 sums.
+fn right_over_left(channel: f64) -> f64 {
+    (std::f64::consts::FRAC_PI_4 * (1.0 + channel + VIOLIN_ZONE_PAN)).tan()
+}
+
+fn assert_ratio(l: f32, r: f32, want: f64, what: &str) {
+    let got = f64::from(r) / f64::from(l);
+    assert!(
+        (got - want).abs() < 1e-4 * want,
+        "{what}: {got} against {want}"
+    );
+}
+
 #[test]
 fn cc_10_and_42_pan_the_channel() {
     let mut left = violin(|s| cc(s, CCNumber::PAN, 0));
     let (l, r) = energy_lr(&mut left, 2048);
-    assert!(
-        l > 1.0 && r == 0.0,
-        "hard left leaves the right silent: {l} {r}"
-    );
+    assert!(l > 1.0, "{l}");
+    assert_ratio(l, r, right_over_left(-1.0), "hard left");
 
     let mut one = violin(|s| cc(s, CCNumber::PAN, 1));
     let (l, r) = energy_lr(&mut one, 2048);
-    assert!(l > 1.0 && r == 0.0, "1 is hard left too: {l} {r}");
+    assert!(l > 1.0, "{l}");
+    assert_ratio(l, r, right_over_left(-1.0), "1 is hard left too");
 
     let mut right = violin(|s| cc(s, CCNumber::PAN, 127));
     let (l, r) = energy_lr(&mut right, 2048);
@@ -404,8 +428,14 @@ fn cc_10_and_42_pan_the_channel() {
         cc(s, CCNumber::PAN, 1);
         cc(s, CCNumber::of(42), 127);
     });
-    let (_, r) = energy_lr(&mut fine, 2048);
-    assert!(r > 0.0, "the fine byte moves the pan off the wall");
+    let (l, r) = energy_lr(&mut fine, 2048);
+    let channel = 2.0 * (127.0 / (126.0 * 128.0)) - 1.0;
+    assert_ratio(
+        l,
+        r,
+        right_over_left(channel),
+        "the fine byte moves the pan off the wall",
+    );
 }
 
 /// RP-036: 64 (40H) is center, with an equal-power distribution: the same level
@@ -544,8 +574,9 @@ fn cc_121_keeps_the_volume_and_the_pan() {
     cc(&mut left, CCNumber::PAN, 0);
     cc(&mut left, CCNumber::RESET_ALL, 0);
     left.note_on(0, 69, 100);
-    let (_, r) = energy_lr(&mut left, 2048);
-    assert_eq!(r, 0.0, "the pan stays hard left");
+    let (l, r) = energy_lr(&mut left, 2048);
+    assert!(l > 1.0, "{l}");
+    assert_ratio(l, r, right_over_left(-1.0), "the pan stays hard left");
 }
 
 // M1 p.14, Legato Footswitch: the note struck while another sounds moves the

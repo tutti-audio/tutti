@@ -14,7 +14,7 @@ use tutti_buffers::Float;
 
 /// A unit placed at a key, and what the placement left unwired.
 ///
-/// Returned by [`Editor::insert`] and [`Editor::replace_or_swap`]: the
+/// Returned by [`Editor::insert`] and [`Editor::replace`]: the
 /// node's typed controls, and the wiring the new unit's shape cannot carry.
 #[derive(Debug)]
 pub struct Inserted<C> {

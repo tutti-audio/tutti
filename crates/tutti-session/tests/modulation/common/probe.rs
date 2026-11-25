@@ -35,7 +35,7 @@ impl tutti_session::HasParam<{ UnitParam::Drive as u16 }> for ProbeUnit {
 /// modulation, the knob without it. `extra` declares a second param after
 /// it, which the probe does not read. `Clone` shares the cells.
 #[derive(Clone)]
-pub struct ProbeUnit {
+pub(crate) struct ProbeUnit {
     param: UnitParam,
     extra: Option<UnitParam>,
     knob: Arc<AtomicF64>,
@@ -44,12 +44,12 @@ pub struct ProbeUnit {
 
 impl ProbeUnit {
     /// A cutoff probe at `knob`.
-    pub fn new(knob: f64) -> Self {
+    pub(crate) fn new(knob: f64) -> Self {
         Self::of(UnitParam::Cutoff, knob)
     }
 
     /// A probe of `param` at `knob`.
-    pub fn of(param: UnitParam, knob: f64) -> Self {
+    pub(crate) fn of(param: UnitParam, knob: f64) -> Self {
         Self {
             param,
             extra: None,
@@ -59,13 +59,13 @@ impl ProbeUnit {
     }
 
     /// With a second param, `extra`, after the first: another param list.
-    pub fn with_extra(mut self, extra: UnitParam) -> Self {
+    pub(crate) fn with_extra(mut self, extra: UnitParam) -> Self {
         self.extra = Some(extra);
         self
     }
 
     /// The knob cell, shared with every clone.
-    pub fn knob(&self) -> Arc<AtomicF64> {
+    pub(crate) fn knob(&self) -> Arc<AtomicF64> {
         Arc::clone(&self.knob)
     }
 }
@@ -142,7 +142,7 @@ impl IntoNode for ProbeUnit {
 
 /// `level` on executor frames `[from, to)`, else 0, on both channels.
 #[derive(Clone)]
-pub struct Pulse {
+pub(crate) struct Pulse {
     pub from: u64,
     pub to: u64,
     pub level: f32,

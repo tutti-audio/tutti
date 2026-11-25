@@ -24,6 +24,11 @@ impl<F: SessionFloat> SamplerPart<F> {
     /// No streamer to wake.
     pub(crate) fn wake(&self) {}
 
+    /// No stream is opened, so none is swept.
+    pub(crate) fn reclaim(&mut self) -> usize {
+        0
+    }
+
     /// No stream has a ratio.
     pub(crate) fn set_sample_rate(&self, _: SampleRate) {}
 }

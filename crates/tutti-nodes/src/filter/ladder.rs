@@ -157,10 +157,9 @@ const RAMP_STEPS: u32 = 16;
 pub struct LadderKernel<F: Float + SimdLanes> {
     input: ChannelTopology,
     bank: LadderBank<F>,
-    /// The blend in flight; the first one after `prepare` lands at once.
+    /// The blend in flight.
     blend: Ramp<LadderBlend<F>>,
     rate: SampleRate,
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes> LadderKernel<F> {
@@ -174,7 +173,6 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
             bank: LadderBank::new(input.width()).saturation(saturation),
             blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
-            applied: false,
         }
     }
 
@@ -197,20 +195,18 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.blend = Ramp::new(Self::design(&LadderControls::DEFAULT, rate)).steps(RAMP_STEPS);
-        self.applied = false;
     }
 
     fn reset(&mut self) {
-        self.blend.jump_to_target();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &LadderControls) {
         self.blend.retarget(Self::design(controls, self.rate));
-        if !self.applied {
-            self.blend.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.blend.jump_to_target();
     }
 
     fn render(

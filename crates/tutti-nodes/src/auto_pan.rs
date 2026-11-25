@@ -136,6 +136,8 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
         self.pan.retarget(controls);
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

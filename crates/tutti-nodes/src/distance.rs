@@ -125,9 +125,6 @@ pub struct DistanceKernel<F: Float> {
     spec: DistanceSpec,
     /// The controls last retargeted to, which `prepare` rebuilds from.
     controls: DistanceControls,
-    /// Whether the next retarget is the first since the kernel was built or reset: nothing
-    /// is sounding then, so the delay lands on the distance at once.
-    fresh: bool,
     distance: Distance<F>,
 }
 
@@ -143,7 +140,6 @@ impl<F: Float> DistanceKernel<F> {
             width,
             spec,
             controls,
-            fresh: true,
             distance: Distance::new(spec, width, rate, &controls),
         }
     }
@@ -168,19 +164,18 @@ impl<F: Float> Kernel for DistanceKernel<F> {
     }
 
     fn reset(&mut self) {
-        self.fresh = true;
         self.distance.reset();
     }
 
-    /// The delay glides to the distance, except the first one after a build or a reset,
-    /// which it lands on: no sound is in the line to bend.
+    /// The delay glides to the distance.
     fn retarget(&mut self, controls: &DistanceControls) {
         self.controls = *controls;
         self.distance.retarget(controls);
-        if self.fresh {
-            self.distance.land();
-            self.fresh = false;
-        }
+    }
+
+    /// The delay lands on the distance: no sound is in the line to bend.
+    fn jump_to_target(&mut self) {
+        self.distance.land();
     }
 
     fn render(

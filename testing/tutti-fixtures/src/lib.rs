@@ -94,6 +94,7 @@ pub use alloc_count::{ThreadCounting, allocations};
 #[cfg(feature = "au")]
 #[allow(
     unused_imports,
+    unreachable_pub,
     reason = "the Audio Unit fixtures exist on macOS; `au` is empty elsewhere"
 )]
 pub use au::*;

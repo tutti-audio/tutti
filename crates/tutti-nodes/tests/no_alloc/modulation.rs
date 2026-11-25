@@ -10,7 +10,7 @@ use tutti_nodes::{
 use tutti_units::{BeatsPerCycle, Feedback, Hz, PhaseIncrement, Seconds, UnitParam};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[lfo, held, controls_moving, ports_fed];
+pub(crate) const ROWS: &[fn()] = &[lfo, held, controls_moving, ports_fed];
 
 /// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
 /// two seconds.
