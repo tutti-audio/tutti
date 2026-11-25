@@ -247,11 +247,12 @@ impl Loaded for ClapLoaded {
 
     /// 64-bit when every audio port advertises it. The ports are read again
     /// (`clap_plugin_audio_ports.get` is `[main-thread]`, and a plugin
-    /// re-declares its ports while deactivated), so the answer is the plugin's
-    /// now; a port the host cannot read leaves the last read, and the
-    /// activation refuses on the same error.
+    /// re-declares its ports while deactivated). A port the host cannot read
+    /// leaves 64-bit unsupported, so 32-bit is chosen.
     fn widths(&mut self, main: MainThreadMarker) -> Widths {
-        let _ = self.rescan_audio_ports(main);
+        if self.rescan_audio_ports(main).is_err() {
+            self.audio.supports_f64 = false;
+        }
         Widths::new(self.audio.supports_f64)
     }
 
