@@ -28,15 +28,14 @@
 //!   a looped stream's ring (fade blended in, wrapping to `resume`), so a live
 //!   voice's own four-tap history reads the same frames.
 //!
-//! # The fade weight
+//! # The fade gains
 //!
-//! Frame `k` of an `n`-frame fade weighs the lead-in by `(k + 1) / (n + 1)`, a
-//! linear fade that excludes both endpoints: the frame before the fade is pure
-//! tail, the frame after it is pure `start`, and neither join steps by more than
-//! `1 / (n + 1)` of the gap between tail and lead-in on top of the material's
-//! own step. Linear, not equal-power, as every crossfade in this crate is: on
-//! correlated material (a sustained tone either side of the seam) a linear fade
-//! holds the level exactly.
+//! Frame `k` of an `n`-frame fade reads `tail * out + lead * in`, the gains of
+//! [`FadeLaw::EqualPower`] at the position `x = (k + 1) / (n + 1)`, which
+//! excludes both endpoints: the frame before the fade is pure tail, the frame
+//! after it is pure `start`. The tail and the lead-in are different stretches
+//! of the source, so they add in power: `out² + in² = 1` at every frame, and a
+//! seam between uncorrelated material holds its level.
 //!
 //! # When there is too little before `start`: fade into the head instead
 //!
@@ -60,6 +59,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use tutti_buffers::Float;
+use tutti_graph::FadeLaw;
 use tutti_units::{SamplePosition, Samples};
 
 /// A loop over whole file frames `[start, end)`, with a crossfade into it: the
@@ -75,8 +75,8 @@ use tutti_units::{SamplePosition, Samples};
 /// streamer's thread); a loop that starts at or past the file's end plays
 /// nothing in a loop.
 ///
-/// The fade is linear, over the last `crossfade` frames before `end`, and
-/// continuous at the wrap:
+/// The fade is equal-power ([`FadeLaw::EqualPower`]), over the last
+/// `crossfade` frames before `end`, and continuous at the wrap:
 ///
 /// - With at least `crossfade` frames before `start`, the tail blends toward
 ///   the frames leading into `start`, and the wrap lands on `start`.
@@ -219,11 +219,11 @@ pub(crate) struct LoopSpan {
 
 /// One of the four frames the kernel interpolates a looped position from: the
 /// file frame it reads, and, inside the crossfade, the lead-in frame it blends
-/// toward and the lead-in's weight.
+/// toward and the gains of the tail and the lead-in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct LoopTap<F> {
     pub(crate) frame: usize,
-    pub(crate) fade: Option<(usize, F)>,
+    pub(crate) fade: Option<(usize, F, F)>,
 }
 
 impl LoopSpan {
@@ -321,18 +321,22 @@ impl LoopSpan {
     }
 
     /// The crossfade at file frame `frame`: the lead-in frame it blends toward
-    /// (one of the `fade` frames leading into `resume`) and the lead-in's
-    /// weight, or `None` outside the fade.
+    /// (one of the `fade` frames leading into `resume`) and the gains
+    /// `(out, in)` of the tail and the lead-in, or `None` outside the fade.
+    /// The gains are [`FadeLaw::EqualPower`]'s at frame `k` of the `fade`-frame
+    /// fade, narrowed to `F` once.
     #[inline]
-    pub(crate) fn fade_at<F: Float>(&self, frame: usize) -> Option<(usize, F)> {
+    pub(crate) fn fade_at<F: Float>(&self, frame: usize) -> Option<(usize, F, F)> {
         let fade_start = self.end - self.fade;
         if frame < fade_start || frame >= self.end {
             return None;
         }
         let k = frame - fade_start;
+        let (out, lead) = FadeLaw::EqualPower.gains(Samples::new(k), Samples::new(self.fade));
         Some((
             self.resume - self.fade + k,
-            F::from_design((k + 1) as f64 / (self.fade + 1) as f64),
+            F::from_unit(out),
+            F::from_unit(lead),
         ))
     }
 
@@ -447,45 +451,68 @@ mod tests {
         assert!(plain > 0, "some frames are plain");
     }
 
+    /// The closed form of frame `k` of an `n`-frame fade's gains: the
+    /// smootherstep `s = x³(6x² − 15x + 10)` of `x = (k + 1) / (n + 1)`, and
+    /// `(cos(πs/2), sin(πs/2))`.
+    fn closed_gains(k: usize, n: usize) -> (f64, f64) {
+        let x = (k + 1) as f64 / (n + 1) as f64;
+        let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+        let a = s * std::f64::consts::FRAC_PI_2;
+        (a.cos(), a.sin())
+    }
+
     /// The fade leads into `start`. A 4-frame fade on `[10, 20)` blends
-    /// frames 16..20 toward 6..10, weighted 1/5 … 4/5, and nothing else; the
-    /// wrap lands on 10.
+    /// frames 16..20 toward 6..10 at the equal-power gains of positions
+    /// 1/5 … 4/5, and nothing else; the wrap lands on 10.
     #[test]
     fn the_fade_blends_the_tail_toward_what_leads_into_start() {
         let span = LoopSpan::unbounded(10, 20, 4).expect("a loop");
-        assert_eq!(span.fade_at::<f32>(15), None);
-        assert_eq!(span.fade_at(16), Some((6, 0.2)));
-        assert_eq!(span.fade_at(19), Some((9, 0.8)));
-        assert_eq!(span.fade_at::<f32>(20), None);
+        assert_eq!(span.fade_at::<f64>(15), None);
+        for k in 0..4 {
+            let (lead, out, gain) = span.fade_at::<f64>(16 + k).expect("inside the fade");
+            let (want_out, want_in) = closed_gains(k, 4);
+            assert_eq!(lead, 6 + k);
+            assert!((out - want_out).abs() <= 1e-12, "out at {k}: {out}");
+            assert!((gain - want_in).abs() <= 1e-12, "in at {k}: {gain}");
+        }
+        assert_eq!(span.fade_at::<f64>(20), None);
         assert_eq!(span.resume(), 10);
         assert_eq!(span.place(20.0), (10.0, true));
     }
 
-    /// A long fade's weight is the closed form `(k + 1) / (fade + 1)` rounded
-    /// once: within half a unit in the last place of the width (`2^-25` in `f32`
-    /// and `2^-54` in `f64` for a weight in `[0.5, 1)`). The fade is 30 million
-    /// frames, past `2^24`, where `f32` holds only even counts: a weight formed
-    /// from the two counts as `f32` rounds three times and lands `1.45 * 2^-24`
-    /// off at this frame, three times the bound.
+    /// The seam's gains are equal-power: `out² + in² = 1` at every frame of a
+    /// 7-frame fade, and the lead-in's gain rises strictly while the tail's
+    /// falls.
     #[test]
-    fn a_long_fades_weight_is_its_closed_form_rounded_once() {
+    fn a_fades_gains_are_equal_power_and_the_lead_in_rises_strictly() {
+        let span = LoopSpan::unbounded(20, 40, 7).expect("a loop");
+        let mut previous = (1.0, 0.0);
+        for frame in 33..40 {
+            let (_, out, gain) = span.fade_at::<f64>(frame).expect("inside the fade");
+            assert!(
+                (out * out + gain * gain - 1.0).abs() <= 1e-12,
+                "frame {frame}"
+            );
+            assert!(gain > previous.1 && out < previous.0, "frame {frame}");
+            previous = (out, gain);
+        }
+    }
+
+    /// A long fade's gains are the closed form rounded once to the width: the
+    /// `f32` gains are within half a unit in the last place of it (`2^-25` for
+    /// a gain in `[0.5, 1)`, `2^-26` below). The fade is 30 million frames, past
+    /// `2^24`, where `f32` holds only even counts: a position formed from the
+    /// two counts as `f32` would round three times.
+    #[test]
+    fn a_long_fades_gains_are_their_closed_form_rounded_once() {
         let fade = 30_000_000usize;
         let span = LoopSpan::unbounded(40_000_000, 80_000_000, fade).expect("a loop");
         let k = 25_000_002usize;
         let frame = 80_000_000 - fade + k;
-        let exact = (k + 1) as f64 / (fade + 1) as f64;
-        let (_, w32) = span.fade_at::<f32>(frame).expect("inside the fade");
-        assert!((f64::from(w32) - exact).abs() <= 2.0_f64.powi(-25) + 2.0_f64.powi(-54));
-        let (_, w64) = span.fade_at::<f64>(frame).expect("inside the fade");
-        // The `f64` weight in `[0.5, 1)` is `m * 2^-53` for an integer `m`; it is the
-        // closed form to half a step when `|m (fade + 1) - (k + 1) 2^53|` is at most
-        // `(fade + 1) 2^52`, an integer comparison with no division to share.
-        let m = (w64 * 2.0_f64.powi(53)) as i128;
-        let off = (m * (fade as i128 + 1) - (k as i128 + 1) * (1_i128 << 53)).abs();
-        assert!(
-            off <= (fade as i128 + 1) * (1_i128 << 52),
-            "f64 weight {w64}"
-        );
+        let (want_out, want_in) = closed_gains(k, fade);
+        let (_, out, gain) = span.fade_at::<f32>(frame).expect("inside the fade");
+        assert!((f64::from(out) - want_out).abs() <= 2.0_f64.powi(-25));
+        assert!((f64::from(gain) - want_in).abs() <= 2.0_f64.powi(-25));
     }
 
     /// With too little before `start`, the fade goes into the loop's head
@@ -497,8 +524,8 @@ mod tests {
     fn with_too_little_before_start_the_fade_goes_into_the_head() {
         let span = LoopSpan::unbounded(2, 20, 4).expect("a loop");
         assert_eq!((span.fade(), span.resume()), (4, 6));
-        assert_eq!(span.fade_at(16), Some((2, 0.2)));
-        assert_eq!(span.fade_at(19), Some((5, 0.8)));
+        assert_eq!(span.fade_at::<f64>(16).map(|(lead, ..)| lead), Some(2));
+        assert_eq!(span.fade_at::<f64>(19).map(|(lead, ..)| lead), Some(5));
         assert_eq!(span.place(20.0), (6.0, true));
         assert_eq!(span.place(34.0), (6.0, true), "the loop repeats [6, 20)");
         // The whole-frame twin the streamer writes its ring by agrees.

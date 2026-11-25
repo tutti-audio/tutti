@@ -416,10 +416,20 @@ fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
 
 /// Every sample of `block` is within rounding of `want` (a fold sums in `f32`).
 fn assert_near(block: &[Vec<f32>], want: &[f32; 8], what: &str) {
+    assert_near_at(block, want, None, what);
+}
+
+/// [`assert_near`] for a block of a render of [`loop_1000_3000`] starting at
+/// `frame0`: a constant channel crossfaded with itself reads `want` times the
+/// sum of the equal-power gains in the fade, and `want` elsewhere.
+fn assert_near_at(block: &[Vec<f32>], want: &[f32; 8], frame0: Option<usize>, what: &str) {
     assert_eq!(block.len(), 8, "{what}: width");
     for (c, (lane, &w)) in block.iter().zip(want).enumerate() {
         assert!(
-            lane.iter().all(|s| (s - w).abs() < 1e-6),
+            lane.iter().enumerate().all(|(j, s)| {
+                let gain = frame0.map_or(1.0, |f| seam_level(f + j));
+                (s - w * gain).abs() < 1e-6
+            }),
             "{what}: channel {c} is not {w}: {:?}",
             &lane[..4]
         );
@@ -499,8 +509,30 @@ fn lanes<N: tutti_graph::Node>(direct: &contract::Direct<N>) -> Vec<Vec<f32>> {
         .collect()
 }
 
+/// The crossfade length of [`loop_1000_3000`].
+const SEAM: usize = 64;
+
 fn loop_1000_3000() -> Option<Loop> {
-    Some(loop_frames(1_000, 3_000, 64))
+    Some(loop_frames(1_000, 3_000, SEAM))
+}
+
+/// The level a constant reads at straight frame `frame` of [`loop_1000_3000`]:
+/// 1 outside its fade; inside it, frame `k` of the fade is the constant
+/// against itself, `cos(πs/2) + sin(πs/2)` with `s = x³(6x² − 15x + 10)` at
+/// `x = (k + 1) / (SEAM + 1)`.
+fn seam_level(frame: usize) -> f32 {
+    let at = if frame < 3_000 {
+        frame
+    } else {
+        1_000 + (frame - 1_000) % 2_000
+    };
+    let Some(k) = at.checked_sub(3_000 - SEAM) else {
+        return 1.0;
+    };
+    let x = (k + 1) as f64 / (SEAM + 1) as f64;
+    let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+    let a = s * std::f64::consts::FRAC_PI_2;
+    (a.cos() + a.sin()) as f32
 }
 
 /// A fork reads a placed file through every one of its paths: forward, looped
@@ -532,7 +564,8 @@ fn a_fork_places_every_read_path() {
                     .iter()
                     .map(|l| l[chunk * BLOCK..(chunk + 1) * BLOCK].to_vec())
                     .collect();
-                assert_near(&block, &f.want, &format!("{what}, block {chunk}"));
+                let frame0 = (path == "looped").then_some(chunk * BLOCK);
+                assert_near_at(&block, &f.want, frame0, &format!("{what}, block {chunk}"));
             }
         }
     }
@@ -558,10 +591,27 @@ fn a_loop_edit_and_wrap_on_a_placed_stream_allocate_nothing() {
             direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
             clock.advance(BLOCK as i64, SampleRate::of(SR));
             let _ = rig.streamer.step();
-            if b >= 4 {
-                assert_near(
+            if (44..48).contains(&b) {
+                // The reader blends the old mapping (flat, no loop) into the
+                // new over 256 frames from the edit, so a seam frame inside
+                // that window lies between the flat figure and the seam's.
+                for (c, lane) in lanes(&direct).iter().enumerate() {
+                    for (j, &s) in lane.iter().enumerate() {
+                        let flat = f.want[c];
+                        let seam = flat * seam_level(b * BLOCK + j);
+                        assert!(
+                            s >= flat.min(seam) - 1e-6 && s <= flat.max(seam) + 1e-6,
+                            "{} channels, block {b}: channel {c} frame {j} is {s}, outside \
+                             [{flat}, {seam}]",
+                            f.channels
+                        );
+                    }
+                }
+            } else if b >= 4 {
+                assert_near_at(
                     &lanes(&direct),
                     &f.want,
+                    Some(b * BLOCK),
                     &format!("{} channels, block {b}", f.channels),
                 );
             }

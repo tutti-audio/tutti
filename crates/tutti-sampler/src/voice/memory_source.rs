@@ -970,7 +970,7 @@ impl<F: Float> MemorySource<F> {
                             let tap = taps[t];
                             let tail = wave[tap.frame];
                             match tap.fade {
-                                Some((lead, w)) => tutti_dsp::lerp(tail, wave[lead], w),
+                                Some((lead, out, gain)) => tail * out + wave[lead] * gain,
                                 None => tail,
                             }
                         };

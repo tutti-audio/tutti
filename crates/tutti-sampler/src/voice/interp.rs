@@ -529,7 +529,7 @@ pub(crate) fn read_looped_frame<F: Float>(
         let tap = taps[t];
         let tail = wave.at(c, tap.frame);
         match tap.fade {
-            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead), w),
+            Some((lead, out, lead_gain)) => tail * out + wave.at(c, lead) * lead_gain,
             None => tail,
         }
     });
