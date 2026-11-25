@@ -140,8 +140,9 @@ pub struct Control {
 
 /// What a control does to the kernel's ring-out ([`Control::ring`]): whether
 /// [`tail_of`](crate::Kernel::tail_of) reads it and, if so, where it is longest. A control
-/// counts as driven for every block its port has a source, from the source's connect on: a
-/// flat signal and an automation source with no event yet included. A driven port may take any value later, so the node reports the most the
+/// counts as driven for every block its port delivers frames: through a connect or disconnect
+/// declick, and from its source's first event on; a source that has not spoken leaves the port
+/// on its base. A driven port may take any value later, so the node reports the most the
 /// kernel rings over the driven controls' whole range, the others as their cells set them
 /// ([`KernelNode`](crate::KernelNode)).
 #[derive(Clone, Copy, Debug, PartialEq)]
