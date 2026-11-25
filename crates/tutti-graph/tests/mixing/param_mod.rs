@@ -511,11 +511,11 @@ fn an_event_sources_value_is_clamped_to_the_range() {
     );
 }
 
-/// A base moved under a source that has not spoken yet ramps linearly
-/// across the next block, landing exactly on the new base at its last
-/// frame — no zipper step.
+/// A base moved under a source that has not spoken yet is read at once, as
+/// an unconnected port reads it: the port is not driven, so there is no
+/// trajectory to ramp.
 #[test]
-fn a_base_move_under_modulation_ramps_across_the_block() {
+fn a_base_move_under_a_silent_source_is_read_at_once() {
     let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "quiet", Unforkable(Ramps::steps(&[])));
@@ -525,27 +525,23 @@ fn a_base_move_under_modulation_ramps_across_the_block() {
     let _ = render(&mut exec, &mut ed, 512, 64);
     cutoff.set(200.0);
     let out = render(&mut exec, &mut ed, 64, 64);
-    for (i, &x) in out[0].iter().enumerate() {
-        let want = if i == 63 {
-            200.0
-        } else {
-            100.0 + 100.0 * ((i + 1) as f32 / 64.0)
-        };
-        assert_eq!(x, want, "frame {i} of the ramp");
-    }
+    assert!(
+        out[0].iter().all(|&x| x == 200.0),
+        "the new base, every frame"
+    );
+    assert!(out[2].iter().all(|&x| x == 0.0), "Base");
 }
 
-/// A port with an event source reads `Frames` on every block, also long after
-/// the source's last ramp ended: the trajectory at rest is still delivered per
-/// frame, at the ramp's end value. Before the source's first event the port
-/// reads `Frames` too, at the base (the source "has not spoken", and a base
-/// move ramps across the block, as the test above pins). A port with no source
-/// reads `Base`: before the connect, and after the disconnect's declick.
+/// A port with an event source delivers `Frames` only through its connect's
+/// declick and from its source's first event on; before that, and once
+/// the disconnect's declick is over, it reads `Base`.
 #[test]
-fn a_connected_param_reads_frames_at_rest_and_base_once_disconnected() {
+fn a_connected_param_reads_frames_through_its_declick_and_once_its_source_has_spoken() {
     const BLOCK: usize = 64;
-    // The first block after the connect's fade, which the ramp then follows.
-    let spoken = (declick() / BLOCK + 1) * BLOCK;
+    // The first block after the connect's fade, then three blocks on which the
+    // source has not spoken, then the block of the ramp.
+    let after = (declick() / BLOCK + 1) * BLOCK;
+    let spoken = after + 3 * BLOCK;
     let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
     let (mut ed, mut exec) = probe_graph(BLOCK, &cutoff, &q);
     // One ramp, 10 frames long, inside the block at `spoken` after the connect
@@ -571,9 +567,17 @@ fn a_connected_param_reads_frames_at_rest_and_base_once_disconnected() {
     let out = render(&mut exec, &mut ed, spoken + 5 * BLOCK, BLOCK);
     let at_rest = spoken + 4 + 10;
     for (i, &framed) in out[2].iter().enumerate() {
+        // A block's port state is the state at its start: the block the declick
+        // ends in still delivers.
+        let want = if (after..spoken).contains(&i) {
+            0.0
+        } else {
+            1.0
+        };
         assert_eq!(
-            framed, 1.0,
-            "frame {i}: the cutoff port reads Frames, Q reads Base"
+            framed, want,
+            "frame {i}: Frames through the declick (frames 0..{after}) and from the first \
+             event's block (frame {spoken}) on, Base between"
         );
     }
     assert!(
@@ -594,8 +598,44 @@ fn a_connected_param_reads_frames_at_rest_and_base_once_disconnected() {
     assert!(ed.disconnect_param(at, ev(1)));
     ed.commit().expect("disconnects");
     let off = render(&mut exec, &mut ed, spoken + BLOCK, BLOCK);
+    assert_eq!(off[2][0], 1.0, "Frames through the disconnect's declick");
     assert_eq!(*off[2].last().expect("rendered"), 0.0, "Base again");
     assert_eq!(*off[0].last().expect("rendered"), 100.0, "on the base");
+}
+
+/// A source that never sends an event is not a source: its port reads
+/// `Base`, at the base's value, on every block after the connect's declick.
+#[test]
+fn a_silent_source_leaves_its_port_on_the_base_after_the_declick() {
+    const BLOCK: usize = 64;
+    let after = (declick() / BLOCK + 1) * BLOCK;
+    let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
+    let (mut ed, mut exec) = probe_graph(BLOCK, &cutoff, &q);
+    ed.insert(NodeKey(1), "silent", Unforkable(Ramps::steps(&[])));
+    ed.commit().expect("commits");
+    // A port's first block has nothing to fade from; the connect follows a run block.
+    let first = render(&mut exec, &mut ed, BLOCK, BLOCK);
+    assert!(first[2].iter().all(|&x| x == 0.0), "no source: Base");
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
+    ed.commit().expect("connects");
+    let out = render(&mut exec, &mut ed, after + 12 * BLOCK, BLOCK);
+    for (i, &framed) in out[2].iter().enumerate() {
+        let want = if i / BLOCK * BLOCK < declick() {
+            1.0
+        } else {
+            0.0
+        };
+        assert_eq!(framed, want, "frame {i}: Frames only through the declick");
+    }
+    assert!(
+        out[0].iter().all(|&x| (x - 100.0).abs() < 1e-3),
+        "the base throughout, to within f32 rounding"
+    );
+    assert!(
+        out[0][after..].iter().all(|&x| x == 100.0),
+        "past the declick the port reads the base itself"
+    );
 }
 
 /// Connecting a source at full swing, and disconnecting it, crossfade over
@@ -1752,16 +1792,10 @@ impl Node for SegmentThenRamp {
     fn reset(&mut self) {}
 }
 
-/// The base of [`segment_then_ramp`]'s second block, frame by frame: moved
-/// 1 → 3 at the block's start, so it ramps across the block
-/// (`1 + 2 (i + 1) / 16`).
-fn moving_base(i: usize) -> f32 {
-    1.0 + (3.0f32 - 1.0) * ((i + 1) as f32 / 16.0)
-}
-
 /// `Cutoff` as the executor renders it, for a [`SegmentThenRamp`] driving
 /// the probe's port: block 1, frames 0..8, at a still base of 1; block 2,
-/// frames 8..24, under [`moving_base`].
+/// frames 8..24, at the base moved 1 → 3 between the blocks (a port whose
+/// source has not spoken reads the base itself, with no ramp across the block).
 fn segment_then_ramp(at: u64, step_at: Option<u64>) -> (Vec<f32>, Vec<f32>) {
     let (cutoff, q) = (Cell::new(1.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
@@ -1793,7 +1827,7 @@ fn assert_bits(got: &[f32], want: &[f32], from: usize) {
 }
 
 /// The second block of [`segment_then_ramp`] with its ramp at frame `at`,
-/// 4 frames to 0 from `held`, and `moving_base` before it.
+/// 4 frames to 0 from `held`, and the base (3) before it.
 fn ramp_from(at: u64, held: impl Fn(usize) -> f32) -> Vec<f32> {
     let k = (at - 8) as usize;
     let b = held(k);
@@ -1817,12 +1851,12 @@ fn ramp_from(at: u64, held: impl Fn(usize) -> f32) -> Vec<f32> {
 /// source's first events, starts from the base at that frame, exactly as
 /// it would with no segment before it (a first ramp starts from the base
 /// at its frame; a second event on a frame replaces the first from the same
-/// value). Pinned under a base that is ramping across the block, so it
-/// cannot start from the previous frame's base or from a value nothing wrote.
+/// value). Pinned under a base moved since the previous block, so it cannot
+/// start from the previous block's base or from a value nothing wrote.
 #[test]
 fn a_ramp_replacing_a_first_segment_on_its_frame_starts_from_the_base() {
-    let want = ramp_from(10, moving_base);
-    assert_eq!(want[2], 1.03125, "the ramp's first frame, from the base");
+    let want = ramp_from(10, |_| 3.0);
+    assert_eq!(want[2], 2.25, "the ramp's first frame, from the base");
     let (first, second) = segment_then_ramp(10, None);
     assert_eq!(first, vec![1.0; 8], "the base, before any event");
     assert_bits(&second, &want, 8);
