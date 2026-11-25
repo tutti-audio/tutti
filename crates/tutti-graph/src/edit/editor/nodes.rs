@@ -121,13 +121,11 @@ impl<F: Float> Editor<F> {
             // fade, so both units must declare the same params.
             && shape.params == running.params
     }
-
     /// Replaces the unit running at `key` with `node`, crossfading from one
     /// to the other over `fade` once the next [`commit`](Self::commit) lands
     /// — a new generation, like [`insert`](Self::insert), but heard as a
-    /// fade rather than a swap. Returns the new unit's typed controls and what it
-    /// unwired ([`insert`](Self::insert)). The
-    /// rules:
+    /// fade rather than a swap. Returns the new unit's typed controls and what
+    /// it unwired ([`insert`](Self::insert)). The rules:
     ///
     /// - Both units run on the node's inputs for `fade.duration` frames and
     ///   their outputs are blended along `fade.law`; then the old unit
@@ -141,110 +139,38 @@ impl<F: Float> Editor<F> {
     /// - New events go to the incoming unit only.
     /// - A replace while a fade runs at `key` waits for it to finish, then
     ///   fades from its incoming unit; a newer one supersedes a waiting one.
+    /// - An [`insert`](Self::insert) or [`remove`](Self::remove) at `key`
+    ///   before the commit takes the fade back, as does a
+    ///   [`reprepare`](Self::reprepare) (whose units restart from silence
+    ///   anyway).
+    /// - Forking follows the new unit, as after an [`insert`](Self::insert):
+    ///   its [`ForkSource`] replaces the key's, and a unit that hands none
+    ///   over makes the key unforkable. (A fork mid-fade forks the incoming
+    ///   unit alone; a fork has no fades.)
     ///
-    /// Refused, changing nothing, with [`CommitError::FadeShape`] when
-    /// `node`'s shape differs from the running unit's in more than its tail,
-    /// and with [`CommitError::NotRunning`] when nothing runs at `key` (not
-    /// yet committed, or removed). An [`insert`](Self::insert) or
-    /// [`remove`](Self::remove) at `key` before the commit takes the fade
-    /// back, as does a [`reprepare`](Self::reprepare) (whose units restart
-    /// from silence anyway).
-    ///
-    /// Forking follows the new unit, as after an [`insert`](Self::insert):
-    /// its [`ForkSource`] replaces the key's, and a unit that hands none
-    /// over makes the key unforkable. (A fork mid-fade forks the incoming
-    /// unit alone; a fork has no fades.)
-    ///
-    /// # Errors
-    ///
-    /// Nothing changes, and `node` is dropped, on [`CommitError::FadeShape`]
-    /// or [`CommitError::NotRunning`] (above), [`CommitError::Repreparing`]
-    /// between a re-prepare's two commits, or [`CommitError::Poisoned`].
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not in the spec.
-    pub fn replace<N: IntoNode<F>>(
-        &mut self,
-        key: NodeKey,
-        node: N,
-        fade: Fade,
-    ) -> Result<Inserted<N::Controls>, CommitError> {
-        self.check_poisoned()?;
-        if self.is_repreparing() {
-            return Err(CommitError::Repreparing);
-        }
-        let running = self
-            .life
-            .plan()
-            .and_then(|p| p.unit(key))
-            .map(|u| u.shape)
-            .filter(|_| self.spec.topology.nodes.contains_key(&key))
-            .ok_or(CommitError::NotRunning { node: key })?;
-        let NodeParts {
-            node: mut unit,
-            controls,
-            fork,
-            // The editor places a unit; a session reads these before it does.
-            params: _,
-            reclaimer: _,
-            published: _,
-            settings: _,
-        } = node.into_parts();
-        let wake = Wake::new();
-        unit.bind_wake(wake.clone());
-        unit.prepare(&self.prepare);
-        let shape = unit.shape();
-        // Everything the running plan was compiled from but the tail: the
-        // op, its PDC and its borrows must be right for both units at once.
-        let fits = Self::fits(&shape, &running);
-        if !fits {
-            return Err(CommitError::FadeShape {
-                node: key,
-                running: Box::new(running),
-                incoming: Box::new(shape),
-            });
-        }
-        // The unit that runs at the key names itself, not the one it replaced.
-        let kind = N::kind();
-        // As `insert`: the new unit's fork source, or none — a replace with
-        // an unforkable unit makes the key unforkable. Only past the checks,
-        // so a refused replace changes nothing.
-        // Edges recorded since the running plan was committed can name ports
-        // the incoming shape lacks, as at an insert: they are unwired.
-        let unwired = self.place(key, kind, unit, wake, shape, fork);
-        self.placements.set_fade(key, fade);
-        Ok(Inserted { controls, unwired })
-    }
-
-    /// [`replace`](Self::replace) where it can fade, and a plain placement at
-    /// `key` where there is nothing to fade from: the node not running yet,
-    /// or a `fade` of zero length (a cut) over a shape the running unit's
-    /// plan does not fit (a latency change). Then the new unit lands as a
-    /// swap on the next commit, as [`insert`](Self::insert) at an existing key
-    /// does, keeping the key's kind. A fade asked for over a shape that does
-    /// not fit is refused with [`CommitError::FadeShape`]: the caller who
-    /// accepts a cut says so with a zero fade.
+    /// It fades where it can, and places plainly where there is nothing to
+    /// fade from: the node not running yet, or a `fade` of zero length (a
+    /// cut) over a shape the running unit's plan does not fit (a latency
+    /// change). Then the new unit lands as a swap on the next commit, as
+    /// [`insert`](Self::insert) at an existing key does, keeping the key's
+    /// kind. A fade asked for over a shape that does not fit (more than its
+    /// tail differs) is refused with [`CommitError::FadeShape`]: the caller
+    /// who accepts a cut says so with a zero fade.
     ///
     /// Either way the placement unwires what the new shape lacks, as
     /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
     /// A shape that fits the running unit's ports and buses has none to
     /// unwire but edges recorded since the last commit.
     ///
-    /// Refused, changing nothing, when the editor is poisoned or
-    /// re-preparing (check [`is_repreparing`](Self::is_repreparing) first to
-    /// keep the node: a refusal consumes it), or on a fade over a shape that
-    /// does not fit. `key` must be in the spec.
-    ///
     /// # Errors
     ///
-    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`], and
-    /// [`CommitError::FadeShape`] for a running unit and a non-zero `fade`;
-    /// nothing changes and `node` is dropped.
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not in the spec: a replace names a node that exists.
+    /// [`CommitError::NoSuchNode`] for a `key` not in the spec,
+    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`] (check
+    /// [`is_repreparing`](Self::is_repreparing) first to keep the node: a
+    /// refusal consumes it), and [`CommitError::FadeShape`] for a non-zero
+    /// `fade` over a running unit whose shape `node`'s does not fit; nothing
+    /// changes and `node` is dropped. Not an error: a non-zero `fade` at a key
+    /// that is not running yet places the node with no fade.
     pub fn replace_or_swap<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
@@ -255,10 +181,9 @@ impl<F: Float> Editor<F> {
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
         }
-        assert!(
-            self.spec.topology.nodes.contains_key(&key),
-            "a replacement names a node in the spec"
-        );
+        if !self.spec.topology.nodes.contains_key(&key) {
+            return Err(CommitError::NoSuchNode { node: key });
+        }
         // The unit that runs at the key names itself, not the one it replaced.
         let kind = N::kind();
         let running = self.life.plan().and_then(|p| p.unit(key)).map(|u| u.shape);
@@ -295,7 +220,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Write a prepared unit at `key` with a fresh generation — the common
-    /// half of [`insert`](Self::insert) and [`replace`](Self::replace) — and
+    /// half of [`insert`](Self::insert) and [`replace_or_swap`](Self::replace_or_swap) — and
     /// unwire what its shape lacks.
     fn place(
         &mut self,
@@ -350,7 +275,7 @@ impl<F: Float> Editor<F> {
     /// op and one PDC, so a latency change is a hard edit for it: the next
     /// commit retires every unit at the key but the newest (a waiting one,
     /// if any) — reported by [`collect`](Self::collect) like any retiree —
-    /// and a [`replace`](Self::replace) not yet committed lands as a plain
+    /// and a [`replace_or_swap`](Self::replace_or_swap) not yet committed lands as a plain
     /// swap.
     ///
     /// Refused with [`CommitError::NoSuchNode`] for a key with no node,
@@ -415,7 +340,7 @@ impl<F: Float> Editor<F> {
     /// authority: it writes the spec's [`NodeSpec`] tail and the editor's
     /// shape entry, which is all the compiler reads. A re-prepare asks the
     /// unit's [`shape`](Node::shape) again and its answer replaces this one;
-    /// so does a [`replace`](Self::replace).
+    /// so does a [`replace_or_swap`](Self::replace_or_swap).
     ///
     /// **A crossfade at `key` is not cut.** A tail ceiling feeds neither PDC
     /// nor the fade's two units' alignment (the latency does), so the fade

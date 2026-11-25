@@ -1,7 +1,7 @@
 //! The control halves of the cells the editor shares with running units: each
 //! param port's range, each weighted lane's gain, each unit's mode and mix.
 //!
-//! A node's cells are made when the node is staged (`insert`, `replace`) and an
+//! A node's cells are made when the node is staged (`insert`, `replace_or_swap`) and an
 //! edge's when its gain entry is declared, so a lane can bind to them before
 //! any commit. A control (`set_param_range`, `set_edge_gain`, `set_mode` ...)
 //! stores into its value and the cell at once and the running unit reads it
