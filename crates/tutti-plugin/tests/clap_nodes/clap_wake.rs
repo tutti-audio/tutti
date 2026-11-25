@@ -7,9 +7,9 @@
 //!
 //! The reference plugin runs in `Woken` render mode: silence until it has made
 //! the request, then a constant. In process the first block after the request
-//! must call the plugin's `process` once and carry the constant; served, the
-//! plugin-server's request reaches the client as `ProcessRequested`, which the
-//! node's wake answers once the control tick has read it.
+//! must call the plugin's `process` once and carry the constant, once the
+//! control tick has raised the node's wake; served, the plugin-server's request
+//! reaches the client as `ProcessRequested`, which the same tick answers.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first.
 
@@ -52,11 +52,11 @@ fn is_woken(out: &[Vec<f32>]) -> bool {
     out.iter().flatten().any(|&s| s == WOKEN_LEVEL)
 }
 
-/// **In process, the block after a `request_process` from another thread calls
-/// the plugin, and no block before it did.** The plugin sleeps on every block;
-/// once its node is parked its `process` count stops. A request from a thread
-/// of the test then makes the very next block call `process` once and carry the
-/// plugin's sound.
+/// **In process, the block after a `request_process` from another thread and
+/// the control tick that follows it calls the plugin, and no block before it
+/// did.** The plugin sleeps on every block; once its node is parked its
+/// `process` count stops. A request from a thread of the test then makes the
+/// first block after the tick call `process` once and carry the plugin's sound.
 #[test]
 fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin() {
     let _lock = machine_lock();
@@ -77,8 +77,10 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");
-    let node = client
-        .bind(tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"));
+    let tempo =
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
+    let rebinder = client.rebinder(tempo.clone());
+    let node = client.bind(tempo);
     let (mut renderer, _controls) = one_plugin_graph(node, 2);
 
     for _ in 0..8 {
@@ -97,6 +99,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
 
     let asked = std::thread::scope(|s| s.spawn(|| probe.request_process_now()).join());
     assert!(asked.expect("the thread returns"), "the plugin asked");
+    rebinder.tick(main_thread());
 
     let out = renderer.render(BLOCK);
     assert_eq!(
@@ -108,11 +111,12 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
 }
 
 /// **Served, a `request_process` the plugin makes on a thread of its own while
-/// its node is parked wakes the node.** No tick is driven: the server's main
-/// loop sends `ProcessRequested` when the plugin asks (the plugin's call rings
-/// the loop's bell), the bridge's control lane thread reads it and raises the node's
-/// wake, and the plugin's sound comes back through the pipeline. Blocks run
-/// until the sound arrives; [`PATIENCE`] only guards a wake that never comes.
+/// its node is parked wakes the node.** The server's main loop sends
+/// `ProcessRequested` when the plugin asks (the plugin's call rings the loop's
+/// bell), the bridge's control lane thread reads it and raises the instance's
+/// request, the control tick calls the node's wake, and the plugin's sound comes
+/// back through the pipeline. Blocks and ticks run until the sound arrives;
+/// [`PATIENCE`] only guards a wake that never comes.
 #[test]
 fn served_a_request_while_parked_wakes_the_node() {
     let _lock = machine_lock();
@@ -124,13 +128,13 @@ fn served_a_request_while_parked_wakes_the_node() {
         .request_process_file(&request);
     let probe = load_probe(SAMPLE_RATE);
     let outputs = probe.client.outputs();
-    let (mut renderer, controls) = one_plugin_graph(
-        probe.client.bind(
-            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
-        ),
-        outputs,
-    );
+    let tempo =
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
+    let bound = probe.client.bind(tempo);
+    let rebinder = bound.rebinder();
+    let (mut renderer, controls) = one_plugin_graph(bound, outputs);
     let step = |renderer: &mut Renderer| {
+        rebinder.tick(main_thread());
         let out = renderer.render(BLOCK);
         // The next block plays the answer to this one's chunk: a reply the
         // server has not sent yet would be abandoned, and with it the sound.

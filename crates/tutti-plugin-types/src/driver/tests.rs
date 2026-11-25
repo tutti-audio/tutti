@@ -900,6 +900,57 @@ fn a_relend_moves_the_processor_without_restarting_the_plugin() {
     assert!(!calls.contains(&Call::Deactivate), "no deactivation");
 }
 
+/// **A realtime end dropped while it holds the Processor hands it back as it
+/// was, and the main thread stops it and lends it to the successor.** The old
+/// end never ran `stop` (a drop only hands back); the tick that collects the
+/// Processor does, and the relend completes with no further action.
+#[test]
+fn a_dropped_end_hands_the_processor_back_and_the_tick_stops_and_relends_it() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = install(&mut rig);
+    rig.op(HostOp::Relend);
+    drop(old);
+    assert!(
+        !rig.plugin.calls().contains(&Call::Stop),
+        "the drop stops nothing"
+    );
+    rig.tick();
+    assert_eq!(
+        rig.plugin
+            .calls()
+            .iter()
+            .filter(|c| **c == Call::Stop)
+            .count(),
+        1,
+        "the main thread stopped it once"
+    );
+    assert!(poll(&mut new), "lent to the successor");
+    assert!(rig.take_notices().is_empty(), "nothing is reported");
+}
+
+/// **A realtime end that is gone without the Processor leaves the plugin
+/// lost, once.** The end took the Processor and destroyed it
+/// ([`take_held`](tutti_rt::Rt::take_held)); nothing will come home, so the
+/// tick reports the loss rather than waiting.
+#[test]
+fn an_end_gone_without_the_processor_is_a_lost_plugin() {
+    let (mut rig, mut rt) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut rt));
+    drop(rt.take_held());
+    drop(rt);
+    rig.tick();
+    assert!(rig.lifecycle.is_poisoned());
+    let lost = rig
+        .take_notices()
+        .into_iter()
+        .filter(|n| matches!(n, Notice::Lost { .. }))
+        .count();
+    assert_eq!(lost, 1, "reported once");
+}
+
 /// **A relend of a plugin that is not active does nothing:** nothing is
 /// recalled, parked or lent, and the successor stays pending.
 #[test]

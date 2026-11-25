@@ -12,9 +12,9 @@
 //! restart). The node it replaces hands the Processor back at its next block,
 //! and the instance's next pump lends it to the successor.
 //!
-//! A node dropped while it holds the Processor and a recall is raised returns
-//! the Processor to the control side, so the replaced node need not stay in the
-//! graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
+//! A node dropped while it holds the Processor returns it to the control side as
+//! it was, and the instance's pump stops it there, so the replaced node need not
+//! stay in the graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
 //! the plugin dies meanwhile ([`Lost`](Settlement::Lost)) no Processor moves,
 //! and neither node renders.
 
@@ -270,8 +270,8 @@ impl<L: Loaded> Pending<L> {
     /// Processor from the node it replaces: the plugin keeps running, and the
     /// Processor is lent to this node at the instance's next pump, with no
     /// deactivation. The node it replaces hands the Processor back at its
-    /// next block, or when it is dropped (the recall is raised, so a node
-    /// dropped while it holds the Processor returns it to the control side).
+    /// next block, or when it is dropped (a node dropped while it holds the
+    /// Processor returns it to the control side, which stops it).
     ///
     /// Call it once the node is in the graph. It does not fail, whatever the
     /// plugin's state is by then (it may have changed since

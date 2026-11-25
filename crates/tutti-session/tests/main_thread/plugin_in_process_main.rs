@@ -407,7 +407,13 @@ impl Rebound {
     /// The plugin renders through its node: output 0 holds the tag of port 0,
     /// channel 0, and output 1 that of channel 1.
     fn renders(&mut self) -> bool {
-        self.channel(0).iter().all(|&v| v == 1.0) && self.channel(1).iter().all(|&v| v == 2.0)
+        self.renders_lead() && self.channel(1).iter().all(|&v| v == 2.0)
+    }
+
+    /// The plugin renders through its node on output 0 alone, which the
+    /// app's broken graph leaves wired.
+    fn renders_lead(&mut self) -> bool {
+        self.channel(0).iter().all(|&v| v == 1.0)
     }
 }
 
@@ -524,7 +530,7 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
     for round in 0..16 {
         let _ = r.s.update();
         assert!(
-            r.renders(),
+            r.renders_lead(),
             "round {round}: the plugin went silent before a commit carried its successor"
         );
     }
@@ -539,7 +545,8 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
 
 /// **The plugin's Processor moves to the successor when a commit that carries it
 /// is sent, with no second action by the app.** The app fixes its graph; the
-/// update that commits it hands the plugin over, and the successor renders.
+/// updates that follow commit it and hand the plugin over, and the successor
+/// renders.
 fn the_plugin_moves_to_its_successor_when_a_commit_succeeds() {
     let mut r = rebound(0);
     let node = r.node;
@@ -553,7 +560,68 @@ fn the_plugin_moves_to_its_successor_when_a_commit_succeeds() {
     let _ = r.until("the Processor to reach the successor", |s| {
         s.graph_ref().testing().rebuild_settling(node) == Some(false)
     });
-    assert!(r.renders(), "the plugin renders through the successor");
+    assert!(r.renders_lead(), "the plugin renders through the successor");
+    r.s.close(tutti_fixtures::main_thread());
+}
+
+/// **From the block that applies the cut to the update that hands the plugin
+/// over, the successor renders silence and nothing is reported.** The commit
+/// that carries the successor cuts the node that held the Processor, which
+/// returns it as it was; the successor has none until the pump lends it. In that
+/// block the plugin's output is exactly zero (never its tags, never stale data),
+/// no update reports a refusal or a loss, and the plugin renders again within
+/// one update of the commit's.
+fn the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over() {
+    let mut r = rebound(0);
+    let node = r.node;
+    r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
+    r.break_graph();
+    r.change_ports(1);
+    let _ = r.until("the wider node staged", |s| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+    });
+    r.fix_graph();
+    let sent = r.s.graph_ref().testing().commits_sent();
+    let mut cut = None;
+    let mut rendered = None;
+    for round in 0..16 {
+        let events = r.s.update();
+        let lead = r.channel(0);
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                SessionEvent::CommitRefused(_)
+                    | SessionEvent::Plugin(tutti_session::PluginEvent {
+                        change: PluginChange::PortsRefused { .. }
+                            | PluginChange::Died { .. }
+                            | PluginChange::GaveUp { .. },
+                        ..
+                    })
+            )),
+            "round {round} reported: {events:?}"
+        );
+        if cut.is_none() && r.s.graph_ref().testing().commits_sent() > sent {
+            cut = Some(round);
+        }
+        if cut.is_some() {
+            if lead.iter().all(|&v| v == 1.0) {
+                rendered = Some(round);
+                break;
+            }
+            assert!(
+                lead.iter().all(|&v| v == 0.0),
+                "round {round}: the successor rendered something other than silence"
+            );
+        }
+    }
+    let (cut, rendered) = (
+        cut.expect("a commit was sent"),
+        rendered.expect("it rendered"),
+    );
+    assert!(
+        rendered <= cut + 1,
+        "the plugin rendered at update {rendered}, more than one after the commit's {cut}"
+    );
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -934,6 +1002,7 @@ a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_successor_is_refused,
 the_plugin_moves_to_its_successor_when_a_commit_succeeds,
+the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
 a_muted_node_stays_muted_through_a_port_change,
 a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor,

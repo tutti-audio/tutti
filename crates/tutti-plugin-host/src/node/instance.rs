@@ -17,9 +17,9 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
-    PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
-    RateRefusalCause, Recovery, RenderMode, RenderModeSupport, SampleRate, Samples, State,
-    Successor, Widths, standing,
+    PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, ProcessWake, Processor,
+    RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport, SampleRate, Samples,
+    State, Successor, Widths, standing,
 };
 use tutti_rt::Mutex;
 use tutti_rt::Rt;
@@ -149,62 +149,31 @@ impl Silence {
 }
 
 /// Where a node binds its [`Wake`](tutti_graph::Wake): the instance raises it
-/// to call the node that holds the Processor when a recall waits, and the
-/// plugin raises it when it asks to be processed again.
+/// to call the node that holds the Processor when a recall waits, or the plugin
+/// asked to be processed again ([`ProcessRequest`]).
+pub(super) type WakeSlot = Mutex<Option<tutti_graph::Wake>>;
+
+/// The plugin's request to be processed again (CLAP's `request_process`), kept
+/// on the instance for the plugin's life: the closure the plugin's host holds
+/// raises it from any thread and touches nothing else, so it never waits and
+/// names no node. The node that holds the Processor [`take`](Self::take)s it
+/// in its block; the control side's pump takes it at each tick and calls that
+/// node's wake, which answers a node the executor parked one update later.
 ///
-/// The instance's slot is the one the plugin's request is bound to for good: it
-/// holds the wake of the node that holds the Processor, which
-/// [`adopt`](Self::adopt) takes from a successor's slot when the Processor
-/// moves to it.
-#[derive(Default)]
-pub(super) struct WakeSlot {
-    wake: Mutex<Option<tutti_graph::Wake>>,
-    /// A [`request`](Self::request) found the slot busy: the control side
-    /// raises it ([`settle`](Self::settle)).
-    missed: AtomicBool,
-}
+/// `Relaxed`: no data is behind the flag; a request read one block late is
+/// answered one block late.
+#[derive(Debug, Default)]
+pub(super) struct ProcessRequest(AtomicBool);
 
-impl WakeSlot {
-    /// The wake of the node this slot belongs to. Control thread.
-    pub(super) fn bind(&self, wake: tutti_graph::Wake) {
-        *self.wake.lock() = Some(wake);
+impl ProcessRequest {
+    /// The plugin asks to be processed again. Any thread; wait-free.
+    fn raise(&self) {
+        self.0.store(true, Ordering::Relaxed);
     }
 
-    /// Takes the wake `from` holds, as the node that holds the Processor now.
-    /// Control thread.
-    pub(super) fn adopt(&self, from: &Self) {
-        let wake = from.wake.lock().clone();
-        if wake.is_some() {
-            *self.wake.lock() = wake;
-        }
-    }
-
-    /// Calls the node that holds the Processor. Control thread.
-    pub(super) fn notify(&self) {
-        if let Some(wake) = &*self.wake.lock() {
-            wake.notify();
-        }
-    }
-
-    /// The plugin asks to be processed again. Any thread, and never waits: a
-    /// slot the control side holds at that moment is raised by the control
-    /// side's next [`settle`](Self::settle).
-    pub(super) fn request(&self) {
-        match self.wake.try_lock() {
-            Some(wake) => {
-                if let Some(wake) = &*wake {
-                    wake.notify();
-                }
-            }
-            None => self.missed.store(true, Ordering::Release),
-        }
-    }
-
-    /// Raises a request that found the slot busy. Control thread.
-    pub(super) fn settle(&self) {
-        if self.missed.swap(false, Ordering::AcqRel) {
-            self.notify();
-        }
+    /// Whether the plugin asked since the last take, which clears it.
+    pub(super) fn take(&self) -> bool {
+        self.0.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -299,10 +268,13 @@ pub(super) struct Instance<L: Loaded> {
     /// The nodes over this instance render silence while a refusal stands.
     silenced: Arc<Silenced>,
     /// The wake of the node whose realtime end holds the Processor: raised
-    /// after a recall, which only that node's next call answers, and by the
-    /// plugin's own request to be processed. A successor node binds its own
-    /// slot, whose wake this one adopts when the Processor moves to its end.
+    /// after a recall, which only that node's next call answers, and for a
+    /// request to be processed. A successor node binds its own slot, which
+    /// becomes this one when the Processor moves to its end.
     wake: Arc<WakeSlot>,
+    /// What the plugin's request to be processed raises, bound to the plugin
+    /// for its life.
+    requested: Arc<ProcessRequest>,
     /// The slot of the successor [`commit`](Self::commit) named, until the
     /// Processor has moved to its end.
     incoming_wake: Option<Arc<WakeSlot>>,
@@ -393,6 +365,7 @@ impl<L: Loaded> Instance<L> {
             silence: None,
             silenced: Arc::default(),
             wake: Arc::default(),
+            requested: Arc::default(),
             incoming_wake: None,
             committed: false,
             lost: Arc::default(),
@@ -400,6 +373,7 @@ impl<L: Loaded> Instance<L> {
             midi_map: MidiMapSlot::new(&wiring),
             midi_map_stale: false,
         };
+        this.bind_process_request();
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(trouble) = refused {
             return Err(IpcError::ActivationFailed(Arc::clone(trouble.reason())));
@@ -426,7 +400,7 @@ impl<L: Loaded> Instance<L> {
         let (mut hand, rt) = Hand::threaded();
         let (lifecycle, state) =
             Lifecycle::adopt(processor, controller, prepare, wiring, &mut hand);
-        let this = Self {
+        let mut this = Self {
             lifecycle,
             state,
             hand,
@@ -437,6 +411,7 @@ impl<L: Loaded> Instance<L> {
             silence: None,
             silenced: Arc::default(),
             wake: Arc::default(),
+            requested: Arc::default(),
             incoming_wake: None,
             committed: false,
             lost: Arc::default(),
@@ -444,8 +419,18 @@ impl<L: Loaded> Instance<L> {
             midi_map: MidiMapSlot::new(wiring),
             midi_map_stale: false,
         };
+        this.bind_process_request();
         this.publish_figures();
         (this, rt)
+    }
+
+    /// Binds the plugin's request to be processed to this instance's flag, once
+    /// and for the plugin's life (a format host keeps its first binding).
+    fn bind_process_request(&mut self) {
+        let requested = Arc::clone(&self.requested);
+        if let Some(control) = self.lifecycle.control() {
+            control.bind_wake(ProcessWake::new(move || requested.raise()));
+        }
     }
 
     /// The widths the plugin processes audio in: read before its activation
@@ -524,15 +509,14 @@ impl<L: Loaded> Instance<L> {
         // A plan parked for the Processor has raised its recall; the realtime
         // end hands it back at the node's next call, which a parked node does
         // not get unless woken. Raised after the recall, never before.
-        if !self.hand.pending()
-            && let Some(incoming) = self.incoming_wake.take()
+        if self.incoming_wake.is_some() && !self.hand.pending() {
+            self.wake = self.incoming_wake.take().unwrap_or_default();
+        }
+        if self.state.is_parked()
+            && let Some(wake) = &*self.wake.lock()
         {
-            self.wake.adopt(&incoming);
+            wake.notify();
         }
-        if self.state.is_parked() {
-            self.wake.notify();
-        }
-        self.wake.settle();
         if std::mem::take(&mut self.midi_map_stale) {
             self.declare_midi_map(main);
             self.reports.push(PluginInvalidation::MidiMap);
@@ -684,6 +668,12 @@ impl<L: Loaded> Instance<L> {
     /// The slot the node that holds the Processor binds its wake in.
     pub(super) fn wake_slot(&self) -> Arc<WakeSlot> {
         Arc::clone(&self.wake)
+    }
+
+    /// The plugin's request to be processed again, which the node that holds
+    /// the Processor takes in its block.
+    pub(super) fn process_request(&self) -> Arc<ProcessRequest> {
+        Arc::clone(&self.requested)
     }
 
     /// The flag the nodes over this instance read to render silence while a
@@ -959,6 +949,13 @@ impl<L: Loaded> Instance<L> {
         match self.drive(main, Event::Tick) {
             Some(trouble) => self.note(trouble),
             None => self.settle(),
+        }
+        // A request no block took: the node that holds the Processor may be
+        // parked, which only its wake answers.
+        if self.requested.take()
+            && let Some(wake) = &*self.wake.lock()
+        {
+            wake.notify();
         }
         let mut changes = std::mem::take(&mut self.changes);
         changes.reports = self.take_reports();

@@ -248,8 +248,8 @@ fn a_recall_reaches_the_node_that_holds_the_processor_while_its_successor_is_sta
 /// **The plugin's own request to be processed raises the wake of the node that
 /// holds the Processor**, whichever node that is: the node the executor runs
 /// while its successor is staged, and the successor once the Processor moved.
-/// The fake sleeps, so the executor parks the node that holds it; a request is
-/// what calls it again.
+/// The fake sleeps, so the executor parks the node that holds it; a request,
+/// answered at the instance's next pump, is what calls it again.
 #[test]
 fn the_plugins_process_request_wakes_the_node_that_holds_the_processor() {
     let mut rig = Rig::new();
@@ -271,6 +271,7 @@ fn the_plugins_process_request_wakes_the_node_that_holds_the_processor() {
 
     let before = rig.processed();
     rig.fake.request_process();
+    let _ = rig.pump();
     rig.block();
     assert!(
         rig.processed() > before,
@@ -290,6 +291,7 @@ fn the_plugins_process_request_wakes_the_node_that_holds_the_processor() {
     rig.rest();
     let before = rig.processed();
     rig.fake.request_process();
+    let _ = rig.pump();
     rig.block();
     assert!(
         rig.processed() > before,

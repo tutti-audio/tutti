@@ -19,7 +19,7 @@
 //! ports it lacks is reported as [`SessionEvent::Unwired`] by the update that
 //! commits the swap. The plugin keeps running. Its Processor is recalled at the
 //! move, returned by the node it replaces at that node's next block (or when
-//! the node is dropped, since the recall is raised), and lent to the new node at
+//! the node is dropped, which hands it back unstopped for the pump to stop), and lent to the new node at
 //! the next update's pump: the plugin is silent from the move to then, at least
 //! one block and one update.
 //!

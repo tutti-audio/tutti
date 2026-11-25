@@ -45,7 +45,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost, Silence, Silenced, WakeSlot};
+use super::instance::{Figures, Instance, Lost, ProcessRequest, Silence, Silenced, WakeSlot};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -92,6 +92,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// Where this node binds its wake: the instance's, for the node that
     /// holds the Processor, or the slot of a successor until it does.
     pub(super) wake: Arc<WakeSlot>,
+    /// The plugin's request to be processed again ([`Instance::process_request`]):
+    /// a block that holds the Processor takes it.
+    pub(super) requested: Arc<ProcessRequest>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
     /// locked or not.
@@ -232,28 +235,22 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     width: PhantomData<fn() -> F>,
 }
 
-/// A node dropped while its realtime end holds the Processor and a recall is
-/// raised (a [`Pending`](super::Pending) commit raises one) hands it back
-/// through the handoff instead of dropping it: the control side collects it at
-/// the instance's next pump. Without a raised recall the Processor drops with
-/// the end, as for any node that leaves the graph.
+/// A node dropped while its realtime end holds the Processor hands it back
+/// as it is: the handoff returns it to the control side, which stops it on the
+/// main thread at the instance's next pump. The node never stops and never
+/// destroys a Processor, because it may be dropped on a control thread that is
+/// not the main one, and a leaked node drops nothing.
 ///
-/// The node is off the audio thread by then (a node leaves the graph before it
-/// is dropped), so this call is the end's only user. The handoff runs
-/// [`Processor::stop`] on the dropping thread, the control thread, as a
-/// retune's poll does between blocks.
-///
-/// It reads no lock: the instance may be held by the control thread that
-/// drops the node. A plugin that is lost (its flag, a latch set when its
-/// lifecycle poisons, through which nothing else is published) has no
-/// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
-/// does when the session retires its node.
+/// The one exception is a plugin that is lost (its flag, a latch set when its
+/// lifecycle poisons): it has no controller left to stop under, so the
+/// Processor is destroyed with the node, as the session's retirement of a lost
+/// plugin does. It reads no lock: the instance may be held by the control
+/// thread that drops the node.
 impl<L: Loaded, F: Float> Drop for InProcessClient<L, F> {
     fn drop(&mut self) {
-        if self.lost.is_lost() || self.rt.held().is_none() {
-            return;
+        if self.lost.is_lost() {
+            drop(self.rt.take_held());
         }
-        let _ = self.rt.poll(Processor::stop);
     }
 }
 
@@ -590,12 +587,13 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, silenced, wake, figures, midi_map) = {
+        let (lost, silenced, wake, requested, figures, midi_map) = {
             let instance = inner.lock();
             (
                 instance.lost_latch(),
                 instance.silenced(),
                 instance.wake_slot(),
+                instance.process_request(),
                 instance.figure_cell(),
                 instance.midi_map().translator(),
             )
@@ -618,6 +616,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             lost,
             silenced,
             wake,
+            requested,
             figures,
             reporting: None,
             edits: None,

@@ -272,6 +272,7 @@ fn fake::FakePlugin::refuse_off_thread_calls
 fn fake::FakePlugin::refuse_rate
 fn fake::FakePlugin::request_editor_size
 fn fake::FakePlugin::request_flags
+fn fake::FakePlugin::request_process
 fn fake::FakePlugin::ring_out
 fn fake::FakePlugin::set_latency
 fn fake::FakePlugin::set_outputs
