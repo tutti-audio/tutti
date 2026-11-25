@@ -264,6 +264,8 @@ struct Shared {
     only_32_bit: AtomicBool,
     /// The width of the last activation: 0 before one, else 1 (32-bit) or 2.
     activated: AtomicU8,
+    /// The callback size of the last activation, in frames (0: none).
+    quantum: AtomicUsize,
     /// Blocks processed at 32-bit, and at 64-bit.
     blocks_32: AtomicU64,
     blocks_64: AtomicU64,
@@ -378,6 +380,7 @@ impl FakePlugin {
             sleeps_over_sound: AtomicBool::new(false),
             only_32_bit: AtomicBool::new(false),
             activated: AtomicU8::new(0),
+            quantum: AtomicUsize::new(0),
             blocks_32: AtomicU64::new(0),
             blocks_64: AtomicU64::new(0),
             editor: AtomicBool::new(false),
@@ -518,6 +521,16 @@ impl FakePlugin {
             1 => Some(FloatWidth::F32),
             2 => Some(FloatWidth::F64),
             _ => None,
+        }
+    }
+
+    /// The device callback size the host activated the fake with, as it sent
+    /// it: `None` before an activation, or when none was known.
+    #[must_use]
+    pub fn activated_quantum(&self) -> Option<Samples> {
+        match self.0.quantum.load(Ordering::Relaxed) {
+            0 => None,
+            frames => Some(Samples::new(frames)),
         }
     }
 
@@ -977,6 +990,9 @@ impl Loaded for FakeLoaded {
             },
             Ordering::Relaxed,
         );
+        shared
+            .quantum
+            .store(prepare.quantum().map_or(0, |q| q.get()), Ordering::Relaxed);
         shared.log.push(Call::Activate(
             prepare.rate(),
             prepare.max_block().samples(),

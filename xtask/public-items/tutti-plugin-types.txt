@@ -248,6 +248,7 @@ fn editor::WindowHandle::from_remote
 fn editor::WindowHandle::from_u64
 fn editor::WindowHandle::from_window
 fn failure::PluginFailure::from_stream
+fn fake::FakePlugin::activated_quantum
 fn fake::FakePlugin::activated_width
 fn fake::FakePlugin::answer_track_info
 fn fake::FakePlugin::app_midi_maps
@@ -310,11 +311,15 @@ fn lifecycle::Prepare::format
 fn lifecycle::Prepare::max_block
 fn lifecycle::Prepare::mode
 fn lifecycle::Prepare::new
+fn lifecycle::Prepare::quantum
 fn lifecycle::Prepare::rate
 fn lifecycle::Prepare::with_format
+fn lifecycle::Prepare::with_max_block
 fn lifecycle::Prepare::with_mode
+fn lifecycle::Prepare::with_quantum
 fn lifecycle::Prepare::with_rate
 fn lifecycle::State::applied
+fn lifecycle::State::behind
 fn lifecycle::State::has_backlog
 fn lifecycle::State::is_busy
 fn lifecycle::State::is_parked
@@ -327,6 +332,7 @@ fn lifecycle::State::retuned
 fn lifecycle::State::set_mode
 fn lifecycle::State::stage
 fn lifecycle::State::tail
+fn lifecycle::State::want
 fn lifecycle::State::wanted
 fn lifecycle::standing
 fn lifecycle::step
