@@ -11,7 +11,7 @@ use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, Tra
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorNode,
     DynamicEqConfig, DynamicEqNode, GateConfig, GateNode, KeySource, LimiterConfig, LimiterNode,
-    Lookahead,
+    Lookahead, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{
     CompressionRatio, Db, Frame, Hz, Latency, Q, SampleRate, Samples, Seconds, Tail, UnitParam,
@@ -646,4 +646,19 @@ fn no_node_here_parks() {
             assert_eq!(d.status, Some(Status::Modified), "block {block}");
         }
     }
+}
+
+/// **A band's detector and make-up rows land whole; the crossovers are smoothed**: each band
+/// runs a compressor bank that ramps its make-up itself and takes its detector settings whole,
+/// as [`CompressorNode`] does, so the graph must not ramp them too. Three bands: six ported
+/// rows each (bypass and solo have no port), then two cutoffs.
+#[test]
+fn multiband_band_rows_are_whole_and_cutoffs_smoothed() {
+    let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+        ChannelTopology::MONO,
+        MultibandBands::new(3).unwrap(),
+    ));
+    let ports = Node::<f32>::shape(&node).params;
+    assert_eq!(ports.len(), 3 * 6 + 2);
+    assert_eq!(ports, ports.whole((1 << (3 * 6)) - 1));
 }

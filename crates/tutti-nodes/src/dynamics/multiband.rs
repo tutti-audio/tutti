@@ -950,19 +950,6 @@ mod tests {
     /// Two bands split at 1 kHz: DC is all band 0, and 10 kHz is
     /// `x^4 / (1 + x^4)` band 1 with `x` the warped ratio, the rest
     /// (`1e-4`) band 0. Band 0 -3 dB and band 1 +6 dB.
-    /// **A band's detector and make-up rows land whole; the crossovers are
-    /// smoothed**: each band runs a compressor bank that ramps its make-up
-    /// itself and takes its detector settings whole, as `CompressorNode` does,
-    /// so the graph must not ramp them too. Three bands: six ported rows each
-    /// (bypass and solo have no port), then two cutoffs.
-    #[test]
-    fn band_rows_are_whole_and_cutoffs_smoothed() {
-        let (n, _) = node(3);
-        let ports = n.declared_ports();
-        assert_eq!(ports.len(), 3 * 6 + 2);
-        assert_eq!(ports, ports.whole((1 << (3 * 6)) - 1));
-    }
-
     #[test]
     fn makeup_applies_per_band() {
         let (n, c) = node(2);
