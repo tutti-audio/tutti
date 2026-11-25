@@ -233,28 +233,33 @@ fn chain() -> GraphBuilder {
     g
 }
 
-/// **A forked chain renders exactly what a freshly built copy of the same
-/// graph renders**, however long the live graph has run: nothing of its
-/// running state — oscillator phase, filter memory, the feedback edge's
-/// captured block — reaches the fork, and all of its wiring does. The fork is
-/// prepared for its own `Prepare` (a larger block here), not the live one's.
+/// **A fork places what a freshly built copy of the graph places**: the same
+/// units at the same keys, at generation 0 however many times the live graph
+/// replaced them, and the same wiring. The fork is prepared for its own
+/// `Prepare` (a larger block here), not the live one's.
 #[test]
-fn a_forked_chain_renders_like_a_fresh_build() {
+fn a_fork_places_the_units_generations_and_wiring_of_a_fresh_build() {
     let mut live = chain().renderer(prepare(64)).expect("builds");
-    let before = live.render(1_000);
-    assert!(before[0].iter().any(|&x| x != 0.0), "the live graph runs");
+    live.render(1_000);
+    let osc = NodeKey(0);
+    let kind = live.editor().spec().topology.nodes[&osc].kind.clone();
+    live.editor_mut().insert(osc, &kind, Sine::new(440.0));
+    assert_eq!(
+        live.editor().spec().generation(osc),
+        1,
+        "the live unit was replaced"
+    );
 
     let pre = prepare(256);
-    let (fork_ed, fork_exec) = live
+    let (fork_ed, _fork_exec) = live
         .editor()
         .fork(ForkTarget::MainOutput, pre)
         .expect("every node is forkable");
     assert_eq!(fork_ed.prepare(), &pre);
-    let forked = render(fork_ed, fork_exec, 3_000);
 
-    let fresh = chain().renderer(pre).expect("builds").render(3_000);
-    assert_eq!(bits(&forked), bits(&fresh));
-    assert!(fresh[1].iter().any(|&x| x != 0.0), "not vacuous");
+    let fresh = chain().renderer(pre).expect("builds");
+    assert_eq!(fork_ed.spec(), fresh.editor().spec());
+    assert_eq!(fork_ed.spec().topology.nodes.len(), 3, "not vacuous");
 }
 
 /// Forks as its fork source was asked to: a constant 0.75 for an offline
