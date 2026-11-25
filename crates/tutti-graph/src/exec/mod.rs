@@ -205,7 +205,7 @@ use tutti_units::PlayReading;
 use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
-use crate::compile::plan::Plan;
+use crate::compile::plan::{Plan, UnitIdx};
 use crate::compile::tail::{GraphTail, Owed, TailGraph, graph_tail_of};
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
@@ -345,7 +345,7 @@ pub struct Executor<F: Float = f32> {
     suspension: Suspension,
     /// The held-key tables of the units a re-prepare checked out, for the
     /// resume commit to hand back.
-    parked: CappedVec<(NodeKey, Keys)>,
+    parked: CappedVec<(UnitIdx, Keys)>,
     /// Where a replaced node writes its state for its successor
     /// (`Node::chase`), sized when a plan is built from what its nodes
     /// declare (`Shape::chase`), so the swap never allocates it.
@@ -435,20 +435,15 @@ impl MainOutputFades {
         Self { run: None, ended }
     }
 
-    /// The fade after commit `seq` installs `plan` over `old`. A main output
+    /// The fade after commit `seq` installs `plan`. A main output
     /// crossfade starts with the plan that carries it, and a plan that
-    /// carries none ends one running. A plan that carries the old main output
-    /// the running plan carries, under the same new main output, continues
-    /// the crossfade from the frames it has rendered.
-    fn install(&mut self, plan: &Plan, old: Option<&Plan>, seq: u64) {
-        let continues = |old: &Plan, bank: crate::MainOutputBank| {
-            old.main_output_id() == plan.main_output_id()
-                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
-        };
-        self.run = match (plan.main_output_bank(), old, self.run) {
-            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
-            (Some(_), ..) => Some(MainOutputFadeRun { seq, done: 0 }),
-            (None, ..) => None,
+    /// carries none ends one running. A plan whose bank continues the one
+    /// running keeps the frames it has rendered.
+    fn install(&mut self, plan: &Plan, seq: u64) {
+        self.run = match (plan.main_output_bank(), self.run) {
+            (Some(bank), Some(run)) if bank.continues => Some(run),
+            (Some(_), _) => Some(MainOutputFadeRun { seq, done: 0 }),
+            (None, _) => None,
         };
     }
 
@@ -1001,6 +996,7 @@ mod tests {
             1,
             Arc::clone(&plan),
             delta,
+            false,
             units,
             |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
@@ -1015,8 +1011,6 @@ mod tests {
             &mut commit,
             StageIn {
                 old: None,
-                carry: true,
-                resumed: false,
                 mix_lane: &|_| None,
             },
         );

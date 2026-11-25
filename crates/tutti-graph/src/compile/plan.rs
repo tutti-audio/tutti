@@ -47,12 +47,14 @@
 
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
 use crate::{EdgeId, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, Samples, UnitAddr};
 
 use crate::compile::VerifyError;
+use crate::compile::carry::Carry;
 use crate::compile::coarsen::Tasks;
 use crate::compile::ids::{
     AudioDelayId, AudioFeedbackId, AudioSlotId, EventDelayId, EventFeedbackId, EventSlotId, Id,
@@ -538,6 +540,17 @@ pub struct PlanUnit {
     /// Its audio ports with a source or a consumer in this plan
     /// ([`Io::wired_inputs`](crate::Io::wired_inputs)).
     pub wired: Wired,
+}
+
+impl PlanUnit {
+    /// Where the unit goes in the store.
+    pub(crate) fn placement(&self) -> Placement {
+        Placement {
+            key: self.key,
+            generation: self.generation,
+            idx: self.idx,
+        }
+    }
 }
 
 /// One step of the plan.
@@ -1299,7 +1312,8 @@ pub struct Plan {
     pub(crate) task_succ: Csr<TaskId>,
     pub(crate) task_activation: Table<TaskId, u32>,
     pub(crate) units: Table<PlanUnitId, PlanUnit>,
-    pub(crate) store_len: u32,
+    /// Which plan this is: a [`Delta`] is compiled against one.
+    pub(crate) id: Identity,
     pub(crate) main_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
     /// The main output generation the spec carried when this plan was committed.
@@ -1337,7 +1351,6 @@ impl Plan {
         program: Program<BySlot>,
         tasks: Tasks,
         units: Table<PlanUnitId, PlanUnit>,
-        store_len: u32,
         graph: &ValidGraph,
         timing: Timing,
     ) -> Self {
@@ -1357,7 +1370,7 @@ impl Plan {
             task_succ: tasks.succ,
             task_activation: tasks.activation,
             units,
-            store_len,
+            id: Identity(PlanId::mint()),
             main_inputs: graph.topology().inputs.count(),
             compensation: timing.compensation,
             main_output_id: crate::MainOutputId::GENESIS,
@@ -1664,6 +1677,48 @@ impl Plan {
     }
 }
 
+/// Which plan a [`Delta`] was compiled against: minted once for each plan, from
+/// one counter, so two plans never share one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlanId(u64);
+
+impl PlanId {
+    fn mint() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// A plan's [`PlanId`], which is not part of what the plan says: two plans
+/// compiled alike are equal, whichever of them was compiled first.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Identity(pub(crate) PlanId);
+
+impl PartialEq for Identity {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// A node whose audio wiring changed in a commit: a port gained its first
+/// source or consumer, or lost its last.
+///
+/// From the plans, not the spec: the old and the new plan's
+/// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
+/// the commit placed with no wiring, a node it removed and a rewire that
+/// leaves each port's answer as it was are not listed. A re-insert at the
+/// same key with a different shape but the same masks reports nothing: bus
+/// layout changes reach a plugin through its own re-activation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rewired {
+    /// The node.
+    pub node: NodeKey,
+    /// Its wired ports in the plan sent before (none for a node new to it).
+    pub was: Wired,
+    /// Its wired ports in the plan this commit sent.
+    pub now: Wired,
+}
+
 /// Where one unit goes in the store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Placement {
@@ -1682,27 +1737,94 @@ pub struct Placement {
 /// attached on the control side (see `Editor::commit`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Delta {
+    insert: Vec<Placement>,
+    retire: Vec<Placement>,
+    replace: Vec<(Placement, Placement)>,
+    fades: Vec<(NodeKey, Fade)>,
+    cuts: Vec<Placement>,
+    store_len: u32,
+    /// The nodes whose wiring moved, in key order.
+    rewired: Vec<Rewired>,
+    /// What the plan takes over from the one it replaces.
+    pub(crate) carry: Carry,
+}
+
+impl Delta {
+    /// The delta `compile` found: the placements and what carries.
+    pub(super) fn new(
+        insert: Vec<Placement>,
+        retire: Vec<Placement>,
+        replace: Vec<(Placement, Placement)>,
+        store_len: u32,
+        rewired: Vec<Rewired>,
+        carry: Carry,
+    ) -> Self {
+        Self {
+            insert,
+            retire,
+            replace,
+            fades: Vec::new(),
+            cuts: Vec::new(),
+            store_len,
+            rewired,
+            carry,
+        }
+    }
+
+    /// The nodes whose wiring moved, in key order: the commit's report.
+    pub(crate) fn take_rewired(&mut self) -> Vec<Rewired> {
+        std::mem::take(&mut self.rewired)
+    }
+
     /// New keys.
-    pub insert: Vec<Placement>,
+    #[must_use]
+    pub fn insert(&self) -> &[Placement] {
+        &self.insert
+    }
+
     /// Keys that are gone. Their units come back to the control thread.
-    pub retire: Vec<Placement>,
+    #[must_use]
+    pub fn retire(&self) -> &[Placement] {
+        &self.retire
+    }
+
     /// Keys whose generation changed: `(old, new)`, same index.
-    pub replace: Vec<(Placement, Placement)>,
+    #[must_use]
+    pub fn replace(&self) -> &[(Placement, Placement)] {
+        &self.replace
+    }
+
     /// Replaces that crossfade rather than swap: each names a key in
-    /// `replace`, at most once. `compile` never fills this — a fade is an
-    /// edit, not part of the graph value — the editor attaches it (see
-    /// [`Editor::replace`](crate::Editor::replace)), and
-    /// [`Plan::verify_fades`] checks it.
-    pub fades: Vec<(NodeKey, Fade)>,
+    /// [`replace`](Self::replace), at most once. `compile` never fills this;
+    /// the editor attaches it (see [`Editor::replace`](crate::Editor::replace)),
+    /// and [`Plan::verify_fades`] checks it.
+    #[must_use]
+    pub fn fades(&self) -> &[(NodeKey, Fade)] {
+        &self.fades
+    }
+
     /// Kept units whose crossfade, running or waiting, is **cut**: every
     /// unit at the key but the newest retires. A hard edit that is not a new
-    /// generation — [`Editor::set_latency`](crate::Editor::set_latency) —
-    /// attaches it, since a fade's two units must share the latency the
-    /// plan compensates. Harmless on a key with no fade. `compile` never
-    /// fills it; [`Plan::verify_fades`] checks it.
-    pub cuts: Vec<Placement>,
+    /// generation ([`Editor::set_latency`](crate::Editor::set_latency))
+    /// attaches it. `compile` never fills it; [`Plan::verify_fades`] checks it.
+    #[must_use]
+    pub fn cuts(&self) -> &[Placement] {
+        &self.cuts
+    }
+
     /// The store length the new plan needs.
-    pub store_len: u32,
+    #[must_use]
+    pub fn store_len(&self) -> u32 {
+        self.store_len
+    }
+
+    /// Sets the [`fades`](Self::fades) and [`cuts`](Self::cuts) of a delta
+    /// `compile` found, replacing any set before. [`Editor::package`](crate::Editor::package)
+    /// verifies them.
+    pub fn attach(&mut self, fades: Vec<(NodeKey, Fade)>, cuts: Vec<Placement>) {
+        self.fades = fades;
+        self.cuts = cuts;
+    }
 }
 
 #[cfg(test)]

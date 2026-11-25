@@ -6,10 +6,10 @@ use tutti_units::{
 };
 
 use super::*;
-use crate::MaxDecay;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{Fdn, Network, NetworkStage};
 use crate::tail_probe;
+use crate::{FdnKind, FdnLayout, FreezeControls, MaxDecay, ShimmerControls, ShimmerLayout};
 use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
@@ -30,15 +30,38 @@ fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
     })
 }
 
+type Plain = FdnBank<f32, FdnLayout>;
+type Shimmering = FdnBank<f32, ShimmerLayout>;
+
+const FROZEN: FreezeControls = FreezeControls { freeze: true };
+
 fn layout(lines: usize) -> FdnLayout {
     FdnLayout::new(lines, MaxDecay::DEFAULT).unwrap()
 }
 
 /// A bank of `layout` at `rate`, at rest on `c`.
-fn at_rest(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnRamps<f32>) {
-    let mut bank = FdnBank::<f32>::new(layout, rate);
+fn at_rest(
+    layout: &FdnLayout,
+    rate: SampleRate,
+    c: &FdnControls,
+) -> (Plain, FdnRamps<f32, FdnLayout>) {
+    let mut bank = Plain::new(layout, rate);
     let mut ramps = bank.ramps();
-    bank.retarget(&mut ramps, c);
+    bank.retarget(&mut ramps, c, &FreezeControls::DEFAULT);
+    ramps.jump_to_target();
+    (bank, ramps)
+}
+
+/// A shimmer bank of `layout` at `rate`, at rest on `c` and `k`.
+fn at_rest_shimmer(
+    layout: &ShimmerLayout,
+    rate: SampleRate,
+    c: &FdnControls,
+    k: &ShimmerControls,
+) -> (Shimmering, FdnRamps<f32, ShimmerLayout>) {
+    let mut bank = Shimmering::new(layout, rate);
+    let mut ramps = bank.ramps();
+    bank.retarget(&mut ramps, c, k);
     ramps.jump_to_target();
     (bank, ramps)
 }
@@ -46,7 +69,7 @@ fn at_rest(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f3
 /// The design of `c`.
 fn design(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> Box<Network> {
     let mut network = Box::new(Network::new(rate));
-    layout.design_into(c, rate, &mut network);
+    layout.design_into(c, &FreezeControls::DEFAULT, rate, &mut network);
     network
 }
 
@@ -66,9 +89,9 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 }
 
 /// `x` through the bank in calls of `block` frames; the two output channels.
-fn run(
-    bank: &mut FdnBank<f32>,
-    ramps: &mut FdnRamps<f32>,
+fn run<L: FdnKind>(
+    bank: &mut FdnBank<f32, L>,
+    ramps: &mut FdnRamps<f32, L>,
     x: &[f32],
     block: usize,
 ) -> [Vec<f32>; 2] {
@@ -259,10 +282,8 @@ fn a_frozen_network_keeps_its_energy() {
     run(&mut bank, &mut ramps, &noise(1, 24_000), 64);
     bank.retarget(
         &mut ramps,
-        &controls(|c| {
-            c.diffusion = Mix::new(1.0);
-            c.freeze = true;
-        }),
+        &controls(|c| c.diffusion = Mix::new(1.0)),
+        &FROZEN,
     );
     // Past the ramp to the frozen gains.
     run(&mut bank, &mut ramps, &vec![0.0; 4_800], 64);
@@ -281,18 +302,13 @@ fn a_frozen_network_keeps_its_energy() {
 #[test]
 fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
     let l = layout(8);
-    let at = |diffusion: f64, freeze: bool| {
-        still(|c| {
-            c.diffusion = Mix::new(diffusion);
-            c.freeze = freeze;
-        })
-    };
-    let (mut bank, mut ramps) = at_rest(&l, RATE, &at(0.0, false));
+    let at = |diffusion: f64| still(|c| c.diffusion = Mix::new(diffusion));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &at(0.0));
     run(&mut bank, &mut ramps, &noise(5, 48_000), 64);
-    bank.retarget(&mut ramps, &at(0.0, true));
+    bank.retarget(&mut ramps, &at(0.0), &FROZEN);
     run(&mut bank, &mut ramps, &vec![0.0; 24_000], 64);
     let before = bank.state_energy(&ramps);
-    bank.retarget(&mut ramps, &at(1.0, true));
+    bank.retarget(&mut ramps, &at(1.0), &FROZEN);
     run(&mut bank, &mut ramps, &vec![0.0; 9_600], 64);
     let db = 10.0 * (bank.state_energy(&ramps) / before).log10();
     assert!(
@@ -408,7 +424,7 @@ fn any_split_of_the_stream_gives_the_same_bits() {
         let render = |block: usize| {
             let (mut bank, mut ramps) = at_rest(&l, RATE, &a);
             let mut out = run(&mut bank, &mut ramps, &x[..at], block);
-            bank.retarget(&mut ramps, &b);
+            bank.retarget(&mut ramps, &b, &FreezeControls::DEFAULT);
             let tail = run(&mut bank, &mut ramps, &x[at..], block);
             for (o, t) in out.iter_mut().zip(tail) {
                 o.extend(t);
@@ -450,7 +466,11 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
     let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let x = noise(9, 4_000);
     run(&mut bank, &mut ramps, &x[..1_777], 64);
-    bank.retarget(&mut ramps, &controls(|c| c.decay = [Seconds::new(0.7); 3]));
+    bank.retarget(
+        &mut ramps,
+        &controls(|c| c.decay = [Seconds::new(0.7); 3]),
+        &FreezeControls::DEFAULT,
+    );
     run(&mut bank, &mut ramps, &x[1_777..2_000], 64);
     let (mut twin, mut twin_ramps) = (bank.clone(), ramps.clone());
     let rest = run(&mut bank, &mut ramps, &x[2_000..], 64);
@@ -463,7 +483,7 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
 #[test]
 fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
     let l = layout(8);
-    let mut bank = FdnBank::<f32>::new(&l, RATE);
+    let mut bank = Plain::new(&l, RATE);
     let mut ramps = bank.ramps();
     let before = run(&mut bank, &mut ramps, &noise(2, 256), 64);
     assert!(before.iter().flatten().all(|&s| s == 0.0));
@@ -498,8 +518,8 @@ fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
 /// band (the time to fall 60 dB).
 #[test]
 fn the_tail_is_the_networks_under_the_ceiling() {
-    let mut plain = FdnBank::<f32>::new(&layout(8), RATE);
-    let mut shimmer = FdnBank::<f32>::new(&shimmering(8), RATE);
+    let mut plain = Plain::new(&layout(8), RATE);
+    let mut shimmer = Shimmering::new(&shimmering(8), RATE);
     assert_eq!(plain.tail(), Tail::Unbounded);
     let Tail::Finite(ceiling) = shimmer.tail() else {
         panic!("a finite ceiling")
@@ -508,14 +528,17 @@ fn the_tail_is_the_networks_under_the_ceiling() {
     let (ramps_p, ramps_s) = (plain.ramps(), shimmer.ramps());
     for rt60 in [0.3, 1.0, 2.5] {
         let c = still(|c| c.decay = [Seconds::new(rt60); 3]);
-        let Tail::Finite(t) = shimmer.tail_of(&ramps_s, &c) else {
+        let Tail::Finite(t) = shimmer.tail_of(&ramps_s, &c, &ShimmerControls::DEFAULT) else {
             panic!("finite")
         };
         assert!(
             t <= ceiling && t.get() as f64 >= rt60 * RATE.get(),
             "{t:?} at {rt60}"
         );
-        assert_eq!(plain.tail_of(&ramps_p, &c), Tail::Finite(t));
+        assert_eq!(
+            plain.tail_of(&ramps_p, &c, &FreezeControls::DEFAULT),
+            Tail::Finite(t)
+        );
     }
 }
 
@@ -526,9 +549,9 @@ fn longest_line(rate: SampleRate) -> usize {
 }
 
 /// `x` (the input, then silence to `frames`) through `bank` at rest on `c`: the two channels.
-fn rendered_tail(
-    bank: &mut FdnBank<f32>,
-    ramps: &mut FdnRamps<f32>,
+fn rendered_tail<L: FdnKind>(
+    bank: &mut FdnBank<f32, L>,
+    ramps: &mut FdnRamps<f32, L>,
     input: &[f32],
     frames: usize,
 ) -> [Vec<f32>; 2] {
@@ -683,7 +706,7 @@ fn assert_tails_cover(cases: Vec<Case>) {
         for &rate in rates {
             let period = longest_line(rate);
             let (mut bank, mut ramps) = at_rest(&layout, rate, &c);
-            let Tail::Finite(tail) = bank.tail_of(&ramps, &c) else {
+            let Tail::Finite(tail) = bank.tail_of(&ramps, &c, &FreezeControls::DEFAULT) else {
                 panic!("{name}: a finite tail")
             };
             for (input_name, input) in tail_probe::stimuli::<f32>(4 * period) {
@@ -762,7 +785,7 @@ fn the_reported_tail_of_a_band_profile_that_is_not_monotone_covers_it_and_is_the
         let tail_at = |decay: [Seconds; 3]| {
             let c = controls(|c| c.decay = decay);
             let (mut bank, ramps) = at_rest(&layout, rate[0], &c);
-            bank.tail_of(&ramps, &c)
+            bank.tail_of(&ramps, &c, &FreezeControls::DEFAULT)
         };
         let (Tail::Finite(tail), Tail::Finite(all_longest)) =
             (tail_at(*decay), tail_at([longest; 3]))
@@ -792,9 +815,10 @@ fn raised<'a>(
     period: usize,
 ) -> impl Iterator<Item = (String, usize, usize, [Vec<f32>; 2], [Vec<f32>; 2])> + 'a {
     let (mut bank, mut ramps) = at_rest(layout, rate, short);
-    let (Tail::Finite(was), Tail::Finite(now)) =
-        (bank.tail_of(&ramps, short), bank.tail_of(&ramps, long))
-    else {
+    let (Tail::Finite(was), Tail::Finite(now)) = (
+        bank.tail_of(&ramps, short, &FreezeControls::DEFAULT),
+        bank.tail_of(&ramps, long, &FreezeControls::DEFAULT),
+    ) else {
         panic!("finite tails")
     };
     // An unbounded ceiling holds nothing under it.
@@ -811,7 +835,7 @@ fn raised<'a>(
         })
         .map(move |(moved_at, (name, input))| {
             bank.reset();
-            bank.retarget(&mut ramps, short);
+            bank.retarget(&mut ramps, short, &FreezeControls::DEFAULT);
             ramps.jump_to_target();
             let head = input.len() + moved_at;
             let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling);
@@ -821,7 +845,7 @@ fn raised<'a>(
                 &tail_probe::padded(&input, head),
                 512,
             );
-            bank.retarget(&mut ramps, long);
+            bank.retarget(&mut ramps, long, &FreezeControls::DEFAULT);
             let rest = tail_probe::run_length(input.len(), reported, period) - head;
             let second = run(&mut bank, &mut ramps, &vec![0.0; rest], 512);
             (
@@ -860,16 +884,16 @@ fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input
 
 /// A layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its input shut:
 /// nothing ever falls to the floor), both for the setting and as the ceiling it declares; the same
-/// bank asked with `freeze` off after that reports the decay's finite tail, and a shimmering
-/// layout with it on a finite one.
+/// bank asked with `freeze` off after that reports the decay's finite tail.
 #[test]
 fn a_frozen_network_reports_an_unbounded_tail() {
     for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
-        let mut plain = FdnBank::<f32>::new(&layout(8), rate);
-        let mut shimmer = FdnBank::<f32>::new(&shimmering(8), rate);
-        let (ramps_p, ramps_s) = (plain.ramps(), shimmer.ramps());
-        let frozen = controls(|c| c.freeze = true);
-        assert_eq!(plain.tail_of(&ramps_p, &frozen), Tail::Unbounded);
+        let mut plain = Plain::new(&layout(8), rate);
+        let ramps_p = plain.ramps();
+        assert_eq!(
+            plain.tail_of(&ramps_p, &FdnControls::DEFAULT, &FROZEN),
+            Tail::Unbounded
+        );
         assert_eq!(plain.tail(), Tail::Unbounded, "the ceiling");
         // Released, the tail is the decay's again: at least the longest band's RT60 (the tail
         // is 66 dB deep, 6 dB past it) and under 66/60 of it plus a quarter for the lines, the
@@ -879,7 +903,9 @@ fn a_frozen_network_reports_an_unbounded_tail() {
             .iter()
             .map(|d| d.get())
             .fold(0.0, f64::max);
-        let Tail::Finite(n) = plain.tail_of(&ramps_p, &FdnControls::DEFAULT) else {
+        let Tail::Finite(n) =
+            plain.tail_of(&ramps_p, &FdnControls::DEFAULT, &FreezeControls::DEFAULT)
+        else {
             panic!("a finite tail once the freeze is released")
         };
         let seconds = n.get() as f64 / rate.get();
@@ -887,10 +913,6 @@ fn a_frozen_network_reports_an_unbounded_tail() {
             seconds >= longest && seconds <= longest * 1.35,
             "{seconds} s for a {longest} s decay"
         );
-        assert!(matches!(
-            shimmer.tail_of(&ramps_s, &frozen),
-            Tail::Finite(_)
-        ));
     }
 }
 
@@ -918,7 +940,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
         })
     };
     let (mut bank, mut ramps) = at_rest(&l, RATE, &bands(1.0));
-    bank.retarget(&mut ramps, &bands(0.0));
+    bank.retarget(&mut ramps, &bands(0.0), &FreezeControls::DEFAULT);
     let designed = [3.0, 1.5, 0.6];
     let Steps::Fixed(ramp_chunks) = ramp(RATE) else {
         panic!("a fixed ramp")
@@ -926,12 +948,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
     let ramp_chunks = ramp_chunks as usize;
     let mut in_flight = 0;
     for chunk in 0..16_000 {
-        run(
-            &mut bank,
-            &mut ramps,
-            &[0.0; FdnBank::<f32>::CHUNK],
-            FdnBank::<f32>::CHUNK,
-        );
+        run(&mut bank, &mut ramps, &[0.0; Plain::CHUNK], Plain::CHUNK);
         for j in 0..ramps.n {
             // The length the chunk ran with, not where the ramp has got to since.
             let (now, to) = (bank.state.c_len[j], ramps.len[j].target());
@@ -964,12 +981,13 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 fn the_tail_owes_the_pre_delay_still_to_fall() {
     let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
-    bank.retarget(&mut ramps, &still(|_| {}));
-    let Tail::Finite(owed) = bank.tail_of(&ramps, &still(|_| {})) else {
+    bank.retarget(&mut ramps, &still(|_| {}), &FreezeControls::DEFAULT);
+    let Tail::Finite(owed) = bank.tail_of(&ramps, &still(|_| {}), &FreezeControls::DEFAULT) else {
         panic!("finite")
     };
     let (mut fresh, fresh_ramps) = at_rest(&l, RATE, &still(|_| {}));
-    let Tail::Finite(base) = fresh.tail_of(&fresh_ramps, &still(|_| {})) else {
+    let Tail::Finite(base) = fresh.tail_of(&fresh_ramps, &still(|_| {}), &FreezeControls::DEFAULT)
+    else {
         panic!("finite")
     };
     assert!(
@@ -977,18 +995,20 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
         "{owed:?} against {base:?}"
     );
     let longest = still(|c| c.decay = [Seconds::new(8.0); 3]);
-    let (mut worst, mut worst_ramps) = at_rest(
+    let (mut worst, mut worst_ramps) = at_rest_shimmer(
         &shimmering(8),
         RATE,
         &still(|c| {
             c.decay = [Seconds::new(8.0); 3];
             c.pre_delay = crate::MAX_PRE_DELAY;
         }),
+        &ShimmerControls::DEFAULT,
     );
-    worst.retarget(&mut worst_ramps, &longest);
-    let (Tail::Finite(t), Tail::Finite(ceiling)) =
-        (worst.tail_of(&worst_ramps, &longest), worst.tail())
-    else {
+    worst.retarget(&mut worst_ramps, &longest, &ShimmerControls::DEFAULT);
+    let (Tail::Finite(t), Tail::Finite(ceiling)) = (
+        worst.tail_of(&worst_ramps, &longest, &ShimmerControls::DEFAULT),
+        worst.tail(),
+    ) else {
         panic!("finite")
     };
     assert!(t <= ceiling, "{t:?} over the ceiling {ceiling:?}");
@@ -1011,15 +1031,10 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
     );
     let steps = ((to.span().get() - from.span().get()) / 0.5).ceil() as usize;
     assert!(steps > 100, "a long way: {steps} chunks");
-    bank.retarget(&mut ramps, &b);
+    bank.retarget(&mut ramps, &b, &FreezeControls::DEFAULT);
     let mut last = from;
     for chunk in 1..=steps {
-        run(
-            &mut bank,
-            &mut ramps,
-            &[0.0; FdnBank::<f32>::CHUNK],
-            FdnBank::<f32>::CHUNK,
-        );
+        run(&mut bank, &mut ramps, &[0.0; Plain::CHUNK], Plain::CHUNK);
         let now = ramps.len[3].now();
         let moved = now.span().get() - last.span().get();
         assert!(moved <= 0.5 + 1e-3, "chunk {chunk}: moved {moved}");
@@ -1039,15 +1054,14 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
     let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
-    bank.retarget(&mut ramps, &still(|c| c.pre_delay = Seconds::new(0.1)));
+    bank.retarget(
+        &mut ramps,
+        &still(|c| c.pre_delay = Seconds::new(0.1)),
+        &FreezeControls::DEFAULT,
+    );
     let mut last = ReadPosition::START;
     for chunk in 1..=2_400 {
-        run(
-            &mut bank,
-            &mut ramps,
-            &[0.0; FdnBank::<f32>::CHUNK],
-            FdnBank::<f32>::CHUNK,
-        );
+        run(&mut bank, &mut ramps, &[0.0; Plain::CHUNK], Plain::CHUNK);
         let now = ramps.pre_len.now();
         let moved = now.span().get() - last.span().get();
         assert!(moved <= 2.0 + 1e-3, "chunk {chunk}: moved {moved}");
@@ -1065,21 +1079,20 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
 /// 30 steps.
 #[test]
 fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
-    let wanted = (0.020 * RATE.get() / FdnBank::<f32>::CHUNK as f64).ceil() as u32;
+    let wanted = (0.020 * RATE.get() / Plain::CHUNK as f64).ceil() as u32;
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8);
     let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
-    bank.retarget(&mut ramps, &still(|c| c.wet = Db::new(-6.0206)));
+    bank.retarget(
+        &mut ramps,
+        &still(|c| c.wet = Db::new(-6.0206)),
+        &FreezeControls::DEFAULT,
+    );
     let target = ramps.wet.target();
     assert!((target - 0.5).abs() < 1e-4);
     for chunk in 1..=wanted {
-        run(
-            &mut bank,
-            &mut ramps,
-            &[0.0; FdnBank::<f32>::CHUNK],
-            FdnBank::<f32>::CHUNK,
-        );
+        run(&mut bank, &mut ramps, &[0.0; Plain::CHUNK], Plain::CHUNK);
         assert_eq!(ramps.wet.now() == target, chunk == wanted, "chunk {chunk}");
     }
 }
@@ -1098,13 +1111,13 @@ fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let m = 100;
     bank.layout = layout(4);
     bank.designed = None;
-    bank.retarget(&mut ramps, &c);
+    bank.retarget(&mut ramps, &c, &FreezeControls::DEFAULT);
     run(&mut bank, &mut ramps, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
 
     bank.layout = layout(8);
     bank.designed = None;
-    bank.retarget(&mut ramps, &c);
+    bank.retarget(&mut ramps, &c, &FreezeControls::DEFAULT);
     run(&mut bank, &mut ramps, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(2 * m + 1), held, "regrown");
 }
@@ -1123,9 +1136,9 @@ fn an_f64_fdn_is_linear() {
     let c = still(|c| c.diffusion = Mix::new(0.6));
     let l = layout(8);
     let render = |input: &[f64]| {
-        let mut bank = FdnBank::<f64>::new(&l, RATE);
+        let mut bank = FdnBank::<f64, FdnLayout>::new(&l, RATE);
         let mut ramps = bank.ramps();
-        bank.retarget(&mut ramps, &c);
+        bank.retarget(&mut ramps, &c, &FreezeControls::DEFAULT);
         ramps.jump_to_target();
         let (mut l, mut r) = (vec![0.0f64; len], vec![0.0f64; len]);
         bank.process(
@@ -1240,8 +1253,8 @@ fn shimmer_transform_error() -> f64 {
     2.0 * 2048.0f64.log2() * f64::from(f32::EPSILON)
 }
 
-fn shimmering(lines: usize) -> FdnLayout {
-    FdnLayout::shimmering(lines, MaxDecay::DEFAULT).unwrap()
+fn shimmering(lines: usize) -> ShimmerLayout {
+    ShimmerLayout::new(layout(lines))
 }
 
 /// The first frame of `x` that is not silent.
@@ -1273,14 +1286,17 @@ fn at_zero_cents_the_echoes_are_the_feedback_and_its_delayed_copy() {
         c.pre_delay = Seconds::ZERO;
         c.width = StereoWidth::new(1.0);
         c.wet = Db::UNITY;
-        c.shimmer_pitch = Cents::new(0.0);
-        c.shimmer_send = Feedback::new_clamped(k);
     });
-    let net = design(&l, RATE, &c);
+    let shimmer = ShimmerControls {
+        pitch: Cents::new(0.0),
+        send: Feedback::new_clamped(k),
+    };
+    let mut net = Box::new(Network::new(RATE));
+    l.design_into(&c, RATE, &mut net);
     let f = fdn_of(&net);
     let g = |j: usize| f.lines[j].absorption.gain(Band::Low).get();
     let input = |j: usize| f.input[j].get();
-    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
+    let (mut bank, mut ramps) = at_rest_shimmer(&l, RATE, &c, &shimmer);
     let d = bank.shimmer_delay().get();
     let frames = 16_000;
     let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 64);
@@ -1310,15 +1326,18 @@ fn at_zero_cents_the_echoes_are_the_feedback_and_its_delayed_copy() {
 }
 
 /// A send the control wrote at or past the stable bound is held at it, a non-finite one is
-/// none, and a layout that does not shimmer takes none: the loop's gain is `1 - k (1 - 1 / B)`
+/// none: the loop's gain is `1 - k (1 - 1 / B)`
 /// at the largest `k`, below 1.
 #[test]
 fn a_send_is_held_under_the_stable_bound() {
     let b = super::super::shimmer::GAIN_BOUND;
-    let target = |l: &FdnLayout, send: Feedback| {
-        let c = controls(|c| c.shimmer_send = send);
-        let (bank, _) = at_rest(l, RATE, &c);
-        bank.target.shimmer
+    let target = |l: &ShimmerLayout, send: Feedback| {
+        let k = ShimmerControls {
+            send,
+            ..ShimmerControls::DEFAULT
+        };
+        let (_, ramps) = at_rest_shimmer(l, RATE, &FdnControls::DEFAULT, &k);
+        ramps.shimmer.now()
     };
     let held = Feedback::MAX_STABLE.get() as f32;
     assert_eq!(target(&shimmering(8), Feedback::new(5.0)), held);
@@ -1326,7 +1345,6 @@ fn a_send_is_held_under_the_stable_bound() {
     assert_eq!(target(&shimmering(8), Feedback::new(f64::NAN)), 0.0);
     assert_eq!(target(&shimmering(8), Feedback::new(-1.0)), 0.0);
     assert_eq!(target(&shimmering(8), Feedback::new(0.5)), 0.5);
-    assert_eq!(target(&layout(8), Feedback::new(0.9)), 0.0);
     let gain = 1.0 - Feedback::MAX_STABLE.get() * (1.0 - 1.0 / b);
     assert!(gain < 1.0, "{gain}");
 }
@@ -1338,23 +1356,21 @@ fn a_send_is_held_under_the_stable_bound() {
 #[test]
 fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
     let l = shimmering(8);
-    let c = |send: f64| {
-        still(|c| {
-            c.decay = [Seconds::new(1.0); 3];
-            c.shimmer_pitch = Cents::new(1200.0);
-            c.shimmer_send = Feedback::new_clamped(send);
-        })
+    let c = still(|c| c.decay = [Seconds::new(1.0); 3]);
+    let k = |send: f64| ShimmerControls {
+        pitch: Cents::new(1200.0),
+        send: Feedback::new_clamped(send),
     };
-    let mut probe = FdnBank::<f32>::new(&l, RATE);
+    let mut probe = Shimmering::new(&l, RATE);
     let ramps = probe.ramps();
-    let Tail::Finite(plain) = probe.tail_of(&ramps, &c(0.0)) else {
+    let Tail::Finite(plain) = probe.tail_of(&ramps, &c, &k(0.0)) else {
         panic!("finite")
     };
     assert!(
         fdn_of(&probe.network).loop_delay == SampleSpan::ZERO,
         "no send, no loop delay in the model"
     );
-    let Tail::Finite(shimmered) = probe.tail_of(&ramps, &c(0.99)) else {
+    let Tail::Finite(shimmered) = probe.tail_of(&ramps, &c, &k(0.99)) else {
         panic!("finite")
     };
     let d = probe.shimmer_delay();
@@ -1367,7 +1383,7 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
         "{shimmered:?} past {plain:?} by the delay"
     );
 
-    let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
+    let (mut bank, mut ramps) = at_rest_shimmer(&l, RATE, &c, &k(0.99));
     let frames = shimmered.get() + 48_000;
     let [left, right] = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 64);
     let peak = left
@@ -1400,7 +1416,8 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
 /// add to the lines' own echoes, and a step is built up far past the input.
 #[test]
 fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
-    let l = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(1.0)).unwrap()).unwrap();
+    let l =
+        ShimmerLayout::new(FdnLayout::new(8, MaxDecay::new(Seconds::new(1.0)).unwrap()).unwrap());
     let cases = [
         // (send, pitch in cents, decay in seconds, also at 44.1 kHz)
         (0.0, 1200.0, 0.3, false),
@@ -1417,13 +1434,13 @@ fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
             rates.extend([SampleRate::SR_48K, SampleRate::SR_44K1]);
         }
         for rate in rates {
-            let c = still(|c| {
-                c.decay = [Seconds::new(decay); 3];
-                c.shimmer_pitch = Cents::new(pitch);
-                c.shimmer_send = Feedback::new_clamped(send);
-            });
-            let (mut bank, mut ramps) = at_rest(&l, rate, &c);
-            let Tail::Finite(tail) = bank.tail_of(&ramps, &c) else {
+            let c = still(|c| c.decay = [Seconds::new(decay); 3]);
+            let k = ShimmerControls {
+                pitch: Cents::new(pitch),
+                send: Feedback::new_clamped(send),
+            };
+            let (mut bank, mut ramps) = at_rest_shimmer(&l, rate, &c, &k);
+            let Tail::Finite(tail) = bank.tail_of(&ramps, &c, &k) else {
                 panic!("send {send}: a finite tail")
             };
             let period = longest_line(rate) + bank.shimmer_delay().get();
@@ -1445,14 +1462,12 @@ fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
 #[test]
 fn the_tail_keeps_the_shifters_delay_until_the_send_ramp_reaches_zero() {
     let l = shimmering(8);
-    let c = |send: f64| {
-        still(|c| {
-            c.decay = [Seconds::new(1.0); 3];
-            c.shimmer_pitch = Cents::new(1200.0);
-            c.shimmer_send = Feedback::new_clamped(send);
-        })
+    let c = still(|c| c.decay = [Seconds::new(1.0); 3]);
+    let k = |send: f64| ShimmerControls {
+        pitch: Cents::new(1200.0),
+        send: Feedback::new_clamped(send),
     };
-    let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
+    let (mut bank, mut ramps) = at_rest_shimmer(&l, RATE, &c, &k(0.99));
     let mut x = impulse(Samples::new(4_000));
     x.fill(0.0);
     x[0] = 1.0;
@@ -1462,15 +1477,15 @@ fn the_tail_keeps_the_shifters_delay_until_the_send_ramp_reaches_zero() {
         .chain(&right)
         .fold(0.0f32, |p, v| p.max(v.abs()));
     let floor = peak * 1e-3;
-    let held = bank.tail_of(&ramps, &c(0.99));
-    let (mut probe, probe_ramps) = at_rest(&l, RATE, &c(0.0));
-    let plain = probe.tail_of(&probe_ramps, &c(0.0));
+    let held = bank.tail_of(&ramps, &c, &k(0.99));
+    let (mut probe, probe_ramps) = at_rest_shimmer(&l, RATE, &c, &k(0.0));
+    let plain = probe.tail_of(&probe_ramps, &c, &k(0.0));
     assert_ne!(held, plain, "the delay is in the tail while the send is on");
-    bank.retarget(&mut ramps, &c(0.0));
+    bank.retarget(&mut ramps, &c, &k(0.0));
     let silence = vec![0.0f32; 64];
     let mut ramping = 0;
     for block in 0..40 {
-        let now = bank.tail_of(&ramps, &c(0.0));
+        let now = bank.tail_of(&ramps, &c, &k(0.0));
         let at_zero = ramps.shimmer.now() == 0.0;
         assert_eq!(
             now,
@@ -1689,8 +1704,10 @@ fn the_tail_of_any_controls_is_under_the_layouts_ceiling() {
         (8.0, SampleRate::SR_48K),
         (8.0, SampleRate::SR_192K),
     ] {
-        let layout = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(max)).unwrap()).unwrap();
-        let mut bank = FdnBank::<f32>::new(&layout, rate);
+        let layout = ShimmerLayout::new(
+            FdnLayout::new(8, MaxDecay::new(Seconds::new(max)).unwrap()).unwrap(),
+        );
+        let mut bank = Shimmering::new(&layout, rate);
         let ramps = bank.ramps();
         let Tail::Finite(ceiling) = bank.tail() else {
             panic!("a finite ceiling")
@@ -1706,7 +1723,9 @@ fn the_tail_of_any_controls_is_under_the_layouts_ceiling() {
                             c.modulation = Bipolar::of(1.0);
                             c.pre_delay = MAX_PRE_DELAY;
                         });
-                        let Tail::Finite(tail) = bank.tail_of(&ramps, &c) else {
+                        let Tail::Finite(tail) =
+                            bank.tail_of(&ramps, &c, &ShimmerControls::DEFAULT)
+                        else {
                             panic!("{max} s at {rate:?}: {a} {b} {d} size {size}: unbounded")
                         };
                         assert!(

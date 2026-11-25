@@ -836,14 +836,26 @@ fn fan_in_on_one_key_is_closed_by_either_source() {
     assert_eq!(r.words(2), vec![on60(), on60(), off60()]);
 }
 
-/// A re-prepare checks the units out and back; the tables go with them, so a
-/// key held across it is still closed.
+/// A re-prepare gives a unit that keeps its key and generation the held-key
+/// tables it checked out, so cutting its edge still closes the key it held; a
+/// unit replaced before the re-prepare is a new one, and the keys its
+/// predecessor held are closed once, with the resume.
 #[test]
-fn a_key_held_across_a_reprepare_is_closed() {
-    let mut r = Rig::new(Mode::Serial, &[2]);
-    r.wire(&[(1, 2)]);
+fn a_reprepare_gives_a_kept_unit_its_tables_back_and_departs_a_replaced_ones() {
+    let mut r = Rig::new(Mode::Serial, &[2, 3]);
+    let mail4 = Mail::default();
+    let src4 = || {
+        Unforkable(Src {
+            mail: mail4.clone(),
+        })
+    };
+    r.ed.insert(NodeKey(4), "src", src4());
+    r.wire(&[(1, 2), (4, 3)]);
     r.send(on60());
+    mail4.lock().unwrap().push((0, on61()));
     r.block();
+    r.ed.replace(NodeKey(4), src4(), Fade::new(Samples::new(0)))
+        .expect("replaces");
     let (ed, exec) = (&mut r.ed, &mut r.exec);
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
     exec.apply_pending();
@@ -851,7 +863,77 @@ fn a_key_held_across_a_reprepare_is_closed() {
     exec.apply_pending();
     ed.collect();
     r.block();
-    r.wire(&[]);
+    assert_eq!(
+        r.words(3),
+        vec![on61(), off61()],
+        "the replaced one's keys depart"
+    );
+    assert_eq!(r.words(2), vec![on60()], "the kept one's stay held");
+    r.wire(&[(4, 3)]);
+    r.block();
+    assert_eq!(r.words(2), vec![on60(), off60()], "its tables came back");
+    assert_eq!(
+        r.words(3),
+        vec![on61(), off61()],
+        "and nothing closed twice"
+    );
+}
+
+/// A source with a probe that says whether the executor still holds it.
+struct Probed {
+    src: Src,
+    _alive: Arc<()>,
+}
+
+impl Node for Probed {
+    fn shape(&self) -> Shape {
+        self.src.shape()
+    }
+    fn prepare(&mut self, prepare: &Prepare) {
+        self.src.prepare(prepare);
+    }
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        self.src.process(cx, io)
+    }
+    fn reset(&mut self) {
+        self.src.reset();
+    }
+}
+
+/// A unit removed before a re-prepare does not come back: the resume commit
+/// departs its held keys once (the sink is sent one off) and installs nothing
+/// at its index, so the executor lets go of the unit.
+#[test]
+fn a_source_removed_before_a_reprepare_is_closed_once_and_not_installed() {
+    let mut r = Rig::new(Mode::Serial, &[2]);
+    let alive = Arc::new(());
+    r.ed.insert(
+        NodeKey(1),
+        "src",
+        Unforkable(Probed {
+            src: Src {
+                mail: r.mail.clone(),
+            },
+            _alive: Arc::clone(&alive),
+        }),
+    );
+    r.wire(&[(1, 2)]);
+    r.send(on60());
+    r.block();
+    assert_eq!(Arc::strong_count(&alive), 2, "the executor runs the unit");
+    r.ed.remove(NodeKey(1));
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
+    ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
+    exec.apply_pending();
+    ed.collect();
+    exec.apply_pending();
+    ed.collect();
+    assert_eq!(
+        Arc::strong_count(&alive),
+        1,
+        "the unit was freed on the control side, not installed again"
+    );
+    r.block();
     r.block();
     assert_eq!(r.words(2), vec![on60(), off60()]);
 }
@@ -1057,6 +1139,48 @@ fn closes_that_do_not_fit_a_block_follow_in_the_next() {
         .filter(|w| (w[0] >> 20) & 0xf == 0x8)
         .count();
     assert_eq!(offs, 200, "every held key is closed");
+}
+
+/// Closes owed to a sink that cannot take them all at once stay owed across
+/// commits, however many blocks have passed since the one that made them:
+/// the next commit moves them on, and each is delivered or counted lost.
+#[test]
+fn closes_still_owed_many_blocks_later_are_delivered_or_counted() {
+    let mut r = Rig::new(Mode::Serial, &[2, 3]);
+    r.wire(&[(1, 2)]);
+    // 16 channels of 100 held keys, 50 a block: more closes than a block's
+    // room takes.
+    for channel in 0..16u8 {
+        for half in 0..2u8 {
+            for note in 0..50u8 {
+                r.send(m1_on(channel, half * 50 + note));
+            }
+            r.block();
+        }
+    }
+    assert_eq!(r.exec.dropped_event_count(), 0, "every key is held");
+    let offs = |r: &Rig| {
+        r.words(2)
+            .iter()
+            .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+            .count()
+    };
+    r.wire(&[]);
+    r.block();
+    // Past the window in which the stager sizes for the cut's buffers, and
+    // with closes still owed, another commit.
+    r.block();
+    r.block();
+    r.block();
+    r.wire(&[(1, 3)]);
+    for _ in 0..60 {
+        r.block();
+    }
+    assert_eq!(
+        offs(&r) as u64 + r.exec.dropped_event_count(),
+        1600,
+        "each held key's close is delivered or counted lost"
+    );
 }
 
 /// A third fade queues while closes are still owed: the owed keys stay

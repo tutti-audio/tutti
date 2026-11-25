@@ -777,13 +777,16 @@ fn a_jump_back_behind_a_loop_edit_plays_the_new_loop() {
     assert_same_outside("a jump back behind the switch", &got, &want, &allowed);
 }
 
-/// A sine loop's own largest step, and the most a fade between two unit
-/// sines may add to it per frame (`2 * 15/8 / (fade + 1)`, the smootherstep's
-/// steepest slope over the unit gap).
+/// The largest step of a fade between two unit sines: each sine's own step
+/// (`2 sin(pi / period)`) weighted by the equal-power gains, whose sum is at
+/// most `sqrt(2)`; plus the gains' own motion, `pi/2 * 15/8 / (fade + 1)`
+/// (the smootherstep's steepest slope) times the sines' combined magnitude,
+/// at most `sqrt(2)`.
 fn sine_bound() -> f32 {
-    (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32
-        + 2.0 * 1.875 / (FADE + 1) as f32
-        + 1e-4
+    let root2 = std::f64::consts::SQRT_2;
+    let own = 2.0 * (std::f64::consts::PI / PERIOD as f64).sin();
+    let motion = std::f64::consts::FRAC_PI_2 * 1.875 / (FADE + 1) as f64;
+    (root2 * (own + motion)) as f32 + 1e-4
 }
 
 /// Fades chain without a step: a loop

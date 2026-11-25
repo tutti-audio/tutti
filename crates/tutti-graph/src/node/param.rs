@@ -14,6 +14,11 @@
 //!            = base_ramp[i], before that
 //! ```
 //!
+//! A source with nothing to say is not a source: a port delivers these frames
+//! only through a connect or disconnect declick and from its source's first
+//! event on. A source that has not spoken leaves the port on its base, as an
+//! unconnected port reads.
+//!
 //! A circular param ([`UnitParam::is_circular`], `Azimuth`) is wrapped onto
 //! `-180..180`, never clamped, and its moves take the short arc. **The port's
 //! frames jump by 360 where a move crosses the seam**: a ramp from 170 to
@@ -741,6 +746,15 @@ impl Ramp {
     }
 }
 
+/// Whether `event` moves `param`: a ramp or curve segment addressed to it.
+fn speaks_for(event: &ParamEvent, param: UnitAddr) -> bool {
+    let want = ParamAddr::unit(param);
+    match event.kind {
+        ParamKind::Ramp(r) => r.addr() == want,
+        ParamKind::Segment(s) => s.is_for(want),
+    }
+}
+
 /// Render one event source's values for a block into `out`: the ramps and
 /// curve segments its events for `param` start, frame by frame, and
 /// `base(i)` on each frame before its first event ever. A first ramp starts
@@ -1339,7 +1353,11 @@ impl<F: Float> ParamState<F> {
             st.ramp = Ramp::default();
         }
         let fading = st.progress.running();
-        if source.is_none() && !fading {
+        // A source with nothing to say is not a source: until its first event
+        // for this param, outside a declick, the port reads its base.
+        let silent = !st.ramp.started
+            && m.is_none_or(|(_, events)| !events.iter().any(|e| speaks_for(e, param)));
+        if (source.is_none() || silent) && !fading {
             if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
             {
