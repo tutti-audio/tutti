@@ -845,6 +845,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a live command on a running translator: a Profile change stops and resets the channels that leave MPE and sends the events that say so",
     ),
     ty(
+        "crates/tutti-voicing/src/mpe_sender.rs",
+        "MpeSender::set_profile",
+        SETTER,
+        "a live command on a running sender: the device enabled or disabled a Profile, and the notes of a zone that changed are forgotten because the receiver stopped them",
+    ),
+    ty(
         "crates/tutti-session/src/graph/observe.rs",
         "Meters::open",
         DEFAULT_ENUM,

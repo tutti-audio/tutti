@@ -78,8 +78,7 @@ pub enum Mcm {
 /// channel 16.
 ///
 /// A zone of either kind hands its layout out ([`Mpe11Zone::layout`],
-/// [`ProfileZone::layout`]); a [`Midi1Translator`](crate::Midi1Translator)
-/// reads nothing else of a zone, so it takes this.
+/// [`ProfileZone::layout`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(

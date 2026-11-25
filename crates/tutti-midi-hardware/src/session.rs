@@ -68,9 +68,10 @@ const _: () = {
     send::<MidiSession>();
 };
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
+use tutti_midi_protocol::{PitchBendSensitivity, ProfileZones};
 use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;
-use tutti_ump::{GroupSpan, MidiGroup};
+use tutti_ump::{GroupSpan, MidiGroup, MpeZoneSet, MpeZoneSpan};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -477,9 +478,10 @@ impl MidiSession {
     /// connecting another is the caller's replacing it.
     ///
     /// It sends in what its device's input has settled when that input is open
-    /// and has settled; otherwise in the OS's description of the device. A
-    /// later settle is the caller's to apply, from what [`poll`](Self::poll)
-    /// reports, with [`OpenOutput::follow`].
+    /// and has settled; otherwise in the OS's description of the device. It
+    /// sends as MPE to the [`mpe_zones`](Self::mpe_zones) of the device. A
+    /// later change of either is the caller's to apply, from what
+    /// [`poll`](Self::poll) reports, with [`follow`](Self::follow).
     ///
     /// `started` is what [`start`](Self::start) resolved to: the backend is ready.
     ///
@@ -497,7 +499,42 @@ impl MidiSession {
         {
             output.set_config(stream.config());
         }
+        self.send_mpe(&mut output);
         Ok(output)
+    }
+
+    /// `output` follows what a [`poll`](Self::poll) reported: a settled or changed
+    /// Stream of its device is its [`set_config`](OpenOutput::set_config), a change
+    /// of its Profiles is the [`mpe_zones`](Self::mpe_zones) it sends to, and any
+    /// other report, or another device's, changes nothing.
+    pub fn follow(&self, output: &mut OpenOutput, polled: &Polled) {
+        match polled {
+            Polled::Stream(id, stream) if id == output.id() => output.set_config(stream.config()),
+            Polled::Profile(id, peer, change) if id == output.id() => {
+                // The device stopped the notes of the zone, and is at the default
+                // range when it has it again (M2-120 sections 3.3 and 3.5): one that
+                // went and came back within a poll is a new zone.
+                if let ProfilesChange::Changed {
+                    address: CiDeviceId::Channel(manager),
+                    profile: ProfileId::MPE,
+                    ..
+                } = change
+                {
+                    let others = self.mpe_zones_where(id, peer.group, |z| z.manager() != *manager);
+                    output.set_mpe_zones(peer.group, others);
+                }
+                self.send_mpe(output);
+            }
+            _ => {}
+        }
+    }
+
+    /// `output` sends as MPE to the zones of its device.
+    fn send_mpe(&self, output: &mut OpenOutput) {
+        for group in MidiGroup::all() {
+            let zones = self.mpe_zones(output.id(), group);
+            output.set_mpe_zones(group, zones);
+        }
     }
 
     /// Whether `id` is an open input that is still delivering: one whose
@@ -527,7 +564,7 @@ impl MidiSession {
     /// not declare them static), and the MIDI-CI peers that were found,
     /// changed or lost ([`Polled::Ci`]). An output a caller holds follows its
     /// device's Protocol and JR Timestamps once the caller hands it each report
-    /// ([`OpenOutput::follow`]).
+    /// ([`follow`](Self::follow)).
     ///
     /// The stepping is done when this returns; the iterator only hands out what
     /// it found, so ignoring it loses nothing but the report.
@@ -813,6 +850,39 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.profiles())
+    }
+
+    /// The zones of the MPE Profile (M2-120) the peers found on the open input `id`
+    /// have enabled on `group`: the [`PeerProfiles::mpe_zones`] of them all, a zone
+    /// that shares a Channel with another peer's left out (section 3.4). `None`
+    /// when no peer has one.
+    #[must_use]
+    pub fn mpe_zones(&self, id: &MidiDeviceId, group: MidiGroup) -> Option<ProfileZones> {
+        self.mpe_zones_where(id, group, |_| true)
+    }
+
+    /// The [`mpe_zones`](Self::mpe_zones) that are to be `kept`.
+    fn mpe_zones_where(
+        &self,
+        id: &MidiDeviceId,
+        group: MidiGroup,
+        kept: impl Fn(MpeZoneSpan) -> bool,
+    ) -> Option<ProfileZones> {
+        let peers = self.profiles(id);
+        let sets = peers
+            .iter()
+            .filter(|peer| peer.at().peer().group == group)
+            .filter_map(|peer| peer.table().mpe_zones().zones);
+        let mut all: Option<MpeZoneSet> = None;
+        for set in sets {
+            for zone in set.zones().filter(|zone| kept(*zone)) {
+                all = match all {
+                    Some(held) => Some(held.with(zone).unwrap_or(held)),
+                    None => Some(MpeZoneSet::single(zone)),
+                };
+            }
+        }
+        all.map(|set| ProfileZones::new(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
     }
 
     /// Asks a peer to enable or disable a Profile it lists, on the input the

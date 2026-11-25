@@ -1,5 +1,5 @@
-//! The translation between MIDI 1.0 and MIDI 2.0: the stateless conversions and
-//! the stateful `Midi2Translator` and `Midi1Translator`.
+//! The translation between MIDI 1.0 and MIDI 2.0: the stateless conversions,
+//! `Midi1Translator` and the stateful `Midi2Translator`.
 
 /// An allocation inside an `RtScope` aborts the running test.
 #[global_allocator]

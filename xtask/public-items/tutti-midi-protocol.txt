@@ -29,7 +29,6 @@ const universal::machine_control::values::MmcFragment::MAX
 const universal::machine_control::values::MmcSpeed::PLAY
 const universal::machine_control::values::MmcTrackBitmap::NONE
 const universal::write::UNIVERSAL_MAX_PAYLOAD
-enum mode::PerNoteTranslation
 enum mpe::profile::ChannelResponse
 enum mpe::profile::ControllerSupport
 enum mpe::profile::PitchBendSupport
@@ -70,18 +69,15 @@ fn flex::flex_metronome
 fn flex::flex_time_signature
 fn flex::flex_time_signature_wire
 fn midi1::midi1
+fn midi1_translator::Midi1Translator::extremes
 fn midi1_translator::Midi1Translator::feed
-fn midi1_translator::Midi1Translator::mode
 fn midi1_translator::Midi1Translator::new
-fn midi1_translator::Midi1Translator::reset
-fn midi1_translator::Midi1Translator::with_mode
 fn midi2_translator::Midi2Translator::finish
 fn midi2_translator::Midi2Translator::flush
 fn midi2_translator::Midi2Translator::new
 fn midi2_translator::Midi2Translator::reset
 fn midi2_translator::Midi2Translator::reset_group
 fn midi2_translator::Midi2Translator::translate
-fn mode::TranslationMode::is_alternate
 fn mpe::profile::ChannelResponse::from_data
 fn mpe::profile::ChannelResponse::to_data
 fn mpe::profile::MpeFeatures::from_data
@@ -285,7 +281,6 @@ fn universal::write::UniversalPayload::as_bytes
 fn voice::channel_voice
 struct midi1_translator::Midi1Translator
 struct midi2_translator::Midi2Translator
-struct mode::TranslationMode
 struct mpe::profile::MpeFeatures
 struct mpe::zone::InvalidMpeLayout
 struct mpe::zone::InvalidProfileZone

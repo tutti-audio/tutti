@@ -148,7 +148,6 @@ mod flex;
 mod midi1;
 mod midi1_translator;
 mod midi2_translator;
-mod mode;
 mod mpe;
 mod per_note_management;
 mod sensitivity;
@@ -162,7 +161,6 @@ pub use flex::{flex_metronome, flex_time_signature, flex_time_signature_wire};
 pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;
-pub use mode::{PerNoteTranslation, TranslationMode};
 pub use mpe::InvalidMpeZones;
 pub use mpe::{
     ChannelResponse, ControllerSupport, Mcm, MemberCount, Mpe11Zone, Mpe11Zones, MpeFeatures,
