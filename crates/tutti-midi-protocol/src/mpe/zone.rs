@@ -14,7 +14,7 @@ use tutti_ump::{
     Rpn, Ump, Voice2,
 };
 
-use crate::{ChannelResponse, PitchBendSensitivity};
+use crate::{ChannelResponse, MpeFeatures, PitchBendSensitivity};
 
 /// Which of the two RP-053 zones an MPE 1.1 configuration describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -450,7 +450,9 @@ impl Mpe11Zone {
 /// One zone of the MIDI-CI MPE Profile (M2-120): a Manager Channel enabled
 /// anywhere, the channels above it, the one bend range of the Manager and
 /// every Member (section 3.5), and the Channel Response of its Members
-/// (section 3.6). A MIDI-CI peer sets it through the Profile; it has no MPE
+/// (section 3.6), and the optional features its receiver declared (section 3.7,
+/// [`MpeFeatures`], which a receiver that did not answer is taken to have the
+/// default of). A MIDI-CI peer sets it through the Profile; it has no MPE
 /// Configuration Message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -462,6 +464,7 @@ pub struct ProfileZone {
     span: MpeZoneSpan,
     range: PitchBendSensitivity,
     response: ChannelResponse,
+    features: MpeFeatures,
 }
 
 /// The persisted shape of a [`ProfileZone`], checked by `TryFrom` on the way
@@ -473,6 +476,8 @@ struct ProfileZoneRaw {
     member_count: MemberCount,
     range: PitchBendSensitivity,
     response: ChannelResponse,
+    #[serde(default)]
+    features: MpeFeatures,
 }
 
 /// A persisted Profile zone whose members run past channel 16.
@@ -489,6 +494,7 @@ impl From<ProfileZone> for ProfileZoneRaw {
             member_count: z.layout().member_count(),
             range: z.range,
             response: z.response,
+            features: z.features,
         }
     }
 }
@@ -500,7 +506,9 @@ impl TryFrom<ProfileZoneRaw> for ProfileZone {
     fn try_from(raw: ProfileZoneRaw) -> Result<Self, Self::Error> {
         let channels = MpeChannels::new(raw.member_count.get() + 1).ok_or(InvalidProfileZone)?;
         let span = MpeZoneSpan::new(raw.manager, channels).ok_or(InvalidProfileZone)?;
-        Ok(Self::new(span, raw.range).channel_response(raw.response))
+        Ok(Self::new(span, raw.range)
+            .channel_response(raw.response)
+            .mpe_features(raw.features))
     }
 }
 
@@ -508,14 +516,15 @@ impl ProfileZone {
     /// A Profile zone over `span`'s channels (the Number of Channels of Set
     /// Profile On, appendix A.3), with `range` as the one bend range of the
     /// Manager and every Member (the Profile starts at
-    /// [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]), and a polyphonic
-    /// response. Any channel can be a Manager.
+    /// [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]), a polyphonic response,
+    /// and the default [`MpeFeatures`]. Any channel can be a Manager.
     #[must_use]
     pub const fn new(span: MpeZoneSpan, range: PitchBendSensitivity) -> Self {
         Self {
             span,
             range,
             response: ChannelResponse::Polyphonic,
+            features: MpeFeatures::DEFAULT,
         }
     }
 
@@ -552,6 +561,22 @@ impl ProfileZone {
     #[must_use]
     pub const fn channel_response(mut self, response: ChannelResponse) -> Self {
         self.response = response;
+        self
+    }
+
+    /// The optional features the zone's receiver declared: how a sender may
+    /// carry Pitch Bend, Channel Pressure and the Third Dimension of Control.
+    #[inline]
+    #[must_use]
+    pub const fn features(&self) -> MpeFeatures {
+        self.features
+    }
+
+    /// The zone with `features` as what its receiver declared
+    /// ([`features`](Self::features)).
+    #[must_use]
+    pub const fn mpe_features(mut self, features: MpeFeatures) -> Self {
+        self.features = features;
         self
     }
 

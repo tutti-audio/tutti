@@ -86,6 +86,12 @@
 //! an [`Answer::SwitchLost`] if it was not yet sent. Closing the input reports
 //! nothing, as for peers.
 //!
+//! When a peer reports the MPE Profile (M2-120) enabled on a Channel, the same
+//! Initiator asks it for the optional features it supports (section 3.7,
+//! [`ask_mpe_features`]); the answer is kept for as long as the Profile stays
+//! enabled there, is part of the zone [`PeerProfiles::mpe_zones`] reads, and is
+//! reported as [`ProfilesChange::MpeFeatures`].
+//!
 //! # Process Inquiry
 //!
 //! A peer whose Discovery Reply declares Process Inquiry
@@ -165,14 +171,19 @@ use tutti_platform::Instant;
 use tutti_graph::Offset;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, Initiator,
+    CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader, CiMessage, CiPeer, Decoded, Initiator,
     MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction,
-    ProfileInitiator, ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
+    ProfileChange, ProfileId, ProfileInitiator, ProfileRequest, ProfileRequestError,
+    ResourceInitiator, ResourceResponder, ResourceStore,
 };
 use tutti_midi_device::MidiDeviceId;
+use tutti_midi_protocol::MpeFeatures;
+use tutti_midi_runtime::{ask_mpe_features, mpe_features};
 use tutti_rt::CounterWriter;
 use tutti_rt::SplitMix64;
-use tutti_ump::{DeviceIdentity, MessageType, MidiGroup, SysexAssembler, SysexStep, Ump};
+use tutti_ump::{
+    DeviceIdentity, MessageType, MidiChannel, MidiGroup, SysexAssembler, SysexStep, Ump,
+};
 use tutti_units::Losses;
 
 use crate::answer::{Answer, ReportEnd};
@@ -346,6 +357,9 @@ struct Member {
     device: CiDevice<Entropy>,
     /// The Initiator of Profile Configuration with each peer that declared it.
     initiators: BTreeMap<Muid, ProfileInitiator>,
+    /// The optional features of the MPE Profile each peer declared for the zone
+    /// whose Manager is the Channel, while the Profile is enabled there.
+    features: BTreeMap<(Muid, MidiChannel), MpeFeatures>,
     /// The Initiator of Process Inquiry with each peer that declared it.
     process: BTreeMap<Muid, ProcessInitiator>,
     /// The Initiator of Property Exchange with each peer that declared it.
@@ -385,6 +399,7 @@ impl Member {
             group,
             device,
             initiators: BTreeMap::new(),
+            features: BTreeMap::new(),
             process: BTreeMap::new(),
             properties: BTreeMap::new(),
             updates: Vec::new(),
@@ -666,6 +681,7 @@ impl Ci {
                         at: member.peer_ref(&self.device, muid),
                         known: initiator.is_known(),
                         table: initiator.table().clone(),
+                        features: member.features_of(muid),
                     })
             })
             .collect()
@@ -1061,6 +1077,7 @@ impl Member {
                     let id = self.peer_id(muid);
                     changes.peers.push((id, CiChange::Lost));
                     if self.initiators.remove(&muid).is_some() {
+                        self.features.retain(|&(peer, _), _| peer != muid);
                         changes.profiles.push((id, ProfilesChange::Dropped));
                     }
                     if self.process.remove(&muid).is_some() {
@@ -1076,6 +1093,15 @@ impl Member {
                 _ => {}
             }
         }
+    }
+
+    /// The features `muid` declared, by the Manager Channel of each zone.
+    fn features_of(&self, muid: Muid) -> BTreeMap<MidiChannel, MpeFeatures> {
+        let peer = (muid, MidiChannel::FIRST)..=(muid, MidiChannel::LAST);
+        self.features
+            .range(peer)
+            .map(|(&(_, manager), &features)| (manager, features))
+            .collect()
     }
 
     fn peer_ref(&self, device: &MidiDeviceId, muid: Muid) -> PeerRef {
@@ -1123,7 +1149,7 @@ impl Member {
                 first
             }
         };
-        self.carry_out(muid, actions, sends, changes);
+        self.carry_out(muid, actions, now, sends, changes);
     }
 
     /// A found peer that declared Process Inquiry is asked for its capabilities
@@ -1166,7 +1192,7 @@ impl Member {
         changes: &mut CiChanges,
     ) {
         for (muid, actions) in hear_all(&mut self.initiators, decoded, now) {
-            self.carry_out(muid, actions, sends, changes);
+            self.carry_out(muid, actions, now, sends, changes);
         }
         for (muid, actions) in hear_all(&mut self.process, decoded, now) {
             self.carry_out_process(muid, actions, sends, changes);
@@ -1182,7 +1208,7 @@ impl Member {
         changes: &mut CiChanges,
     ) {
         for (muid, actions) in expire_all(&mut self.initiators, now) {
-            self.carry_out(muid, actions, sends, changes);
+            self.carry_out(muid, actions, now, sends, changes);
         }
         for (muid, actions) in expire_all(&mut self.process, now) {
             self.carry_out_process(muid, actions, sends, changes);
@@ -1276,7 +1302,7 @@ impl Member {
             Switch::Off(address) => initiator.set_off(address, switch.profile, now),
         };
         match started {
-            Ok(actions) => self.carry_out(switch.at.peer().muid, actions, sends, changes),
+            Ok(actions) => self.carry_out(switch.at.peer().muid, actions, now, sends, changes),
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
@@ -1284,15 +1310,20 @@ impl Member {
         }
     }
 
-    /// What an Initiator asks for: messages to send, changes to tell.
+    /// What an Initiator asks for: messages to send, changes to tell. A peer that
+    /// reports the MPE Profile enabled on a Channel is asked for its features
+    /// ([`ask_mpe_features`]); one that reports it disabled or removed there
+    /// loses the ones it gave.
     fn carry_out(
-        &self,
+        &mut self,
         muid: Muid,
         actions: Vec<ProfileAction>,
+        now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
         let id = self.peer_id(muid);
+        let mut enabled = Vec::new();
         for action in actions {
             let change = match action {
                 ProfileAction::Send(message) => {
@@ -1306,11 +1337,42 @@ impl Member {
                     address,
                     profile,
                     change,
-                } => ProfilesChange::Changed {
-                    address,
-                    profile,
-                    change,
-                },
+                } => {
+                    if let (CiDeviceId::Channel(manager), ProfileId::MPE) = (address, profile) {
+                        match change {
+                            ProfileChange::Enabled => {
+                                // The answer to ask for is the zone's now.
+                                self.features.remove(&(muid, manager));
+                                enabled.push(manager);
+                            }
+                            ProfileChange::Disabled | ProfileChange::Removed => {
+                                self.features.remove(&(muid, manager));
+                            }
+                            _ => {}
+                        }
+                    }
+                    ProfilesChange::Changed {
+                        address,
+                        profile,
+                        change,
+                    }
+                }
+                ProfileAction::Resolved {
+                    request:
+                        ProfileRequest::Details {
+                            address: CiDeviceId::Channel(manager),
+                            profile: ProfileId::MPE,
+                            ..
+                        },
+                    outcome,
+                } => {
+                    let features = mpe_features(&outcome).ok();
+                    match features {
+                        Some(features) => self.features.insert((muid, manager), features),
+                        None => self.features.remove(&(muid, manager)),
+                    };
+                    ProfilesChange::MpeFeatures { manager, features }
+                }
                 ProfileAction::Resolved { request, outcome } => {
                     changes
                         .answers
@@ -1329,6 +1391,16 @@ impl Member {
                 _ => continue,
             };
             changes.profiles.push((id, change));
+        }
+        for manager in enabled {
+            let Some(initiator) = self.initiators.get_mut(&muid) else {
+                return;
+            };
+            match ask_mpe_features(initiator, manager, now) {
+                Ok(asked) => self.carry_out(muid, asked, now, sends, changes),
+                // The answer to the one in flight is what the session waits for.
+                Err(ProfileRequestError::AlreadyAsking) => {}
+            }
         }
     }
 }

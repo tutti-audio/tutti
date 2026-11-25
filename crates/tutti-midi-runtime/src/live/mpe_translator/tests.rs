@@ -5,7 +5,7 @@ use tutti_graph::UmpAt;
 use tutti_midi_protocol::{MemberCount, Mpe11Zone, Mpe11Zones, MpeZone, ProfileZone, ProfileZones};
 use tutti_ump::{
     Address, BendValue, CCNumber, ControlValue, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent,
-    NoteVelocity, U7, U14, Voice2,
+    NoteVelocity, Rpn, U7, U14, Voice2,
 };
 use tutti_units::Semitones;
 
@@ -1050,6 +1050,98 @@ fn disable(translator: &mut MpeTranslator) -> Vec<UmpAt> {
     let mut out = Vec::new();
     translator.set_profile(MidiGroup::FIRST, None, Offset::ZERO, |e| out.push(e));
     out
+}
+
+/// The Registered Controller `0x20/index` of `channel`, the bipolar form of M2-120
+/// Table 9.
+fn bipolar(channel: u8, index: u8, data: u32) -> UmpAt {
+    let rpn = Rpn::new(U7::of(0x20), U7::of(index));
+    at(0, midi::registered(MidiChannel::of(channel), rpn, data))
+}
+
+/// **A Member's bipolar controllers are its Pressure and third dimension**
+/// (M2-120 sections 4.8, 4.9): Registered Controller 0x20/0x20 is read as
+/// Channel Pressure, over the upper half (a value below the centre is none), and
+/// 0x20/0x21 as Control Change 74, as it is, for the note the channel holds, and
+/// for the next note when none is held. Neither goes on as a Registered Controller.
+/// Spec: m2-120/4.4#5, m2-120/4.5#6, m2-120/4.9#4
+#[test]
+fn a_members_bipolar_controllers_are_its_pressure_and_third_dimension() {
+    let mut translator = profiled(0, 4);
+    // Told with no note: the first note starts with them.
+    assert!(decoded(&mut translator, &bipolar(1, 0x20, 0xC000_0000)).is_empty());
+    assert!(decoded(&mut translator, &bipolar(1, 0x21, 0x2000_0000)).is_empty());
+    let out = decoded(&mut translator, &note_on(1, 60, 100));
+    assert!(matches!(
+        out[0],
+        (1, Voice2::PolyPressure { note, value }) if note.get() == 60 && value.get() == 0x8000_0000
+    ));
+    assert!(matches!(
+        out[1],
+        (1, Voice2::AssignablePerNote { note, controller: 74, value })
+            if note.get() == 60 && value.get() == 0x2000_0000
+    ));
+    let out = decoded(&mut translator, &bipolar(1, 0x20, 0xFFFF_FFFF));
+    assert!(matches!(
+        out[..],
+        [(1, Voice2::PolyPressure { value, .. })] if value.get() == 0xFFFF_FFFE
+    ));
+    let out = decoded(&mut translator, &bipolar(1, 0x20, 0x7000_0000));
+    assert!(matches!(
+        out[..],
+        [(1, Voice2::PolyPressure { value, .. })] if value.get() == 0
+    ));
+    let out = decoded(&mut translator, &bipolar(1, 0x21, 0xF000_0000));
+    assert!(matches!(
+        out[..],
+        [(1, Voice2::AssignablePerNote { controller: 74, value, .. })] if value.get() == 0xF000_0000
+    ));
+}
+
+/// The Manager's bipolar controllers are read the same: they reach each note of
+/// the zone and go on as the Channel Pressure and Control Change 74 they stand
+/// for (section 4.9: bipolar controllers are used by the Manager and the Members).
+/// Spec: m2-120/4.4#5, m2-120/4.5#6, m2-120/4.9#4
+#[test]
+fn a_managers_bipolar_controllers_reach_every_members_note() {
+    let mut translator = profiled(0, 4);
+    translator.translated(&note_on(1, 60, 100));
+    translator.translated(&note_on(2, 64, 100));
+    let out = decoded(&mut translator, &bipolar(0, 0x20, 0xC000_0000));
+    assert_eq!(
+        out.iter()
+            .filter_map(|(c, v)| match v {
+                Voice2::PolyPressure { note, value } => Some((*c, note.get(), value.get())),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [(1, 60, 0x8000_0000), (2, 64, 0x8000_0000)]
+    );
+    assert!(matches!(
+        out.last(),
+        Some((0, Voice2::ChannelPressure(v))) if v.get() == 0x8000_0000
+    ));
+    let out = decoded(&mut translator, &bipolar(0, 0x21, 0x4000_0000));
+    assert_eq!(
+        out.iter()
+            .filter(|(_, v)| matches!(v, Voice2::AssignablePerNote { controller: 74, .. }))
+            .count(),
+        2
+    );
+    assert!(
+        out.iter()
+            .all(|(_, v)| !matches!(v, Voice2::Registered { .. }))
+    );
+}
+
+/// The bipolar controllers are the Profile's: in an MPE 1.1 zone, which defines
+/// no such controller, 0x20/0x20 is an ordinary Registered Controller and passes.
+#[test]
+fn an_mpe11_zone_has_no_bipolar_controllers() {
+    let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(3));
+    translator.translated(&note_on(1, 60, 100));
+    let out = decoded(&mut translator, &bipolar(1, 0x20, 0xFFFF_FFFF));
+    assert!(matches!(out[..], [(1, Voice2::Registered { .. })]));
 }
 
 /// An translator of no MPE 1.1 zones with the Profile zone enabled.

@@ -123,8 +123,8 @@
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
-    ChannelResponse, Mcm, Mpe11Zone, Mpe11Zones, MpeLayout, MpeMode, PitchBendSensitivity,
-    ProfileZone, ProfileZones,
+    ChannelResponse, Mcm, Mpe11Zone, Mpe11Zones, MpeExpression, MpeLayout, MpeMode,
+    PitchBendSensitivity, ProfileZone, ProfileZones,
 };
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiChannelSet, MidiGroup, NoteNumber, RegisteredData,
@@ -735,6 +735,9 @@ impl MpeTranslator {
     /// Rewrite one already-normalized (MIDI-2) event.
     ///
     /// Yields the events to forward downstream, in order:
+    /// - under the Profile, a bipolar Registered Controller 0x20/0x20 or
+    ///   0x20/0x21 of a zone channel is read as the Channel Pressure or CC74 it
+    ///   stands for (M2-120 section 4.8), and goes on as that;
     /// - a member-channel bend/pressure/CC74 becomes its native per-note form,
     ///   for the note that channel holds; with no note held it is remembered,
     ///   and the channel's next Note On is preceded by the per-note forms of
@@ -955,6 +958,15 @@ impl MpeTranslator {
         // M1-100 section 2.2.1: a channel in no Zone is for conventional use.
         let Some(zone) = state.zone_of(ch) else {
             return Some(*event);
+        };
+        // The Profile's bipolar Registered Controllers (M2-120 section 4.8) are
+        // Channel Pressure and Control Change 74 on the Manager and every
+        // Member (section 4.9): what follows reads them as those.
+        let unipolar = MpeExpression::unipolar(voice);
+        let (event, voice) = if zone.rules == Rules::Profile && unipolar != voice {
+            (&message(address, event.0, unipolar), unipolar)
+        } else {
+            (event, voice)
         };
         let role = zone.role_of(ch);
         if zone.rules.receive(role, &voice, zone.monophonic) == Receive::Ignore {

@@ -29,6 +29,7 @@ const universal::machine_control::values::MmcFragment::MAX
 const universal::machine_control::values::MmcSpeed::PLAY
 const universal::machine_control::values::MmcTrackBitmap::NONE
 const universal::write::UNIVERSAL_MAX_PAYLOAD
+enum mpe::expression::MpeExpression
 enum mpe::profile::ChannelResponse
 enum mpe::profile::ControllerSupport
 enum mpe::profile::PitchBendSupport
@@ -78,6 +79,8 @@ fn midi2_translator::Midi2Translator::new
 fn midi2_translator::Midi2Translator::reset
 fn midi2_translator::Midi2Translator::reset_group
 fn midi2_translator::Midi2Translator::translate
+fn mpe::expression::MpeExpression::form
+fn mpe::expression::MpeExpression::unipolar
 fn mpe::profile::ChannelResponse::from_data
 fn mpe::profile::ChannelResponse::to_data
 fn mpe::profile::MpeFeatures::from_data
@@ -112,8 +115,10 @@ fn mpe::zone::MpeLayout::member_channels
 fn mpe::zone::MpeLayout::member_count
 fn mpe::zone::MpeZone::master_channel
 fn mpe::zone::ProfileZone::channel_response
+fn mpe::zone::ProfileZone::features
 fn mpe::zone::ProfileZone::layout
 fn mpe::zone::ProfileZone::manager
+fn mpe::zone::ProfileZone::mpe_features
 fn mpe::zone::ProfileZone::new
 fn mpe::zone::ProfileZone::range
 fn mpe::zone::ProfileZone::response
