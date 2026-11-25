@@ -21,14 +21,14 @@ use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use crate::transport::control::{ControlUnparker, ControlWait, control_unparker};
 use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::EditReader;
 use tutti_plugin_types::PipelineCounts;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
-    AtomicCell, Counter, Mutex, Overflow, Parker, RingReader, RingWriter, Tally, TallyWriter,
-    Unparker, parker, ring, tally,
+    AtomicCell, Counter, Generation, Mutex, Overflow, Parker, RingReader, RingWriter, Tally,
+    TallyWriter, Unparker, parker, ring, tally,
 };
 use tutti_units::{Chunks, Normalized, ParamId, SampleRate};
 
@@ -110,6 +110,13 @@ pub(super) struct Channels {
     /// claim drains at the next), and a control thread that installs a reader or
     /// flushes claims it waiting.
     host_edits: Arc<AudioThreadCell<Option<EditReader>>>,
+    /// The host's writes the server has answered, as the generation the lane's
+    /// drain had swept when it sent them ([`note_acked`](Self::note_acked)):
+    /// what [`acked`](Self::acked) reads from the control side.
+    acked: Arc<AtomicU32>,
+    /// A flush asked for to deliver the host's writes is queued and the lane has
+    /// not dequeued it ([`ask_flush`](Self::ask_flush)).
+    flush_asked: Arc<std::sync::atomic::AtomicBool>,
     /// How many chunks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
     abandoned: TallyWriter<Chunks>,
@@ -125,6 +132,12 @@ pub(super) struct Channels {
     /// did not apply the change within the fence deadline. The change may still
     /// land; the blocks after it were not held for it.
     unapplied: TallyWriter<u64>,
+    /// Host parameter writes the plugin did not get, ever: every parameter of a
+    /// flush the server answered as not applied (refused, or no Processor). An
+    /// answer past the lane's window is counted when it comes; a flush with no
+    /// answer counts nothing, as it may still land. The audio lane's thread
+    /// counts them ([`Channels::note_unapplied_edits`]).
+    unapplied_edits: TallyWriter<u64>,
     /// Parameter buffers the audio thread leaked rather than free, ever: the
     /// free list had no room for one it returned (a broken sizing bound).
     leaked_buffers: TallyWriter<u64>,
@@ -305,6 +318,7 @@ impl Channels {
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers, unapplied) =
             (tally(), tally(), tally(), tally(), tally());
+        let unapplied_edits = tally();
         let channels = Self {
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
@@ -319,10 +333,13 @@ impl Channels {
             sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
+            acked: Arc::new(AtomicU32::new(0)),
+            flush_asked: Arc::default(),
             abandoned: abandoned.writer(),
             late: late.writer(),
             commands_refused: commands_refused.writer(),
             unapplied: unapplied.writer(),
+            unapplied_edits: unapplied_edits.writer(),
             leaked_buffers: leaked_buffers.writer(),
             replies: Arc::new(AtomicU64::new(0)),
             dropped_param_events: dropped_param_events.writer(),
@@ -362,23 +379,62 @@ impl Channels {
     /// Hands `apply` each parameter the host wrote since the last drain, with
     /// its latest value. The audio lane's thread, once per block: a refused
     /// claim (a control thread flushes) drains nothing, and the slots keep what
-    /// they hold.
-    pub(super) fn drain_host_edits(&self, apply: impl FnMut(ParamId, Normalized)) {
+    /// they hold. The generation of the writes the drain swept, which the
+    /// answer to the block that carries them acknowledges; generation zero when
+    /// nothing was drained.
+    pub(super) fn drain_host_edits(&self, apply: impl FnMut(ParamId, Normalized)) -> Generation {
         if let Some(mut cell) = self.host_edits.try_borrow_mut()
             && let Some(reader) = cell.as_mut()
         {
             reader.drain(apply);
+            return reader.swept();
+        }
+        Generation::new(0)
+    }
+
+    /// What no block has taken, claiming the cell, and the generation of the
+    /// writes the drain swept: a flush's, which sends it ahead of whatever it
+    /// must precede. Control side.
+    pub(super) fn take_host_edits(&self) -> (Vec<(ParamId, Normalized)>, Generation) {
+        let mut taken = Vec::new();
+        let mut swept = Generation::new(0);
+        if let Some(reader) = self.claim_host_edits().as_mut() {
+            reader.drain(|id, value| taken.push((id, value)));
+            swept = reader.swept();
+        }
+        (taken, swept)
+    }
+
+    /// Records that the server answered a request, a block or a flush, whose
+    /// drain had swept `swept`: every write up to it is the plugin's, or counted
+    /// lost ([`unapplied_edits`](Self::unapplied_edits_cell)) and not sent
+    /// again. The server answers in order, and every answered request either
+    /// applied its writes or was counted; one forgotten at its ceiling is acked
+    /// by a later answer. Audio lane's thread only; never moves back.
+    pub(super) fn note_acked(&self, swept: Generation) {
+        if swept.has_reached(self.acked()) {
+            self.acked.store(swept.get(), Ordering::Release);
         }
     }
 
-    /// What no block has taken, claiming the cell: a flush's, which sends it
-    /// ahead of whatever it must precede. Control side.
-    pub(super) fn take_host_edits(&self) -> Vec<(ParamId, Normalized)> {
-        let mut taken = Vec::new();
-        if let Some(reader) = self.claim_host_edits().as_mut() {
-            reader.drain(|id, value| taken.push((id, value)));
-        }
-        taken
+    /// Whether the caller is the one to queue a flush for delivery: `true` when
+    /// none is queued and not yet dequeued, so a settle that polls often asks
+    /// once. Control side.
+    pub(super) fn ask_flush(&self) -> bool {
+        !self.flush_asked.swap(true, Ordering::AcqRel)
+    }
+
+    /// The flush asked for is dequeued, or could not be queued: the next ask
+    /// queues another. Any thread.
+    pub(super) fn flush_dequeued(&self) {
+        self.flush_asked.store(false, Ordering::Release);
+    }
+
+    /// The writes the server has answered for, by any request that carried them
+    /// ([`note_acked`](Self::note_acked)).
+    /// Wait-free, any thread.
+    pub(super) fn acked(&self) -> Generation {
+        Generation::new(self.acked.load(Ordering::Acquire))
     }
 
     /// The current sample rate. It only sizes a timeout, so a value one block
@@ -811,6 +867,17 @@ impl Channels {
     /// lane's thread only.
     pub(super) fn note_unapplied(&self) {
         self.unapplied.add(1);
+    }
+
+    /// Records `n` host parameter writes the plugin did not get. Audio lane's
+    /// thread only.
+    pub(super) fn note_unapplied_edits(&self, n: u64) {
+        self.unapplied_edits.add(n);
+    }
+
+    /// The cell [`note_unapplied_edits`](Self::note_unapplied_edits) counts into.
+    pub(super) fn unapplied_edits_cell(&self) -> Tally<u64> {
+        self.unapplied_edits.tally()
     }
 
     /// The cell [`note_unapplied`](Self::note_unapplied) counts into.

@@ -971,8 +971,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
     use tutti_graph::{Editor, ForkByClone, Prepare, TransportPosition};
     use tutti_modulation::{
-        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, RouteTarget,
-        Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
+        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, Source as ModSource,
+        SourceKey, TargetDecl, TargetKey, Waveform,
     };
     use tutti_nodes::testing::Osc;
     use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType};
@@ -995,10 +995,11 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     let at = |p| TargetKey::param(1, ParamAddr::Unit(p));
     let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
-        to: RouteTarget::Param(at(p)),
+        to: at(p),
         depth: tutti_rt::Param::new(Bipolar::of(depth)),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
+        scale: None,
     };
 
     let (mut ed, mut exec) = Editor::new(Prepare::new(

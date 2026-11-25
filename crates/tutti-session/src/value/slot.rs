@@ -67,9 +67,9 @@ pub enum SlotId {
     #[cfg(feature = "sampler")]
     Speed(NodeKey),
     /// How a modulation route maps its source's value onto its span.
-    RoutePolarity(ModRouteId),
+    RoutePolarity(ShapeKey),
     /// The law that shapes a modulation route's value.
-    RouteCurve(ModRouteId),
+    RouteCurve(ShapeKey),
     /// An LFO source's rate.
     SourceRate(ModSourceId),
     /// A macro source's value.
@@ -96,7 +96,7 @@ pub enum SlotId {
     #[cfg(feature = "plugin")]
     PluginMidiMap(NodeKey),
     /// The depth of the route from a source into a target.
-    RouteDepth((ModSourceId, ModTarget)),
+    RouteDepth(DepthKey),
 }
 
 impl SlotId {
@@ -1247,4 +1247,23 @@ mod tests {
             "an equal clip, by value, publishes nothing"
         );
     }
+}
+
+/// What names a route's depth: the route from a source into a target, or the
+/// depth of the scale of a route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DepthKey {
+    /// The route from a source into a target.
+    Into(ModSourceId, ModTarget),
+    /// The scale of a route: a route has at most one.
+    Scale(ModRouteId),
+}
+
+/// What names a polarity or a curve: a route's, or its scale's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ShapeKey {
+    /// The route's own.
+    Route(ModRouteId),
+    /// The scale of the route: a route has at most one.
+    Scale(ModRouteId),
 }

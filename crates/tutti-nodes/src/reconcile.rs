@@ -22,9 +22,8 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
-    Compiled, ControlProgram, Declarations, ProgramCompileError, RouteDecl, RouteKey, RouteTarget,
-    SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey,
-    compile,
+    Compiled, ControlProgram, Declarations, ProgramCompileError, RouteDecl, RouteKey, SignalKind,
+    SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey, compile,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{At, Normalized, ParamAddr, ParamId};
@@ -330,8 +329,10 @@ struct SourcePlan {
 /// lane already reads the program the apply published (the publish
 /// happens before the schedule). Nothing crosses outside the ports, so the
 /// envelope stays `ForkByClone`: a fork's executor has its own command
-/// ring and starts idle. A follower needs none: it sends on every grid
-/// point while it is not silent.
+/// ring and starts idle. A follower's new route needs none: it sends on
+/// every grid point while it is not silent. A source (either kind) the
+/// apply rebuilds owes one too: a lane holds the old node's last value
+/// until the new node sends.
 ///
 /// **Rebinds.** A native target resolves against the node the editor holds
 /// at its key, staged or committed: the unit declares its param ranges when
@@ -371,7 +372,7 @@ struct SourcePlan {
 /// use std::sync::Arc;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_modulation::{
-///     LayerClock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
+///     LayerClock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey,
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
 /// use tutti_buffers::ChannelLayout;
@@ -419,10 +420,11 @@ struct SourcePlan {
 ///     RouteKey(1),
 ///     RouteDecl {
 ///         source: SourceKey(1),
-///         to: RouteTarget::Param(cutoff),
+///         to: cutoff,
 ///         depth: Param::new(Bipolar::of(0.3)),
 ///         polarity: Polarity::Bipolar,
 ///         curve: Law::Linear,
+///         scale: None,
 ///     },
 /// )];
 /// let targets = [(cutoff, TargetDecl { min: 20.0, max: 20_000.0, automation: None })];
@@ -450,7 +452,7 @@ pub struct Modulation {
     sources: BTreeMap<SourceKey, SignalNode>,
     /// Event edges as wired: source → target.
     edges: BTreeSet<(SourceKey, TargetKey)>,
-    /// Note envelopes owed a resync at the next commit.
+    /// Sources owed a resync at the next commit.
     resync: BTreeSet<SourceKey>,
     /// Resyncs the editor refused for good (no such port, a resolution
     /// too coarse, a poisoned executor) and that were dropped.
@@ -513,13 +515,13 @@ struct Memo {
     epoch: u32,
 }
 
-/// The depth of each depth route, by bits: the one depth read when compiled
-/// (a route into a param is read by its lane from the cell).
+/// The depth of each route's scale, by bits: the one depth read when compiled
+/// (a route's own is read by its lane from the cell).
 fn scalers<'a>(decl: &Declarations<'a>) -> impl Iterator<Item = (RouteKey, u64)> + 'a {
-    decl.routes
-        .iter()
-        .filter(|(_, route)| matches!(route.to, RouteTarget::Depth(_)))
-        .map(|(key, route)| (*key, route.depth.load().get().to_bits()))
+    decl.routes.iter().filter_map(|(key, route)| {
+        let scale = route.scale.as_ref()?;
+        Some((*key, scale.depth.load().get().to_bits()))
+    })
 }
 
 fn same_target(a: &TargetDecl, b: &TargetDecl) -> bool {
@@ -612,7 +614,7 @@ impl Modulation {
         self.sources.get(&source).map(|s| s.key)
     }
 
-    /// Note envelopes owed a resync: the next [`commit`](Self::commit) (or
+    /// Sources owed a resync: the next [`commit`](Self::commit) (or
     /// [`send_resyncs`](Self::send_resyncs)) schedules them.
     pub fn resyncs_owed(&self) -> usize {
         self.resync.len()
@@ -922,27 +924,23 @@ impl Modulation {
                 }
                 continue;
             }
-            // A rebuilt source sends where it stands (0) on its first frame: a
-            // lane holds the old node's last value until it does.
-            let replacing = rebuilt.contains(&source);
+            // A rebuilt source is owed a resync: a lane holds the old node's
+            // last value until the new one sends.
+            if rebuilt.contains(&source) {
+                self.resync.insert(source);
+            }
             match plan.decl.kind {
                 SignalKind::Follower { .. } => {
-                    let mut node = EnvelopeFollowerNode::from(
+                    let node = EnvelopeFollowerNode::from(
                         EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
                             .expect("a follower's declaration"),
                     );
-                    if replacing {
-                        node = node.replacing();
-                    }
                     editor.insert(plan.key, "envelope-follower", ForkByClone(node));
                 }
                 SignalKind::NoteEnvelope { .. } => {
-                    let mut node = NoteEnvelopeNode::from(
+                    let node = NoteEnvelopeNode::from(
                         NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
                     );
-                    if replacing {
-                        node = node.replacing();
-                    }
                     editor.insert(plan.key, "note-envelope", ForkByClone(node));
                 }
             }
@@ -1067,11 +1065,7 @@ impl Modulation {
         // A resync owed to a source with no node (unresolved, or gone) is
         // owed to nothing.
         let sources = &self.sources;
-        self.resync.retain(|s| {
-            sources
-                .get(s)
-                .is_some_and(|n| matches!(n.decl.kind, SignalKind::NoteEnvelope { .. }))
-        });
+        self.resync.retain(|s| sources.contains_key(s));
         self.prev = Some(compiled);
         applied.resync = !self.resync.is_empty();
         if applied.unresolved_targets.is_empty() && applied.unresolved_sources.is_empty() {
@@ -1363,9 +1357,7 @@ impl Modulation {
             decl.routes.iter().collect();
         routes.sort_by_key(|(k, _)| *k);
         for (key, route) in routes {
-            let RouteTarget::Param(t) = route.to else {
-                continue;
-            };
+            let t = route.to;
             if !edges.contains(&(route.source, t)) {
                 continue;
             }

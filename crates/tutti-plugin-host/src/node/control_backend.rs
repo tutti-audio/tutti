@@ -43,7 +43,7 @@ use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health,
-    InProcess, OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
+    InProcess, OwnBypass, ParamWriteError, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -204,7 +204,7 @@ where
         let job = AfterWrites {
             inner: Arc::clone(&self.inner),
             post: self.edits.clone(),
-            mark: self.edits.mark(),
+            pending: self.edits.pending(),
             collector: self.work.clone(),
             work,
             reply,
@@ -289,7 +289,7 @@ pub(super) fn queue_inform(
 struct AfterWrites<L: InProcess, W, P> {
     inner: Arc<Mutex<Instance<L>>>,
     post: super::host_edits::EditPost,
-    mark: tutti_rt::Generation,
+    pending: crate::PendingWrites,
     collector: MainWorkHandle,
     work: W,
     reply: P,
@@ -306,11 +306,11 @@ where
     /// Settles the writes and runs the work; a node draining them now leaves it
     /// for the next tick, or answers `None` when no main thread ticks. The
     /// re-asks end: the claim's holder is one bounded audio-thread drain.
-    fn step(self, main: MainThreadMarker) {
+    fn step(mut self, main: MainThreadMarker) {
         let settled = {
             let mut instance = self.inner.lock();
             match instance.control() {
-                Some(control) => self.post.settle(main, control, self.mark),
+                Some(control) => self.post.settle(main, control, &mut self.pending),
                 None => Poll::Ready(()),
             }
         };
@@ -368,12 +368,11 @@ where
     /// The slot holds a `Normalized`, so no out-of-range or NaN value reaches
     /// the plugin. A read-only parameter is written like any other: the
     /// session checks that policy before it hands a write over.
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError> {
         if self.lost.is_lost() {
-            // No node drains a lost plugin's slots: the write is counted, as
-            // `Health::refused_edits` reads it, and not stored.
-            self.edits.refuse(1);
-            return Ok(());
+            // No node drains a lost plugin's slots: the write is refused at the
+            // call, not stored and not counted.
+            return Err(ParamWriteError::Lost(id));
         }
         self.edits.write(id, value)?;
         self.inform_controller_later();
@@ -393,7 +392,8 @@ where
             OwnBypass::Parameter(id) => {
                 match self.set_parameter_value(id, bypass_value(bypassed)) {
                     Ok(()) => BypassWrite::Sent,
-                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                    Err(ParamWriteError::Lost(_)) => BypassWrite::Lost,
+                    Err(_) => BypassWrite::Refused,
                 }
             }
             OwnBypass::Property => self
@@ -563,13 +563,13 @@ where
         }
     }
 
-    fn writes(&self) -> tutti_rt::Generation {
-        self.edits.mark()
+    fn writes(&self) -> crate::PendingWrites {
+        self.edits.pending()
     }
 
-    fn settle(&self, main: MainThreadMarker, mark: tutti_rt::Generation) -> Poll<()> {
+    fn settle(&self, main: MainThreadMarker, pending: &mut crate::PendingWrites) -> Poll<()> {
         match self.inner.lock().control() {
-            Some(control) => self.edits.settle(main, control, mark),
+            Some(control) => self.edits.settle(main, control, pending),
             None => Poll::Ready(()),
         }
     }
@@ -969,7 +969,9 @@ mod off_main_tests {
             handle
                 .any_thread()
                 .set_parameter_value(ParamId::new(9_999), Normalized::of(0.5)),
-            Err(tutti_plugin_types::UnknownParam(ParamId::new(9_999)))
+            Err(tutti_plugin_types::ParamWriteError::Undeclared(
+                ParamId::new(9_999)
+            ))
         );
     }
 

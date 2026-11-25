@@ -130,10 +130,10 @@ impl ClapLoaded {
     }
 
     /// Whether the parameter with `param_id` carries the
-    /// `CLAP_PARAM_REQUIRES_PROCESS` flag: its changes must be delivered
-    /// through `process()`, in event order, and not through an out-of-band
-    /// `flush`, while the plugin is processing. `false` if the id is unknown or
-    /// the plugin has no params.
+    /// `CLAP_PARAM_REQUIRES_PROCESS` flag: while the plugin is **active**, its
+    /// changes must be delivered through `process()`, in event order, and not
+    /// through an out-of-band `flush`. `false` if the id is unknown or the
+    /// plugin has no params.
     ///
     /// Answered from the same table as `parameter_list`, so the two cannot
     /// drift about which parameters exist.

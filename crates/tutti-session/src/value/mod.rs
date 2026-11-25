@@ -92,8 +92,8 @@ pub(crate) use slot::{
     TempoCell, WordSlot,
 };
 pub use slot::{
-    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, OutputPolicyTarget, SettingTarget,
-    TempoTarget,
+    ClickTargets, ClickVolumeTarget, DepthKey, LoopTarget, MeterTarget, OutputPolicyTarget,
+    SettingTarget, ShapeKey, TempoTarget,
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

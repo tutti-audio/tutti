@@ -9,8 +9,10 @@ const protocol::CONTROL_FRAME_BYTES
 const protocol::PROTOCOL_VERSION
 enum client::audio::messages::IpcEvent
 enum error::PluginRenderFault
+enum protocol::envelope::ApplyOutcome
 enum protocol::envelope::AudioReply
 enum protocol::envelope::AudioRequest
+enum protocol::envelope::BlockWrites
 enum protocol::envelope::ControlFrame
 enum protocol::envelope::Lane
 enum protocol::envelope::ModeOutcome

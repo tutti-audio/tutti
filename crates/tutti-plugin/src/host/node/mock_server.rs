@@ -143,7 +143,10 @@ fn serve_audio(
                 log.lock().push(Said::Audio(AudioRequest::Reset));
                 None
             }
-            AudioRequest::ApplyParameters { id, .. } => Some(AudioReply::ParametersApplied { id }),
+            AudioRequest::ApplyParameters { id, .. } => Some(AudioReply::ParametersApplied {
+                id,
+                outcome: tutti_plugin_ipc::ApplyOutcome::Applied,
+            }),
         };
         if let Some(reply) = reply
             && !send(stream, &reply)
@@ -315,6 +318,7 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
         midi_out: data.midi_events,
         status: Default::default(),
         refused: false,
+        writes: tutti_plugin_ipc::BlockWrites::Handed,
     }
 }
 

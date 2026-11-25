@@ -234,6 +234,8 @@ fn seq_slots::EpochWatch::get
 fn seq_slots::Generation::get
 fn seq_slots::Generation::has_reached
 fn seq_slots::Generation::new
+fn seq_slots::GenerationPublisher::publish
+fn seq_slots::GenerationWatch::get
 fn seq_slots::SeqSlotsReader::drain_in_epoch
 fn seq_slots::SeqSlotsReader::epoch
 fn seq_slots::SeqSlotsReader::epoch_watch
@@ -241,6 +243,7 @@ fn seq_slots::SeqSlotsReader::swept
 fn seq_slots::SeqSlotsWriter::new_epoch
 fn seq_slots::SeqSlotsWriter::write
 fn seq_slots::SeqSlotsWriter::written
+fn seq_slots::generation_watch
 fn seq_slots::seq_slots
 fn split::ClaimTable::new
 fn split::Held::new
@@ -355,6 +358,8 @@ struct seq_cell::SeqReader
 struct seq_cell::SeqWriter
 struct seq_slots::EpochWatch
 struct seq_slots::Generation
+struct seq_slots::GenerationPublisher
+struct seq_slots::GenerationWatch
 struct seq_slots::SeqSlotsReader
 struct seq_slots::SeqSlotsWriter
 struct spin::BlockWaits

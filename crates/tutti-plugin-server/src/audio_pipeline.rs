@@ -15,7 +15,7 @@ use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_plugin_ipc::{ProcessAudioData, SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{BlockWrites, ProcessAudioData, SlabLayout, SlabWriter};
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
@@ -217,6 +217,8 @@ pub(crate) struct AudioOutput {
     /// The block's audio was not published: its input slot was recycled, or an
     /// output channel was not written. The host reads it as silence.
     pub refused: bool,
+    /// Whether the block's parameter changes were handed to the plugin.
+    pub writes: BlockWrites,
     /// Why the plugin failed the block, when it did: a value with no drop
     /// glue, which the caller hands to the control side to log.
     pub failure: Option<BlockFault>,
@@ -403,6 +405,7 @@ impl AudioPipeline {
             return AudioOutput {
                 latency_us: 0,
                 refused: true,
+                writes: BlockWrites::Dropped,
                 failure: None,
             };
         }
@@ -612,6 +615,9 @@ impl AudioPipeline {
             AudioOutput {
                 latency_us: start.elapsed().as_micros() as u64,
                 refused: !published,
+                // Every path here called the plugin's `render_block` with the
+                // block's changes in its context.
+                writes: BlockWrites::Handed,
                 failure,
             }
         })

@@ -211,7 +211,6 @@ tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::w
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_channels
 
 # tutti-session
-tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx::with_mods
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::map
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::map
 tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain

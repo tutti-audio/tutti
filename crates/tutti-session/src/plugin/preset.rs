@@ -14,9 +14,9 @@ use std::task::Poll;
 use std::time::Duration;
 
 use tutti_plugin::{Answer, PluginAnswers};
+use tutti_plugin_host::PendingWrites;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
-use tutti_rt::Generation;
 
 use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::state::{Landed, PluginApplyError};
@@ -136,7 +136,7 @@ impl PluginOp for LoadPresetOp {
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        _mark: Generation,
+        _pending: &mut PendingWrites,
     ) -> Poll<Result<(), PresetError>> {
         handle.load_preset(main, &self.id)
     }

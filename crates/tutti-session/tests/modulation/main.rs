@@ -10,7 +10,7 @@ mod offline;
 #[global_allocator]
 static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
-// The session's modulation loop (`Session::mods`, `ModInput`).
+// The session's modulation loop (`Session::mods`).
 mod modulation;
 // The value a lane drives a param or an edge's gain to, read beside the base.
 mod effective;

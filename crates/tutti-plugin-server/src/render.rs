@@ -47,7 +47,9 @@ use tutti_rt::Mutex;
 
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::{AudioReply, AudioRequest, SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{
+    ApplyOutcome, AudioReply, AudioRequest, BlockWrites, SlabLayout, SlabWriter,
+};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, Features, IpcError, IpcResult, MidiEventVec, PluginIo, PluginResult,
@@ -131,9 +133,10 @@ pub(crate) trait RenderEnd: Render + Send {
     /// (and drains the writes queued to it).
     fn has_processor(&mut self) -> bool;
     /// Delivers parameter changes between blocks by the format's own route
-    /// ([`Processor::flush_parameters`]); a plugin whose Processor is not here
-    /// has nothing to deliver them to.
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()>;
+    /// ([`Processor::flush_parameters`]), and says what became of them: a
+    /// plugin whose Processor is not here has nothing to deliver them to
+    /// ([`Unseated`](ApplyOutcome::Unseated)).
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome;
 }
 
 /// [`RenderEnd`] over the format's Processor, in a handoff.
@@ -197,10 +200,13 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
         self.rt.held().is_some()
     }
 
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome {
         match self.rt.held() {
-            Some(processor) => processor.flush_parameters(changes),
-            None => Ok(()),
+            Some(processor) => match processor.flush_parameters(changes) {
+                Ok(()) => ApplyOutcome::Applied,
+                Err(_) => ApplyOutcome::Refused,
+            },
+            None => ApplyOutcome::Unseated,
         }
     }
 }
@@ -835,13 +841,15 @@ impl RenderSide {
             // route for parameters outside a block, before the answer.
             AudioRequest::ApplyParameters { id, param_changes } => {
                 let began = self.informs.begin();
-                if let Some(seat) = self.seat.as_mut()
-                    && seat.flush_parameters(&param_changes).is_err()
-                {
+                let outcome = match self.seat.as_mut() {
+                    Some(seat) => seat.flush_parameters(&param_changes),
+                    None => ApplyOutcome::Unseated,
+                };
+                if outcome == ApplyOutcome::Refused {
                     self.failures += 1;
                 }
                 self.informs.note(&param_changes, began);
-                Ok(Some(AudioReply::ParametersApplied { id }))
+                Ok(Some(AudioReply::ParametersApplied { id, outcome }))
             }
             // The plugin forgets its signal history,
             // in order with the blocks on this connection, so a reset is never
@@ -901,8 +909,10 @@ impl RenderSide {
             seq,
             midi_out: MidiEventVec::new(),
             status: BlockStatus::Continue,
-            // Nothing is published on these paths.
+            // Nothing is published on these paths, and the block's changes
+            // reach no plugin.
             refused: true,
+            writes: BlockWrites::Dropped,
         };
 
         // NOTE: every early return below replies WITHOUT publishing to the slab,
@@ -981,6 +991,7 @@ impl RenderSide {
             },
             status: pipeline.status(),
             refused: output.refused,
+            writes: output.writes,
         })
     }
 
@@ -1791,8 +1802,11 @@ mod tests {
         fn has_processor(&mut self) -> bool {
             true
         }
-        fn flush_parameters(&mut self, _: &ParameterChanges) -> PluginResult<()> {
-            Ok(())
+        fn flush_parameters(&mut self, _: &ParameterChanges) -> ApplyOutcome {
+            match self.mode {
+                Mode::Fail => ApplyOutcome::Refused,
+                _ => ApplyOutcome::Applied,
+            }
         }
     }
 
@@ -1816,6 +1830,63 @@ mod tests {
         link.send(ToRender::Seat(Box::new(plugin))).unwrap();
         side.drain();
         (link, side, host)
+    }
+
+    /// An `ApplyParameters` of one change, and the outcome the render side
+    /// answers it with.
+    fn applied_as(side: &mut RenderSide) -> ApplyOutcome {
+        let mut changes = ParameterChanges::reserved(1, 1);
+        assert!(changes.add_change(
+            tutti_units::ParamId::new(1),
+            tutti_plugin_types::fake::at_frame(0),
+            tutti_units::Normalized::of(0.5),
+        ));
+        let request = AudioRequest::ApplyParameters {
+            id: tutti_plugin_ipc::ReqId::new(1),
+            param_changes: changes,
+        };
+        match side.handle(request).unwrap() {
+            Some(AudioReply::ParametersApplied { id, outcome }) => {
+                assert_eq!(id, tutti_plugin_ipc::ReqId::new(1));
+                outcome
+            }
+            other => panic!("not acknowledged: {other:?}"),
+        }
+    }
+
+    /// **The answer to `ApplyParameters` says what became of the changes**: a
+    /// plugin whose flush landed is `Applied`, one that refused is `Refused`,
+    /// and with no seat or no Processor the changes went nowhere, `Unseated`.
+    #[test]
+    fn apply_parameters_answers_what_became_of_the_changes() {
+        let (_link, mut side) = link().expect("bells");
+        assert_eq!(applied_as(&mut side), ApplyOutcome::Unseated, "no seat");
+        let (_link, mut side, _host) = seated(Faulty::new(Mode::Fail));
+        assert_eq!(applied_as(&mut side), ApplyOutcome::Refused);
+        let (_link, mut side, _host) = seated(Faulty::new(Mode::Owned(Vec::new())));
+        assert_eq!(applied_as(&mut side), ApplyOutcome::Applied);
+    }
+
+    /// **A block's reply says whether its parameter changes reached the plugin,
+    /// apart from whether its audio was published**: with no seat they are
+    /// dropped; handed to a plugin whose `process` then fails, they are handed
+    /// all the same (the block is refused, the write is not lost).
+    #[test]
+    fn a_block_reply_says_whether_the_changes_reached_the_plugin() {
+        let writes = |side: &mut RenderSide| match side.handle(block(1)).unwrap() {
+            Some(AudioReply::AudioProcessed {
+                refused, writes, ..
+            }) => (refused, writes),
+            other => panic!("not a block's answer: {other:?}"),
+        };
+        let (_link, mut side) = link().expect("bells");
+        assert_eq!(writes(&mut side), (true, BlockWrites::Dropped), "no seat");
+        let (_link, mut side, _host) = seated(Faulty::new(Mode::Fail));
+        assert_eq!(
+            writes(&mut side),
+            (true, BlockWrites::Handed),
+            "process failed after the hand-over"
+        );
     }
 
     fn block(seq: u64) -> AudioRequest {

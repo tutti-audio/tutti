@@ -307,11 +307,13 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
 
 /// The state `handle` saves now, asked again while a node drains the writes.
 fn saved(handle: &PluginHandle) -> Vec<u8> {
-    let mark = handle.writes();
+    let mut pending = handle.writes();
     loop {
-        if let std::task::Poll::Ready(state) =
-            handle.save_state_on(main_thread(), tutti_plugin_types::StateUse::Project, mark)
-        {
+        if let std::task::Poll::Ready(state) = handle.save_state_on(
+            main_thread(),
+            tutti_plugin_types::StateUse::Project,
+            &mut pending,
+        ) {
             return state.expect("saved");
         }
     }

@@ -994,8 +994,9 @@ pub(crate) struct HostedPlugin {
     /// The lane knobs of the parameters a modulation lane drives: where a set
     /// of one goes.
     pub(crate) driven: crate::plugin_params::Driven,
-    /// The writes to a parameter the plugin dropped after the session read its
-    /// declaration, which the value table counts and
+    /// The writes the plugin did not take after the session read its
+    /// declaration (a dropped parameter, a lost plugin, one that did not
+    /// answer), which the value table counts and
     /// [`Plugin::losses`] reports as refused.
     refused_writes: Arc<std::sync::atomic::AtomicU64>,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
@@ -2576,7 +2577,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// `Phase::Plugins`. See the module docs.
-    pub(crate) fn plugins_phase(&mut self, cx: crate::PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
+    pub(crate) fn plugins_phase(&mut self, cx: crate::PhaseCx, out: &mut Vec<SessionEvent>) {
         self.graph.graveyard.warn_if_piling();
         self.graph.reconcile_own_bypass();
         let now = cx.now;
@@ -3406,7 +3407,7 @@ mod tests {
             &self,
             _id: ParamId,
             _value: Normalized,
-        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             Ok(())
         }
         fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {

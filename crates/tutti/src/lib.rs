@@ -547,9 +547,8 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
-        InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn, PrerollTable,
+        InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn,
     };
-    pub use tutti_session::Apply;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
     #[cfg(any(
@@ -559,6 +558,7 @@ pub mod session {
         feature = "midi"
     ))]
     pub use tutti_session::LoadError;
+    pub use tutti_session::{Apply, PrerollTable};
     pub use tutti_session::{
         BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
@@ -619,9 +619,9 @@ pub mod session {
     ))]
     pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
-        AutomationTake, MixRef, ModInput, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget,
-        Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
-        RouteInfo, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
+        AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
+        ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
+        RouteInfo, Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{

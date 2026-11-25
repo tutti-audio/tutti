@@ -1,7 +1,7 @@
 //! Modulation on control lanes, through the session (doc 014 §8, §12.5).
 //!
 //! Every
-//! test here declares through [`Session::mods`] (or a host's [`ModInput`]),
+//! test here declares through [`Session::mods`],
 //! runs the session's updates, and asserts on what the graph renders: the
 //! nodes are [`ProbeUnit`]s, which write the value their param port reads to
 //! their output, so a render is the delivered value frame by frame. The audio
@@ -17,25 +17,20 @@ use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
-use std::cell::Cell;
 use std::sync::Arc;
-use tutti_platform::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_modulation::{
-    Adsr, Curve, Declarations, Follower, Lfo, NoteEnvelope, ProgramCompileError, RouteDecl,
-    RouteKey, RouteTarget, Source, SourceKey, TargetKey,
-};
+use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope, Polarity};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ModDelayConfig, ModHost, PhaserConfig, ReconcileError};
+use tutti_nodes::{ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput,
-    ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort,
-    PHASES, ParamRef, ParamTarget, PhaseCx, Problem, Replacement, RouteSpec, Session, SessionEvent,
-    TargetName, declare_targets,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRefusal,
+    ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef,
+    ParamTarget, PolarityTarget, Problem, Replacement, RouteSpec, Scale, ScaleError, Session,
+    SessionEvent, TargetName,
 };
 use tutti_units::{
     Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -623,131 +618,6 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     assert_eq!(s.mod_state().problems().next(), None);
 }
 
-/// A host's keys: the target key `bits` names `node`; its one source has no
-/// feed. `depth` is its route's depth cell, kept across updates.
-struct HostKeys {
-    bits: u64,
-    node: Cell<Option<NodeKey>>,
-    depth: tutti_rt::Param<Bipolar>,
-}
-
-impl ModHost for HostKeys {
-    fn node(&self, target: u64) -> Option<NodeKey> {
-        (target == self.bits).then(|| self.node.get()).flatten()
-    }
-    fn feed(&self, _: SourceKey) -> Option<Feed> {
-        None
-    }
-}
-
-/// One update of every phase with the host's declarations: a macro at 1
-/// (source 1) routed at depth 0.1 (route 2) onto `target`, whose targets are
-/// `targets`.
-fn host_update(
-    s: &mut DetachedSession,
-    keys: &HostKeys,
-    target: TargetKey,
-    targets: &[(TargetKey, tutti_modulation::TargetDecl)],
-) -> Vec<SessionEvent> {
-    let sources = [(SourceKey(1), Source::Macro { value: 1.0 })];
-    let routes = [(
-        RouteKey(2),
-        RouteDecl {
-            source: SourceKey(1),
-            to: RouteTarget::Param(target),
-            depth: keys.depth.clone(),
-            polarity: tutti_modulation::Polarity::Bipolar,
-            curve: tutti_modulation::Law::Linear,
-        },
-    )];
-    let input = ModInput {
-        declarations: Declarations {
-            sources: &sources,
-            routes: &routes,
-            targets,
-        },
-        keys,
-    };
-    let cx = PhaseCx::at(Instant::now()).with_mods(input);
-    let mut out = Vec::new();
-    for &phase in PHASES {
-        s.run_phase(phase, cx, &mut out);
-    }
-    out
-}
-
-/// **Two ranges, or two automations, on one param are refused by target.** A
-/// host's macro `+100` on a cutoff probe (knob 500, range `0..=1000`). A
-/// second range on the cutoff (`0..=2000`, which would make it `+200`) is
-/// refused as `DuplicateTarget` naming the cutoff, once, and nothing changes:
-/// the probe still plays 600. Without the refusal the two would merge, the
-/// winner being whichever the query met last. Dropping it applies again; then
-/// two automations on the cutoff are refused the same way.
-#[test]
-fn two_ranges_or_automations_on_one_param_are_refused() {
-    let (mut s, mut side) = rig(1);
-    let probe = s.graph().add(ProbeUnit::new(500.0));
-    main_output(&mut s, &[probe.erase()]);
-    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff).key();
-    let keys = HostKeys {
-        bits: cutoff.node().expect("a param target"),
-        node: Cell::new(Some(probe.erase())),
-        depth: tutti_rt::Param::new(Bipolar::of(0.1)),
-    };
-    let one = declare_targets([(cutoff, 0.0, 1_000.0)], []);
-    for _ in 0..4 {
-        host_update(&mut s, &keys, cutoff, &one);
-    }
-    assert_eq!(s.mod_state().problems().next(), None);
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
-
-    let refused_by_cutoff = |s: &mut DetachedSession, targets: &[_], what: &str| {
-        let mut refused = refusals(host_update(s, &keys, cutoff, targets));
-        refused.extend(refusals(host_update(s, &keys, cutoff, targets)));
-        assert_eq!(refused.len(), 1, "{what}: one message: {refused:?}");
-        assert_eq!(refused[0].target(), Some(cutoff), "{what}: by target");
-        assert!(
-            matches!(
-                s.mod_state().problems().next(),
-                Some(Problem::Refused {
-                    cause: ModRefusal::Apply(ReconcileError::Compile(
-                        ProgramCompileError::DuplicateTarget(_)
-                    )),
-                    ..
-                })
-            ),
-            "{what}: held"
-        );
-    };
-
-    let two_ranges = declare_targets([(cutoff, 0.0, 1_000.0), (cutoff, 0.0, 2_000.0)], []);
-    refused_by_cutoff(&mut s, &two_ranges, "two ranges");
-    assert_eq!(
-        *render(&mut side, 1_024, 128)[0].last().unwrap(),
-        600.0,
-        "nothing changed"
-    );
-    for _ in 0..4 {
-        host_update(&mut s, &keys, cutoff, &one);
-    }
-    assert_eq!(
-        s.mod_state().problems().next(),
-        None,
-        "dropping it applies again"
-    );
-
-    let curve = || -> Option<Arc<dyn Curve>> {
-        Some(Arc::new(
-            Trajectory::new().with_range(Hz::new(0.0), Hz::new(1_000.0)),
-        ))
-    };
-    let two_automations = declare_targets(
-        [(cutoff, 0.0, 1_000.0)],
-        [(cutoff, curve()), (cutoff, curve())],
-    );
-    refused_by_cutoff(&mut s, &two_automations, "two automations");
-}
-
 // ----------------------------------------------------------- rebind --
 
 /// **A route onto a param of a node added in the same update goes out in that
@@ -1258,6 +1128,197 @@ fn a_depth_slider_keeps_phase() {
             "after, frame {f}: {v} vs {want}"
         );
     }
+}
+
+/// A macro of 1 at depth 0.2 on the cutoff probe's `0..=1000` (knob 500),
+/// scaled by a macro of 0.5 at depth 1:
+/// `1000 * 0.2 * (1 * 0.5)` = 100 over the knob, so 600. Settled; returns the
+/// session, its audio side and the two macros.
+fn scaled_scene() -> (
+    DetachedSession,
+    AudioSide,
+    ParamRef,
+    ModSourceId,
+    ModSourceId,
+) {
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let full = m.macro_(1.0);
+    let half = m.macro_(0.5);
+    let scaled = m
+        .route(RouteSpec::new(full, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
+        .unwrap();
+    settle(&mut s);
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    let _ = s.update();
+    (s, side, cutoff, full, half)
+}
+
+/// **A depth write to a route that another route scales lands from the
+/// cell.** From the scene's 600, writing the scaled route's depth to 0.6
+/// sends no plan and republishes nothing, and the next block reads
+/// `1000 * 0.6 * 0.5` = 300 over the knob, so 800.
+#[test]
+fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
+    let (mut s, mut side, cutoff, full, _) = scaled_scene();
+    let settled = sent(&s);
+    s.set(DepthTarget::of(full, cutoff).to(Bipolar::of(0.6)))
+        .unwrap();
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&sent(&s), &settled),
+        "a depth write sent a plan"
+    );
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 800.0);
+}
+
+/// **A scale's own depth write is applied.** The scale's
+/// depth is read when the program is compiled, so the write republishes the
+/// cutoff's program with no plan: from the scene's scaled depth 0.2 and scale
+/// `0.5 * 1`, writing the scale's depth to 0.5 reads `1000 * 0.2 * (0.5 *
+/// 0.5)` = 50 over the knob, so 550.
+#[test]
+fn a_scales_own_depth_write_is_applied() {
+    let (mut s, mut side, _, full, _) = scaled_scene();
+    let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
+    let settled = sent(&s);
+    s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
+        .unwrap();
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&sent(&s), &settled),
+        "a depth write sent a plan"
+    );
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 550.0);
+}
+
+/// **One source can route into a target and scale a route into it.** A
+/// macro of 0.5 routes into the cutoff (`0..=1000`, knob 500) at depth 0.1 and
+/// scales the depth of a macro of 1's route at depth 0.2, itself at depth 1:
+/// `1000 * 0.2 * 0.5` plus `1000 * 0.1 * 0.5` over the knob, so 650. Each of
+/// the two depths has its own name; writing the scale's depth to 0.5 reads
+/// `1000 * 0.2 * 0.25 + 50` over the knob, 600, and the route into the cutoff
+/// to 0.3 reads `50 + 1000 * 0.3 * 0.5`, 700. A scale set again replaces the
+/// first, with its depth.
+#[test]
+fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let full = m.macro_(1.0);
+    let half = m.macro_(0.5);
+    let scaled = m
+        .route(RouteSpec::new(full, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    m.route(RouteSpec::new(half, cutoff, Bipolar::of(0.1)))
+        .unwrap();
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(0.3))))
+        .unwrap();
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
+        .expect("a scale is replaced");
+    settle(&mut s);
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+
+    s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    s.set(DepthTarget::of(half, cutoff).to(Bipolar::of(0.3)))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+}
+
+/// **Clearing a scale restores the unscaled figure, and so does removing the
+/// scaling source.** From the scene's 600, `scale(route, None)` reads
+/// `1000 * 0.2 * 1` = 200 over the knob, so 700; a scale set again reads 600,
+/// and removing its source reads 700 with the route's `scale` empty. A scale
+/// goes with its route, and one asked of a route or by a source that is gone
+/// is refused at the call.
+#[test]
+fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
+    let (mut s, mut side, _, full, half) = scaled_scene();
+    let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
+    assert_eq!(s.mods().route(scaled).unwrap().scale, Some(half));
+    s.mods_mut().scale(scaled, None).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(s.mods().route(scaled).unwrap().scale, None);
+    let scale = Some(Scale::new(half, Bipolar::of(1.0)));
+    s.mods_mut().scale(scaled, scale).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    s.mods_mut().remove_source(half).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(s.mods().route(scaled).unwrap().scale, None);
+    assert_eq!(
+        s.mods_mut().scale(scaled, scale),
+        Err(ScaleError::NoSuchSource(NoSuchModSource(half)))
+    );
+    s.mods_mut().remove_route(scaled).unwrap();
+    assert_eq!(
+        s.mods_mut().scale(scaled, None),
+        Err(ScaleError::NoSuchRoute(NoSuchModRoute(scaled)))
+    );
+}
+
+/// **A scale's polarity is its own target.** From the scene's 600 (scale
+/// `0.5` at depth 1, bipolar), a unipolar scale maps the macro's 0.5 to
+/// `(0.5 + 1) / 2` = 0.75: `1000 * 0.2 * 0.75` = 150 over the knob, so 650.
+/// The route's own polarity is not the scale's: the route's macro at 1 stays
+/// 1 under unipolar, so writing it moves nothing.
+#[test]
+fn a_scales_polarity_shapes_the_scale_not_the_route() {
+    let (mut s, mut side, _, full, _) = scaled_scene();
+    let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
+    s.set(PolarityTarget::scale_of(scaled).to(Polarity::Unipolar))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+    s.set(scaled.polarity().to(Polarity::Unipolar)).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+}
+
+/// **A scale needs a time function on both sides.** A follower as the scale's
+/// source, or as the scaled route's own source, is refused at the call and
+/// nothing changes.
+#[test]
+fn a_scale_by_or_of_a_signal_source_is_refused() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let follower = m.follower(Follower::default(), probe);
+    let mac = m.macro_(0.5);
+    let by_time = m
+        .route(RouteSpec::new(mac, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    assert_eq!(
+        m.scale(by_time, Some(Scale::new(follower, Bipolar::of(1.0)))),
+        Err(ScaleError::SignalSource { route: by_time })
+    );
+    let by_signal = m
+        .route(RouteSpec::new(follower, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    assert_eq!(
+        m.scale(by_signal, Some(Scale::new(mac, Bipolar::of(1.0)))),
+        Err(ScaleError::SignalSource { route: by_signal })
+    );
+    assert_eq!(m.view().route(by_time).unwrap().scale, None);
+    assert_eq!(m.view().route(by_signal).unwrap().scale, None);
 }
 
 // ------------------------------------------------------------- fork --
