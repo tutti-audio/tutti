@@ -382,7 +382,6 @@ impl Capture {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
             let _ = fork.bridge.audio().set_render_mode(RenderMode::Offline);
-            fork.state.client.told_render_mode(RenderMode::Offline);
             // Not pinned end to end here: the out-of-process reference
             // plugin is CLAP, which has no system-time field. The in-process
             // VST2 fork drops its clock the same way, and
@@ -629,16 +628,30 @@ mod tests {
     #[test]
     fn a_served_live_fork_keeps_the_live_render_mode() {
         let (source, client, _threads) = source_over(rig());
+        let rig_bridge = source.bridge.upgrade().expect("the bridge lives");
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");
         let offline = source.capture(RenderMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
-        client.told_render_mode(RenderMode::Offline);
+        let rebinder = client.rebinder(tempo(4.0));
+        // What the server answers reaches the lifecycle at a pump.
+        let told = |mode| {
+            assert!(rig_bridge.audio().set_render_mode(mode));
+            tutti_fixtures::wait_until(
+                "the server's answer to reach the lifecycle",
+                Duration::from_secs(60),
+                || {
+                    rebinder.tick(tutti_fixtures::main_thread());
+                    source.live.render_mode() == Some(mode)
+                },
+            );
+        };
+        told(RenderMode::Offline);
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(live.snapshot.offline(live.mode), "told offline: offline");
 
-        client.told_render_mode(RenderMode::Realtime);
+        told(RenderMode::Realtime);
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }

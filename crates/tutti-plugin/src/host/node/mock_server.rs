@@ -188,6 +188,10 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record, list
                     refusal: None,
                 })
             }
+            ControlRequest::SetRenderMode { mode } => Some(ControlReply::RenderModeSet {
+                mode,
+                outcome: tutti_plugin_ipc::ModeOutcome::Took,
+            }),
             _ => None,
         };
         if let Some(reply) = reply

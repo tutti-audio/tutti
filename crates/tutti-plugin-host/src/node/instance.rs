@@ -652,11 +652,6 @@ impl<L: Loaded> Instance<L> {
             .push(PluginInvalidation::RenderModeNotApplied { mode });
     }
 
-    /// The plugin's bridge was told `mode` directly: wanted, and in flight.
-    pub(super) fn told_mode(&mut self, mode: RenderMode) {
-        self.state.told_mode(mode);
-    }
-
     /// The render mode the plugin runs in, or is being changed to.
     pub(super) fn render_mode(&self) -> RenderMode {
         self.wanted().mode()

@@ -630,14 +630,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         LiveView(Arc::downgrade(&self.inner))
     }
 
-    /// Records that the plugin's bridge was told `mode` directly: a fork's
-    /// build, off the main thread, tells its server before the first block.
-    /// The lifecycle wants `mode` and waits for the answer instead of telling
-    /// the plugin again.
-    pub fn told_render_mode(&self, mode: tutti_plugin_types::RenderMode) {
-        self.inner.lock().told_mode(mode);
-    }
-
     /// The control side of this node's controller map: what the plugin declares
     /// and the app entered, shared by every node over the instance and by the
     /// handle ([`PluginHandle::midi_map`](crate::PluginHandle::midi_map)).

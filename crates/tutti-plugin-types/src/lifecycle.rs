@@ -783,14 +783,6 @@ impl State {
         self.wanted = Some(wanted);
     }
 
-    /// Records that the plugin was told `mode` outside the lifecycle (its
-    /// server, by the bridge): wanted, and in flight until the plugin answers
-    /// ([`Event::Answered`]).
-    pub fn told_mode(&mut self, mode: RenderMode) {
-        self.wanted = self.wanted().map(|w| w.with_mode(mode));
-        self.asking = Some(mode);
-    }
-
     /// How far the plugin is from what the host wants, and the cheapest step
     /// that closes it.
     ///
@@ -1462,9 +1454,15 @@ impl State {
                     }),
                 );
             }
+            // The server runs the last mode it was told, whoever told it (the
+            // lifecycle, or the host's bridge directly), so that is what the
+            // host wants now.
             Told::ModeTook(mode) => {
                 if let Some(applied) = &mut self.applied {
                     applied.mode = mode;
+                }
+                if let Some(wanted) = &mut self.wanted {
+                    wanted.mode = mode;
                 }
                 if self.asking == Some(mode) {
                     self.asking = None;
