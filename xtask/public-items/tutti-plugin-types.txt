@@ -81,6 +81,7 @@ enum invalidation::PluginRefresh
 enum invalidation::ResyncClass
 enum invalidation::ResyncKind
 enum layout_support::LayoutSupport
+enum lifecycle::Behind
 enum lifecycle::Effect
 enum lifecycle::Event
 enum lifecycle::HostOp
@@ -90,6 +91,7 @@ enum lifecycle::Reply
 enum lifecycle::Request
 enum lifecycle::RescanScope
 enum lifecycle::Stage
+enum lifecycle::Told
 enum load_stage::LoadStage
 enum locate::Helper
 enum locate::Locator
@@ -114,6 +116,7 @@ enum probe_failure::ProbeRefusal
 enum probe_wire::ProbeOutcome
 enum process::BlockStatus
 enum rate_refusal::RateRefusalCause
+enum render_mode::ModeTold
 enum render_mode::RenderModeSupport
 enum server_error::ServerError
 enum state_frame::Opened
@@ -327,10 +330,10 @@ fn lifecycle::State::is_parked
 fn lifecycle::State::is_quiet
 fn lifecycle::State::latency
 fn lifecycle::State::layout
+fn lifecycle::State::mode_asked
 fn lifecycle::State::new
 fn lifecycle::State::renders
-fn lifecycle::State::retuned
-fn lifecycle::State::set_mode
+fn lifecycle::State::retune_asked
 fn lifecycle::State::stage
 fn lifecycle::State::tail
 fn lifecycle::State::want

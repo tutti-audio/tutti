@@ -1315,7 +1315,7 @@ pub struct Plan {
     pub(crate) id: Identity,
     pub(crate) main_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
-    /// The main output generation the spec carried when this plan was committed.
+    /// The main output generation the spec carried when this plan was compiled.
     pub(crate) main_output_id: crate::MainOutputId,
     /// The old main output's outputs this plan renders after its own channels,
     /// while a main output change crossfades.
@@ -1372,7 +1372,7 @@ impl Plan {
             id: Identity(PlanId::mint()),
             main_inputs: graph.topology().inputs.count(),
             compensation: timing.compensation,
-            main_output_id: crate::MainOutputId::GENESIS,
+            main_output_id: graph.main_output_id(),
             main_output_bank: graph.main_output_bank(),
             rendered_outputs: timing.rendered_outputs,
             total_latency: timing.total,

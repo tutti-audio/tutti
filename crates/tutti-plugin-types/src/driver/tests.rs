@@ -944,3 +944,34 @@ fn an_adopted_plugin_is_in_the_state_a_driven_activation_leaves() {
         "lent to the realtime end"
     );
 }
+
+/// **A render mode told to a plugin that has none is refused**, as a served
+/// plugin's server refuses it: the plugin did not take the mode, so the applied
+/// `Prepare` and the wanted one stand as they were, the host is told which mode
+/// was refused, and the plugin keeps rendering. (The reconcile never asks a
+/// plugin whose support is `Unsupported`; this is the answer when the control's
+/// support and its answer disagree.)
+#[test]
+fn a_mode_told_to_a_plugin_with_no_mode_is_refused_and_the_state_stands() {
+    let mut rig = Rig::new();
+    let prepared = prepare(48_000.0);
+    rig.op(HostOp::Activate(prepared));
+    rig.take_notices();
+    rig.op(HostOp::SetMode(RenderMode::Offline));
+    assert_eq!(
+        rig.state.applied(),
+        Some(prepared),
+        "the applied mode stands"
+    );
+    assert_eq!(rig.state.wanted(), Some(prepared), "the want is given up");
+    assert!(
+        matches!(
+            rig.take_notices().as_slice(),
+            [Notice::ModeRefused {
+                mode: RenderMode::Offline
+            }]
+        ),
+        "the host is told the mode was not taken"
+    );
+    assert!(rig.state.renders());
+}

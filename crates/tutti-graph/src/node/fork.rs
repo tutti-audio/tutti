@@ -1131,15 +1131,9 @@ impl<F: Float> Editor<F> {
     /// The first [`ForkFault`] reported by a forked unit's health probe, in
     /// key order.
     pub fn fork_health(&self) -> Result<(), ForkFault> {
-        let mut probes: Vec<_> = self.fork_probes().iter().collect();
-        probes.sort_by_key(|(key, _)| *key);
-        for (key, probe) in probes {
+        for (key, probe) in self.fork_probes() {
             if let Some((kind, cause)) = probe.fault() {
-                return Err(ForkFault {
-                    key: *key,
-                    kind,
-                    cause,
-                });
+                return Err(ForkFault { key, kind, cause });
             }
         }
         Ok(())

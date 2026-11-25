@@ -273,6 +273,14 @@ pub(crate) fn configure() {
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_REFUSE_STATE_LOAD") {
         REFUSE_STATE_LOAD.store(n != 0, Ordering::SeqCst);
     }
+    if let Some(n) = u32_var("TUTTI_CLAP_PROBE_RENDER_EXTENSION") {
+        // SAFETY: a plain atomic store; `unsafe` is on the signature only.
+        unsafe { crate::tutti_test_plugin_set_render_extension(n) };
+    }
+    if let Some(n) = u32_var("TUTTI_CLAP_PROBE_REFUSE_OFFLINE") {
+        // SAFETY: a plain atomic store; `unsafe` is on the signature only.
+        unsafe { crate::refusal::tutti_test_plugin_set_refuse_offline(n) };
+    }
     // Refuse activation at this rate (Hz, matched bit for bit), as
     // `tutti_test_plugin_set_activate_refusal` does in-process: an
     // out-of-process test cannot reach that switch.
