@@ -250,6 +250,22 @@ fn deny_probes_cargo_deny_first() {
 }
 
 #[test]
+fn deslop_probes_deslop_please_first_and_reads_the_allow_list() {
+    let steps = plan("deslop", &[], &ctx()).unwrap();
+    assert_eq!(steps[0], Step::RequireDeslop);
+    assert_eq!(
+        steps[1].display(),
+        "deslop-please --allow xtask/deslop.allow"
+    );
+    let steps = plan("write-deslop-allow", &[], &ctx()).unwrap();
+    assert_eq!(steps[0], Step::RequireDeslop);
+    assert_eq!(
+        steps[1].display(),
+        "deslop-please --update-allow xtask/deslop.allow"
+    );
+}
+
+#[test]
 fn book_renders_its_sounds_then_builds_into_its_own_dir_or_the_one_named() {
     let sound =
         "cargo run --locked --release -p tutti-book --example getting_started -- book/src/sounds";
