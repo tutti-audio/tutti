@@ -19,7 +19,7 @@
 mod mask;
 
 use crate::error::{EncodeError, Result};
-use crate::pcm::Pcm;
+use crate::pcm::{FloatWidth, IntDepth, Pcm};
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use mask::channel_mask;
@@ -72,7 +72,7 @@ impl Header {
         let channels = spec.layout().count();
         let sample_bytes = pcm.bits().div_ceil(8);
         let extensible = extensible(spec.layout(), pcm);
-        let float = matches!(pcm, Pcm::Float32 | Pcm::Float64);
+        let float = matches!(pcm, Pcm::Float(_));
         let bytes_per_sec = rate
             .wrapping_mul(u32::from(sample_bytes))
             .wrapping_mul(u32::from(channels));
@@ -241,16 +241,18 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
         self.bytes.clear();
         for &s in samples {
             match self.pcm {
-                Pcm::Int16 => self
-                    .bytes
-                    .extend_from_slice(&s.convert_to::<i16>().to_le_bytes()),
-                Pcm::Int24 => self
-                    .bytes
-                    .extend_from_slice(&s.convert_to::<I24>().get().to_le_bytes()[..3]),
-                Pcm::Float32 => self
+                Pcm::Int(pcm) => match pcm.depth() {
+                    IntDepth::Int16 => self
+                        .bytes
+                        .extend_from_slice(&s.convert_to::<i16>().to_le_bytes()),
+                    IntDepth::Int24 => self
+                        .bytes
+                        .extend_from_slice(&s.convert_to::<I24>().get().to_le_bytes()[..3]),
+                },
+                Pcm::Float(FloatWidth::F32) => self
                     .bytes
                     .extend_from_slice(&s.convert_to::<f32>().to_le_bytes()),
-                Pcm::Float64 => self
+                Pcm::Float(FloatWidth::F64) => self
                     .bytes
                     .extend_from_slice(&s.convert_to::<f64>().to_le_bytes()),
             }

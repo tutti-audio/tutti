@@ -34,10 +34,13 @@ pub struct DitherNoise {
 }
 
 impl DitherNoise {
-    /// A source at the workspace's dither seed.
+    /// The seed of [`new`](Self::new): the workspace's dither seed.
+    pub const DEFAULT_SEED: u64 = 0x1234_5678;
+
+    /// A source at the workspace's dither seed ([`DEFAULT_SEED`](Self::DEFAULT_SEED)).
     #[must_use]
     pub const fn new() -> Self {
-        Self::with_seed(0x1234_5678)
+        Self::with_seed(Self::DEFAULT_SEED)
     }
 
     /// A source whose sequence is the one of `seed`. Seed the sources of signals that are

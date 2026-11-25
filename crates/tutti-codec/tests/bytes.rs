@@ -16,9 +16,13 @@
 
 use std::io::Cursor;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::Interleaved;
 #[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
 use tutti_codec::FileEncoder;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Encoder, Format, Spec};
 use tutti_units::SampleRate;
 
@@ -41,7 +45,7 @@ fn input(channels: usize, frames: usize) -> Vec<f32> {
 #[cfg(any(feature = "encode-wav", feature = "encode-flac"))]
 fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
     let layout = ChannelLayout::from(channels);
-    let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
+    let spec = Spec::of_channels(format, ChannelSet::default_for(layout), SampleRate::SR_44K1);
     let samples = input(usize::from(channels), frames);
     let cut = frames / 3 * usize::from(channels);
     let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new())).unwrap();
@@ -58,7 +62,7 @@ fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
 #[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
 fn file_of<S: tutti_buffers::Sample>(format: Format, channels: u16, samples: &[S]) -> Vec<u8> {
     let layout = ChannelLayout::from(channels);
-    let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
+    let spec = Spec::of_channels(format, ChannelSet::default_for(layout), SampleRate::SR_44K1);
     let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new())).unwrap();
     encoder
         .write(Interleaved::new(samples, layout).unwrap())
@@ -91,7 +95,9 @@ fn subtype(tag: u8) -> [u8; 16] {
 #[test]
 fn a_16_bit_wav_has_the_pcm_header_and_the_rules_codes() {
     let bytes = file_of(
-        Format::Wav(tutti_codec::Pcm::Int16),
+        Format::Wav(tutti_codec::Pcm::Int(
+            IntPcm::new(IntDepth::Int16).no_dither(),
+        )),
         2,
         &[0.5f32, -0.5, 1.0, -1.0],
     );
@@ -126,7 +132,13 @@ fn a_24_bit_wav_is_extensible_with_three_byte_codes() {
     samples[0] = 0.5;
     samples[1] = -1.0;
     samples[2] = 1.0;
-    let bytes = file_of(Format::Wav(tutti_codec::Pcm::Int24), 6, &samples);
+    let bytes = file_of(
+        Format::Wav(tutti_codec::Pcm::Int(
+            IntPcm::new(IntDepth::Int24).no_dither(),
+        )),
+        6,
+        &samples,
+    );
     assert_eq!(u32_at(&bytes, 16), 40, "fmt size");
     assert_eq!(u16_at(&bytes, 20), 0xFFFE, "extensible");
     assert_eq!(u16_at(&bytes, 22), 6, "channels");
@@ -155,7 +167,10 @@ fn a_24_bit_wav_is_extensible_with_three_byte_codes() {
 fn the_float_wavs_carry_the_ieee_float_subtype_and_every_bit() {
     use tutti_codec::Pcm;
     let wide = [1.0 / 3.0f64, -1.0e-300, 1.5, -0.0];
-    for (pcm, bits, align) in [(Pcm::Float32, 32u16, 8u16), (Pcm::Float64, 64, 16)] {
+    for (pcm, bits, align) in [
+        (Pcm::Float(FloatWidth::F32), 32u16, 8u16),
+        (Pcm::Float(FloatWidth::F64), 64, 16),
+    ] {
         let bytes = file_of(Format::Wav(pcm), 2, &wide);
         assert_eq!(u16_at(&bytes, 20), 0xFFFE, "{pcm:?} extensible");
         assert_eq!(u16_at(&bytes, 32), align, "{pcm:?} block align");
@@ -168,7 +183,7 @@ fn the_float_wavs_carry_the_ieee_float_subtype_and_every_bit() {
         );
         let data = &bytes[68..];
         match pcm {
-            Pcm::Float32 => {
+            Pcm::Float(FloatWidth::F32) => {
                 let got: Vec<u32> = data
                     .as_chunks::<4>()
                     .0
@@ -198,8 +213,14 @@ fn the_float_wavs_carry_the_ieee_float_subtype_and_every_bit() {
 #[test]
 fn an_empty_wav_is_a_header_alone() {
     for (pcm, len) in [
-        (tutti_codec::Pcm::Int16, 44usize),
-        (tutti_codec::Pcm::Int24, 68),
+        (
+            tutti_codec::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            44usize,
+        ),
+        (
+            tutti_codec::Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            68,
+        ),
     ] {
         let bytes = written(Format::Wav(pcm), 2, 0);
         assert_eq!(bytes.len(), len, "{pcm:?}");
@@ -227,7 +248,9 @@ fn ssnd_data(b: &[u8]) -> &[u8] {
 #[test]
 fn a_16_bit_aiff_has_the_comm_chunk_and_the_rules_codes() {
     let bytes = file_of(
-        Format::Aiff(tutti_codec::Pcm::Int16),
+        Format::Aiff(tutti_codec::Pcm::Int(
+            IntPcm::new(IntDepth::Int16).no_dither(),
+        )),
         2,
         &[0.5f32, -0.5, 1.0, -1.0],
     );
@@ -272,7 +295,10 @@ fn a_16_bit_aiff_has_the_comm_chunk_and_the_rules_codes() {
 fn the_float_aiffs_are_aifc_naming_their_compression() {
     use tutti_codec::Pcm;
     let wide = [1.0 / 3.0f64, -1.0e-300];
-    for (pcm, name) in [(Pcm::Float32, b"fl32"), (Pcm::Float64, b"fl64")] {
+    for (pcm, name) in [
+        (Pcm::Float(FloatWidth::F32), b"fl32"),
+        (Pcm::Float(FloatWidth::F64), b"fl64"),
+    ] {
         let bytes = file_of(Format::Aiff(pcm), 2, &wide);
         assert_eq!(&bytes[8..12], b"AIFC", "{pcm:?}");
         assert!(
@@ -281,7 +307,7 @@ fn the_float_aiffs_are_aifc_naming_their_compression() {
         );
         let data = ssnd_data(&bytes);
         match pcm {
-            Pcm::Float32 => {
+            Pcm::Float(FloatWidth::F32) => {
                 let got: Vec<u32> = data[..8]
                     .as_chunks::<4>()
                     .0
@@ -309,7 +335,7 @@ fn the_float_aiffs_are_aifc_naming_their_compression() {
 #[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
 fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
     let layout = ChannelLayout::from(channels);
-    let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
+    let spec = Spec::of_channels(format, ChannelSet::default_for(layout), SampleRate::SR_44K1);
     let samples = input(usize::from(channels), frames);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("written");
@@ -338,12 +364,14 @@ fn flac_decodes_to_the_quantized_input_at_every_level() {
     use tutti_codec::FlacLevel::{Best, Fast, Fastest, Medium, Standard};
     use tutti_codec::IntDepth::{Int16, Int24};
     use tutti_codec::Pcm;
-    for (depth, pcm) in [(Int16, Pcm::Int16), (Int24, Pcm::Int24)] {
+    for depth in [Int16, Int24] {
+        let int = IntPcm::new(depth).no_dither();
+        let pcm = Pcm::Int(int);
         for (channels, frames) in [(1u16, 3usize), (2, 10_000), (6, 10_000)] {
             let quantized = decoded(Format::Wav(pcm), channels, frames);
             for level in [Fastest, Fast, Medium, Standard, Best] {
                 assert_eq!(
-                    decoded(Format::Flac { depth, level }, channels, frames),
+                    decoded(Format::Flac { pcm: int, level }, channels, frames),
                     quantized,
                     "FLAC {level:?} {depth:?} {channels}ch {frames}"
                 );
@@ -366,7 +394,7 @@ fn the_flac_levels_write_different_files() {
                 level,
                 written(
                     Format::Flac {
-                        depth: Int16,
+                        pcm: IntPcm::new(Int16).no_dither(),
                         level,
                     },
                     2,

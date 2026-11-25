@@ -1,4 +1,6 @@
 use super::*;
+use crate::FloatWidth;
+use crate::IntDepth;
 
 /// An extension names its format with the defaults, case and `aif` aside; an
 /// unknown one is named lowercased, and a missing one is `(none)`.
@@ -13,18 +15,18 @@ fn extensions_name_formats_and_refuse_the_rest() {
     #[cfg(feature = "encode-wav")]
     assert_eq!(
         Format::from_path("a/b.WAV").unwrap(),
-        Format::Wav(Pcm::Int24)
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))
     );
     #[cfg(feature = "encode-aiff")]
     assert_eq!(
         Format::from_extension("aif").unwrap(),
-        Format::Aiff(Pcm::Int24)
+        Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24)))
     );
     #[cfg(feature = "encode-flac")]
     assert_eq!(
         Format::from_extension("flac").unwrap(),
         Format::Flac {
-            depth: IntDepth::Int24,
+            pcm: IntPcm::new(IntDepth::Int24),
             level: FlacLevel::Standard
         }
     );
@@ -36,29 +38,32 @@ fn extensions_name_formats_and_refuse_the_rest() {
 fn the_integer_width_and_the_length_bound_follow_the_format() {
     #[cfg(feature = "encode-wav")]
     {
-        assert_eq!(Format::Wav(Pcm::Int16).int_depth(), Some(IntDepth::Int16));
-        assert_eq!(Format::Wav(Pcm::Float32).int_depth(), None);
+        assert_eq!(
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))).int_pcm(),
+            Some(IntPcm::new(IntDepth::Int16))
+        );
+        assert_eq!(Format::Wav(Pcm::Float(FloatWidth::F32)).int_pcm(), None);
         assert!(
-            Format::Wav(Pcm::Int16)
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))
                 .max_frames(ChannelLayout::STEREO)
                 .is_some()
         );
     }
     #[cfg(feature = "encode-aiff")]
     {
-        assert_eq!(Format::Aiff(Pcm::Float32).int_depth(), None);
+        assert_eq!(Format::Aiff(Pcm::Float(FloatWidth::F32)).int_pcm(), None);
         assert_eq!(
-            Format::Aiff(Pcm::Int24).max_frames(ChannelLayout::STEREO),
+            Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24))).max_frames(ChannelLayout::STEREO),
             None
         );
     }
     #[cfg(feature = "encode-flac")]
     assert_eq!(
         Format::Flac {
-            depth: IntDepth::Int16,
+            pcm: IntPcm::new(IntDepth::Int16),
             level: FlacLevel::Best
         }
-        .int_depth(),
-        Some(IntDepth::Int16)
+        .int_pcm(),
+        Some(IntPcm::new(IntDepth::Int16))
     );
 }

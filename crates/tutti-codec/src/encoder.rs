@@ -3,21 +3,28 @@
 use crate::error::{EncodeError, Result};
 #[cfg(encode)]
 use crate::format::Format;
+use crate::pcm::{IntDepth, IntPcm};
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use std::io::{BufWriter, Seek, Write};
 use std::path::PathBuf;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Interleaved, Sample};
+use tutti_buffers::{I24, Interleaved, InterleavedMut, Sample, convert};
+use tutti_dsp::{DitherNoise, NoiseShaping, Quantizer};
 use tutti_platform::{Staged, StagedCommitError, StagedFile, StagedKeep};
-use tutti_units::Samples;
+use tutti_units::{SampleRate, Samples};
+
+/// Frames quantized at a time: the stage's whole scratch, allocated at [`Encoder::create`].
+const CHUNK: Samples = Samples::new(1024);
 
 /// Writes blocks of audio as one file of a [format](crate::Format): whichever
 /// format the [`Spec`] names, behind one type.
 ///
 /// An encoder takes blocks already at the [`Spec`]'s rate and width: it does not
-/// pull, resample or dither, and nothing here stops a caller from handing it
-/// blocks that were not. The pipeline in front of it is the caller's. [`write`](Self::write) is fallible, so a full disk in the middle
+/// pull or resample, and nothing here stops a caller from handing it
+/// blocks that were not. The pipeline in front of it is the caller's. An integer file
+/// is dithered by the encoder itself, as its [`IntPcm`] says (see [`write`](Self::write)),
+/// so no path forgets to. [`write`](Self::write) is fallible, so a full disk in the middle
 /// of a take is an error at the block that hit it, not a short file that
 /// reports success; [`finish`](Self::finish) closes the file exactly once.
 ///
@@ -29,12 +36,13 @@ use tutti_units::Samples;
 /// ```
 /// # #[cfg(feature = "encode-wav")] {
 /// use std::io::Cursor;
-/// use tutti_codec::{Encoder, Format, Pcm, Spec};
-/// use tutti_buffers::ChannelLayout;
+/// use tutti_codec::{Encoder, Format, IntDepth, IntPcm, Pcm, Spec};
+/// use tutti_buffers::{ChannelLayout, ChannelSet};
 /// use tutti_units::SampleRate;
 /// use tutti_buffers::{Interleaved, Sample};
 ///
-/// let spec = Spec::of_width(Format::Wav(Pcm::Int16), ChannelLayout::STEREO, SampleRate::SR_48K);
+/// let pcm = Pcm::Int(IntPcm::new(IntDepth::Int16));
+/// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
 /// let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new()))?;
 /// encoder.write(Interleaved::new(&[0.5, -0.5, 0.25, -0.25], ChannelLayout::STEREO)?)?;
 /// let wav = encoder.finish()?.into_inner();
@@ -46,6 +54,8 @@ use tutti_units::Samples;
 pub struct Encoder<W: Write + Seek> {
     inner: Inner<W>,
     layout: ChannelLayout,
+    /// The quantize stage of an integer file; a float file has none.
+    quantize: Option<Quantize>,
     /// The first failure of a `write`, kept for `finish` to report.
     first_error: Option<EncodeError>,
 }
@@ -104,8 +114,8 @@ impl<W: Write + Seek> Inner<W> {
                 spec, pcm, sink,
             )?))),
             #[cfg(feature = "encode-flac")]
-            Format::Flac { depth, level } => Ok(Self::Flac(Box::new(
-                crate::flac::FlacWriter::create(spec, depth, level, sink)?,
+            Format::Flac { pcm, level } => Ok(Self::Flac(Box::new(
+                crate::flac::FlacWriter::create(spec, pcm.depth(), level, sink)?,
             ))),
         }
     }
@@ -137,6 +147,105 @@ pub(crate) fn check_planned(spec: &Spec, frames: Samples) -> Result<()> {
     }
 }
 
+/// The scratch an integer file's chunk is quantized into, as the file's depth stores it.
+enum Ints {
+    I16(Vec<i16>),
+    I24(Vec<I24>),
+}
+
+/// The quantize stage of an integer file: the dither and rounding of a block that has more
+/// resolution than the file's depth.
+///
+/// A chunk is widened to `f64` once, given its noise and error feedback by the
+/// [`Quantizer`] in `f64`, and narrowed to the file's integer there: no step goes through `f32`.
+struct Quantize {
+    pcm: IntPcm,
+    layout: ChannelLayout,
+    rate: SampleRate,
+    quantizer: Quantizer<f64>,
+    /// The chunk as `f64`.
+    widened: Vec<f64>,
+    /// The chunk as the file's integer.
+    ints: Ints,
+    clipped: u64,
+}
+
+impl Quantize {
+    /// The stage for an integer file of `pcm`, blocks of `layout` at `rate`, its noise the
+    /// sequence of `seed`.
+    fn new(pcm: IntPcm, layout: ChannelLayout, rate: SampleRate, seed: u64) -> Self {
+        let room = layout.interleaved_len(CHUNK);
+        let mut quantizer = Quantizer::new(pcm.dither_shape(), layout, seed);
+        if pcm.is_noise_shaped() {
+            quantizer = quantizer.shaped(&NoiseShaping::new(rate));
+        }
+        Self {
+            pcm,
+            layout,
+            rate,
+            quantizer,
+            widened: Vec::with_capacity(room),
+            ints: match pcm.depth() {
+                IntDepth::Int16 => Ints::I16(Vec::with_capacity(room)),
+                IntDepth::Int24 => Ints::I24(Vec::with_capacity(room)),
+            },
+            clipped: 0,
+        }
+    }
+
+    /// The same stage with the noise of `seed`.
+    fn seeded(self, seed: u64) -> Self {
+        Self::new(self.pcm, self.layout, self.rate, seed)
+    }
+
+    /// Whether a block of `S` has more resolution than the file's depth: a float, or a wider
+    /// integer. Only such a block is brought down here; a block already on the file's grid, or
+    /// coarser, is written as it is.
+    fn lowers<S: Sample>(&self) -> bool {
+        S::STEP.is_none_or(|step| step < self.pcm.depth().lsb().get())
+    }
+
+    /// Quantizes `block` a chunk at a time and writes each chunk to `inner`.
+    fn write<S: Sample, W: Write + Seek>(
+        &mut self,
+        inner: &mut Inner<W>,
+        block: Interleaved<'_, S>,
+    ) -> Result<()> {
+        let mut at = Samples::ZERO;
+        while at < block.frames() {
+            let end = (at + CHUNK).min(block.frames());
+            let part = block.slice(at..end);
+            // Within the capacity `new` reserved: neither grows.
+            self.widened.clear();
+            self.widened.resize(part.samples().len(), 0.0);
+            let mut widened = InterleavedMut::new(&mut self.widened, self.layout)?;
+            convert(part, widened.reborrow())?;
+            let widened = widened.as_interleaved();
+            self.clipped += match &mut self.ints {
+                Ints::I16(ints) => quantize_chunk(&mut self.quantizer, widened, ints, inner)?,
+                Ints::I24(ints) => quantize_chunk(&mut self.quantizer, widened, ints, inner)?,
+            };
+            at = end;
+        }
+        Ok(())
+    }
+}
+
+/// `widened` quantized to `I` in `ints` and written to `inner`; the values that clipped.
+fn quantize_chunk<I: Sample, W: Write + Seek>(
+    quantizer: &mut Quantizer<f64>,
+    widened: Interleaved<'_, f64>,
+    ints: &mut Vec<I>,
+    inner: &mut Inner<W>,
+) -> Result<u64> {
+    let layout = widened.layout();
+    ints.clear();
+    ints.resize(widened.samples().len(), I::SILENCE);
+    let clipped = quantizer.quantize(widened, InterleavedMut::new(ints, layout)?);
+    inner.write(Interleaved::new(ints, layout)?)?;
+    Ok(clipped)
+}
+
 impl<W: Write + Seek> Encoder<W> {
     /// Starts a file of `spec` in `sink`, writing its header.
     ///
@@ -151,8 +260,31 @@ impl<W: Write + Seek> Encoder<W> {
         Ok(Self {
             inner: Inner::open(spec, sink)?,
             layout: spec.layout(),
+            quantize: spec.format().int_pcm().map(|pcm| {
+                Quantize::new(pcm, spec.layout(), spec.rate(), DitherNoise::DEFAULT_SEED)
+            }),
             first_error: None,
         })
+    }
+
+    /// Sets the noise sequence an integer file's dither draws from, which
+    /// [`create`](Self::create) starts at [`DitherNoise::DEFAULT_SEED`]; a float file has
+    /// no dither and ignores it. Call it before the first write.
+    ///
+    /// Encoders of signals that are summed later (a bounce's stems, takes armed together)
+    /// take seeds mixed from distinct indices ([`SplitMix64::mix`](tutti_rt::SplitMix64::mix)),
+    /// never one seed, which would add their noise coherently.
+    #[must_use]
+    pub fn dither_seed(mut self, seed: u64) -> Self {
+        self.quantize = self.quantize.map(|q| q.seeded(seed));
+        self
+    }
+
+    /// The values the quantize stage has clipped so far: a float or wider integer value past
+    /// the file's range, held at its rail. `0` for a float file, which clips nothing.
+    #[must_use]
+    pub fn clipped(&self) -> u64 {
+        self.quantize.as_ref().map_or(0, |q| q.clipped)
     }
 
     /// Lowers the number of frames a WAV file may hold to `frames`; it never
@@ -164,9 +296,14 @@ impl<W: Write + Seek> Encoder<W> {
         self
     }
 
-    /// Writes one block of any [`Sample`] format; the file's width is
+    /// Writes one block of any [`Sample`] format; the file's sample type is
     /// reached by the rule in [`Sample`], and a block already in it is written
-    /// as it is. A caller that dithers converts first.
+    /// as it is.
+    ///
+    /// Where resolution drops, an integer file is dithered as its [`IntPcm`] says: a float
+    /// block, or an integer one wider than the file's depth (an `i32` into 16 bits). An
+    /// integer block as narrow as the file, or narrower, and every block into a float file, is
+    /// converted exactly.
     ///
     /// An empty block writes nothing.
     ///
@@ -194,7 +331,10 @@ impl<W: Write + Seek> Encoder<W> {
                 got: block.layout(),
             });
         }
-        self.inner.write(block)
+        match &mut self.quantize {
+            Some(quantize) if quantize.lowers::<S>() => quantize.write(&mut self.inner, block),
+            _ => self.inner.write(block),
+        }
     }
 
     /// Closes the file: back-patches its sizes and flushes the sink. Returns
@@ -286,6 +426,21 @@ impl FileEncoder {
     pub fn create_planned(spec: &Spec, target: impl Into<Staged>, frames: Samples) -> Result<Self> {
         check_planned(spec, frames)?;
         Self::create(spec, target)
+    }
+
+    /// Sets the noise sequence of an integer file's dither: [`Encoder::dither_seed`].
+    #[must_use]
+    pub fn dither_seed(self, seed: u64) -> Self {
+        Self {
+            encoder: self.encoder.dither_seed(seed),
+            ..self
+        }
+    }
+
+    /// The values the file's quantize stage has clipped so far: [`Encoder::clipped`].
+    #[must_use]
+    pub fn clipped(&self) -> u64 {
+        self.encoder.clipped()
     }
 
     /// As [`Encoder::write`].
