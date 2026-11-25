@@ -362,12 +362,12 @@ impl<F: Float> RingLoop<F> {
         };
         let first = fade_start.saturating_sub(from);
         for (k, frame) in run.iter_mut().enumerate().skip(first) {
-            let Some((lead, out, gain)) = self.span.fade_at(from + k) else {
+            let Some((lead, out, inn)) = self.span.fade_at(from + k) else {
                 continue;
             };
             let lead = lead_in.frame(Samples::new(lead + fade - self.span.resume()));
             for (s, &l) in frame.iter_mut().zip(lead) {
-                *s = *s * out + l * gain;
+                *s = *s * out + l * inn;
             }
         }
     }

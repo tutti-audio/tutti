@@ -970,7 +970,7 @@ impl<F: Float> MemorySource<F> {
                             let tap = taps[t];
                             let tail = wave[tap.frame];
                             match tap.fade {
-                                Some((lead, out, gain)) => tail * out + wave[lead] * gain,
+                                Some((lead, out, inn)) => tail * out + wave[lead] * inn,
                                 None => tail,
                             }
                         };

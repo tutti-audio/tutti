@@ -469,11 +469,11 @@ mod tests {
         let span = LoopSpan::unbounded(10, 20, 4).expect("a loop");
         assert_eq!(span.fade_at::<f64>(15), None);
         for k in 0..4 {
-            let (lead, out, gain) = span.fade_at::<f64>(16 + k).expect("inside the fade");
+            let (lead, out, inn) = span.fade_at::<f64>(16 + k).expect("inside the fade");
             let (want_out, want_in) = closed_gains(k, 4);
             assert_eq!(lead, 6 + k);
             assert!((out - want_out).abs() <= 1e-12, "out at {k}: {out}");
-            assert!((gain - want_in).abs() <= 1e-12, "in at {k}: {gain}");
+            assert!((inn - want_in).abs() <= 1e-12, "in at {k}: {inn}");
         }
         assert_eq!(span.fade_at::<f64>(20), None);
         assert_eq!(span.resume(), 10);
@@ -488,13 +488,13 @@ mod tests {
         let span = LoopSpan::unbounded(20, 40, 7).expect("a loop");
         let mut previous = (1.0, 0.0);
         for frame in 33..40 {
-            let (_, out, gain) = span.fade_at::<f64>(frame).expect("inside the fade");
+            let (_, out, inn) = span.fade_at::<f64>(frame).expect("inside the fade");
             assert!(
-                (out * out + gain * gain - 1.0).abs() <= 1e-12,
+                (out * out + inn * inn - 1.0).abs() <= 1e-12,
                 "frame {frame}"
             );
-            assert!(gain > previous.1 && out < previous.0, "frame {frame}");
-            previous = (out, gain);
+            assert!(inn > previous.1 && out < previous.0, "frame {frame}");
+            previous = (out, inn);
         }
     }
 
@@ -510,9 +510,9 @@ mod tests {
         let k = 25_000_002usize;
         let frame = 80_000_000 - fade + k;
         let (want_out, want_in) = closed_gains(k, fade);
-        let (_, out, gain) = span.fade_at::<f32>(frame).expect("inside the fade");
+        let (_, out, inn) = span.fade_at::<f32>(frame).expect("inside the fade");
         assert!((f64::from(out) - want_out).abs() <= 2.0_f64.powi(-25));
-        assert!((f64::from(gain) - want_in).abs() <= 2.0_f64.powi(-25));
+        assert!((f64::from(inn) - want_in).abs() <= 2.0_f64.powi(-25));
     }
 
     /// With too little before `start`, the fade goes into the loop's head

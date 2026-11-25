@@ -529,7 +529,7 @@ pub(crate) fn read_looped_frame<F: Float>(
         let tap = taps[t];
         let tail = wave.at(c, tap.frame);
         match tap.fade {
-            Some((lead, out, lead_gain)) => tail * out + wave.at(c, lead) * lead_gain,
+            Some((lead, out, inn)) => tail * out + wave.at(c, lead) * inn,
             None => tail,
         }
     });
