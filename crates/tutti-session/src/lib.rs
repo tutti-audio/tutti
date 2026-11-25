@@ -154,6 +154,7 @@ mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
 mod policy;
+mod preroll;
 #[cfg(feature = "record")]
 mod recorder;
 #[cfg(feature = "plugin")]
@@ -323,6 +324,7 @@ pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
+pub use preroll::PrerollTable;
 #[cfg(feature = "record")]
 pub use recorder::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
 #[cfg(feature = "plugin")]
