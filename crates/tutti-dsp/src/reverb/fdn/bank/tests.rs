@@ -40,7 +40,11 @@ fn layout(lines: usize) -> FdnLayout {
 }
 
 /// A bank of `layout` at `rate`, at rest on `c`.
-fn at_rest(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (Plain, FdnRamps<f32>) {
+fn at_rest(
+    layout: &FdnLayout,
+    rate: SampleRate,
+    c: &FdnControls,
+) -> (Plain, FdnRamps<f32, FdnLayout>) {
     let mut bank = Plain::new(layout, rate);
     let mut ramps = bank.ramps();
     bank.retarget(&mut ramps, c, &FreezeControls::DEFAULT);
@@ -54,7 +58,7 @@ fn at_rest_shimmer(
     rate: SampleRate,
     c: &FdnControls,
     k: &ShimmerControls,
-) -> (Shimmering, FdnRamps<f32>) {
+) -> (Shimmering, FdnRamps<f32, ShimmerLayout>) {
     let mut bank = Shimmering::new(layout, rate);
     let mut ramps = bank.ramps();
     bank.retarget(&mut ramps, c, k);
@@ -87,7 +91,7 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 /// `x` through the bank in calls of `block` frames; the two output channels.
 fn run<L: FdnKind>(
     bank: &mut FdnBank<f32, L>,
-    ramps: &mut FdnRamps<f32>,
+    ramps: &mut FdnRamps<f32, L>,
     x: &[f32],
     block: usize,
 ) -> [Vec<f32>; 2] {
@@ -547,7 +551,7 @@ fn longest_line(rate: SampleRate) -> usize {
 /// `x` (the input, then silence to `frames`) through `bank` at rest on `c`: the two channels.
 fn rendered_tail<L: FdnKind>(
     bank: &mut FdnBank<f32, L>,
-    ramps: &mut FdnRamps<f32>,
+    ramps: &mut FdnRamps<f32, L>,
     input: &[f32],
     frames: usize,
 ) -> [Vec<f32>; 2] {
@@ -1332,8 +1336,8 @@ fn a_send_is_held_under_the_stable_bound() {
             send,
             ..ShimmerControls::DEFAULT
         };
-        let (bank, _) = at_rest_shimmer(l, RATE, &FdnControls::DEFAULT, &k);
-        bank.target.shimmer
+        let (_, ramps) = at_rest_shimmer(l, RATE, &FdnControls::DEFAULT, &k);
+        ramps.shimmer.now()
     };
     let held = Feedback::MAX_STABLE.get() as f32;
     assert_eq!(target(&shimmering(8), Feedback::new(5.0)), held);

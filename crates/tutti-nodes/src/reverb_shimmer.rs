@@ -287,4 +287,79 @@ mod tests {
         want.network.decay[1] = Seconds::new(3.0);
         assert_eq!(got, want);
     }
+
+    /// A fresh node, a reset one, a re-prepared one and a fork land their first design whole.
+    /// A diagonal two-line shimmer at one decay in every band, a send `k` and no shift, takes
+    /// an impulse `c_0` into line 0, whose first echo is `ear c_0` at `t0` and whose second is
+    /// `ear g_0 c_0 (1 - k / 2)` at `2 t0` (`g_0` the loop gain of the line): the first needs
+    /// the input gain on its target at the first frame, the second the absorption and the send
+    /// ramp as well, none of which a ramp from the idle coefficients reaches in a trip.
+    #[test]
+    fn the_first_block_after_a_prepare_a_reset_or_a_fork_lands_whole() {
+        use crate::test_support::{RATE, render_chunked};
+        use tutti_dsp::{Band, FdnLayout, NetworkStage};
+        use tutti_graph::ParamNode as _;
+        use tutti_graph::{Node as _, Prepare};
+        use tutti_units::Bipolar;
+
+        let k = 0.5;
+        let controls = FdnNodeControls::<ShimmerLayout> {
+            network: FdnControls {
+                decay: [Seconds::new(2.0); 3],
+                diffusion: Mix::new(0.0),
+                modulation: Bipolar::of(0.0),
+                ..FdnControls::DEFAULT
+            },
+            kind: ShimmerControls {
+                pitch: Cents::new(0.0),
+                send: Feedback::new_clamped(k),
+            },
+        };
+        let layout = ShimmerLayout::new(FdnLayout::new(2, MaxDecay::DEFAULT).unwrap());
+        let mut network = Box::new(tutti_dsp::Network::new(RATE));
+        layout.design_into(&controls.network, RATE, &mut network);
+        let Some(NetworkStage::Fdn(f)) = network.stages.first() else {
+            panic!("one FDN stage")
+        };
+        let t0 = f.lines[0].length.get() as usize;
+        let ear = f.output.rows[0][0].get();
+        let g0 = f.lines[0].absorption.gain(Band::Low).get();
+        let want = [
+            (t0, ear * f.input[0].get()),
+            (2 * t0, ear * g0 * f.input[0].get() * (1.0 - k / 2.0)),
+        ];
+        let mut impulse = vec![0.0f32; 3_072];
+        impulse[0] = 1.0;
+        let landed = |n: &mut dyn tutti_graph::Node<f32>, what: &str| {
+            let left = &render_chunked(n, std::slice::from_ref(&impulse), 1024)[0];
+            for (at, amplitude) in want {
+                assert!(
+                    (f64::from(left[at]) - amplitude).abs() < 1e-4,
+                    "{what}: frame {at} holds {} for {amplitude}",
+                    left[at]
+                );
+            }
+        };
+        let silence = vec![vec![0.0f32; 1_024]];
+        let mut n = crate::test_support::prepared(ShimmerNode::<f32>::from(
+            ShimmerConfig::new().layout(layout).controls(controls),
+        ));
+        let cells = n.param_set();
+        landed(&mut n, "fresh");
+        assert!(cells.set(UnitParam::Feedback, 0.9));
+        render_chunked(&mut n, &[vec![0.25f32; 2_048]], 1024);
+        assert!(cells.set(UnitParam::Feedback, k));
+        n.reset();
+        landed(&mut n, "reset");
+        render_chunked(&mut n, &[vec![0.25f32; 2_048]], 1024);
+        n.prepare(&Prepare::new(
+            RATE,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(1024)),
+        ));
+        landed(&mut n, "re-prepare");
+        n.reset();
+        render_chunked(&mut n, &silence, 1024);
+        let mut fork = n.fork_fresh();
+        landed(&mut fork, "fork");
+    }
 }

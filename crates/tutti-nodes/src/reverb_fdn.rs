@@ -141,11 +141,11 @@ control_set! {
 
 /// A [`FdnBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running<F: FftFloat, L: FdnKind> {
+struct Running<F: FftFloat + Lerp, L: FdnKind> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
     bank: FdnBank<F, L>,
-    ramps: FdnRamps<F>,
+    ramps: FdnRamps<F, L>,
 }
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
@@ -155,7 +155,7 @@ struct Running<F: FftFloat, L: FdnKind> {
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
-pub struct FdnKernel<F: FftFloat, L: FdnKind> {
+pub struct FdnKernel<F: FftFloat + Lerp, L: FdnKind> {
     layout: L,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F, L>>,

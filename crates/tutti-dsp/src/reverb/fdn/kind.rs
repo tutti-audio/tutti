@@ -93,6 +93,9 @@ impl FdnKind for ShimmerLayout {}
 
 pub(super) mod sealed {
     use super::*;
+    use crate::reverb::fdn::shimmer::GAIN_BOUND;
+    use crate::{Lerp, Ramp, Steps};
+    use tutti_buffers::Float;
 
     /// What a [`FdnBank`](crate::FdnBank) asks of its kind.
     pub trait Sealed: Copy + Debug + PartialEq {
@@ -100,6 +103,8 @@ pub(super) mod sealed {
         type Controls: Copy + PartialEq + Debug;
         /// What the kind keeps in the feedback path.
         type State<F: FftFloat>: Shifter<F>;
+        /// What the kind's ramps hold beyond the network's.
+        type Ramps<F: Float + Lerp>: ShiftRamps<F, Self::Controls>;
 
         /// The lines and longest decay.
         fn layout(&self) -> &FdnLayout;
@@ -115,8 +120,25 @@ pub(super) mod sealed {
         );
         /// The ceiling over every control, from the network's own `tail` at the longest decay.
         fn ceiling(&self, tail: DecayTime, rate: SampleRate) -> DecayTime;
-        /// The pitch and share of the feedback `k` shifts.
-        fn shift(k: &Self::Controls) -> (Cents, Feedback);
+    }
+
+    /// The ramps of what a kind adds to the feedback: nothing for a plain network.
+    pub trait ShiftRamps<F: Float + Lerp, C>: Clone + Debug {
+        /// At rest, nothing shifted.
+        fn new() -> Self;
+        /// Aims at the kind's controls `k`, over `ramp`.
+        fn retarget(&mut self, k: &C, ramp: Steps);
+        /// Takes one step.
+        fn step(&mut self);
+        /// Jumps to the target now.
+        fn jump_to_target(&mut self);
+        /// The share of the feedback shifted now.
+        fn now(&self) -> F;
+        /// The shift now.
+        fn pitch(&self) -> Cents;
+        /// Whether the shifted path is in the loop for `k`: its send is above zero, or its
+        /// ramp has not reached zero.
+        fn shifts(&self, k: &C) -> bool;
     }
 
     /// The shifter in the feedback path of a kind: none for a plain network.
@@ -125,14 +147,76 @@ pub(super) mod sealed {
         fn delay(&self) -> Samples;
         /// Back to silence.
         fn reset(&mut self);
-        /// Shifts by `pitch` from the next hop on.
-        fn retarget(&mut self, pitch: Cents);
-        /// The shifted share added to each line at frame `into` of the chunk: `k` of the
-        /// mean of the feedback `d` (`root` the weight of a line in it), the shifted mean
-        /// scaled by `bound`.
-        fn share(&mut self, into: usize, d: &[F], k: F, root: F, bound: F) -> F;
+        /// Sets the chunk's constants: the share `send` of the feedback shifted by `pitch`
+        /// (from the next hop on), over `lines` lines.
+        fn begin_chunk(&mut self, send: F, pitch: Cents, lines: usize);
+        /// Writes into `d[j]` the sample line `j` takes at frame `into` of the chunk, from
+        /// the feedback `d` after its absorption: the line's share `c_in[j] * xd` of the input
+        /// plus the reflection `d[j] - 2 v[j] sum`, and for a shimmer the shifted share of
+        /// the mean of the reflected feedback.
+        fn feed(&mut self, into: usize, d: &mut [F], v: &[F], c_in: &[F], xd: F, sum: F);
         /// Hands the finished chunk to the shifter.
         fn end_chunk(&mut self);
+    }
+
+    impl<F: Float + Lerp, C> ShiftRamps<F, C> for () {
+        fn new() -> Self {}
+        fn retarget(&mut self, _: &C, _: Steps) {}
+        fn step(&mut self) {}
+        fn jump_to_target(&mut self) {}
+        fn now(&self) -> F {
+            F::ZERO
+        }
+        fn pitch(&self) -> Cents {
+            Cents::new(0.0)
+        }
+        fn shifts(&self, _: &C) -> bool {
+            false
+        }
+    }
+
+    /// The shimmer's send and shift.
+    #[derive(Clone, Debug)]
+    pub struct ShimmerRamps<F: Float> {
+        /// The share of the feedback the shimmer shifts, `k`.
+        send: Ramp<F>,
+        /// The shimmer's shift, which takes the vocoder's own hop to land.
+        pitch: Cents,
+    }
+
+    impl<F: Float + Lerp> ShiftRamps<F, ShimmerControls> for ShimmerRamps<F> {
+        fn new() -> Self {
+            Self {
+                send: Ramp::new(F::ZERO),
+                pitch: Cents::new(0.0),
+            }
+        }
+        fn retarget(&mut self, k: &ShimmerControls, ramp: Steps) {
+            // A send of 0.99 at most (`Feedback::MAX_STABLE`), whatever the control wrote.
+            let send = k.send.get();
+            let target = if send > 0.0 {
+                F::from_design(send.min(Feedback::MAX_STABLE.get()))
+            } else {
+                F::ZERO
+            };
+            self.send.retarget_by(target, ramp);
+            self.pitch = k.pitch;
+        }
+        fn step(&mut self) {
+            self.send.advance(1);
+        }
+        fn jump_to_target(&mut self) {
+            self.send.jump_to_target();
+        }
+        fn now(&self) -> F {
+            self.send.now()
+        }
+        fn pitch(&self) -> Cents {
+            self.pitch
+        }
+        fn shifts(&self, k: &ShimmerControls) -> bool {
+            k.send > Feedback::NONE || self.send.now() > F::ZERO
+        }
     }
 
     impl<F: FftFloat> Shifter<F> for () {
@@ -140,9 +224,12 @@ pub(super) mod sealed {
             Samples::ZERO
         }
         fn reset(&mut self) {}
-        fn retarget(&mut self, _: Cents) {}
-        fn share(&mut self, _: usize, _: &[F], _: F, _: F, _: F) -> F {
-            F::ZERO
+        fn begin_chunk(&mut self, _: F, _: Cents, _: usize) {}
+        fn feed(&mut self, _: usize, d: &mut [F], v: &[F], c_in: &[F], xd: F, sum: F) {
+            let two = F::ONE + F::ONE;
+            for j in 0..d.len() {
+                d[j] = c_in[j] * xd + d[j] - two * v[j] * sum;
+            }
         }
         fn end_chunk(&mut self) {}
     }
@@ -154,18 +241,29 @@ pub(super) mod sealed {
         fn reset(&mut self) {
             Shimmer::reset(self);
         }
-        fn retarget(&mut self, pitch: Cents) {
-            Shimmer::retarget(self, pitch);
+        fn begin_chunk(&mut self, send: F, pitch: Cents, lines: usize) {
+            self.set_chunk(send, F::from_design(1.0 / (lines as f64).sqrt()));
+            self.retarget(pitch);
         }
-        fn share(&mut self, into: usize, d: &[F], k: F, root: F, bound: F) -> F {
-            let mean = d.iter().copied().sum::<F>() * root;
+        fn feed(&mut self, into: usize, d: &mut [F], v: &[F], c_in: &[F], xd: F, sum: F) {
+            let two = F::ONE + F::ONE;
+            let mut mean = F::ZERO;
+            for j in 0..d.len() {
+                d[j] -= two * v[j] * sum;
+                mean += d[j];
+            }
+            let (k, root) = self.chunk();
+            let mean = mean * root;
             self.push(into, mean);
             // A send of exactly 0 leaves the lines untouched, a non-finite shifted sample
-            // included.
-            if k > F::ZERO {
-                k * (self.back(into) * bound - mean) * root
+            // included. The shifted feedback re-enters at `1 / GAIN_BOUND` of its level.
+            let share = if k > F::ZERO {
+                k * (self.back(into) * F::from_design(1.0 / GAIN_BOUND) - mean) * root
             } else {
                 F::ZERO
+            };
+            for j in 0..d.len() {
+                d[j] = c_in[j] * xd + d[j] + share;
             }
         }
         fn end_chunk(&mut self) {
@@ -176,6 +274,7 @@ pub(super) mod sealed {
     impl Sealed for FdnLayout {
         type Controls = FreezeControls;
         type State<F: FftFloat> = ();
+        type Ramps<F: Float + Lerp> = ();
 
         fn layout(&self) -> &FdnLayout {
             self
@@ -194,14 +293,12 @@ pub(super) mod sealed {
         fn ceiling(&self, _: DecayTime, _: SampleRate) -> DecayTime {
             DecayTime::Unbounded
         }
-        fn shift(_: &FreezeControls) -> (Cents, Feedback) {
-            (Cents::new(0.0), Feedback::NONE)
-        }
     }
 
     impl Sealed for ShimmerLayout {
         type Controls = ShimmerControls;
         type State<F: FftFloat> = Shimmer<F>;
+        type Ramps<F: Float + Lerp> = ShimmerRamps<F>;
 
         fn layout(&self) -> &FdnLayout {
             &self.layout
@@ -227,9 +324,6 @@ pub(super) mod sealed {
                 )),
                 other => other,
             }
-        }
-        fn shift(k: &ShimmerControls) -> (Cents, Feedback) {
-            (k.pitch, k.send)
         }
     }
 }

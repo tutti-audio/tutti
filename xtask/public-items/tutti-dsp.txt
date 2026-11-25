@@ -1250,6 +1250,7 @@ struct reverb::fdn::design::FdnLayout
 struct reverb::fdn::kind::FreezeControls
 struct reverb::fdn::kind::ShimmerControls
 struct reverb::fdn::kind::ShimmerLayout
+struct reverb::fdn::kind::sealed::ShimmerRamps
 struct reverb::fdn::shimmer::Shimmer
 struct reverb::freeverb::bank::FreeverbBank
 struct reverb::freeverb::bank::FreeverbRamps
@@ -1341,6 +1342,7 @@ trait model::system::System
 trait ramp::Lerp
 trait reverb::fdn::kind::FdnKind
 trait reverb::fdn::kind::sealed::Sealed
+trait reverb::fdn::kind::sealed::ShiftRamps
 trait reverb::fdn::kind::sealed::Shifter
 trait stft::window::Window
 trait viterbi::Transition

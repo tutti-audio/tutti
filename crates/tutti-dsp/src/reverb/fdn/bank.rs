@@ -76,14 +76,12 @@ use crate::block::expect_output_width;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, InputOutput};
 use tutti_units::{
-    Cents, Feedback, Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
-    Tail,
+    Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail,
 };
 
 use super::design::{CROSSOVER, FdnControls, set_loop_delay};
 use super::kind::FdnKind;
-use super::kind::sealed::Shifter;
-use super::shimmer::GAIN_BOUND;
+use super::kind::sealed::{ShiftRamps, Shifter};
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
@@ -124,8 +122,6 @@ struct Target<F> {
     out: Vec<[F; 2]>,
     wet: F,
     width: F,
-    shimmer: F,
-    shimmer_pitch: Cents,
 }
 
 impl<F: Float> Target<F> {
@@ -147,8 +143,6 @@ impl<F: Float> Target<F> {
             out: vec![[F::ZERO; 2]; lines],
             wet: F::ZERO,
             width: F::ONE,
-            shimmer: F::ZERO,
-            shimmer_pitch: Cents::new(0.0),
         }
     }
 }
@@ -160,7 +154,7 @@ impl<F: Float> Target<F> {
 /// Retargeted by [`FdnBank::retarget`], stepped once a chunk by [`FdnBank::process`]. A ramp steps
 /// before its chunk runs: the first chunk after a `retarget` reads step 1.
 #[derive(Clone, Debug)]
-pub struct FdnRamps<F: Float> {
+pub struct FdnRamps<F: Float + Lerp, L: FdnKind> {
     /// The steps of the 20 ms ramp of a gain, at the rate prepared for.
     ramp: Steps,
     /// The lines in use: 0 until the first `retarget`, and the bank is silent.
@@ -190,13 +184,11 @@ pub struct FdnRamps<F: Float> {
     out: Vec<[Ramp<F>; 2]>,
     wet: Ramp<F>,
     width: Ramp<F>,
-    /// The share of the feedback the shimmer shifts, `k`.
-    shimmer: Ramp<F>,
-    /// The shimmer's shift, which takes the vocoder's own hop to land.
-    shimmer_pitch: Cents,
+    /// What the kind adds: the shimmer's send and shift, nothing for a plain layout.
+    shimmer: L::Ramps<F>,
 }
 
-impl<F: Float + Lerp> FdnRamps<F> {
+impl<F: Float + Lerp, L: FdnKind> FdnRamps<F, L> {
     fn new(lines: usize, ramp: Steps, t: &Target<F>) -> Self {
         let rest = Ramp::new(F::ZERO);
         Self {
@@ -217,8 +209,7 @@ impl<F: Float + Lerp> FdnRamps<F> {
             out: vec![[rest; 2]; lines],
             wet: rest,
             width: Ramp::new(F::ONE),
-            shimmer: rest,
-            shimmer_pitch: Cents::new(0.0),
+            shimmer: L::Ramps::new(),
         }
     }
 
@@ -235,7 +226,6 @@ impl<F: Float + Lerp> FdnRamps<F> {
                 &mut self.mix,
                 &mut self.wet,
                 &mut self.width,
-                &mut self.shimmer,
             ])
     }
 
@@ -243,12 +233,14 @@ impl<F: Float + Lerp> FdnRamps<F> {
     pub fn jump_to_target(&mut self) {
         self.ramps().for_each(Ramp::jump_to_target);
         self.lengths().for_each(Ramp::jump_to_target);
+        self.shimmer.jump_to_target();
     }
 
     /// Takes one step of every ramp.
     fn step(&mut self) {
         self.ramps().for_each(|g| g.advance(1));
         self.lengths().for_each(|g| g.advance(1));
+        self.shimmer.step();
     }
 
     /// The ramps of a length: the lines', the gains' design lengths and the pre-delay.
@@ -262,7 +254,7 @@ impl<F: Float + Lerp> FdnRamps<F> {
     /// Aims every ramp at the target's value with its own rate: a length by
     /// [`LENGTH_STEP`] a chunk, the pre-delay by [`PRE_STEP`], every other gain in the ramp.
     /// The lines from `n` on keep their gains and lengths; their input and output gains close.
-    fn retarget(&mut self, t: &Target<F>) {
+    fn retarget(&mut self, t: &Target<F>, kind: &L::Controls) {
         let ramp = self.ramp;
         let n = t.n;
         self.n = n;
@@ -290,8 +282,7 @@ impl<F: Float + Lerp> FdnRamps<F> {
             .retarget_position(t.pre_len, Steps::Rate(PRE_STEP));
         self.wet.retarget_by(t.wet, ramp);
         self.width.retarget_by(t.width, ramp);
-        self.shimmer.retarget_by(t.shimmer, ramp);
-        self.shimmer_pitch = t.shimmer_pitch;
+        self.shimmer.retarget(kind, ramp);
     }
 }
 
@@ -321,8 +312,6 @@ struct State<F> {
     c_wet: F,
     c_width: F,
     c_pre: ReadPosition,
-    /// The chunk's share of the feedback the shimmer shifts.
-    c_shimmer: F,
 }
 
 /// A feedback delay network of any layout: its lines, its pre-delay and what a chunk
@@ -397,7 +386,6 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
                 c_wet: F::ZERO,
                 c_width: F::ZERO,
                 c_pre: ReadPosition::START,
-                c_shimmer: F::ZERO,
             },
             shimmer,
             designed: None,
@@ -411,7 +399,7 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// The ramps of this bank, at rest and set to nothing: its first [`retarget`](Self::retarget)
     /// is the caller's to land.
     #[must_use]
-    pub fn ramps(&self) -> FdnRamps<F> {
+    pub fn ramps(&self) -> FdnRamps<F, L> {
         FdnRamps::new(self.max_lines, ramp(self.rate), &self.target)
     }
 
@@ -443,14 +431,14 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// the ceiling's worst design already has.
     pub fn tail_of(
         &mut self,
-        ramps: &FdnRamps<F>,
+        ramps: &FdnRamps<F, L>,
         network: &FdnControls,
         kind: &L::Controls,
     ) -> Tail {
         self.design(network, kind);
         // The shifted path's delay is in the loop while the send is above zero, and until its
         // ramp has reached zero: the shifted share still circulating is read at the ramp's value.
-        let delay = if L::shift(kind).1 > Feedback::NONE || ramps.shimmer.now() > F::ZERO {
+        let delay = if ramps.shimmer.shifts(kind) {
             self.shimmer.delay()
         } else {
             Samples::ZERO
@@ -491,20 +479,15 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// Aims `ramps` at the design of `controls`: the first recirculating stage's lines,
     /// matrix, outputs, pre-delay, wet gain and width, each as the value its ramp moves to.
     /// No allocation.
-    pub fn retarget(&mut self, ramps: &mut FdnRamps<F>, network: &FdnControls, kind: &L::Controls) {
+    pub fn retarget(
+        &mut self,
+        ramps: &mut FdnRamps<F, L>,
+        network: &FdnControls,
+        kind: &L::Controls,
+    ) {
         self.design(network, kind);
         if self.coefficients() {
-            // A send of 0.99 at most (`Feedback::MAX_STABLE`), whatever the control wrote;
-            // a plain layout sends none.
-            let (pitch, send) = L::shift(kind);
-            let send = send.get();
-            self.target.shimmer = if send > 0.0 {
-                F::from_design(send.min(Feedback::MAX_STABLE.get()))
-            } else {
-                F::ZERO
-            };
-            self.target.shimmer_pitch = pitch;
-            ramps.retarget(&self.target);
+            ramps.retarget(&self.target, kind);
         }
     }
 
@@ -604,7 +587,7 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     }
 
     /// The constants of the chunk that starts now, from the ramps' step.
-    fn begin_chunk(&mut self, c: &FdnRamps<F>) {
+    fn begin_chunk(&mut self, c: &FdnRamps<F, L>) {
         let s = &mut self.state;
         let n = c.n;
         let depth: f64 = c.depth.now().into();
@@ -652,8 +635,8 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
         } else {
             F::ZERO
         };
-        s.c_shimmer = c.shimmer.now();
-        self.shimmer.retarget(c.shimmer_pitch);
+        self.shimmer
+            .begin_chunk(c.shimmer.now(), c.shimmer.pitch(), n);
         s.c_wet = c.wet.now();
         s.c_width = c.width.now();
         s.c_pre = c.pre_len.now();
@@ -669,7 +652,7 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// [`BlockMismatch`] when the block's output is not two channels wide.
     pub fn process(
         &mut self,
-        ramps: &mut FdnRamps<F>,
+        ramps: &mut FdnRamps<F, L>,
         block: &mut InputOutput<'_, F>,
     ) -> Result<(), BlockMismatch> {
         // Any input is mixed down to the one wet signal, which is a stereo pair.
@@ -697,12 +680,8 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
         }
         let scale = F::from_design(1.0 / width.max(1) as f64);
         let p = ramps.complement;
-        let (two, half) = (F::ONE + F::ONE, F::lit(0.5));
+        let half = F::lit(0.5);
         let mut d = [F::ZERO; 16];
-        // The shimmer's share of each line is `1 / sqrt(n)` (the unit vector `u`), and the
-        // shifted feedback re-enters at `1 / GAIN_BOUND` of its level.
-        let root = F::from_design(1.0 / (n as f64).sqrt());
-        let bound = F::from_design(1.0 / GAIN_BOUND);
         for i in 0..frames {
             if self.into == 0 {
                 ramps.step();
@@ -741,15 +720,12 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
             }
             // `m` scales the projection, so `m = 1` is the reflection to the bit.
             let sum = s.c_mix * sum;
-            // The feedback `f` and the shifted share of its mean component.
+            // Each line takes its share of the input and the reflected feedback, and for a
+            // shimmer the shifted share of its mean.
+            self.shimmer
+                .feed(self.into, &mut d[..n], &s.c_v[..n], &s.c_in[..n], xd, sum);
             for j in 0..n {
-                d[j] -= two * s.c_v[j] * sum;
-            }
-            let share = self
-                .shimmer
-                .share(self.into, &d[..n], s.c_shimmer, root, bound);
-            for j in 0..n {
-                s.lines[j].put(s.c_in[j] * xd + d[j] + share);
+                s.lines[j].put(d[j]);
             }
             // Every row moves on, the idle ones too: a line past `n` keeps the frames it held
             // and a later regrowth reads them at the right age.
@@ -775,7 +751,7 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// state of a frozen network (the absorption's one-poles are not read while every gain is
     /// 1). For the tests.
     #[cfg(test)]
-    pub(crate) fn state_energy(&self, ramps: &FdnRamps<F>) -> f64 {
+    pub(crate) fn state_energy(&self, ramps: &FdnRamps<F, L>) -> f64 {
         let s = &self.state;
         (0..ramps.n)
             .map(|j| {
