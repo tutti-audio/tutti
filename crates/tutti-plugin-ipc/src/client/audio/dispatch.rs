@@ -31,6 +31,7 @@ use tutti_plugin_types::{
     MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told,
 };
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
+use tutti_rt::Generation;
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
 
@@ -137,16 +138,21 @@ pub(super) enum AbandonedAudio {
     /// A block's `AudioProcessed`: its MIDI is forwarded.
     Block,
     /// The one `ParametersApplied` of an `ApplyParameters` of `edits`
-    /// parameters: counted when it comes, if the plugin did not take them.
-    Params { edits: u64 },
+    /// parameters whose drain had swept `swept`: counted when it comes, if the
+    /// plugin did not take them, and the writes up to `swept` answered.
+    Params { edits: u64, swept: Generation },
 }
 
-/// How many of a flush's `edits` the plugin does not have, by its answer.
-fn undelivered(outcome: ApplyOutcome, edits: u64) -> u64 {
+/// The server answered a flush of `edits` parameters whose drain had swept
+/// `swept`, in its window or late: the writes it did not take are counted, and
+/// whatever the outcome the writes up to `swept` are answered
+/// ([`Channels::note_acked`]), so a settle that waits for them ends.
+fn answered(channels: &Channels, outcome: ApplyOutcome, edits: u64, swept: Generation) {
     match outcome {
-        ApplyOutcome::Applied => 0,
-        ApplyOutcome::Refused | ApplyOutcome::Unseated => edits,
+        ApplyOutcome::Applied => {}
+        ApplyOutcome::Refused | ApplyOutcome::Unseated => channels.note_unapplied_edits(edits),
     }
+    channels.note_acked(swept);
 }
 
 /// The key of the request an audio reply answers.
@@ -259,6 +265,23 @@ impl AudioState {
         }
     }
 
+    /// The writes a flush sends, one change per parameter on the first frame:
+    /// what no block has taken (the slots, newest), preceded by what blocks
+    /// took and kept ([`carry_write`](Self::carry_write)) and have not sent,
+    /// so the answer covers every write up to the generation returned. Audio
+    /// lane's thread: may allocate.
+    pub(super) fn flush_frame(&mut self, channels: &Channels) -> (ParameterChanges, Generation) {
+        let (taken, swept) = channels.take_host_edits();
+        let mut changes = ParameterChanges::reserved_bridged(taken.len() + self.carried.len(), 1);
+        for (id, value) in &taken {
+            // A slot per parameter and one change per slot, in a set reserved a
+            // queue for each: none is past its room.
+            let _ = changes.add_change(*id, Offset::ZERO, *value);
+        }
+        self.merge_carried(&mut changes);
+        (changes, swept)
+    }
+
     /// Put what [`carry`](Self::carry) and [`carry_write`](Self::carry_write) kept into the block about to be sent,
     /// on its first frame: a parameter the block moves itself keeps its own
     /// points, preceded by the carried value when its first point is later
@@ -360,9 +383,9 @@ impl AudioState {
                 }
                 Ok(None)
             }
-            Heard::Abandoned(AbandonedAudio::Params { edits }) => {
+            Heard::Abandoned(AbandonedAudio::Params { edits, swept }) => {
                 if let AudioReply::ParametersApplied { outcome, .. } = reply {
-                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                    answered(channels, outcome, edits, swept);
                 }
                 Ok(None)
             }
@@ -813,8 +836,9 @@ pub(super) fn handle_audio(
             // Taken now, as this lane dequeues it: every block queued before it
             // has taken what was written before that block, and what is taken
             // here is newer than all of it.
-            let changes = host_edit_changes(channels);
+            let (changes, swept) = state.flush_frame(channels);
             if changes.is_empty() {
+                channels.note_acked(swept);
                 done.send(true);
                 return Ok(());
             }
@@ -826,7 +850,7 @@ pub(super) fn handle_audio(
             let window = lifecycle.timeouts().param_wait();
             state.conv.open(
                 key,
-                AbandonedAudio::Params { edits },
+                AbandonedAudio::Params { edits, swept },
                 Instant::now(),
                 window,
                 window,
@@ -838,12 +862,12 @@ pub(super) fn handle_audio(
                     param_changes: changes,
                 },
             )?;
-            // Counted where the answer is heard, in the window or late
-            // ([`AudioState::hear`]): none in the window counts nothing, as the
-            // flush may still land.
+            // Counted and acknowledged where the answer is heard, in the window
+            // or late ([`AudioState::hear`]): none in the window does neither,
+            // as the flush may not have landed.
             let took = match wait_audio(stream, state, channels, key)? {
                 Some(AudioReply::ParametersApplied { outcome, .. }) => {
-                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                    answered(channels, outcome, edits, swept);
                     outcome == ApplyOutcome::Applied
                 }
                 _ => false,
@@ -911,19 +935,6 @@ fn fence(
 ) -> IpcResult<()> {
     query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)?;
     Ok(())
-}
-
-/// The host's writes no block has taken, as one change per parameter on the first
-/// frame: what a flush sends. Taken by the audio lane's thread.
-pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
-    let taken = channels.take_host_edits();
-    let mut changes = ParameterChanges::reserved(taken.len(), 1);
-    for (id, value) in &taken {
-        // A slot per parameter and one change per slot, in a set reserved a
-        // queue for each: none is past its room.
-        let _ = changes.add_change(*id, Offset::ZERO, *value);
-    }
-    changes
 }
 
 /// The control lane's command, run on its thread: **every request but the
@@ -1315,6 +1326,19 @@ mod tests {
         );
     }
 
+    /// **A flush carries what blocks took and have not sent**: a write a block
+    /// kept for its next frame (the block was skipped as stale) is in the frame
+    /// a flush sends, so the answer covers it.
+    #[test]
+    fn a_flush_frame_carries_what_a_skipped_block_kept() {
+        let (mut state, _replies, channels) = audio_state();
+        state.carry_write(ParamId::new(4), unit_value(0.4));
+        let (frame, _) = state.flush_frame(&channels);
+        let queue = frame.queue(ParamId::new(4)).expect("the carried write");
+        assert_eq!(queue.points.len(), 1);
+        assert!((queue.points[0].value.get() - 0.4).abs() < 1e-12);
+    }
+
     /// **A late acknowledgement of `ApplyParameters` is dropped without
     /// answering anything**, and is not counted as a late block.
     #[test]
@@ -1324,7 +1348,10 @@ mod tests {
         abandoned(
             &mut state,
             AudioKey::Params(id),
-            AbandonedAudio::Params { edits: 2 },
+            AbandonedAudio::Params {
+                edits: 2,
+                swept: Generation::new(0),
+            },
         );
         let heard = state.hear(
             AudioReply::ParametersApplied {

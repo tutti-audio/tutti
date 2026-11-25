@@ -112,7 +112,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::Timeouts;
-use tutti_rt::Mutex;
+use tutti_rt::{Generation, Mutex};
 
 pub use messages::IpcEvent;
 pub use thread::IpcThread;
@@ -564,6 +564,32 @@ impl AudioBridge {
             }
             None
         }
+    }
+
+    /// How many of the host's writes have been made, as the generation
+    /// [`edits_delivered`](Self::edits_delivered) waits for; `None` before the
+    /// first write, when the table does not exist.
+    pub(crate) fn edits_queued(&self) -> Option<Generation> {
+        self.host_edits
+            .lock()
+            .as_ref()
+            .map(|table| table.writer.written())
+    }
+
+    /// Asks for the delivery of the host's writes up to `upto`
+    /// ([`edits_queued`](Self::edits_queued)) and answers whether the server has
+    /// answered a flush that carried them: `false` asks the audio lane to flush
+    /// (idempotent: one already asked for is not asked again), and the answer,
+    /// in its window or late, makes a later call `true`. A flush that is never
+    /// answered leaves it `false`. A crashed plugin reads as delivered: the call
+    /// that follows fails on its own. Control side; never waits.
+    pub(crate) fn edits_delivered(&self, upto: Generation) -> bool {
+        if self.lifecycle.is_crashed() || self.channels.acked().has_reached(upto) {
+            return true;
+        }
+        // The answer is read from the cell, not from this ask.
+        drop(self.request_flush());
+        false
     }
 
     /// Has the plugin apply the writes no block has carried yet, before the
@@ -1307,6 +1333,15 @@ impl AudioBridge {
 mod tests {
     use super::*;
 
+    /// The state the audio lane's thread keeps, for a test that takes a flush's
+    /// frame as the lane would.
+    fn lane_state() -> dispatch::AudioState {
+        dispatch::AudioState::new(
+            tutti_plugin_types::Timeouts::default().drain,
+            channels::response_ring().0,
+        )
+    }
+
     /// A bridge with no lane thread: its commands stay in the queues for a test
     /// to take, as the lane's thread would.
     fn bridge_without_a_lane() -> AudioBridge {
@@ -1343,7 +1378,7 @@ mod tests {
         let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() else {
             panic!("the flush is queued");
         };
-        let changes = dispatch::host_edit_changes(&bridge.channels);
+        let (changes, _) = lane_state().flush_frame(&bridge.channels);
         let sent: Vec<f64> = changes
             .queues
             .iter()
@@ -1393,8 +1428,9 @@ mod tests {
         }));
         assert_eq!(bridge.write_parameter(id, Normalized::of(0.75)), Ok(()));
         let mut last = None;
+        let mut state = lane_state();
         while let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() {
-            let changes = dispatch::host_edit_changes(&bridge.channels);
+            let (changes, _) = state.flush_frame(&bridge.channels);
             for point in changes.queues.iter().flat_map(|q| q.points.iter()) {
                 last = Some(point.value.get());
             }

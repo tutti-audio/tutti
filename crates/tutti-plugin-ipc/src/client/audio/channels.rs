@@ -21,14 +21,14 @@ use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use crate::transport::control::{ControlUnparker, ControlWait, control_unparker};
 use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::EditReader;
 use tutti_plugin_types::PipelineCounts;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
-    AtomicCell, Counter, Mutex, Overflow, Parker, RingReader, RingWriter, Tally, TallyWriter,
-    Unparker, parker, ring, tally,
+    AtomicCell, Counter, Generation, Mutex, Overflow, Parker, RingReader, RingWriter, Tally,
+    TallyWriter, Unparker, parker, ring, tally,
 };
 use tutti_units::{Chunks, Normalized, ParamId, SampleRate};
 
@@ -110,6 +110,10 @@ pub(super) struct Channels {
     /// claim drains at the next), and a control thread that installs a reader or
     /// flushes claims it waiting.
     host_edits: Arc<AudioThreadCell<Option<EditReader>>>,
+    /// The host's writes the server has answered, as the generation the lane's
+    /// drain had swept when it sent them ([`note_acked`](Self::note_acked)):
+    /// what [`acked`](Self::acked) reads from the control side.
+    acked: Arc<AtomicU32>,
     /// How many chunks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
     abandoned: TallyWriter<Chunks>,
@@ -326,6 +330,7 @@ impl Channels {
             sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
+            acked: Arc::new(AtomicU32::new(0)),
             abandoned: abandoned.writer(),
             late: late.writer(),
             commands_refused: commands_refused.writer(),
@@ -379,14 +384,32 @@ impl Channels {
         }
     }
 
-    /// What no block has taken, claiming the cell: a flush's, which sends it
-    /// ahead of whatever it must precede. Control side.
-    pub(super) fn take_host_edits(&self) -> Vec<(ParamId, Normalized)> {
+    /// What no block has taken, claiming the cell, and the generation of the
+    /// writes the drain swept: a flush's, which sends it ahead of whatever it
+    /// must precede. Control side.
+    pub(super) fn take_host_edits(&self) -> (Vec<(ParamId, Normalized)>, Generation) {
         let mut taken = Vec::new();
+        let mut swept = Generation::new(0);
         if let Some(reader) = self.claim_host_edits().as_mut() {
             reader.drain(|id, value| taken.push((id, value)));
+            swept = reader.swept();
         }
-        taken
+        (taken, swept)
+    }
+
+    /// Records that the server answered a flush whose drain had swept `swept`:
+    /// every write up to it is the plugin's, or counted lost. Audio lane's
+    /// thread only; never moves back.
+    pub(super) fn note_acked(&self, swept: Generation) {
+        if swept.has_reached(self.acked()) {
+            self.acked.store(swept.get(), Ordering::Release);
+        }
+    }
+
+    /// The writes the server has answered a flush for ([`note_acked`](Self::note_acked)).
+    /// Wait-free, any thread.
+    pub(super) fn acked(&self) -> Generation {
+        Generation::new(self.acked.load(Ordering::Acquire))
     }
 
     /// The current sample rate. It only sizes a timeout, so a value one block

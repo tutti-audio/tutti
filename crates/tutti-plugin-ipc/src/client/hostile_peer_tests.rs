@@ -2785,6 +2785,110 @@ fn a_late_flush_answer_is_counted_as_one_in_the_window_is() {
     assert_eq!(unapplied_after_late_answer(Applied), 0, "late and applied");
 }
 
+/// A bridge over a server that holds back the answer to its first
+/// `ApplyParameters` until `release`, then answers it `outcome`, and answers
+/// every later one `Applied`. Its audio lane's window is short.
+fn holding_server(outcome: crate::ApplyOutcome) -> (MockServer, std::sync::mpsc::SyncSender<()>) {
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(50);
+        t.rate = Duration::from_millis(10);
+        t
+    };
+    let mock = MockServer::start_lanes_under(
+        "held-flush",
+        timeouts,
+        move |msg| match msg {
+            AudioRequest::ApplyParameters { id, .. } => {
+                let outcome = if first.swap(false, Ordering::SeqCst) {
+                    let _ = release.recv();
+                    outcome
+                } else {
+                    crate::ApplyOutcome::Applied
+                };
+                Action::Audio(Box::new(AudioReply::ParametersApplied { id, outcome }))
+            }
+            other => answer_blocks(other),
+        },
+        |_| Action::Silent,
+    );
+    mock.bridge.audio().declare_host_edits([ParamId::new(1)]);
+    (mock, release_tx)
+}
+
+/// One host write to parameter 1, and the mark a settle takes for it.
+fn write_one(audio: &super::audio::AudioBridge) -> tutti_rt::Generation {
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    audio.edits_queued().expect("a write was made")
+}
+
+/// **A served write is delivered when the server answers a flush that carried
+/// it**, not before: asking for it flushes, and the answer ends the wait.
+#[test]
+fn a_served_write_is_delivered_when_its_flush_is_answered() {
+    let (mock, release) = holding_server(crate::ApplyOutcome::Applied);
+    let audio = mock.bridge.audio();
+    let upto = write_one(audio);
+    assert!(!audio.edits_delivered(upto), "asks for the flush");
+    assert!(!audio.edits_delivered(upto), "asking again changes nothing");
+    release.send(()).expect("the server waits");
+    tutti_fixtures::wait_until("the flush's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+    assert_eq!(audio.unapplied_edits(), 0);
+}
+
+/// **A flush the server refused ends the wait**, with the loss counted: the
+/// settle is `Ready`, not stuck on a write the plugin will never have.
+#[test]
+fn a_refused_flush_ends_the_wait_with_the_loss_counted() {
+    let (mock, release) = holding_server(crate::ApplyOutcome::Refused);
+    let audio = mock.bridge.audio();
+    let upto = write_one(audio);
+    assert!(!audio.edits_delivered(upto));
+    release.send(()).expect("the server waits");
+    tutti_fixtures::wait_until("the flush's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+    assert_eq!(audio.unapplied_edits(), 1);
+}
+
+/// **A flush that timed out leaves the wait open, and its late answer ends
+/// it**: the write may not be in the plugin, so a read after the timeout would
+/// miss it. The lane hears the late answer while it waits for the next flush's.
+#[test]
+fn a_timed_out_flush_leaves_the_wait_open_until_its_late_answer() {
+    let (mock, release) = holding_server(crate::ApplyOutcome::Applied);
+    let audio = mock.bridge.audio();
+    let upto = write_one(audio);
+    assert!(!audio.edits_delivered(upto));
+    // The settle runs behind the flush on the audio lane: once it returns, the
+    // lane has given the flush up.
+    audio.settle();
+    assert!(!audio.edits_delivered(upto), "a timeout is no answer");
+    release.send(()).expect("the server waits");
+    let next = write_one(audio);
+    assert!(!audio.edits_delivered(next), "asks for the next flush");
+    tutti_fixtures::wait_until("the late answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+}
+
+/// **A crashed plugin reads as delivered**: the read or save that follows fails
+/// on its own, by name, and no wait outlives the plugin.
+#[test]
+fn a_crashed_plugin_reads_as_delivered() {
+    let (mock, _release) = holding_server(crate::ApplyOutcome::Applied);
+    let audio = mock.bridge.audio();
+    let upto = write_one(audio);
+    audio.mark_crashed(tutti_plugin_types::PluginFailure::StreamClosed);
+    assert!(audio.edits_delivered(upto));
+}
+
 /// **A shutdown ends a setting's wait through its reply.** The control lane is
 /// held in a query the server answers late, a render mode waits in its slot, and
 /// the bridge is shut down: the lane's end drops the setting's reply, so the
