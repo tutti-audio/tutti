@@ -117,11 +117,12 @@ macro_rules! served_control {
             }
 
             /// Queued on the command bus as the blocks around it are, so the
-            /// change lands between two blocks. `true` when queued, which is
-            /// not whether the plugin acts on the mode (the load-time
-            /// `Features::RENDER_MODE` says), and never needs a restart.
+            /// change lands between two blocks, and never needs a restart.
+            /// `true` when queued. A plugin without `Features::RENDER_MODE` is
+            /// not asked, as one in process is not: it has no mode to take.
             fn set_render_mode(&self, mode: RenderMode) -> bool {
-                !self.link.bridge.audio().is_crashed()
+                self.link.loaded.features.contains(Features::RENDER_MODE)
+                    && !self.link.bridge.audio().is_crashed()
                     && self.link.bridge.audio().set_render_mode(mode)
             }
 

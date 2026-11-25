@@ -38,6 +38,8 @@ pub enum ClapSwitch {
     LatencyChangedInActivate,
     /// Whether the plugin offers `clap.tail` (0 or 1).
     TailExtension,
+    /// Whether the plugin offers `clap.render` (0 or 1).
+    RenderExtension,
     /// Whether the render path scales its output by the `Gain` parameter (0
     /// or 1).
     ApplyGain,
@@ -56,7 +58,8 @@ impl ClapSwitch {
     /// `#[no_mangle] pub unsafe extern "C" fn(u32)`
     /// (`lib.rs`: `set_render_mode`, `set_port_layout`, `set_ports_64bit`,
     /// `request_ports_rescan`, `set_latency_changed_in_activate`,
-    /// `set_latency_at_activation`, `set_tail_extension`; `rt_probe.rs`:
+    /// `set_latency_at_activation`, `set_tail_extension`,
+    /// `set_render_extension`; `rt_probe.rs`:
     /// `set_status_mode`).
     fn symbol(self) -> &'static [u8] {
         match self {
@@ -70,6 +73,7 @@ impl ClapSwitch {
                 b"tutti_test_plugin_set_latency_changed_in_activate\0"
             }
             Self::TailExtension => b"tutti_test_plugin_set_tail_extension\0",
+            Self::RenderExtension => b"tutti_test_plugin_set_render_extension\0",
             Self::ApplyGain => b"tutti_test_plugin_set_apply_gain\0",
             Self::NoteOutPorts => b"tutti_test_plugin_set_note_out_ports\0",
             Self::TimerStall => b"tutti_test_plugin_set_timer_stall_ms\0",

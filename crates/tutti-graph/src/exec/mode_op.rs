@@ -35,7 +35,7 @@ pub(super) fn moded_node_op<
         .last()
         .filter(|p| p.is_mix())
         .map(|p| (p.from, &st.events.pev(p.slot)[..]));
-    let declick = plan.prepare.declick();
+    let declick = head.declick;
     u.mode.mix.drive_step(frames, declick, source);
 
     let want = u.mode.seen();

@@ -102,13 +102,14 @@ pub use protocol::{
     ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
     GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling, Lane,
-    LaneOpened, LoadPlugin, LoadPreset, LoadState, Message, News, OpenEditor, OpenLane,
-    PROTOCOL_VERSION, ParameterList, ParameterNormalized, ParameterPlain, ParameterText,
+    LaneOpened, LoadPlugin, LoadPreset, LoadState, Message, ModeOutcome, News, OpenEditor,
+    OpenLane, PROTOCOL_VERSION, ParameterList, ParameterNormalized, ParameterPlain, ParameterText,
     ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn, PresetList,
-    PresetLoaded, ProcessAudioData, Reaction, ReqId, Request, SampleRateSet, SaveState, SavedState,
-    SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
-    SetupSharedMemory, SharedMemoryReady, Shutdown, SlabLayout, StageState, StagedState,
-    StateLoaded, StateReady, StateStaged, Stop, Unanswered, Wiring, Working, serve,
+    PresetLoaded, ProcessAudioData, Reaction, RenderModeSet, ReqId, Request, SampleRateSet,
+    SaveState, SavedState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
+    SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, SlabLayout,
+    StageState, StagedState, StateLoaded, StateReady, StateStaged, Stop, Unanswered, Wiring,
+    Working, serve,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;

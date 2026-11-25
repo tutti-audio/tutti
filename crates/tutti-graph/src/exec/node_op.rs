@@ -364,6 +364,8 @@ pub(crate) struct Head<'p, 'e> {
     pub(crate) meter: Option<&'e MeterMap>,
     /// The project's tempo map for the block: lent by the host, read-only.
     pub(crate) tempo: Option<&'e TempoMap>,
+    /// The block's declick length (`BlockInputs::declick`).
+    pub(crate) declick: Samples,
 }
 
 /// What a node op may write besides its own unit: every buffer through `A`
@@ -437,7 +439,7 @@ pub(super) fn run_params<
         .iter()
         .peekable();
     let declared = h.pu.shape.params;
-    let declick = plan.prepare.declick();
+    let declick = h.declick;
     // The state was sized from the unit's shape; a fade's two units declare
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());

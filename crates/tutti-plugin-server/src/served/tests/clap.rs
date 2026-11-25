@@ -1708,6 +1708,39 @@ fn a_render_mode_toggle_does_not_cycle_the_plugin() {
     assert!(instance.is_active());
 }
 
+/// **A plugin with no render mode answers `Unsupported` every time it is
+/// asked**, whatever mode it was asked before: asking it again, or for the mode
+/// it already runs in, is not taking it.
+#[test]
+fn a_plugin_with_no_render_extension_answers_unsupported_every_time() {
+    use tutti_plugin_ipc::ModeOutcome;
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+    let mut instance = {
+        let _without = crate::test_utils::clap_probe_without_render();
+        ClapInstance::load_first(
+            main_thread(),
+            Path::new(clap_plugin()),
+            44100.0,
+            512,
+            FloatWidth::F32,
+        )
+        .expect("load")
+    };
+    for mode in [
+        RenderMode::Realtime,
+        RenderMode::Offline,
+        RenderMode::Offline,
+        RenderMode::Realtime,
+    ] {
+        assert_eq!(
+            instance.set_render_mode(main_thread(), mode),
+            ModeOutcome::Unsupported,
+            "{mode:?}"
+        );
+    }
+    assert!(instance.is_active());
+}
+
 // ── Parameter Get/Set Roundtrip ──
 
 /// **A parameter written to an active plugin also reaches the next block**
