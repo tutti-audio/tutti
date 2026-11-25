@@ -106,6 +106,14 @@ pub enum PluginParamRefusal {
     /// The parameter is declared read-only.
     #[error("parameter {0} is read-only")]
     ReadOnly(tutti_units::ParamId),
+    /// The plugin is lost (crashed or gone), so the write to this parameter
+    /// was not stored.
+    #[error("the plugin is lost: parameter {0} was not written")]
+    Lost(tutti_units::ParamId),
+    /// A served plugin did not answer in time (or has given no parameter list
+    /// yet), so the write to this parameter was not stored: ask again.
+    #[error("the plugin did not answer its parameter list: parameter {0} was not written")]
+    Unanswered(tutti_units::ParamId),
     /// The parameter's declaration no longer reads as the target's unit.
     #[error(transparent)]
     Unit(#[from] UnitError),

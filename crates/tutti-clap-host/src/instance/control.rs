@@ -724,6 +724,16 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
+    /// The values queued to the Processor.
+    fn queued(&self) -> Option<tutti_rt::Generation> {
+        Some(self.queued_edits())
+    }
+
+    /// The plugin has processed the values queued up to `upto`.
+    fn delivered(&self, upto: tutti_rt::Generation) -> bool {
+        self.edits_delivered(upto)
+    }
+
     /// Applied at the head of the Processor's next block: the slot of the
     /// parameter keeps the latest value.
     fn queue_write(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {

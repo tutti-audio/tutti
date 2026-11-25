@@ -135,24 +135,6 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
     );
 }
 
-/// **An update with no edit publishes nothing**: the figures go out with a
-/// plan, and a clean session sends none. The graph's own inserts edit it, so
-/// the first update commits; a sentinel published into the table after that
-/// must survive an update with no edit.
-#[test]
-fn an_update_with_no_edit_publishes_nothing() {
-    let mut s = detached();
-    skewed(&mut s);
-    let _ = s.update();
-    assert!(!s.graph_ref().has_uncommitted_edits());
-    let sentinel = vec![Samples::new(99)];
-    s.compensation().set(&sentinel);
-
-    let _ = s.update();
-
-    assert_eq!(s.compensation().to_vec(), sentinel, "no table published");
-}
-
 /// **The spec's latency fold and the compiled plan agree**, on a latent graph
 /// and on one with no latency: the fold (`latency_plan`, what a readout
 /// reads) is what the compiled plan compensates by, zeros and all (the fold

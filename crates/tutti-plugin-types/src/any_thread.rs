@@ -7,9 +7,9 @@
 //! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
-    Answer, AutomationMode, AutomationModeError, BypassWrite, OwnBypass, ParameterInfo,
-    PipelineCounts, PluginFailure, RenderMode, StateError, StateUse, TerminationReason,
-    UnknownParam, bypass_value,
+    Answer, AutomationMode, AutomationModeError, BypassWrite, OwnBypass, ParamWriteError,
+    ParameterInfo, PipelineCounts, PluginFailure, RenderMode, StateError, StateUse,
+    TerminationReason, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -66,9 +66,12 @@ pub trait AnyThread: Send + Sync {
     /// plugin comes first: it never waits for the plugin, is never dropped for
     /// a locked instance or for lack of room, and a newer write to the same
     /// parameter replaces one no block has taken. **A served** plugin's is
-    /// queued on its control connection, where a full queue refuses it, counted.
-    /// A lost or restarting plugin answers `Ok`, and its recovery restores from
-    /// the caller's mirror.
+    /// stored in its slot on the client and sent with the next block.
+    ///
+    /// A write to a plugin that is lost is refused with
+    /// [`ParamWriteError::Lost`], in both hostings, and is not counted in
+    /// [`Health::refused_edits`], which counts only the writes a plugin
+    /// refused when they were applied.
     ///
     /// **A control-side call**: it takes a lock (in process the slots' writer,
     /// served the declared list), so it belongs to the session's control
@@ -79,8 +82,11 @@ pub trait AnyThread: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`UnknownParam`] when the plugin did not declare `id`.
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam>;
+    /// [`ParamWriteError::Undeclared`] when the plugin did not declare `id`;
+    /// [`ParamWriteError::Lost`] when it is lost;
+    /// [`ParamWriteError::Unanswered`] when a served plugin gave no parameter
+    /// list to check `id` against. Nothing is stored in any of the three.
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError>;
 
     /// The plain value `value` stands for, converted by the plugin's format
     /// ([`Control::parameter_plain`](crate::Control::parameter_plain)), so a
@@ -144,7 +150,8 @@ pub trait AnyThread: Send + Sync {
             OwnBypass::Parameter(id) => {
                 match self.set_parameter_value(id, bypass_value(bypassed)) {
                     Ok(()) => BypassWrite::Sent,
-                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                    Err(ParamWriteError::Lost(_)) => BypassWrite::Lost,
+                    Err(_) => BypassWrite::Refused,
                 }
             }
             OwnBypass::Property => BypassWrite::Lost,
@@ -197,9 +204,10 @@ pub trait Health: Send + Sync {
     fn block_counts(&self) -> PipelineCounts;
 
     /// Host parameter writes the plugin did not take, over its life: a write
-    /// refused when it was applied (a read-only or withdrawn parameter), and
-    /// one made to a plugin that was already lost. A served plugin's is the
-    /// server's count, as it last told.
+    /// refused when it was applied (a read-only or withdrawn parameter). A
+    /// write to a plugin that was already lost is refused at the call
+    /// ([`AnyThread::set_parameter_value`]) and not counted. A
+    /// served plugin's is the server's count, as it last told.
     fn refused_edits(&self) -> u64;
 
     /// Ends the plugin's server process, latching
@@ -229,7 +237,11 @@ mod tests {
         fn parameter_value(&self, _: ParamId) -> Answer<Option<Normalized>> {
             Answer::ready(None)
         }
-        fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+        fn set_parameter_value(
+            &self,
+            id: ParamId,
+            value: Normalized,
+        ) -> Result<(), ParamWriteError> {
             self.written.lock().push((id, value.get()));
             Ok(())
         }

@@ -533,7 +533,7 @@ pub struct Graph<F: Float = f32> {
     resumed: bool,
     /// The per-channel pre-roll of the plan sent last, for sources outside
     /// the graph (a disk stream), republished with every plan.
-    compensation: Arc<tutti_graph::PrerollTable>,
+    compensation: Arc<crate::PrerollTable>,
     /// The total latency of the plan sent last.
     latency: Samples,
 }
@@ -3778,7 +3778,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// The per-channel pre-roll of the plan sent last.
-    pub(crate) fn compensation(&self) -> &Arc<tutti_graph::PrerollTable> {
+    pub(crate) fn compensation(&self) -> &Arc<crate::PrerollTable> {
         &self.compensation
     }
 

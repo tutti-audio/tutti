@@ -1026,6 +1026,31 @@ fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
     assert_eq!(crashes.load(Ordering::Relaxed), 1, "heard once");
 }
 
+/// **A write to a lost in-process plugin fails at the call**, and is not counted
+/// as a refusal: no node drains a lost plugin's slots, so `Ok` would be a write
+/// that goes nowhere.
+#[test]
+fn a_write_to_a_lost_in_process_plugin_fails_at_the_call() {
+    let rig = Rig::new(None, Features::TRANSPORT);
+    ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
+    let (_client, handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
+        SR,
+    )
+    .expect("the recording plugin loads");
+    rig.panic_in_flush.store(true, Ordering::Relaxed);
+    handle.editor_idle(main_thread());
+    assert!(handle.is_crashed());
+    let written = handle.send_parameter(ParamId::new(1), Normalized::of(0.5));
+    assert_eq!(
+        written,
+        Err(tutti_plugin_types::ParamWriteError::Lost(ParamId::new(1)))
+    );
+    assert_eq!(handle.refused_edits(), 0, "a refusal counts only refusals");
+}
+
 /// **A rebuilt node of a plugin with controls of its own counts into the same
 /// cells, once**: the second node's overflow of MIDI out and chords adds its
 /// own to the total, nothing is reset by the rebuild and nothing counted twice.

@@ -230,7 +230,7 @@ impl tutti_plugin_host::MainThreadControl for Draining {
     fn settle(
         &self,
         _main: tutti_plugin_types::MainThreadMarker,
-        _mark: tutti_rt::Generation,
+        _pending: &mut tutti_plugin_host::PendingWrites,
     ) -> std::task::Poll<()> {
         if self.draining.load(std::sync::atomic::Ordering::Acquire) {
             std::task::Poll::Pending

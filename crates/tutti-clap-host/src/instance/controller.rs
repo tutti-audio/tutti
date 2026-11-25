@@ -43,6 +43,9 @@ pub struct ClapController {
     loaded: Option<ClapLoaded>,
     /// The writes to the Processor: one slot per declared parameter.
     edits: EditWriter,
+    /// What the Processor has taken of `edits`: published once the plugin's
+    /// call that took the values has returned.
+    delivered: tutti_rt::GenerationWatch,
     /// The ranges the Processor denormalizes against, republished after a
     /// rescan that changed the parameters.
     pub(crate) ranges: Publisher<RangeTable>,
@@ -67,7 +70,7 @@ impl std::fmt::Debug for ClapController {
 impl ClapController {
     pub(crate) fn new(
         loaded: ClapLoaded,
-        edits: EditWriter,
+        (edits, delivered): (EditWriter, tutti_rt::GenerationWatch),
         ranges: Publisher<RangeTable>,
         pools: Publisher<PoolCell>,
         (reported, reports_dropped): (ReportDrain, Arc<AtomicU64>),
@@ -75,6 +78,7 @@ impl ClapController {
         Self {
             loaded: Some(loaded),
             edits,
+            delivered,
             ranges,
             pools,
             reported,
@@ -177,6 +181,16 @@ impl ClapController {
         // this call, so the slot exists.
         let written = self.edits.write(id, value);
         debug_assert!(written.is_ok(), "{written:?}");
+    }
+
+    /// How many values [`queue_edit`](Self::queue_edit) has stored.
+    pub(crate) fn queued_edits(&self) -> tutti_rt::Generation {
+        self.edits.written()
+    }
+
+    /// Whether the plugin has processed the values queued up to `upto`.
+    pub(crate) fn edits_delivered(&self, upto: tutti_rt::Generation) -> bool {
+        self.delivered.get().has_reached(upto)
     }
 
     /// Makes every write made so far stale (see [`EditWriter::reset`]).

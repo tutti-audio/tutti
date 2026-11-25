@@ -58,7 +58,6 @@ pub(crate) mod main_output;
 pub(crate) mod order;
 mod place;
 pub(crate) mod plan;
-pub(crate) mod preroll;
 pub(crate) mod program;
 pub(crate) mod schedule;
 mod shapes;
