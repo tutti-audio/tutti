@@ -27,7 +27,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
-    Adsr, Declarations, Law, LayerClock, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
+    Adsr, Declarations, Law, LayerClock, LfoShape, Polarity, RouteDecl, RouteKey, Scale,
     Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
 };
 use tutti_music::FrameClock;
@@ -315,10 +315,11 @@ impl Decl {
             RouteKey(k),
             RouteDecl {
                 source,
-                to: RouteTarget::Param(to),
+                to,
                 depth: Param::new(Bipolar::of(depth)),
                 polarity: Polarity::Bipolar,
                 curve: Law::Linear,
+                scale: None,
             },
         ));
         RouteKey(k)
@@ -347,6 +348,32 @@ impl Decl {
         for (r, d) in &mut self.routes {
             if *r == k {
                 d.polarity = polarity;
+            }
+        }
+    }
+
+    /// Scales route `k` by `source` at `depth`, bipolar and linear.
+    fn scale(&mut self, k: RouteKey, source: SourceKey, depth: f64) {
+        for (r, d) in &mut self.routes {
+            if *r == k {
+                d.scale = Some(Scale {
+                    source,
+                    depth: Param::new(Bipolar::of(depth)),
+                    polarity: Polarity::Bipolar,
+                    curve: Law::Linear,
+                });
+            }
+        }
+    }
+
+    fn set_scale_depth(&mut self, k: RouteKey, depth: f64) {
+        for (r, d) in &mut self.routes {
+            if *r == k {
+                d.scale
+                    .as_ref()
+                    .expect("scaled")
+                    .depth
+                    .store(Bipolar::of(depth));
             }
         }
     }
@@ -1211,7 +1238,7 @@ fn a_target_moved_to_another_key_on_its_port_takes_it() {
     let one = r.host.targets[&1].clone();
     r.host.targets.insert(7, one);
     r.decl.targets[0].0 = cutoff_of(7);
-    r.decl.routes[0].1.to = RouteTarget::Param(cutoff_of(7));
+    r.decl.routes[0].1.to = cutoff_of(7);
     let applied = r
         .host
         .apply(&mut r.m, &r.decl.get(), &mut r.ed)
@@ -1568,28 +1595,22 @@ fn a_steady_apply_is_skipped_and_renders_the_same() {
 }
 
 /// The rig with a macro of 1 at depth 0.2 on probe 1's cutoff (`0..=1000`,
-/// knob 500), scaled by a macro of 0.5 through a depth route of depth 1:
-/// the offset is `1000 * 0.2 * 1 * 0.5` = 100, so 600. Steady; returns the
-/// scaled route and its depth route.
-fn scaled_rig() -> (Rig, RouteKey, RouteKey) {
+/// knob 500), scaled by a macro of 0.5 at depth 1: the offset is
+/// `1000 * 0.2 * 1 * 0.5` = 100, so 600. Steady; returns the scaled route.
+fn scaled_rig() -> (Rig, RouteKey) {
     let mut r = rig(128);
     r.decl.routes.clear();
     r.decl.sources.clear();
     let full = r.decl.source(5, ModSource::Macro { value: 1.0 });
     let half = r.decl.source(6, ModSource::Macro { value: 0.5 });
     let scaled = r.decl.route(7, full, cutoff_of(1), 0.2);
-    let by = r.decl.route(8, half, cutoff_of(1), 1.0);
-    for (k, route) in &mut r.decl.routes {
-        if *k == by {
-            route.to = RouteTarget::Depth(scaled);
-        }
-    }
+    r.decl.scale(scaled, half, 1.0);
     render(&mut r.ed, &mut r.exec, 128, 128);
     reapply(&mut r);
     r.m.commit(&mut r.ed).expect("commits");
     near(tail(&mut r), 600.0);
     steady(&mut r);
-    (r, scaled, by)
+    (r, scaled)
 }
 
 /// The probe's last frame after 1024 more.
@@ -1601,28 +1622,28 @@ fn near(got: f32, want: f32) {
     assert!((got - want).abs() < 1e-3, "{got} is not {want}");
 }
 
-/// **A depth write to a route that a depth route scales lands from the cell.**
+/// **A depth write to a scaled route lands from the cell.**
 /// In [`scaled_rig`]'s state (600), writing the scaled route's depth to 0.6
 /// after a steady state commits and republishes nothing, and the next
 /// block reads `1000 * 0.6 * 0.5` = 300, so 800.
 #[test]
 fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
-    let (mut r, scaled, _) = scaled_rig();
+    let (mut r, scaled) = scaled_rig();
     r.decl.set_depth(scaled, 0.6);
     let applied = reapply(&mut r);
     assert!(!applied.commit && applied.republished.is_empty());
     near(tail(&mut r), 800.0);
 }
 
-/// **A depth route's own depth write is applied.** The depth route's cell is
+/// **A scale's own depth write is applied.** The scale's cell is
 /// read when compiled, so only the memo's record of it makes the apply run:
 /// from [`scaled_rig`]'s state (scaled depth 0.2, scale `0.5 * 1`), writing
-/// the depth route's depth to 0.5 republishes the cutoff's program without a
+/// the scale's depth to 0.5 republishes the cutoff's program without a
 /// commit, and the next block reads `1000 * 0.2 * (0.5 * 0.5)` = 50, so 550.
 #[test]
-fn a_depth_routes_own_depth_write_is_applied() {
-    let (mut r, _, by) = scaled_rig();
-    r.decl.set_depth(by, 0.5);
+fn a_scales_own_depth_write_is_applied() {
+    let (mut r, scaled) = scaled_rig();
+    r.decl.set_scale_depth(scaled, 0.5);
     let applied = reapply(&mut r);
     assert!(!applied.commit);
     assert_eq!(applied.republished, vec![cutoff_of(1)]);

@@ -55,18 +55,32 @@ fn seconds(rate: f64) -> LayerClock {
     }
 }
 
-fn route(source: u64, to: RouteTarget, depth: f64) -> RouteDecl {
+fn route(source: u64, to: TargetKey, depth: f64) -> RouteDecl {
     RouteDecl {
         source: SourceKey(source),
         to,
         depth: Param::new(Bipolar::of(depth)),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
+        scale: None,
     }
 }
 
-fn to(node: u64) -> RouteTarget {
-    RouteTarget::Param(target(node))
+/// `route` with its depth scaled by `source` at `depth`, bipolar and linear.
+fn scaled(route: RouteDecl, source: u64, depth: f64) -> RouteDecl {
+    RouteDecl {
+        scale: Some(Scale {
+            source: SourceKey(source),
+            depth: Param::new(Bipolar::of(depth)),
+            polarity: Polarity::Bipolar,
+            curve: Law::Linear,
+        }),
+        ..route
+    }
+}
+
+fn to(node: u64) -> TargetKey {
+    target(node)
 }
 
 fn follower() -> Source {
@@ -140,17 +154,10 @@ impl Rig {
         ];
         let routes = vec![
             (RouteKey(100), route(10, to(1), 0.3)),
-            (RouteKey(101), route(11, to(1), 0.1)),
+            (RouteKey(101), scaled(route(11, to(1), 0.1), 12, 1.0)),
             (RouteKey(102), route(12, to(2), 0.2)),
             (RouteKey(103), route(13, to(2), -0.6)),
-            (
-                RouteKey(104),
-                route(14, RouteTarget::Param(plugin(4, 7)), 0.5),
-            ),
-            (
-                RouteKey(105),
-                route(12, RouteTarget::Depth(RouteKey(101)), 1.0),
-            ),
+            (RouteKey(104), route(14, plugin(4, 7), 0.5)),
             (RouteKey(106), route(15, to(3), 0.4)),
             (RouteKey(107), route(13, to(1), 0.25)),
         ];
@@ -274,10 +281,11 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                 let want = 0.0f64 + (-0.0 + shape(raw, depth, polarity, curve) * span);
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
-                    to: RouteTarget::Param(t),
+                    to: (t),
                     depth: Param::new(depth),
                     polarity,
                     curve,
+                    scale: None,
                 };
                 // A triangle on 4 beats is +1 at beat 1, −1 at beat 3, +0.5
                 // at beat 0.5 and −0.5 at beat 2.5, exactly.
@@ -300,17 +308,18 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                     (RouteKey(2), r(2, target(2))),
                     (RouteKey(3), r(3, target(3))),
                     (RouteKey(4), r(4, plugin(4, 1))),
-                    (RouteKey(5), r(1, plugin(5, 2))),
-                    // Scales route 5 by a macro at +1 through the unit
-                    // amount: a scale of exactly 1.
+                    // Scaled by a macro at +1 through the unit amount: a scale
+                    // of exactly 1.
                     (
-                        RouteKey(6),
+                        RouteKey(5),
                         RouteDecl {
-                            source: SourceKey(5),
-                            to: RouteTarget::Depth(RouteKey(5)),
-                            depth: Param::new(Bipolar::MAX),
-                            polarity: Polarity::Unipolar,
-                            curve: Law::Linear,
+                            scale: Some(Scale {
+                                source: SourceKey(5),
+                                depth: Param::new(Bipolar::MAX),
+                                polarity: Polarity::Unipolar,
+                                curve: Law::Linear,
+                            }),
+                            ..r(1, plugin(5, 2))
                         },
                     ),
                 ];
@@ -619,50 +628,20 @@ fn each_refusal_fires_by_name() {
         run(&one_lfo, &r1, &live),
         Err(ProgramCompileError::LiveCurve(target(1)))
     );
-    // A depth_by chain deeper than one.
-    let two = [
-        (SourceKey(1), lfo(LfoShape::Sine, beats(1.0))),
-        (SourceKey(2), Source::Macro { value: 0.5 }),
-    ];
-    let chain = [
-        (RouteKey(1), route(1, to(1), 0.5)),
-        (RouteKey(2), route(2, RouteTarget::Depth(RouteKey(1)), 1.0)),
-        (RouteKey(3), route(2, RouteTarget::Depth(RouteKey(2)), 1.0)),
-    ];
-    assert_eq!(
-        run(&two, &chain, &t1),
-        Err(ProgramCompileError::DepthByChain { route: RouteKey(3) })
-    );
-    // Two depth routes to one route.
-    let twice = [
-        (RouteKey(1), route(1, to(1), 0.5)),
-        (RouteKey(2), route(2, RouteTarget::Depth(RouteKey(1)), 1.0)),
-        (RouteKey(3), route(1, RouteTarget::Depth(RouteKey(1)), 1.0)),
-    ];
-    assert_eq!(
-        run(&two, &twice, &t1),
-        Err(ProgramCompileError::TwoDepthBy { route: RouteKey(1) })
-    );
-    // A depth route from a signal source, and to a route from one.
+    // A scale from a signal source, and of a route from one.
     let sig = [
         (SourceKey(1), lfo(LfoShape::Sine, beats(1.0))),
         (SourceKey(2), follower()),
     ];
-    let from_signal = [
-        (RouteKey(1), route(1, to(1), 0.5)),
-        (RouteKey(2), route(2, RouteTarget::Depth(RouteKey(1)), 1.0)),
-    ];
+    let from_signal = [(RouteKey(1), scaled(route(1, to(1), 0.5), 2, 1.0))];
     assert_eq!(
         run(&sig, &from_signal, &t1),
-        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(1) })
     );
-    let of_signal = [
-        (RouteKey(1), route(2, to(1), 0.5)),
-        (RouteKey(2), route(1, RouteTarget::Depth(RouteKey(1)), 1.0)),
-    ];
+    let of_signal = [(RouteKey(1), scaled(route(2, to(1), 0.5), 1, 1.0))];
     assert_eq!(
         run(&sig, &of_signal, &t1),
-        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(1) })
     );
     // Unknown references.
     assert_eq!(
@@ -672,10 +651,10 @@ fn each_refusal_fires_by_name() {
     assert_eq!(
         run(
             &one_lfo,
-            &[(RouteKey(2), route(1, RouteTarget::Depth(RouteKey(9)), 1.0))],
+            &[(RouteKey(2), scaled(route(1, to(1), 1.0), 9, 1.0))],
             &t1
         ),
-        Err(ProgramCompileError::UnknownRoute { route: RouteKey(2) })
+        Err(ProgramCompileError::UnknownSource { route: RouteKey(2) })
     );
     assert_eq!(
         run(&one_lfo, &r1, &[]),
@@ -805,18 +784,16 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
                 RouteKey(100 + s),
                 RouteDecl {
                     source: SourceKey(s),
-                    to: RouteTarget::Param(target(1 + k % 2)),
+                    to: (target(1 + k % 2)),
                     depth: Param::new(Bipolar::of(0.3)),
                     polarity,
                     curve,
+                    scale: None,
                 },
             ));
         }
     }
-    routes.push((
-        RouteKey(999),
-        route(0, RouteTarget::Param(plugin(5, 3)), 0.2),
-    ));
+    routes.push((RouteKey(999), route(0, plugin(5, 3), 0.2)));
     let targets = [
         (target(1), ranged(20.0, 20_000.0)),
         (target(2), ranged(0.0, 1.0)),
@@ -839,7 +816,7 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
 
 /// The clock of `route`'s layer in `target` (`depth_by` its scaler's id).
 fn layer_clock(c: &Compiled, t: TargetKey, route: u64, depth_by: Option<u64>) -> LayerClock {
-    let id = layer_id(RouteKey(route), depth_by.map(RouteKey));
+    let id = layer_id(RouteKey(route), depth_by.map(SourceKey));
     c.programs[&t]
         .layers()
         .iter()
@@ -901,14 +878,11 @@ fn a_depth_by_change_keeps_the_lfos_anchor() {
     *rig.source_mut(10) = lfo(LfoShape::Sine, seconds(4.0));
     let c1 = rig.compile(Some(&c0), now(3, 480_000));
     let a1 = anchor_of(layer_clock(&c1, target(1), 100, None)).expect("anchored");
-    rig.routes.push((
-        RouteKey(201),
-        route(15, RouteTarget::Depth(RouteKey(100)), 1.0),
-    ));
+    rig.route_mut(100).scale = scaled(route(10, to(1), 0.0), 15, 1.0).scale;
     let c2 = rig.compile(Some(&c1), now(3, 600_000));
-    let scaled = layer_clock(&c2, target(1), 100, Some(201));
+    let scaled = layer_clock(&c2, target(1), 100, Some(15));
     assert_eq!(anchor_of(scaled), Some(a1), "adding a depth_by keeps it");
-    rig.routes.retain(|(k, _)| k.0 != 201);
+    rig.route_mut(100).scale = None;
     let c3 = rig.compile(Some(&c2), now(3, 700_000));
     let plain = layer_clock(&c3, target(1), 100, None);
     assert_eq!(anchor_of(plain), Some(a1), "removing it keeps it");
@@ -1071,12 +1045,9 @@ fn a_depth_by_scaler_reads_its_own_lfos_clock() {
     let mut rig = Rig::new();
     rig.sources
         .push((SourceKey(20), lfo(LfoShape::Sine, seconds(3.0))));
-    rig.routes.push((
-        RouteKey(201),
-        route(20, RouteTarget::Depth(RouteKey(100)), 1.0),
-    ));
+    rig.route_mut(100).scale = scaled(route(10, to(1), 0.0), 20, 1.0).scale;
     let depth_clock = |c: &Compiled| {
-        let id = layer_id(RouteKey(100), Some(RouteKey(201)));
+        let id = layer_id(RouteKey(100), Some(SourceKey(20)));
         c.programs[&target(1)]
             .layers()
             .iter()
@@ -1095,7 +1066,7 @@ fn a_depth_by_scaler_reads_its_own_lfos_clock() {
     assert!(anchor_of(c1.clocks[&SourceKey(20)]).is_some(), "anchored");
     assert_eq!(depth_clock(&c1), c1.clocks[&SourceKey(20)]);
     assert_eq!(
-        layer_clock(&c1, target(1), 100, Some(201)),
+        layer_clock(&c1, target(1), 100, Some(20)),
         c1.clocks[&SourceKey(10)]
     );
 }
@@ -1111,7 +1082,7 @@ fn an_edge_is_a_target_apart_from_a_param_of_the_same_bits() {
     assert_eq!(target(1).node(), Some(1));
     let sources = [(SourceKey(1), lfo(LfoShape::Sine, seconds(1.0)))];
     let routes = [
-        (RouteKey(1), route(1, RouteTarget::Param(edge), 0.5)),
+        (RouteKey(1), route(1, edge, 0.5)),
         (RouteKey(2), route(1, to(1), 0.25)),
     ];
     let targets = [(edge, ranged(-1.0, 1.0)), (target(1), ranged(20.0, 200.0))];
@@ -1132,7 +1103,7 @@ fn a_mix_is_a_target_apart_from_an_edge_and_a_param_of_the_same_bits() {
     assert_eq!(mix.node(), Some(1));
     let sources = [(SourceKey(1), lfo(LfoShape::Sine, seconds(1.0)))];
     let routes = [
-        (RouteKey(1), route(1, RouteTarget::Param(mix), 0.5)),
+        (RouteKey(1), route(1, mix, 0.5)),
         (RouteKey(2), route(1, to(1), 0.25)),
     ];
     let targets = [(mix, ranged(0.0, 1.0)), (target(1), ranged(20.0, 200.0))];

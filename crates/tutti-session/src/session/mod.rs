@@ -16,7 +16,7 @@ pub use event::SessionEvent;
 pub use main_output::MainOutputTopologyStatus;
 #[cfg(feature = "midi")]
 pub use parts::MidiNodes;
-pub use phases::{ModInput, PHASES, Phase, PhaseCx};
+pub use phases::{PHASES, Phase, PhaseCx};
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -218,7 +218,7 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
 #[cfg(feature = "plugin")]
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// Serves the plugins: the part of a phase only an `f32` session has.
-    pub(crate) fn serve_plugins(&mut self, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
+    pub(crate) fn serve_plugins(&mut self, cx: PhaseCx, out: &mut Vec<SessionEvent>) {
         self.plugins_phase(cx, out);
         self.rebind_plugins(cx.main, out);
     }
@@ -466,10 +466,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         crate::ModsView::new(&self.mods.own)
     }
 
-    /// The session's own modulation declarations, to edit (design 015
-    /// §4.3, §5.1): the next update applies them. A session has one
-    /// declarer: while these hold anything, a host's
-    /// [`ModInput`] is refused.
+    /// The session's own modulation declarations, to edit: the next update
+    /// applies them.
     pub fn mods_mut(&mut self) -> crate::Mods<'_> {
         // Whatever the handle edits is built into the next apply's
         // declarations.

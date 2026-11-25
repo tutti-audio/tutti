@@ -69,6 +69,7 @@ enum modulation::ModRefusal
 enum modulation::ModTarget
 enum modulation::Problem
 enum modulation::RouteError
+enum modulation::ScaleError
 enum modulation::SourceError
 enum modulation::SourceName
 enum modulation::TargetName
@@ -115,6 +116,8 @@ enum value::error::PluginParamRefusal
 enum value::error::SetRefusal
 enum value::error::UnitError
 enum value::error::ValueErrorKind
+enum value::slot::DepthKey
+enum value::slot::ShapeKey
 enum value::slot::SlotId
 enum value::target::TargetId
 enum value::watcher::ChangedBy
@@ -522,6 +525,7 @@ fn modulation::Mods::record
 fn modulation::Mods::remove_route
 fn modulation::Mods::remove_source
 fn modulation::Mods::route
+fn modulation::Mods::scale
 fn modulation::Mods::set_source
 fn modulation::Mods::take_mut
 fn modulation::Mods::view
@@ -542,7 +546,7 @@ fn modulation::ParamRef::unit_at
 fn modulation::RouteSpec::curve
 fn modulation::RouteSpec::new
 fn modulation::RouteSpec::polarity
-fn modulation::declare_targets
+fn modulation::Scale::new
 fn peer::Presence::cause
 fn peer::Presence::is_live
 fn peer_state::OtherPeer::expected
@@ -694,7 +698,6 @@ fn session::main_output::Session::main_output_topology_status
 fn session::main_output::Session::output_device
 fn session::main_output::Session::requested_main_output_topology
 fn session::phases::PhaseCx::at
-fn session::phases::PhaseCx::with_mods
 fn session::phases::Session::commit
 fn session::phases::Session::run_phase
 fn session::phases::Session::update
@@ -784,6 +787,7 @@ fn value::controls::MixTarget::of
 fn value::controls::ModeTarget::node
 fn value::controls::ModeTarget::of
 fn value::depth::DepthTarget::of
+fn value::depth::DepthTarget::scale_of
 fn value::depth::DepthTarget::source
 fn value::depth::DepthTarget::target
 fn value::edit_log::EditLog::cap
@@ -801,11 +805,13 @@ fn value::plugin::PluginMidiMapTarget::node
 fn value::plugin::PluginParamTarget::id
 fn value::plugin::PluginParamTarget::node
 fn value::plugin::PluginTrackInfoTarget::node
+fn value::program::CurveTarget::scale_of
 fn value::program::ModRouteId::curve
 fn value::program::ModRouteId::polarity
 fn value::program::ModSourceId::rate
 fn value::program::ModSourceId::value
 fn value::program::ParamTarget::automation
+fn value::program::PolarityTarget::scale_of
 fn value::range::ParamTarget::range
 fn value::range::RangeTarget::of
 fn value::saved::SavedValues::is_empty
@@ -970,6 +976,7 @@ struct modulation::NoSuchModSource
 struct modulation::ParamRef
 struct modulation::RouteInfo
 struct modulation::RouteSpec
+struct modulation::Scale
 struct modulation::SourceInfo
 struct peer::PeerResourceId
 struct peer_state::OtherPeer
@@ -1010,7 +1017,6 @@ struct sampler::OpenStream
 struct sampler::OpenedStream
 struct session::Session
 struct session::parts::midi::MidiNodes
-struct session::phases::ModInput
 struct session::phases::PhaseCx
 struct switch::ClockError
 struct take::Punch
