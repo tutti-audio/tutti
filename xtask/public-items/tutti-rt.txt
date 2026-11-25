@@ -8,7 +8,6 @@ const request_flags::RequestFlags::NONE
 const spin::BlockWaits::DEFAULT
 enum fault_latch::Drained
 enum handoff::Handback
-enum last_out::Party
 enum render_gate::GateState
 enum ring::Overflow
 enum ring::PushError
@@ -77,6 +76,7 @@ fn cell::AudioThreadCell::try_borrow_mut
 fn claim_lock::Claim::claim
 fn claim_lock::Claim::is_dead
 fn claim_lock::Claim::new
+fn claim_lock::Claim::take
 fn claim_lock::Claim::try_claim
 fn dirty_set::DirtyIndex::get
 fn dirty_set::DirtySet::index
@@ -130,8 +130,6 @@ fn job_gate::JobGate::run
 fn job_gate::JobGate::try_run
 fn job_gate::JobGate::waits
 fn job_gate::JobGate::with_waits
-fn last_out::LastOut::leave
-fn last_out::LastOut::new
 fn level_cell::LevelReader::take
 fn level_cell::LevelWriter::fold
 fn level_cell::level_cell
@@ -322,7 +320,6 @@ struct gauge::tally::TallyWriter
 struct handoff::Handoff
 struct handoff::Rt
 struct job_gate::JobGate
-struct last_out::LastOut
 struct level_cell::LevelReader
 struct level_cell::LevelSpan
 struct level_cell::LevelWriter
