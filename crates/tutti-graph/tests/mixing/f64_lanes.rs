@@ -3,6 +3,8 @@
 //! in `f64`; the edge-weight and mix lanes ramp in `f64`. A param event's ramp
 //! or segment is rendered from its `f64` payload.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::Float;
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
@@ -114,7 +116,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .unwrap();
     ed.connect_param(at, EventOutputPort::new(SRC, 0)).unwrap();
     if let Some(range) = range {
@@ -234,7 +236,7 @@ fn a_range_change_lands_on_the_next_block() {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .unwrap();
     ed.connect_param(at, EventOutputPort::new(SRC, 0)).unwrap();
     ed.commit().expect("commits");
@@ -309,7 +311,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
     let from = PortSource::Node(OutputPort::new(LANE, 0));
-    ed.wire_outputs([from]).unwrap();
+    ed.wire_declared_outputs([from]).unwrap();
     let id = EdgeId::into_output(0, from);
     ed.set_edge_gain(id, Gain::new(0.5)).expect("an edge");
     ed.commit().expect("commits");
@@ -340,7 +342,7 @@ fn an_f64_mix_ramps_in_f64() {
         tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
     ))
     .unwrap();
-    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -418,7 +420,7 @@ fn render_segment(
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "lane", lane);
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
-    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .unwrap();
     ed.connect_param(
         ParamIn {

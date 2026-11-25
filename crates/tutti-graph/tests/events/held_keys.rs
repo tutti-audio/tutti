@@ -5,6 +5,8 @@
 //! Each scenario runs on the one-participant executor and on the parallel one, and the
 //! two must log the same events.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -1816,7 +1818,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "once", ForkByClone(Once(false, mid_note)));
     ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)));
     ed.connect_events(at(2), EventEdge::Direct(out(1))).unwrap();
-    ed.wire_outputs(vec![tutti_graph::PortSource::Node(
+    ed.wire_declared_outputs(vec![tutti_graph::PortSource::Node(
         tutti_graph::OutputPort::new(NodeKey(2), 0),
     )])
     .unwrap();

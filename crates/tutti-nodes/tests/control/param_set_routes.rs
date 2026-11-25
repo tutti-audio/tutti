@@ -11,6 +11,8 @@
 //! The address checks write through `ParamSet::set`, and the end-to-end check
 //! drives a control lane whose knob is the filter's cell.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::atomic::Ordering;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock, Mono, Planes};
 use tutti_fixtures::signal::peak;
@@ -124,7 +126,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ));
     let probe = NodeKey(1);
     ed.insert(probe, "probe", Unforkable(Probe));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
         .unwrap();
     let at = ParamIn {
         node: probe,

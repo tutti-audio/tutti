@@ -2,6 +2,8 @@
 //! samples bit for bit: the old main output's channels are outputs of the plan like
 //! the main output's own, claimed and written by the same tasks.
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::support;
 use tutti_graph::EdgeId;
 
@@ -34,7 +36,7 @@ impl Pool for Counting {
 /// Six sines, each through its own gain (keys 11 to 16), the main output's two
 /// channels taking `pair`.
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
-    ed.wire_outputs(
+    ed.wire_declared_outputs(
         pair.map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
     )

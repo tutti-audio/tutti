@@ -6,6 +6,8 @@
 //! rendered samples show which port each read took. `Switched` and `Lonely`
 //! have no params and render a setting and a required value.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::prepare;
@@ -115,7 +117,7 @@ fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.wire_outputs(
+    ed.wire_declared_outputs(
         (0..3)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
@@ -281,7 +283,7 @@ impl Rig {
     fn new(node: impl tutti_graph::IntoNode) -> Self {
         let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
         ed.insert(NODE, "node", node);
-        ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
+        ed.wire_declared_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
             .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();

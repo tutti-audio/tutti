@@ -5,6 +5,8 @@
 //! The random-topology check is in `tests/executor/invariants.rs`
 //! (`a_coarsened_plan_renders_as_one_participant_does`).
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -78,7 +80,7 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
         }
         outputs.push(node(s));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
 }
 
 /// `lanes` chains of `depth` gains declaring `cost`, each off the main
@@ -97,7 +99,7 @@ fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
         }
         wire(ed, s, l as u16, last);
     }
-    ed.wire_outputs(vec![node(s)]).unwrap();
+    ed.wire_declared_outputs(vec![node(s)]).unwrap();
 }
 
 /// Render `blocks` (input on every channel), every output's samples.
@@ -172,7 +174,7 @@ fn packed_siblings_render_bit_identically() {
             wire(&mut ed, l + 1, 0, PortSource::MainInput(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }
-        ed.wire_outputs(vec![node(s)]).unwrap();
+        ed.wire_declared_outputs(vec![node(s)]).unwrap();
         commit(&mut ed, &mut exec);
         exec
     };

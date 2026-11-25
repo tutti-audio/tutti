@@ -2,6 +2,8 @@
 //! executor delivers it once, at offset 0 of the successor's first block,
 //! ahead of every other event there.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -165,7 +167,7 @@ impl Node for Edge0 {
 fn rig(old: Keeper) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(NodeKey(1), "keeper", Unforkable(old));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
@@ -270,7 +272,7 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     )
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     block(&mut exec);
@@ -308,7 +310,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
     let log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(NodeKey(1), "wide", Unforkable(Wide(5)));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     block(&mut exec);
@@ -347,7 +349,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
                 Unforkable(Keeper::new(Some(cc(k as u8, 10 * k as u8)), true, 8, &log)),
             );
         }
-        ed.wire_outputs(
+        ed.wire_declared_outputs(
             keys.clone()
                 .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
         )
@@ -476,7 +478,7 @@ impl Node for Mute {
 fn a_held_chase_counts_what_the_successor_cannot_take() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(NodeKey(1), "mute", Unforkable(Mute));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     block(&mut exec);

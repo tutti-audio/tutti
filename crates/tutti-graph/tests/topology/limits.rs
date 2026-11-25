@@ -4,6 +4,8 @@
 //! outputs, its block capacity); a graph past them must be refused on the
 //! control thread rather than reach an audio callback that cannot run it.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
@@ -29,8 +31,10 @@ fn prep(max: usize) -> Prepare {
 }
 
 fn wire(ed: &mut Editor, width: u16) {
-    ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+    )
+    .unwrap();
 }
 
 const LIMITS: Limits = Limits {

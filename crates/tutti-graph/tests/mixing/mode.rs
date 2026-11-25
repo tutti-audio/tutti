@@ -11,6 +11,8 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
@@ -1289,7 +1291,7 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
         );
         ed.connect_edge(EdgeId::into_port(at(2, 0), direct(1)))
             .unwrap();
-        ed.wire_outputs(vec![out(2, 0)]).unwrap();
+        ed.wire_declared_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1381,7 +1383,7 @@ fn a_fork_copies_the_mode_and_starts_steady() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

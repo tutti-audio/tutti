@@ -5,6 +5,8 @@
 //! Against the committed `TimGM6mb.sf2`; a missing fixture fails, as in the
 //! other suites here. 120 BPM: a beat is half a second.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
@@ -56,7 +58,7 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .unwrap();
-    ed.wire_outputs(
+    ed.wire_declared_outputs(
         (0..2).map(|port| {
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),

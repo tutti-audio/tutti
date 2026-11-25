@@ -56,7 +56,7 @@ tutti-ump = { path = "../tutti-ump", default-features = false }
 # `signal::sine`, the stimulus of the normalize tests.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # `contract::prepared`, which prepares a node before a test reads its tail.
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 # The tempo map an offline timeline runs on.
 tutti-tempo = { path = "../tutti-tempo" }
 # Convolution nodes and the `testing` stimulus nodes for the end-to-end export

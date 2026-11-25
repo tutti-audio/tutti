@@ -19,6 +19,8 @@
 //! cargo bench -p tutti-nodes --bench node_kernels
 //! ```
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, MaxBlock};
 use tutti_dsp::LadderSaturation;
@@ -115,7 +117,7 @@ fn channel_sum(c: &mut Criterion) {
             let (mut ed, mut exec) =
                 Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
             ed.resize_inputs(ChannelLayout::from(sources * width));
-            ed.wire_outputs(vec![PortSource::Zero; width as usize])
+            ed.wire_declared_outputs(vec![PortSource::Zero; width as usize])
                 .unwrap();
             for channel in 0..width {
                 for k in 0..sources {

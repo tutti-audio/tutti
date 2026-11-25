@@ -4,6 +4,8 @@
 //!
 //! 120 BPM at 48 kHz: a beat is 24 000 frames.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -55,8 +57,10 @@ fn graph(frame: u64) -> (Editor, Executor) {
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .unwrap();
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

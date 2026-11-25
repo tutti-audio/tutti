@@ -1,6 +1,8 @@
 //! A node that parked itself on `Status::Idle` is called again on the next
 //! block after its `Wake` is raised from any thread, and not before.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -73,7 +75,7 @@ fn one_napper() -> (Editor, Executor, Placements) {
     let placements = Placements::default();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NAP, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NAP, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -206,7 +208,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
         .chain([&pulse])
         .map(|&node| PortSource::Node(OutputPort::new(node, 0)))
         .collect();
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

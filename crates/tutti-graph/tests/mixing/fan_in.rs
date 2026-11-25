@@ -9,6 +9,8 @@
 //! render is compared with another, it is the parallel executor against the
 //! one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
@@ -542,7 +544,7 @@ fn flags(n: u64) -> Flags {
         ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
             .unwrap();
     }
-    ed.wire_outputs(vec![out(n + 1)]).unwrap();
+    ed.wire_declared_outputs(vec![out(n + 1)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -612,7 +614,7 @@ fn a_sum_is_constant_when_its_live_addends_are() {
             ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
                 .unwrap();
         }
-        ed.wire_outputs(vec![out(n + 1)]).unwrap();
+        ed.wire_declared_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

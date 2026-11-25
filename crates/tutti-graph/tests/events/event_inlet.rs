@@ -9,6 +9,8 @@
 //! Every figure is analytic (a frame, an offset, a capacity), none read from
 //! another render.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -581,7 +583,7 @@ fn graph(
         ))
         .unwrap();
     }
-    ed.wire_outputs([out(30)]).unwrap();
+    ed.wire_declared_outputs([out(30)]).unwrap();
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),

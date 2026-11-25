@@ -4,6 +4,8 @@
 //! tests, where the callback fed a stereo-folded meter; the fold tests became
 //! per-channel ones (the meter does not fold).
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
@@ -50,7 +52,7 @@ fn engine(
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)));
-    ed.wire_outputs((0..outputs).map(|c| {
+    ed.wire_declared_outputs((0..outputs).map(|c| {
         if channel.is_none_or(|only| only == c) {
             PortSource::Node(OutputPort::new(NodeKey(1), 0))
         } else {
@@ -189,7 +191,7 @@ fn the_main_output_reads_before_the_declick() {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     let mut meter = ed
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
@@ -262,7 +264,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
         "step",
         tutti_graph::Unforkable(Step { loud: 100, at: 0 }),
     );
-    ed.wire_outputs((0..6).map(|c| {
+    ed.wire_declared_outputs((0..6).map(|c| {
         if c == 2 {
             PortSource::Node(OutputPort::new(NodeKey(1), 0))
         } else {

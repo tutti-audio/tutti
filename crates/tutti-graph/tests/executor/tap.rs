@@ -3,6 +3,8 @@
 //! the parallel executor, and allocation-free on every participant. A closed
 //! tap compiles to no op, and a render is the same with a tap open or closed.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{Interleaved, PlanesMut};
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
@@ -86,7 +88,7 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
         .unwrap();
         gains.push(out(gain));
     }
-    ed.wire_outputs(gains.clone()).unwrap();
+    ed.wire_declared_outputs(gains.clone()).unwrap();
     gains
 }
 

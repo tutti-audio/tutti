@@ -64,7 +64,7 @@ futures-channel = { workspace = true }
 
 [dev-dependencies]
 # `contract::prepared`, to drive the inlet node by hand in the capture tests.
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 # The RT gates render a real graph under a disabled allocator.
 assert_no_alloc = { version = "1", default-features = false }
 criterion.workspace = true

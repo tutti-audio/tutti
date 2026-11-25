@@ -2,6 +2,8 @@
 //! class changes only the parallel schedule: sibling panners pack into fewer tasks than
 //! undeclared ones, and the render on a pool is bit for bit the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::signal::plane_bits as bits;
@@ -83,7 +85,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.resize_inputs(ChannelLayout::STEREO);
     let sources = PANNERS + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.wire_outputs([PortSource::Zero; 2]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero; 2]).unwrap();
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < PANNERS {

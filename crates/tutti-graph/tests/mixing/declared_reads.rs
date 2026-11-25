@@ -8,6 +8,8 @@
 //! steps `Cutoff` and the second band's `Threshold`; the node's outputs show
 //! which param each read took.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::prepare;
@@ -140,7 +142,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.wire_outputs(
+    ed.wire_declared_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),

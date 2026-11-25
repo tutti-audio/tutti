@@ -3,6 +3,8 @@
 //! that is not parked, and `process` is not called meanwhile. A real recall
 //! (a `tutti_rt` handoff) is answered under `RtScope`.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -76,7 +78,7 @@ fn rig() -> Rig {
             returned: Arc::clone(&returned),
         }),
     );
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -192,7 +194,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
         outputs.push(PortSource::Node(OutputPort::new(NodeKey(k), 0)));
         counts.push((processed, parked));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

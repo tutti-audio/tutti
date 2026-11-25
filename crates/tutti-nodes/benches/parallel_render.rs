@@ -40,6 +40,8 @@
 //! Eight participants on a four-core machine
 //! oversubscribe it and are reported as measured, not dropped.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Duration;
@@ -111,7 +113,7 @@ fn wide(lanes: usize, depth: usize, workers: usize, waits: Waits) -> Executor {
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
@@ -196,7 +198,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
     ed.resize_inputs(ChannelLayout::MONO);
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let k = NodeKey(lane as u64 + 1);
         gain(&mut ed, k, lane, light);
@@ -230,7 +232,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.wire_outputs([PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);

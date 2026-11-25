@@ -20,6 +20,8 @@
 
 #![cfg(feature = "vst2")]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::param_reads::ParamReads as _;
 use std::sync::MutexGuard;
 use tutti_buffers::MaxBlock;
@@ -165,7 +167,7 @@ fn live_graph(key: NodeKey, node: impl IntoNode) -> Editor {
     let (mut editor, _exec) = Editor::new(prepare_at(SAMPLE_RATE));
     let _ = editor.insert(key, "vst2", node);
     editor
-        .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
         .unwrap();
     editor
 }
@@ -256,7 +258,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
     let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
     editor.insert(key, "fork", tutti_graph::Unforkable(fork));
     editor
-        .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
         .unwrap();
     editor.commit().expect("commits");
     let mut renderer = Renderer::new(editor, exec);
@@ -471,7 +473,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
         let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
         editor.insert(key, "fork", tutti_graph::Unforkable(fork));
         editor
-            .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+            .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
             .unwrap();
         editor.commit().expect("commits");
         let _ = Renderer::new(editor, exec).render(BLOCK);

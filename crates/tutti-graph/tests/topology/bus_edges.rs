@@ -5,6 +5,8 @@
 //! here), never another render. A render is compared with another only as the
 //! parallel executor against the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_fixtures::signal::bits as bits_of;
 use tutti_graph::testing as common;
@@ -730,7 +732,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
         ))
         .unwrap();
     }
-    ed.wire_outputs(vec![out_port(2, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out_port(2, 0)]).unwrap();
     // The author's own lane: the constant into the sink at a weight of 0.25.
     let own = lane(2, 0, out_port(3, 0));
     ed.connect_edge(EdgeId::into_port(at(2, 0), Edge::Direct(out_port(3, 0))))
@@ -915,7 +917,7 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
     ed.insert(key(2), "mono", ForkByClone(Mono));
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
-    ed.wire_outputs(vec![out_port(2, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out_port(2, 0)]).unwrap();
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
         .fork(ForkTarget::MainOutput, prepare(BLOCK))
@@ -1015,7 +1017,7 @@ fn a_same_topology_main_output_edge_is_the_hand_wired_plan() {
 #[test]
 fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     let before = ed.revision();
     assert_eq!(
@@ -1028,7 +1030,7 @@ fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     // Declared, but three unassigned channels have no place in a named stereo.
     let (mut ed, _exec) = editor(&[(1, source(3, unassigned(3)))], 3);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     let before = ed.revision();
     assert!(matches!(
@@ -1049,7 +1051,8 @@ fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
 fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.wire_outputs([out_port(1, 0), PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([out_port(1, 0), PortSource::Zero])
+        .unwrap();
     let lane = main_output_lane(0, out_port(1, 0));
     assert_eq!(
         ed.connect_bus_to_main_output(from(1, 0)),
@@ -1058,7 +1061,7 @@ fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     assert!(ed.spec().main_output_sources.is_empty());
 
     // The other order: the ordinary source arrives after the main output edge.
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     feed_output(&mut ed, 0, [out_port(1, 0)]);
@@ -1086,7 +1089,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
         .unwrap();
     }
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
@@ -1115,7 +1118,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
     );
     // A re-declaration it folds to re-lowers: stereo to mono is 0.5 L + 0.5 R.
     ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
-    ed.wire_outputs([PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1136,7 +1139,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
 fn main_output_edges_connect_disconnect_and_go_with_their_node() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (3, source(2, smpte(2)))], 0);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.connect_bus_to_main_output(from(3, 0)).unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
@@ -1186,7 +1189,7 @@ fn a_fork_of_a_main_output_edge_renders_the_fold() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
     ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
-    ed.wire_outputs([PortSource::Zero]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed

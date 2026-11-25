@@ -4,6 +4,8 @@
 //!
 //! A note at frame 0 into a saw synth, 120 BPM at 48 kHz.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeKey;
@@ -119,7 +121,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .unwrap();
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
         .unwrap();
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);

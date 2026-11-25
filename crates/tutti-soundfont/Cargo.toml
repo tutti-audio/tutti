@@ -46,7 +46,7 @@ serde = "1"
 assert_no_alloc = { version = "1", default-features = false }
 # `contract::{drive_input, Direct}`: the unit driven by hand, as a graph drives
 # it, in its tests and allocation gate.
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 
 [package.metadata.docs.rs]
 all-features = true

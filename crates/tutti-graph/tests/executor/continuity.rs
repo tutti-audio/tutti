@@ -23,6 +23,8 @@
 //!
 //! Each runs on one participant and on a pool.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
@@ -493,7 +495,7 @@ fn rig(workers: usize, inbox: &Inbox) -> Harness {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.wire_outputs(vec![audio(SUM)]).unwrap();
+    ed.wire_declared_outputs(vec![audio(SUM)]).unwrap();
     ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
         .unwrap();
     let at = EventInputPort::new(REC, 0);
@@ -806,7 +808,7 @@ fn bank_continues_the_old_history(workers: usize) {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
+    ed.wire_declared_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
         .unwrap();
     ed.commit().expect("commits");
     // Impulses at 162 (in the ring when the commit lands at 192), 197 and 282.
@@ -848,7 +850,7 @@ fn bank_continues_the_old_history(workers: usize) {
     ));
     let id = ed.spec().main_output_id.next();
     ed.declare_main_output(ed.spec().main_output, id);
-    ed.wire_outputs(vec![audio(NEW)]).unwrap();
+    ed.wire_declared_outputs(vec![audio(NEW)]).unwrap();
     ed.commit().expect("declares the new main output");
     for b in 3..5 {
         let bufs = step(&mut ed, &mut exec, b * BLOCK);
@@ -953,7 +955,7 @@ fn a_rate_change(workers: usize) {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.wire_outputs(vec![audio(SUM_NODE)]).unwrap();
+    ed.wire_declared_outputs(vec![audio(SUM_NODE)]).unwrap();
     let sink = EventInputPort::new(SINK, 0);
     ed.connect_events(sink, EventEdge::Direct(src(EMIT)))
         .unwrap();
