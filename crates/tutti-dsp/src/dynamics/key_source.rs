@@ -7,8 +7,8 @@
 ///   The detector measures the key and the gain is applied to the signal, so the signal
 ///   being measured need not be the signal being shaped (a ducker, a de-esser, a gate keyed
 ///   from a kick). **A key nobody feeds is silence**, which compresses nothing and holds a
-///   gate closed: the graph feeds an unconnected input zeros, and a node cannot tell a wired
-///   key from an unwired one.
+///   gate closed: the graph feeds an unconnected input zeros, and the keyed nodes read
+///   those zeros as the key.
 /// - [`Own`](Self::Own): no key bus. The detector reads the signal itself, as an ordinary
 ///   compressor or gate does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

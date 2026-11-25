@@ -16,7 +16,7 @@
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
 use super::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, NetworkStage,
+    Absorption, AllPass, AllPassForm, Fdn, Line, MAX_CHANNELS, Matrix, Network, NetworkStage,
     energy,
 };
 use crate::onepole::cutoff_pole;
@@ -624,10 +624,11 @@ impl Fdn {
         best
     }
 
-    /// The loop's spectral radius bound in `band`-wise form: the largest
-    /// `10^(log rho + log sigma)` over the bands, 0 for an empty one and
-    /// infinity for one the analysis does not accept. A lossless loop is at 1.
-    fn radius(&self) -> f64 {
+    /// The loop's spectral radius bound, `10^(log rho + log sigma)` at the slowest line's
+    /// peak response ([`slowest_peak`](Self::slowest_peak): the stored peak of a band
+    /// profile, which is above the scaled nominal gains); 0 for an empty loop and infinity
+    /// for one the analysis does not accept. A lossless loop is at 1.
+    fn radius(&self, rate: SampleRate) -> f64 {
         let n = self.lines.len();
         if n == 0 {
             return 0.0;
@@ -638,14 +639,10 @@ impl Fdn {
         if self.is_lossless() {
             return 1.0;
         }
-        let mut worst = 0.0f64;
-        for band in Band::ALL {
-            let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
-                return f64::INFINITY;
-            };
-            worst = worst.max(Db::new(db_rho + db_sigma).to_amplitude().get());
-        }
-        worst
+        let Some((db_rho, db_sigma, _)) = self.slowest_peak(rate) else {
+            return f64::INFINITY;
+        };
+        Db::new(db_rho + db_sigma).to_amplitude().get()
     }
 }
 
@@ -682,14 +679,14 @@ impl Lti for Network {
     }
 
     /// The slowest decay per frame over the stages: for a loop, `sigma rho` of the
-    /// slowest band (`Fdn::rt60_bound`'s own figure, `10^((dB rho + dB
+    /// slowest line at its peak response (`Fdn::rt60_bound`'s own figure, `10^((dB rho + dB
     /// sigma) / 20)` per frame); a series all-pass's `|g|^(1/D)`; 0 for taps and a FIR; 1
     /// for a lossless loop; infinity for what the analysis does not accept.
     fn spectral_radius(&self) -> f64 {
         self.stages
             .iter()
             .map(|s| match s {
-                NetworkStage::Fdn(f) => f.radius(),
+                NetworkStage::Fdn(f) => f.radius(self.rate),
                 NetworkStage::AllPass(a) => a.iter().map(AllPass::radius).fold(0.0, f64::max),
                 NetworkStage::Taps(t) => {
                     if t.taps.iter().all(|t| t.gain.get().is_finite()) {
