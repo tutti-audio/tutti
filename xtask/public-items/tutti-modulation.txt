@@ -21,6 +21,7 @@ enum program::Waveform
 enum shape::LfoShape
 enum shape::Polarity
 enum sources::LfoRate
+fn compile::Source::is_signal
 fn compile::TargetKey::edge
 fn compile::TargetKey::mix
 fn compile::TargetKey::node

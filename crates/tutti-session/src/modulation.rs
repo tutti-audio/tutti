@@ -915,15 +915,17 @@ struct OwnRoute {
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
-    /// The polarity and curve of the scale, the targets of
-    /// `PolarityTarget::scale_of` and `CurveTarget::scale_of`; `Some` when
-    /// `decl.scale` is.
+    /// The route's one scale ([`Mods::scale`]). `decl.scale` is always
+    /// `None`: [`decl`](Self::decl) builds the compiled scale from this.
     scale: Option<OwnScale>,
 }
 
-/// The polarity and curve a route's scale is declared with.
+/// A route's scale: its source and depth, and the polarity and curve in
+/// force, the targets of `PolarityTarget::scale_of` and `CurveTarget::scale_of`.
 #[derive(Debug)]
 struct OwnScale {
+    source: SourceKey,
+    depth: Param<Bipolar>,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
 }
@@ -934,16 +936,12 @@ impl OwnRoute {
         RouteDecl {
             polarity: self.polarity.get(),
             curve: self.curve.get(),
-            scale: self
-                .decl
-                .scale
-                .clone()
-                .zip(self.scale.as_ref())
-                .map(|(scale, shape)| tutti_modulation::Scale {
-                    polarity: shape.polarity.get(),
-                    curve: shape.curve.get(),
-                    ..scale
-                }),
+            scale: self.scale.as_ref().map(|s| tutti_modulation::Scale {
+                source: s.source,
+                depth: s.depth.clone(),
+                polarity: s.polarity.get(),
+                curve: s.curve.get(),
+            }),
             ..self.decl.clone()
         }
     }
@@ -1039,8 +1037,8 @@ impl OwnMods {
             Self::depth_slot(route),
             Arc::new(DepthSlot(route.decl.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
-        if let (Some(scale), Some(shape)) = (&route.decl.scale, &route.scale) {
-            self.provide_scale(id, scale, shape);
+        if let Some(scale) = &route.scale {
+            self.provide_scale(id, scale);
         }
     }
 
@@ -1059,7 +1057,7 @@ impl OwnMods {
     }
 
     /// Registers the targets of the scale of route `id`.
-    fn provide_scale(&self, id: ModRouteId, scale: &tutti_modulation::Scale, shape: &OwnScale) {
+    fn provide_scale(&self, id: ModRouteId, scale: &OwnScale) {
         let [depth, polarity, curve] = Self::scale_slots(id);
         self.table.provide(
             depth,
@@ -1067,10 +1065,10 @@ impl OwnMods {
         );
         self.table.provide_staged(
             polarity,
-            PublishedSlot::new(Field(Arc::clone(&shape.polarity))),
+            PublishedSlot::new(Field(Arc::clone(&scale.polarity))),
         );
         self.table
-            .provide_staged(curve, PublishedSlot::new(Field(Arc::clone(&shape.curve))));
+            .provide_staged(curve, PublishedSlot::new(Field(Arc::clone(&scale.curve))));
     }
 
     /// Clears the scale of every route that `source` scales.
@@ -1078,9 +1076,8 @@ impl OwnMods {
         let slots: Vec<SlotId> = self
             .routes
             .iter_mut()
-            .filter(|(_, r)| r.decl.scale.as_ref().is_some_and(|s| s.source == source))
+            .filter(|(_, r)| r.scale.as_ref().is_some_and(|s| s.source == source))
             .flat_map(|(&key, r)| {
-                r.decl.scale = None;
                 r.scale = None;
                 Self::scale_slots(route_id(key))
             })
@@ -1537,7 +1534,7 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
-            scale: self.decl.scale.as_ref().map(|s| source_id(s.source)),
+            scale: self.scale.as_ref().map(|s| source_id(s.source)),
             depth: self.decl.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
@@ -1746,8 +1743,10 @@ impl Mods<'_> {
     /// the one `scale` gives; its polarity and curve are
     /// [`PolarityTarget::scale_of`](crate::PolarityTarget::scale_of) and
     /// [`CurveTarget::scale_of`](crate::CurveTarget::scale_of), starting
-    /// bipolar and linear; a replaced scale's are dropped with it. A scale
-    /// goes with its route, and with its source when that is removed.
+    /// bipolar and linear. A `Some` is a new scale: it replaces the old one's
+    /// depth, polarity and curve, so a change to the depth alone goes through
+    /// [`DepthTarget::scale_of`](crate::DepthTarget::scale_of). A scale goes
+    /// with its route, and with its source when that is removed.
     ///
     /// # Errors
     ///
@@ -1766,31 +1765,25 @@ impl Mods<'_> {
                 let Some(by) = self.own.sources.get(&source) else {
                     return Err(ScaleError::NoSuchSource(NoSuchModSource(scale.source)));
                 };
-                let signal =
-                    |s: &Source| matches!(s, Source::Follower { .. } | Source::NoteEnvelope { .. });
                 let scaled = self.own.sources.get(&declared.decl.source);
-                if signal(&by.source.get()) || scaled.is_some_and(|s| signal(&s.source.get())) {
+                if by.source.get().is_signal() || scaled.is_some_and(|s| s.source.get().is_signal())
+                {
                     return Err(ScaleError::SignalSource { route });
                 }
-                Some(tutti_modulation::Scale {
+                Some(OwnScale {
                     source,
                     depth: Param::new(scale.depth),
-                    polarity: Polarity::Bipolar,
-                    curve: Law::Linear,
+                    polarity: Declared::new(Polarity::Bipolar, &self.own.edited),
+                    curve: Declared::new(Law::Linear, &self.own.edited),
                 })
             }
         };
-        let shape = new.as_ref().map(|_| OwnScale {
-            polarity: Declared::new(Polarity::Bipolar, &self.own.edited),
-            curve: Declared::new(Law::Linear, &self.own.edited),
-        });
         self.own.table.unprovide(&OwnMods::scale_slots(route));
-        if let (Some(scale), Some(shape)) = (&new, &shape) {
-            self.own.provide_scale(route, scale, shape);
+        if let Some(scale) = &new {
+            self.own.provide_scale(route, scale);
         }
         if let Some(declared) = self.own.routes.get_mut(&key) {
-            declared.decl.scale = new;
-            declared.scale = shape;
+            declared.scale = new;
         }
         Ok(())
     }

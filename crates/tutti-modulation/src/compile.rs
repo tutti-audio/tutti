@@ -169,6 +169,16 @@ pub enum Source {
     },
 }
 
+impl Source {
+    /// Whether the source is a signal: a node in the graph (a follower or a
+    /// note envelope), not a time function. A depth is scaled by a time
+    /// function only.
+    #[must_use]
+    pub fn is_signal(&self) -> bool {
+        signal_kind(self).is_some()
+    }
+}
+
 /// What scales a route's depth: a time function whose value, through its own
 /// amount, multiplies the route's offset ([`DepthBy`]).
 ///
@@ -541,12 +551,7 @@ pub fn compile(
     }
 
     // Scales: a time function scales a route of a time function.
-    let is_signal = |s: SourceKey| {
-        matches!(
-            sources[&s],
-            Source::Follower { .. } | Source::NoteEnvelope { .. }
-        )
-    };
+    let is_signal = |s: SourceKey| sources[&s].is_signal();
     for (&key, route) in &routes {
         let Some(scale) = &route.scale else {
             continue;
