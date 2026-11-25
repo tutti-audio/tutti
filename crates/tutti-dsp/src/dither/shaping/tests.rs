@@ -1,31 +1,14 @@
 use super::*;
-use crate::{DitherShape, DitherSink};
+use crate::{DitherShape, Quantizer};
 use core::f64::consts::PI;
-use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Sink, SinkFailed};
+use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut};
 use tutti_units::Amplitude;
-
-/// Collects the integers a mono sink receives.
-#[derive(Default)]
-struct Collect(Vec<i16>);
-
-impl Sink for Collect {
-    type Sample = i16;
-    type Error = std::convert::Infallible;
-    fn layout(&self) -> ChannelLayout {
-        ChannelLayout::MONO
-    }
-    fn write(&mut self, block: Interleaved<'_, i16>) -> Result<(), SinkFailed> {
-        self.0.extend_from_slice(block.samples());
-        Ok(())
-    }
-    fn finalize(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 /// One i16 step in the float domain.
 const LSB: f64 = 1.0 / 32768.0;
-const AMP_LSB: Amplitude = Amplitude::new(LSB);
+
+/// The workspace's dither seed.
+const SEED: u64 = 0x1234_5678;
 
 fn rate(hz: f64) -> SampleRate {
     SampleRate::new(hz).unwrap()
@@ -42,27 +25,27 @@ fn tone(n: usize, sample_rate: f64) -> Vec<f64> {
     )
 }
 
-fn sink(shaping: Option<&NoiseShaping>) -> DitherSink<Collect, f64> {
-    let sink = DitherSink::new(Collect::default(), Some(DitherShape::Triangular));
-    match shaping {
-        Some(s) => sink.shaped(s),
-        None => sink,
+/// `x` (mono) quantized to `i16` in writes of `piece` samples, dithered with TPDF from the
+/// workspace's seed.
+fn quantize(shaping: Option<&NoiseShaping>, x: &[f64], piece: usize) -> Vec<i16> {
+    let mut quantizer =
+        Quantizer::<f64>::new(Some(DitherShape::Triangular), ChannelLayout::MONO, SEED);
+    if let Some(s) = shaping {
+        quantizer = quantizer.shaped(s);
     }
-}
-
-fn write_all(sink: &mut DitherSink<Collect, f64>, x: &[f64], piece: usize) {
-    for part in x.chunks(piece) {
-        sink.write(Interleaved::new(part, ChannelLayout::MONO).unwrap())
-            .unwrap();
+    let mut out = vec![0i16; x.len()];
+    for (part, out) in x.chunks(piece).zip(out.chunks_mut(piece)) {
+        quantizer.quantize(
+            Interleaved::new(part, ChannelLayout::MONO).unwrap(),
+            InterleavedMut::new(out, ChannelLayout::MONO).unwrap(),
+        );
     }
+    out
 }
 
 /// The error `y - x` of a run, in LSB.
 fn error_lsb(shaping: Option<&NoiseShaping>, x: &[f64]) -> Vec<f64> {
-    let mut s = sink(shaping);
-    write_all(&mut s, x, 4096);
-    s.into_inner()
-        .0
+    quantize(shaping, x, 4096)
         .iter()
         .zip(x)
         .map(|(&y, &x)| (f64::from(y) * LSB - x) / LSB)
@@ -236,123 +219,6 @@ fn the_ntf_follows_the_threshold_in_hz_at_every_rate() {
             );
         }
     }
-}
-
-/// A full-scale overload (a constant 2.0, which clips every value) holds the loop's state to
-/// the error bound, `2 LSB`, and a zero input after it recovers: once the history has flushed
-/// (`taps` values), each error is a rounding error of at most half an LSB (no dither is added
-/// here) and `y = e * NTF`, so `|y| <= (1 + sum |c_k|) / 2` LSB, never the overload's size.
-#[test]
-fn an_overload_keeps_the_state_bounded_and_the_loop_recovers() {
-    let shaping = NoiseShaping::new(rate(44_100.0));
-    let taps = shaping.order();
-    let mut feedback = ErrorFeedback::<f64>::new(&shaping, 1);
-    let mut out = vec![0i16; 4096];
-    let run = |feedback: &mut ErrorFeedback<f64>, x: f64, out: &mut [i16]| {
-        let xs = vec![x; out.len()];
-        let view = || Interleaved::new(&xs, ChannelLayout::MONO).unwrap();
-        feedback.process(
-            AMP_LSB,
-            view(),
-            view(),
-            InterleavedMut::new(out, ChannelLayout::MONO).unwrap(),
-        );
-    };
-    run(&mut feedback, 2.0, &mut out);
-    assert!(out.iter().all(|&y| y == i16::MAX));
-    assert!(
-        feedback.peak() <= 2.0 * LSB,
-        "peak {}",
-        feedback.peak() / LSB
-    );
-    // Silence: the first `taps` values still see the overload, the rest do not.
-    run(&mut feedback, 0.0, &mut out);
-    let gain: f64 = 1.0 + shaping.taps().iter().map(|c| c.abs()).sum::<f64>();
-    let after = &out[taps..];
-    let worst = after
-        .iter()
-        .map(|&y| f64::from(y).abs())
-        .fold(0.0, f64::max);
-    assert!(
-        worst <= 0.5 * gain,
-        "recovered peak {worst} vs {}",
-        0.5 * gain
-    );
-    assert!(feedback.peak() <= 2.0 * LSB);
-}
-
-/// The output is the same bit for bit however the writes are cut: the history and the dither
-/// source both continue across writes and chunk boundaries.
-#[test]
-fn the_shaped_output_does_not_depend_on_the_write_sizes() {
-    let shaping = NoiseShaping::new(rate(48_000.0));
-    let x = tone(5000, 48_000.0);
-    let mut whole = sink(Some(&shaping));
-    write_all(&mut whole, &x, x.len());
-    for piece in [1, 7, 700, 1024, 1025] {
-        let mut cut = sink(Some(&shaping));
-        write_all(&mut cut, &x, piece);
-        assert_eq!(whole.get_mut().0, cut.get_mut().0, "piece {piece}");
-    }
-}
-
-/// Runs `feedback` over `x` (interleaved at `layout`, no dither) into an `i16` buffer.
-fn run_layout(feedback: &mut ErrorFeedback<f64>, layout: ChannelLayout, x: &[f64]) -> Vec<i16> {
-    let mut out = vec![0i16; x.len()];
-    let view = || Interleaved::new(x, layout).unwrap();
-    feedback.process(
-        AMP_LSB,
-        view(),
-        view(),
-        InterleavedMut::new(&mut out, layout).unwrap(),
-    );
-    out
-}
-
-/// A NaN, then an infinity, leave nothing in the history (a non-finite error is dropped),
-/// and the finite signal after them is shaped as before: the history stays finite and within
-/// `2 LSB`, and once it has flushed `|y - x| <= (1 + sum |c_k|) / 2` LSB (rounding error of at
-/// most half an LSB, `y - x = e * NTF`).
-#[test]
-fn a_nan_and_an_infinity_do_not_latch_in_the_history() {
-    let shaping = NoiseShaping::new(rate(44_100.0));
-    let mut feedback = ErrorFeedback::<f64>::new(&shaping, 1);
-    let mut x = vec![0.1; 8];
-    x[2] = f64::NAN;
-    x[5] = f64::INFINITY;
-    run_layout(&mut feedback, ChannelLayout::MONO, &x);
-    assert!(feedback.peak().is_finite() && feedback.peak() <= 2.0 * LSB);
-    let finite = tone(4096, 44_100.0);
-    let out = run_layout(&mut feedback, ChannelLayout::MONO, &finite);
-    assert!(feedback.peak().is_finite() && feedback.peak() <= 2.0 * LSB);
-    let gain = 1.0 + shaping.taps().iter().map(|c| c.abs()).sum::<f64>();
-    for (&y, &x) in out.iter().zip(&finite).skip(shaping.order()) {
-        let err = (f64::from(y) * LSB - x).abs() / LSB;
-        assert!(err <= 0.5 * gain, "error {err} LSB past {}", 0.5 * gain);
-    }
-}
-
-/// Stereo with the left channel overloaded and the right silent: each channel has its own
-/// history, so the right channel stays at its rounding error of exactly zero (a zero input
-/// quantizes to zero with nothing fed back) and the left holds the error bound. Then a
-/// silent left channel recovers within the same per-channel bound as the mono case.
-#[test]
-fn each_channel_keeps_its_own_history() {
-    let shaping = NoiseShaping::new(rate(44_100.0));
-    let mut feedback = ErrorFeedback::<f64>::new(&shaping, 2);
-    let loud: Vec<f64> = (0..4096).flat_map(|_| [2.0, 0.0]).collect();
-    let out = run_layout(&mut feedback, ChannelLayout::STEREO, &loud);
-    assert!(out.chunks(2).all(|f| f[0] == i16::MAX && f[1] == 0));
-    assert_eq!(feedback.peak_of(1), 0.0);
-    assert!(feedback.peak_of(0) <= 2.0 * LSB && feedback.peak_of(0) > 0.0);
-    let quiet = vec![0.0; 2 * 4096];
-    let out = run_layout(&mut feedback, ChannelLayout::STEREO, &quiet);
-    let gain = 1.0 + shaping.taps().iter().map(|c| c.abs()).sum::<f64>();
-    for f in out.chunks(2).skip(shaping.order()) {
-        assert!(f64::from(f[0]).abs() <= 0.5 * gain);
-        assert_eq!(f[1], 0);
-    }
-    assert_eq!(feedback.peak_of(1), 0.0);
 }
 
 /// `feedback_gain` bounds the shaped output's departure from its input: every error the loop

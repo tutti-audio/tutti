@@ -119,9 +119,9 @@
 //!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]);
 //!   [`VariableResampler`], a windowed-sinc reader whose ratio is set per call, and the
 //!   [`FillController`] that steers it from a buffer's fill.
-//! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
-//!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
-//!   [`NoiseShaping`] as its optional error feedback.
+//! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`Quantizer`], which
+//!   dithers a float block on its way to a fixed-point format, with [`NoiseShaping`] as its
+//!   optional error feedback.
 //! - **Envelope** (`envelope.rs`): an [`EnvelopeStages`] description, designed once into an
 //!   [`EnvelopeDesign`] of [`EnvelopeLeg`]s (linear or dB-linear, [`EnvelopeCurve`], timed by an
 //!   [`EnvelopePace`]), and the [`Envelope`] runner that reads it a chunk at a time.
@@ -293,8 +293,8 @@ pub use distance::{
     DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
     ReferenceDistanceError,
 };
+pub use dither::quantizer::Quantizer;
 pub use dither::shaping::NoiseShaping;
-pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallSignals,

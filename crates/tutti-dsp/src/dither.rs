@@ -4,8 +4,8 @@
 //! RNG that continues across blocks. [`DitherNoise`] is that RNG and the two
 //! noise shapes; which signals to dither, and at what depth, is the caller's.
 
+pub(crate) mod quantizer;
 pub(crate) mod shaping;
-pub(crate) mod sink;
 
 use tutti_buffers::{Float, InterleavedMut};
 use tutti_rt::SplitMix64;
@@ -34,12 +34,18 @@ pub struct DitherNoise {
 }
 
 impl DitherNoise {
-    /// A source at the seed every export starts from.
+    /// A source at the workspace's dither seed.
     #[must_use]
     pub const fn new() -> Self {
-        const SEED: u64 = 0x1234_5678;
+        Self::with_seed(0x1234_5678)
+    }
+
+    /// A source whose sequence is the one of `seed`. Seed the sources of signals that are
+    /// summed later with [`SplitMix64::mix`] of distinct indices, so they do not share noise.
+    #[must_use]
+    pub const fn with_seed(seed: u64) -> Self {
         Self {
-            rng: SplitMix64::new(SEED),
+            rng: SplitMix64::new(seed),
         }
     }
 

@@ -475,7 +475,7 @@ impl<F: SynthFloat> VoiceBank<F> {
             .map(|_| {
                 V::<F>::seed_rng(|| {
                     counter += 1;
-                    seed_from(counter)
+                    SplitMix64::mix(counter)
                 })
             })
             .collect();
@@ -898,12 +898,6 @@ impl<F: SynthFloat> VoiceBank<F> {
 /// velocity change to 1% in about 2.3 ms — inaudible as a fade, long enough
 /// that no single sample steps by more than 4% of the change at 48 kHz.
 const GAIN_TIME_CONSTANT: Seconds = Seconds::new(0.0005);
-
-/// The `n`th noise seed: [`SplitMix64::mix`] of the counter, a bijection, so distinct counters
-/// give distinct seeds and no stream is another's shifted copy.
-fn seed_from(n: u64) -> u64 {
-    SplitMix64::mix(n)
-}
 
 /// Group and lane-within-group of a flat lane index.
 #[inline(always)]
