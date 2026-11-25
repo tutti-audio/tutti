@@ -1271,12 +1271,12 @@ fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_ex
     Ok(out.planes().iter().map(|p| p[0]).collect())
 }
 
-/// A declared main output is what the file is placed from: four `Unassigned` buses into
-/// a six-channel file keep channels 2 and 3 at 2 and 3 (undeclared, a four is
-/// quad and its rears land on the side pair at 4 and 5), a declared 5.1 folds
-/// into stereo by the 5.1 rules, and a declaration the file cannot take is
+/// A placement given to the setup is what the file is placed from: four `Unassigned` buses into
+/// a six-channel file keep channels 2 and 3 at 2 and 3 (without it, the graph's
+/// declared quad puts its rears on the side pair at 4 and 5), a given 5.1 folds
+/// into stereo by the 5.1 rules, and a placement the file cannot take is
 /// `ConfigError::Placement`, and one that is not as wide as the graph
-/// `ConfigError::MainOutput`.
+/// `RenderError::TopologyWidth`.
 #[test]
 fn a_declared_main_output_is_what_the_file_is_placed_from() {
     use tutti_buffers::FoldError;
@@ -1307,9 +1307,7 @@ fn a_declared_main_output_is_what_the_file_is_placed_from() {
     ));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::RenderError::InvalidConfig(
-            ConfigError::MainOutput(tutti_graph::MainOutputError::Width { .. })
-        ))
+        Err(tutti_export::RenderError::TopologyWidth { .. })
     ));
     // Declared as a 5.1 (six wide), a six-channel graph folds to stereo by it.
     let six_channels = |main_output: ChannelTopology| {

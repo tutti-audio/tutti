@@ -58,7 +58,7 @@ fn smootherstep(x: f64) -> f64 {
 #[test]
 fn a_declared_main_output_change_crossfades_over_the_declick() {
     let mut s = session();
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Mono.topology()))
+    s.declare_main_output_topology(tutti_buffers::Bed::Mono.topology())
         .expect("a mono main output");
     let mut right = Vec::new();
     for _ in 0..5 {
@@ -79,7 +79,7 @@ fn a_declared_main_output_change_crossfades_over_the_declick() {
 #[test]
 fn a_hard_declaration_cuts_at_the_block() {
     let mut s = session();
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Mono.topology()))
+    s.declare_main_output_topology(tutti_buffers::Bed::Mono.topology())
         .expect("a mono main output")
         .unfaded();
     assert!(block(&mut s).iter().all(|&r| r == 0.25));

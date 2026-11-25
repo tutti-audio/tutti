@@ -55,28 +55,19 @@ impl FileChannels {
     pub(crate) fn fold_from<F: Float>(
         &self,
         outputs: usize,
-        main_output: Option<&ChannelTopology>,
+        main_output: &ChannelSet,
     ) -> crate::Result<Fold<F>> {
         let graph = ChannelLayout::try_from(outputs)
             .map_err(|e| ConfigError::Placement(tutti_buffers::BufferError::from(e).into()))?;
-        if let Some(main_output) = main_output
-            && main_output.width() != graph
-        {
-            return Err(
-                ConfigError::MainOutput(tutti_graph::MainOutputError::Width {
-                    declared: main_output.width(),
-                    requested: graph,
-                })
-                .into(),
-            );
+        if main_output.width() != graph {
+            return Err(crate::RenderError::TopologyWidth {
+                topology: main_output.width(),
+                rendered: graph,
+            });
         }
-        // A graph wider than a topology holds has none: its channels are
-        // unassigned, so they go by index.
-        let from = match main_output {
-            Some(main_output) => Some(*main_output),
-            None => ChannelTopology::default_for(graph),
-        };
-        let fold = match (&from, self.channels.topology()) {
+        // A main output past the widths a topology holds has none: its
+        // channels go by index.
+        let fold = match (main_output.topology(), self.channels.topology()) {
             (Some(from), _) => {
                 fold_to_channels(from, &self.channels, tutti_buffers::FoldLevels::default())
             }
@@ -113,8 +104,9 @@ pub(crate) struct GraphSource<'a, F: Float> {
     planes: Vec<Vec<F>>,
     /// The main output's channels: the first of `planes`.
     outputs: usize,
-    /// What the graph's output channels are, when it declared it.
-    main_output: Option<ChannelTopology>,
+    /// What the file is placed from: the main output the committed plan was
+    /// compiled with, or the setup's own topology.
+    main_output: ChannelSet,
     max_block: usize,
     produced: Samples,
     /// The executor's dropped and recovered counts the render counts from
@@ -149,7 +141,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
         executor: &'a mut tutti_graph::Executor<F>,
         sample_rate: tutti_units::SampleRate,
         clock: &'a dyn RenderClock,
-        main_output: Option<ChannelTopology>,
+        placed_from: Option<ChannelTopology>,
         before: (u64, u64),
         rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
     ) -> crate::Result<Self> {
@@ -189,6 +181,11 @@ impl<'a, F: Float> GraphSource<'a, F> {
                 )
             },
         );
+        let main_output = placed_from.map(ChannelSet::from).unwrap_or_else(|| {
+            executor
+                .plan()
+                .map_or(editor.spec().main_output, |p| p.main_output())
+        });
         let planes = vec![vec![F::ZERO; max_block]; rendered];
         // The gate is open from the first block.
         drain_rt_log(rt_log.as_ref());
@@ -223,9 +220,9 @@ impl<F: Float> GraphSource<'_, F> {
         self.outputs
     }
 
-    /// What the graph's outputs are, when it declared it.
-    pub(crate) fn main_output(&self) -> Option<&ChannelTopology> {
-        self.main_output.as_ref()
+    /// What the file is placed from.
+    pub(crate) fn main_output(&self) -> &ChannelSet {
+        &self.main_output
     }
 
     /// The planes of the block last rendered: one per main output, the first
@@ -344,7 +341,7 @@ pub(crate) fn with_source<F: Float, T>(
     clock: &dyn RenderClock,
     f: impl FnOnce(&mut GraphSource<'_, F>) -> crate::Result<Outcome<T>>,
 ) -> crate::Result<(Outcome<T>, u64)> {
-    let main_output = graph.main_output_topology().cloned();
+    let placed_from = graph.main_output_override();
     let settled = graph.settled();
     let rt_log = graph.rt_log();
     let (editor, executor) = graph.parts_mut();
@@ -353,7 +350,7 @@ pub(crate) fn with_source<F: Float, T>(
         executor,
         sample_rate,
         clock,
-        main_output,
+        placed_from,
         settled,
         rt_log,
     )?;

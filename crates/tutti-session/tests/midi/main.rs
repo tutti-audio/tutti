@@ -13,6 +13,8 @@ mod bounced;
 mod common;
 #[cfg(feature = "midi")]
 mod held_keys;
+#[cfg(feature = "midi")]
+mod held_reader;
 #[cfg(feature = "midi-hardware")]
 #[path = "../support/tempo.rs"]
 mod tempo;

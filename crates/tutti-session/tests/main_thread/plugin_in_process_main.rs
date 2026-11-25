@@ -477,7 +477,7 @@ impl Rebound {
         use tutti_nodes::testing::Const;
         let stereo = ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap();
         self.s
-            .declare_main_output_topology(Some(stereo))
+            .declare_main_output_topology(stereo)
             .expect("a stereo main output");
         let g = self.s.graph();
         let wide = g.add(ForkByClone(Const::new(0.0, ChannelLayout::STEREO)));
@@ -490,7 +490,7 @@ impl Rebound {
         let _ = self.s.update();
         let mono = ChannelTopology::unassigned(ChannelLayout::from_count(1)).unwrap();
         self.s
-            .declare_main_output_topology(Some(mono))
+            .declare_main_output_topology(mono)
             .expect("a mono main output");
     }
 
@@ -499,7 +499,7 @@ impl Rebound {
         use tutti_buffers::{ChannelLayout, ChannelTopology};
         let stereo = ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap();
         self.s
-            .declare_main_output_topology(Some(stereo))
+            .declare_main_output_topology(stereo)
             .expect("a stereo main output");
     }
 }

@@ -167,6 +167,7 @@ fn compile::plan::Plan::event_values
 fn compile::plan::Plan::gain_ports
 fn compile::plan::Plan::in_place
 fn compile::plan::Plan::main_inputs
+fn compile::plan::Plan::main_output
 fn compile::plan::Plan::main_output_bank
 fn compile::plan::Plan::main_output_id
 fn compile::plan::Plan::main_outputs

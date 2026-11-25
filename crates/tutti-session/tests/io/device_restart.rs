@@ -253,15 +253,16 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
 
 /// **A restart onto a wider device widens the main output, as the build does; onto a
 /// narrower one it keeps it.** Stereo at 44.1 kHz, then a 5.1 device at
-/// 48 kHz: the main output is six wide (the device a floor), so a host routing to the
-/// surround channels finds them there rather than zero-filled by the fold,
-/// the device reports its six, and the audio side renders six: the
-/// compensation table, which the committed graph's figures fill, has an entry
-/// per main output channel. Then back onto a stereo device: the main output keeps its six
+/// 48 kHz: the main output stays stereo, the device reports its six, and the
+/// audio side renders six device channels from the two. A host that wants the
+/// surround channels declares a six-wide main output, and the compensation
+/// table, which the committed graph's figures fill, then has an entry per
+/// main output channel. Then back onto a stereo device: the main output keeps its six
 /// and the engine folds.
 #[test]
-fn a_restart_onto_a_wider_device_widens_the_main_output() {
+fn a_restart_onto_a_wider_device_leaves_the_main_output_as_declared() {
     let (mut s, _old, _, _) = engine();
+    let _ = s.update();
     assert_eq!(s.graph_ref().outputs(), 2);
 
     let (driver, surround) = ManualStreamDriver::new();
@@ -269,8 +270,8 @@ fn a_restart_onto_a_wider_device_widens_the_main_output() {
         .expect("restarts");
     assert_eq!(
         s.graph_ref().outputs(),
-        6,
-        "the main output takes the device's six"
+        2,
+        "the restart leaves the main output as it was"
     );
     assert_eq!(s.device().spec().channels, ChannelLayout::from(6u16));
     for _ in 0..4 {
@@ -278,6 +279,17 @@ fn a_restart_onto_a_wider_device_widens_the_main_output() {
             .render_block(Samples::new(480))
             .expect("the stream is open");
         assert_eq!(block.len(), 480 * 6);
+        let _ = s.update();
+    }
+    assert_eq!(s.compensation().to_vec().len(), 2);
+
+    s.declare_main_output_topology(tutti_buffers::Bed::Surround51.topology())
+        .expect("six places on the six-wide device")
+        .unfaded();
+    for _ in 0..4 {
+        surround
+            .render_block(Samples::new(480))
+            .expect("the stream is open");
         let _ = s.update();
     }
     assert_eq!(

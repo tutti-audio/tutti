@@ -681,6 +681,7 @@ impl GraphSpec {
                 params: self.params.clone(),
                 gains: self.gains.clone(),
                 main_output_id: self.main_output_id,
+                main_output: self.main_output,
                 main_output_bank: None,
             }),
             _ => Err(errs),
@@ -772,6 +773,7 @@ pub struct ValidGraph {
     params: BTreeMap<ParamIn, EventOutputPort>,
     gains: BTreeMap<EdgeId, EdgeGain>,
     main_output_id: crate::MainOutputId,
+    main_output: tutti_buffers::ChannelSet,
     main_output_bank: Option<crate::MainOutputBank>,
 }
 
@@ -791,6 +793,11 @@ impl ValidGraph {
     /// change is crossfading.
     pub fn main_output_bank(&self) -> Option<crate::MainOutputBank> {
         self.main_output_bank
+    }
+
+    /// The channels the main output was declared with.
+    pub(crate) fn main_output(&self) -> tutti_buffers::ChannelSet {
+        self.main_output
     }
 
     /// The id of the main output the spec declared.

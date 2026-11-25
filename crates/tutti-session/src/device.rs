@@ -17,8 +17,9 @@
 //! - the engine follows by itself: it adopts the new rate on the first block
 //!   that carries it, rescaling its frame clock and every scheduled
 //!   `At::Frame` transport command to the same wall-clock time;
-//! - the graph's main output, widened to a wider device as the build widens it
-//!   ([`main_output_width`](crate::main_output_width)), never narrowed;
+//! - the graph's main output stays as declared, whatever the new device's
+//!   width: the engine folds it, and an app that wants a different main
+//!   output declares it ([`Session::declare_main_output_topology`]);
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,
 //!   through the re-prepare, the MIDI sync node;
@@ -42,7 +43,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_buffers::{ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
 use tutti_engine::{OutputQuantum, OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
 use tutti_units::{SampleRate, Samples, Seconds};
@@ -959,30 +960,14 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// restart or a clock switch refuses before anything moves.
     pub(crate) fn check_device(&self, device: &tutti_buffers::ChannelSet) -> Result<()> {
         let channels = device.width();
-        // A map names the main output's own channels, so a device swap does not widen
-        // a main output that has one; without it a wider device widens an undeclared
-        // main output by the build's rule.
         let policy = self.output.policy.current();
-        let mapped = policy.map.targets().is_some();
-        let main_output = self
-            .graph
-            .main_output_topology()
-            .cloned()
-            .unwrap_or_else(|| {
-                let width = if mapped {
-                    self.graph.outputs()
-                } else {
-                    crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), channels)
-                };
-                ChannelTopology::default_for(ChannelLayout::clamped(width))
-                    .expect("a main output is at most MAX_CHANNELS wide")
-            });
+        let main_output = self.graph.main_output_topology();
         // The policy in force has to place the main output on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
         policy
             .routing()
-            .fold::<C::Float>(&main_output, device)
+            .fold::<C::Float>(main_output, device)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     main_output: self.graph.main_output_id(),
@@ -1012,8 +997,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // The new device is what the request states or the engine's order for
         // its width. The main output in force has to be placeable on it:
         // refused before the graph moves, the stream still stopped, like any
-        // refusal here. The main output a wider device will widen an
-        // undeclared one to is the main output in force.
+        // refusal here.
         let device = crate::policy::device_placement(spec.channels, topology)?;
         self.check_device(&device.channels)?;
         // The new device's callback size too: a hosted plugin's pipeline
@@ -1050,23 +1034,16 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         if self.output.reattempt(&mut self.graph) {
             self.commit();
         }
-        // A wider device widens the main output, by the build's rule; a narrower one
-        // keeps it, and the engine folds. Committed and settled here too, so
-        // the first block has the width. A commit refused for now leaves the
-        // edit flag set, and the next update retries.
-        // A declared main output keeps the width it declared: the device is no floor
-        // under it.
-        let mapped = self.output.policy.current().map.targets().is_some();
-        let width =
-            crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
-        if self.graph.main_output_topology().is_none() && !mapped && width > self.graph.outputs() {
-            // Undeclared, so it cannot be refused.
-            let widened = self.graph.widen_outputs(width);
-            debug_assert!(widened.is_ok());
-            self.commit();
-        }
+        // The main output keeps the width it declared, wider or narrower than
+        // the device: the engine folds.
+        // Before the first commit the editor has sent no plan, so there is
+        // none to resume: the first update sends it.
         let running = stopped.apply_pending();
-        debug_assert!(running, "the re-prepare resumed inside the hook");
+        let planned = self.graph.sent_compensation().is_some();
+        debug_assert!(
+            running || !planned,
+            "the re-prepare resumed inside the hook"
+        );
         // The figures the first block runs at, published before it.
         self.graph.publish_sent();
         // The hardware inlets place an arrival a block after it came, a

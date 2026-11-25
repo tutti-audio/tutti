@@ -1016,8 +1016,8 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl,
-        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
+        FollowTempo, HeldReader, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack,
+        LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
         NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause, Unplayed,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
