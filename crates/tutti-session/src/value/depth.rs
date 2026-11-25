@@ -29,12 +29,14 @@ impl Slot<Bipolar> for DepthSlot {
 
 keyed_slot_target!(
     /// The depth of the route from a source into a target, a fraction of the
-    /// target's range (negative inverts), as [`DepthTarget::of`] names it.
+    /// target's range (negative inverts), as [`DepthTarget::of`] names it; or
+    /// of a route's scale, as [`DepthTarget::scale_of`] names it.
     ///
     /// The route's lane reads the depth from a cell at every evaluation, so a
     /// write lands at once: the lane's program is not republished, nothing is
     /// recompiled, and no phase resets. A call that names a source and target
-    /// with no route between them (never declared, or removed) fails with
+    /// with no route between them (never declared, or removed), or a scale of a
+    /// route with none, fails with
     /// `NoSuchTarget`.
     DepthTarget,
     Bipolar,
@@ -54,28 +56,29 @@ impl DepthTarget {
         Self::new(DepthKey::Into(source, target.into()))
     }
 
-    /// The depth of the route from `source` into the depth of `route`
-    /// ([`RouteSpec::scaling`](crate::RouteSpec::scaling)).
+    /// The depth of the scale of `route` ([`Mods::set_scale`](crate::Mods::set_scale)).
     #[must_use]
-    pub fn scaling(source: ModSourceId, route: ModRouteId) -> Self {
-        Self::new(DepthKey::Scaling(source, route))
+    pub fn scale_of(route: ModRouteId) -> Self {
+        Self::new(DepthKey::Scale(route))
     }
 
-    /// The source of the route.
+    /// The source of the route, for a route into a target; `None` for a
+    /// scale.
     #[must_use]
-    pub const fn source(self) -> ModSourceId {
+    pub const fn source(self) -> Option<ModSourceId> {
         match self.0 {
-            DepthKey::Into(source, _) | DepthKey::Scaling(source, _) => source,
+            DepthKey::Into(source, _) => Some(source),
+            DepthKey::Scale(_) => None,
         }
     }
 
-    /// What the route modulates, for a route into a target; `None` for one
-    /// that scales another route's depth.
+    /// What the route modulates, for a route into a target; `None` for a
+    /// scale.
     #[must_use]
     pub const fn target(self) -> Option<ModTarget> {
         match self.0 {
             DepthKey::Into(_, target) => Some(target),
-            DepthKey::Scaling(..) => None,
+            DepthKey::Scale(_) => None,
         }
     }
 }

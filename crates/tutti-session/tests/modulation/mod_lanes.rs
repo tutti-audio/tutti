@@ -29,7 +29,8 @@ use tutti_nodes::{ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRefusal,
     ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef,
-    ParamTarget, Problem, Replacement, RouteError, RouteSpec, Session, SessionEvent, TargetName,
+    ParamTarget, Problem, Replacement, RouteSpec, Scale, ScaleError, Session, SessionEvent,
+    TargetName,
 };
 use tutti_units::{
     Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -1130,7 +1131,7 @@ fn a_depth_slider_keeps_phase() {
 }
 
 /// A macro of 1 at depth 0.2 on the cutoff probe's `0..=1000` (knob 500),
-/// scaled by a macro of 0.5 through a route of depth 1 into its depth:
+/// scaled by a macro of 0.5 at depth 1:
 /// `1000 * 0.2 * (1 * 0.5)` = 100 over the knob, so 600. Settled; returns the
 /// session, its audio side and the two macros.
 fn scaled_scene() -> (
@@ -1151,7 +1152,7 @@ fn scaled_scene() -> (
     let scaled = m
         .route(RouteSpec::new(full, cutoff, Bipolar::of(0.2)))
         .unwrap();
-    m.route(RouteSpec::scaling(half, scaled, Bipolar::of(1.0)))
+    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
         .unwrap();
     settle(&mut s);
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
@@ -1177,17 +1178,17 @@ fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 800.0);
 }
 
-/// **A scaling route's own depth write is applied.** The scaling route's
+/// **A scale's own depth write is applied.** The scale's
 /// depth is read when the program is compiled, so the write republishes the
 /// cutoff's program with no plan: from the scene's scaled depth 0.2 and scale
-/// `0.5 * 1`, writing the scaling depth to 0.5 reads `1000 * 0.2 * (0.5 *
+/// `0.5 * 1`, writing the scale's depth to 0.5 reads `1000 * 0.2 * (0.5 *
 /// 0.5)` = 50 over the knob, so 550.
 #[test]
-fn a_scaling_routes_own_depth_write_is_applied() {
-    let (mut s, mut side, _, full, half) = scaled_scene();
+fn a_scales_own_depth_write_is_applied() {
+    let (mut s, mut side, _, full, _) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     let settled = sent(&s);
-    s.set(DepthTarget::scaling(half, scaled).to(Bipolar::of(0.5)))
+    s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
     assert!(
@@ -1197,14 +1198,14 @@ fn a_scaling_routes_own_depth_write_is_applied() {
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 550.0);
 }
 
-/// **One source can route into a target and scale another route into it.** A
+/// **One source can route into a target and scale a route into it.** A
 /// macro of 0.5 routes into the cutoff (`0..=1000`, knob 500) at depth 0.1 and
 /// scales the depth of a macro of 1's route at depth 0.2, itself at depth 1:
 /// `1000 * 0.2 * 0.5` plus `1000 * 0.1 * 0.5` over the knob, so 650. Each of
-/// the two depths has its own name; writing the scaling depth to 0.5 reads
+/// the two depths has its own name; writing the scale's depth to 0.5 reads
 /// `1000 * 0.2 * 0.25 + 50` over the knob, 600, and the route into the cutoff
-/// to 0.3 reads `50 + 1000 * 0.3 * 0.5`, 700. A second scale of the same route
-/// from the same source is a duplicate, from another source `AlreadyScaled`.
+/// to 0.3 reads `50 + 1000 * 0.3 * 0.5`, 700. A scale set again replaces the
+/// first, with its depth.
 #[test]
 fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
     let (mut s, mut side) = rig(1);
@@ -1220,22 +1221,14 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
         .unwrap();
     m.route(RouteSpec::new(half, cutoff, Bipolar::of(0.1)))
         .unwrap();
-    m.route(RouteSpec::scaling(half, scaled, Bipolar::of(1.0)))
-        .expect("a route into a depth is not the route into the target");
-    assert_eq!(
-        m.route(RouteSpec::scaling(half, scaled, Bipolar::of(0.3))),
-        Err(RouteError::Duplicate {
-            target: cutoff.into()
-        })
-    );
-    assert_eq!(
-        m.route(RouteSpec::scaling(full, scaled, Bipolar::of(0.3))),
-        Err(RouteError::AlreadyScaled { route: scaled })
-    );
+    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(0.3))))
+        .unwrap();
+    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
+        .expect("a scale is replaced");
     settle(&mut s);
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
 
-    s.set(DepthTarget::scaling(half, scaled).to(Bipolar::of(0.5)))
+    s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
@@ -1245,27 +1238,37 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
 }
 
-/// **A scaling route goes with the route it scales**, and one onto a route
-/// that is not declared is refused at the call. A scale is one deep: a route
-/// onto a scaling route is refused, so no scale outlives the route it rests on.
+/// **Clearing a scale restores the unscaled figure, and so does removing the
+/// scaling source.** From the scene's 600, `set_scale(route, None)` reads
+/// `1000 * 0.2 * 1` = 200 over the knob, so 700; a scale set again reads 600,
+/// and removing its source reads 700 with the route's `scale` empty. A scale
+/// goes with its route, and one asked of a route or by a source that is gone
+/// is refused at the call.
 #[test]
-fn a_scaling_route_goes_with_its_scaled_route() {
-    let (mut s, _side, _, full, half) = scaled_scene();
+fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
+    let (mut s, mut side, _, full, half) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
-    let scaling = s.mods().routes().find(|r| r.source == half).unwrap();
-    assert_eq!(scaling.scales, Some(scaled));
-    let third = s.mods_mut().macro_(1.0);
+    assert_eq!(s.mods().route(scaled).unwrap().scale, Some(half));
+    s.mods_mut().set_scale(scaled, None).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(s.mods().route(scaled).unwrap().scale, None);
+    let scale = Some(Scale::new(half, Bipolar::of(1.0)));
+    s.mods_mut().set_scale(scaled, scale).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    s.mods_mut().remove_source(half).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(s.mods().route(scaled).unwrap().scale, None);
     assert_eq!(
-        s.mods_mut()
-            .route(RouteSpec::scaling(third, scaling.id, Bipolar::of(1.0))),
-        Err(RouteError::ScalesAScale { route: scaling.id })
+        s.mods_mut().set_scale(scaled, scale),
+        Err(ScaleError::NoSuchSource(NoSuchModSource(half)))
     );
     s.mods_mut().remove_route(scaled).unwrap();
-    assert_eq!(s.mods().routes().count(), 0, "the scaling route went too");
     assert_eq!(
-        s.mods_mut()
-            .route(RouteSpec::scaling(half, scaled, Bipolar::of(1.0))),
-        Err(RouteError::NoSuchRoute(NoSuchModRoute(scaled)))
+        s.mods_mut().set_scale(scaled, None),
+        Err(ScaleError::NoSuchRoute(NoSuchModRoute(scaled)))
     );
 }
 

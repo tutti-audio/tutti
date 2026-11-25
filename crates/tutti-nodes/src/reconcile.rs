@@ -22,9 +22,8 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
-    Compiled, ControlProgram, Declarations, ProgramCompileError, RouteDecl, RouteKey, RouteTarget,
-    SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey,
-    compile,
+    Compiled, ControlProgram, Declarations, ProgramCompileError, RouteDecl, RouteKey, SignalKind,
+    SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey, compile,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{At, Normalized, ParamAddr, ParamId};
@@ -373,7 +372,7 @@ struct SourcePlan {
 /// use std::sync::Arc;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_modulation::{
-///     LayerClock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
+///     LayerClock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey,
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
 /// use tutti_buffers::ChannelLayout;
@@ -421,10 +420,11 @@ struct SourcePlan {
 ///     RouteKey(1),
 ///     RouteDecl {
 ///         source: SourceKey(1),
-///         to: RouteTarget::Param(cutoff),
+///         to: cutoff,
 ///         depth: Param::new(Bipolar::of(0.3)),
 ///         polarity: Polarity::Bipolar,
 ///         curve: Law::Linear,
+///         scale: None,
 ///     },
 /// )];
 /// let targets = [(cutoff, TargetDecl { min: 20.0, max: 20_000.0, automation: None })];
@@ -515,13 +515,13 @@ struct Memo {
     epoch: u32,
 }
 
-/// The depth of each depth route, by bits: the one depth read when compiled
-/// (a route into a param is read by its lane from the cell).
+/// The depth of each route's scale, by bits: the one depth read when compiled
+/// (a route's own is read by its lane from the cell).
 fn scalers<'a>(decl: &Declarations<'a>) -> impl Iterator<Item = (RouteKey, u64)> + 'a {
-    decl.routes
-        .iter()
-        .filter(|(_, route)| matches!(route.to, RouteTarget::Depth(_)))
-        .map(|(key, route)| (*key, route.depth.load().get().to_bits()))
+    decl.routes.iter().filter_map(|(key, route)| {
+        let scale = route.scale.as_ref()?;
+        Some((*key, scale.depth.load().get().to_bits()))
+    })
 }
 
 fn same_target(a: &TargetDecl, b: &TargetDecl) -> bool {
@@ -1357,9 +1357,7 @@ impl Modulation {
             decl.routes.iter().collect();
         routes.sort_by_key(|(k, _)| *k);
         for (key, route) in routes {
-            let RouteTarget::Param(t) = route.to else {
-                continue;
-            };
+            let t = route.to;
             if !edges.contains(&(route.source, t)) {
                 continue;
             }

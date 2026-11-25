@@ -1250,11 +1250,11 @@ mod tests {
 }
 
 /// What names a route's depth: the route from a source into a target, or the
-/// one from a source into another route's depth.
+/// depth of the scale of a route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DepthKey {
     /// The route from a source into a target.
     Into(ModSourceId, ModTarget),
-    /// The route from a source into the depth of a route.
-    Scaling(ModSourceId, ModRouteId),
+    /// The scale of a route: a route has at most one.
+    Scale(ModRouteId),
 }

@@ -11,7 +11,6 @@ const program::MAX_LANE_INPUTS
 const program::MAX_LANE_LAYERS
 const source::CONTROL_GRID
 enum compile::ProgramCompileError
-enum compile::RouteTarget
 enum compile::SignalKind
 enum compile::Source
 enum compile::TargetKey
@@ -81,6 +80,7 @@ struct compile::Compiled
 struct compile::Declarations
 struct compile::RouteDecl
 struct compile::RouteKey
+struct compile::Scale
 struct compile::SignalSource
 struct compile::SourceKey
 struct compile::TargetDecl
