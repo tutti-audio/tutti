@@ -149,13 +149,13 @@ impl<F: Float> EditLink<F> {
 
     /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
-    pub(super) fn main_output_fade_ended(&self) -> u64 {
-        self.fade_ended.get().0
+    pub(super) fn main_output_fade_ended(&self) -> CommitSeq {
+        self.fade_ended.get()
     }
 
     /// The sequence number the next commit sends with.
-    pub(super) fn next_seq(&self) -> u64 {
-        self.sent + 1
+    pub(super) fn next_seq(&self) -> CommitSeq {
+        CommitSeq(self.sent + 1)
     }
 
     /// Sends `commit`, which starts `fades` crossfades: the caller checked
