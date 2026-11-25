@@ -819,6 +819,7 @@ mod tests {
             midi_out: Default::default(),
             status: Default::default(),
             refused: false,
+            writes: crate::BlockWrites::Handed,
         };
         let mut round = || {
             send(&mut p.host, &block).expect("send");

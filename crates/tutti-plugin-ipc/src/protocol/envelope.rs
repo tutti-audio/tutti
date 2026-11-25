@@ -155,6 +155,9 @@ pub enum AudioReply {
         /// or the plugin refused the sample rate. The host reads the block as
         /// silence, and counts a missed one refused.
         refused: bool,
+        /// Whether the block's parameter changes reached the plugin: a fact
+        /// apart from `refused`, which is about the audio.
+        writes: BlockWrites,
     },
     /// The answer to an [`ApplyParameters`](AudioRequest::ApplyParameters),
     /// sent once the render thread has tried the changes: the outcome says
@@ -165,6 +168,22 @@ pub enum AudioReply {
         /// Whether the plugin has the changes.
         outcome: ApplyOutcome,
     },
+}
+
+/// What became of the parameter changes a block carried, as the server's
+/// render thread answers it.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BlockWrites {
+    /// The block never reached the plugin (no seat, a refused rate, a block the
+    /// slab or the ports could not hold): its changes were dropped.
+    #[default]
+    Dropped,
+    /// The changes were handed to the plugin with the block, whatever `process`
+    /// returned: a `process` error after the hand-over is not a lost write, the
+    /// format had the changes, and the block fault is counted as one.
+    Handed,
 }
 
 /// What became of the changes of an

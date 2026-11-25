@@ -318,6 +318,7 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
         midi_out: data.midi_events,
         status: Default::default(),
         refused: false,
+        writes: tutti_plugin_ipc::BlockWrites::Handed,
     }
 }
 

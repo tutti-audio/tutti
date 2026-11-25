@@ -47,7 +47,9 @@ use tutti_rt::Mutex;
 
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::{ApplyOutcome, AudioReply, AudioRequest, SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{
+    ApplyOutcome, AudioReply, AudioRequest, BlockWrites, SlabLayout, SlabWriter,
+};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, Features, IpcError, IpcResult, MidiEventVec, PluginIo, PluginResult,
@@ -907,8 +909,10 @@ impl RenderSide {
             seq,
             midi_out: MidiEventVec::new(),
             status: BlockStatus::Continue,
-            // Nothing is published on these paths.
+            // Nothing is published on these paths, and the block's changes
+            // reach no plugin.
             refused: true,
+            writes: BlockWrites::Dropped,
         };
 
         // NOTE: every early return below replies WITHOUT publishing to the slab,
@@ -987,6 +991,7 @@ impl RenderSide {
             },
             status: pipeline.status(),
             refused: output.refused,
+            writes: output.writes,
         })
     }
 
@@ -1860,6 +1865,28 @@ mod tests {
         assert_eq!(applied_as(&mut side), ApplyOutcome::Refused);
         let (_link, mut side, _host) = seated(Faulty::new(Mode::Owned(Vec::new())));
         assert_eq!(applied_as(&mut side), ApplyOutcome::Applied);
+    }
+
+    /// **A block's reply says whether its parameter changes reached the plugin,
+    /// apart from whether its audio was published**: with no seat they are
+    /// dropped; handed to a plugin whose `process` then fails, they are handed
+    /// all the same (the block is refused, the write is not lost).
+    #[test]
+    fn a_block_reply_says_whether_the_changes_reached_the_plugin() {
+        let writes = |side: &mut RenderSide| match side.handle(block(1)).unwrap() {
+            Some(AudioReply::AudioProcessed {
+                refused, writes, ..
+            }) => (refused, writes),
+            other => panic!("not a block's answer: {other:?}"),
+        };
+        let (_link, mut side) = link().expect("bells");
+        assert_eq!(writes(&mut side), (true, BlockWrites::Dropped), "no seat");
+        let (_link, mut side, _host) = seated(Faulty::new(Mode::Fail));
+        assert_eq!(
+            writes(&mut side),
+            (true, BlockWrites::Handed),
+            "process failed after the hand-over"
+        );
     }
 
     fn block(seq: u64) -> AudioRequest {

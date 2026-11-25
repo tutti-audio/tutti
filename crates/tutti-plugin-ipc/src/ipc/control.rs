@@ -245,6 +245,23 @@ macro_rules! served_control {
                 AnyThread::set_parameter_value(self, id, value)
             }
 
+            /// The host's writes made so far: what a flush the server answers
+            /// must have carried ([`AudioBridge::edits_queued`]).
+            ///
+            /// [`AudioBridge::edits_queued`]: crate::AudioBridge
+            fn queued(&self) -> Option<tutti_rt::Generation> {
+                self.link.bridge.audio().edits_queued()
+            }
+
+            /// Whether the server answered a request that carried the writes up
+            /// to `upto`; when not, asks the audio lane to flush them
+            /// ([`AudioBridge::edits_delivered`]).
+            ///
+            /// [`AudioBridge::edits_delivered`]: crate::AudioBridge
+            fn delivered(&self, upto: tutti_rt::Generation) -> bool {
+                self.link.bridge.audio().edits_delivered(upto)
+            }
+
             /// From the declared parameters the client keeps, not a round trip
             /// per write (the client's declared-parameter cache): a lost plugin is
             /// [`Lost`](tutti_plugin_types::ParamWriteError::Lost), one that does

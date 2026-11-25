@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 69;
+pub const PROTOCOL_VERSION: u32 = 70;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -79,16 +79,16 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::IpcResult<
 
 pub(crate) use envelope::default_format;
 pub use envelope::{
-    AppMidiMapApplied, ApplyOutcome, ArmPluginMidiLearn, AudioReply, AudioRequest, CloseEditor,
-    ControlFrame, ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized,
-    GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
-    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened,
-    LoadPlugin, LoadPreset, LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList,
-    ParameterNormalized, ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText,
-    PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, ReqId, Request,
-    SampleRateSet, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
-    SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, StageState,
-    StagedState, StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
+    AppMidiMapApplied, ApplyOutcome, ArmPluginMidiLearn, AudioReply, AudioRequest, BlockWrites,
+    CloseEditor, ControlFrame, ControlReply, ControlRequest, CurrentPreset, EditorOpened,
+    EditorSized, GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized,
+    GetParameterPlain, GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Lane,
+    LaneOpened, LoadPlugin, LoadPreset, LoadState, ModeOutcome, News, OpenEditor, OpenLane,
+    ParameterList, ParameterNormalized, ParameterPlain, ParameterText, ParameterValue,
+    ParameterValueFromText, PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet,
+    ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize,
+    SetRenderMode, SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown,
+    StageState, StagedState, StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
 };
 pub use frame::Framed;
 pub use message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
@@ -333,6 +333,7 @@ mod tests {
                 midi_out: Default::default(),
                 status: Default::default(),
                 refused: false,
+                writes: crate::BlockWrites::Handed,
             })
             .unwrap()),
             0
@@ -794,6 +795,7 @@ mod tests {
             midi_out,
             status: tutti_plugin_types::BlockStatus::Sleep,
             refused: true,
+            writes: crate::BlockWrites::Handed,
         };
         let bytes = postcard::to_allocvec(&msg).unwrap();
         let back: AudioReply = postcard::from_bytes(&bytes).unwrap();
@@ -804,8 +806,10 @@ mod tests {
                 midi_out,
                 status,
                 refused,
+                writes,
             } => {
                 assert!(refused);
+                assert_eq!(writes, crate::BlockWrites::Handed);
                 assert_eq!(latency_us, 42);
                 assert_eq!(status, tutti_plugin_types::BlockStatus::Sleep);
                 // The block-identity echo. Not load-bearing for audio
@@ -864,7 +868,7 @@ mod tests {
     #[test]
     fn audio_processed_midi_out_has_pinned_bytes() {
         #[rustfmt::skip]
-        const BYTES: [u8; 27] = [
+        const BYTES: [u8; 28] = [
             0, // variant
             42, // latency_us
             7, // seq
@@ -873,6 +877,7 @@ mod tests {
             0x84, 0x86, 0x88, 0x08, 1, 2, 3, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F, // 0x0102_0304; 1, 2, 3, u32::MAX
             2, // status: sleep
             1, // refused
+            1, // writes: handed
         ];
         let midi_out: MidiEventVec = [
             WireMidi {
@@ -892,6 +897,7 @@ mod tests {
             midi_out,
             status: tutti_plugin_types::BlockStatus::Sleep,
             refused: true,
+            writes: crate::BlockWrites::Handed,
         };
         assert_eq!(postcard::to_allocvec(&msg).unwrap(), BYTES);
         let back: AudioReply = postcard::from_bytes(&BYTES).unwrap();

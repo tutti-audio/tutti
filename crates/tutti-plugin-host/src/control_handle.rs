@@ -96,6 +96,27 @@ impl<C: Control + Clone + Send + Sync> MainThreadControl for C {
         f(&mut self.clone());
     }
 
+    /// No writes are held apart from the plugin on this side: what the control
+    /// queued for delivery ([`Control::queued`]) is fixed at the first settle.
+    fn writes(&self) -> PendingWrites {
+        PendingWrites::new(tutti_rt::Generation::new(0))
+    }
+
+    /// `Ready` once the control says every write it queued at the first settle
+    /// is delivered ([`Control::delivered`]), which asks for it.
+    fn settle(&self, _main: MainThreadMarker, pending: &mut PendingWrites) -> std::task::Poll<()> {
+        let settled = lent(self, |control| {
+            pending
+                .queue_mark(|| control.queued())
+                .is_none_or(|upto| control.delivered(upto))
+        });
+        if settled.unwrap_or(true) {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    }
+
     fn editor_idle(&self, main: MainThreadMarker) {
         self.lend(&mut |control| control.editor_idle(main));
     }

@@ -1049,6 +1049,7 @@ mod tests {
             midi_out: Default::default(),
             status: Default::default(),
             refused: false,
+            writes: crate::BlockWrites::Handed,
         };
         let block = |seq| {
             let AudioCommand::Process(mut payload) = payload_with_midi(0) else {
@@ -1197,6 +1198,7 @@ mod tests {
                     midi_out: Default::default(),
                     status: Default::default(),
                     refused: false,
+                    writes: crate::BlockWrites::Handed,
                 };
                 if crate::write_frame(&mut &*peer, &reply).is_err() {
                     break;

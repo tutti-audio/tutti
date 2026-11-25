@@ -12,6 +12,7 @@ enum error::PluginRenderFault
 enum protocol::envelope::ApplyOutcome
 enum protocol::envelope::AudioReply
 enum protocol::envelope::AudioRequest
+enum protocol::envelope::BlockWrites
 enum protocol::envelope::ControlFrame
 enum protocol::envelope::Lane
 enum protocol::envelope::ModeOutcome
