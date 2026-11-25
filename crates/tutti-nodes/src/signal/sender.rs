@@ -18,13 +18,13 @@ use super::PlayWalk;
 /// fits and re-sends where it stands at the next block's first frame.
 pub const SOURCE_EVENT_CAPACITY: std::num::NonZeroU32 = std::num::NonZeroU32::new(256).unwrap();
 
-/// How a control source's node is wired: its cost, whether it has a MIDI
-/// input, and how it reads its audio input.
+/// How a control source's node is wired: its cost, whether it hears MIDI on
+/// its event input, and how it reads its audio input.
 pub trait SourcePorts: ControlSource {
     /// Its cost class.
     const COST: Cost;
-    /// It has one MIDI event input (event input 0), read through
-    /// [`ControlSource::heard`].
+    /// It hears MIDI on its event input (input 0, which every source node
+    /// has), through [`ControlSource::heard`].
     const MIDI_IN: bool;
 
     /// Frames `from..to` of its audio input, in order, before the stops on
@@ -85,30 +85,20 @@ pub struct SourceNode<S: ControlSource> {
     /// Its audio input's width ([`ChannelLayout::EMPTY`]: none).
     input: ChannelLayout,
     flight: Option<Flight>,
-    /// Re-send where it stands at the next block's first frame.
+    /// Re-send where it stands at the next block's first frame: the last
+    /// block refused events.
     owed: bool,
     /// The play clock's epoch at the last frame read; `None` while fresh.
     epoch: Option<u32>,
     /// Frames since its last reset: the clock its flight is timed on.
     position: u64,
-    /// Its MIDI event input, when its source hears one.
-    midi_in: Option<InEvents>,
+    /// Its event input: [`EventKind::Resync`], and MIDI when its source hears it.
+    events_in: InEvents,
     /// Its segment output.
     out: OutEvents,
 }
 
 impl<S: ControlSource> SourceNode<S> {
-    /// This node, sending where it stands on its first block's first frame
-    /// (0, while it has sent nothing): for one that replaces another of the
-    /// same [`SourceId`] (a declaration edit rebuilds it), since a lane holds
-    /// the old node's last value until this one sends. A fork (the node
-    /// reset) does not keep it.
-    #[must_use]
-    pub fn replacing(mut self) -> Self {
-        self.owed = true;
-        self
-    }
-
     /// The source id its segments are addressed to.
     pub fn source(&self) -> SourceId {
         self.id
@@ -191,13 +181,14 @@ impl<S: SourcePorts> SourceNode<S> {
             owed: false,
             epoch: None,
             position: 0,
-            midi_in: shape.event_input(0),
+            events_in: shape.event_input(0).expect("declared one event input"),
             out: shape.event_output(0).expect("declared one event output"),
         }
     }
 
-    /// Its audio input (if any) in, no audio out; a MIDI input if its source
-    /// hears one, and one event output (the segments).
+    /// Its audio input (if any) in, no audio out; one event input
+    /// ([`EventKind::Resync`], and MIDI if its source hears it), and one event
+    /// output (the segments).
     fn declared(input: ChannelLayout) -> Shape {
         let shape = if input == ChannelLayout::EMPTY {
             Shape::EMPTY
@@ -205,7 +196,7 @@ impl<S: SourcePorts> SourceNode<S> {
             Shape::sink_unassigned(input)
         };
         shape
-            .events(u16::from(S::MIDI_IN), 1)
+            .events(1, 1)
             .param_events()
             .event_capacity(SOURCE_EVENT_CAPACITY)
             .cost(S::COST)
@@ -269,8 +260,9 @@ fn grid_points(cx: &Cx<'_>, walk: &PlayWalk, len: usize, prev: Option<u32>, stri
 }
 
 impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
-    /// Its audio input (if any) in, no audio out; a MIDI input if its source
-    /// hears one, and one event output (the segments).
+    /// Its audio input (if any) in, no audio out; one event input
+    /// ([`EventKind::Resync`], and MIDI if its source hears it), and one event
+    /// output (the segments).
     fn shape(&self) -> Shape {
         Self::declared(self.input)
     }
@@ -285,10 +277,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
             return Status::Modified;
         }
         let walk = PlayWalk::new(cx, len);
-        let events = match self.midi_in {
-            Some(port) => io.events(port).as_slice(),
-            None => &[],
-        };
+        let events = io.events(self.events_in).as_slice();
         let n_starts = walk.starts(cx, len, self.epoch).count();
         // Every other stop a block can hold: the owed re-send, the starts,
         // and per event its own leg and the corner it may set.
@@ -301,7 +290,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
             port: self.out,
         };
         if std::mem::take(&mut self.owed) {
-            // Refused last block, or replacing a node: where it stands now.
+            // Refused last block: where it stands now.
             let seg = self.standing(self.position);
             self.send(&mut out, &mut io, 0, seg);
         }
@@ -351,7 +340,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
                 }
                 while let Some(x) = events.get(ev).filter(|x| x.offset.index() == p) {
                     match x.kind {
-                        EventKind::Midi(ump) => {
+                        EventKind::Midi(ump) if S::MIDI_IN => {
                             let level = self.level(self.position + p as u64);
                             let leg = self.source.heard(play(p), level, ump);
                             self.send_leg(&mut out, &mut io, p, leg);
