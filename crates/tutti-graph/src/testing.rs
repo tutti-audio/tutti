@@ -843,7 +843,7 @@ impl<F: Float> Harness<F> {
     }
 
     /// `switch`, with the regenerated keys in `fades` crossfading
-    /// (`Editor::replace_or_swap`'s contract). The executor gets the fades for the
+    /// (`Editor::replace`'s contract). The executor gets the fades for the
     /// keys its delta replaces, as `Editor::commit` attaches them.
     ///
     /// A node's **declared latency is the spec's**, as after
@@ -866,7 +866,7 @@ impl<F: Float> Harness<F> {
         let (plan, mut delta) =
             compile(graph, &shapes, &prepare(self.max_block), self.plan.as_ref())
                 .expect("compiles");
-        delta.cuts = plan
+        let cuts = plan
             .units()
             .iter()
             .filter(|now| {
@@ -879,23 +879,20 @@ impl<F: Float> Harness<F> {
                             && was.shape.latency != now.shape.latency
                     })
             })
-            .map(|u| crate::Placement {
-                key: u.key,
-                generation: u.generation,
-                idx: u.idx,
-            })
+            .map(crate::PlanUnit::placement)
             .collect();
         plan.verify().expect("verifies");
-        delta.fades = delta
-            .replace
+        let fades = delta
+            .replace()
             .iter()
             .filter_map(|&(_, new)| fades.get(&new.key).map(|&f| (new.key, f)))
             .collect();
+        delta.attach(fades, cuts);
         let placed: Vec<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, n)| n.key))
+            .chain(delta.replace().iter().map(|(_, n)| n.key))
             .collect();
         self.outputs = graph.topology().outputs.len();
         self.inputs = graph.topology().inputs.count() as usize;

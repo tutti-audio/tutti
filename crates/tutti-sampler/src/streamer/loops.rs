@@ -362,12 +362,12 @@ impl<F: Float> RingLoop<F> {
         };
         let first = fade_start.saturating_sub(from);
         for (k, frame) in run.iter_mut().enumerate().skip(first) {
-            let Some((lead, weight)) = self.span.fade_at(from + k) else {
+            let Some((lead, out, inn)) = self.span.fade_at(from + k) else {
                 continue;
             };
             let lead = lead_in.frame(Samples::new(lead + fade - self.span.resume()));
             for (s, &l) in frame.iter_mut().zip(lead) {
-                *s = tutti_dsp::lerp(*s, l, weight);
+                *s = *s * out + l * inn;
             }
         }
     }
@@ -403,8 +403,8 @@ pub(crate) struct Mapping<F: Float> {
 /// One slot's content, compared to find where two mappings part.
 #[derive(Debug, PartialEq)]
 enum Key<F> {
-    /// A file frame, and inside a fade its lead-in and weight.
-    Frame(usize, Option<(usize, F)>),
+    /// A file frame, and inside a fade its lead-in and gains.
+    Frame(usize, Option<(usize, F, F)>),
     /// Nothing is ever read here (past the end of an unlooped or reversed
     /// stream).
     Unread,
@@ -888,6 +888,29 @@ mod tests {
         );
     }
 
+    /// Frame `k` of an `n`-frame fade, tail toward lead-in, from the closed
+    /// form: `s = x³(6x² − 15x + 10)` at `x = (k + 1) / (n + 1)`, gains
+    /// `cos(πs/2)` and `sin(πs/2)`.
+    fn blended(tail: f32, lead: f32, k: u32, n: u32) -> f32 {
+        let x = f64::from(k + 1) / f64::from(n + 1);
+        let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+        let a = s * std::f64::consts::FRAC_PI_2;
+        (f64::from(tail) * a.cos() + f64::from(lead) * a.sin()) as f32
+    }
+
+    /// Each sample within four `f32` epsilons of the larger of 1 and its
+    /// magnitude: the gains are narrowed to `f32` once, and each product and
+    /// the sum round once more.
+    fn assert_close(got: &[f32], want: &[f32]) {
+        assert_eq!(got.len(), want.len());
+        for (i, (g, w)) in got.iter().zip(want).enumerate() {
+            assert!(
+                (g - w).abs() <= 4.0 * f32::EPSILON * w.abs().max(1.0),
+                "sample {i}: {g} vs {w}"
+            );
+        }
+    }
+
     /// A fill writes the loop as the sequence `LoopSpan` defines: from
     /// frame 0, a crossfaded loop `[5, 9)` writes the file up to 5, blends
     /// 7 and 8 toward 3 and 4 as it writes them, and wraps to 5; a fill that
@@ -899,30 +922,29 @@ mod tests {
     fn a_fill_writes_the_looped_sequence() {
         let wave = make_mono_wave(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
         let lead = loop_frames(&wave, (5, 9), 2);
-        let blended = |tail: f32, lead: f32, k: f32| tail * (1.0 - k / 3.0) + lead * (k / 3.0);
-        let (b7, b8) = (blended(7.0, 3.0, 1.0), blended(8.0, 4.0, 2.0));
-        assert_eq!(
-            fill(&lead, &wave, 0, 13, 1),
-            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, b7, b8, 5.0, 6.0, b7, b8]
+        let (b7, b8) = (blended(7.0, 3.0, 0, 2), blended(8.0, 4.0, 1, 2));
+        assert_close(
+            &fill(&lead, &wave, 0, 13, 1),
+            &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, b7, b8, 5.0, 6.0, b7, b8],
         );
         // Straight 11 is the loop's third frame, 7, on its second pass.
-        assert_eq!(fill(&lead, &wave, 11, 4, 1), [b7, b8, 5.0, 6.0]);
+        assert_close(&fill(&lead, &wave, 11, 4, 1), &[b7, b8, 5.0, 6.0]);
 
         // Head mode: `[1, 9)` fading 3 into its own head resumes at 4.
         let head = loop_frames(&wave, (1, 9), 3);
-        let b = |tail: f32, lead: f32, k: f32| tail * (1.0 - k / 4.0) + lead * (k / 4.0);
-        assert_eq!(
-            fill(&head, &wave, 5, 8, 1),
-            [
+        let b = |tail: f32, lead: f32, k: u32| blended(tail, lead, k, 3);
+        assert_close(
+            &fill(&head, &wave, 5, 8, 1),
+            &[
                 5.0,
-                b(6.0, 1.0, 1.0),
-                b(7.0, 2.0, 2.0),
-                b(8.0, 3.0, 3.0),
+                b(6.0, 1.0, 0),
+                b(7.0, 2.0, 1),
+                b(8.0, 3.0, 2),
                 4.0,
                 5.0,
-                b(6.0, 1.0, 1.0),
-                b(7.0, 2.0, 2.0)
-            ]
+                b(6.0, 1.0, 0),
+                b(7.0, 2.0, 1),
+            ],
         );
 
         // Many wraps of a short loop read the file once: the first pass.
@@ -960,15 +982,14 @@ mod tests {
             len: Some(wave.len()),
             ring_loop: Some(ring_loop),
         };
-        let blended = |tail: f32, lead: f32, k: f32| tail * (1.0 - k / 3.0) + lead * (k / 3.0);
         let want = [
             (6.0, 106.0),
-            (blended(7.0, 3.0, 1.0), blended(107.0, 103.0, 1.0)),
-            (blended(8.0, 4.0, 2.0), blended(108.0, 104.0, 2.0)),
+            (blended(7.0, 3.0, 0, 2), blended(107.0, 103.0, 0, 2)),
+            (blended(8.0, 4.0, 1, 2), blended(108.0, 104.0, 1, 2)),
             (5.0, 105.0),
         ];
         let want: Vec<f32> = want.iter().flat_map(|&(l, r)| [l, r]).collect();
-        assert_eq!(fill(&looped, &wave, 6, 4, 2), want);
+        assert_close(&fill(&looped, &wave, 6, 4, 2), &want);
     }
 
     /// A six-channel loop wraps at its full FRAME length: frame 100 of a

@@ -56,7 +56,7 @@ enum Inverse {
 impl Tuple {
     /// The speakers' indices: two for a horizontal layout, three otherwise.
     #[must_use]
-    pub fn speakers(&self) -> &[u16] {
+    pub(crate) fn speakers(&self) -> &[u16] {
         match self.inverse {
             Inverse::Pair(_) => &self.speakers[..2],
             Inverse::Triplet(_) => &self.speakers[..3],

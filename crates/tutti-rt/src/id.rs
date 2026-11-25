@@ -54,7 +54,7 @@ macro_rules! id {
         $(#[$meta:meta])*
         $vis:vis struct $name:ident: named;
     ) => {
-        $crate::id!(@define [pub] $(#[$meta])* $vis struct $name;);
+        $crate::id!(@define [$vis] $(#[$meta])* $vis struct $name;);
     };
     (
         @define [$($ctor:tt)*]
@@ -106,7 +106,7 @@ macro_rules! id {
             #[inline]
             #[must_use]
             #[allow(dead_code)]
-            pub const fn get(self) -> u64 {
+            $vis const fn get(self) -> u64 {
                 self.0.get()
             }
         }
@@ -125,12 +125,12 @@ mod tests {
 
     crate::id! {
         /// A test id.
-        pub struct WidgetId;
+        pub(super) struct WidgetId;
     }
 
     crate::id! {
         /// A test id a caller names.
-        pub struct NamedId: named;
+        pub(super) struct NamedId: named;
     }
 
     #[test]

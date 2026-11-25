@@ -8,11 +8,11 @@ use tutti_rt::Param;
 use tutti_units::{Amplitude, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
-pub const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
+pub(crate) const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
 
 /// A constant source in any sample format.
 #[derive(Clone)]
-pub struct Dc(pub f64);
+pub(super) struct Dc(pub f64);
 
 impl<F: Float> Node<F> for Dc {
     fn shape(&self) -> Shape {
@@ -28,7 +28,7 @@ impl<F: Float> Node<F> for Dc {
 
 /// Multiplies a mono signal by its `Amplitude` param, in any sample format.
 #[derive(Clone)]
-pub struct Gain(pub Param<Amplitude>);
+pub(super) struct Gain(pub Param<Amplitude>);
 
 impl<F: Float> Node<F> for Gain {
     fn shape(&self) -> Shape {

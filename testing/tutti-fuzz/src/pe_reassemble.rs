@@ -49,7 +49,7 @@ const RESOURCES: [&str; 17] = [
 /// each a length byte and that many bytes of chunk fields. The reassembler
 /// never holds more than its limits, and a decoded body is never longer than
 /// the body limit, so a zlib bomb is refused.
-pub fn pe_reassemble(data: &[u8]) {
+pub(crate) fn pe_reassemble(data: &[u8]) {
     let Some((&pick, rest)) = data.split_first() else {
         return;
     };

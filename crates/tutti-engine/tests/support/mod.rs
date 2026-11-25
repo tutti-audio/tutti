@@ -24,7 +24,7 @@ use tutti_units::{Beat, Bpm, Hz, SampleRate, Tail};
 
 /// A map of steps: each `(beat, bpm)` holds until the next. A tempo change
 /// is a point at a beat, never a command at a frame.
-pub fn step_map(points: &[(f64, f64)]) -> Arc<TempoMap> {
+pub(crate) fn step_map(points: &[(f64, f64)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
             beat: Beat::new(beat),
@@ -38,7 +38,7 @@ pub fn step_map(points: &[(f64, f64)]) -> Arc<TempoMap> {
 /// The beat frame `frame` reaches at a constant `bpm` and `rate`, in the
 /// closed form the clock derives it with: a step placed there lands on
 /// `frame` itself.
-pub fn beat_of_frame(frame: u64, bpm: f64, rate: f64) -> f64 {
+pub(crate) fn beat_of_frame(frame: u64, bpm: f64, rate: f64) -> f64 {
     frame as f64 * bpm / (60.0 * rate)
 }
 
@@ -47,14 +47,14 @@ pub fn beat_of_frame(frame: u64, bpm: f64, rate: f64) -> f64 {
 /// Starts at [`SampleRate::DEFAULT`]; a graph corrects that through
 /// `prepare`.
 #[derive(Clone)]
-pub struct Sine {
+pub(crate) struct Sine {
     frequency: Hz,
     sample_rate: SampleRate,
     phase: f64,
 }
 
 impl Sine {
-    pub fn new(frequency: Hz) -> Self {
+    pub(crate) fn new(frequency: Hz) -> Self {
         Self {
             frequency,
             sample_rate: SampleRate::DEFAULT,
@@ -98,7 +98,7 @@ impl Node for Sine {
 /// allocation-budget chain varies it per node so no two nodes do identical
 /// work — it is a test knob, not a control a host sets.
 #[derive(Clone)]
-pub struct Gain(pub f32);
+pub(crate) struct Gain(pub f32);
 
 impl Node for Gain {
     fn shape(&self) -> Shape {
@@ -129,7 +129,7 @@ impl Node for Gain {
 ///
 /// The engine tests use it as the oracle for the graph's beats.
 #[derive(Clone, Copy, Debug)]
-pub struct Segment {
+pub(crate) struct Segment {
     pub frame: u64,
     pub beat: f64,
     pub bpm: f64,
@@ -139,7 +139,7 @@ pub struct Segment {
 impl Segment {
     /// The beat on frame `f`: `TimelineSegment::beat_at`'s arithmetic,
     /// IEEE-exact on every target (no libm).
-    pub fn at(&self, f: u64) -> f64 {
+    pub(crate) fn at(&self, f: u64) -> f64 {
         self.beat + ((f - self.frame) as f64 * self.bpm) / (60.0 * self.rate)
     }
 }
@@ -148,7 +148,7 @@ impl Segment {
 /// wrap check for that frame, as the engine advances to a frame before it
 /// applies the commands due on it).
 #[derive(Clone, Copy, Debug)]
-pub enum Change {
+pub(crate) enum Change {
     Tempo(f64),
     Loop(Option<(f64, f64)>),
     Seek(f64),
@@ -157,7 +157,7 @@ pub enum Change {
 /// The model's beat on every frame `0..=frames` at `rate`, rolling from
 /// beat 0 at `bpm`, under `changes` (frame, change), which must be in frame
 /// order.
-pub fn model_beats(rate: f64, bpm: f64, changes: &[(u64, Change)], frames: u64) -> Vec<f64> {
+pub(crate) fn model_beats(rate: f64, bpm: f64, changes: &[(u64, Change)], frames: u64) -> Vec<f64> {
     let mut seg = Segment {
         frame: 0,
         beat: 0.0,

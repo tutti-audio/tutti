@@ -44,7 +44,7 @@ use super::types::PlayDirection;
 use crate::streamer::StreamFile;
 
 // A read is placed by the `Place` the voice built from its file's topology
-// (`DiskSource::with_reader`), the same one its live read uses: the caller
+// (`DiskVoice::new`), the same one its live read uses: the caller
 // passes it, so a fork plays the channels where the live voice does.
 
 /// Frames per page. Two pages are resident; see [`Pages`].
@@ -454,10 +454,10 @@ impl<F: Float> Pages<F> {
         let mut frames = [[F::ZERO; MAX_WAVE_CHANNELS]; 4];
         for (frame, tap) in frames.iter_mut().zip(taps.iter()) {
             frame[..ch].copy_from_slice(&self.frame(tap.frame)[..ch]);
-            if let Some((lead, t)) = tap.fade {
+            if let Some((lead, out, inn)) = tap.fade {
                 let lead = self.frame(lead);
                 for (s, &l) in frame[..ch].iter_mut().zip(lead.iter()) {
-                    *s = tutti_dsp::lerp(*s, l, t);
+                    *s = *s * out + l * inn;
                 }
             }
         }

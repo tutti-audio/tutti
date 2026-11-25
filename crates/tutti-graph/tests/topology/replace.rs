@@ -1,4 +1,4 @@
-//! `Editor::replace_or_swap`: swapping a running node's unit with a crossfade. The
+//! `Editor::replace`: swapping a running node's unit with a crossfade. The
 //! rules are in `src/fade.rs`; each test here pins one.
 
 use tutti_graph::EdgeId;
@@ -77,7 +77,7 @@ fn a_fade_has_no_step_at_either_end() {
         let len = 100;
         let (mut ed, mut exec) = gain_graph(1.0);
         let mut out = dc(&mut exec, 40);
-        ed.replace_or_swap(
+        ed.replace(
             NODE,
             Unforkable(gain(3.0)),
             Fade::new(Samples::new(len)).law(curve),
@@ -114,7 +114,7 @@ fn the_fade_is_exactly_its_length() {
     let (mut ed, mut exec) = gain_graph(1.0);
     let mut out = dc(&mut exec, 20);
     let start = out.len();
-    ed.replace_or_swap(NODE, Unforkable(gain(3.0)), Fade::new(Samples::new(len)))
+    ed.replace(NODE, Unforkable(gain(3.0)), Fade::new(Samples::new(len)))
         .expect("same shape");
     ed.commit().expect("commits");
     for &n in RAGGED.iter().cycle().take(10) {
@@ -191,7 +191,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
     dc(&mut exec, 16);
     ed.collect();
 
-    ed.replace_or_swap(
+    ed.replace(
         NODE,
         Unforkable(gain(2.0)),
         Fade::new(Samples::new(100)).law(FadeLaw::EqualPower),
@@ -232,8 +232,7 @@ fn long_fades_do_not_block_commits() {
     exec.process(64, &TransportPosition::default(), &[], &mut []);
     let second = Fade::new(Samples::new(48_000));
     for &k in &keys {
-        ed.replace_or_swap(k, Unforkable(gain(2.0)), second)
-            .expect("fits");
+        ed.replace(k, Unforkable(gain(2.0)), second).expect("fits");
         ed.commit().expect("a running fade blocks nothing");
         exec.process(64, &TransportPosition::default(), &[], &mut []);
     }
@@ -251,7 +250,7 @@ fn a_remove_beside_a_fade_retires_at_once() {
     ed.commit().expect("commits");
     dc(&mut exec, 16);
     ed.collect();
-    ed.replace_or_swap(NODE, Unforkable(gain(2.0)), Fade::new(Samples::new(48_000)))
+    ed.replace(NODE, Unforkable(gain(2.0)), Fade::new(Samples::new(48_000)))
         .expect("fits");
     ed.remove(other);
     ed.commit().expect("commits");
@@ -274,18 +273,18 @@ fn a_shape_mismatch_is_refused() {
         width: 2,
     });
     assert!(
-        ed.replace_or_swap(NODE, Unforkable(wider), fade)
+        ed.replace(NODE, Unforkable(wider), fade)
             .map(|placed| placed.controls)
             .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE))
     );
     let not_in_place = TestNode::new(Kind::Thru { width: 1 });
     assert!(
-        ed.replace_or_swap(NODE, Unforkable(not_in_place), fade)
+        ed.replace(NODE, Unforkable(not_in_place), fade)
             .map(|placed| placed.controls)
             .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE))
     );
     assert_eq!(
-        ed.replace_or_swap(NodeKey(9), Unforkable(gain(1.0)), fade)
+        ed.replace(NodeKey(9), Unforkable(gain(1.0)), fade)
             .map(|placed| placed.controls),
         Err(CommitError::NoSuchNode { node: NodeKey(9) })
     );
@@ -319,7 +318,7 @@ fn a_shape_mismatch_is_refused() {
     exec.apply_pending();
     ed.collect();
     assert!(
-        ed.replace_or_swap(
+        ed.replace(
             lagged,
             Unforkable(TestNode::new(Kind::Lag { latency: 5 })),
             fade
@@ -327,7 +326,7 @@ fn a_shape_mismatch_is_refused() {
         .map(|placed| placed.controls)
         .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == lagged))
     );
-    ed.replace_or_swap(
+    ed.replace(
         lagged,
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
         fade,
@@ -349,11 +348,11 @@ fn a_shape_mismatch_is_refused() {
     exec.apply_pending();
     ed.collect();
     assert!(
-        ed.replace_or_swap(bursting, Unforkable(burst(3)), fade)
+        ed.replace(bursting, Unforkable(burst(3)), fade)
             .map(|placed| placed.controls)
             .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == bursting))
     );
-    ed.replace_or_swap(bursting, Unforkable(burst(2)), fade)
+    ed.replace(bursting, Unforkable(burst(2)), fade)
         .expect("the same capacity fades");
 
     // The verifier, on a delta built by hand: a fade across a latency change.
@@ -382,7 +381,7 @@ fn a_shape_mismatch_is_refused() {
     let valid = spec.validate().expect("valid");
     let (plan, mut delta) =
         compile(&valid, &shapes, &prepare(128), ed.base().map(|p| &**p)).expect("compiles");
-    delta.fades = vec![(lagged, fade)];
+    delta.attach(vec![(lagged, fade)], Vec::new());
     let units: BTreeMap<NodeKey, Box<dyn Node>> =
         [(lagged, Box::new(TestNode::new(later)) as Box<dyn Node>)]
             .into_iter()
@@ -402,7 +401,7 @@ fn a_shape_mismatch_is_refused() {
 fn a_replace_during_a_fade_waits_for_it() {
     let (mut ed, mut exec) = gain_graph(1.0);
     let fade = |len| Fade::new(Samples::new(len));
-    ed.replace_or_swap(NODE, Unforkable(gain(2.0)), fade(100))
+    ed.replace(NODE, Unforkable(gain(2.0)), fade(100))
         .expect("fits");
     ed.commit().expect("commits");
     let mut out = dc(&mut exec, 25);
@@ -415,11 +414,11 @@ fn a_replace_during_a_fade_waits_for_it() {
         },
         Arc::clone(&never),
     );
-    ed.replace_or_swap(NODE, Unforkable(waiting), fade(50))
+    ed.replace(NODE, Unforkable(waiting), fade(50))
         .expect("fits");
     ed.commit().expect("commits");
     out.extend(dc(&mut exec, 25));
-    ed.replace_or_swap(NODE, Unforkable(gain(8.0)), fade(50))
+    ed.replace(NODE, Unforkable(gain(8.0)), fade(50))
         .expect("fits");
     ed.commit().expect("commits");
     for _ in 0..8 {
@@ -515,7 +514,7 @@ fn events_go_to_the_incoming_unit_only() {
     block(&mut exec);
     assert_eq!(old.load(Ordering::Relaxed), 4 + 1);
 
-    ed.replace_or_swap(
+    ed.replace(
         NODE,
         Unforkable(EventCount(Arc::clone(&new))),
         Fade::new(Samples::new(200)).law(FadeLaw::EqualPower),
@@ -544,12 +543,10 @@ fn a_hard_edit_cuts_a_fade() {
     let fade = Fade::new(Samples::new(1000));
     for cut in ["remove", "insert"] {
         let (mut ed, mut exec) = gain_graph(1.0);
-        ed.replace_or_swap(NODE, Unforkable(gain(2.0)), fade)
-            .expect("fits");
+        ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
         ed.commit().expect("commits");
         dc(&mut exec, 64);
-        ed.replace_or_swap(NODE, Unforkable(gain(4.0)), fade)
-            .expect("fits");
+        ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
         ed.commit().expect("commits");
         dc(&mut exec, 64);
         assert_eq!(ed.fades_in_flight(), 2, "one running, one waiting");
@@ -572,12 +569,10 @@ fn a_hard_edit_cuts_a_fade() {
     }
 
     let (mut ed, mut exec) = gain_graph(1.0);
-    ed.replace_or_swap(NODE, Unforkable(gain(2.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
-    ed.replace_or_swap(NODE, Unforkable(gain(4.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
     ed.reprepare(prepare(64)).expect("re-prepares");
@@ -607,12 +602,10 @@ fn a_hard_edit_cuts_a_fade() {
 fn set_latency_cuts_a_fade() {
     let fade = Fade::new(Samples::new(1000));
     let (mut ed, mut exec) = gain_graph(1.0);
-    ed.replace_or_swap(NODE, Unforkable(gain(2.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
-    ed.replace_or_swap(NODE, Unforkable(gain(4.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
     assert!(ed.collect().is_empty());
@@ -646,7 +639,7 @@ fn a_replace_takes_the_incoming_units_kind() {
     ] {
         let (mut ed, _exec) = gain_graph(1.0);
         assert_eq!(ed.spec().topology.nodes[&NODE].kind, "gain");
-        ed.replace_or_swap(NODE, Unforkable(incoming), fade)
+        ed.replace(NODE, Unforkable(incoming), fade)
             .expect("not poisoned, not re-preparing");
         assert_eq!(
             ed.spec().topology.nodes[&NODE].kind,
@@ -656,19 +649,19 @@ fn a_replace_takes_the_incoming_units_kind() {
     }
 }
 
-/// **`replace_or_swap` fades where `replace` would, and swaps only a cut or
+/// **`replace` fades where `replace` would, and swaps only a cut or
 /// a node that is not running**: a unit that fits the running one fades in;
 /// one that does not (here: a latency the plan was not compiled for) is
 /// refused under a fade and lands whole on the next commit under a zero fade,
 /// as an insert at the key does; so does a replace of a node that is not
 /// running yet.
 #[test]
-fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
+fn replace_fades_when_it_fits_and_swaps_when_it_does_not() {
     let fade = Fade::new(Samples::new(100));
 
     let (mut ed, mut exec) = gain_graph(1.0);
     dc(&mut exec, 20);
-    ed.replace_or_swap(NODE, Unforkable(gain(3.0)), fade)
+    ed.replace(NODE, Unforkable(gain(3.0)), fade)
         .expect("not poisoned, not re-preparing");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 1, "a fitting unit fades");
@@ -683,7 +676,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
     dc(&mut exec, 20);
     let lagged = || Unforkable(TestNode::new(Kind::Lag { latency: 3 }));
     assert!(
-        ed.replace_or_swap(NODE, lagged(), fade)
+        ed.replace(NODE, lagged(), fade)
             .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE)),
         "a fade over a shape change is refused"
     );
@@ -692,7 +685,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
         "gain",
         "a refusal changes nothing"
     );
-    ed.replace_or_swap(NODE, lagged(), Fade::new(Samples::ZERO))
+    ed.replace(NODE, lagged(), Fade::new(Samples::ZERO))
         .expect("a cut over a shape change is a swap");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 0, "nothing to fade from");
@@ -706,7 +699,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
     // Not running yet: inserted and replaced before any commit.
     let (mut ed, _exec) = Editor::new(prepare(128));
     ed.insert(NodeKey(5), "gain", Unforkable(gain(1.0)));
-    ed.replace_or_swap(NodeKey(5), Unforkable(gain(2.0)), fade)
+    ed.replace(NodeKey(5), Unforkable(gain(2.0)), fade)
         .expect("swaps");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 0);
@@ -734,11 +727,11 @@ fn a_remove_after_a_declicked_remove_cuts_the_leaving_node() {
     assert_eq!(ed.collect(), vec![NODE], "the unit came back");
 }
 
-/// **`fade_fits` answers what `replace_or_swap` does**: true for a shape that
+/// **`fade_fits` answers what `replace` does**: true for a shape that
 /// fits (the swap fades), false for another (a fade is refused), `None` for a
 /// node that is not there.
 #[test]
-fn fade_fits_agrees_with_replace_or_swap() {
+fn fade_fits_agrees_with_replace() {
     use tutti_graph::Node;
     let fade = Fade::new(Samples::new(100));
     let (mut ed, mut exec) = gain_graph(1.0);
@@ -748,8 +741,8 @@ fn fade_fits_agrees_with_replace_or_swap() {
     assert_eq!(ed.fade_fits(NODE, &fitting.shape()), Some(true));
     assert_eq!(ed.fade_fits(NODE, &other.shape()), Some(false));
     assert_eq!(ed.fade_fits(NodeKey(9), &fitting.shape()), None);
-    assert!(ed.replace_or_swap(NODE, Unforkable(other), fade).is_err());
-    ed.replace_or_swap(NODE, Unforkable(fitting), fade)
+    assert!(ed.replace(NODE, Unforkable(other), fade).is_err());
+    ed.replace(NODE, Unforkable(fitting), fade)
         .expect("a fitting shape fades");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 1);

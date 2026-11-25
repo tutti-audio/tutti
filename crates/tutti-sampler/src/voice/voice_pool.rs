@@ -718,7 +718,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
 
     use crate::streamer::{RegionBuffer, StreamId};
     use crate::voice::VoiceWindow;
-    use crate::voice::disk_voice::{DiskSource, DiskVoice, DiskVoiceConfig};
+    use crate::voice::disk_voice::{DiskVoiceConfig, tests::voice_over};
     use std::path::PathBuf;
 
     // How far into its source the reader got over the measured blocks, at a
@@ -747,9 +747,9 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
         // requires it, and the published stretch rate is read back through
         // the same cell.
         let state = Arc::new(Cells::new());
-        let inner = DiskSource::new(reader, pos);
-        let voice = DiskVoice::new(
-            inner,
+        let voice = voice_over(
+            reader,
+            pos,
             Arc::clone(&state),
             DiskVoiceConfig {
                 window: VoiceWindow {
@@ -758,7 +758,6 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
-            None,
         );
 
         let play = Playback {
@@ -1347,16 +1346,16 @@ fn streaming_voice() -> Voice<f32> {
 /// [`streaming_voice`] over stream `StreamId::of(region)`.
 fn streaming_voice_of(region: u64) -> Voice<f32> {
     use crate::streamer::{Cells, RegionBuffer, StreamId};
-    use crate::voice::disk_voice::{DiskSource, DiskVoice, DiskVoiceConfig};
+    use crate::voice::disk_voice::{DiskVoiceConfig, tests::voice_over};
 
     let (writer, reader, pos) =
         RegionBuffer::with_capacity(StreamId::of(region), std::path::PathBuf::new(), 128, 2u16);
     drop(writer);
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos);
     Voice {
-        source: VoiceSource::Disk(DiskVoice::new(
-            inner,
+        source: VoiceSource::Disk(voice_over(
+            reader,
+            pos,
             state,
             DiskVoiceConfig {
                 window: VoiceWindow {
@@ -1365,7 +1364,6 @@ fn streaming_voice_of(region: u64) -> Voice<f32> {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
-            None,
         )),
         play: Playback::default(),
     }

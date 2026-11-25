@@ -1,5 +1,5 @@
 //! Replacing a running node's unit with a crossfade: the [`Fade`] an
-//! [`Editor::replace_or_swap`](crate::Editor::replace_or_swap) asks for, and the
+//! [`Editor::replace`](crate::Editor::replace) asks for, and the
 //! [`FadeLaw`] it follows.
 //!
 //! The rules the executor implements:
@@ -43,8 +43,8 @@
 use tutti_curve::FadeLaw;
 use tutti_units::{SampleRate, Samples, Seconds};
 
-/// How [`Editor::replace_or_swap`](crate::Editor::replace_or_swap) swaps a unit: over
-/// `duration` frames, along `law`. See [`Editor::replace_or_swap`](crate::Editor::replace_or_swap)
+/// How [`Editor::replace`](crate::Editor::replace) swaps a unit: over
+/// `duration` frames, along `law`. See [`Editor::replace`](crate::Editor::replace)
 /// for the rules.
 ///
 /// A zero `duration` is a plain swap: the new unit takes over at the block

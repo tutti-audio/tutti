@@ -1,12 +1,10 @@
 use tutti_units::{Amplitude, Gain, SampleSpan};
 
 use super::*;
+use crate::reverb::fdn::kind::sealed::Sealed as _;
 use crate::reverb::network::{Band, Fdn, Matrix, Network, NetworkStage};
+use crate::{DecayTime, ShimmerLayout};
 use crate::{Lti as _, System as _};
-
-fn shimmering() -> FdnLayout {
-    FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap()
-}
 
 fn base() -> FdnControls {
     FdnControls::DEFAULT
@@ -19,8 +17,17 @@ fn with(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
 }
 
 fn design_at(d: &FdnLayout, c: &FdnControls, rate: SampleRate) -> Box<Network> {
+    design_with(d, c, &FreezeControls::DEFAULT, rate)
+}
+
+fn design_with(
+    d: &FdnLayout,
+    c: &FdnControls,
+    freeze: &FreezeControls,
+    rate: SampleRate,
+) -> Box<Network> {
     let mut network = Box::new(Network::new(rate));
-    d.design_into(c, rate, &mut network);
+    d.design_into(c, freeze, rate, &mut network);
     network
 }
 
@@ -51,33 +58,29 @@ fn every_control_designs_a_stable_network() {
             rate: Hz::new(x),
             width: StereoWidth::new(x),
             wet: Db::new(x),
-            freeze: x > 0.5,
-            ..FdnControls::DEFAULT
         };
-        let n = design_of(&d, &c);
+        let freeze = FreezeControls { freeze: x > 0.5 };
+        let n = design_with(&d, &c, &freeze, SampleRate::SR_48K);
         assert!(n.is_stable(), "{x}");
         assert!(n.pre_delay <= pre_delay_frames(MAX_PRE_DELAY, SampleRate::SR_48K));
     }
 }
 
-/// A shimmering layout is the plain one with a shifter in the loop: even lines from 2 to 16 as
-/// the plain layout's, with no freeze, and every control, a send and a shift past their ranges
-/// or not finite included, designs a stable network.
+/// A shimmer layout designs the plain layout's network with no freeze, and every control,
+/// not finite or past its range included, designs a stable network that is not lossless.
 #[test]
-fn a_shimmering_layout_designs_a_stable_network_that_never_freezes() {
-    assert!(FdnLayout::shimmering(3, MaxDecay::DEFAULT).is_none());
-    assert!(FdnLayout::shimmering(18, MaxDecay::DEFAULT).is_none());
-    let d = FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap();
-    assert!(d.shimmers() && !FdnLayout::default().shimmers());
+fn a_shimmer_layout_designs_a_stable_network_that_never_freezes() {
+    let d = ShimmerLayout::default();
+    let rate = SampleRate::SR_48K;
     for x in [f64::NAN, f64::INFINITY, -3.0, 40.0, 0.0] {
         let c = FdnControls {
-            shimmer_pitch: Cents::new(x),
-            shimmer_send: Feedback::new(x),
-            freeze: true,
+            decay: [Seconds::new(x); 3],
             ..FdnControls::DEFAULT
         };
-        let n = design_of(&d, &c);
+        let mut n = Box::new(Network::new(rate));
+        d.design_into(&c, rate, &mut n);
         assert!(n.is_stable() && !n.is_lossless(), "{x}");
+        assert_eq!(n, design_of(d.layout(), &c), "{x}");
     }
 }
 
@@ -113,13 +116,16 @@ fn diffusion_is_the_reflection_vector() {
 }
 
 /// A freeze holds every gain at exactly one, shuts the input, stops the modulation and makes
-/// the network lossless with an unbounded tail; a shimmering layout, whose tail always decays,
-/// ignores it.
+/// the network lossless with an unbounded tail.
 #[test]
 fn a_freeze_is_lossless_and_takes_no_input() {
-    let (d, shimmer) = (FdnLayout::default(), shimmering());
-    let frozen = with(|c| c.freeze = true);
-    let n = design_of(&d, &frozen);
+    let d = FdnLayout::default();
+    let n = design_with(
+        &d,
+        &base(),
+        &FreezeControls { freeze: true },
+        SampleRate::SR_48K,
+    );
     let f = fdn_of(&n);
     assert!(n.is_lossless() && n.is_stable());
     assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
@@ -137,8 +143,6 @@ fn a_freeze_is_lossless_and_takes_no_input() {
             assert_eq!(l.absorption.gain(band), Amplitude::UNITY);
         }
     }
-    assert_eq!(design_of(&shimmer, &frozen), design_of(&shimmer, &base()));
-    assert!(!design_of(&shimmer, &frozen).is_lossless());
 }
 
 /// Lengths are whole frames, grow with the size and scale with the rate, so a settled network
@@ -210,7 +214,11 @@ fn a_configuration_refuses_a_line_count_it_cannot_hold() {
 fn the_capacity_dominates_where_rounding_matters() {
     let d = FdnLayout::default();
     let rate = SampleRate::SR_192K;
-    let bound = d.capacity(rate, Samples::ZERO);
+    // The ceiling a shimmer declares: a plain layout's is unbounded, which holds nothing.
+    let bound = NetworkCapacity {
+        tail: ShimmerLayout::new(d).ceiling(d.capacity(rate, Samples::ZERO).tail, rate),
+        ..d.capacity(rate, Samples::ZERO)
+    };
     for k in 1..100 {
         let c = FdnControls {
             decay: [d.max_decay; 3],

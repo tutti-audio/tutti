@@ -14,9 +14,7 @@ use tutti_graph::{
     AudioDelayKey, CompileError, CycleEdge, EventEdge, EventInputPort, EventOutputPort,
     GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
 };
-use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InputDelay, InputPort, Invalid, NodeSpec, OutputPort, PortSource,
-};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, Invalid, NodeSpec, OutputPort, PortSource};
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 
@@ -410,75 +408,37 @@ fn an_event_inputs_view_is_its_own_slot_written_by_the_node_op() {
 }
 
 // ---------------------------------------------------------------------------
-// Latency: the plan's delays are exactly `latency::delays`'.
+// Latency: the plan's delays are the solve's gaps.
 // ---------------------------------------------------------------------------
 
-/// Every per-port delay, every output alignment, the per-channel pre-roll and
-/// the total agree with `tutti_graph::delays` on all thirteen shapes.
+/// Output channel 0 runs through a 512-frame node and channel 1 is dry: the
+/// dry channel is delayed by exactly 512 at the output, the latent one by
+/// nothing, and the pre-roll is 0 and 512.
 #[test]
-fn pdc_delays_equal_latency_delays() {
-    let mut nonzero = 0;
-    for (name, t) in shapes() {
-        let plan = compiled(&t);
-        let rec = delays(&t, SampleRate::SR_48K);
-        let comp = rec.compensation().clone();
-
-        let mut want_in: Vec<(AudioDelayKey, Samples)> = rec
-            .inputs()
-            .iter()
-            .map(|d| {
-                let (sink, by) = (at(d.node, d.port), d.by);
-                let [Edge::Direct(from)] = t.edges[&sink][..] else {
-                    unreachable!("latency::plan delays only direct edges")
-                };
-                (AudioDelayKey::Edge { at: sink, from }, by)
-            })
-            .collect();
-        want_in.sort();
-        let mut got_in: Vec<(AudioDelayKey, Samples)> = plan
-            .audio_delays()
-            .iter()
-            .filter(|d| matches!(d.key, AudioDelayKey::Edge { .. }))
-            .map(|d| (d.key, d.len))
-            .collect();
-        got_in.sort();
-        assert_eq!(got_in, want_in, "{name}: input delays");
-
-        let want_out: Vec<(AudioDelayKey, Samples)> = rec
-            .outputs()
-            .iter()
-            .filter(|d| !t.outputs[d.channel].is_empty())
-            .map(|d| {
-                let key = AudioDelayKey::Output {
-                    channel: d.channel as u16,
-                    from: t.outputs[d.channel][0],
-                };
-                (key, d.by)
-            })
-            .collect();
-        let got_out: Vec<(AudioDelayKey, Samples)> = plan
-            .audio_delays()
-            .iter()
-            .filter(|d| matches!(d.key, AudioDelayKey::Output { .. }))
-            .map(|d| (d.key, d.len))
-            .collect();
-        assert_eq!(got_out, want_out, "{name}: output alignment");
-
-        assert_eq!(
-            plan.total_latency().samples(),
-            comp.total(),
-            "{name}: total"
-        );
-        for ch in 0..t.outputs.len() {
-            assert_eq!(
-                plan.compensation()[ch],
-                comp.for_channel(ch),
-                "{name}: pre-roll of channel {ch}"
-            );
-        }
-        nonzero += usize::from(!comp.is_empty());
-    }
-    assert!(nonzero >= 2, "the agreement is not vacuous");
+fn a_dry_output_channel_is_delayed_to_the_latent_one() {
+    let mut t = Topology::default();
+    t.nodes.insert(A, spec("dc", 0, 1));
+    t.nodes
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(512)));
+    edge(&mut t, at(B, 0), out(A, 0));
+    t.set_outputs(vec![
+        PortSource::Node(out(B, 0)),
+        PortSource::Node(out(A, 0)),
+    ]);
+    let plan = compiled(&t);
+    let delays: Vec<_> = plan.audio_delays().iter().map(|d| (d.key, d.len)).collect();
+    assert_eq!(
+        delays,
+        vec![(
+            AudioDelayKey::Output {
+                channel: 1,
+                from: PortSource::Node(out(A, 0)),
+            },
+            Samples::new(512)
+        )]
+    );
+    assert_eq!(plan.total_latency().samples(), Samples::new(512));
+    assert_eq!(plan.compensation(), &[Samples::new(0), Samples::new(512)]);
 }
 
 /// The solve against an analytic figure: a diamond whose branches carry 3 and
@@ -912,7 +872,7 @@ fn the_delta_moves_only_what_changed() {
         None,
     )
     .unwrap();
-    assert_eq!(delta.insert.len(), 3);
+    assert_eq!(delta.insert().len(), 3);
     let idx = |p: &tutti_graph::Plan, k| p.unit(k).unwrap().idx;
 
     let mut g = GraphSpec::new(t);
@@ -930,16 +890,16 @@ fn the_delta_moves_only_what_changed() {
     .unwrap();
 
     assert_eq!(idx(&second, A), idx(&first, A), "A kept its place");
-    assert_eq!(delta.retire.len(), 1);
-    assert_eq!(delta.retire[0].key, B);
-    assert_eq!(delta.replace.len(), 1);
-    assert_eq!(delta.replace[0].0.key, C);
-    assert_eq!(delta.replace[0].1.generation, 1);
+    assert_eq!(delta.retire().len(), 1);
+    assert_eq!(delta.retire()[0].key, B);
+    assert_eq!(delta.replace().len(), 1);
+    assert_eq!(delta.replace()[0].0.key, C);
+    assert_eq!(delta.replace()[0].1.generation, 1);
     assert_eq!(idx(&second, C), idx(&first, C), "replaced in place");
-    assert_eq!(delta.insert.len(), 1);
-    assert_eq!(delta.insert[0].key, D);
+    assert_eq!(delta.insert().len(), 1);
+    assert_eq!(delta.insert()[0].key, D);
     assert_eq!(idx(&second, D), idx(&first, B), "D reuses B's freed index");
-    assert_eq!(delta.store_len, 3);
+    assert_eq!(delta.store_len(), 3);
 }
 
 /// A `PortSource::MainInput` input that merges with a latent path **is** delayed
@@ -967,16 +927,11 @@ fn a_main_input_merging_with_a_latent_path_is_delayed() {
         from: PortSource::MainInput(0),
     };
     assert_eq!(plan.audio_delay(key), Samples::new(48));
-    // The pure pass agrees.
+    // The pure pass: the main input departs at zero, the node arrives at 48.
     assert_eq!(
-        delays(&t, SampleRate::SR_48K).inputs(),
-        &[InputDelay {
-            node: C,
-            port: 1,
-            feed: Feed::Outside,
-            by: Samples::new(48)
-        }],
-        "latency::delays aligns the main input as the plan does"
+        delays(&t, SampleRate::SR_48K).arrival(C),
+        Samples::new(48),
+        "latency::delays aligns the main input to the arrival the plan does"
     );
 
     let mut harness = Harness::new(128);
@@ -1056,15 +1011,11 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     assert_eq!(comp.total(), Samples::new(64));
     assert_eq!(plan.total_latency().samples(), comp.total());
     assert_eq!(plan.compensation(), comp.channels());
+    let solved = delays(&g, SampleRate::SR_48K);
     assert_eq!(
-        delays(&g, SampleRate::SR_48K).inputs(),
-        &[InputDelay {
-            node: C,
-            port: 0,
-            feed: Feed::Node(B),
-            by: Samples::new(64)
-        }],
-        "and the pass puts the delay on the same port"
+        solved.departure(B).align_to(solved.arrival(C)),
+        Samples::new(64),
+        "and the pass gives the dry source the same gap"
     );
     // Over the topology alone the event path is invisible.
     assert!(latency_plan(&t, SampleRate::SR_48K).is_empty());

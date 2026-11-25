@@ -461,7 +461,11 @@ impl GraphSpec {
     ///   the param's own value, sample-accurate, from the source's first
     ///   event on (a first ramp starts from the base at its frame, also
     ///   when it replaces a segment sent first on that frame); before
-    ///   it, the port reads its base. Automation replaces the knob, as in
+    ///   it, a source with nothing to say is not a source: outside the
+    ///   connect's declick the port reads
+    ///   [`ParamInput::Base`](crate::ParamInput::Base), as unconnected,
+    ///   and delivers frames from the block of the source's first event
+    ///   on. Automation replaces the knob, as in
     ///   every DAW. Other events are ignored.
     /// - **An undriven param resolves to its base, never to 0.** A port with
     ///   no source this block reads
@@ -490,7 +494,7 @@ impl GraphSpec {
     ///   lane does, having nothing in flight; a hand-wired source answers
     ///   [`EventKind::Resync`](crate::EventKind::Resync) or drives the knob
     ///   instead).
-    /// - **A crossfade's base.** A [`replace`](crate::Editor::replace_or_swap) with a
+    /// - **A crossfade's base.** A [`replace`](crate::Editor::replace) with a
     ///   fade keeps the key's param state, so both units hear one source;
     ///   the base is the incoming unit's control, ramped over one block like
     ///   any control move, not over the fade. Ramping it over the fade would

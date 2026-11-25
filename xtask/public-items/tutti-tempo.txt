@@ -31,12 +31,6 @@ fn map::TempoMap::with_point
 fn point::TempoPoint::ramp_beats
 fn point::TempoPoint::ramp_time
 fn point::TempoPoint::step
-fn segment::Seg::beat_in
-fn segment::Seg::bpm_at_beat
-fn segment::Seg::bpm_at_sec
-fn segment::Seg::is_sound
-fn segment::Seg::new
-fn segment::Seg::sec_in
 fn view::TempoView::beat_at_frame
 fn view::TempoView::beat_at_seconds
 fn view::TempoView::chord_cell

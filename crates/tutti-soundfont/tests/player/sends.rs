@@ -167,6 +167,29 @@ fn a_negative_send_sends_nothing() {
     );
 }
 
+/// The audible floor is on the voice's own gain, so a quiet send is not cut
+/// early. With a send of 0.05 (50 tenths of a percent, generator 15), a
+/// release the voice falls through from the send's old cut (the voice's gain
+/// at 0.001 / 0.05 = 0.02) to its floor (0.001) over many chunks: the send plane
+/// is the dry plane times 0.05 on every frame (the send's scale), and both
+/// planes end on the same frame.
+/// Spec: sf2.synth.sends.effects, sf2.gen.chorusEffectsSend
+#[test]
+fn a_quiet_send_ends_with_its_voice() {
+    // 38 is releaseVolEnv: 1200 timecents is 2 s for 100 dB.
+    let mut rig = rig(vec![(CHORUS_SEND, 50), (38, 1200)]);
+    rig.note_on(0, 69, 100);
+    rig.render_all(8192);
+    rig.note_off(0, 69);
+    let [dry_l, _, chorus_l, _, _] = rig.render_all(44_100 * 3);
+    let last = |plane: &[f32]| plane.iter().rposition(|&s| s != 0.0).expect("it sounds");
+    let end = last(&dry_l);
+    assert_eq!(last(&chorus_l), end, "both planes end on one frame");
+    for (i, (d, c)) in dry_l.iter().zip(&chorus_l).enumerate().take(end + 1) {
+        assert!((c - 0.05 * d).abs() < 1e-7, "[{i}]: {c} against 0.05 x {d}");
+    }
+}
+
 /// A send nobody sends to is reported silent, and is exact zeros: with the
 /// controllers at 0 and no generator, only the dry pair is heard, and the
 /// status names the other three. With the reverb on only, the chorus pair is

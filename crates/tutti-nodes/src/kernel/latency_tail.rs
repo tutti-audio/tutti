@@ -64,6 +64,8 @@ impl Kernel for Echo {
 
     fn retarget(&mut self, _: &()) {}
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, f32>,

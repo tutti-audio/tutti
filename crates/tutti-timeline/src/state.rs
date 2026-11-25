@@ -48,7 +48,7 @@ impl AtomicBpm {
 /// Seek is an *absolute* jump, not an offset — the clock overwrites its
 /// position with `target` and clears `pending`.
 #[derive(Clone, Debug)]
-pub struct PendingSeek {
+pub(crate) struct PendingSeek {
     /// The absolute beat to land on. Meaningless unless `pending` is set.
     pub target: Arc<AtomicF64>,
     /// Whether a jump is due. Cleared by the clock when it takes the target.
@@ -58,7 +58,7 @@ pub struct PendingSeek {
 impl PendingSeek {
     /// An empty slot with no seek pending.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             target: Arc::new(AtomicF64::new(0.0)),
             pending: Arc::new(AtomicBool::new(false)),
@@ -66,13 +66,13 @@ impl PendingSeek {
     }
 
     /// Request a jump to `beat`. Applied by the clock on its next buffer.
-    pub fn request(&self, beat: impl Into<Beat>) {
+    pub(crate) fn request(&self, beat: impl Into<Beat>) {
         self.target.store(beat.into().get(), Ordering::Release);
         self.pending.store(true, Ordering::Release);
     }
 
     /// Takes a pending target, clearing the flag. `None` if no seek is due.
-    pub fn take(&self) -> Option<Beat> {
+    pub(crate) fn take(&self) -> Option<Beat> {
         self.pending
             .swap(false, Ordering::AcqRel)
             .then(|| Beat::new(self.target.load(Ordering::Acquire)))
@@ -81,7 +81,7 @@ impl PendingSeek {
     /// Whether a jump is waiting for the clock. Advisory — the clock may
     /// consume it between this read and any action taken on the answer.
     #[must_use]
-    pub fn is_pending(&self) -> bool {
+    pub(crate) fn is_pending(&self) -> bool {
         self.pending.load(Ordering::Acquire)
     }
 }

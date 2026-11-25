@@ -777,13 +777,16 @@ fn a_jump_back_behind_a_loop_edit_plays_the_new_loop() {
     assert_same_outside("a jump back behind the switch", &got, &want, &allowed);
 }
 
-/// A sine loop's own largest step, and the most a fade between two unit
-/// sines may add to it per frame (`2 * 15/8 / (fade + 1)`, the smootherstep's
-/// steepest slope over the unit gap).
+/// The largest step of a fade between two unit sines: each sine's own step
+/// (`2 sin(pi / period)`) weighted by the equal-power gains, whose sum is at
+/// most `sqrt(2)`; plus the gains' own motion, `pi/2 * 15/8 / (fade + 1)`
+/// (the smootherstep's steepest slope) times the sines' combined magnitude,
+/// at most `sqrt(2)`.
 fn sine_bound() -> f32 {
-    (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32
-        + 2.0 * 1.875 / (FADE + 1) as f32
-        + 1e-4
+    let root2 = std::f64::consts::SQRT_2;
+    let own = 2.0 * (std::f64::consts::PI / PERIOD as f64).sin();
+    let motion = std::f64::consts::FRAC_PI_2 * 1.875 / (FADE + 1) as f64;
+    (root2 * (own + motion)) as f32 + 1e-4
 }
 
 /// Fades chain without a step: a loop
@@ -1100,15 +1103,14 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         a.shared_state.stretch_rate(),
         tutti_units::ReadRate::new(0.5)
     );
-    let direction =
-        |voice: &mut DiskVoice<f32>| voice.live_mut().lent_control().map(|c| c.direction);
-    assert_eq!(direction(&mut a), Some(crate::PlayDirection::Reverse));
+    let direction = |voice: &mut DiskVoice<f32>| voice.live_mut().lent_control().direction;
+    assert_eq!(direction(&mut a), crate::PlayDirection::Reverse);
 
     // And nothing of it on the other.
     assert_eq!(b.gain(), tutti_units::Amplitude::new(1.0));
     assert_eq!(b.shared_state.speed(), PlaybackRate::UNITY);
     assert_eq!(b.shared_state.stretch_rate(), tutti_units::ReadRate::UNITY);
-    assert_eq!(direction(&mut b), Some(crate::PlayDirection::Forward));
+    assert_eq!(direction(&mut b), crate::PlayDirection::Forward);
     assert!(
         !Arc::ptr_eq(&a.shared_state, &b.shared_state),
         "the two voices hold one cell"
@@ -1129,7 +1131,7 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, LEN);
     let mut live = Live::new(&path, None, 1.0);
-    let lent = |live: &mut Live| live.voice.live_mut().lent_control().expect("a live voice");
+    let lent = |live: &mut Live| live.voice.live_mut().lent_control();
 
     let forward = lent(&mut live);
     assert_eq!(forward.direction, crate::PlayDirection::Forward);

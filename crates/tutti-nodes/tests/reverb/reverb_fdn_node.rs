@@ -10,7 +10,7 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, System};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_declared_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -20,7 +20,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
+use tutti_nodes::{FdnConfig, FdnNode, FdnNodeControls, FreeverbConfig, FreeverbNode};
 use tutti_units::{
     Bipolar, Db, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
@@ -32,12 +32,32 @@ fn plain() -> FdnLayout {
     FdnLayout::default()
 }
 
+/// Every control at the default but the freeze, which is on.
+const FROZEN: FdnNodeControls<FdnLayout> = FdnNodeControls {
+    network: FdnControls::DEFAULT,
+    kind: FreezeControls { freeze: true },
+};
+
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
+    live_with(
+        layout,
+        FdnNodeControls {
+            network: c,
+            kind: FreezeControls::DEFAULT,
+        },
+    )
+}
+
+fn live_with(layout: FdnLayout, c: FdnNodeControls<FdnLayout>) -> FdnNode<f32> {
     FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(c))
 }
 
 fn node(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
     prepared(live(layout, c), SR, BLOCK)
+}
+
+fn node_with(layout: FdnLayout, c: FdnNodeControls<FdnLayout>) -> FdnNode<f32> {
+    prepared(live_with(layout, c), SR, BLOCK)
 }
 
 struct Rig {
@@ -95,7 +115,7 @@ fn finite(d: &Driven) -> usize {
 /// The network's own tail at -60 dB in frames at 48 kHz.
 fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
     let mut network = Box::new(Network::new(SR));
-    layout.design_into(c, SR, &mut network);
+    layout.design_into(c, &FreezeControls::DEFAULT, SR, &mut network);
     let tutti_dsp::DecayTime::Finite(s) = network.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
@@ -161,11 +181,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
 /// `tail_of`), and `Unbounded` again once its freeze cell is on.
 #[test]
 fn a_frozen_node_reports_an_unbounded_tail_to_the_graph() {
-    let frozen = FdnControls {
-        freeze: true,
-        ..FdnControls::DEFAULT
-    };
-    let mut rig = Rig::new(node(plain(), frozen));
+    let mut rig = Rig::new(node_with(plain(), FROZEN));
     for block in [
         impulse(),
         vec![0.0; BLOCK],
@@ -200,15 +216,15 @@ fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tai
         ..FdnControls::DEFAULT
     };
     let (short, long) = (decays(0.3), decays(2.0));
-    let mut bank = FdnBank::<f32>::new(&layout, SR);
+    let mut bank = FdnBank::<f32, FdnLayout>::new(&layout, SR);
     let ramps = bank.ramps();
     let frames = |t: Tail| match t {
         Tail::Finite(n) => n.get(),
         other => panic!("a finite tail, not {other:?}"),
     };
     let (owed, new) = (
-        frames(bank.tail_of(&ramps, &short)),
-        frames(bank.tail_of(&ramps, &long)),
+        frames(bank.tail_of(&ramps, &short, &FreezeControls::DEFAULT)),
+        frames(bank.tail_of(&ramps, &long, &FreezeControls::DEFAULT)),
     );
     assert!(owed < new, "{owed} < {new}");
     let mut rig = Rig::new(node(layout, short));
@@ -422,6 +438,120 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
     assert!(
         long > 100.0 * short,
         "6 s keeps {long} of its energy, 0.3 s {short}"
+    );
+}
+
+/// What a source sends: `Decay[0]` held at `value` from block `at`'s first frame (`None`: it
+/// never sends an event).
+struct Speaks {
+    at: Option<usize>,
+    value: f64,
+    block: usize,
+}
+
+impl Speaks {
+    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
+impl Node for Speaks {
+    fn shape(&self) -> tutti_graph::Shape {
+        Self::SHAPE
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &tutti_graph::Cx<'_>, mut io: tutti_graph::Io<'_>) -> Status {
+        if self.at == Some(self.block) {
+            let start = io.offset(0).expect("a block has a frame");
+            let hold = tutti_graph::ParamSegment::unit(
+                UnitAddr::new(UnitParam::Decay, 0),
+                self.value,
+                self.value,
+                Samples::new(1),
+            );
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(tutti_graph::ParamEvent::segment(start, hold));
+        }
+        self.block += 1;
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A source with nothing to say does not drive the decay: wired before the node's first block
+/// (so no declick runs), a source that never sends leaves the graph's reported tail the
+/// unwired node's on every block, and one that speaks leaves it so until its first event,
+/// from which the port is driven and the node owes the ring at the decay's longest.
+#[test]
+fn a_source_that_has_not_spoken_leaves_the_decay_tail_as_unwired() {
+    const BLOCKS: usize = 24;
+    const SPEAKS: usize = 12;
+    let reported = |source: Option<Option<usize>>| -> Vec<Option<Samples>> {
+        let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
+        let (n, _) = g.add_with_controls(live(plain(), FdnControls::DEFAULT));
+        g.connect_input(0, n, 0).connect_output(n, 0, 0);
+        g.connect_output(n, 1, 1);
+        let mut r = g
+            .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
+            .expect("the graph builds");
+        if let Some(at) = source {
+            let key = tutti_graph::NodeKey(9_000);
+            let editor = r.editor_mut();
+            let src = Speaks {
+                at,
+                value: MaxDecay::CAP.get(),
+                block: 0,
+            };
+            editor.insert(key, "source", tutti_graph::Unforkable(src));
+            let to = ParamIn {
+                node: n,
+                param: UnitAddr::new(UnitParam::Decay, 0),
+            };
+            editor
+                .connect_param(to, tutti_graph::EventOutputPort::new(key, 0))
+                .unwrap();
+            editor.commit().expect("the source commits");
+        }
+        (0..BLOCKS)
+            .map(|b| {
+                let x = if b == 0 { impulse() } else { vec![0.0; BLOCK] };
+                let _ = r.render_input(Planes::new(&[&x]).unwrap());
+                r.executor()
+                    .reported_tail(&r.editor().spec().topology)
+                    .samples()
+            })
+            .collect()
+    };
+    let unwired = reported(None);
+    assert_eq!(
+        reported(Some(None)),
+        unwired,
+        "never written: the unwired figure"
+    );
+    let spoken = reported(Some(Some(SPEAKS)));
+    assert_eq!(
+        spoken[..SPEAKS],
+        unwired[..SPEAKS],
+        "before its first event the same"
+    );
+    let driven = Samples::new(tail_of(
+        &plain(),
+        &FdnControls {
+            decay: [
+                Seconds::new(MaxDecay::CAP.get()),
+                FdnControls::DEFAULT.decay[1],
+                FdnControls::DEFAULT.decay[2],
+            ],
+            ..FdnControls::DEFAULT
+        },
+    ));
+    assert!(
+        spoken[SPEAKS..].iter().all(|&t| t == Some(driven)),
+        "from its first event on: the tail at the longest decay, {driven:?}, not {:?}",
+        &spoken[SPEAKS..]
     );
 }
 
@@ -678,11 +808,7 @@ fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
 /// grid, its modulation phases and its ramps where the thaw left them.
 #[test]
 fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
-    let frozen = FdnControls {
-        freeze: true,
-        ..FdnControls::DEFAULT
-    };
-    let mut rig = Rig::new(node(plain(), frozen));
+    let mut rig = Rig::new(node_with(plain(), FROZEN));
     let cells = rig.node.param_set();
     for _ in 0..500 {
         assert_eq!(

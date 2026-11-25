@@ -638,13 +638,13 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
 /// not through a crossfade the plan cannot hold, and the new bound holds in
 /// the next block.
 #[test]
-fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
+fn replace_to_a_node_with_another_bound_commits_and_holds_it() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
         assert_eq!(rig.run(1)[0].len(), 8);
         let fade = tutti_graph::Fade::new(Samples::ZERO);
         rig.ed
-            .replace_or_swap(
+            .replace(
                 NodeKey(100),
                 tutti_graph::Unforkable(Recorder {
                     bound: Some(3),

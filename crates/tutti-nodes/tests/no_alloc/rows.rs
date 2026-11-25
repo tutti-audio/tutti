@@ -40,7 +40,7 @@ const FACTORS: [OversamplingFactor; 3] = [
 ];
 
 /// The rows: a node, its input, the controls it moves.
-pub const ROWS: &[fn()] = &[
+pub(crate) const ROWS: &[fn()] = &[
     bit_crusher,
     comb_filter,
     frequency_shifter,

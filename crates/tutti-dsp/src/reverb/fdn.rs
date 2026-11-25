@@ -3,4 +3,5 @@
 
 pub(crate) mod bank;
 pub(crate) mod design;
+pub(crate) mod kind;
 pub(crate) mod shimmer;

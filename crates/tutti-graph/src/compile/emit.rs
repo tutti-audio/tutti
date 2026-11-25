@@ -188,6 +188,7 @@ impl<'a> Emitter<'a> {
             block: prepare.max_block().get(),
             program: Program {
                 ops: Table::default(),
+                node_op: Table::default(),
                 audio_list: Vec::new(),
                 event_list: Vec::new(),
                 param_ports: Vec::new(),
@@ -257,6 +258,11 @@ impl<'a> Emitter<'a> {
                 .collect::<Table<OpId, Vec<OpId>>>(),
         );
         self.program.sizing.feedback = feedback;
+        self.program.node_op = self
+            .node_ops
+            .into_iter()
+            .map(|op| op.expect("the order holds every unit"))
+            .collect();
         self.program
     }
 
@@ -822,15 +828,8 @@ impl<'a> Emitter<'a> {
                         .0,
                 ),
             };
-            let d = if timing.in_bank(channel) {
-                let dep = self.source(source).map_or(Latency::ZERO, |(_, dep)| dep);
-                match source {
-                    PortSource::Zero => Samples::ZERO,
-                    _ => dep.gap_to(timing.bank_total),
-                }
-            } else {
-                timing.compensation[usize::from(channel)]
-            };
+            let dep = self.source(source).map_or(Latency::ZERO, |(_, dep)| dep);
+            let d = dep.gap_to(timing.output_time(channel));
             // Delaying silence is silence: a zero channel reports its
             // compensation (as `latency::plan` does) but gets no ring.
             let key = AudioDelayKey::Output {

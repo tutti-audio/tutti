@@ -184,6 +184,7 @@ fn slotted<V: Id, S: Id, R>(
 pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot> {
     let Program {
         ops,
+        node_op,
         audio_list,
         event_list,
         param_ports,
@@ -338,6 +339,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         .collect();
     Program {
         ops,
+        node_op,
         audio_list,
         event_list,
         param_ports: param_ports

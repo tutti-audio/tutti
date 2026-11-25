@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use crate::EdgeId;
 use crate::compile::ids::{
     AudioDelayId, AudioFeedbackId, AudioSlotId, AudioValueId, EventDelayId, EventFeedbackId,
-    EventSlotId, EventValueId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, Table,
+    EventSlotId, EventValueId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
 };
 use crate::compile::plan::{
     AudioDelay, AudioFeedbackKey, Csr, EventDelay, EventFeedbackKey, EventSlotCapacity,
@@ -155,6 +155,8 @@ impl Refs for BySlot {
 pub(crate) struct Program<S: Refs> {
     /// The ops, in the serial order.
     pub(crate) ops: Table<OpId, Op<S::Audio, S::Event>>,
+    /// The [`Op::Node`] that runs each unit: one per unit.
+    pub(crate) node_op: Table<PlanUnitId, OpId>,
     /// The audio operands lists the ops' spans index.
     pub(crate) audio_list: Vec<S::Audio>,
     /// The event operands lists the ops' spans index.

@@ -88,8 +88,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// latency and the tail.
     fn shape(&self) -> Shape;
 
-    /// Prepares for `rate` and blocks of at most `max_block` frames. Control side. The
-    /// first [`retarget`](Self::retarget) after it lands at once.
+    /// Prepares for `rate` and blocks of at most `max_block` frames. Control side.
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock);
 
     /// Back to silence. Audio thread: no allocation.
@@ -106,6 +105,13 @@ pub trait Kernel: Clone + Send + 'static {
     /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
+
+    /// Puts every running coefficient (the ramps, blends and glides
+    /// [`retarget`](Self::retarget) aims) on its target at once. The node calls it right
+    /// after the first `retarget` since a prepare, a reset or a fork, so the first design
+    /// sounds whole instead of ramping in from silence's coefficients. A kernel with
+    /// nothing running implements it empty. Audio thread: no allocation.
+    fn jump_to_target(&mut self);
 
     /// Runs the block's input into its output, with the controls a port drives per frame in
     /// `signals`. The node gives it the main buses' views at the width of the kernel's
@@ -274,6 +280,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
 ///     fn reset(&mut self) {}
 ///     fn retarget(&mut self, _: &()) {}
+///     fn jump_to_target(&mut self) {}
 ///     fn render(
 ///         &mut self,
 ///         block: &mut InputOutput<'_, f32>,
@@ -381,6 +388,7 @@ impl<K: Kernel> KernelNode<K> {
         if let Some(t) = &mut self.tuned {
             t.position = 0;
             t.dirty = false;
+            t.applied = None;
             if let Some(clock) = &mut t.clock {
                 clock.clear();
             }
@@ -547,8 +555,10 @@ impl<K: Kernel> KernelNode<K> {
 
     fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
         self.kernel.retarget(&controls);
-        if let Some(t) = &mut self.tuned {
-            t.applied = Some(controls);
+        if let Some(t) = &mut self.tuned
+            && t.applied.replace(controls).is_none()
+        {
+            self.kernel.jump_to_target();
         }
     }
 }
@@ -835,6 +845,7 @@ impl<K: Kernel> Clone for KernelNode<K> {
                     clock
                 }),
                 dirty: false,
+                applied: None,
                 ..t
             }),
         }
@@ -1010,6 +1021,7 @@ mod tests {
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
             fn reset(&mut self) {}
             fn retarget(&mut self, _: &Gain) {}
+            fn jump_to_target(&mut self) {}
             fn render(
                 &mut self,
                 _: &mut InputOutput<'_, f32>,
@@ -1081,6 +1093,7 @@ mod tests {
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
             fn reset(&mut self) {}
             fn retarget(&mut self, _: &Gain) {}
+            fn jump_to_target(&mut self) {}
             fn render(
                 &mut self,
                 block: &mut InputOutput<'_, f32>,
@@ -1155,6 +1168,7 @@ mod tests {
             self.heard.calls.fetch_add(1, Relaxed);
         }
         fn retarget(&mut self, _: &NoControls) {}
+        fn jump_to_target(&mut self) {}
         fn render(
             &mut self,
             block: &mut InputOutput<'_, f32>,
@@ -1225,5 +1239,54 @@ mod tests {
         );
         assert_eq!(f64::from_bits(heard.last.load(Relaxed)), 75.0);
         assert_eq!(heard.calls.load(Relaxed), 2);
+    }
+
+    /// The first design after a prepare, a reset, a re-prepare or a fork lands whole, whatever
+    /// the run before moved: a side-only pair `(1, -1)` through a stereo width of `w` reads
+    /// `w` on the left from frame 0, where a ramp from the width before would still be
+    /// climbing.
+    #[test]
+    fn the_first_design_after_a_prepare_a_reset_or_a_fork_lands_whole() {
+        use crate::test_support::{RATE, drive_block, prepared as prepared_node};
+        use crate::{StereoWidthConfig, StereoWidthNode};
+        use tutti_graph::{Node, ParamNode, Prepare};
+        use tutti_units::{StereoWidth, UnitParam};
+
+        let (l, r) = ([1.0f32; 64], [-1.0f32; 64]);
+        let set = |n: &StereoWidthNode<f32>, w: f64| {
+            assert!(n.param_set().set(UnitParam::StereoWidth, w))
+        };
+        let lands = |n: &mut dyn Node, what: &str| {
+            let out = drive_block(n, &[&l, &r]);
+            assert!(
+                out[0].iter().all(|&y| (y - 0.25).abs() < 1e-6),
+                "{what}: {:?}",
+                &out[0][..4]
+            );
+        };
+        let mut n = prepared_node(StereoWidthNode::<f32>::from(
+            StereoWidthConfig::new().width(StereoWidth::new(0.25)),
+        ));
+        lands(&mut n, "prepare");
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        n.reset();
+        lands(&mut n, "reset");
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        n.prepare(&Prepare::new(
+            RATE,
+            MaxBlock::of(tutti_units::Samples::new(1024)),
+        ));
+        lands(&mut n, "re-prepare");
+        // A fork taken while the live node is mid-ramp is a clone, not a reset.
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        drive_block(&mut n, &[&[1.0; 4], &[-1.0; 4]]);
+        let mut fork = n.fork_fresh();
+        lands(&mut fork, "fork");
     }
 }

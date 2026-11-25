@@ -84,7 +84,6 @@ impl<F: Float> TryFrom<AmbisonicEncoderConfig> for AmbisonicEncoderNode<F> {
                 encoder: AmbisonicEncoder::new(order, normalization, config.direction),
                 order,
                 normalization,
-                landed: false,
                 float: PhantomData,
             },
             DirectionSet,
@@ -114,8 +113,6 @@ pub struct AmbisonicEncoderKernel<F: Float> {
     encoder: AmbisonicEncoder,
     order: AmbisonicOrder,
     normalization: HarmonicNormalization,
-    /// Whether a retarget has landed since the last prepare or reset: the first lands whole.
-    landed: bool,
     float: PhantomData<fn() -> F>,
 }
 
@@ -134,21 +131,16 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
         .cost(Cost::Moderate)
     }
 
-    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {
-        self.landed = false;
-    }
+    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
 
-    fn reset(&mut self) {
-        self.landed = false;
-    }
+    fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &Direction) {
-        if self.landed {
-            self.encoder.retarget(*controls);
-        } else {
-            self.encoder.jump_to(*controls);
-            self.landed = true;
-        }
+        self.encoder.retarget(*controls);
+    }
+
+    fn jump_to_target(&mut self) {
+        self.encoder.jump_to_target();
     }
 
     fn render(
@@ -223,7 +215,6 @@ impl<F: Float> TryFrom<AmbisonicRotatorConfig> for AmbisonicRotatorNode<F> {
                 order,
                 normalization,
                 roll: config.roll,
-                landed: false,
                 float: PhantomData,
             },
             DirectionSet,
@@ -239,7 +230,6 @@ pub struct AmbisonicRotatorKernel<F: Float> {
     order: AmbisonicOrder,
     normalization: HarmonicNormalization,
     roll: ArcDegrees,
-    landed: bool,
     float: PhantomData<fn() -> F>,
 }
 
@@ -254,22 +244,17 @@ impl<F: Float> Kernel for AmbisonicRotatorKernel<F> {
         Shape::through(bus(self.order, self.normalization)).cost(Cost::Moderate)
     }
 
-    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {
-        self.landed = false;
-    }
+    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
 
-    fn reset(&mut self) {
-        self.landed = false;
-    }
+    fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &Direction) {
-        let rotation = Rotation::new(self.order, *controls, self.roll);
-        if self.landed {
-            self.rotator.retarget(rotation);
-        } else {
-            self.rotator.jump_to(rotation);
-            self.landed = true;
-        }
+        self.rotator
+            .retarget(Rotation::new(self.order, *controls, self.roll));
+    }
+
+    fn jump_to_target(&mut self) {
+        self.rotator.jump_to_target();
     }
 
     fn render(
@@ -456,6 +441,8 @@ impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
     fn reset(&mut self) {}
 
     fn retarget(&mut self, _: &()) {}
+
+    fn jump_to_target(&mut self) {}
 
     fn render(
         &mut self,

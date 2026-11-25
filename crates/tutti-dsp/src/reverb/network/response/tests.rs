@@ -266,6 +266,34 @@ fn elimination_is_cramers_rule_on_two_lines() {
     }
 }
 
+/// A band profile whose response peaks above every nominal gain (a mid band over a
+/// short low band) has the stored peak as its loop gain, so the line's radius is
+/// `peak^(1/m)` for a line of `m` frames, above any nominal band's `g^(1/m)`.
+#[test]
+fn the_spectral_radius_reads_the_stored_peak_of_a_band_profile() {
+    let a = Absorption::bands(
+        Amplitude::new(0.05),
+        Amplitude::new(0.8),
+        Amplitude::new(0.8),
+        [Hz::new(300.0), Hz::new(4_000.0)],
+        RATE,
+    );
+    let Absorption::Bands(b) = a else {
+        panic!("bands")
+    };
+    let peak = b.peak().get();
+    assert!(peak > 0.8, "the peak is over every set gain ({peak})");
+    let n = network(vec![NetworkStage::Fdn(fdn(
+        &[line(1_000.0, a)],
+        Matrix::Diagonal,
+        &[1.0],
+        &[1.0],
+    ))]);
+    let want = libm::pow(peak, 1.0 / 1_000.0);
+    assert!((n.spectral_radius() - want).abs() < 1e-12, "{want}");
+    assert!(n.spectral_radius() > libm::pow(0.8, 1.0 / 1_000.0));
+}
+
 /// The spectral radius of a diagonal network of pure gains is the exact
 /// `max g_i^(1/m_i)`, of a lossless one 1, of taps and a FIR 0, and of
 /// an all-pass `|g|^(1/D)`; of a loop the analysis cannot accept, infinity.

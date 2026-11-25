@@ -566,7 +566,7 @@
 //!
 //! # Editing a running graph
 //!
-//! - [`Editor::replace_or_swap`] swaps a node's unit with a crossfade ([`Fade`],
+//! - [`Editor::replace`] swaps a node's unit with a crossfade ([`Fade`],
 //!   along a [`FadeLaw`]); the outgoing unit retires on the control
 //!   thread.
 //! - [`Editor::set_latency`] changes a node's declared latency (a hosted
@@ -676,8 +676,8 @@ pub use edges::event_inlet::{
 pub use edges::event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
 pub use edit::builder::{GraphBuilder, Renderer};
 pub use edit::editor::{
-    CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,
-    Unwired, WireError,
+    CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Unwired,
+    WireError,
 };
 pub use event::sorted::{EventOrderError, SortedEvents, SubBlocks};
 pub use event::types::{Event, EventKind, Harmony, HarmonyKind, UmpAt};
@@ -707,8 +707,8 @@ pub use compile::ids::{
     PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, TaskId,
 };
 pub use compile::latency::{
-    ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
-    OutputDelay, PortFeed, delays, plan as latency_plan,
+    ChannelFeed, Compensation, Delays, Feed, LatencyGraph, MAX_NODE_LATENCY, PortFeed, delays,
+    plan as latency_plan,
 };
 pub use compile::main_output::{
     MainOutputBank, MainOutputError, MainOutputId, fold_to_channels, fold_to_topology,
@@ -717,7 +717,7 @@ pub use compile::main_output::{
 pub use compile::plan::{
     AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, Delta, EventDelay, EventDelayKey,
     EventFeedbackKey, EventSlotCapacity, FeedbackSpec, GainPortOp, InputBound, Op, ParamPortOp,
-    Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+    Placement, Plan, PlanUnit, Rewired, Span, UnitIdx, Value,
 };
 pub use compile::preroll::PrerollTable;
 pub use compile::tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};

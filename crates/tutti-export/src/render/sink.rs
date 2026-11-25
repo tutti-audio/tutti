@@ -32,7 +32,7 @@ impl BlockCursor {
     /// Both edges use `Samples`'s named subtraction verb `remaining_after`
     /// rather than `-`: `Samples` deliberately has no `Sub`, because an unsigned
     /// count that wraps is a length that reads off the end of the world.
-    pub fn window(&self, block_len: Samples) -> Range<usize> {
+    pub(crate) fn window(&self, block_len: Samples) -> Range<usize> {
         let start = self.latency.remaining_after(self.block_start).get();
         if start >= block_len.get() {
             return 0..0;

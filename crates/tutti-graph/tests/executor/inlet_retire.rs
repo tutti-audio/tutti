@@ -52,7 +52,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     // A cut, then a crossfade, each over a fresh ring.
     for fade in [Fade::new(Samples::new(0)), Fade::new(Samples::new(96))] {
         let (next, mut w) = inlet();
-        ed.replace_or_swap(KEY, next, fade).expect("replaces");
+        ed.replace(KEY, next, fade).expect("replaces");
         ed.commit().expect("compiles");
         exec.apply_pending();
         w.push_interleaved(Interleaved::new(&[0.25; 128], w.layout()).unwrap());

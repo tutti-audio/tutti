@@ -22,7 +22,7 @@
 //! so the executor's push always has room. `commit` drains the return ring
 //! first, so a caller that only ever commits never has to call `collect`.
 //!
-//! A crossfade ([`replace_or_swap`](crate::Editor::replace_or_swap)) does **not** hold its commit:
+//! A crossfade ([`replace`](crate::Editor::replace)) does **not** hold its commit:
 //! the box comes back as soon as it is applied. The fade's outgoing unit
 //! comes back on its own, on the fade-return ring, when the fade ends (or
 //! is cut), and `collect` drains that ring too. Each fade a commit starts
@@ -89,7 +89,6 @@ mod taps;
 mod unwired;
 mod wiring;
 use cells::LiveCells;
-pub use commit::Rewired;
 pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::Link;
@@ -171,7 +170,7 @@ impl Limits {
 /// compiling anything.
 ///
 /// Every method runs on the control thread and may allocate. Other edits:
-/// [`replace_or_swap`](Self::replace_or_swap) swaps a unit with a crossfade,
+/// [`replace`](Self::replace) swaps a unit with a crossfade,
 /// [`set_latency`](Self::set_latency) changes a node's declared latency,
 /// [`reprepare`](Self::reprepare) changes the sample rate or maximum block,
 /// [`schedule`](Self::schedule) delivers an event on an exact frame or beat,
@@ -343,25 +342,14 @@ impl MainOutputState {
         })
     }
 
-    /// A plan carrying `bank` (a main output of generation `main_output`) was
-    /// sent as commit `seq`. A plan that carries the crossfade the last one
-    /// carried continues it: the executor keeps its progress, and it ends
-    /// under the seq that began it.
-    fn sent(
-        &mut self,
-        bank: Option<crate::MainOutputBank>,
-        main_output: crate::MainOutputId,
-        seq: u64,
-    ) {
+    /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
+    /// the crossfade the last one carried keeps it: the executor keeps its
+    /// progress, and it ends under the seq that began it.
+    fn sent(&mut self, bank: Option<crate::MainOutputBank>, seq: u64) {
         self.bank = bank.map(|bank| {
             self.bank
-                .filter(|b| !b.ended && b.old == bank.old && b.main_output == main_output)
-                .unwrap_or(SentBank {
-                    seq,
-                    old: bank.old,
-                    main_output,
-                    ended: false,
-                })
+                .filter(|_| bank.continues)
+                .unwrap_or(SentBank { seq, ended: false })
         });
         if self.bank.is_none() {
             self.fading = None;
@@ -393,10 +381,6 @@ struct SentBank {
     /// Its `seq`, or that of the commit that began the crossfade it
     /// continues.
     seq: u64,
-    /// The main output that fades out.
-    old: crate::MainOutputId,
-    /// The main output that fades in.
-    main_output: crate::MainOutputId,
     /// Whether the executor has rendered its crossfade through.
     ended: bool,
 }
@@ -752,9 +736,9 @@ impl<F: Float> Editor<F> {
 
     /// Whether a [`reprepare`](Self::reprepare) is between its two commits:
     /// until the next [`collect`](Self::collect) after the executor hands the
-    /// units back, `commit`, `replace_or_swap`, `set_latency` and `reprepare` refuse
+    /// units back, `commit`, `replace`, `set_latency` and `reprepare` refuse
     /// with [`CommitError::Repreparing`]. A host that must not lose what it
-    /// would pass to one of them (a `replace_or_swap` consumes its node) asks first.
+    /// would pass to one of them (a `replace` consumes its node) asks first.
     pub fn is_repreparing(&self) -> bool {
         matches!(self.life, Lifecycle::Repreparing { .. })
     }
@@ -905,5 +889,5 @@ type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 /// Each is built into the commit and comes back once on the fade-return
 /// ring (`Commit::build`).
 fn starting(delta: &Delta) -> usize {
-    delta.fades.iter().filter(|(_, f)| !f.is_cut()).count()
+    delta.fades().iter().filter(|(_, f)| !f.is_cut()).count()
 }

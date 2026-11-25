@@ -42,7 +42,7 @@ impl RenderPlan {
     /// both: the kept span plus the tail's bound, and that plus the trimmed
     /// head. A tail that follows the graph ends the render sooner
     /// ([`drive`](super::drive)), never later.
-    pub fn of(job: &Job) -> Self {
+    pub(crate) fn of(job: &Job) -> Self {
         Self {
             total: job.max_total(),
             output_length: job.max_output_length(),

@@ -297,14 +297,13 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         self.depth.jump_to_target();
         self.feedback.jump_to_target();
         self.clock.reset();
-        self.clock.unland();
     }
 
-    /// Aims the depth and the feedback at `controls`, takes the rate's step, and at a
-    /// segment's start solves the segment. The rate lands whole at that grid point and the
-    /// LFO's phase is continuous across it; a retarget inside a segment is a control that
-    /// moved, and waits for the next grid point. The first retarget after a prepare lands
-    /// the depth and the feedback at once.
+    /// Aims the depth and the feedback at `controls` and takes the rate's step, whenever a
+    /// control moves; the segment is solved at its corner, from the depth the ramp has there.
+    /// The rate lands whole at that corner and the LFO's phase is continuous across it. The
+    /// first design after a prepare or a reset lands in
+    /// [`jump_to_target`](Kernel::jump_to_target) before the first segment is solved.
     fn retarget(&mut self, controls: &PhaserControls) {
         // A control reaches here finite (the cells' reader holds the last finite value); the
         // rate is floored and the feedback clamped.
@@ -316,13 +315,13 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         let steps = Steps::Fixed(self.steps);
         self.depth.retarget_by(F::from_unit(controls.depth), steps);
         self.feedback.retarget_by(F::from_unit(feedback), steps);
-        if self.clock.lands() {
-            self.depth.jump_to_target();
-            self.feedback.jump_to_target();
-        }
-        if self.clock.at_corner() {
-            self.solve();
-        }
+    }
+
+    /// The depth and the feedback on their targets. The complements stay on their segment:
+    /// the sweep is the LFO's, not a design.
+    fn jump_to_target(&mut self) {
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
     }
 
     fn render(
@@ -330,6 +329,9 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
+        if self.clock.due() {
+            self.solve();
+        }
         let frames = block.frames().get();
         let rendered = self
             .chain
@@ -698,6 +700,8 @@ mod tests {
         let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         let mut k = kernel(1, 4, band, Stagger::NONE);
         k.retarget(&controls(5.0, 1.0, 0.5));
+        k.jump_to_target();
+        k.solve();
         let start = exact_complement(band, 5.0, 1.0, 0.0, 0);
         let end = exact_complement(band, 5.0, 1.0, 0.0, 16);
         assert!((k.complements[0].now() - start).abs() < 1e-6, "the start");
@@ -724,6 +728,8 @@ mod tests {
         ] {
             let mut k = kernel(3, 4, band, stagger);
             k.retarget(&controls(1.0, 1.0, 0.5));
+            k.jump_to_target();
+            k.solve();
             for (ch, offset) in offsets.into_iter().enumerate() {
                 let want = exact_complement(band, 1.0, 1.0, offset, 0);
                 let got = k.complements[ch].now();
@@ -923,7 +929,7 @@ mod tests {
             "the sweep was running"
         );
         k.prepare(RATE, MaxBlock::of(Samples::new(64)));
-        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
+        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false, true));
         let y = drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &silence(2, 200));
         assert!(y.iter().flatten().all(|&s| s == 0.0));
     }
