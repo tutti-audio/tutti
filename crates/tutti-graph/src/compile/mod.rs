@@ -60,7 +60,7 @@ mod place;
 pub(crate) mod plan;
 pub(crate) mod preroll;
 pub(crate) mod program;
-mod schedule;
+pub(crate) mod schedule;
 mod shapes;
 pub(crate) mod tail;
 mod timing;
