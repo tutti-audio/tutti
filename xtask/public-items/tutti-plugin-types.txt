@@ -330,6 +330,7 @@ fn lifecycle::State::latency
 fn lifecycle::State::layout
 fn lifecycle::State::new
 fn lifecycle::State::renders
+fn lifecycle::State::retune_asked
 fn lifecycle::State::stage
 fn lifecycle::State::tail
 fn lifecycle::State::want
