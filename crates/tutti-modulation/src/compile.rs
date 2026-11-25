@@ -244,11 +244,22 @@ impl PartialEq for RouteDecl {
 }
 
 impl RouteDecl {
-    /// The amount with `depth`: a layer's route carries none (its cell is
-    /// bound to the program, so a write to it changes no program).
-    fn amount(&self, depth: Bipolar) -> Amount {
+    /// The route's amount, with no depth: its cell is bound to the program,
+    /// so a write to it changes no program.
+    fn amount(&self) -> Amount {
         Amount {
-            depth,
+            depth: Bipolar::ZERO,
+            polarity: self.polarity,
+            curve: self.curve,
+        }
+    }
+}
+
+impl Scale {
+    /// The scale's amount, with its depth as the cell holds it when compiled.
+    fn amount(&self) -> Amount {
+        Amount {
+            depth: self.depth.load(),
             polarity: self.polarity,
             curve: self.curve,
         }
@@ -640,7 +651,7 @@ pub fn compile(
                 entry.1.push(InputLayer {
                     id,
                     source: nodes[&route.source].id,
-                    amount: route.amount(Bipolar::ZERO),
+                    amount: route.amount(),
                 });
                 edges.insert((route.source, target));
             }
@@ -651,18 +662,14 @@ pub fn compile(
                     DepthBy {
                         clock,
                         wave,
-                        amount: Amount {
-                            depth: by.depth.load(),
-                            polarity: by.polarity,
-                            curve: by.curve,
-                        },
+                        amount: by.amount(),
                     }
                 });
                 entry.0.push(Layer {
                     id,
                     clock,
                     wave,
-                    amount: route.amount(Bipolar::ZERO),
+                    amount: route.amount(),
                     depth_by,
                 });
             }
