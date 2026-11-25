@@ -448,8 +448,8 @@ fn messages(events: Vec<TimedMidiEvent>) -> (Vec<(TimedMidiEvent, Rest)>, Box<[T
         let kind = packets[0].event().message_type();
         if packets.len() > 1 && packets.iter().all(|p| p.event().message_type() == kind) {
             let rest = Rest {
-                start: rests.len() as u32,
-                len: (packets.len() - 1) as u32,
+                start: u32::try_from(rests.len()).expect("a clip's packets fit u32"),
+                len: u32::try_from(packets.len() - 1).expect("a clip's packets fit u32"),
             };
             rests.extend_from_slice(&packets[1..]);
             items.push((packets[0], rest));
