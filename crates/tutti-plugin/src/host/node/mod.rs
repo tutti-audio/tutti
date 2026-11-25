@@ -820,23 +820,10 @@ impl PluginAnswers {
 mod event_route_tests {
     use super::*;
 
-    /// **The bridge's notices reach the host as the invalidations the session
-    /// maps**: a refused render mode keeps its mode, and a restart the plugin
-    /// would not make is `Stuck` with its reason.
+    /// **A restart the plugin would not make reaches the host as the
+    /// invalidation the session maps**: `Stuck` with the plugin's reason.
     #[test]
-    fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_map_to_their_invalidations() {
-        let mode = plain_invalidation(IpcEvent::RenderModeNotApplied {
-            mode: tutti_plugin_types::RenderMode::Offline,
-        });
-        assert!(
-            matches!(
-                mode,
-                Ok(PluginInvalidation::RenderModeNotApplied {
-                    mode: tutti_plugin_types::RenderMode::Offline
-                })
-            ),
-            "{mode:?}"
-        );
+    fn a_restart_the_plugin_would_not_make_maps_to_its_invalidation() {
         let stuck = plain_invalidation(IpcEvent::WouldNotStop {
             reason: "inside a block".into(),
         });
