@@ -4,8 +4,6 @@
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::AtomicCell;
-use tutti_units::SampleRate;
 
 use tutti_rt::Mutex;
 
@@ -178,7 +176,6 @@ where
     let Wired {
         mut client,
         inner,
-        pending_sample_rate,
         post,
         descriptor,
         loaded,
@@ -190,6 +187,7 @@ where
     let reporting = Reporting {
         invalidate: invalidate_sink.clone(),
         transport: transport_sink.clone(),
+        rates_only: false,
     };
     // A pump the node's rebinder runs reports through the handle's listeners too.
     client.reporting = Some(reporting.clone());
@@ -200,7 +198,6 @@ where
     let backend = Arc::new(ControlBackend {
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
-        pending_sample_rate: Arc::clone(&pending_sample_rate),
         edits: post,
         reporting,
         lost,
@@ -224,9 +221,6 @@ struct Wired<L: Loaded, F: Float> {
     client: InProcessClient<L, F>,
     /// The control side the client and a handle both reach.
     inner: Arc<Mutex<Instance<L>>>,
-    /// Where the audio side parks a rate for the main thread's pump; drained
-    /// by the handle's backend.
-    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where the backend posts the host's parameter writes the client drains.
     post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
@@ -281,7 +275,6 @@ where
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
     // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
     // or the node's `Rebinder::tick`, which the session calls at each update.
-    let pending_sample_rate = Arc::new(AtomicCell::new(None));
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
@@ -295,7 +288,6 @@ where
         declared,
         loaded.features,
         sample_rate,
-        Arc::clone(&pending_sample_rate),
         None,
         ids.iter().copied(),
         spares,
@@ -308,7 +300,6 @@ where
         client,
         inner,
         post,
-        pending_sample_rate,
         descriptor,
         loaded,
     })
@@ -385,7 +376,6 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(AtomicCell::new(None)),
         None,
         parameters,
         spares,

@@ -1,15 +1,19 @@
 //! The noise gate [`GateNode`]: closes below a threshold, keyed from a side-chain or from
 //! its own signal.
 
+use std::sync::Arc;
+
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, GateBank, GateControls, GateSignals, KeyFilter, KeySource, Lerp,
     SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
+use tutti_graph::{ErasedSetting, HasSetting, Shape};
+use tutti_rt::AtomicCell;
+use tutti_units::{CompressionRatio, Db, Hz, KeyFilterSetting, Q, SampleRate, Seconds, Tail};
 
+use super::keyed_shape;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A noise gate: `channels = N` means N audio inputs, then (for a side-chain key) N key
@@ -42,13 +46,15 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// # The key filter
 ///
-/// [`GateConfig::key_filter`] puts a [`KeyFilter`] on the key: the detector hears the
-/// key through a high-pass or a band-pass, and the signal the gate is applied to is never
-/// filtered. It is off by default. A node built with one has two more controls after the
-/// range, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
-/// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
-/// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
-/// The filter's coefficients ramp to a new cutoff over one grid period.
+/// The detector hears the key through a [`KeyFilter`], a high-pass or a band-pass, and the
+/// signal the gate is applied to is never filtered. The filter is a setting a running node
+/// switches, off by default ([`GateControls::key_filter`] starts it): the node's `key_filter` setting is the word it reads
+/// once per grid period (`session.set(key.key_filter().to(KeyFilter::HighPass))`), and [`KeyFilter::Off`] leaves the filter unrun. The node always has
+/// the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and the Q
+/// ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth) after the ratio, so
+/// eight params in all; while the filter is off they are not in use and are kept, and a switch
+/// in lands on them and starts the filter from silence. The filter's coefficients ramp to a new
+/// cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -74,19 +80,18 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
 pub type GateNode<F> = KernelNode<GateKernel<F>>;
 
-/// What a [`GateNode`] is made from: its main bus, the key its detector listens to, the
-/// filter on that key and the controls it starts at.
+/// What a [`GateNode`] is made from: its main bus, the key its detector listens to and the
+/// controls it starts at, the key filter's among them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateConfig {
     input: ChannelTopology,
     key: KeySource,
-    filter: KeyFilter,
     controls: GateControls,
 }
 
 impl GateConfig {
-    /// A gate on the bus `input` that listens to its own signal ([`KeySource::Own`]), with no
-    /// key filter and at [`GateControls::DEFAULT`].
+    /// A gate on the bus `input` that listens to its own signal ([`KeySource::Own`]), with the
+    /// key filter off and at [`GateControls::DEFAULT`].
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
     /// [`ChannelTopology::default_for`] before it reaches here: `new(ChannelTopology::default_for(n)?)`.
@@ -95,7 +100,6 @@ impl GateConfig {
         Self {
             input,
             key: KeySource::Own,
-            filter: KeyFilter::Off,
             controls: GateControls::DEFAULT,
         }
     }
@@ -106,16 +110,6 @@ impl GateConfig {
     #[must_use]
     pub fn key(self, key: KeySource) -> Self {
         Self { key, ..self }
-    }
-
-    /// The filter the detector hears the key through, starting at the `key_cutoff` and
-    /// `key_q` of the [`controls`](Self::controls) (100 Hz and Butterworth in the default's).
-    /// The node gains the cutoff and Q controls after its others; [`KeyFilter::Off`], the
-    /// default, has none, and the two fields of the controls are only what a later filter
-    /// starts at.
-    #[must_use]
-    pub fn key_filter(self, filter: KeyFilter) -> Self {
-        Self { filter, ..self }
     }
 
     /// The values the node's cells start at, as [`GateControls`] says: the threshold (the key
@@ -141,43 +135,31 @@ impl GateConfig {
 
 impl<F: Float + SimdLanes + Lerp> From<GateConfig> for GateNode<F> {
     fn from(config: GateConfig) -> Self {
+        let set = GateSet {
+            key_filter: Arc::new(AtomicCell::new(config.controls.key_filter)),
+        };
         Self::with_kernel(
-            GateKernel::new(config.input, config.key, config.filter),
-            GateSet::new(
-                config.filter,
-                config.controls.key_cutoff,
-                config.controls.key_q,
-            ),
+            GateKernel::new(config.input, config.key),
+            set,
             config.controls,
         )
     }
 }
 
-/// The gate's controls: threshold, attack, hold, release and range, then the key filter's
-/// cutoff and Q if its [`KeyFilter`] is not [`Off`](KeyFilter::Off).
-#[derive(Clone, Copy, Debug)]
+/// The gate's controls: threshold, attack, hold, release, range and ratio, then the key
+/// filter's cutoff and Q. It holds the key filter's word too, which is not a port: the
+/// controls it assembles read it.
+#[derive(Clone, Debug)]
 pub struct GateSet {
-    filter: KeyFilter,
-    /// The cutoff the filter starts at: a part the ports do not carry until the node has a
-    /// filter, so a node given a filter later starts there.
-    cutoff: Hz,
-    /// The Q the filter starts at, held as `cutoff` is.
-    q: Q,
-}
-
-impl GateSet {
-    fn new(filter: KeyFilter, cutoff: Hz, q: Q) -> Self {
-        Self { filter, cutoff, q }
-    }
+    key_filter: Arc<AtomicCell<KeyFilter>>,
 }
 
 control_set! {
     GateSet(s): GateControls = GateControls {
-        key_cutoff: s.cutoff,
-        key_q: s.q,
+        key_filter: s.key_filter.load(),
         ..GateControls::DEFAULT
     };
-    live: (if s.filter == KeyFilter::Off { 6 } else { 8 });
+    live: (all);
     Threshold => Db = threshold { fast },
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
@@ -194,6 +176,21 @@ control_set! {
     fn defaults(&self) -> GateControls {
         GateControls::DEFAULT
     }
+
+    fn settings(&self) -> Vec<ErasedSetting> {
+        vec![ErasedSetting::new::<Self, KeyFilterSetting>(Arc::clone(&self.key_filter))]
+    }
+
+    fn detach(&mut self) {
+        self.key_filter = Arc::new(AtomicCell::new(self.key_filter.load()));
+    }
+}
+
+/// Which [`KeyFilter`] the detector hears the key through: the node reads it once per grid
+/// period, and a store lands at the next. A clone shares it; a fork holds one of its own, at
+/// the value at the fork.
+impl HasSetting<KeyFilterSetting> for GateSet {
+    type Word = KeyFilter;
 }
 
 /// The gate as a [`Kernel`]: a [`GateBank`] sized at the prepared rate, its detector on the
@@ -206,22 +203,17 @@ control_set! {
 pub struct GateKernel<F: Float + SimdLanes> {
     input: ChannelTopology,
     key: KeySource,
-    filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<GateBank<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
     /// A gate on `input` whose detector reads `key`.
-    fn new(input: ChannelTopology, key: KeySource, filter: KeyFilter) -> Self {
+    fn new(input: ChannelTopology, key: KeySource) -> Self {
         Self {
             input,
             key,
-            filter,
             bank: None,
-            applied: false,
         }
     }
 }
@@ -236,19 +228,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let main = Buses::main(self.input);
-        let inputs = match self.key {
-            KeySource::Own => main,
-            KeySource::Sidechain => main
-                .with(Bus::new(self.input, BusRole::Sidechain))
-                .expect("a main bus and a key are two buses"),
-        };
-        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
+        keyed_shape(self.input, self.key)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.width()));
-        self.applied = false;
+        self.bank = Some(GateBank::new(self.input.width(), rate));
     }
 
     fn reset(&mut self) {
@@ -260,9 +244,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     fn retarget(&mut self, controls: &GateControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(bank) = &mut self.bank {
             bank.jump_to_target();
-            self.applied = true;
         }
     }
 
@@ -650,7 +636,8 @@ mod tests {
     }
 
     /// The shape declares every control in the order of the set (threshold, attack, hold,
-    /// release, range), with the cells as their bases, no latency and no tail.
+    /// release, range, ratio, then the key filter's cutoff and Q, kept while the filter is
+    /// off), with the cells as their bases, no latency and no tail.
     #[test]
     fn gate_declares_its_params() {
         let m = prepared_at(
@@ -670,15 +657,26 @@ mod tests {
                 UnitParam::Hold,
                 UnitParam::Release,
                 UnitParam::Range,
-                UnitParam::Ratio
+                UnitParam::Ratio,
+                UnitParam::Cutoff,
+                UnitParam::Q
             ][..]
         );
         assert_eq!(shape.audio_in().count(), 2);
         assert_eq!(shape.latency, tutti_units::Latency::ZERO);
         assert_eq!(shape.tail, tutti_units::Tail::None);
-        for (k, base) in [-20.0, 0.0001, 0.01, 0.1, -30.0, f64::INFINITY]
-            .into_iter()
-            .enumerate()
+        for (k, base) in [
+            -20.0,
+            0.0001,
+            0.01,
+            0.1,
+            -30.0,
+            f64::INFINITY,
+            100.0,
+            Q::BUTTERWORTH.get(),
+        ]
+        .into_iter()
+        .enumerate()
         {
             assert_eq!(m.param_base(k), Some(base), "control {k}'s base");
         }

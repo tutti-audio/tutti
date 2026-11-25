@@ -286,12 +286,6 @@ impl ClapProcessor {
         self.scratch.last_process_status.load(Ordering::Relaxed)
     }
 
-    /// Whether notes go to the plugin as `clap_event_midi`, as read from its
-    /// note port at the last (re)activation: see [`crate::ClapLoaded::sends_midi_notes`].
-    pub fn sends_midi_notes(&self) -> bool {
-        self.scratch.input_events.supports_midi_notes()
-    }
-
     /// Whether the plugin's most recent block reported `CLAP_PROCESS_TAIL` —
     /// it produced no new signal but is still decaying, so the host should keep
     /// calling `process` until the tail runs out.

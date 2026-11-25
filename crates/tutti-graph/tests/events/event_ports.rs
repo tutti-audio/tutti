@@ -733,9 +733,10 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
         burst_unit(PER_BLOCK as u32, &plan, &refused),
     );
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
-    let g = ed.spec_mut();
-    g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
-    g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
+        .unwrap();
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..4 {
@@ -784,10 +785,12 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     );
     ed.insert(NodeKey(2), "burst", burst_unit(16, &plan, &refused));
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LEN }));
-    let g = ed.spec_mut();
-    g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
-    g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
-    g.connect_events(at(1, 1), EventEdge::feedback(out(2, 0), Samples::new(LEN)));
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
+        .unwrap();
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
+        .unwrap();
+    ed.connect_events(at(1, 1), EventEdge::feedback(out(2, 0), Samples::new(LEN)))
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..LEN / 16 {
@@ -870,10 +873,12 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
     ed.insert(NodeKey(2), "a", burst_unit(32, &a_plan, &refused));
     ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
     ed.insert(NodeKey(4), "b", burst_unit(4, &b_plan, &refused));
-    let g = ed.spec_mut();
-    g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
-    g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
-    g.connect_events(at(1, 0), EventEdge::Direct(out(4, 0)));
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)))
+        .unwrap();
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)))
+        .unwrap();
+    ed.connect_events(at(1, 0), EventEdge::Direct(out(4, 0)))
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..4 {

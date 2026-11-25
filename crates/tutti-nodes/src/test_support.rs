@@ -8,7 +8,7 @@ use tutti_units::{Db, Real, SampleRate, Samples};
 pub(crate) use tutti_fixtures::noise;
 
 use crate::kernel::{ControlSignals, Kernel};
-use crate::params::ControlSet;
+use crate::params::{ControlSet, Ring};
 
 /// The rate the node helpers below prepare and drive nodes at.
 pub(crate) const RATE: SampleRate = SampleRate::SR_48K;
@@ -242,7 +242,9 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Ve
 /// What the driver does to a kernel that cuts at every grid point ([`Kernel::CUT_ALWAYS`]) for
 /// the frames of `input`: a retarget at every grid point and at every frame of `moves` (a
 /// control that moved), each at the controls in force there (`moves` is `(frame, controls)`
-/// in order, the first at frame 0), the frames between rendered together.
+/// in order, the first at frame 0), the frames between rendered together. The first design of
+/// the call lands whole, as [`KernelNode`](crate::KernelNode)'s first design after a prepare or
+/// a reset does.
 pub(crate) fn drive_kernel<K: Kernel>(
     k: &mut K,
     moves: &[(usize, <K::Set as ControlSet>::Controls)],
@@ -255,13 +257,102 @@ pub(crate) fn drive_kernel<K: Kernel>(
     stops.dedup();
     stops.push(frames);
     let mut out = vec![Vec::new(); input.len()];
-    for w in stops.windows(2) {
+    for (i, w) in stops.windows(2).enumerate() {
         let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
         k.retarget(&at);
+        if i == 0 {
+            k.jump_to_target();
+        }
         let piece: Vec<Vec<K::Float>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
         for (o, y) in out.iter_mut().zip(render_kernel(k, &piece)) {
             o.extend(y);
         }
     }
     out
+}
+
+/// The tail `node` reports for one block of `inputs` (one slice per input port) at frame 0,
+/// its params at their bases.
+pub(crate) fn reported_tail(node: &mut dyn Node, inputs: &[&[f32]]) -> Option<tutti_units::Tail> {
+    use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+    let env = Env {
+        frame: tutti_units::Frame::new(0),
+        sample_rate: RATE,
+        block_len: Samples::new(inputs[0].len()),
+        transport: TransportPosition::default(),
+        changes: TransportChanges::NONE,
+        play: PlayClock::ZERO,
+    };
+    tutti_graph::contract::drive_input(node, &env, Planes::new(inputs).unwrap(), &[], &[])
+        .reported_tail
+}
+
+/// The addresses of the controls `set` flags `no_ring`, in port order.
+pub(crate) fn non_ringing<S: ControlSet>(set: &S) -> Vec<tutti_units::UnitAddr> {
+    let addrs = set.addrs();
+    (0..addrs.len())
+        .filter(|&k| set.control(k).ring == Ring::Never)
+        .map(|k| addrs[k])
+        .collect()
+}
+
+/// A tail as a figure, `Unbounded` the top.
+fn tail_rank(tail: tutti_units::Tail) -> u64 {
+    match tail {
+        tutti_units::Tail::Finite(n) => n.get() as u64,
+        tutti_units::Tail::Unbounded => u64::MAX,
+        other => panic!("a tail that is a figure, not {other:?}"),
+    }
+}
+
+/// For every control `kernel`'s set states a longest value for ([`Ring::LongestAt`]), the
+/// kernel's `tail_of` does not fall as that control moves to the stated value: sweeping it over
+/// its raw `range` (the ends and nine interior points) never gives more than the figure at the
+/// stated value, with the other controls at their defaults and with each other control the
+/// tail reads at either end of its range. Each stated value is one its own control accepts. `ranges[k]` is row `k`'s raw range; rows the tail
+/// never reads are not swept. The kernel is prepared.
+pub(crate) fn assert_tail_longest_at_stated<K: Kernel>(
+    kernel: &mut K,
+    set: &K::Set,
+    ranges: &[(f64, f64)],
+) {
+    let n = set.addrs().len();
+    assert_eq!(ranges.len(), n, "a range for every row");
+    let mut base = vec![0.0f64; n];
+    set.flatten(&set.defaults(), &mut base);
+    kernel.retarget(&set.assemble(&base));
+    let mut figure = |raw: &[f64]| tail_rank(kernel.tail_of(&set.assemble(raw)));
+    let mut stated = 0;
+    for k in 0..n {
+        let Ring::LongestAt(longest) = set.control(k).ring else {
+            continue;
+        };
+        stated += 1;
+        assert!(
+            set.control(k).accepts(longest),
+            "row {k} states {longest}, which its own control refuses"
+        );
+        let mut others = vec![base.clone()];
+        for j in (0..n).filter(|&j| j != k && set.control(j).ring != Ring::Never) {
+            for end in [ranges[j].0, ranges[j].1] {
+                let mut raw = base.clone();
+                raw[j] = end;
+                others.push(raw);
+            }
+        }
+        for mut raw in others {
+            raw[k] = longest;
+            let top = figure(&raw);
+            for i in 0..=10 {
+                raw[k] = ranges[k].0 + (ranges[k].1 - ranges[k].0) * f64::from(i) / 10.0;
+                let got = figure(&raw);
+                assert!(
+                    got <= top,
+                    "row {k} at {}: {got} frames, past {top} at its stated {longest}; others {raw:?}",
+                    raw[k]
+                );
+            }
+        }
+    }
+    assert!(stated > 0, "the set states a longest value");
 }

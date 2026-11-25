@@ -107,22 +107,7 @@ where
         // prepare, whether or not the Processor is in hand: the node's only
         // say over it.
         this.drive_wait(p);
-        // A Processor that follows the graph takes its rate, block and
-        // quantum live (no restart, no main thread); one that does not is
-        // told the rate by the lifecycle.
-        if this.retune(p) {
-            // The Processor started its pipeline over: the chunk in flight is
-            // dropped (`drop_chunk` below), and the rest of a SysEx open in it
-            // is cut, as at a reset. Its far end keeps its reassembler's open
-            // message across the retune (a served server does nothing for a
-            // rate it already has), so a tail taken now would complete the
-            // message with a gap.
-            this.intake.lost();
-        } else {
-            this.set_rate(p.sample_rate());
-        }
-        // The session's mode, at configure time beside the rate.
-        this.set_render_mode_from(p);
+        this.follow(p);
         // A chunked Processor's delivery chunk is its own (`Processor::chunk`),
         // and it starts counting from here.
         this.phase = Samples::new(0);
@@ -154,9 +139,30 @@ where
         if this.owed_lost > 0 {
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
-        if this.rate_refused {
-            // The plugin was not told this node's rate (`set_rate`): silence,
-            // not audio at another rate.
+        if this.silenced.holds() {
+            // The plugin was not told this node's rate (`Instance::reconcile`), or runs at
+            // the rate it kept after refusing it: silence, not audio at another
+            // rate. A Processor the control side recalls is still handed back.
+            // The node returns `Silent`, never `Idle`, and has an event input,
+            // so the executor keeps calling it. A note sounding when the mute
+            // begins is cut: the refused change deactivated the plugin and
+            // activated it anew (`HostOp::Reconfigure`), and `Processor::reset`
+            // is called only by this node's `reset`, so nothing resumes it;
+            // the activation that ends the mute starts clear again.
+            let _ = this.rt.poll(Processor::stop);
+            // The MIDI the block carries is not delivered: counted, and the
+            // rest of a SysEx open in it is skipped, as for a block the
+            // plugin did not process.
+            let midi = io
+                .events(this.event_in)
+                .as_slice()
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::Midi(_)))
+                .count() as u64;
+            if midi > 0 {
+                this.lose_midi(midi);
+                io.count_lost(midi);
+            }
             return Status::Silent;
         }
         let ports = this.declared.ports;
@@ -173,6 +179,9 @@ where
         // (stopped) when the control side recalled it. Taken once, here, so
         // its chunk (`Processor::chunk`) is read from the one the block runs.
         let mut processor = this.rt.poll(Processor::stop);
+        // A plugin that asked to be processed again is not reported idle by
+        // this block, whatever it answers.
+        let asked = processor.is_some() && this.requested.take();
         let chunk = processor
             .as_deref()
             .and_then(Processor::chunk)
@@ -419,7 +428,7 @@ where
             // this one shipped (a wake's) comes a block later: it is not
             // parked again before then.
             let stale = std::mem::take(&mut this.idled);
-            this.idled = slept && this.out_events.is_empty() && !stale;
+            this.idled = slept && this.out_events.is_empty() && !stale && !asked;
             return slept_status(&io, this.idled);
         }
 
@@ -535,8 +544,7 @@ where
             // What a Processor says it lost (none that is not chunked does).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
-                this.params.count_midi_dropped(reported);
-                this.intake.lost();
+                this.lose_midi(reported);
                 io.count_lost(reported);
             }
         }
@@ -546,9 +554,8 @@ where
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,
             // and the rest of every SysEx open in it is skipped.
-            this.params.count_midi_dropped(block_midi as u64);
+            this.lose_midi(block_midi as u64);
             io.count_lost(block_midi as u64);
-            this.intake.lost();
         }
         if let (Some(out), true) = (out, processed) {
             let out_events = &mut this.out.midi_events;
@@ -562,7 +569,7 @@ where
                 }
             }
         }
-        slept_status(&io, slept && !sends)
+        slept_status(&io, slept && !sends && !asked)
     }
 
     fn reset(&mut self) {
@@ -588,15 +595,12 @@ where
         }
     }
 
-    /// Hands the plugin's host a wake that raises the node's: a plugin that
-    /// slept and later asks to be processed again (CLAP's `request_process`)
-    /// runs on the next block even though the executor parked the node.
-    /// Control thread.
+    /// Binds the node's wake: the instance raises it for a recall that waits
+    /// and for the plugin's request to be processed again, which a plugin that
+    /// slept makes (CLAP's `request_process`) so that it runs on the next block
+    /// though the executor parked the node. Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
-        let mut instance = self.client.inner.lock();
-        if let Some(control) = instance.control() {
-            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
-        }
+        *self.client.wake.lock() = Some(wake);
     }
 }
 
@@ -768,6 +772,14 @@ mod owed_tests {
             .map(|v| v.get())
     }
 
+    /// A graph prepare at `rate`.
+    fn at(rate: SampleRate) -> tutti_graph::Prepare {
+        tutti_graph::Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::new(tutti_units::Samples::new(BLOCK)).expect("a block"),
+        )
+    }
+
     /// **A fork told its rate off the main thread is refused, not left at the
     /// wrong rate.** A fork's `prepare` dispatches the rate under the main
     /// thread's proof; off that thread it cannot, so the node records the
@@ -785,8 +797,8 @@ mod owed_tests {
             .expect("the fork loads on the main thread");
         let (fork, refused) = std::thread::spawn(move || {
             let mut fork = fork;
-            fork.set_rate(SampleRate::SR_96K);
-            let refused = fork.rate_refused;
+            fork.follow(&at(SampleRate::SR_96K));
+            let refused = fork.silenced.holds();
             (fork, refused)
         })
         .join()
@@ -795,9 +807,9 @@ mod owed_tests {
         // The harness thread is not the process's main thread either, so a second
         // `prepare` is refused too: only the main thread's clears the refusal.
         let mut fork = fork;
-        fork.set_rate(SampleRate::SR_96K);
+        fork.follow(&at(SampleRate::SR_96K));
         assert!(
-            fork.rate_refused,
+            fork.silenced.holds(),
             "a prepare off the main thread cannot clear it"
         );
     }
@@ -822,7 +834,7 @@ mod owed_tests {
         .with_render_mode(tutti_graph::RenderMode::Offline);
         let fork = std::thread::spawn(move || {
             let mut fork = fork;
-            fork.set_render_mode_from(&prepare);
+            fork.follow(&prepare);
             fork
         })
         .join()
@@ -843,9 +855,11 @@ mod owed_tests {
     /// does: the Processor is recalled, so the node's next block hands it
     /// back and renders without it.
     fn recall(inner: &tutti_rt::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
-        inner
-            .lock()
-            .set_sample_rate(main_thread(), SampleRate::SR_44K1, None)
+        let mut instance = inner.lock();
+        instance.want(|w| w.with_rate(SampleRate::SR_44K1));
+        instance.rate_asked();
+        instance
+            .reconcile(Some(main_thread()), None)
             .expect("the change starts");
     }
 
@@ -995,60 +1009,15 @@ mod owed_tests {
         );
     }
 
-    /// **A SysEx open across the node's reset is not completed past it**:
-    /// its tail is skipped, counted, and the plugin's host drops it at the
-    /// next `START`, as the CLAP and VST3 hosts do on a plugin reset.
-    #[test]
-    fn a_sysex_open_across_a_reset_is_not_completed() {
-        use tutti_graph::Node as _;
-        let (client, _handle) = load_client(
-            main_thread(),
-            tutti_fixtures::vst2_probe(),
-            SampleRate::SR_48K,
-        )
-        .unwrap_or_else(|e| {
-            panic!(
-                "in-process load of the probe at {:?}: {e:?}",
-                tutti_fixtures::vst2_probe()
-            )
-        });
-        let controls = client.controls();
-        let mut unit = Direct::new(
-            client.bind(tutti_fixtures::tempo()),
-            SampleRate::SR_48K,
-            BLOCK,
-        );
-        let unit_in = unit
-            .node
-            .shape()
-            .event_input(0)
-            .expect("the node declares an event input");
-        let (cut, next) = dumps();
-
-        unit.events(unit_in, &cut[..3]);
-        unit.block();
-        unit.node.reset();
-        let tail: Vec<Event> = cut[3..].iter().chain(&next).copied().collect();
-        unit.events(unit_in, &tail);
-        unit.block();
-
-        let processor = unit.node.rt.held().expect("lent");
-        assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
-        assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
-        assert_eq!(
-            unit.node.controls().block_losses().inputs_refused,
-            1,
-            "the dump the plugin's host dropped whole, counted in its own unit"
-        );
-    }
-
-    /// **The plugin's host dropping a cut dump does not cut the next one.** A dump cut by a
-    /// reset is dropped whole by the plugin's host at the next dump's `START`; that drop is
+    /// **A SysEx open across the node's reset is not completed past it, and the plugin's host
+    /// dropping that cut dump does not cut the next one.** The cut dump's tail is skipped and
+    /// counted; the plugin's host drops the dump whole at the next dump's `START`, as the CLAP
+    /// and VST3 hosts do on a plugin reset. That drop is
     /// the host's, counted in its own unit, and the node's open SysEx (the new dump, here
     /// spanning two blocks) is not skipped for it: its `END` reaches the plugin, and no event
     /// beyond the reset's tail counts as lost.
     #[test]
-    fn a_host_drop_does_not_cut_the_next_dump() {
+    fn a_sysex_open_across_a_reset_is_skipped_and_the_hosts_drop_does_not_cut_the_next_dump() {
         use tutti_graph::Node as _;
         let (client, _handle) = load_client(
             main_thread(),

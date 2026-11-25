@@ -9,8 +9,8 @@ use tutti_buffers::MaxBlock;
 use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
-use super::tail_elapsed;
-use crate::compile::plan::{Direct, Form, NodePorts, NodeRec, NodeTables, Plan};
+use crate::compile::ids::{Generation, PlanUnitId};
+use crate::compile::plan::{Direct, Form, NodePorts, NodeTables, Plan, PlanUnit, PortSlots};
 use crate::edges::rtlog::{LogSink, LogSlots};
 use crate::event::merge::{merge_into, merge_params, merge_walk};
 use crate::event::sorted::SortedEvents;
@@ -32,7 +32,7 @@ use crate::node::{ConstantMask, Cx, InPlaceMask, MAX_PORTS, Node, SilenceMask, S
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
 
-/// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
+/// [`Op::Node`](crate::Op::Node): run `u` for the unit `head` names: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
 /// crossfade running there reached its end this block.
 #[inline(always)]
@@ -65,29 +65,29 @@ pub(super) fn run_node_op<
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
-    let (rec, plan, frames) = (head.rec, head.plan, head.frames);
+    let (np, plan, frames) = (head.ports, head.plan, head.frames);
     debug_assert_eq!(
-        u.generation, rec.generation,
+        u.generation,
+        Generation::new(head.pu.generation),
         "unit generation matches the plan"
     );
     let nodes = &plan.nodes;
     if u.fade.is_some() {
         // A crossfade runs here: both units, then the blend. Off the hot
         // path, whatever the form.
-        let ports = rec.ports(nodes);
-        return fading_node_op(u, head, st, ports, nodes);
+        return fading_node_op(u, head, st, np.slots(nodes), nodes);
     }
     // Each arm hands `node_op` its port slots. For the three direct forms
     // they are literal one-element arrays, so once `node_op` is inlined every
     // per-port loop in it — masks, skip, finish — folds to straight-line
     // code.
-    match rec.form {
+    match np.form {
         Form::Source { out } => {
             node_op(
                 u,
                 head,
                 st,
-                NodePorts::audio(&[], &[out]),
+                PortSlots::audio(&[], &[out]),
                 |call, node, st| {
                     let mut outs = [st.arena.slot_mut(out, frames)];
                     call.process(node, &[], &mut outs)
@@ -98,7 +98,7 @@ pub(super) fn run_node_op<
             u,
             head,
             st,
-            NodePorts::audio(&[input], &[out]),
+            PortSlots::audio(&[input], &[out]),
             |call, node, st| {
                 let (i, o) = st.arena.pair(input, out, frames);
                 call.process(node, &[i], &mut [o])
@@ -108,7 +108,7 @@ pub(super) fn run_node_op<
             u,
             head,
             st,
-            NodePorts::audio(&[slot], &[slot]),
+            PortSlots::audio(&[slot], &[slot]),
             |call, node, st| {
                 let mut outs = [st.arena.slot_mut(slot, frames)];
                 call.process(node, &[&[]], &mut outs)
@@ -127,10 +127,9 @@ pub(super) fn run_node_op<
         // so a two-port node does not initialise 64 entries per call. An
         // event-free node builds no event table at all, whatever its width.
         Form::Audio => {
-            let ports = rec.ports(nodes);
             let borrows = &nodes.audio_borrows[..];
-            node_op(u, head, st, ports, |call, node, st| {
-                match rec.ain.max(rec.aout) {
+            node_op(u, head, st, np.slots(nodes), |call, node, st| {
+                match np.ain.max(np.aout) {
                     0..=4 => call.run_audio::<4, A>(node, &mut *st.arena, borrows),
                     5..=16 => call.run_audio::<16, A>(node, &mut *st.arena, borrows),
                     _ => call.run_audio::<MAX_PORTS, A>(node, &mut *st.arena, borrows),
@@ -138,10 +137,9 @@ pub(super) fn run_node_op<
             });
         }
         Form::General => {
-            let ports = rec.ports(nodes);
-            node_op(u, head, st, ports, |call, node, st| {
-                let a = rec.ain.max(rec.aout);
-                let e = rec.ein.max(rec.eout);
+            node_op(u, head, st, np.slots(nodes), |call, node, st| {
+                let a = np.ain.max(np.aout);
+                let e = np.ein.max(np.eout);
                 let (arena, events) = (&mut *st.arena, &mut *st.events);
                 let dropped = &mut *st.dropped;
                 match (a, e) {
@@ -179,18 +177,18 @@ pub(super) fn fading_node_op<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    ports @ NodePorts {
+    ports @ PortSlots {
         ain,
         aout,
         ein,
         eout,
-    }: NodePorts<'_>,
+    }: PortSlots<'_>,
     nodes: &NodeTables,
 ) -> bool {
     let frames = h.frames;
     // The key's params, once for both units: the outgoing one hears the
     // modulation the incoming one does.
-    let modulated = !h.rec.params.is_empty() || u.params.busy();
+    let modulated = !h.ports.params.is_empty() || u.params.busy();
     if modulated {
         run_params(u, h, st);
     }
@@ -222,12 +220,12 @@ pub(super) fn fading_node_op<
             &evin[..ein.len()],
             &mut evout[..eout.len()],
         )
-        .with_main(h.rec.main)
-        .with_wired(h.rec.wired)
+        .with_main(h.ports.main)
+        .with_wired(h.pu.wired)
         .params(params);
         let cx = Cx {
             env: h.env,
-            arrival: h.rec.arrival,
+            arrival: h.pu.arrival,
             history: h.history,
             meter: h.meter,
             tempo: h.tempo,
@@ -344,9 +342,14 @@ pub(super) fn in_masks<Fl: SlotFlags + ?Sized>(
     (SilenceMask(silent), ConstantMask(constant))
 }
 
-/// A node op's constants: its record and the block's.
+/// A node op's constants: its unit and the block's.
 pub(crate) struct Head<'p, 'e> {
-    pub(crate) rec: &'p NodeRec,
+    /// The unit's place in [`Plan::units`].
+    pub(crate) unit: PlanUnitId,
+    /// The unit: where it lives in the store, its shape and arrival.
+    pub(crate) pu: &'p PlanUnit,
+    /// What lowering knows of its call.
+    pub(crate) ports: &'p NodePorts,
     /// The plan, for the param tables.
     pub(crate) plan: &'p Plan,
     pub(crate) frames: usize,
@@ -361,6 +364,8 @@ pub(crate) struct Head<'p, 'e> {
     pub(crate) meter: Option<&'e MeterMap>,
     /// The project's tempo map for the block: lent by the host, read-only.
     pub(crate) tempo: Option<&'e TempoMap>,
+    /// The block's declick length (`BlockInputs::declick`).
+    pub(crate) declick: Samples,
 }
 
 /// What a node op may write besides its own unit: every buffer through `A`
@@ -404,7 +409,7 @@ pub(super) fn node_op<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    ports: NodePorts<'_>,
+    ports: PortSlots<'_>,
     call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     node_op_with(u, h, st, ports, false, call_node);
@@ -413,7 +418,9 @@ pub(super) fn node_op<
 /// Run a unit's fused param step (see the `param` module docs,
 /// `src/node/param.rs`): each declared param, from its source this plan, into
 /// the unit's param buffers. Off the hot path: only a unit with a driven
-/// param, or one mid-declick, gets here.
+/// param, or one mid-declick, gets here. A port at rest (undriven, with
+/// nothing running) is not visited, so its node is not asked its base; the
+/// unit's first block visits every port.
 #[inline(never)]
 pub(super) fn run_params<
     F: Float,
@@ -425,19 +432,24 @@ pub(super) fn run_params<
     h: &Head<'_, '_>,
     st: &OpState<'_, A, Fl, E>,
 ) {
-    let (rec, frames, plan) = (h.rec, h.frames, h.plan);
+    let (frames, plan) = (h.frames, h.plan);
     let Unit { node, params, .. } = u;
     params.begin();
-    let ports = &plan.program.param_ports[rec.params.range()];
-    let mut next = ports.iter().peekable();
-    let declared = rec.declared;
-    let declick = plan.prepare.declick();
+    let mut driven = plan.program.param_ports[h.ports.params.range()]
+        .iter()
+        .peekable();
+    let declared = h.pu.shape.params;
+    let declick = h.declick;
     // The state was sized from the unit's shape; a fade's two units declare
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());
     for (k, &param) in declared.as_slice().iter().enumerate().take(n) {
+        let source = driven.next_if(|p| p.port as usize == k);
+        if source.is_none() && params.at_rest(k) {
+            continue;
+        }
         let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
-        match next.next_if(|p| p.port as usize == k) {
+        match source {
             Some(p) => {
                 let events = st.events.pev(p.slot);
                 params.port(k, param, frames, declick, Some((p.from, events)), base);
@@ -459,17 +471,17 @@ pub(super) fn node_op_with<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    NodePorts {
+    PortSlots {
         ain,
         aout,
         ein,
         eout,
-    }: NodePorts<'_>,
+    }: PortSlots<'_>,
     params_done: bool,
     call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
-    let (rec, frames) = (h.rec, h.frames);
-    let unit = rec.unit;
+    let (np, frames) = (h.ports, h.frames);
+    let unit = h.unit;
     // Flushed events and scheduled commands only ever go to an event input.
     let injected = !ein.is_empty() && *st.has_inject;
     // A bypassed node is sent no events but the closes of what it holds
@@ -492,7 +504,7 @@ pub(super) fn node_op_with<
         };
         let (held_in, inject, due) = (u.mode.held_in(), &mut *st.inject, st.due);
         let (events, dropped) = (&mut *st.events, &mut *st.dropped);
-        let arrived = match rec.ein {
+        let arrived = match np.ein {
             0..=4 => assemble::<4, E>(h, flow, held_in, inject, due, events, dropped),
             5..=16 => assemble::<16, E>(h, flow, held_in, inject, due, events, dropped),
             _ => assemble::<MAX_PORTS, E>(h, flow, held_in, inject, due, events, dropped),
@@ -528,20 +540,7 @@ pub(super) fn node_op_with<
     // See the module docs: a node with event inputs parks only on its own
     // say-so (`Status::Idle`); one without parks when its inputs, its last
     // output and its latency plus tail agree.
-    let skip = quiet_inputs
-        && if ein.is_empty() {
-            !ain.is_empty()
-                && u.last_quiet
-                && tail_elapsed(
-                    match u.reported {
-                        None => rec.park_after,
-                        Some(t) => Tail::Finite(rec.latency).then(t),
-                    },
-                    u.quiet,
-                )
-        } else {
-            u.last_idle
-        };
+    let skip = quiet_inputs && u.at_rest(np, &h.pu.shape);
     // A bypassed node is called until it has been sent the close of what
     // it holds, whatever it says of itself.
     let skip = skip && !owes_closes;
@@ -554,7 +553,7 @@ pub(super) fn node_op_with<
     // still declicking off one; every other unit pays this one branch. Run
     // whether or not the node is then skipped, so its ramps and declick
     // advance with the timeline.
-    if !params_done && (!rec.params.is_empty() || u.params.busy()) {
+    if !params_done && (!np.params.is_empty() || u.params.busy()) {
         run_params(u, h, st);
     }
     if skip {
@@ -588,10 +587,16 @@ pub(super) fn node_op_with<
         tempo: h.tempo,
         max: h.max,
         frames,
-        rec,
+        unit,
+        pu: h.pu,
+        ports: np,
         silent: in_silent,
         constant: in_constant,
-        cap: rec.event_capacity.map_or(h.cap, |n| n.get() as usize),
+        cap: h
+            .pu
+            .shape
+            .event_capacity
+            .map_or(h.cap, |n| n.get() as usize),
         params,
     };
     let status = call_node(&call, &mut *u.node, st);
@@ -599,7 +604,7 @@ pub(super) fn node_op_with<
     // This call's report, or the ceiling when it made none.
     u.reported = reported
         .get()
-        .and_then(|r| crate::node::narrow_tail(rec.tail, r));
+        .and_then(|r| crate::node::narrow_tail(h.pu.shape.tail, r));
 
     u.last_idle = status == Status::Idle;
     finish(
@@ -607,7 +612,7 @@ pub(super) fn node_op_with<
         frames,
         ain,
         aout,
-        rec.in_place,
+        np.in_place,
         &mut *st.arena,
         st.flags,
     );
@@ -651,11 +656,11 @@ pub(super) fn direct_op<
     d: &Direct,
     nodes: &NodeTables,
 ) {
-    let NodePorts { ain, aout, .. } = h.rec.ports(nodes);
-    let ain: &[AudioSlotId; I] = ain.try_into().expect("a direct record's input count");
-    let aout: &[AudioSlotId; O] = aout.try_into().expect("a direct record's output count");
+    let PortSlots { ain, aout, .. } = h.ports.slots(nodes);
+    let ain: &[AudioSlotId; I] = ain.try_into().expect("a direct row's input count");
+    let aout: &[AudioSlotId; O] = aout.try_into().expect("a direct row's output count");
     let frames = h.frames;
-    node_op(u, h, st, NodePorts::audio(ain, aout), |call, node, st| {
+    node_op(u, h, st, PortSlots::audio(ain, aout), |call, node, st| {
         let (ins, mut outs) = st.arena.direct::<I, O>(frames, d);
         call.process(node, &ins, &mut outs)
     });
@@ -672,7 +677,7 @@ struct Flow {
     scheduled: bool,
 }
 
-/// Fill the views of `h.rec`'s event inputs: what each input is handed this
+/// Fill the views of the unit's event inputs: what each input is handed this
 /// block. A bypassed node (`discards`) is handed only the closes of what it
 /// holds. Any other node is handed, per port and merged by `(offset, source
 /// order)` with ties to the older: the events flushed to it, the port's
@@ -693,8 +698,8 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
     events: &mut E,
     dropped: &mut Dropped,
 ) -> bool {
-    let rec = h.rec;
-    let (unit, frames, ports) = (rec.unit, h.frames, usize::from(rec.ein));
+    let np = h.ports;
+    let (unit, frames, ports) = (h.unit, h.frames, usize::from(np.ein));
     debug_assert!(ports <= N);
     let bound = h.plan.units[unit].shape.event_input_capacity;
 
@@ -702,7 +707,7 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
     let mut sourced_params: [&[ParamEvent]; N] = [&[]; N];
     let mut views: [Option<&mut EventSlot>; N] = std::array::from_fn(|_| None);
     events.borrow_sorted(
-        &h.plan.nodes.event_assemble[rec.event_assemble.range()],
+        &h.plan.nodes.event_assemble[np.event_assemble.range()],
         |port, v| {
             sourced[usize::from(port)] = &v.events[..];
             sourced_params[usize::from(port)] = &v.params[..];
@@ -825,7 +830,9 @@ pub(super) struct Call<'p, 'e, F: Float> {
     tempo: Option<&'e TempoMap>,
     max: MaxBlock,
     frames: usize,
-    rec: &'p NodeRec,
+    unit: PlanUnitId,
+    pu: &'p PlanUnit,
+    ports: &'p NodePorts,
     silent: SilenceMask,
     constant: ConstantMask,
     /// Events each of the node's event output writers accepts: its declared
@@ -858,12 +865,12 @@ impl<'p, F: Float> Call<'p, '_, F> {
             outs,
             self.silent,
             self.constant,
-            self.rec.in_place,
+            self.ports.in_place,
             &[],
             &mut [],
         )
-        .with_main(self.rec.main)
-        .with_wired(self.rec.wired)
+        .with_main(self.ports.main)
+        .with_wired(self.pu.wired)
         .params(self.params)
         .tail(self.reported)
         .with_log(self.log);
@@ -876,7 +883,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
     fn cx(&self) -> Cx<'_> {
         Cx {
             env: self.env,
-            arrival: self.rec.arrival,
+            arrival: self.pu.arrival,
             history: self.history,
             meter: self.meter,
             tempo: self.tempo,
@@ -892,13 +899,13 @@ impl<'p, F: Float> Call<'p, '_, F> {
         arena: &mut A,
         borrows: &[(AudioSlotId, Role)],
     ) -> Status {
-        let (n_in, n_out) = (self.rec.ain as usize, self.rec.aout as usize);
+        let (n_in, n_out) = (self.ports.ain as usize, self.ports.aout as usize);
         debug_assert!(n_in <= N && n_out <= N);
         let mut ins: [&[F]; N] = [&[]; N];
         let mut outs: [&mut [F]; N] = std::array::from_fn(|_| &mut [][..]);
         arena.borrow(
             self.frames,
-            &borrows[self.rec.borrows.range()],
+            &borrows[self.ports.borrows.range()],
             &mut ins,
             &mut outs,
         );
@@ -917,17 +924,17 @@ impl<'p, F: Float> Call<'p, '_, F> {
         nodes: &NodeTables,
         dropped: &mut Dropped,
     ) -> Status {
-        let rec = self.rec;
+        let np = self.ports;
         let frames = self.frames;
-        let (n_in, n_out) = (rec.ain as usize, rec.aout as usize);
-        let (e_in, e_out) = (rec.ein as usize, rec.eout as usize);
+        let (n_in, n_out) = (np.ain as usize, np.aout as usize);
+        let (e_in, e_out) = (np.ein as usize, np.eout as usize);
         debug_assert!(n_in.max(n_out) <= N && e_in.max(e_out) <= M);
 
         let mut ins: [&[F]; N] = [&[]; N];
         let mut outs: [&mut [F]; N] = std::array::from_fn(|_| &mut [][..]);
         arena.borrow(
             frames,
-            &nodes.audio_borrows[rec.borrows.range()],
+            &nodes.audio_borrows[np.borrows.range()],
             &mut ins,
             &mut outs,
         );
@@ -935,7 +942,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
         let mut evin: [SortedEvents<'_>; M] = [SortedEvents::EMPTY; M];
         let mut evout_bufs: [Option<&mut EventSlot>; M] = std::array::from_fn(|_| None);
         events.borrow_sorted(
-            &nodes.event_borrows[rec.event_borrows.range()],
+            &nodes.event_borrows[np.event_borrows.range()],
             |port, v| {
                 evin[port as usize] =
                     SortedEvents::trusted(&v.events, frames).trusted_params(&v.params, frames);
@@ -964,24 +971,24 @@ impl<'p, F: Float> Call<'p, '_, F> {
             &mut outs[..n_out],
             self.silent,
             self.constant,
-            rec.in_place,
+            np.in_place,
             &evin[..e_in],
             &mut evout[..e_out],
         )
-        .with_main(rec.main)
-        .with_wired(rec.wired)
+        .with_main(np.main)
+        .with_wired(self.pu.wired)
         .params(self.params)
         .with_lost(&unplaced)
         .tail(self.reported)
         .with_log(self.log);
         let status = node.process(&self.cx(), io);
         if unplaced.get() != 0 {
-            dropped.at_node(rec.unit, unplaced.get());
+            dropped.at_node(self.unit, unplaced.get());
         }
         for (port, d) in drops.iter().take(e_out).enumerate() {
             let (refused, recovered) = (d.refused.get(), d.recovered.get());
             if refused != 0 || recovered != 0 {
-                dropped.at_port(rec.unit, port as u16, refused, recovered);
+                dropped.at_port(self.unit, port as u16, refused, recovered);
             }
         }
         status

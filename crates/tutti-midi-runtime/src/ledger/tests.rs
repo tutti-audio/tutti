@@ -7,7 +7,7 @@ use tutti_ump::{MidiChannel, MidiGroup, NoteNumber};
 #[test]
 fn an_owed_off_is_the_note_off_the_wire_types_build() {
     let address = tutti_ump::Address::new(MidiGroup::of(3), MidiChannel::of(9));
-    let key = NoteKey::new(Protocol::Midi2, address, NoteNumber::of(61)).unwrap();
+    let key = NoteKey::new(address, NoteNumber::of(61));
     let off = owed_off(key, Offset::ZERO);
     let want = midi::note_off(address, 61, 0);
     assert_eq!(off, Event::midi(Offset::ZERO, want));

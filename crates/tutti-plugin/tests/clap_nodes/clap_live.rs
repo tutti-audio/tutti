@@ -24,11 +24,14 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::clap_probe;
 use crate::ramp_source::{RampSource, ramp};
 use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
+use tutti_graph::EdgeId;
 
 use std::ops::Range;
 
@@ -176,14 +179,14 @@ fn run_live(
         )
         .controls;
     for port in 0..inputs {
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(key, port as u16),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(src, 0)))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(src, 0))),
+        ))
+        .unwrap();
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .unwrap();
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;
 

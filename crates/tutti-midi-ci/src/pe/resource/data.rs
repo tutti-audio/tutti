@@ -69,8 +69,7 @@ impl PeBinary {
     /// the JSON form's.
     #[must_use]
     pub fn new(media_type: MediaType, bytes: Vec<u8>) -> Option<Self> {
-        (!media_type.as_str().eq_ignore_ascii_case("application/json"))
-            .then_some(Self { media_type, bytes })
+        (!media_type.is_json()).then_some(Self { media_type, bytes })
     }
 
     /// The `bytes` that are no format a media type names:

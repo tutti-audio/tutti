@@ -134,49 +134,42 @@ fn the_tail_is_the_schroeder_figure() {
     }
 }
 
-/// The General MIDI send takes a mono input and gives a stereo one, with no
-/// latency, and offers no cell to the graph (its dry/wet is the graph's mix); a
-/// live node offers the room and the damping. Its tail is a ceiling.
+/// A Freeverb, the General MIDI send included, takes a mono input and gives a stereo one, with
+/// no latency; it offers the room and the damping and no mix (the blend is the graph's mix).
+/// Its declared tail is the ceiling (the room at its largest), and the first block reports the
+/// General MIDI room's own figure, the Schroeder tail of room 0.5.
 #[test]
 fn the_ports_and_the_ceiling() {
-    let fixed = prepared(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-        SR,
-        BLOCK,
-    );
-    let shape = fixed.shape();
+    let send = prepared(FreeverbNode::<f32>::from(FreeverbConfig::new()), SR, BLOCK);
+    let shape = send.shape();
     assert_eq!(shape.audio_in(), ChannelLayout::MONO);
     assert_eq!(shape.audio_out(), ChannelLayout::STEREO);
     assert_eq!(shape.latency.samples(), Samples::ZERO);
-    assert_eq!(shape.params.len(), 0, "no cells");
-    assert_eq!(shape.tail, Tail::Finite(Samples::new(tail_of(gm()))));
-    assert_eq!(fixed.param_set().params().count(), 0);
-
-    let live = live(gm());
-    let shape = live.shape();
-    let ports = shape.params.len();
-    assert_eq!(ports, 2, "the room and the damping");
+    assert_eq!(shape.params.len(), 2, "the room and the damping");
+    assert_eq!(send.param_set().params().count(), 2);
+    assert_eq!(
+        send.param_set().get(UnitParam::Wet),
+        None,
+        "wet only: the blend is the graph's mix, not a port"
+    );
     let Tail::Finite(ceiling) = shape.tail else {
         panic!("finite")
     };
+    let reported = tail_of(gm()) as i64;
+    assert!(
+        (reported - schroeder_tail(0.5)).abs() <= 1,
+        "the send reports {reported}"
+    );
     assert!(
         ceiling.get() > 2 * tail_of(gm()),
-        "the live ceiling is the worst case (room 1), far above the General MIDI room's"
-    );
-    // The fixed node's ceiling is exact, the live node's is not.
-    assert_eq!(live.param_set().params().count(), 2);
-    assert_eq!(fixed.param_set().params().count(), 0);
-    assert_eq!(
-        live.param_set().get(UnitParam::Wet),
-        None,
-        "wet only: the blend is the graph's mix, not a port"
+        "the ceiling is the worst case (room 1), far above the General MIDI room's"
     );
 }
 
 /// The ports are in a fixed order, which the graph's wires and a saved project
 /// name by index: the design's cells in the order its params list them. Freeverb
 /// offers `[RoomSize, Damping]`; the FDN offers the three decays, the size, the diffusion, the pre-delay, the
-/// modulation depth and rate, the width and the wet gain.
+/// modulation depth and rate, the width, the wet gain and the freeze.
 #[test]
 fn the_port_order_is_the_cells_in_their_order() {
     let freeverb = live(gm());
@@ -201,6 +194,7 @@ fn the_port_order_is_the_cells_in_their_order() {
             UnitAddr::first(UnitParam::Rate),
             UnitAddr::first(UnitParam::StereoSpread),
             UnitAddr::new(UnitParam::GainDb, 0),
+            UnitAddr::first(UnitParam::Freeze),
         ]
     );
 }
@@ -228,19 +222,12 @@ fn a_live_node_reports_the_tail_of_its_current_network() {
     }
 }
 
-/// The reported tail holds: past it the output is exactly silent, for the fixed
-/// send and a live node at a short and a long room (the harness's check, which
+/// The reported tail holds: past it the output is exactly silent, for the
+/// General MIDI room and a short and a long one (the harness's check, which
 /// also looks past the ceiling).
 #[test]
 fn the_reported_tail_is_honest() {
-    assert_declared_tail(
-        &mut prepared(
-            FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-            SR,
-            BLOCK,
-        ),
-        SR,
-    );
+    assert_declared_tail(&mut live(gm()), SR);
     assert_declared_tail(&mut live(controls(0.1, 0.5)), SR);
     assert_declared_tail(&mut live(controls(0.9, 0.2)), SR);
 }
@@ -294,7 +281,7 @@ fn the_room_is_cut_at_its_tail_to_the_frame() {
     // Block-aligned input ends at a block edge: 4000 = 62 * 64 + 32, so the last
     // input frame is mid-block, as it may be.
     let mut rig = Rig::new(prepared(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        FreeverbNode::<f32>::from(FreeverbConfig::new()),
         SR,
         BLOCK,
     ));
@@ -379,11 +366,9 @@ fn an_idle_reverb_wakes_as_a_fresh_one() {
 
 /// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a control signal
 /// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a control signal that rises through
-/// the stream renders the same cut into blocks of 32, 64 and 100 frames. And the tail is
-/// reported from the *longest* room the port takes in the block, so a decay that falls
-/// through the block is not reported short.
+/// the stream renders the same cut into blocks of 32, 64 and 100 frames.
 #[test]
-fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
+fn a_modulated_port_is_read_on_the_grid() {
     // Long enough for the combs to come round, where the room is heard.
     let x = noise(3, 4_096);
     let held = vec![0.9f32; BLOCK];
@@ -416,19 +401,74 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
     for block in [64, 100] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }
+}
 
-    // Falling through the block: 0.9 at the start, 0.1 at the end.
-    let falling: Vec<f32> = (0..BLOCK)
-        .map(|i| 0.9 - 0.8 * i as f32 / (BLOCK - 1) as f32)
-        .collect();
+/// The ceiling the shape declares, in frames.
+fn ceiling(node: &FreeverbNode<f32>) -> usize {
+    match node.shape().tail {
+        Tail::Finite(n) => n.get(),
+        other => panic!("a finite ceiling, not {other:?}"),
+    }
+}
+
+/// A port has frames for every block it has a source, so a signal that is flat for the block
+/// (here, low) is a driven room: it may take any value after the block, and the block reports
+/// the figure at the largest room, the room's stated longest value, not the figure of the low
+/// room. The room is the only control the tail reads, so that figure is the ceiling's. An
+/// automation source at rest also hands frames (`tutti-graph`'s `ParamState::port` frames a
+/// port whenever it has a source); a node-level drive cannot deliver a param event, so a flat
+/// signal is the nearest this pins.
+#[test]
+fn a_flat_signal_on_the_room_reports_the_figure_at_the_largest_room() {
+    let none: Option<&[f32]> = None;
+    let low = vec![0.1f32; BLOCK];
     let mut rig = Rig::new(live(controls(0.5, 0.5)));
-    let d = rig.block(&impulse(), &[Some(&falling), none]);
+    let d = rig.block(&impulse(), &[Some(&low), none]);
+    assert_eq!(reported(&d), tail_of(controls(1.0, 0.5)));
+    assert_eq!(reported(&d), ceiling(&rig.node));
     assert!(
-        reported(&d) >= tail_of(controls(0.9, 0.5)),
-        "{} against the long room's {}",
-        reported(&d),
-        tail_of(controls(0.9, 0.5))
+        tail_of(controls(0.1, 0.5)) < reported(&d),
+        "the low room's figure is below it"
     );
+}
+
+/// The tail reads the room and not the damping: moving the damping alone leaves the reported
+/// tail, which is what its `no_ring` flag promises, and a driven damping reports the cells'
+/// figure, below the ceiling.
+#[test]
+fn the_damping_does_not_change_the_reported_tail() {
+    let base = tail_of(controls(0.5, 0.5));
+    for damp in [0.0, 0.25, 0.75, 1.0] {
+        assert_eq!(tail_of(controls(0.5, damp)), base, "damping {damp}");
+    }
+    let none: Option<&[f32]> = None;
+    let heavy = vec![1.0f32; BLOCK];
+    let mut rig = Rig::new(live(controls(0.5, 0.5)));
+    let ceiling = ceiling(&rig.node);
+    let d = rig.block(&impulse(), &[none, Some(&heavy)]);
+    assert_eq!(reported(&d), base);
+    assert!(base < ceiling);
+}
+
+/// With the port gone the cells' figure applies again, but the ring the ceiling owed is held
+/// until heard out, measured from the last input frame: eight silent blocks and a block of
+/// new input at its frame 0 take off nine blocks.
+#[test]
+fn a_released_port_keeps_the_ceilings_ring_until_heard_out() {
+    let none: Option<&[f32]> = None;
+    let low = vec![0.1f32; BLOCK];
+    let mut rig = Rig::new(live(controls(0.1, 0.5)));
+    let ceiling = ceiling(&rig.node);
+    assert_eq!(
+        reported(&rig.block(&impulse(), &[Some(&low), none])),
+        ceiling
+    );
+    for _ in 0..8 {
+        assert_eq!(reported(&rig.silent()), ceiling, "held");
+    }
+    let owed = ceiling - 9 * BLOCK;
+    assert!(tail_of(controls(0.1, 0.5)) < owed);
+    assert_eq!(reported(&rig.block(&impulse(), &[])), owed);
 }
 
 /// A non-finite write to a cell reads as unchanged: the node keeps the last
@@ -531,8 +571,8 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         let editor = r.editor_mut();
         editor.insert(key, "lane", lane);
         editor
-            .spec_mut()
-            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0));
+            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0))
+            .unwrap();
         editor.commit().expect("the lane commits");
         let frames = 60_000;
         let mut x = noise(8, 4_800);
@@ -564,8 +604,6 @@ fn it_is_inserted_with_a_param_set() {
         !set.set(UnitParam::Wet, 0.25),
         "no mix port: the graph blends"
     );
-    let (_, fixed) = FreeverbNode::<f32>::from(FreeverbConfig::general_midi()).into_node();
-    assert!(!fixed.set(UnitParam::RoomSize, 0.7), "the send has no room");
 }
 
 /// A node has no rate until it is prepared: it declares no latency and an unknown tail
@@ -574,7 +612,7 @@ fn it_is_inserted_with_a_param_set() {
 /// declares two tails.
 #[test]
 fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
-    let node = FreeverbNode::<f32>::from(FreeverbConfig::general_midi());
+    let node = FreeverbNode::<f32>::from(FreeverbConfig::new());
     let shape = node.shape();
     assert_eq!(shape.latency.samples().get(), 0);
     assert_eq!(shape.tail, Tail::Unknown);

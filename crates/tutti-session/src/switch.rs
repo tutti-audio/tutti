@@ -451,7 +451,7 @@ mod tests {
             _: &OutputSpec,
             _: OutputBlock,
             _: std::sync::Arc<StreamFaults>,
-        ) -> std::result::Result<Never, Self::Error> {
+        ) -> std::result::Result<tutti_engine::OpenedOutput<Never>, Self::Error> {
             Err(tutti_cpal::DeviceError::InvalidDevice("no card".into()))
         }
     }
@@ -468,7 +468,7 @@ mod tests {
             _: &OutputSpec,
             _: OutputBlock,
             _: std::sync::Arc<StreamFaults>,
-        ) -> std::result::Result<Never, Self::Error> {
+        ) -> std::result::Result<tutti_engine::OpenedOutput<Never>, Self::Error> {
             Err(TimerError::Thread(std::io::Error::other("no thread")))
         }
     }

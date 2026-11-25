@@ -1,4 +1,4 @@
-use tutti_units::{Amplitude, Gain, SampleRate, SampleSpan};
+use tutti_units::{Amplitude, Gain, Hz, SampleRate, SampleSpan};
 
 use super::super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, LineModulation,
@@ -133,17 +133,18 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
     assert!((a.gain(Band::Low).get() - 0.8).abs() < 1e-15);
     assert!((a.gain(Band::Mid).get() - 0.8 * 0.5 / 1.25f64.sqrt()).abs() < 1e-15);
     assert!((a.gain(Band::High).get() - 0.8 * 0.5 / 1.5).abs() < 1e-15);
-    let b = Absorption::Bands {
-        low: Amplitude::new(0.9),
-        mid: Amplitude::new(0.8),
-        high: Amplitude::new(0.7),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let b = Absorption::bands(
+        Amplitude::new(0.9),
+        Amplitude::new(0.8),
+        Amplitude::new(0.7),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     assert_eq!(
         Band::ALL.map(|x| b.gain(x)),
         [0.9, 0.8, 0.7].map(Amplitude::new)
     );
-    let from = Absorption::from_rt60(
+    let from = Absorption::designed(
         [Seconds::new(2.0), Seconds::new(1.0), Seconds::new(0.5)],
         [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
         SampleSpan::of(4800.0),
@@ -234,12 +235,13 @@ fn stability_follows_the_gains_and_the_matrix() {
         assert!(stable(&two(0.99), m.clone()));
         assert!(!stable(&two(1.01), m));
     }
-    let low_only = Absorption::Bands {
-        low: Amplitude::new(1.0),
-        mid: Amplitude::new(0.9),
-        high: Amplitude::new(0.9),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let low_only = Absorption::bands(
+        Amplitude::new(1.0),
+        Amplitude::new(0.9),
+        Amplitude::new(0.9),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     let n = network(&[NetworkStage::Fdn(fdn(
         &[line(100.0, low_only), line(130.0, low_only)],
         Matrix::Hadamard,
@@ -299,12 +301,13 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
     assert!(frozen.is_lossless() && frozen.is_stable());
     assert_eq!(frozen.tail(Db::new(-60.0)), DecayTime::Unbounded);
     assert_eq!(frozen.rt60(Band::Mid).get(), f64::INFINITY);
-    let almost = Absorption::Bands {
-        low: Amplitude::new(1.0),
-        mid: Amplitude::new(1.0),
-        high: Amplitude::new(0.999),
-        crossover: [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
-    };
+    let almost = Absorption::bands(
+        Amplitude::new(1.0),
+        Amplitude::new(1.0),
+        Amplitude::new(0.999),
+        [tutti_units::Hz::new(200.0), tutti_units::Hz::new(2000.0)],
+        RATE,
+    );
     let n = network(&[NetworkStage::Fdn(fdn(
         &[line(100.0, almost), line(130.0, almost)],
         Matrix::Hadamard,
@@ -403,7 +406,7 @@ fn the_shortest_path_decides_the_direct_path() {
         }])
         .unwrap(),
     );
-    // A network is 111 KB: each is built and read in its own frame, never held across the test.
+    // A network is 115 KB: each is built and read in its own frame, never held across the test.
     let min_delay = |stages: &[NetworkStage]| network(stages).min_delay();
     let direct = |stages: &[NetworkStage]| network(stages).has_direct_path();
     assert!(direct(std::slice::from_ref(&ap)));
@@ -525,7 +528,7 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         }
         assert!(!stable(a), "damp {damp}");
         let f = fdn(&[line(100.0, a)], Matrix::Diagonal);
-        assert_eq!(f.rt60_bound(Band::Mid, RATE).get(), f64::INFINITY);
+        assert_eq!(f.rt60_bound(RATE).get(), f64::INFINITY);
         let n = network(&[NetworkStage::Fdn(f)]);
         assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
     }
@@ -639,7 +642,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
         .unwrap();
     let estimate = mixed.rt60(Band::Mid).get();
     assert!((estimate - 1.32).abs() < 1e-3, "{estimate}");
-    let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(Band::Mid, rate);
+    let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(rate);
     assert!((bound.get() - 3.0).abs() < 1e-3);
     let DecayTime::Finite(tail) = mixed.tail(Db::new(-60.0)) else {
         panic!("finite")
@@ -682,7 +685,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
         .push(NetworkStage::Fdn(fdn(&lines, Matrix::Diagonal)))
         .unwrap();
     let exact = diagonal.rt60(Band::Mid).get();
-    let bound = fdn(&lines, Matrix::Diagonal).rt60_bound(Band::Mid, rate);
+    let bound = fdn(&lines, Matrix::Diagonal).rt60_bound(rate);
     assert!((bound.get() - exact).abs() < 1e-4);
 }
 
@@ -694,14 +697,129 @@ fn a_nearly_orthogonal_matrix_adds_a_lag_a_structured_one_does_not() {
     let g = Absorption::Gain(Amplitude::new(0.9));
     let lines = [line(100.0, g), line(130.0, g)];
     let structured = fdn(&lines, Matrix::Householder);
-    assert_eq!(structured.lag_extra_frames(Band::Mid), 0.0);
+    assert_eq!(structured.lag_extra_frames(SampleRate::SR_48K), 0.0);
     let c = Matrix::Circulant(gain_row(&[1.000_000_2, 0.0]));
     let near = fdn(&lines, c);
-    assert!(near.orthogonal() && near.lag_extra_frames(Band::Mid) > 0.0);
+    assert!(near.orthogonal() && near.lag_extra_frames(SampleRate::SR_48K) > 0.0);
     assert!(
-        near.rt60_bound(Band::Mid, SampleRate::SR_48K).get()
-            > structured.rt60_bound(Band::Mid, SampleRate::SR_48K).get()
+        near.rt60_bound(SampleRate::SR_48K).get() > structured.rt60_bound(SampleRate::SR_48K).get()
     );
+}
+
+fn bands(low: f64, mid: f64, high: f64) -> Absorption {
+    Absorption::bands(
+        Amplitude::new(low),
+        Amplitude::new(mid),
+        Amplitude::new(high),
+        [Hz::new(300.0), Hz::new(4_000.0)],
+        RATE,
+    )
+}
+
+/// The decay bound reads the absorption's largest response over every frequency, not its
+/// three nominal band gains. Gains that fall with frequency peak at the low band's: the figure
+/// is the nominal one exactly. A mid band above a short low band peaks between the crossovers
+/// above every nominal gain: the bound is the line's own
+/// `-60 m / (fs 20 log10 peak)`, longer than any band's, and a peak at or over 1 never decays.
+#[test]
+fn the_decay_bound_reads_the_peak_response_of_a_band_profile() {
+    let one = |a: Absorption| fdn(&[line(1_000.0, a)], Matrix::Diagonal);
+
+    let falling = one(bands(0.9, 0.7, 0.5));
+    assert!(
+        (falling.rt60_bound(RATE).get() - falling.rt60(Band::Low, RATE).get()).abs() < 1e-9,
+        "the bound is the low band's decay"
+    );
+
+    let a = bands(0.05, 0.8, 0.8);
+    let rising = one(a);
+    let peak = a.sup(RATE);
+    assert!(peak > 0.8, "{peak}");
+    let want = -60.0 * 1_000.0 / (RATE.get() * 20.0 * peak.log10());
+    assert!((rising.rt60_bound(RATE).get() - want).abs() < 1e-9 * want);
+    assert!(rising.rt60_bound(RATE) > rising.rt60(Band::Mid, RATE));
+
+    let over = bands(0.0, 0.99, 0.99);
+    assert!(over.sup(RATE) > 1.0);
+    assert_eq!(one(over).rt60_bound(RATE).get(), f64::INFINITY);
+    let n = network(&[NetworkStage::Fdn(one(over))]);
+    assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
+}
+
+/// The lines whose echoes can sum in one output channel deepen the floor the decay is measured
+/// to by a margin for two coinciding echoes: `20 log10 min(2, n)`, `n = Σ|c| / max|c|` of the
+/// widest row. Four identical lines of 1 000 frames at RT60 2 s, the row `[1, 1, 1, 1]` (4
+/// lines, still 6.02 dB) over the row `[1, 0, 0, 0]`: the tail to -60 dB is
+/// `1000 / fs + 2 (60 + 20 log10 2) / 60` seconds; a row of unequal gains `[1, 0.5, 0.5, 0]` is
+/// 2 lines, the same; one line in every row is no margin. Lines of equal length coincide in
+/// all their echoes, and the margin is for all of them.
+#[test]
+fn the_tail_adds_the_lines_that_sum_in_one_output_channel_to_the_floors_depth() {
+    // Lengths 1000 to 1003 (pairwise distinct), each at the loop gain of RT60 2 s.
+    let lengths = [1_000.0, 1_001.0, 1_002.0, 1_003.0];
+    let lines = lengths.map(|m| {
+        let g = loop_gain(SampleSpan::of(m), Seconds::new(2.0), RATE);
+        line(m, Absorption::Gain(g))
+    });
+    let tail_of_lines = |lines: &[Line], rows: &[&[f64]]| {
+        let mut f = fdn(lines, Matrix::Diagonal);
+        let rows: Vec<Gains> = rows.iter().map(|r| gain_row(r)).collect();
+        f.output = NetworkOutputMap {
+            rows: Inline::from_slice(&rows).unwrap(),
+        };
+        let counted = f.coincident_lines(1.0);
+        let DecayTime::Finite(t) = network(&[NetworkStage::Fdn(f)]).tail(Db::new(-60.0)) else {
+            panic!("a damped line rings out")
+        };
+        (counted, t.get())
+    };
+    let tail_with = |rows: &[&[f64]]| tail_of_lines(&lines, rows);
+    let transit = 1_003.0 / RATE.get();
+    let at = |lines: f64| transit + 2.0 * (60.0 + 20.0 * lines.min(2.0).log10()) / 60.0;
+    let (n, t) = tail_with(&[&[1.0, 1.0, 1.0, 1.0], &[1.0, 0.0, 0.0, 0.0]]);
+    assert_eq!(n, 4.0);
+    assert!((t - at(4.0)).abs() < 1e-6, "{t}");
+    assert_eq!(at(4.0), at(2.0));
+    let (n, t) = tail_with(&[&[1.0, 0.5, 0.5, 0.0]]);
+    assert_eq!(n, 2.0);
+    assert!((t - at(2.0)).abs() < 1e-6, "{t}");
+    let (n, t) = tail_with(&[&[0.0, 0.0, 1.0, 0.0], &[0.5, 0.0, 0.0, 0.0]]);
+    assert_eq!(n, 1.0);
+    assert!((t - at(1.0)).abs() < 1e-6, "{t}");
+
+    // Equal lengths coincide in every echo: the margin is for the four, 20 log10 4.
+    let g = loop_gain(SampleSpan::of(1_000.0), Seconds::new(2.0), RATE);
+    let equal = [line(1_000.0, Absorption::Gain(g)); 4];
+    let (n, t) = tail_of_lines(&equal, &[&[1.0, 1.0, 1.0, 1.0]]);
+    assert_eq!(n, 4.0);
+    let want = 1_000.0 / RATE.get() + 2.0 * (60.0 + 20.0 * 4.0f64.log10()) / 60.0;
+    assert!((t - want).abs() < 1e-6, "{t} against {want}");
+}
+
+/// The width stage `(M + wS, M - wS)` mixes the output rows into each channel, and a mixing
+/// matrix lets every tapped line's echo reach any line: with rows `[1, 1, 0, 0]` and
+/// `[0, 0, 1, 1]` on diagonal lines, width 1 leaves each channel its two lines, width 0 puts all
+/// four in both (`(M, M)`), and width 2 weighs the two rows `1.5` and `0.5`: `(1.5 + 1.5 + 0.5 +
+/// 0.5) / 1.5` lines. A Householder matrix over the same four lines counts every tapped line.
+#[test]
+fn the_lines_that_sum_follow_the_width_and_a_mixing_matrix() {
+    let lines = [line(1_000.0, Absorption::Gain(Amplitude::new(0.9))); 4];
+    let with = |matrix: Matrix| {
+        let mut f = fdn(&lines, matrix);
+        let rows: Vec<Gains> = [[1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.0]]
+            .iter()
+            .map(|r| gain_row(r))
+            .collect();
+        f.output = NetworkOutputMap {
+            rows: Inline::from_slice(&rows).unwrap(),
+        };
+        f
+    };
+    let diagonal = with(Matrix::Diagonal);
+    assert_eq!(diagonal.coincident_lines(1.0), 2.0);
+    assert_eq!(diagonal.coincident_lines(0.0), 4.0);
+    assert!((diagonal.coincident_lines(2.0) - 4.0 / 1.5).abs() < 1e-12);
+    assert_eq!(with(Matrix::Householder).coincident_lines(1.0), 4.0);
 }
 
 /// A nested all-pass must be a lattice with `|g| < 1` for the loop analysis:

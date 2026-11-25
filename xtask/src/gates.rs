@@ -36,6 +36,8 @@ mod platform_seam;
 mod pointers;
 mod prose;
 mod prose_names;
+mod public_api_counts;
+mod public_items;
 mod range_types;
 mod ratchet;
 mod recipe_lists;
@@ -50,6 +52,9 @@ mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
+// Backs the local `unused-public` recipe (it needs rust-analyzer): not a gate.
+mod scip;
+mod unused_public;
 // Read by `check-umbrella`.
 mod umbrella_collisions;
 mod use_tree;
@@ -58,8 +63,13 @@ mod values;
 mod vst3_sdk;
 mod width;
 
+pub(crate) use public_api_counts::{
+    count as count_api, skipped as skipped_in_counts, table as count_table,
+};
 pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
+pub(crate) use unused_public::app_report as unused_public_app;
+pub(crate) use unused_public::report as unused_public;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -203,6 +213,9 @@ pub(crate) const GATES: &[GateDef] = &[
     }),
     gate("check-building", true, |r| {
         building::check(&r.tree, building::ALLOW, building::MIN_SITES)
+    }),
+    gate("check-public-items", true, |r| {
+        public_items::check(&r.tree, public_items::MIN_ITEMS)
     }),
     gate("check-umbrella", true, |r| umbrella::check(&r.tree)),
     gate("check-logging", true, |r| {
@@ -531,6 +544,32 @@ pub(crate) fn prune_building(root: &Path) -> Result<(), String> {
     let file = root.join(building::LIST);
     fs::write(&file, text).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     println!("wrote {}: {removed} stale rows deleted", building::LIST);
+    Ok(())
+}
+
+/// Write `xtask/public-items/<crate>.txt` for every crate from the tree, and delete a list
+/// of no crate.
+pub(crate) fn write_public_items(root: &Path) -> Result<(), String> {
+    let tree = RealTree {
+        root: root.to_path_buf(),
+    };
+    let lists = public_items::lists(&tree);
+    let dir = root.join(public_items::DIR);
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    for old in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let rel = format!(
+            "{}/{}",
+            public_items::DIR,
+            old.file_name().to_string_lossy()
+        );
+        if !lists.contains_key(&rel) {
+            fs::remove_file(old.path()).map_err(|e| format!("cannot delete {rel}: {e}"))?;
+        }
+    }
+    for (path, text) in &lists {
+        fs::write(root.join(path), text).map_err(|e| format!("cannot write {path}: {e}"))?;
+    }
+    println!("wrote {} lists in {}", lists.len(), public_items::DIR);
     Ok(())
 }
 

@@ -63,11 +63,11 @@
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
 //! block** and its sorted events.
 //!
-//! **A node op is one record.** The compiler lowers each `Op::Node` into a
-//! `NodeRec` (`plan.rs`): store index, generation, arrival, latency plus
-//! tail, the port slots, the buffer borrow requests **already sorted**, and
-//! a `Form` that picks the borrow. A
-//! call does one indexed load and never sorts. The commonest shapes — at most one audio input and one
+//! **A node op is one row.** The compiler lowers each `Op::Node` into a
+//! `NodePorts` row of `Plan::ports` (`plan.rs`): the port slots, the buffer
+//! borrow requests **already sorted**, and a `Form` that picks the borrow;
+//! the unit's place, shape and arrival are its `PlanUnit`. A
+//! call does two indexed loads and never sorts. The commonest shapes — at most one audio input and one
 //! audio output, or the stereo shapes 0→2, 1→2, 2→1 and 2→2, all with no
 //! event ports — borrow their slots directly, and their whole call path is
 //! specialised so the per-port loops fold away. An
@@ -205,7 +205,8 @@ use tutti_units::PlayReading;
 use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
-use crate::compile::plan::Plan;
+use crate::compile::plan::{Plan, UnitIdx};
+use crate::compile::tail::{GraphTail, Owed, TailGraph, graph_tail_of};
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
 use crate::exec::command::CommandRx;
@@ -217,6 +218,7 @@ use crate::exec::slots::{AudioSlots, EventSlots, SlotFlags};
 use crate::node::Prepare;
 use crate::node::play::PlayState;
 use crate::{EdgeFade, EdgeId};
+use std::collections::HashMap;
 
 /// Puts `item` into `to`, which has room for it by construction (the editor
 /// sized `to` with the commit that is applying). A refusal is a miscount on
@@ -259,9 +261,7 @@ mod stage;
 mod state;
 mod update;
 
-pub(crate) use commit::{
-    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
-};
+pub(crate) use commit::{Commit, CommitSeq, Crossfade, ExecLink, Opened, Participants, Rendered};
 pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
 use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
@@ -302,7 +302,7 @@ pub const FADE_CAPACITY: usize = 256;
 /// How many ended edge fades the executor can have waiting for the editor. A
 /// lane that finds the ring full offers its report again next block, so a
 /// full ring delays an edge's removal and loses nothing.
-const EDGE_FADE_CAPACITY: usize = 1024;
+pub(crate) const EDGE_FADE_CAPACITY: usize = 1024;
 
 /// The audio-thread half of a graph: runs the current [`Plan`] one block at a
 /// time, on the calling thread or spread over a [`Pool`] (see [`set_pool`](Self::set_pool)).
@@ -343,7 +343,7 @@ pub struct Executor<F: Float = f32> {
     suspension: Suspension,
     /// The held-key tables of the units a re-prepare checked out, for the
     /// resume commit to hand back.
-    parked: CappedVec<(NodeKey, Keys)>,
+    parked: CappedVec<(UnitIdx, Keys)>,
     /// Where a replaced node writes its state for its successor
     /// (`Node::chase`), sized when a plan is built from what its nodes
     /// declare (`Shape::chase`), so the swap never allocates it.
@@ -433,20 +433,15 @@ impl MainOutputFades {
         Self { run: None, ended }
     }
 
-    /// The fade after commit `seq` installs `plan` over `old`. A main output
+    /// The fade after commit `seq` installs `plan`. A main output
     /// crossfade starts with the plan that carries it, and a plan that
-    /// carries none ends one running. A plan that carries the old main output
-    /// the running plan carries, under the same new main output, continues
-    /// the crossfade from the frames it has rendered.
-    fn install(&mut self, plan: &Plan, old: Option<&Plan>, seq: u64) {
-        let continues = |old: &Plan, bank: crate::MainOutputBank| {
-            old.main_output_id() == plan.main_output_id()
-                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
-        };
-        self.run = match (plan.main_output_bank(), old, self.run) {
-            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
-            (Some(_), ..) => Some(MainOutputFadeRun { seq, done: 0 }),
-            (None, ..) => None,
+    /// carries none ends one running. A plan whose bank continues the one
+    /// running keeps the frames it has rendered.
+    fn install(&mut self, plan: &Plan, seq: u64) {
+        self.run = match (plan.main_output_bank(), self.run) {
+            (Some(bank), Some(run)) if bank.continues => Some(run),
+            (Some(_), _) => Some(MainOutputFadeRun { seq, done: 0 }),
+            (None, _) => None,
         };
     }
 
@@ -528,7 +523,7 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
-/// latency then its tail (`NodeRec::park_after`).
+/// latency then its tail (`Shape::park_after`).
 fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
@@ -538,24 +533,18 @@ fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
 }
 
 impl<F: Float> Executor<F> {
-    pub(crate) fn new(
-        prepare: Prepare,
-        cap: usize,
-        ends: ExecutorEnds<F>,
-        commands: CommandRx,
-    ) -> Self {
-        let readings = ends.readings;
+    pub(crate) fn new(prepare: Prepare, cap: usize, link: ExecLink<F>) -> Self {
         Self {
             prepare,
             event_cap: cap,
             inbox: Inbox {
-                queue: ends.queue,
-                back: ends.back,
-                fade_back: ends.fade_back,
-                losses: ends.losses,
-                unreported: readings.unreported,
-                edge_fades: ends.edge_fades,
-                commands,
+                queue: link.queue,
+                back: link.back,
+                fade_back: link.fade_back,
+                losses: link.losses,
+                unreported: link.unreported,
+                edge_fades: link.edge_fades,
+                commands: link.commands,
                 applied: 0,
             },
             plan: None,
@@ -564,16 +553,16 @@ impl<F: Float> Executor<F> {
             clock: Clock {
                 frame: Frame::ZERO,
                 history: Box::new(TransportHistory::new()),
-                play: PlayState::new(readings.play),
+                play: PlayState::new(link.played),
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
             parked: CappedVec::with_capacity(0),
             chase: CappedVec::default(),
             pool: None,
-            pool_participants: readings.pool,
-            rendered: RenderedBlocks::new(readings.rendered),
-            main_output_fade: MainOutputFades::new(readings.main_output_fade_ended),
+            pool_participants: link.participants,
+            rendered: RenderedBlocks::new(link.rendered),
+            main_output_fade: MainOutputFades::new(link.fade_ended),
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -645,11 +634,6 @@ impl<F: Float> Executor<F> {
         self.logs.take_readers()
     }
 
-    /// The pool blocks run on, if any.
-    pub fn pool(&self) -> Option<&Arc<dyn Pool>> {
-        self.pool.as_ref()
-    }
-
     /// Whether the running plan's blocks are spread across the pool: a pool
     /// of more than one participant is set and the plan has more than one
     /// task. Otherwise every block runs on the calling thread alone.
@@ -702,6 +686,38 @@ impl<F: Float> Executor<F> {
             width: plan.rendered_outputs() - bank.base,
             done: Samples::new(run.done),
             fade: bank.fade,
+        })
+    }
+
+    /// The graph's tail over what its units owe now: [`graph_tail`]'s fold
+    /// (a cascade adds, a merge takes the largest) with each unit's two
+    /// figures. A node owes what is left of its last
+    /// [`report_tail`](crate::Io::report_tail) (else its declared ceiling) when
+    /// nothing upstream still owes, and nothing when the executor skips it as
+    /// at rest; after an upstream that still owes it owes its declared
+    /// ceiling, since a report is about the input already heard. A node the
+    /// plan does not run keeps its declared figure.
+    ///
+    /// `topology` is the graph the running plan was compiled from (the
+    /// editor's spec). Call it between blocks, on the thread that renders:
+    /// an offline render owns its executor, and a live one has no such
+    /// moment.
+    ///
+    /// [`graph_tail`]: crate::graph_tail
+    pub fn reported_tail<G: TailGraph<Node = NodeKey>>(&self, topology: &G) -> GraphTail {
+        let owed: HashMap<NodeKey, Owed> = self.plan.as_ref().map_or_else(HashMap::new, |plan| {
+            plan.units
+                .iter_enumerated()
+                .filter_map(|(unit, pu)| {
+                    let u = self.store[pu.idx.0 as usize].as_ref()?;
+                    Some((pu.key, u.owed(&plan.ports[unit], &pu.shape)))
+                })
+                .collect()
+        });
+        graph_tail_of(topology, self.prepare.sample_rate(), |node| {
+            owed.get(&node)
+                .copied()
+                .unwrap_or_else(|| Owed::declared(topology.tail(node)))
         })
     }
 
@@ -926,6 +942,7 @@ mod tests {
     /// come out as their exact `f64` sum times the gain, `3 * (1 + 1.5 * 2^-40)`.
     #[test]
     fn an_f64_executor_sums_and_scales_in_f64() {
+        use crate::edit::editor::link::link;
         use crate::model::graph::{Edge, InputPort, NodeSpec, OutputPort, PortSource, Topology};
         use crate::model::mode::{ModeCell, ModeState, NodeMode};
         use crate::model::spec::GraphSpec;
@@ -960,18 +977,14 @@ mod tests {
                 .expect("compiles");
         let plan = Arc::new(plan);
 
-        let (mut channels, ends) = channels::<f64>();
-        let (_commands, command_rx) = crate::exec::command::command_channel();
-        let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
-        let mut stager = Stager::new(
-            DEFAULT_EVENT_CAPACITY,
-            channels.readings.pool.clone(),
-            channels.readings.rendered.clone(),
-        );
+        let (mut edit, exec_link) = link::<f64>();
+        let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, exec_link);
+        let mut stager = edit.stager(DEFAULT_EVENT_CAPACITY);
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),
             delta,
+            false,
             units,
             |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
@@ -986,12 +999,10 @@ mod tests {
             &mut commit,
             StageIn {
                 old: None,
-                carry: true,
-                resumed: false,
                 mix_lane: &|_| None,
             },
         );
-        assert!(channels.to_executor.push(commit).is_ok(), "queued");
+        edit.send(commit, 0);
 
         let mut out = vec![0.0f64; 64];
         exec.process(64, &TransportPosition::default(), &[], &mut [&mut out[..]]);

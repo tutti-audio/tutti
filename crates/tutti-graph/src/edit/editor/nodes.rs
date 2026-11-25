@@ -2,12 +2,13 @@
 //! declares (latency, tail).
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_units::{Latency, Tail};
 
 use super::outlets::Closed;
-use super::{CommitError, Editor, Inserted, Unwired};
+use super::{CommitError, Editor, Inserted, Unwired, write};
 use crate::model::bus_edge::{BusOutputPort, NodeBus};
 use crate::model::fade::Fade;
 use crate::model::gain::EdgeFade;
@@ -55,6 +56,7 @@ impl<F: Float> Editor<F> {
             params: _,
             reclaimer: _,
             published: _,
+            settings: _,
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -80,7 +82,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Whether a unit of shape `incoming` could fade in at `key`: whether it
-    /// fits the running unit's, the question [`replace_or_swap`](Self::replace_or_swap)
+    /// fits the running unit's, the question [`replace`](Self::replace)
     /// answers with [`CommitError::FadeShape`]. `Some(false)` for a node with
     /// no running unit yet, and `None` for a `key` not in the spec.
     #[must_use]
@@ -119,13 +121,11 @@ impl<F: Float> Editor<F> {
             // fade, so both units must declare the same params.
             && shape.params == running.params
     }
-
     /// Replaces the unit running at `key` with `node`, crossfading from one
     /// to the other over `fade` once the next [`commit`](Self::commit) lands
     /// — a new generation, like [`insert`](Self::insert), but heard as a
-    /// fade rather than a swap. Returns the new unit's typed controls and what it
-    /// unwired ([`insert`](Self::insert)). The
-    /// rules:
+    /// fade rather than a swap. Returns the new unit's typed controls and what
+    /// it unwired ([`insert`](Self::insert)). The rules:
     ///
     /// - Both units run on the node's inputs for `fade.duration` frames and
     ///   their outputs are blended along `fade.law`; then the old unit
@@ -139,29 +139,38 @@ impl<F: Float> Editor<F> {
     /// - New events go to the incoming unit only.
     /// - A replace while a fade runs at `key` waits for it to finish, then
     ///   fades from its incoming unit; a newer one supersedes a waiting one.
+    /// - An [`insert`](Self::insert) or [`remove`](Self::remove) at `key`
+    ///   before the commit takes the fade back, as does a
+    ///   [`reprepare`](Self::reprepare) (whose units restart from silence
+    ///   anyway).
+    /// - Forking follows the new unit, as after an [`insert`](Self::insert):
+    ///   its [`ForkSource`] replaces the key's, and a unit that hands none
+    ///   over makes the key unforkable. (A fork mid-fade forks the incoming
+    ///   unit alone; a fork has no fades.)
     ///
-    /// Refused, changing nothing, with [`CommitError::FadeShape`] when
-    /// `node`'s shape differs from the running unit's in more than its tail,
-    /// and with [`CommitError::NotRunning`] when nothing runs at `key` (not
-    /// yet committed, or removed). An [`insert`](Self::insert) or
-    /// [`remove`](Self::remove) at `key` before the commit takes the fade
-    /// back, as does a [`reprepare`](Self::reprepare) (whose units restart
-    /// from silence anyway).
+    /// It fades where it can, and places plainly where there is nothing to
+    /// fade from: the node not running yet, or a `fade` of zero length (a
+    /// cut) over a shape the running unit's plan does not fit (a latency
+    /// change). Then the new unit lands as a swap on the next commit, as
+    /// [`insert`](Self::insert) at an existing key does, keeping the key's
+    /// kind. A fade asked for over a shape that does not fit (more than its
+    /// tail differs) is refused with [`CommitError::FadeShape`]: the caller
+    /// who accepts a cut says so with a zero fade.
     ///
-    /// Forking follows the new unit, as after an [`insert`](Self::insert):
-    /// its [`ForkSource`] replaces the key's, and a unit that hands none
-    /// over makes the key unforkable. (A fork mid-fade forks the incoming
-    /// unit alone; a fork has no fades.)
+    /// Either way the placement unwires what the new shape lacks, as
+    /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
+    /// A shape that fits the running unit's ports and buses has none to
+    /// unwire but edges recorded since the last commit.
     ///
     /// # Errors
     ///
-    /// Nothing changes, and `node` is dropped, on [`CommitError::FadeShape`]
-    /// or [`CommitError::NotRunning`] (above), [`CommitError::Repreparing`]
-    /// between a re-prepare's two commits, or [`CommitError::Poisoned`].
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not in the spec.
+    /// [`CommitError::NoSuchNode`] for a `key` not in the spec,
+    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`] (check
+    /// [`is_repreparing`](Self::is_repreparing) first to keep the node: a
+    /// refusal consumes it), and [`CommitError::FadeShape`] for a non-zero
+    /// `fade` over a running unit whose shape `node`'s does not fit; nothing
+    /// changes and `node` is dropped. Not an error: a non-zero `fade` at a key
+    /// that is not running yet places the node with no fade.
     pub fn replace<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
@@ -172,90 +181,9 @@ impl<F: Float> Editor<F> {
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
         }
-        let running = self
-            .life
-            .plan()
-            .and_then(|p| p.unit(key))
-            .map(|u| u.shape)
-            .filter(|_| self.spec.topology.nodes.contains_key(&key))
-            .ok_or(CommitError::NotRunning { node: key })?;
-        let NodeParts {
-            node: mut unit,
-            controls,
-            fork,
-            // The editor places a unit; a session reads these before it does.
-            params: _,
-            reclaimer: _,
-            published: _,
-        } = node.into_parts();
-        let wake = Wake::new();
-        unit.bind_wake(wake.clone());
-        unit.prepare(&self.prepare);
-        let shape = unit.shape();
-        // Everything the running plan was compiled from but the tail: the
-        // op, its PDC and its borrows must be right for both units at once.
-        let fits = Self::fits(&shape, &running);
-        if !fits {
-            return Err(CommitError::FadeShape {
-                node: key,
-                running: Box::new(running),
-                incoming: Box::new(shape),
-            });
+        if !self.spec.topology.nodes.contains_key(&key) {
+            return Err(CommitError::NoSuchNode { node: key });
         }
-        // The unit that runs at the key names itself, not the one it replaced.
-        let kind = N::kind();
-        // As `insert`: the new unit's fork source, or none — a replace with
-        // an unforkable unit makes the key unforkable. Only past the checks,
-        // so a refused replace changes nothing.
-        // Edges recorded since the running plan was committed can name ports
-        // the incoming shape lacks, as at an insert: they are unwired.
-        let unwired = self.place(key, kind, unit, wake, shape, fork);
-        self.placements.set_fade(key, fade);
-        Ok(Inserted { controls, unwired })
-    }
-
-    /// [`replace`](Self::replace) where it can fade, and a plain placement at
-    /// `key` where there is nothing to fade from: the node not running yet,
-    /// or a `fade` of zero length (a cut) over a shape the running unit's
-    /// plan does not fit (a latency change). Then the new unit lands as a
-    /// swap on the next commit, as [`insert`](Self::insert) at an existing key
-    /// does, keeping the key's kind. A fade asked for over a shape that does
-    /// not fit is refused with [`CommitError::FadeShape`]: the caller who
-    /// accepts a cut says so with a zero fade.
-    ///
-    /// Either way the placement unwires what the new shape lacks, as
-    /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
-    /// A shape that fits the running unit's ports and buses has none to
-    /// unwire but edges recorded since the last commit.
-    ///
-    /// Refused, changing nothing, when the editor is poisoned or
-    /// re-preparing (check [`is_repreparing`](Self::is_repreparing) first to
-    /// keep the node: a refusal consumes it), or on a fade over a shape that
-    /// does not fit. `key` must be in the spec.
-    ///
-    /// # Errors
-    ///
-    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`], and
-    /// [`CommitError::FadeShape`] for a running unit and a non-zero `fade`;
-    /// nothing changes and `node` is dropped.
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not in the spec: a replace names a node that exists.
-    pub fn replace_or_swap<N: IntoNode<F>>(
-        &mut self,
-        key: NodeKey,
-        node: N,
-        fade: Fade,
-    ) -> Result<Inserted<N::Controls>, CommitError> {
-        self.check_poisoned()?;
-        if self.is_repreparing() {
-            return Err(CommitError::Repreparing);
-        }
-        assert!(
-            self.spec.topology.nodes.contains_key(&key),
-            "a replacement names a node in the spec"
-        );
         // The unit that runs at the key names itself, not the one it replaced.
         let kind = N::kind();
         let running = self.life.plan().and_then(|p| p.unit(key)).map(|u| u.shape);
@@ -267,6 +195,7 @@ impl<F: Float> Editor<F> {
             params: _,
             reclaimer: _,
             published: _,
+            settings: _,
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -285,7 +214,7 @@ impl<F: Float> Editor<F> {
         }
         let unwired = self.place(key, kind, unit, wake, shape, fork);
         if fits {
-            self.placements.set_fade(key, fade);
+            self.entries.set_fade(key, fade);
         }
         Ok(Inserted { controls, unwired })
     }
@@ -302,18 +231,18 @@ impl<F: Float> Editor<F> {
         shape: Shape,
         fork: Option<Box<dyn ForkSource<F>>>,
     ) -> Unwired {
-        self.touch();
         // A later placement at a key takes an earlier fade back (the fade
         // was for the unit this one supersedes), and a unit that hands no
         // fork source over makes the key unforkable.
-        let generation = self.placements.place(key, unit, wake, fork);
-        let spec = NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
+        let generation = self.entries.place(key, unit, wake, fork);
+        let node = NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
             .latency(shape.latency.samples())
             .tail(shape.tail);
-        self.spec.topology.nodes.insert(key, spec);
-        self.spec.generations.insert(key, generation);
-        self.shapes.insert(key, shape);
-        self.cells.stage(key, shape.params, &self.values);
+        let spec = self.spec_mut();
+        spec.topology.nodes.insert(key, node);
+        spec.generations.insert(key, generation);
+        self.shapes_mut().insert(key, shape);
+        self.entries.stage_cells(key, shape.params, &self.values);
         self.unwire(key, &shape)
     }
 
@@ -375,19 +304,14 @@ impl<F: Float> Editor<F> {
                 limit,
             });
         }
-        let (Some(node), Some(shape)) = (
-            self.spec.topology.nodes.get_mut(&key),
-            self.shapes.get_mut(&key),
-        ) else {
-            return Err(CommitError::NoSuchNode { node: key });
-        };
-        node.latency = latency.samples();
-        shape.latency = latency;
-        self.touch();
+        self.edit_figures(key, |node, shape| {
+            node.latency = latency.samples();
+            shape.latency = latency;
+        })?;
         // A hard edit for a crossfade: its two units must share the latency
         // the plan compensates, so a fade running or waiting here is cut by
         // the next commit, and a replace not yet committed lands as a swap.
-        self.placements.cut_latency(key);
+        self.entries.cut_latency(key);
         Ok(())
     }
 
@@ -444,15 +368,29 @@ impl<F: Float> Editor<F> {
                 limit,
             });
         }
-        let (Some(node), Some(shape)) = (
-            self.spec.topology.nodes.get_mut(&key),
-            self.shapes.get_mut(&key),
-        ) else {
+        self.edit_figures(key, |node, shape| {
+            node.tail = tail;
+            shape.tail = tail;
+        })
+    }
+
+    /// Writes a figure `key`'s node and shape both hold: `NoSuchNode` for a
+    /// key either lacks, and nothing changes.
+    fn edit_figures(
+        &mut self,
+        key: NodeKey,
+        write_to: impl FnOnce(&mut NodeSpec, &mut Shape),
+    ) -> Result<(), CommitError> {
+        if !self.spec.topology.nodes.contains_key(&key) || !self.shapes.contains_key(&key) {
             return Err(CommitError::NoSuchNode { node: key });
-        };
-        node.tail = tail;
-        shape.tail = tail;
+        }
         self.touch();
+        let spec = write(&mut self.spec, &mut self.structure);
+        let shapes = write(&mut self.shapes, &mut self.structure);
+        if let (Some(node), Some(shape)) = (spec.topology.nodes.get_mut(&key), shapes.get_mut(&key))
+        {
+            write_to(node, shape);
+        }
         Ok(())
     }
 
@@ -460,7 +398,7 @@ impl<F: Float> Editor<F> {
     /// [`remove_declicked`](Self::remove_declicked) until its output fades.
     #[must_use]
     pub fn is_leaving(&self, key: NodeKey) -> bool {
-        self.placements.is_leaving(key)
+        self.entries.is_leaving(key)
     }
 
     /// [`remove`](Self::remove) with the node's output edges faded out
@@ -528,9 +466,9 @@ impl<F: Float> Editor<F> {
             self.values.set_fade(id, EdgeFade::Out);
         }
         for (from, to) in feeds {
-            self.spec.set_bus_fade(from, to, EdgeFade::Out);
+            self.spec_mut().set_bus_fade(from, to, EdgeFade::Out);
         }
-        self.placements.leave(key);
+        self.entries.leave(key);
         false
     }
 
@@ -556,7 +494,7 @@ impl<F: Float> Editor<F> {
     /// are left empty (silence).
     pub fn remove(&mut self, key: NodeKey) {
         // A node that was leaving is cut now.
-        self.placements.stop_leaving(key);
+        self.entries.stop_leaving(key);
         self.remove_keeping(key, None);
     }
 
@@ -570,22 +508,23 @@ impl<F: Float> Editor<F> {
         keep: Option<(&BTreeSet<EdgeId>, &[(BusOutputPort, Option<NodeBus>)])>,
     ) {
         self.touch();
+        let spec = write(&mut self.spec, &mut self.structure);
         let leaving = keep.is_some();
         let no_edges = BTreeSet::new();
         let (kept_edges, kept_feeds) = keep.unwrap_or((&no_edges, &[]));
         // A bus edge that touches the node goes with it, as its edges do.
-        self.spec.main_output_sources.retain(|f| {
+        spec.main_output_sources.retain(|f| {
             !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                 || kept_feeds.contains(&(f.source, None))
         });
-        self.spec.bus_edges.retain(|to, sources| {
+        spec.bus_edges.retain(|to, sources| {
             sources.retain(|f| {
                 !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                     || kept_feeds.contains(&(f.source, Some(*to)))
             });
             to.node != key && !sources.is_empty()
         });
-        let t = &mut self.spec.topology;
+        let t = &mut spec.topology;
         if !leaving {
             t.nodes.remove(&key);
         }
@@ -651,10 +590,15 @@ impl<F: Float> Editor<F> {
                     }
                 }
             }
-            // And an event tap, which then reads nothing.
-            for spec in t.event_taps.values_mut() {
+            // And an event tap, which then reads nothing: it leaves the plan as
+            // an audio tap does, and its reader is told once the plan without
+            // it runs.
+            for (&id, spec) in &mut t.event_taps {
                 if spec.source.is_some_and(|s| s.node() == key) {
                     spec.source = None;
+                    if let Some(end) = self.event_taps.meta(id) {
+                        self.link.end_tap(Arc::clone(end));
+                    }
                 }
             }
             // A key is the author's and can be inserted again after a removal, so
@@ -669,25 +613,22 @@ impl<F: Float> Editor<F> {
                 }
             }
         }
-        self.spec.events.retain(|at, _| at.node != key);
-        for sources in self.spec.events.values_mut() {
+        spec.events.retain(|at, _| at.node != key);
+        for sources in spec.events.values_mut() {
             sources.retain(|e: &EventEdge| e.from().node != key);
         }
-        self.spec
-            .required_resolution
+        spec.required_resolution
             .retain(|(at, from), _| at.node != key && from.node != key);
-        self.spec
-            .params
+        spec.params
             .retain(|at, from| at.node != key && from.node != key);
         // A lane the node drove stops driving: its edge keeps its entry and
         // reads its base.
-        for g in self.spec.gains.values_mut() {
+        for g in spec.gains.values_mut() {
             if g.source.is_some_and(|s| s.node == key) {
                 g.source = None;
             }
         }
         // The gain of an edge that went with the node goes with it.
-        let spec = &self.spec;
         let stale: Vec<EdgeId> = spec
             .gains
             .keys()
@@ -695,16 +636,15 @@ impl<F: Float> Editor<F> {
             .filter(|id| !spec.has_edge(*id))
             .collect();
         for id in stale {
-            self.spec.gains.remove(&id);
+            spec.gains.remove(&id);
             self.values.forget_edge(id);
         }
         if leaving {
             return;
         }
         self.values.forget(key);
-        self.cells.forget(key);
-        self.spec.generations.remove(&key);
-        self.shapes.remove(&key);
-        self.placements.forget(key);
+        spec.generations.remove(&key);
+        self.shapes_mut().remove(&key);
+        self.entries.forget(key);
     }
 }

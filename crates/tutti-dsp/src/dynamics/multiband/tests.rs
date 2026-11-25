@@ -267,6 +267,7 @@ fn unity_bands_have_a_flat_impulse_magnitude() {
     ] {
         let mut k = bank(1, bands);
         k.retarget(&unity(&freqs));
+        k.jump_to_target();
         let out = run(&mut k, &[&impulse]).remove(0);
         let fft = RealFft::new(N);
         let mut scratch = fft.new_scratch();
@@ -392,6 +393,7 @@ fn a_bypassed_band_passes_unprocessed() {
         RATE,
     );
     k.retarget(&set);
+    k.jump_to_target();
     let x = vec![0.5f64; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
     assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-12);
@@ -700,54 +702,73 @@ fn any_call_length_gives_the_same_bits() {
     }
 }
 
-/// A reset bank is a fresh one: after a loud, moved and bypassed run, `reset` and the same
-/// retarget render the bits a fresh bank renders, and so does `process` straight after `reset`
-/// with no `retarget`; the meters read nothing.
+/// A reset bank is silent, with its targets kept and its ramps at rest on them: after a loud
+/// run, `reset` leaves the meters at none, silence in renders silence, no reduction carries
+/// over, the makeup is the set one with no retarget, and a makeup is at its full gain on the
+/// first frames rather than ramping from 0 dB.
 #[test]
-fn a_reset_bank_renders_as_a_fresh_one() {
-    let len = 3_000;
-    let x: Vec<f32> = (0..len)
-        .map(|n| 0.7 * libm::sin(0.05 * n as f64) as f32)
-        .collect();
-    let mut loud = unity(&[200.0, 3_000.0]);
-    loud.bands[0] = band(-40.0, 0.0, 10.0, 0.001, 0.2, 6.0);
-    loud.bands[1].bypass = true;
-    loud.bands[2].solo = true;
-    let mut set = unity(&[400.0, 2_000.0]);
-    set.bands[1] = band(-20.0, 3.0, 3.0, 0.001, 0.05, 2.0);
-    let mut fresh = bank(1, 3);
-    fresh.retarget(&set);
-    let want = run(&mut fresh, &[&x]);
-    let mut k = bank(1, 3);
-    k.retarget(&loud);
-    run(&mut k, &[&vec![0.9f32; 5_000]]);
+fn a_reset_bank_is_silent_with_its_targets_kept_and_ramps_at_rest() {
+    let mut set = unity(&[1_000.0]);
+    set.bands[0] = band(-60.0, 0.0, 4.0, 0.0, 10.0, 6.0);
+    set.bands[1].bypass = true;
+    let mut k = MultibandBank::<f64>::new(
+        BankShape::new(ChannelTopology::MONO, MultibandBands::of(2)),
+        RATE,
+    );
+    k.retarget(&set);
+    k.jump_to_target();
+    run(&mut k, &[&vec![0.5f64; 5_000]]);
+    assert!(k.take_reading().band(0).unwrap() > Db::new(10.0));
+    run(&mut k, &[&vec![0.5f64; 5_000]]);
     k.reset();
     assert_eq!(k.take_reading().iter().map(Db::get).sum::<f64>(), 0.0);
+    // Silence in, silence out: the crossover and the followers hold nothing.
+    let quiet = run(&mut k, &[&vec![0.0f64; 2_000]]);
+    assert!(quiet[0].iter().all(|&v| v == 0.0), "a reset bank is silent");
+    // No reduction is carried over, and the targets are kept: a signal under the threshold,
+    // which the 10 s release of the loud run would still be reducing by 40 dB, gets the 6 dB
+    // makeup alone, with no retarget after the reset.
+    let under = run(&mut k, &[&vec![0.0005f64; SETTLE]]);
+    assert!(
+        (mean(&under[0][SETTLE - 2_000..]) - 0.0005 * linear(6.0)).abs() < 1e-9,
+        "{}",
+        mean(&under[0][SETTLE - 2_000..])
+    );
+    // The makeup rests on its target: a 6 dB makeup under a high split, set before the
+    // reset, is at its full value on the frames just after it (a ramp from 0 dB over
+    // `GAIN_RAMP` would still be climbing there).
+    let mut set = unity(&[10_000.0]);
+    set.bands[0] = band(0.0, 0.0, 1.0, 0.0, 0.0, 6.0);
     k.retarget(&set);
-    let got = run(&mut k, &[&x]);
-    assert!(
-        got[0]
-            .iter()
-            .zip(&want[0])
-            .all(|(a, b)| a.to_bits() == b.to_bits()),
-        "a reset bank differs from a fresh one"
-    );
-    // Straight after the reset, with no `retarget`: the fresh bank splits and sums at the octave
-    // splits, and a reset one does the same.
-    let mut fresh = bank(1, 3);
-    let want = run(&mut fresh, &[&x]);
-    let mut k = bank(1, 3);
-    k.retarget(&loud);
-    run(&mut k, &[&vec![0.9f32; 5_000]]);
     k.reset();
-    let got = run(&mut k, &[&x]);
+    let out = run(&mut k, &[&vec![0.5f64; 400]]);
+    let want = 0.5 * linear(6.0);
     assert!(
-        got[0]
-            .iter()
-            .zip(&want[0])
-            .all(|(a, b)| a.to_bits() == b.to_bits()),
-        "a reset bank differs from a fresh one without a `retarget`"
+        out[0][100..200].iter().all(|v| (v - want).abs() < 1e-3),
+        "{:?}",
+        &out[0][100..110]
     );
+    // The weights rest on their targets: a bypass and a solo moved 50 frames before the reset
+    // (the ramp is 5 ms, over 200 frames) are whole on frames 100 to 200 after it. DC 0.5 sits
+    // in band 0 of a 10 kHz split. Bypassed, the band passes unreduced and without its 6 dB
+    // makeup: 0.5. With band 1 soloed, band 0 is muted: 0, since band 1 holds no DC.
+    for (bypass, solo, want) in [(true, false, 0.5), (false, true, 0.0)] {
+        let mut set = unity(&[10_000.0]);
+        set.bands[0] = band(0.0, 0.0, 1.0, 0.0, 0.0, 6.0);
+        k.retarget(&set);
+        k.reset();
+        set.bands[0].bypass = bypass;
+        set.bands[1].solo = solo;
+        k.retarget(&set);
+        run(&mut k, &[&vec![0.5f64; 50]]);
+        k.reset();
+        let out = run(&mut k, &[&vec![0.5f64; 400]]);
+        assert!(
+            out[0][100..200].iter().all(|v| (v - want).abs() < 1e-3),
+            "bypass {bypass}, solo {solo}: {:?}",
+            &out[0][100..104]
+        );
+    }
 }
 
 /// A threshold control signal that ends inside a chunk drives the frames it has and no others: with
@@ -867,6 +888,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
             .crossover(hz(&[1_000.0]))
             .bands([band(0.0, 0.0, 8.0, 0.01, 0.1, 0.0); MAX_BANDS]),
     );
+    k.jump_to_target();
     let mut out = vec![0.0f64; n];
     k.process(
         MultibandSignals::default(),

@@ -9,8 +9,6 @@ use tutti_graph::testing as common;
 
 use tutti_buffers::MaxBlock;
 
-use common::test_pool;
-
 use tutti_fixtures::{Shared, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -106,9 +104,7 @@ fn rig(
 ) -> (Editor, Executor, Shared<Vec<(u32, u32)>>) {
     let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
     let (mut ed, mut exec) = Editor::new(prep);
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let ports: u16 = writers.iter().map(|w| w.len() as u16).sum();
     let seen = Shared::new(vec![(0, 0); ports as usize]);
     ed.insert(
@@ -131,10 +127,11 @@ fn rig(
             }),
         );
         for p in 0..scripts.len() {
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 EventInputPort::new(NodeKey(100), next),
                 EventEdge::Direct(EventOutputPort::new(key, p as u16)),
-            );
+            )
+            .unwrap();
             next += 1;
         }
     }
@@ -146,7 +143,7 @@ fn rig(
 
 fn run(ed: &mut Editor, exec: &mut Executor, blocks: usize) -> Vec<EventLoss> {
     for _ in 0..blocks {
-        exec.process(BLOCK, &TransportPosition::default(), &[], &mut []);
+        common::block(exec, BLOCK, 0);
     }
     ed.take_event_losses().collect()
 }
@@ -225,22 +222,23 @@ fn the_parallel_losses_are_the_one_participant_ones() {
         ]
     };
     let writers: Vec<Vec<Script>> = (0..4).map(scripts).collect();
-    let (mut ed, mut exec, seen) = rig(1, 16, &writers);
-    let serial = run(&mut ed, &mut exec, 5);
-    let (serial_total, serial_seen) = (exec.dropped_event_count(), seen.lock().unwrap().to_vec());
-    assert!(!serial.is_empty());
-    let sorted = |mut v: Vec<EventLoss>| {
-        v.sort_by_key(|l| (l.node, l.port, l.count));
-        v
-    };
-    for workers in common::WORKERS {
+    let render = |workers: usize| {
         let (mut ed, mut exec, seen) = rig(workers, 16, &writers);
-        assert!(exec.is_parallel(), "{workers} workers");
-        let parallel = run(&mut ed, &mut exec, 5);
-        assert_eq!(exec.dropped_event_count(), serial_total, "{workers}");
-        assert_eq!(seen.lock().unwrap().to_vec(), serial_seen, "{workers}");
-        assert_eq!(sorted(parallel), sorted(serial.clone()), "{workers}");
-    }
+        assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");
+        let losses = run(&mut ed, &mut exec, 5);
+        (
+            losses,
+            exec.dropped_event_count(),
+            seen.lock().unwrap().to_vec(),
+        )
+    };
+    let (serial, ..) =
+        common::agree_across_workers(common::WORKERS, render, |(losses, total, seen)| {
+            let mut sorted = losses.clone();
+            sorted.sort_by_key(|l| (l.node, l.port, l.count));
+            (sorted, *total, seen.clone())
+        });
+    assert!(!serial.is_empty());
 }
 
 /// Records the frame of every event its event inputs are sent, block by
@@ -287,9 +285,7 @@ impl Bounded {
     fn new(workers: usize, bound: Option<u32>, ons: &[u32]) -> Self {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let blocks = tutti_fixtures::BlockLog::shared();
         ed.insert(
             NodeKey(100),
@@ -326,8 +322,8 @@ impl Bounded {
         );
         let input = self.input();
         self.ed
-            .spec_mut()
-            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
+            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)))
+            .unwrap();
     }
 
     fn input(&self) -> EventInputPort {
@@ -520,9 +516,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let blocks = tutti_fixtures::BlockLog::shared();
         let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
@@ -551,10 +545,11 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             tutti_graph::Unforkable(Once { written: false }),
         );
         for node in [1, 2] {
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 input,
                 EventEdge::Direct(EventOutputPort::new(NodeKey(node), 0)),
-            );
+            )
+            .unwrap();
         }
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -620,10 +615,11 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
                 scripts: vec![Script { ons: 1, offs: 0 }],
             }),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         let plan = exec.plan().expect("applied");
@@ -642,13 +638,13 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
 /// not through a crossfade the plan cannot hold, and the new bound holds in
 /// the next block.
 #[test]
-fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
+fn replace_to_a_node_with_another_bound_commits_and_holds_it() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
         assert_eq!(rig.run(1)[0].len(), 8);
         let fade = tutti_graph::Fade::new(Samples::ZERO);
         rig.ed
-            .replace_or_swap(
+            .replace(
                 NodeKey(100),
                 tutti_graph::Unforkable(Recorder {
                     bound: Some(3),
@@ -731,9 +727,7 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let blocks = tutti_fixtures::Record::new();
         ed.insert(
             NodeKey(100),
@@ -752,10 +746,11 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
                 next: 40,
             }),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -868,9 +863,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let blocks = tutti_fixtures::BlockLog::shared();
         let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
@@ -885,10 +878,11 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             "writer",
             tutti_graph::Unforkable(EarlyOnsLateOffs),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             input,
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

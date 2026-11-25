@@ -2,28 +2,28 @@
 //! rings themselves.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
 use tutti_rt::{
-    CappedVec, ControlDrop, Counter, CounterWriter, Gauge, GaugeWriter, Overflow, PushError,
-    Reading, RingReader, RingWriter, counter, gauge, ring,
+    CappedVec, ControlDrop, CounterWriter, GaugeWriter, PushError, Reading, RingReader, RingWriter,
 };
-use tutti_units::{Blocks, PlayReading, Samples};
+use tutti_units::{Blocks, Samples};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
-use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
-use crate::compile::ids::Generation;
-use crate::compile::plan::{Delta, Plan, UnitIdx};
+use crate::compile::ids::PlanUnitId;
+use crate::compile::plan::{Delta, Placement, Plan, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
 use crate::event::types::Event;
 use crate::exec::arena::Arena;
+use crate::exec::command::CommandRx;
 use crate::exec::held::{Keys, Tables};
 use crate::exec::loss::EventLoss;
 use crate::model::gain::GainCell;
@@ -128,9 +128,6 @@ impl<F: Float> Crossfade<F> {
 /// A unit a commit places, with everything built for it on the control
 /// side.
 pub(super) struct Incoming<F: Float = f32> {
-    pub(super) key: NodeKey,
-    pub(super) idx: UnitIdx,
-    pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// The crossfade it arrives with, over the unit at its key.
     pub(super) fade: Option<Box<Crossfade<F>>>,
@@ -143,10 +140,25 @@ pub(super) struct Incoming<F: Float = f32> {
     pub(super) staging: Tables,
 }
 
+/// One unit a commit installs, and what applying it needs to know of the
+/// unit it replaces: nothing is looked up by key.
+pub(super) struct Install<F: Float = f32> {
+    /// Where the unit goes.
+    pub(super) at: Placement,
+    /// The unit it replaces, at the same index.
+    pub(super) was: Option<Placement>,
+    /// The unit's row in the plan.
+    pub(super) unit: PlanUnitId,
+    /// The most the unit it replaces hands its successor (`Node::chase`),
+    /// set when the commit is staged.
+    pub(super) chase: Option<NonZeroU32>,
+    pub(super) incoming: Incoming<F>,
+}
+
 /// A kept unit's rebuilt bypass line.
 pub(super) struct Relined<F: Float = f32> {
     pub(super) idx: UnitIdx,
-    pub(super) latency: usize,
+    pub(super) latency: Samples,
     pub(super) line: Option<BypassLine<F>>,
 }
 
@@ -166,7 +178,12 @@ pub(crate) struct Commit<F: Float = f32> {
     pub(super) suspend: Option<Prepare>,
     pub(super) plan: Option<Arc<Plan>>,
     pub(super) delta: Delta,
-    pub(super) incoming: Vec<Incoming<F>>,
+    /// This is a re-prepare's resume: the executor's store is empty, every
+    /// unit of the plan comes back, and the held-key tables of those the plan
+    /// keeps go back to them.
+    pub(super) resumed: bool,
+    /// The units it installs: the delta's inserts, then its replaces.
+    pub(super) install: Vec<Install<F>>,
     /// Kept units whose declared latency changed, each with its rebuilt
     /// bypass line (`Editor::set_latency`).
     pub(super) relined: Vec<Relined<F>>,
@@ -191,14 +208,14 @@ pub(crate) struct Commit<F: Float = f32> {
     pub(super) gone: Gone,
     /// A re-prepare's first half: where the units' held-key tables wait for
     /// the resume (`Executor::parked`), with room for every unit.
-    pub(super) parked: CappedVec<(NodeKey, Keys)>,
+    pub(super) parked: CappedVec<(UnitIdx, Keys)>,
     /// Tap producers and meter cells the editor opened since the last commit.
     pub(super) opened: Opened<F>,
 }
 
 /// What the editor hands the executor with a commit: what it opened since its
 /// last one (a tap's producers and a meter's cells), and the cell of every
-/// weighted lane the plan lists (`Plan::sum_lanes`).
+/// weighted lane the plan lists (the plan's sum lanes).
 #[derive(Debug)]
 pub(crate) struct Opened<F: Float = f32> {
     /// The live base of each weighted lane of the plan, by edge. The editor
@@ -223,31 +240,45 @@ impl<F: Float> Default for Opened<F> {
 impl<F: Float> Commit<F> {
     /// `params` builds each incoming unit's param state from its key and
     /// declared port count (the editor's range cells).
+    ///
+    /// A unit arrives for each key `delta` inserts or replaces. On a `resumed`
+    /// commit the store is empty, so every unit of the plan arrives, and
+    /// `delta` is the one `compile` found against the plan before the
+    /// re-prepare: its `retire` and `replace` only depart held keys and parked
+    /// tables. They never touch the store: no retire of an empty slot, no
+    /// chase, and no copy from a ring the suspend dropped.
     pub(crate) fn build(
         seq: u64,
         plan: Arc<Plan>,
         delta: Delta,
+        resumed: bool,
         mut units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         mut params: impl FnMut(NodeKey, usize, usize) -> ParamState<F>,
         mut modes: impl FnMut(NodeKey) -> ModeState<F>,
         mut wakes: impl FnMut(NodeKey) -> Wake,
         opened: Opened<F>,
     ) -> Box<Commit<F>> {
-        let wanted = delta
-            .insert
-            .iter()
-            .copied()
-            .chain(delta.replace.iter().map(|&(_, new)| new));
+        let wanted: Vec<(Placement, Option<Placement>)> = if resumed {
+            plan.units().iter().map(|u| (u.placement(), None)).collect()
+        } else {
+            delta
+                .insert()
+                .iter()
+                .map(|&p| (p, None))
+                .chain(delta.replace().iter().map(|&(old, new)| (new, Some(old))))
+                .collect()
+        };
         let max_block = plan.prepare.max_block().get();
-        let incoming = wanted
-            .map(|p| {
+        let install = wanted
+            .into_iter()
+            .map(|(p, was)| {
                 let unit = units
                     .remove(&p.key)
                     .unwrap_or_else(|| panic!("no unit supplied for node {}", p.key.0));
                 // A fade's scratch holds the outgoing unit's outputs, which
                 // have the incoming unit's width (`verify_fades`).
                 let fade = delta
-                    .fades
+                    .fades()
                     .iter()
                     .find(|(k, f)| *k == p.key && !f.is_cut())
                     .map(|&(key, f)| {
@@ -271,29 +302,32 @@ impl<F: Float> Commit<F> {
                     plan.unit(p.key).map_or(0, |u| u.shape.params.len()),
                     max_block,
                 );
-                Incoming {
-                    key: p.key,
-                    idx: p.idx,
-                    generation: Generation::new(p.generation),
-                    node: NodeBox::new(unit, wakes(p.key)),
-                    fade,
-                    params,
-                    mode: modes(p.key),
-                    keys: Keys::default(),
-                    staging: Tables::new(),
+                Install {
+                    at: p,
+                    was,
+                    unit: plan.unit_id(p.key).expect("a placed key is in the plan"),
+                    chase: None,
+                    incoming: Incoming {
+                        node: NodeBox::new(unit, wakes(p.key)),
+                        fade,
+                        params,
+                        mode: modes(p.key),
+                        keys: Keys::default(),
+                        staging: Tables::new(),
+                    },
                 }
             })
             .collect::<Vec<_>>();
         // A kept unit whose declared latency changed gets the line its new
         // latency needs, built here (`Editor::set_latency` cuts it).
         let relined = delta
-            .cuts
+            .cuts()
             .iter()
             .filter_map(|p| {
                 let shape = &plan.unit(p.key)?.shape;
                 Some(Relined {
                     idx: p.idx,
-                    latency: shape.latency.samples().get(),
+                    latency: shape.latency.samples(),
                     line: BypassLine::for_shape(shape),
                 })
             })
@@ -304,13 +338,12 @@ impl<F: Float> Commit<F> {
             units.keys().collect::<Vec<_>>()
         );
         // Reserved here so applying moves retirees in without growing.
-        let retired = CappedVec::with_capacity(delta.retire.len() + delta.replace.len());
+        let delta_units = delta.retire().len() + delta.replace().len();
+        let retired = CappedVec::with_capacity(delta_units);
         // Every incoming unit's may come back unused, and every unit leaving
         // brings its own.
-        let spare_params =
-            CappedVec::with_capacity(incoming.len() + delta.retire.len() + delta.replace.len());
-        let delta_units = delta.retire.len() + delta.replace.len();
-        let spare_modes = CappedVec::with_capacity(incoming.len() + delta_units);
+        let spare_params = CappedVec::with_capacity(install.len() + delta_units);
+        let spare_modes = CappedVec::with_capacity(install.len() + delta_units);
         let spare_lines = CappedVec::with_capacity(relined.len());
         Box::new(Self {
             _control: ControlDrop::new(),
@@ -318,7 +351,8 @@ impl<F: Float> Commit<F> {
             suspend: None,
             plan: Some(plan),
             delta,
-            incoming,
+            resumed,
+            install,
             relined,
             retired,
             spare_params,
@@ -344,7 +378,8 @@ impl<F: Float> Commit<F> {
             suspend: Some(prepare),
             plan: None,
             delta: Delta::default(),
-            incoming: Vec::new(),
+            resumed: false,
+            install: Vec::new(),
             relined: Vec::new(),
             retired: CappedVec::with_capacity(units),
             spare_params: CappedVec::with_capacity(units),
@@ -357,13 +392,6 @@ impl<F: Float> Commit<F> {
             parked: CappedVec::with_capacity(units),
             opened: Opened::default(),
         })
-    }
-
-    /// Whether this commit crossfades `key` in.
-    pub(super) fn fades_in(&self, key: NodeKey) -> bool {
-        self.incoming
-            .iter()
-            .any(|i| i.fade.as_ref().is_some_and(|x| x.key == key))
     }
 
     /// Items the lists this box carries back refused when it was applied:
@@ -504,105 +532,26 @@ impl Reading for CommitSeq {
     }
 }
 
-/// The levels and counts the executor publishes, as the editor reads them.
-pub(crate) struct Readings {
-    /// The executor's play clock, as it last published it.
-    pub(crate) play: Gauge<Played>,
+/// The executor's ends of the link to its editor: the rings it drains and
+/// answers on, the command ring, and one writer per reading it publishes.
+/// `link()` builds it with the editor's end.
+pub(crate) struct ExecLink<F: Float = f32> {
+    pub(crate) queue: RingReader<Box<Commit<F>>>,
+    pub(crate) back: RingWriter<Box<Commit<F>>>,
+    pub(crate) fade_back: RingWriter<Box<Crossfade<F>>>,
+    pub(crate) losses: RingWriter<EventLoss>,
+    pub(crate) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
+    pub(crate) commands: CommandRx,
+    /// The play clock, as the executor last published it.
+    pub(crate) played: GaugeWriter<Played>,
     /// Refusals the log and the ring could not name.
-    pub(crate) unreported: Counter<u64>,
-    /// The executor's pool participants, and the blocks it has rendered
-    /// (`Stager`).
-    pub(crate) pool: Gauge<Participants>,
-    pub(crate) rendered: Gauge<Rendered>,
+    pub(crate) unreported: CounterWriter<u64>,
+    /// The pool participants, and the blocks rendered (`Stager`).
+    pub(crate) participants: GaugeWriter<Participants>,
+    pub(crate) rendered: GaugeWriter<Rendered>,
     /// The `seq` of the commit whose main output crossfade the executor last
     /// finished (`Editor::finish_fades`).
-    pub(crate) main_output_fade_ended: Gauge<CommitSeq>,
-}
-
-/// The executor's ends of [`Readings`]: one writer per reading.
-pub(crate) struct ReadingWriters {
-    pub(super) play: GaugeWriter<Played>,
-    pub(super) unreported: CounterWriter<u64>,
-    pub(super) pool: GaugeWriter<Participants>,
-    pub(super) rendered: GaugeWriter<Rendered>,
-    pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
-}
-
-/// Builds the readings: the executor's writers and the editor's readers.
-fn readings() -> (ReadingWriters, Readings) {
-    let (play_tx, play_rx) = gauge(Played(PlayReading::default()));
-    let (unreported_tx, unreported_rx) = counter::<u64>();
-    let (pool_tx, pool_rx) = gauge(Participants(0));
-    let (rendered_tx, rendered_rx) = gauge(Rendered(Blocks::ZERO));
-    let (fade_ended_tx, fade_ended_rx) = gauge(CommitSeq(0));
-    (
-        ReadingWriters {
-            play: play_tx,
-            unreported: unreported_tx,
-            pool: pool_tx,
-            rendered: rendered_tx,
-            main_output_fade_ended: fade_ended_tx,
-        },
-        Readings {
-            play: play_rx,
-            unreported: unreported_rx,
-            pool: pool_rx,
-            rendered: rendered_rx,
-            main_output_fade_ended: fade_ended_rx,
-        },
-    )
-}
-
-/// The queue pair between an editor and its executor.
-pub(crate) struct Channels<F: Float = f32> {
-    pub(crate) to_executor: RingWriter<Box<Commit<F>>>,
-    pub(crate) returned: RingReader<Box<Commit<F>>>,
-    /// Crossfades coming back (see the module docs, "Crossfades").
-    pub(crate) faded: RingReader<Box<Crossfade<F>>>,
-    /// Where the executor says which ports lost events.
-    pub(crate) losses: RingReader<EventLoss>,
-    /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
-    pub(crate) edge_fades: RingReader<(EdgeId, EdgeFade)>,
-    pub(crate) readings: Readings,
-}
-
-/// The executor's ends of the rings.
-pub(crate) struct ExecutorEnds<F: Float = f32> {
-    pub(super) queue: RingReader<Box<Commit<F>>>,
-    pub(super) back: RingWriter<Box<Commit<F>>>,
-    pub(super) fade_back: RingWriter<Box<Crossfade<F>>>,
-    pub(super) losses: RingWriter<EventLoss>,
-    pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
-    pub(super) readings: ReadingWriters,
-}
-
-/// Build the rings: the editor's ends and the executor's.
-pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
-    let (tx, rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY, Overflow::Refuse);
-    let (back_tx, back_rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
-    let (fade_tx, fade_rx) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
-    let (loss_tx, loss_rx) = ring::<EventLoss>(crate::exec::loss::RING_CAPACITY, Overflow::Refuse);
-    let (fade_end_tx, fade_end_rx) =
-        ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
-    let (writers, readings) = readings();
-    (
-        Channels {
-            to_executor: tx,
-            returned: back_rx,
-            faded: fade_rx,
-            losses: loss_rx,
-            edge_fades: fade_end_rx,
-            readings,
-        },
-        ExecutorEnds {
-            queue: rx,
-            back: back_tx,
-            fade_back: fade_tx,
-            losses: loss_tx,
-            edge_fades: fade_end_tx,
-            readings: writers,
-        },
-    )
+    pub(crate) fade_ended: GaugeWriter<CommitSeq>,
 }
 
 #[cfg(test)]
@@ -622,7 +571,7 @@ mod tests {
         c.spare_held.mark_overflowed();
         c.parked.mark_overflowed();
         c.gone.spare.mark_overflowed();
-        c.gone.replaced.mark_overflowed();
+        c.gone.chased.mark_overflowed();
         assert_eq!(c.refused(), 5);
     }
 }

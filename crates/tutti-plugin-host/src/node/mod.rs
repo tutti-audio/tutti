@@ -24,11 +24,13 @@ mod instance;
 mod loader;
 #[cfg(test)]
 mod midi_map_tests;
+#[cfg(test)]
+mod mute_tests;
 mod off_main_wait;
 mod rebind;
 mod width_error;
 
-pub use client::{InProcessClient, PluginNode};
+pub use client::{InProcessClient, LiveView, PluginNode};
 pub use loader::{
     ClientOverError, LoadClientError, client_over, load_client, load_client_restoring,
 };

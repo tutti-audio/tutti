@@ -9,7 +9,10 @@
 //! render is compared with another, it is the parallel executor against the
 //! one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -20,8 +23,7 @@ use common::{Harness, Kind, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InputPort, Io, Node, NodeKey, Op,
-    OutputPort, Plan, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
-    compile,
+    OutputPort, Plan, PortSource, Prepare, Shape, Status, Topology, Unforkable, compile,
 };
 use tutti_units::Samples;
 
@@ -539,9 +541,10 @@ fn flags(n: u64) -> Flags {
         }),
     );
     for k in 1..=n {
-        ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
+        ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+            .unwrap();
     }
-    ed.spec_mut().topology.set_outputs(vec![out(n + 1)]);
+    ed.wire_declared_outputs(vec![out(n + 1)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -554,14 +557,7 @@ fn flags(n: u64) -> Flags {
 }
 
 fn block(exec: &mut Executor) -> Vec<f32> {
-    let mut out = vec![0.0f32; BLOCK];
-    exec.process(
-        BLOCK,
-        &TransportPosition::default(),
-        &[],
-        &mut [out.as_mut_slice()],
-    );
-    out
+    common::block(exec, BLOCK, 1).remove(0)
 }
 
 /// Silent addends make a silent sum: the probe (no tail) is called once and
@@ -615,9 +611,10 @@ fn a_sum_is_constant_when_its_live_addends_are() {
             }),
         );
         for k in 1..=n {
-            ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
+            ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+                .unwrap();
         }
-        ed.spec_mut().topology.set_outputs(vec![out(n + 1)]);
+        ed.wire_declared_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

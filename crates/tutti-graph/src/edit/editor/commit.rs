@@ -4,58 +4,19 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::lifecycle::Resume;
+use super::lifecycle::Committed;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
-use crate::compile::plan::{Delta, Placement, Plan};
+use crate::compile::plan::{Delta, Plan, Rewired};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
 use crate::model::gain::{EdgeFade, EdgeGain};
 use crate::model::spec::{GraphSpec, ValidGraph};
-use crate::node::param::ParamState;
-use crate::node::{Node, Wired};
+use crate::node::Node;
+use crate::node::param::{ParamPorts, ParamState};
 use crate::{Edge, EdgeId, PortSink, PortSource};
 use crate::{Fade, MainOutputBank, NodeKey};
 use tutti_units::Gain;
-
-/// A node whose audio wiring changed in a commit: a port gained its first
-/// source or consumer, or lost its last.
-///
-/// From the plans, not the spec: the old and the new plan's
-/// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
-/// the commit placed with no wiring, a node it removed and a rewire that
-/// leaves each port's answer as it was are not listed. A re-insert at the
-/// same key with a different shape but the same masks reports nothing: bus
-/// layout changes reach a plugin through its own re-activation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rewired {
-    /// The node.
-    pub node: NodeKey,
-    /// Its wired ports in the plan sent before (none for a node new to it).
-    pub was: Wired,
-    /// Its wired ports in the plan this commit sent.
-    pub now: Wired,
-}
-
-impl Rewired {
-    /// The nodes of `new` whose wired ports differ from `old`'s, in key
-    /// order.
-    fn between(old: Option<&Plan>, new: &Plan) -> Vec<Self> {
-        new.units()
-            .iter()
-            .filter_map(|u| {
-                let was = old
-                    .and_then(|p| p.unit(u.key))
-                    .map_or_else(Wired::default, |o| o.wired);
-                (was != u.wired).then_some(Self {
-                    node: u.key,
-                    was,
-                    now: u.wired,
-                })
-            })
-            .collect()
-    }
-}
 
 impl<F: Float> Editor<F> {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
@@ -76,6 +37,10 @@ impl<F: Float> Editor<F> {
     ///
     /// When the box coming back is a [`reprepare`](Self::reprepare)'s first
     /// half, this re-prepares the units it carries and sends the second.
+    ///
+    /// Items an executor apply had no room to hand back, leaked rather than
+    /// freed on the audio thread, are logged with `tracing::error!` once per
+    /// increase: such a count is a tutti bug.
     pub fn collect(&mut self) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         while let Some(done) = self.link.pop_returned() {
@@ -95,6 +60,14 @@ impl<F: Float> Editor<F> {
             drop(x);
         }
         self.stager.observe(self.link.acked());
+        // Control thread: the audio thread only counts what its lists refused.
+        let leaked = self.link.take_leaked();
+        if leaked > 0 {
+            tracing::error!(
+                leaked,
+                "an executor apply had no room to hand back {leaked} owned items and leaked them; this is a tutti bug"
+            );
+        }
         keys
     }
 
@@ -136,16 +109,17 @@ impl<F: Float> Editor<F> {
     /// fade holds neither: its commit comes back when applied, and its slot
     /// on the fade-return ring is its own.
     ///
-    /// A commit that changes nothing — the spec and shapes those of the last
-    /// commit, no unit pending, no crossfade or latency cut waiting — sends
-    /// nothing and returns `Ok`: it would compile the plan the executor
-    /// already has, with an empty delta. So it costs a comparison, not a
-    /// compile, and a host may commit every frame. Nor does one whose spec
-    /// differs only in param **ranges**: those are controls, not plan, so it
-    /// validates the spec, writes the ranges to the running units (see
-    /// [`set_param_range`](Self::set_param_range)) and sends nothing. That
-    /// still costs the validate and a clone of the spec, on this thread;
-    /// [`set_param_range`](Self::set_param_range) costs a store.
+    /// A commit that changes nothing structural sends nothing and returns
+    /// `Ok`: the spec and shapes those of the last commit, no unit pending,
+    /// no crossfade, latency cut, tap, event tap or meter waiting. It would
+    /// compile the plan the executor already has, with an empty delta. So it
+    /// costs a comparison of two counters (the editor's structure against
+    /// the one that commit recorded) when no spec or shape was written since,
+    /// and a comparison of the contents when one was, not a compile, and a
+    /// host may commit every frame. A param range, a base, a mode or a mix is
+    /// a control, not structure: it is stored into the running unit's cells
+    /// when set (see [`set_param_range`](Self::set_param_range)) and never
+    /// moves the counter.
     ///
     /// **A range and a rewire in one commit** do not land together: the
     /// commit writes every range cell at once, and the plan lands when the
@@ -180,82 +154,91 @@ impl<F: Float> Editor<F> {
         }
         self.link.check_room()?;
         self.check_spec()?;
-        if !self.placements.is_staged()
+        if let Some(c) = self.life.committed()
+            && !self.entries.is_staged()
             && !self.taps.has_pending()
             && !self.event_taps.has_pending()
             && !self.meters.has_pending()
             // A plan whose main output crossfade has ended is compiled again without
             // the old main output's channels.
             && !self.main_output.fade_ended()
-            && self
-                .life
-                .committed()
-                .is_some_and(|c| c.shapes == self.shapes && c.spec.same_plan(&self.spec))
         {
-            // The plan the executor has is this spec's: at most a value
-            // moved, which is a control.
-            return Ok(Vec::new());
+            // An equal structure is the spec and shapes committed. A moved
+            // one may have come back to them (a route dropped and added
+            // again), which the contents say.
+            if c.structure == self.structure {
+                // A write that skipped the guards would leave the structure
+                // equal and the spec changed.
+                debug_assert!(
+                    c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes,
+                    "a write bypassed the structural guards"
+                );
+                return Ok(Vec::new());
+            }
+            if c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes {
+                return Ok(Vec::new());
+            }
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
-        let (mut plan, mut delta) = compile(
+        let (plan, mut delta) = compile(
             &valid,
             &self.shapes,
             &self.prepare,
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
-        plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
-        delta.fades = delta
-            .replace
+        let fades = delta
+            .replace()
             .iter()
-            .filter_map(|&(_, new)| self.placements.fade(new.key).map(|f| (new.key, f)))
+            .filter_map(|&(_, new)| self.entries.fade(new.key).map(|f| (new.key, f)))
             .collect();
         // The keys `set_latency` changed that this delta keeps: their
         // crossfades are cut (see `Delta::cuts`).
         let base = self.life.plan().map(|p| &**p);
-        delta.cuts = self
-            .placements
+        let cuts = self
+            .entries
             .latency_cuts()
             .filter_map(|key| {
                 let now = plan.unit(key)?;
                 let was = base?.unit(key)?;
-                (was.generation == now.generation && was.idx == now.idx).then_some(Placement {
-                    key,
-                    generation: now.generation,
-                    idx: now.idx,
-                })
+                (was.generation == now.generation && was.idx == now.idx).then(|| now.placement())
             })
             .collect();
+        delta.attach(fades, cuts);
         debug_assert_eq!(
             plan.verify_fades(self.base().map(|p| &**p), &delta),
             Ok(()),
             "`replace` checked every fade it attached"
         );
         let needed: Vec<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, new)| new.key))
+            .chain(delta.replace().iter().map(|(_, new)| new.key))
             .collect();
         // Check before taking anything, so a failed commit leaves every
         // pending unit where it was.
-        if let Some(&node) = needed.iter().find(|&&k| !self.placements.has_unit(k)) {
+        if let Some(&node) = needed.iter().find(|&&k| !self.entries.has_unit(k)) {
             return Err(CommitError::MissingUnit { node });
         }
         self.fade_room(&delta)?;
         let units: BTreeMap<NodeKey, Box<dyn Node<F>>> = needed
             .into_iter()
-            .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
+            .map(|k| (k, self.entries.take_unit(k).expect("checked above")))
             .collect();
-        self.placements.clear_fades_and_cuts();
-        let rewired = Rewired::between(self.base().map(|p| &**p), &plan);
-        self.send(plan, delta, units, &weights, None);
+        self.entries.clear_fades_and_cuts();
+        let rewired = delta.take_rewired();
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = fading;
-        self.sync_ranges();
-        self.life
-            .set_committed(self.spec.clone(), self.shapes.clone());
+        self.entries.sync(&self.values);
+        self.gains.sync(&self.spec, &self.values);
+        self.life.set_committed(Committed {
+            structure: self.structure,
+            spec: Arc::clone(&self.spec),
+            shapes: Arc::clone(&self.shapes),
+        });
         // A lane the spec no longer has takes its base and range with it.
         let spec = &self.spec;
         self.values.retain_edges(|id| spec.gains.contains_key(&id));
@@ -287,8 +270,8 @@ impl<F: Float> Editor<F> {
     ///   ends the crossfade running as a cut: the old main output's channels cannot
     ///   stand beside a main output of another width.
     ///
-    /// While a crossfade runs the editor holds a clone of the committed spec
-    /// and shapes, the old main output's wiring, until it ends.
+    /// While a crossfade runs the editor shares the committed spec and
+    /// shapes, the old main output's wiring, until it ends.
     pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
         self.main_output.fade = fade.filter(|f| !f.is_cut());
     }
@@ -411,6 +394,7 @@ impl<F: Float> Editor<F> {
             old: was.spec.main_output_id,
             base,
             fade,
+            continues: continuing.is_some(),
         };
         let fading = Fading {
             was: was.clone(),
@@ -435,8 +419,10 @@ impl<F: Float> Editor<F> {
     ///
     /// Nothing is sent on [`CommitError::Poisoned`],
     /// [`CommitError::Repreparing`], [`CommitError::Backpressure`],
-    /// [`CommitError::TooManyOutputs`], or [`CommitError::Fade`] when the
-    /// delta's crossfades fail [`Plan::verify_fades`].
+    /// [`CommitError::TooManyOutputs`], [`CommitError::StaleDelta`] when the
+    /// delta was compiled against another plan than [`base`](Self::base), or
+    /// [`CommitError::Fade`] when the delta's crossfades fail
+    /// [`Plan::verify_fades`].
     pub fn package(
         &mut self,
         plan: Plan,
@@ -450,6 +436,9 @@ impl<F: Float> Editor<F> {
         }
         self.link.check_room()?;
         self.limits.outputs(plan.main_outputs())?;
+        if delta.carry.prev != self.base().map(|p| p.id.0) {
+            return Err(CommitError::StaleDelta);
+        }
         self.fade_room(&delta)?;
         plan.verify_fades(self.base().map(|p| &**p), &delta)
             .map_err(CommitError::Fade)?;
@@ -457,43 +446,40 @@ impl<F: Float> Editor<F> {
         // The plan was compiled elsewhere, from the spec as it stands (as a
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
-        self.send(plan, delta, units, &weights, None);
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = None;
         Ok(())
     }
 
     /// Builds the commit of `plan` and sends it: the caller checked the
     /// link's room (`check_room`, `fade_room`), so the send cannot fail.
-    /// `resume` is a re-prepare's second half.
+    /// `resumed` is a re-prepare's second half.
     pub(super) fn send(
         &mut self,
         plan: Plan,
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         bus_weights: &BusLanes,
-        resume: Option<Resume>,
+        resumed: bool,
     ) {
         self.touch();
         let fades = starting(&delta);
-        self.main_output.sent(
-            plan.main_output_bank(),
-            plan.main_output_id(),
-            self.link.next_seq(),
-        );
+        self.main_output
+            .sent(plan.main_output_bank(), self.link.next_seq());
         let plan = Arc::new(plan);
-        let spec = &self.spec;
-        let values = &self.values;
-        let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
-        let params = |key: NodeKey, ports: usize, max: usize| {
-            let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declared, values)
-        };
-        let gains = self.cells.gains.for_plan(&plan, spec, values, bus_weights);
-        let modes = |key: NodeKey| modes_cells.state(key, &plan, values);
-        let placements = &self.placements;
+        for &key in units.keys() {
+            let declared = plan.unit(key).map_or(ParamPorts::NONE, |u| u.shape.params);
+            self.entries.stage_cells(key, declared, &self.values);
+        }
+        let gains = self
+            .gains
+            .for_plan(&plan, &self.spec, &self.values, bus_weights);
+        let entries = &self.entries;
+        let params = |key: NodeKey, ports: usize, max: usize| entries.param_state(key, ports, max);
+        let modes = |key: NodeKey| entries.mode_state(key, &plan);
         // A unit handed in whole (`send`'s callers) was never bound: its flag
         // is a fresh one nothing holds.
-        let wakes = |key: NodeKey| placements.wake(key).cloned().unwrap_or_default();
+        let wakes = |key: NodeKey| entries.wake(key).cloned().unwrap_or_default();
         let taps = self.taps.take_pending();
         let event_taps = self.event_taps.take_pending();
         let meters = self.meters.take_pending();
@@ -501,6 +487,7 @@ impl<F: Float> Editor<F> {
             self.link.next_seq(),
             Arc::clone(&plan),
             delta,
+            resumed,
             units,
             params,
             modes,
@@ -515,22 +502,19 @@ impl<F: Float> Editor<F> {
         // Everything applying needs that is a function of the plan is built
         // here, so the audio thread only swaps and moves.
         let max = plan.prepare.max_block().get();
-        let mode_cells = &self.cells.modes;
         let old = self.life.plan().map(Arc::clone);
         self.stager.stage(
             &mut commit,
             StageIn {
                 old: old.as_deref(),
-                carry: resume.is_none_or(|r| r.carry),
-                resumed: resume.is_some(),
                 mix_lane: &|key| {
-                    mode_cells
-                        .get(key)
+                    entries
+                        .mode(key)
                         .map(|cell| ParamState::lane(max, cell.ranges()))
                 },
             },
         );
-        self.cells.keep_placed(&plan, &self.values);
+        self.entries.keep_placed(&plan, &self.values);
         self.link.send(commit, fades);
         // `commit` syncs the cells against the spec it last sent, then
         // records this one.

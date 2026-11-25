@@ -1,0 +1,53 @@
+# The public items of tutti-tempo: one row per `pub` item its source declares, `<kind> <path>`,
+# sorted (`cargo xtask write-public-items` rewrites this file from the tree).
+# A new public item needs its row in the change that adds it, argued in the pull request;
+# a row with no item is deleted, so the list only shrinks on its own.
+enum error::FromBeatsError
+enum error::TempoError
+enum point::Transition
+fn beats::TempoMap::from_beats
+fn builder::TempoMapBuilder::build
+fn builder::TempoMapBuilder::ramp_beats_to
+fn builder::TempoMapBuilder::ramp_time_to
+fn builder::TempoMapBuilder::step_to
+fn builder::TempoMapBuilder::then_step
+fn builder::TempoMapBuilder::transition_to
+fn grid::Cell::beat_at
+fn grid::CellGrid::get
+fn grid::CellGrid::new
+fn grid::CellGrid::of
+fn map::TempoMap::beat_at_seconds
+fn map::TempoMap::builder
+fn map::TempoMap::constant
+fn map::TempoMap::constant_tempo
+fn map::TempoMap::new
+fn map::TempoMap::points
+fn map::TempoMap::seconds_at
+fn map::TempoMap::stepped_to
+fn map::TempoMap::tempo_at
+fn map::TempoMap::tempo_at_seconds
+fn map::TempoMap::view
+fn map::TempoMap::with_point
+fn point::TempoPoint::ramp_beats
+fn point::TempoPoint::ramp_time
+fn point::TempoPoint::step
+fn view::TempoView::beat_at_frame
+fn view::TempoView::beat_at_seconds
+fn view::TempoView::chord_cell
+fn view::TempoView::frame_at_or_after
+fn view::TempoView::frames_between
+fn view::TempoView::map
+fn view::TempoView::next_change
+fn view::TempoView::rate
+fn view::TempoView::seconds_at
+fn view::TempoView::tempo_at
+fn view::TempoView::tempo_at_frame
+fn view::TempoView::tempo_at_seconds
+fn view::TempoView::tempo_slope
+struct builder::TempoMapBuilder
+struct grid::Cell
+struct grid::CellGrid
+struct grid::CellGridError
+struct map::TempoMap
+struct point::TempoPoint
+struct view::TempoView

@@ -11,7 +11,7 @@ use tutti_nodes::{
 use tutti_units::{CompressionRatio, Db, Seconds};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[compressors, limiters, brickwall_limiters, gates];
+pub(crate) const ROWS: &[fn()] = &[compressors, limiters, brickwall_limiters, gates];
 
 /// 2 000 blocks after 16 warm-up blocks, the sidechain wired.
 fn keyed(amplitude: f32) -> Gate {
@@ -59,8 +59,10 @@ fn compressors() {
         let node = CompressorNode::<f32>::from(
             CompressorConfig::new(topology)
                 .key(KeySource::Sidechain)
-                .key_filter(filter)
-                .controls(mono),
+                .controls(CompressorControls {
+                    key_filter: filter,
+                    ..mono
+                }),
         );
         keyed(amplitude).run(&format!("compressor {filter:?}"), node, |_, _| {});
     }
@@ -147,8 +149,10 @@ fn gates() {
         let node = GateNode::<f32>::from(
             GateConfig::new(topology)
                 .key(KeySource::Sidechain)
-                .key_filter(filter)
-                .controls(gate_controls(-60.0, -20.0)),
+                .controls(GateControls {
+                    key_filter: filter,
+                    ..gate_controls(-60.0, -20.0)
+                }),
         );
         gate(amplitude, &format!("gate {filter:?}"), node);
     }

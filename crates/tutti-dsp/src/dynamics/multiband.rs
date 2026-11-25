@@ -265,8 +265,6 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
     audible: [Ramp<F>; MAX_BANDS],
     /// The steps a weight ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// Whether the first `retarget` since the last reset has been applied.
-    applied: bool,
     /// Each band's deepest reduction since the last reading, in dB.
     deepest: [Db; MAX_BANDS],
     scratch: Scratch<F>,
@@ -298,11 +296,10 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             crossover: CrossoverBank::new(width),
             blend: Ramp::new(model.blend()).steps(COEFF_INTERVAL as u32),
             model,
-            compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
+            compressors: core::array::from_fn(|_| CompressorBank::new(width, rate)),
             bypass: [Ramp::new(F::ZERO); MAX_BANDS],
             audible: [Ramp::new(F::ONE); MAX_BANDS],
             steps,
-            applied: false,
             deepest: [Db::UNITY; MAX_BANDS],
             scratch: Scratch::new(channels, bands),
         }
@@ -314,26 +311,41 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
         self.bands
     }
 
-    /// Back to a fresh bank: silent, splitting and summing at the octave splits, every band
-    /// a compressor that does nothing, the weights at 0 (bypass) and 1 (audible), the meters
-    /// at none, and the next [`retarget`](Self::retarget) landing at once. No allocation.
+    /// Back to silence: the state cleared, the ramps at rest on their targets, the meters at
+    /// none. The design and the bands' controls are kept. No allocation.
     pub fn reset(&mut self) {
         self.crossover.reset();
-        self.model
-            .design_into(&CrossoverControls::octaves(self.rate), self.rate);
-        self.blend = Ramp::new(self.model.blend()).steps(COEFF_INTERVAL as u32);
-        self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
-        self.bypass = [Ramp::new(F::ZERO); MAX_BANDS];
-        self.audible = [Ramp::new(F::ONE); MAX_BANDS];
+        for compressor in &mut self.compressors {
+            compressor.reset();
+        }
+        self.jump_ramps();
         self.deepest = [Db::UNITY; MAX_BANDS];
-        self.applied = false;
+    }
+
+    /// Lands every ramp (the crossover's blend, each band's makeup and key filter, bypass and
+    /// audible weights) on its target now.
+    pub fn jump_to_target(&mut self) {
+        for compressor in &mut self.compressors {
+            compressor.jump_to_target();
+        }
+        self.jump_ramps();
+    }
+
+    /// Lands the blend and the weights on their targets.
+    fn jump_ramps(&mut self) {
+        self.blend.jump_to_target();
+        for (bypass, audible) in self.bypass.iter_mut().zip(&mut self.audible) {
+            bypass.jump_to_target();
+            audible.jump_to_target();
+        }
     }
 
     /// Aims at `controls`: the crossover is designed in place (total: a set out of order is
     /// solved with its splits no lower than the one before) and ramps to the design over a
     /// grid period, each band's compressor is set as [`CompressorBank::retarget`] does, and the
-    /// bypass and solo weights ramp over [`GAIN_RAMP`]. The first `retarget` after
-    /// [`new`](Self::new) or [`reset`](Self::reset) lands whole. No allocation.
+    /// bypass and solo weights ramp over [`GAIN_RAMP`]. A fresh bank ramps from its defaults; call
+    /// [`jump_to_target`](Self::jump_to_target) after the first to start on the controls. No
+    /// allocation.
     pub fn retarget(&mut self, controls: &MultibandSettings) {
         self.model.design_into(&controls.crossover, self.rate);
         self.blend.retarget(self.model.blend());
@@ -344,15 +356,6 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             self.compressors[b].retarget(&band.compressor);
             self.bypass[b].retarget_by(flag(band.bypass), steps);
             self.audible[b].retarget_by(flag(!any_solo || band.solo), steps);
-        }
-        if !self.applied {
-            self.blend.jump_to_target();
-            for b in 0..self.bands {
-                self.compressors[b].jump_to_target();
-                self.bypass[b].jump_to_target();
-                self.audible[b].jump_to_target();
-            }
-            self.applied = true;
         }
     }
 

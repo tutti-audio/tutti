@@ -6,7 +6,9 @@
 //! shares the Discovery *body* format, so [`DeviceBody`] serves both.
 
 use bitflags::bitflags;
-use tutti_ump::{DeviceIdentity, FunctionBlockId, U7, U28};
+use tutti_ump::{CiVersion, DeviceIdentity, FunctionBlockId, U7, U28};
+
+use super::CI_VERSION;
 
 /// Sub-ID#2: Discovery message (M2-101 §5.5).
 pub const SUB_ID2_DISCOVERY: u8 = 0x70;
@@ -75,6 +77,16 @@ impl MaxSysexSize {
     pub(crate) const fn to_le7(self) -> [u8; 4] {
         // The size is at most 28 bits, so it is a U28.
         U28::masked(self.get()).to_le7()
+    }
+}
+
+/// The Message Format Version of a Discovery or Reply body with (`true`) or without
+/// the fields Version 2 adds (§5.3, Tables 6 and 8).
+fn version_of(has_version_2_fields: bool) -> CiVersion {
+    if has_version_2_fields {
+        CI_VERSION
+    } else {
+        CiVersion::of(1)
     }
 }
 
@@ -154,6 +166,11 @@ impl DiscoveryData {
         }
     }
 
+    /// The Message Format Version the body has: 1 ends before the Output Path ID.
+    pub(crate) fn ci_version(&self) -> CiVersion {
+        version_of(self.output_path_id.is_some())
+    }
+
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         self.body.encode(out);
         if let Some(path) = self.output_path_id {
@@ -231,6 +248,11 @@ impl ReplyData {
     #[must_use]
     pub fn function_block(&self) -> Option<FunctionBlockId> {
         self.version_2.and_then(|v2| v2.function_block)
+    }
+
+    /// The Message Format Version the body has: 1 ends before the Version 2 fields.
+    pub(crate) fn ci_version(&self) -> CiVersion {
+        version_of(self.version_2.is_some())
     }
 
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {

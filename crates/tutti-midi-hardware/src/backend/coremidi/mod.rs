@@ -194,7 +194,7 @@ fn unique_id_of(id: EndpointId) -> Option<UniqueId> {
 
 /// The macOS [`MidiEndpoints`] implementation.
 #[derive(Debug)]
-pub struct CoreMidiEndpoints;
+pub(super) struct CoreMidiEndpoints;
 
 impl Default for CoreMidiEndpoints {
     fn default() -> Self {
@@ -215,7 +215,7 @@ impl CoreMidiEndpoints {
     /// While the MIDI server restarts (CoreMIDI refuses clients for about five
     /// seconds) the hub thread retries for up to 10 s once per process window;
     /// starts asked within 10 s of a failed window make one attempt.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         let _ = watch::hub();
         Self
     }

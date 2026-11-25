@@ -5,6 +5,9 @@
 //! The random-topology check is in `tests/executor/invariants.rs`
 //! (`a_coarsened_plan_renders_as_one_participant_does`).
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
@@ -36,10 +39,11 @@ fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
 }
 
 fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NodeKey(node), port),
-        vec![Edge::Direct(from)],
-    );
+        Edge::Direct(from),
+    ))
+    .unwrap();
 }
 
 fn node(key: u64) -> PortSource {
@@ -50,9 +54,7 @@ fn node(key: u64) -> PortSource {
 /// more than one.
 fn with_pool(workers: usize) -> (Editor, Executor) {
     let (ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     (ed, exec)
 }
 
@@ -65,7 +67,7 @@ fn commit(ed: &mut Editor, exec: &mut Executor) {
 /// For each of `fans` main inputs, `lanes` gains off it, summed onto its
 /// own output: `tiny/16` of `tutti-nodes`' bench when `fans` is 1.
 fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: Option<Cost>) {
-    ed.spec_mut().topology.inputs = ChannelLayout::try_from(fans).expect("a test width is small");
+    ed.resize_inputs(ChannelLayout::try_from(fans).expect("a test width is small"));
     let mut outputs = Vec::new();
     for f in 0..fans {
         let s = 1_000 * (f as u64 + 1);
@@ -78,13 +80,13 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
         }
         outputs.push(node(s));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_declared_outputs(outputs).unwrap();
 }
 
 /// `lanes` chains of `depth` gains declaring `cost`, each off the main
 /// input, summed (lightly) onto one output.
 fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let s = 1_000_000;
     ed.insert(NodeKey(s), "sum", sum(lanes, Some(Cost::Light)));
     for l in 0..lanes {
@@ -97,7 +99,7 @@ fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
         }
         wire(ed, s, l as u16, last);
     }
-    ed.spec_mut().topology.set_outputs(vec![node(s)]);
+    ed.wire_declared_outputs(vec![node(s)]).unwrap();
 }
 
 /// Render `blocks` (input on every channel), every output's samples.
@@ -113,13 +115,11 @@ fn render(exec: &mut Executor, inputs: usize, outputs: usize, blocks: &[usize]) 
             })
             .collect();
         let ins: Vec<&[f32]> = chans.iter().map(Vec::as_slice).collect();
-        let mut chunk = vec![vec![0.0f32; n]; outputs];
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
+        for (a, c) in all
+            .iter_mut()
+            .zip(common::block_in(exec, n, &ins, outputs, &t))
         {
-            let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-            exec.process(n, &t, &ins, &mut outs);
-        }
-        for (a, c) in all.iter_mut().zip(chunk) {
             a.extend(c);
         }
         frame += n as u64;
@@ -164,7 +164,7 @@ fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
 fn packed_siblings_render_bit_identically() {
     let build = |workers: usize| {
         let (mut ed, mut exec) = with_pool(workers);
-        ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+        ed.resize_inputs(ChannelLayout::MONO);
         let s = 1_000_000;
         ed.insert(NodeKey(s), "sum", sum(15, None));
         for l in 0..15u64 {
@@ -174,41 +174,43 @@ fn packed_siblings_render_bit_identically() {
             wire(&mut ed, l + 1, 0, PortSource::MainInput(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }
-        ed.spec_mut().topology.set_outputs(vec![node(s)]);
+        ed.wire_declared_outputs(vec![node(s)]).unwrap();
         commit(&mut ed, &mut exec);
         exec
     };
-    let serial = {
-        let mut exec = build(1);
-        let plan = exec.plan().expect("a plan").clone();
-        plan.verify().expect("sound");
-        // The input, the three heavy gains, the packed light ones (twelve
-        // gains in fewer tasks), the sum and its output.
-        let heavy = |op: tutti_graph::OpId| {
-            matches!(plan.ops()[op.index()], tutti_graph::Op::Node { unit, .. }
-                if plan.units()[unit.index()].shape.cost == Cost::Heavy
-                    && plan.units()[unit.index()].shape.audio_in().count() == 1)
-        };
-        let mut light_tasks = 0;
-        for t in plan.tasks() {
-            let ops = &plan.task_ops()[t.range()];
-            if ops.iter().any(|&o| heavy(o)) {
-                assert_eq!(ops.len(), 1, "a heavy gain shares a task");
-            } else if ops.len() > 1 {
-                light_tasks += 1;
+    let serial = common::agree_across_workers(
+        WORKERS,
+        |workers| {
+            let mut exec = build(workers);
+            if workers == 1 {
+                let plan = exec.plan().expect("a plan").clone();
+                plan.verify().expect("sound");
+                // The input, the three heavy gains, the packed light ones
+                // (twelve gains in fewer tasks), the sum and its output.
+                let heavy = |op: tutti_graph::OpId| {
+                    matches!(plan.ops()[op.index()], tutti_graph::Op::Node { unit, .. }
+                        if plan.units()[unit.index()].shape.cost == Cost::Heavy
+                            && plan.units()[unit.index()].shape.audio_in().count() == 1)
+                };
+                let mut light_tasks = 0;
+                for t in plan.tasks() {
+                    let ops = &plan.task_ops()[t.range()];
+                    if ops.iter().any(|&o| heavy(o)) {
+                        assert_eq!(ops.len(), 1, "a heavy gain shares a task");
+                    } else if ops.len() > 1 {
+                        light_tasks += 1;
+                    }
+                }
+                assert!(light_tasks >= 1, "some light gains packed");
+                assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
+            } else {
+                assert!(exec.is_parallel());
             }
-        }
-        assert!(light_tasks >= 1, "some light gains packed");
-        assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
-        render(&mut exec, 1, 1, &ragged())
-    };
+            render(&mut exec, 1, 1, &ragged())
+        },
+        |r| bits(r),
+    );
     assert!(serial[0].iter().any(|&x| x != 0.0));
-    for workers in WORKERS {
-        let mut exec = build(workers);
-        assert!(exec.is_parallel());
-        let parallel = render(&mut exec, 1, 1, &ragged());
-        assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-    }
 }
 
 /// A pool that counts the blocks it is asked to run, and records the last

@@ -7,8 +7,12 @@
 //! parallel and no-allocation gates are in `rt_no_alloc_modulation.rs`,
 //! beside the gated pool they share.
 
+use tutti_graph::testing::declare_outputs;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
+use tutti_graph::testing::feed_output;
 use tutti_ump::{MidiChannel, U7, Ump};
 
 use atomic_float::AtomicF64;
@@ -303,28 +307,30 @@ fn editor(max: usize) -> (Editor, Executor) {
 /// Audio output `port` of `from` into input `port` of `to`, for each port.
 fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
     for port in 0..ports {
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(to), port),
-            vec![Edge::Direct(out(from, port))],
-        );
+            Edge::Direct(out(from, port)),
+        ))
+        .unwrap();
     }
 }
 
 fn wire_events(ed: &mut Editor, from: u64, to: u64) {
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(to), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
-    );
+    )
+    .unwrap();
 }
 
 /// A `Tap` at `tap` on `from`'s events, its four outputs appended.
 fn tap(ed: &mut Editor, from: u64, tap: u64) {
     ed.insert(NodeKey(tap), "tap", ForkByClone(Tap::default()));
     wire_events(ed, from, tap);
-    ed.spec_mut()
-        .topology
-        .outputs
-        .extend((0..4).map(|p| vec![out(tap, p)]));
+    for port in 0..4 {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        feed_output(ed, channel, [out(tap, port)]);
+    }
 }
 
 fn cutoff(node: u64) -> ParamIn {
@@ -348,7 +354,12 @@ fn lane_to_probe(
     probe: u64,
 ) {
     ed.insert(NodeKey(probe), "probe", ForkByClone(Probe));
-    ed.spec_mut().topology.outputs.push(vec![out(probe, 0)]);
+    {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        declare_outputs(ed, ChannelLayout::from_count(channel + 1));
+        ed.connect_edge(EdgeId::into_output(channel, out(probe, 0)))
+            .unwrap()
+    };
     ed.set_param_range(cutoff(probe), ParamRange::of(0.0, 1.0))
         .expect("a probe");
     ed.commit().expect("commits");
@@ -371,8 +382,8 @@ fn lane_to_probe(
             .range(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
     ed.insert(NodeKey(lane), "lane", node);
-    ed.spec_mut()
-        .connect_param(cutoff(probe), EventOutputPort::new(NodeKey(lane), 0));
+    ed.connect_param(cutoff(probe), EventOutputPort::new(NodeKey(lane), 0))
+        .unwrap();
     wire_events(ed, from, lane);
 }
 
@@ -839,10 +850,11 @@ fn a_kick_ducks_the_pad_through_a_lane() {
     // Crossed: the pulse's full channel (0) on the follower's right, so
     // the peak is not the first channel.
     for (from, to) in [(0, 1), (1, 0)] {
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(2), to),
-            vec![Edge::Direct(out(1, from))],
-        );
+            Edge::Direct(out(1, from)),
+        ))
+        .unwrap();
     }
     lane_to_probe(&mut ed, 2, 7, -0.6, 0.8, 3, 4);
     ed.commit().expect("commits");

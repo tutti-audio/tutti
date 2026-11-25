@@ -37,7 +37,6 @@ use arrayvec::ArrayVec;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{Bus, Buses, Cx, InEvents, Offset, OutEvents, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
-use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
 use tutti_tempo::TempoView;
 use tutti_timeline::TempoReader;
@@ -45,7 +44,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost};
+use super::instance::{Figures, Instance, Lost, ProcessRequest, Silenced, WakeSlot};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -85,14 +84,24 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) rt: Rt<L::Processor>,
     /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
     lost: Arc<Lost>,
+    /// Whether the plugin runs at the rate it kept after refusing the graph's:
+    /// the node renders silence ([`Instance::silenced`]). The instance holds
+    /// the other clone and outlives the node, so the node's drop never frees it.
+    pub(super) silenced: Arc<Silenced>,
+    /// Where this node binds its wake: the instance's, for the node that
+    /// holds the Processor, or the slot of a successor until it does.
+    pub(super) wake: Arc<WakeSlot>,
+    /// The plugin's request to be processed again ([`Instance::process_request`]):
+    /// a block that holds the Processor takes it.
+    pub(super) requested: Arc<ProcessRequest>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
     /// locked or not.
     pub(super) figures: Arc<Figures>,
     /// Where a pump of the instance delivers what it finds, for a node whose
     /// plugin has a handle to hear it; the successor a [`Rebinder`](super::Rebinder) builds
-    /// delivers through the same. `None` for an out-of-process plugin, whose own
-    /// listener reports it.
+    /// delivers through the same. An out-of-process plugin's delivers the rates
+    /// only ([`report_rates_to`](Self::report_rates_to)): its own listener reports the rest.
     pub(super) reporting: Option<Reporting>,
     /// The host's parameter writes (`host_edits`), drained at the head of each
     /// block a Processor renders. `None` for a plugin whose writes do not come
@@ -150,28 +159,6 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// declared capability and its delivered behaviour read from one value.
     pub(super) features: Features,
     pub(super) sample_rate: SampleRate,
-    /// A rate the graph handed this node that the plugin has not been told
-    /// about yet; empty when there is none.
-    ///
-    /// Telling a plugin its rate is a deactivation and an activation, which
-    /// needs the main thread. A `prepare` on it runs the change itself; one off
-    /// it parks the rate here ([`queue_sample_rate`]) for the main thread's
-    /// pump ([`drain_sample_rate`], the editor idle pump), the same deferral
-    /// the out-of-process client gets from its command queue.
-    ///
-    /// Shared with the control backend, which drains it.
-    pub(super) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
-    /// Who tells the plugin the rate the node is prepared at.
-    pub(super) rate_delivery: RateDelivery,
-    /// A fork's rate could not be told to the plugin (its `prepare` ran off the
-    /// main thread), so it is at a rate other than the node's: the node renders
-    /// silence until a `prepare` on the main thread tells it.
-    pub(super) rate_refused: bool,
-    /// The render mode the last `prepare` carried (realtime before one): a
-    /// `prepare` tells the plugin its mode only when the one it carries
-    /// changed, so a re-prepare at the same mode leaves what the session
-    /// announced since.
-    prepared_mode: tutti_graph::RenderMode,
     /// The events per block the node declares it accepts on its event input
     /// (`Shape::event_input_capacity`): `MIDI_STACK_BOUND`, held to `event_room`.
     pub(super) event_input: std::num::NonZeroU32,
@@ -229,28 +216,22 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     width: PhantomData<fn() -> F>,
 }
 
-/// A node dropped while its realtime end holds the Processor and a recall is
-/// raised (a [`Pending`](super::Pending) commit raises one) hands it back
-/// through the handoff instead of dropping it: the control side collects it at
-/// the instance's next pump. Without a raised recall the Processor drops with
-/// the end, as for any node that leaves the graph.
+/// A node dropped while its realtime end holds the Processor hands it back
+/// as it is: the handoff returns it to the control side, which stops it on the
+/// main thread at the instance's next pump. The node never stops and never
+/// destroys a Processor, because it may be dropped on a control thread that is
+/// not the main one, and a leaked node drops nothing.
 ///
-/// The node is off the audio thread by then (a node leaves the graph before it
-/// is dropped), so this call is the end's only user. The handoff runs
-/// [`Processor::stop`] on the dropping thread, the control thread, as a
-/// retune's poll does between blocks.
-///
-/// It reads no lock: the instance may be held by the control thread that
-/// drops the node. A plugin that is lost (its flag, a latch set when its
-/// lifecycle poisons, through which nothing else is published) has no
-/// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
-/// does when the session retires its node.
+/// The one exception is a plugin that is lost (its flag, a latch set when its
+/// lifecycle poisons): it has no controller left to stop under, so the
+/// Processor is destroyed with the node, as the session's retirement of a lost
+/// plugin does. It reads no lock: the instance may be held by the control
+/// thread that drops the node.
 impl<L: Loaded, F: Float> Drop for InProcessClient<L, F> {
     fn drop(&mut self) {
-        if self.lost.is_lost() || self.rt.held().is_none() {
-            return;
+        if self.lost.is_lost() {
+            drop(self.rt.take_held());
         }
-        let _ = self.rt.poll(Processor::stop);
     }
 }
 
@@ -338,19 +319,6 @@ fn buses_of(plugin: &[PluginBus]) -> Buses {
         }
     }
     buses
-}
-
-/// Who tells the plugin the rate the node is prepared at.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RateDelivery {
-    /// Off the main thread, pending in `pending_sample_rate` for the main
-    /// thread's editor pump (`Backend::editor_idle`) to dispatch: the live
-    /// instance.
-    Pending,
-    /// Off the main thread, refused (silence until a `prepare` on it): a fork.
-    /// Nothing pumps a fork's editor (it has no handle), so a pending rate
-    /// would never reach it.
-    InPrepare,
 }
 
 /// The transport a block hands the plugin: what `audioMasterGetTime`
@@ -499,37 +467,6 @@ impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
     }
 }
 
-/// Park `rate` for the main thread to dispatch. Audio-thread safe: one
-/// `Release` store, no lock and no allocation.
-///
-/// Last write wins. A rate superseded before anyone drained it never reached
-/// the plugin, so dropping it loses nothing — the plugin only needs to hear the
-/// rate it is about to run at.
-pub(super) fn queue_sample_rate(cell: &AtomicCell<Option<SampleRate>>, rate: SampleRate) {
-    cell.store(Some(rate));
-}
-
-/// Dispatch a pending rate, if any, and report whether one reached the plugin.
-///
-/// Main thread only: `Instance::set_sample_rate` deactivates and activates the
-/// plugin, which allocates. This is the drain half of the deferral
-/// [`queue_sample_rate`] opens. The Processor is on the audio thread, so the
-/// change starts with a recall and finishes at a later pump, once the audio
-/// thread has handed it back.
-pub(super) fn drain_sample_rate<L: Loaded>(
-    main: MainThreadMarker,
-    cell: &AtomicCell<Option<SampleRate>>,
-    inner: &Mutex<Instance<L>>,
-) -> bool {
-    let Some(rate) = cell.swap(None) else {
-        return false;
-    };
-    // A refusal is kept in the instance and reported by the control side's next
-    // pump (`Instance::take_reports`), so the result is not read here.
-    let _ = inner.lock().set_sample_rate(main, rate, None);
-    true
-}
-
 /// What a fork loads a plugin again from: where it came from, and the collector
 /// of its owner, which the new instance hands its close to.
 #[derive(Clone)]
@@ -549,7 +486,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         declared: Declared,
         features: Features,
         sample_rate: SampleRate,
-        pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
         counters: Option<Arc<crate::DeliveryCounters>>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
@@ -587,10 +523,13 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, figures, midi_map) = {
+        let (lost, silenced, wake, requested, figures, midi_map) = {
             let instance = inner.lock();
             (
                 instance.lost_latch(),
+                instance.silenced(),
+                instance.wake_slot(),
+                instance.process_request(),
                 instance.figure_cell(),
                 instance.midi_map().translator(),
             )
@@ -611,6 +550,9 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             inner,
             rt,
             lost,
+            silenced,
+            wake,
+            requested,
             figures,
             reporting: None,
             edits: None,
@@ -631,10 +573,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             spares,
             features,
             sample_rate,
-            pending_sample_rate,
-            rate_delivery: RateDelivery::Pending,
-            rate_refused: false,
-            prepared_mode: tutti_graph::RenderMode::Realtime,
             event_input,
             event_room,
             params,
@@ -685,6 +623,23 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         }
     }
 
+    /// Where the node's pump delivers what it finds of a rate, for an
+    /// out-of-process plugin: the refusal its activation or a tell met and its
+    /// restoring, which no listener of the bridge reports.
+    pub fn report_rates_to(&mut self, invalidate: crate::InvalidateSink) {
+        self.reporting = Some(Reporting {
+            invalidate,
+            transport: crate::TransportSink::new(),
+            rates_only: true,
+        });
+    }
+
+    /// What a fork reads of this plugin's lifecycle, keeping nothing alive.
+    #[must_use]
+    pub fn live_view(&self) -> LiveView<L> {
+        LiveView(Arc::downgrade(&self.inner))
+    }
+
     /// The control side of this node's controller map: what the plugin declares
     /// and the app entered, shared by every node over the instance and by the
     /// handle ([`PluginHandle::midi_map`](crate::PluginHandle::midi_map)).
@@ -707,6 +662,48 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// (`tutti-plugin`) does it through this.
     pub fn go_offline(&mut self) {
         self.transport.go_offline();
+    }
+}
+
+/// A view of a plugin's lifecycle that holds no strong reference
+/// ([`InProcessClient::live_view`]): once every node and handle on the plugin is
+/// gone, it reads nothing.
+pub struct LiveView<L: Loaded>(std::sync::Weak<Mutex<Instance<L>>>);
+
+impl<L: Loaded> Clone for LiveView<L> {
+    fn clone(&self) -> Self {
+        Self(std::sync::Weak::clone(&self.0))
+    }
+}
+
+impl<L: Loaded> std::fmt::Debug for LiveView<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveView").finish_non_exhaustive()
+    }
+}
+
+impl<L: Loaded> LiveView<L> {
+    /// The render mode the plugin runs in, or is being changed to; `None` once
+    /// the plugin is gone.
+    #[must_use]
+    pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
+        Some(self.0.upgrade()?.lock().render_mode())
+    }
+
+    /// Records that the plugin is to run in `mode` and tells it with `tell`
+    /// (the control side's own tell, which needs no main thread), from any
+    /// thread: the lifecycle then waits for the answer to that tell, and the
+    /// want is not undone by the answer. `false` once the plugin is gone or
+    /// lost, or when `tell` queues nothing.
+    pub fn announce_render_mode(
+        &self,
+        mode: tutti_plugin_types::RenderMode,
+        tell: impl FnOnce(tutti_plugin_types::RenderMode) -> bool,
+    ) -> bool {
+        let Some(instance) = self.0.upgrade() else {
+            return false;
+        };
+        instance.lock().announce_mode(mode, tell)
     }
 }
 
@@ -733,6 +730,14 @@ pub(super) fn void_stale_edits(edits: Option<&EditPort>, params: &mut ParamDeliv
 }
 
 impl<L: Loaded, F: Float> InProcessClient<L, F> {
+    /// `n` MIDI events were not delivered: counted dropped, and the rest of
+    /// every SysEx open in the intake is skipped. The caller reports the
+    /// loss to the graph (`Io::count_lost`).
+    pub(super) fn lose_midi(&mut self, n: u64) {
+        self.params.count_midi_dropped(n);
+        self.intake.lost();
+    }
+
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next
@@ -746,33 +751,33 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     }
 
     /// Offers `p`'s rate, block ceiling and quantum to the Processor
-    /// ([`Processor::retune`]) and reads the latency it adds afterwards.
+    /// ([`Processor::RETUNE`]) and reads the latency it adds afterwards.
     /// `true` when it took them live: the plugin is told no restart, needs no
-    /// main thread, and [`set_rate`](Self::set_rate) is not run. `false` when
+    /// main thread, and the instance is not reconciled. `false` when
     /// it has none in hand or does not follow the graph (an in-process one).
-    pub(super) fn retune(&mut self, p: &tutti_graph::Prepare) -> bool {
+    pub(super) fn retune(&mut self, instance: &mut Instance<L>, p: &tutti_graph::Prepare) -> bool {
         let rate = p.sample_rate();
         let max_block = Samples::new(p.max_block().get());
+        let Some(retune) = <L::Processor as Processor>::RETUNE else {
+            return false;
+        };
         let Some(processor) = self.rt.poll(Processor::stop) else {
             return false;
         };
-        if !processor.retune(
+        retune(
+            processor,
             rate,
             max_block,
             p.quantum().map(tutti_buffers::MaxBlock::samples),
-        ) {
-            return false;
-        }
+        );
         self.pipeline = processor.latency();
+        instance.retune_asked();
         if let Some(controls) = &self.controls {
             // What a host holding the controls reads as the declared latency
             // and stamps a source with.
             controls.set_pipeline(self.pipeline);
             controls.restamp(rate);
         }
-        self.sample_rate = rate;
-        self.rate_refused = false;
-        self.inner.lock().retuned(rate);
         true
     }
 
@@ -798,7 +803,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// render mode: armed for an offline graph, disarmed for any other. What
     /// the node's `prepare` does on every prepare, with no guard and whether
     /// or not the Processor is in hand; it is the only writer of the switch,
-    /// and the plugin's own render mode ([`set_render_mode_from`](Self::set_render_mode_from))
+    /// and the plugin's own render mode ([`Instance::follow_graph_mode`](super::instance::Instance::follow_graph_mode))
     /// is a separate thing.
     pub(super) fn drive_wait(&self, p: &tutti_graph::Prepare) {
         if let Some(switch) = &self.wait_switch {
@@ -816,82 +821,42 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         self.wait_switch = Some(switch);
     }
 
-    /// Tells the plugin the render mode `p` carries when it is not the mode
-    /// the plugin runs in and not the one the last `prepare` carried. What the
-    /// node's `prepare` does with its mode; main thread only, as a mode change
-    /// is a main-thread call on every format.
-    pub(super) fn set_render_mode_from(&mut self, p: &tutti_graph::Prepare) {
-        let mode = p.render_mode();
-        // The guard keeps a mode the handle or `Phase::RenderMode` set from
-        // being undone by a re-prepare at the same mode, and by a first prepare
-        // in realtime (`prepared_mode` starts there): a plugin set offline on
-        // its handle stays offline through a realtime prepare until a prepare
-        // carries a change.
-        if self.prepared_mode == mode {
-            return;
-        }
-        let mut inner = self.inner.lock();
-        if inner.render_mode() != mode {
-            // The node is out of any executor (`Node::prepare`'s contract), so
-            // its realtime end is here: the exchange finishes in this call.
-            let Some(main) = MainThreadMarker::new() else {
-                // Not recorded, so the next prepare on the main thread tells it;
-                // the handle's subscribers hear it as the rate's refusal is.
-                inner.note_mode_not_applied(mode);
-                return;
-            };
-            inner.set_render_mode(main, mode, Some(&mut self.rt));
-        }
-        self.prepared_mode = mode;
-    }
-
-    /// Take `sample_rate` as the rate blocks run at, and hand it to the
-    /// plugin as [`RateDelivery`] says: pending for the main thread (see
-    /// `pending_sample_rate`), or, on a fork, dispatched here. What the
-    /// node's `prepare` does with its rate. (The transport snapshot's rate is
-    /// the block's own, from its `Env`.)
-    pub(super) fn set_rate(&mut self, sample_rate: tutti_units::SampleRate) {
-        let rate = sample_rate;
-        let changed = rate != self.sample_rate;
-        self.sample_rate = rate;
-        // Only on a change: a redundant bracket makes a plugin reallocate its
-        // buffers.
-        if !changed && !self.rate_refused {
-            return;
-        }
-        // `prepare` has no token to be handed and cannot fail, so it asks for
-        // the proof. On the main thread the change runs here, to the end: the
-        // node is out of any executor (`Node::prepare`'s contract), so its
-        // realtime end hands the Processor back and takes the new one in this
-        // call.
-        if let Some(main) = MainThreadMarker::new() {
-            let outcome = self
-                .inner
-                .lock()
-                .set_sample_rate(main, rate, Some(&mut self.rt));
-            // A refusal renders silence (no Processor is lent) and is reported
-            // through the handle (`PluginInvalidation::RateRefused`).
-            self.rate_refused = outcome.is_err();
-            if let Err(reason) = outcome {
+    /// What the node's `prepare` asks of the plugin: the graph's rate, block
+    /// ceiling and callback size recorded as wanted, the Processor retuned live
+    /// when it is in hand and follows the graph, else the plugin activated again
+    /// at them (on the main thread, to the end; off it, by the instance's next
+    /// pump, the nodes silent until then), and the graph's render mode.
+    pub(super) fn follow(&mut self, p: &tutti_graph::Prepare) {
+        self.sample_rate = p.sample_rate();
+        let main = MainThreadMarker::new();
+        // One lock throughout: a pump on another thread between the want and
+        // the tell would reconcile the new ask as well, and the plugin would
+        // hear it twice (and `rate_asked` after that pump would reopen the
+        // refusal it had just told).
+        let inner = Arc::clone(&self.inner);
+        {
+            let mut instance = inner.lock();
+            instance.want(|w| {
+                let wanted = tutti_plugin_types::Prepare::new(p.sample_rate(), p.max_block())
+                    .with_format(w.format())
+                    .with_mode(w.mode());
+                p.quantum().map_or(wanted, |q| wanted.with_quantum(q))
+            });
+            instance.rate_asked();
+            if self.retune(&mut instance, p) {
+                // The Processor started its pipeline over: the chunk in flight is
+                // dropped by the caller, and the rest of a SysEx open in it is cut,
+                // as at a reset. Its far end keeps its reassembler's open message
+                // across the retune, so a tail taken now would complete the
+                // message with a gap.
+                self.intake.lost();
+            } else if let Err(reason) = instance.reconcile(main, Some(&mut self.rt)) {
                 tracing::error!("a plugin refused its rate: {reason}");
             }
-            return;
         }
-        match self.rate_delivery {
-            // Off the main thread the bracket cannot run: pending for the main
-            // thread's pump.
-            RateDelivery::Pending => queue_sample_rate(&self.pending_sample_rate, rate),
-            // A fork has no pump: the refusal is recorded (`rate_refused`), the
-            // node renders silence rather than audio at the wrong rate, and the
-            // next `prepare` on the main thread clears it.
-            RateDelivery::InPrepare => {
-                self.rate_refused = true;
-                tracing::error!(
-                    "a forked plugin was prepared off the main thread; \
-                     it renders silence until it is prepared on it"
-                );
-            }
-        }
+        self.inner
+            .lock()
+            .follow_graph_mode(main, p.render_mode(), Some(&mut self.rt));
     }
 }
 

@@ -633,9 +633,9 @@ impl Error for ForkError {
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutputPort::new(NodeKey(1), 0),
-/// )]);
+/// editor
+///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
+///     .expect("the node exists");
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
 /// ```
 #[derive(Clone, Debug)]
@@ -709,9 +709,9 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutputPort::new(NodeKey(1), 0),
-/// )]);
+/// editor
+///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
+///     .expect("the node exists");
 /// assert_eq!(
 ///     editor.fork(ForkTarget::MainOutput, prepare).err(),
 ///     Some(ForkError::NotForkable { key: NodeKey(1) }),
@@ -984,8 +984,7 @@ impl<F: Float> Editor<F> {
                     // Every path that places a unit (insert, replace) sets
                     // or clears its source with the generation it assigns,
                     // so this is a generation moved some other way (a
-                    // caller writing `spec_mut().generations`, a `package`
-                    // placing units the editor never saw). Forking the old
+                    // `package` placing units the editor never saw). Forking the old
                     // unit would be a copy of something no longer there.
                     debug_assert!(
                         false,
@@ -1132,15 +1131,9 @@ impl<F: Float> Editor<F> {
     /// The first [`ForkFault`] reported by a forked unit's health probe, in
     /// key order.
     pub fn fork_health(&self) -> Result<(), ForkFault> {
-        let mut probes: Vec<_> = self.fork_probes().iter().collect();
-        probes.sort_by_key(|(key, _)| *key);
-        for (key, probe) in probes {
+        for (key, probe) in self.fork_probes() {
             if let Some((kind, cause)) = probe.fault() {
-                return Err(ForkFault {
-                    key: *key,
-                    kind,
-                    cause,
-                });
+                return Err(ForkFault { key, kind, cause });
             }
         }
         Ok(())

@@ -35,18 +35,13 @@ pub(super) struct Timing {
 }
 
 impl Timing {
-    /// Whether `channel` is one of an old main output's, heard at `bank_total`.
-    pub(super) fn in_bank(&self, channel: u16) -> bool {
-        self.bank_base
-            .is_some_and(|base| usize::from(channel) >= base)
-    }
-
-    /// The output time `channel` is aligned to.
+    /// The output time `channel` is aligned to: `bank_total` for one of an
+    /// old main output's channels (see [`ValidGraph::main_output_bank`]),
+    /// `total` for the rest.
     pub(super) fn output_time(&self, channel: u16) -> Latency {
-        if self.in_bank(channel) {
-            self.bank_total
-        } else {
-            self.total
+        match self.bank_base {
+            Some(base) if usize::from(channel) >= base => self.bank_total,
+            _ => self.total,
         }
     }
 }
@@ -82,9 +77,7 @@ pub(super) fn solve(
     let total = Latency::new(solved.compensation().total());
     let rendered_outputs = graph.topology().outputs.len();
     let bank_total = match (graph.main_output_bank(), prev) {
-        (Some(bank), Some(p)) if p.main_output_bank.is_some_and(|b| b.old == bank.old) => {
-            p.bank_total
-        }
+        (Some(bank), Some(p)) if bank.continues => p.bank_total,
         (_, Some(p)) => p.total_latency,
         (_, None) => total,
     };

@@ -7,7 +7,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
-use crate::common::blocks;
+use crate::common::{blocks, next_block};
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
 use tutti_session::Session;
@@ -41,10 +41,10 @@ fn keys(s: &mut Session) -> DeviceInfo {
         .expect("Keys is listed")
 }
 
-/// `n` events from the device before any block reads them, all stamped with
-/// the one reading of the clock, so they fall in one block whatever the load.
+/// `n` events from the device before any block reads them, all due in the
+/// next block.
 fn push(fake: &FakeCounters, n: u64) {
-    let at = Instant::now();
+    let at = next_block();
     for i in 0..n {
         let ump = Ump::from(Message::midi2(
             MidiChannel::FIRST,

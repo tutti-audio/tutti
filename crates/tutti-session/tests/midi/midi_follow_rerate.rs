@@ -11,14 +11,17 @@ use crate::common::{Keyed, blocks};
 use std::time::Duration;
 use tutti_platform::Instant;
 
+use tutti_graph::Fade;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::SysexDeviceId;
+use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    ClockKind, FollowClock, FollowMachineControl, FollowTempo, MidiEvent, Session, SessionEvent,
+    ClockKind, FollowClock, FollowMachineControl, FollowTempo, MidiEvent, Replacement, Session,
+    SessionEvent,
 };
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Sysex7Packets, System, Ump};
-use tutti_units::{Bpm, SampleRate};
+use tutti_units::{Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const KEYS: u64 = 1;
@@ -142,23 +145,31 @@ fn a_follower_hears_its_source_after_a_re_rate() {
         let _ = s.update();
         s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
         // The re-prepare's second half lands on a render, then the commit.
-        let _ = s.update();
+        // The old reader ends when its tap is re-opened; the follower does not.
+        let mut all = update_events(&mut s);
         blocks(&mut s, 8);
-        let _ = s.update();
+        all.extend(update_events(&mut s));
         blocks(&mut s, 1);
-        let _ = s.update();
+        all.extend(update_events(&mut s));
 
         (follower.send)(&fake);
         let mut heard = false;
         for _ in 0..100 {
             blocks(&mut s, 1);
             let events = update_events(&mut s);
-            if (follower.heard)(&s, &events) {
-                heard = true;
+            heard = (follower.heard)(&s, &events);
+            all.extend(events);
+            if heard {
                 break;
             }
         }
         assert!(heard, "{} did not hear its source", follower.name);
+        assert!(
+            !all.iter()
+                .any(|e| matches!(e, MidiEvent::Unfollowed { .. })),
+            "{} did not end at the re-rate; got {all:?}",
+            follower.name
+        );
     }
 }
 
@@ -189,6 +200,36 @@ fn a_follower_whose_input_is_gone_commits_nothing() {
             s.graph_ref().testing().commits_sent(),
             settled,
             "{} edited the graph after its input went",
+            follower.name
+        );
+    }
+}
+
+/// **A follower whose input node is replaced at its key does not end.** The
+/// replacement is not a removal: the tap stays on the key, and no
+/// `Unfollowed` is raised.
+#[test]
+fn a_follower_whose_input_is_replaced_does_not_end() {
+    for follower in FOLLOWERS {
+        let (mut s, _fake) = rig();
+        (follower.follow)(&mut s);
+        let _ = s.update();
+        let input = s.input();
+        s.graph()
+            .replace(
+                input,
+                Replacement::new(MidiClipNode::new([])).fade(Fade::new(Samples::new(0))),
+            )
+            .expect("the input is there");
+        let mut all = update_events(&mut s);
+        for _ in 0..4 {
+            blocks(&mut s, 1);
+            all.extend(update_events(&mut s));
+        }
+        assert!(
+            !all.iter()
+                .any(|e| matches!(e, MidiEvent::Unfollowed { .. })),
+            "{} ended when its input was replaced; got {all:?}",
             follower.name
         );
     }

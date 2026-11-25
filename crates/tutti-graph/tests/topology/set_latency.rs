@@ -1,6 +1,9 @@
 //! `Editor::set_latency`: a runtime latency change — a plugin whose latency
 //! atomic moved — recompiles and moves PDC, without touching the unit.
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -82,7 +85,7 @@ fn graph(plugin: Plugin) -> (Editor, Executor) {
 
 fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepared);
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(PLUGIN, "plugin", Unforkable(plugin));
     ed.insert(
         DRY,
@@ -92,31 +95,32 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
             width: 1,
         })),
     );
-    let t = &mut ed.spec_mut().topology;
     for k in [PLUGIN, DRY] {
-        t.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(k, 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
     }
-    t.set_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(PLUGIN, 0)),
         PortSource::Node(OutputPort::new(DRY, 0)),
-    ]);
+    ])
+    .unwrap();
     (ed, exec)
 }
 
 /// One block of `input` through `exec`; both its outputs.
 fn block(exec: &mut Executor, input: &[f32]) -> [Vec<f32>; 2] {
-    let n = input.len();
-    let (mut a, mut b) = (vec![0.0f32; n], vec![0.0f32; n]);
-    exec.process(
-        n,
-        &TransportPosition::default(),
+    common::block_in(
+        exec,
+        input.len(),
         &[input],
-        &mut [&mut a, &mut b],
-    );
-    [a, b]
+        2,
+        &TransportPosition::default(),
+    )
+    .try_into()
+    .expect("two outputs")
 }
 
 /// A one at `at`, zeros elsewhere.

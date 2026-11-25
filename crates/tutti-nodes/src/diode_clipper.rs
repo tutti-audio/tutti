@@ -103,7 +103,7 @@ control_set! {
     DiodeClipperSet(_s): DiodeClipperControls = DiodeClipperControls::DEFAULT;
     live: (all);
     Cutoff => Hz = cutoff,
-    GainDb => Db = drive via ClipperDrive;
+    GainDb => Db = drive via ClipperDrive { no_ring };
 
     fn defaults(&self) -> DiodeClipperControls {
         DiodeClipperControls::DEFAULT
@@ -119,7 +119,6 @@ pub struct DiodeClipperKernel<F: Float> {
     /// can be designed.
     rate: SampleRate,
     clipper: DiodeClipper<F>,
-    applied: bool,
     oversampled: Option<Oversampled<F>>,
 }
 
@@ -130,7 +129,6 @@ impl<F: Float + Lerp> DiodeClipperKernel<F> {
             factor: config.factor,
             rate: SampleRate::SR_48K,
             clipper: DiodeClipper::<F>::new(config.width, SampleRate::SR_48K),
-            applied: false,
             oversampled: None,
         }
     }
@@ -164,12 +162,10 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.clipper = DiodeClipper::<F>::new(self.input.width(), self.rate);
-        self.applied = false;
     }
 
     fn reset(&mut self) {
         self.clipper.reset();
-        self.applied = false;
         for state in self.oversampled.iter_mut().flat_map(|o| &mut o.channels) {
             state.reset();
         }
@@ -177,10 +173,10 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
 
     fn retarget(&mut self, controls: &DiodeClipperControls) {
         self.clipper.retarget(controls);
-        if !self.applied {
-            self.clipper.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.clipper.jump_to_target();
     }
 
     fn render(
@@ -188,15 +184,12 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let rendered = match &mut self.oversampled {
+        match &mut self.oversampled {
             Some(oversampled) => oversampled.render(None::<Mono<'_, F>>, block, |_, wide| {
                 self.clipper.process(wide)
             }),
             None => self.clipper.process(block),
-        };
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        }
     }
 
     fn latency(&self) -> Samples {
@@ -234,6 +227,26 @@ mod tests {
                 .cutoff(Hz::new(cutoff))
                 .drive(ClipperDrive::of(Db::new(drive))),
         ))
+    }
+
+    /// The tail reads the cutoff and not the drive: moving the drive alone leaves the reported
+    /// tail, which is what the drive's `no_ring` flag promises.
+    #[test]
+    fn the_drive_does_not_change_the_reported_tail() {
+        let impulse = tutti_fixtures::signal::impulse::<f32>(tutti_units::Samples::new(64));
+        let reported = |drive: f64| {
+            let mut n = node(1_000.0, drive);
+            crate::test_support::reported_tail(&mut n, &[&impulse])
+        };
+        assert_eq!(
+            crate::test_support::non_ringing(&DiodeClipperSet),
+            [tutti_units::UnitAddr::first(UnitParam::GainDb)]
+        );
+        let base = reported(0.0);
+        assert!(matches!(base, Some(Tail::Finite(_))), "{base:?}");
+        for drive in [-40.0, -6.0, 6.0, 24.0] {
+            assert_eq!(reported(drive), base, "{drive} dB");
+        }
     }
 
     /// The impulse of a linear-range input, at the highest cutoff, peaks at the oversampler's

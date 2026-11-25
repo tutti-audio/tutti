@@ -3,10 +3,13 @@
 //! sibling synths pack into fewer tasks than undeclared ones, and the render on a pool is bit
 //! for bit the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
+use tutti_graph::EdgeId;
 
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
@@ -98,7 +101,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     let sources = LIGHT + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
+    ed.wire_declared_outputs([PortSource::Zero; 2]).unwrap();
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));
         ed.insert(clip, "clip", MidiClipNode::new(notes(k)));
@@ -113,15 +116,17 @@ fn graph(workers: usize, declared: bool) -> Executor {
                 ed.insert(key, "synth", synth(32, 1));
             }
         }
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(key, 0),
             EventEdge::Direct(EventOutputPort::new(clip, 0)),
-        );
+        )
+        .unwrap();
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.
         for c in 0..2u16 {
             let from = PortSource::Node(OutputPort::new(key, c));
-            ed.spec_mut().topology.connect_output(c as usize, from);
+            ed.connect_edge(EdgeId::into_output((c as usize) as u16, from))
+                .unwrap();
         }
     }
     ed.commit().expect("commits");

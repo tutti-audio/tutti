@@ -188,6 +188,10 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record, list
                     refusal: None,
                 })
             }
+            ControlRequest::SetRenderMode { mode } => Some(ControlReply::RenderModeSet {
+                mode,
+                outcome: tutti_plugin_ipc::ModeOutcome::Took,
+            }),
             _ => None,
         };
         if let Some(reply) = reply
@@ -277,6 +281,7 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
             latency_samples: Samples::ZERO,
             tail: PluginTail::Unknown,
             features: Features::TRANSPORT
+                | Features::RENDER_MODE
                 | Features::MIDI_OUT
                 | Features::PARAM_AUTOMATION
                 | Features::SEQUENCER_CONTEXT,

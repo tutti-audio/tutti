@@ -1,15 +1,19 @@
 //! The feed-forward [`CompressorNode`] with an external side-chain, soft knee and
 //! makeup gain.
 
+use std::sync::Arc;
+
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals,
     KeyFilter, KeySource, Lerp, SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
+use tutti_graph::{ErasedSetting, HasSetting, Shape};
+use tutti_rt::AtomicCell;
+use tutti_units::{CompressionRatio, Db, Hz, KeyFilterSetting, Q, SampleRate, Seconds, Tail};
 
+use super::keyed_shape;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A compressor: `channels = N` means N audio inputs, then (for a side-chain key) N key
@@ -41,13 +45,15 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// # The key filter
 ///
-/// [`CompressorConfig::key_filter`] puts a [`KeyFilter`] on the key: the detector hears the
-/// key through a high-pass or a band-pass, and the signal the gain is applied to is never
-/// filtered. It is off by default. A node built with one has two more controls after the
-/// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
-/// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
-/// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
-/// The filter's coefficients ramp to a new cutoff over one grid period.
+/// The detector hears the key through a [`KeyFilter`], a high-pass or a band-pass, and the
+/// signal the gain is applied to is never filtered. The filter is a setting a running node
+/// switches, off by default ([`CompressorControls::key_filter`] starts it): the node's `key_filter` setting is the word it reads
+/// once per grid period (`session.set(key.key_filter().to(KeyFilter::HighPass))`), and [`KeyFilter::Off`] leaves the filter unrun. The node always has
+/// the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and the Q
+/// ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth) after the makeup, so
+/// eight params in all; while the filter is off they are not in use and are kept, and a switch
+/// in lands on them and starts the filter from silence. The filter's coefficients ramp to a new
+/// cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -74,19 +80,18 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
 pub type CompressorNode<F> = KernelNode<CompressorKernel<F>>;
 
-/// What a [`CompressorNode`] is made from: its main bus, the key its detector listens to, the
-/// filter on that key and the controls it starts at.
+/// What a [`CompressorNode`] is made from: its main bus, the key its detector listens to and the
+/// controls it starts at, the key filter's among them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CompressorConfig {
     input: ChannelTopology,
     key: KeySource,
-    filter: KeyFilter,
     controls: CompressorControls,
 }
 
 impl CompressorConfig {
     /// A compressor on the bus `input` that listens to its own signal ([`KeySource::Own`]),
-    /// with no key filter and at [`CompressorControls::DEFAULT`], which does nothing (ratio 1,
+    /// with the key filter off and at [`CompressorControls::DEFAULT`], which does nothing (ratio 1,
     /// threshold 0 dB): a caller names what it wants with [`controls`](Self::controls).
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
@@ -96,7 +101,6 @@ impl CompressorConfig {
         Self {
             input,
             key: KeySource::Own,
-            filter: KeyFilter::Off,
             controls: CompressorControls::DEFAULT,
         }
     }
@@ -109,21 +113,11 @@ impl CompressorConfig {
         Self { key, ..self }
     }
 
-    /// The filter the detector hears the key through, starting at the `key_cutoff` and
-    /// `key_q` of the [`controls`](Self::controls) (100 Hz and Butterworth in the default's).
-    /// The node gains the cutoff and Q controls after its others; [`KeyFilter::Off`], the
-    /// default, has none, and the two fields of the controls are only what a later filter
-    /// starts at.
-    #[must_use]
-    pub fn key_filter(self, filter: KeyFilter) -> Self {
-        Self { filter, ..self }
-    }
-
     /// The values the node's cells start at: the threshold (`Db`, typically negative, since 0 dB
     /// is full scale), the knee width, the ratio (`4.0` is 4 dB in for 1 dB out above the
     /// threshold; at least 1, no expansion), the envelope times (short attacks catch
     /// transients, long releases sound smoother) and the makeup gain (applied after the
-    /// reduction, unconditionally), as [`CompressorControls`] says. The envelope's one-pole
+    /// reduction, unconditionally) and the key filter with its cutoff and Q, as [`CompressorControls`] says. The envelope's one-pole
     /// coefficients are derived from the times at the rate
     /// [`Node::prepare`](tutti_graph::Node::prepare) hands it.
     #[must_use]
@@ -134,43 +128,31 @@ impl CompressorConfig {
 
 impl<F: Float + SimdLanes + Lerp> From<CompressorConfig> for CompressorNode<F> {
     fn from(config: CompressorConfig) -> Self {
+        let set = CompressorSet {
+            key_filter: Arc::new(AtomicCell::new(config.controls.key_filter)),
+        };
         Self::with_kernel(
-            CompressorKernel::new(config.input, config.key, config.filter),
-            CompressorSet::new(
-                config.filter,
-                config.controls.key_cutoff,
-                config.controls.key_q,
-            ),
+            CompressorKernel::new(config.input, config.key),
+            set,
             config.controls,
         )
     }
 }
 
-/// The compressor's controls: threshold, knee, ratio, attack, release and makeup, then the
-/// key filter's cutoff and Q if its [`KeyFilter`] is not [`Off`](KeyFilter::Off).
-#[derive(Clone, Copy, Debug)]
+/// The compressor's controls: threshold, knee, ratio, attack, release and makeup, then the key
+/// filter's cutoff and Q. It holds the key filter's word too, which is not a port: the
+/// controls it assembles read it.
+#[derive(Clone, Debug)]
 pub struct CompressorSet {
-    filter: KeyFilter,
-    /// The cutoff the filter starts at: a part the ports do not carry until the node has a
-    /// filter, so a node given a filter later starts there.
-    cutoff: Hz,
-    /// The Q the filter starts at, held as `cutoff` is.
-    q: Q,
-}
-
-impl CompressorSet {
-    fn new(filter: KeyFilter, cutoff: Hz, q: Q) -> Self {
-        Self { filter, cutoff, q }
-    }
+    key_filter: Arc<AtomicCell<KeyFilter>>,
 }
 
 control_set! {
     CompressorSet(s): CompressorControls = CompressorControls {
-        key_cutoff: s.cutoff,
-        key_q: s.q,
+        key_filter: s.key_filter.load(),
         ..CompressorControls::DEFAULT
     };
-    live: (if s.filter == KeyFilter::Off { 6 } else { 8 });
+    live: (all);
     Threshold => Db = threshold { fast },
     Knee => Db = knee { whole },
     Ratio => CompressionRatio = ratio { whole },
@@ -186,6 +168,21 @@ control_set! {
     fn defaults(&self) -> CompressorControls {
         CompressorControls::DEFAULT
     }
+
+    fn settings(&self) -> Vec<ErasedSetting> {
+        vec![ErasedSetting::new::<Self, KeyFilterSetting>(Arc::clone(&self.key_filter))]
+    }
+
+    fn detach(&mut self) {
+        self.key_filter = Arc::new(AtomicCell::new(self.key_filter.load()));
+    }
+}
+
+/// Which [`KeyFilter`] the detector hears the key through: the node reads it once per grid
+/// period, and a store lands at the next. A clone shares it; a fork holds one of its own, at
+/// the value at the fork.
+impl HasSetting<KeyFilterSetting> for CompressorSet {
+    type Word = KeyFilter;
 }
 
 /// The compressor as a [`Kernel`]: a [`CompressorBank`] sized at the prepared rate, its
@@ -198,22 +195,17 @@ control_set! {
 pub struct CompressorKernel<F: Float + SimdLanes> {
     input: ChannelTopology,
     key: KeySource,
-    filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<CompressorBank<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
     /// A compressor on `input` whose detector reads `key`.
-    fn new(input: ChannelTopology, key: KeySource, filter: KeyFilter) -> Self {
+    fn new(input: ChannelTopology, key: KeySource) -> Self {
         Self {
             input,
             key,
-            filter,
             bank: None,
-            applied: false,
         }
     }
 }
@@ -228,19 +220,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let main = Buses::main(self.input);
-        let inputs = match self.key {
-            KeySource::Own => main,
-            KeySource::Sidechain => main
-                .with(Bus::new(self.input, BusRole::Sidechain))
-                .expect("a main bus and a key are two buses"),
-        };
-        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
+        keyed_shape(self.input, self.key)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.width()));
-        self.applied = false;
+        self.bank = Some(CompressorBank::new(self.input.width(), rate));
     }
 
     fn reset(&mut self) {
@@ -252,9 +236,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     fn retarget(&mut self, controls: &CompressorControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(bank) = &mut self.bank {
             bank.jump_to_target();
-            self.applied = true;
         }
     }
 
@@ -596,7 +582,7 @@ mod tests {
         }
     }
 
-    /// The controls given to a config are the cells' values, all six of them.
+    /// The controls given to a config are the cells' values, the six the test names.
     #[test]
     fn the_config_controls_reach_the_cells() {
         let c = CompressorControls {
@@ -626,8 +612,8 @@ mod tests {
     }
 
     /// The shape declares every control in the order of the set (threshold, knee, ratio,
-    /// attack, release, makeup as `GainDb`), with the cells as their bases, no latency and
-    /// no tail, at every width.
+    /// attack, release, makeup as `GainDb`, then the key filter's cutoff and Q, kept while the
+    /// filter is off), with the cells as their bases, no latency and no tail.
     #[test]
     fn compressor_declares_its_params() {
         let m = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
@@ -640,13 +626,27 @@ mod tests {
                 UnitParam::Ratio,
                 UnitParam::Attack,
                 UnitParam::Release,
-                UnitParam::GainDb
+                UnitParam::GainDb,
+                UnitParam::Cutoff,
+                UnitParam::Q
             ][..]
         );
         assert_eq!(shape.audio_in().count(), 2);
         assert_eq!(shape.latency, tutti_units::Latency::ZERO);
         assert_eq!(shape.tail, tutti_units::Tail::None);
-        for (k, base) in [-20.0, 0.0, 4.0, 0.0001, 0.1, 0.0].into_iter().enumerate() {
+        for (k, base) in [
+            -20.0,
+            0.0,
+            4.0,
+            0.0001,
+            0.1,
+            0.0,
+            100.0,
+            Q::BUTTERWORTH.get(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             assert_eq!(m.param_base(k), Some(base), "control {k}'s base");
         }
     }

@@ -35,13 +35,12 @@ use crate::{
     Answered, ArmPluginMidiLearn, CloseEditor, GetCurrentPreset, GetParameter, GetParameterList,
     GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
     GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
-    SetAppMidiMap, SetAutomationState, SetEditorSize, SetTrackInfo, SetupSharedMemory, StateLoaded,
-    Unanswered,
+    SetAppMidiMap, SetAutomationState, SetEditorSize, SetSampleRate, SetTrackInfo,
+    SetupSharedMemory, StateLoaded, Unanswered,
 };
 use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::Answer;
-use tutti_plugin_types::RateRefusal;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
     PresetError, StateError, StateUse, UnknownParam, edit_slots,
@@ -51,6 +50,7 @@ use tutti_plugin_types::{
     NoteExpressionTextChanges, ParameterChanges, ParameterInfo, PluginPreset, PresetId,
     ScaleChanges, TransportChanges, TransportInfo,
 };
+use tutti_plugin_types::{RateRefusal, RateRefusalCause};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -624,6 +624,32 @@ impl AudioBridge {
         true
     }
 
+    /// Tells the plugin `rate` and waits for its answer, which is the caller's
+    /// alone: it is not filed as a [`Told`](tutti_plugin_types::Told), so the
+    /// lifecycle and the listener never hear it (a restart's own rate is
+    /// answered by its activation). The standing refusal is recorded as a
+    /// rate change records it. Main thread; not for a block.
+    ///
+    /// # Errors
+    ///
+    /// Why the plugin does not run at `rate`.
+    pub(crate) fn set_sample_rate_now(
+        &self,
+        rate: SampleRate,
+    ) -> std::result::Result<(), tutti_plugin_types::RateRefusal> {
+        self.channels.set_sample_rate(rate);
+        let cause = match self.call(SetSampleRate { rate }, Deadline::Rate, Object::None) {
+            Ok(set) => set.refusal,
+            Err(Lost::NoAnswer { after }) => Some(RateRefusalCause::NoAnswer { after }),
+            Err(lost) => Some(RateRefusalCause::Deactivated {
+                reason: format!("the rate was not delivered: {lost:?}"),
+            }),
+        };
+        let refusal = cause.map(|cause| tutti_plugin_types::RateRefusal::new(rate, cause));
+        self.lifecycle.set_rate_refusal(refusal.clone());
+        refusal.map_or(Ok(()), Err)
+    }
+
     /// Asks for a render-mode change, ordered against the blocks. `false` only
     /// when the bridge is crashed; the request goes into a slot, never a queue
     /// that can be full.
@@ -643,7 +669,6 @@ impl AudioBridge {
             return false;
         }
         self.channels.request_setting(Setting::RenderMode(mode));
-        self.lifecycle.set_render_mode(mode);
         true
     }
 
@@ -652,13 +677,6 @@ impl AudioBridge {
     /// still land; the blocks after it were not held for it.
     pub fn unapplied_settings(&self) -> u64 {
         self.channels.unapplied_cell().get()
-    }
-
-    /// The render mode the host last queued for the plugin
-    /// ([`set_render_mode`](Self::set_render_mode)): what the host asked
-    /// for, not what the plugin accepted. Realtime until it queues another.
-    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
-        self.lifecycle.render_mode()
     }
 
     /// Makes the bridge thread wait `wait` for each block's reply, in place of

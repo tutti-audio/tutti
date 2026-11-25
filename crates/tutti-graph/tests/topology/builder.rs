@@ -3,8 +3,11 @@
 //! rules are written out independently below ([`net_rule`]) and each render
 //! is pinned to the figure they give in closed form.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -144,7 +147,7 @@ mod net_rule {
     use super::*;
 
     /// A node: its output width and what feeds each of its inputs.
-    pub struct Node {
+    pub(super) struct Node {
         pub outs: usize,
         pub sources: Vec<PortSource>,
     }
@@ -155,7 +158,7 @@ mod net_rule {
 
     /// `pipe(a, b)`: input `c` of `b` reads `a`'s port
     /// `c % a_outs`; silence when `a` has no outputs.
-    pub fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<PortSource> {
         (0..b_ins)
             .map(|c| {
                 if a_outs > 0 {
@@ -169,7 +172,7 @@ mod net_rule {
 
     /// `pipe_output(n)`: main output `c` reads `n`'s port
     /// `c % n_outs`; silence when `n` has no outputs.
-    pub fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
         (0..outputs)
             .map(|c| {
                 if n_outs > 0 {
@@ -183,7 +186,7 @@ mod net_rule {
 
     /// `pipe_input(n)`: input `c` reads main input `c % main_inputs`;
     /// silence when there are none.
-    pub fn pipe_input(main_inputs: usize, ins: usize) -> Vec<PortSource> {
+    pub(super) fn pipe_input(main_inputs: usize, ins: usize) -> Vec<PortSource> {
         (0..ins)
             .map(|c| {
                 if main_inputs > 0 {
@@ -199,7 +202,7 @@ mod net_rule {
     /// there are main inputs; otherwise its inputs stay silent), each later
     /// one reads what fed main output `i % outputs` (silence with no
     /// outputs), and each takes over the outputs with `pipe_output`.
-    pub fn chain(
+    pub(super) fn chain(
         main_inputs: usize,
         outputs: usize,
         widths: &[(usize, usize)],
@@ -235,7 +238,7 @@ mod net_rule {
     /// [`Width`] node's output `c` is `c + 1` plus the sum of its inputs,
     /// evaluated in the order the nodes were added (every source precedes
     /// the node it feeds in these graphs).
-    pub fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
+    pub(super) fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
         let mut value: Vec<(NodeKey, Vec<f32>)> = Vec::new();
         let read = |value: &[(NodeKey, Vec<f32>)], s: &PortSource| match s {
             PortSource::Node(from) => {
@@ -257,7 +260,7 @@ mod net_rule {
 }
 
 /// The same graph written twice — through the builder, and by hand through
-/// `Editor::insert` and `spec_mut` — gives equal specs, equal plans and a
+/// `Editor::insert` and the wiring calls — gives equal specs, equal plans and a
 /// bit-identical render. It covers every kind of wiring the builder writes:
 /// a main input, a node-to-node edge, a feedback edge, a main output
 /// fed by `set_output` and one by `connect_output`, and an event edge.
@@ -312,28 +315,34 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         test_node,
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let at = |node: u64, port: u16| InputPort::new(NodeKey(node), port);
     let from = |node: u64, port: u16| OutputPort::new(NodeKey(node), port);
-    spec.topology
-        .edges
-        .insert(at(0, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
-    spec.topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
+        at(0, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
         at(0, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay))],
-    );
-    spec.topology
-        .edges
-        .insert(at(1, 0), vec![Edge::Direct(PortSource::Node(from(0, 0)))]);
-    spec.topology.set_outputs(vec![
+        Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::Node(from(0, 0))),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
-    ]);
-    spec.connect_events(
+    ])
+    .unwrap();
+    ed.connect_events(
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let mut by_hand = Renderer::new(ed, exec);
     by_hand.render(1); // installs the plan the builder installed eagerly
@@ -644,9 +653,8 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);
 }

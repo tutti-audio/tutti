@@ -7,13 +7,16 @@ use tutti_buffers::{
 };
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
-use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
+use tutti_dsp::{
+    FdnLayout, FreeverbControls, LadderType, SecondOrderShape, ShapeKind, Stages, SvfType,
+    Waveshape,
+};
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
-    AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, AutoPanConfig, AutoPanNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
     DelayLayout, DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
@@ -124,7 +127,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "distortion",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(4.0)),
             )),
         ),
@@ -133,19 +136,21 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "distortion first order",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
-                    .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::FirstOrder)
-                    .expect("an order the kind has"),
+                DistortionConfig::new(
+                    ChannelLayout::STEREO,
+                    Waveshape::new(ShapeKind::Tanh).first_order(),
+                )
+                .drive(Drive::new(4.0)),
             )),
         ),
         (
             "distortion second order",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
-                    .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::SecondOrder)
-                    .expect("an order the kind has"),
+                DistortionConfig::new(
+                    ChannelLayout::STEREO,
+                    Waveshape::second_order(SecondOrderShape::Softsign),
+                )
+                .drive(Drive::new(4.0)),
             )),
         ),
         (
@@ -283,7 +288,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "fdn",
             Box::new(FdnNode::<f32>::from(FdnConfig::new().layout(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
+                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT).unwrap(),
             ))),
         ),
         (
@@ -514,6 +519,8 @@ mod logged {
 
     use super::{BLOCK, POISONED, SR};
     use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
+    use tutti_graph::EdgeId;
+    use tutti_graph::testing::WireDeclared;
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InputPort, IntoNode, Io, LogFilter, Node, NodeKey, OutputPort,
         PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
@@ -577,14 +584,15 @@ mod logged {
             }),
         );
         ed.insert(fx, "fx", node);
-        let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
-            topology.edges.insert(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(fx, port),
-                vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
-            );
+                Edge::Direct(PortSource::Node(OutputPort::new(src, port))),
+            ))
+            .unwrap();
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))));
+        ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
+            .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

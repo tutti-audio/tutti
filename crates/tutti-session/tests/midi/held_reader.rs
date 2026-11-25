@@ -205,3 +205,63 @@ fn a_node_not_in_the_graph_fails_at_the_open() {
         Err(tutti_session::MidiError::Tap(_))
     ));
 }
+
+/// **A note is one key whichever protocol carries it** (M2-104 Appendix D.3
+/// translates a MIDI 1.0 and a MIDI 2.0 Note On and Note Off field for field):
+/// a MIDI 1.0 Note On is ended by a MIDI 2.0 Note Off of the same Group,
+/// Channel and note, and the other way round.
+#[test]
+fn a_note_begun_in_one_protocol_ends_by_an_off_in_the_other() {
+    let mut r = rig(64);
+    r.send([0x2090_3c40, 0, 0, 0]);
+    assert_eq!(notes(r.read().0), [60]);
+    r.send(NOTE_OFF_60);
+    assert!(
+        r.read().0.is_empty(),
+        "the MIDI 2.0 off ends the MIDI 1.0 on"
+    );
+
+    r.send(NOTE_ON_60);
+    assert_eq!(notes(r.read().0), [60]);
+    r.send([0x2080_3c00, 0, 0, 0]);
+    assert!(
+        r.read().0.is_empty(),
+        "the MIDI 1.0 off ends the MIDI 2.0 on"
+    );
+}
+
+/// **A command scheduled for a later frame is held from that frame**: the tap
+/// hears the event in the block that plays it, not when it is sent.
+#[test]
+fn a_note_scheduled_ahead_is_held_once_its_block_plays() {
+    let mut r = rig(64);
+    let mut keys = r.s.midi().input(r.instrument).expect("the live input");
+    let _ = r.s.update();
+    let due = tutti_units::Frame::new(512 * 20);
+    keys.note_on(
+        Stamp::Frame(due),
+        MidiChannel::FIRST,
+        NoteNumber::of(67),
+        NoteVelocity::new(0x8000),
+    )
+    .unwrap();
+    assert!(r.read().0.is_empty(), "held before its frame");
+    blocks(&mut r.s, 20);
+    assert_eq!(notes(r.reader.update().0), [67]);
+}
+
+/// **A reader whose instrument is removed keeps what it last read**: the node
+/// feeds the tap no more, so the set stays as it was and reading it loses
+/// nothing.
+#[test]
+fn a_removed_instrument_leaves_the_set_as_it_was() {
+    let mut r = rig(64);
+    r.send(NOTE_ON_60);
+    assert_eq!(notes(r.read().0), [60]);
+    r.s.remove(r.instrument).unwrap();
+    let _ = r.s.update();
+    r.send([0x4090_4000, 0x8000_0000, 0, 0]);
+    let (held, losses) = r.read();
+    assert_eq!(notes(held), [60]);
+    assert_eq!(losses.dropped(), 0);
+}

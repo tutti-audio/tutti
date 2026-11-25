@@ -9,7 +9,9 @@ use tutti_modulation::{
     Law, LayerClock, Lfo, LfoRate, Polarity, ProgramTime, RATE_ANCHOR_MARGIN, Waveform, shape,
 };
 use tutti_nodes::automation::{Breakpoint, Trajectory};
-use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
+use tutti_session::{
+    DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, SourceError, ValueErrorKind,
+};
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Hz, SamplePosition, SampleRate, UnitParam};
 
 use crate::common::probe::ProbeUnit;
@@ -318,8 +320,8 @@ fn a_macro_set_keeps_the_lane_steady() {
 
 /// **A target names what the source is.** A macro has a value and no rate, an
 /// LFO a rate and no value, and a route or source that was removed has none: a
-/// call that names one fails at the call, and `set_source` re-registers the
-/// targets of the source it installs.
+/// call that names one fails at the call, and `set_source` refuses a source
+/// of another kind, so a macro keeps its value target.
 #[test]
 fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     let (mut s, mut side) = rig(1);
@@ -332,21 +334,21 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
         ValueErrorKind::NoSuchTarget
     );
 
-    s.mods_mut().set_source(knob, Lfo::sine()).unwrap();
+    assert!(matches!(
+        s.mods_mut().set_source(knob, Lfo::sine()),
+        Err(SourceError::ChangesKind { .. })
+    ));
+    s.set(knob.value().to(Bipolar::ZERO))
+        .expect("still a macro");
     assert_eq!(
-        refused(s.set(knob.value().to(Bipolar::ZERO))),
+        refused(s.set(knob.rate().to(LfoRate::Hz(Hz::new(1.0))))),
         ValueErrorKind::NoSuchTarget,
-        "no longer a macro"
+        "still no rate"
     );
-    s.set(knob.rate().to(LfoRate::Hz(Hz::new(3.0)))).unwrap();
     let _ = s.update();
     assert!(matches!(
         program(&s, cutoff).layers()[0].wave,
-        Waveform::Shape { .. }
-    ));
-    assert!(matches!(
-        clock(&s, cutoff),
-        LayerClock::Seconds { rate, .. } if rate == Hz::new(3.0)
+        Waveform::Const(_)
     ));
 
     s.mods_mut().remove_route(route).unwrap();

@@ -22,8 +22,8 @@ use crate::{
 };
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{
-    DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, LadderSaturation,
-    LadderType, ShapeKind, Stages, SvfType,
+    DelayControls, DelayLayout, FdnLayout, FreeverbControls, LadderSaturation, LadderType,
+    ShapeKind, Stages, SvfType, Waveshape,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close, wide_signal};
@@ -160,7 +160,8 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
     let h = 1.7;
     let want: Vec<f64> = x.iter().map(|&x| h * x / (1.0 + (h * x).abs())).collect();
     let node = DistortionNode::<f64>::from(
-        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign).drive(Drive::new(1.7)),
+        DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
+            .drive(Drive::new(1.7)),
     );
     assert_close(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
 }
@@ -396,9 +397,9 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            FdnNode::<f64>::from(FdnConfig::new().layout(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-            ))
+            FdnNode::<f64>::from(
+                FdnConfig::new().layout(FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT).unwrap()),
+            )
         },
         SampleRate::SR_44K1,
         1,

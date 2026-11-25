@@ -215,14 +215,11 @@ impl<T: Pod> SeqSlotsReader<T> {
     /// value of its latest write, skipping what [`new_epoch`](SeqSlotsWriter::new_epoch)
     /// made stale. Reads each slot once and never retries: a slot a write
     /// overlaps is read on the next drain. Never allocates, locks or waits.
-    pub fn drain(&mut self, mut apply: impl FnMut(usize, T)) {
-        self.drain_in_epoch(|slot, value, _| apply(slot, value));
-    }
-
-    /// [`drain`](Self::drain), handing `apply` the epoch the drain observed
-    /// beside each value: the one every value it yields was checked against, so
-    /// a caller that keeps a value past the drain knows which epoch it is
-    /// valid in ([`epoch`](Self::epoch) says which is current later).
+    ///
+    /// `apply` also gets the epoch the drain observed beside each value: the
+    /// one every value it yields was checked against, so a caller that keeps a
+    /// value past the drain knows which epoch it is valid in
+    /// ([`epoch`](Self::epoch) says which is current later).
     pub fn drain_in_epoch(&mut self, apply: impl FnMut(usize, T, u32)) {
         self.collect();
         self.finish(apply);

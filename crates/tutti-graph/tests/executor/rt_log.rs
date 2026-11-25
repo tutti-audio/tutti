@@ -3,6 +3,8 @@
 //! coalesced, gated and merged by frame, on the one-participant executor and on the
 //! parallel one, which renders the same samples with logging on.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::{TestPool, prepare, test_pool};
@@ -110,7 +112,7 @@ fn build(
         );
         outputs.push(PortSource::Node(OutputPort::new(key, 0)));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -119,10 +121,7 @@ fn build(
 }
 
 fn render(exec: &mut Executor, frames: usize, outs: usize) -> Vec<Vec<f32>> {
-    let mut bufs = vec![vec![0.0f32; frames]; outs];
-    let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(frames, &TransportPosition::default(), &[], &mut refs);
-    bufs
+    common::block(exec, frames, outs)
 }
 
 /// Drains under `filter` (which the gate takes from the next block), the
@@ -348,13 +347,12 @@ fn a_parallel_render_with_logging_on_is_bit_identical_to_the_one_participant_one
             .collect();
         (audio, records)
     };
-    let serial = run(None);
+    let serial = common::agree_across_workers(
+        common::WORKERS,
+        |workers| run((workers > 1).then(|| test_pool(workers))),
+        |(audio, records)| (common::bits(audio), records.clone()),
+    );
     assert_eq!(serial.1.len(), blocks.len() * 4 * 3);
-    for workers in common::WORKERS {
-        let parallel = run(Some(test_pool(workers)));
-        assert_eq!(parallel.0, serial.0, "{workers} workers: the samples");
-        assert_eq!(parallel.1, serial.1, "{workers} workers: the records");
-    }
 }
 
 #[test]

@@ -26,8 +26,8 @@ use tutti_buffers::{Float, InputOutput, Mono, Planes};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};
-use super::gain_pass::{CHUNK, GAIN_RAMP, MAX_KNEE, floored, key_levels};
-use super::key_filter::{KeyFilter, KeyStage};
+use super::gain_pass::{CHUNK, GAIN_RAMP, MAX_KNEE, floored};
+use super::key_filter::{KeyFilter, KeyPath};
 use crate::follower::{Follower, Smoothed};
 use crate::{Lerp, Ramp, SimdLanes, Steps};
 
@@ -53,10 +53,14 @@ pub struct CompressorControls {
     pub release: Seconds,
     /// Gain added after the reduction, in dB.
     pub makeup: Db,
-    /// The cutoff of the key filter: read only by a bank built with
-    /// [`key_filter`](CompressorBank::key_filter). Held in the SVF's range.
+    /// The filter the detector hears the key through. A running bank switches: from
+    /// [`Off`](KeyFilter::Off) the filter starts from silence at the cutoff and Q below, and
+    /// between its two responses it keeps its state.
+    pub key_filter: KeyFilter,
+    /// The cutoff of the key filter, held in the SVF's range. Not in use while the filter is
+    /// off, and kept: a switch in lands on it.
     pub key_cutoff: Hz,
-    /// The Q of the key filter, read as `key_cutoff` is.
+    /// The Q of the key filter, kept as `key_cutoff` is.
     pub key_q: Q,
 }
 
@@ -70,6 +74,7 @@ impl CompressorControls {
         attack: Seconds::ZERO,
         release: Seconds::ZERO,
         makeup: Db::UNITY,
+        key_filter: KeyFilter::Off,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
@@ -94,6 +99,7 @@ struct CompressorMember {
     attack: Seconds,
     release: Seconds,
     makeup: Db,
+    key_filter: KeyFilter,
     key_cutoff: Hz,
     key_q: Q,
     rate: SampleRate,
@@ -111,6 +117,7 @@ impl CompressorMember {
             attack: c.attack,
             release: c.release,
             makeup: c.makeup.finite_or(d.makeup).clamp(-MAX_MAKEUP, MAX_MAKEUP),
+            key_filter: c.key_filter,
             key_cutoff: c.key_cutoff.finite_or(d.key_cutoff),
             key_q: c.key_q.finite_or(d.key_q),
             rate,
@@ -189,14 +196,16 @@ pub struct CompressorBank<F: Float + SimdLanes> {
     /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
     /// and positive: a per-sample level in `F`, as `reduction` is.
     deepest: F,
-    /// The filter on the key, if the bank has one.
-    key: Option<KeyStage<F>>,
+    /// The path the key takes to the detector, through its filter while the filter is on.
+    key: KeyPath<F>,
 }
 
 impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
-    /// A compressor that does nothing at `rate`, to be set.
+    /// A compressor that does nothing at `rate`, to be set, whose key filter covers `width`
+    /// key channels (key channels past `width` are not heard through it). Allocates: build it
+    /// on the control side.
     #[must_use]
-    pub fn new(rate: SampleRate) -> Self {
+    pub fn new(width: ChannelLayout, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
@@ -207,20 +216,8 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
             rate,
             reduction: Smoothed::ZERO,
             deepest: F::ZERO,
-            key: None,
+            key: KeyPath::new(width, rate),
         }
-    }
-
-    /// This bank with the detector hearing its key through `filter`, over `width` key
-    /// channels at the cutoff and Q [`retarget`](Self::retarget) gives it. [`KeyFilter::Off`] is no
-    /// filter; key channels past `width` are not heard. Allocates: build it on the control
-    /// side.
-    #[must_use]
-    pub fn key_filter(mut self, filter: KeyFilter, width: ChannelLayout) -> Self {
-        self.key = filter
-            .response()
-            .map(|ty| KeyStage::new(ty, width, self.rate));
-        self
     }
 
     /// Back to silence: no reduction, nothing metered, and the makeup at rest on its target.
@@ -229,30 +226,25 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         self.reduction = Smoothed::ZERO;
         self.deepest = F::ZERO;
         self.makeup.jump_to_target();
-        if let Some(key) = &mut self.key {
-            key.reset();
-        }
+        self.key.reset();
     }
 
-    /// Lands the makeup on its target now.
+    /// Lands the makeup and the key filter's coefficients on their targets now.
     pub fn jump_to_target(&mut self) {
         self.makeup.jump_to_target();
-        if let Some(key) = &mut self.key {
-            key.jump_to_target();
-        }
+        self.key.jump_to_target();
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
     /// the makeup ramps over [`GAIN_RAMP`]. A non-finite control is the default's, a knee
-    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, ramps to
-    /// the cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
-    /// allocation.
+    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, while on, ramps to
+    /// the cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)); a
+    /// switch in from off starts it from silence on them at once. No allocation.
     pub fn retarget(&mut self, controls: &CompressorControls) {
         let member = CompressorMember::designed(controls, self.rate);
         self.detector = CompressorStage::of(&member);
-        if let Some(key) = &mut self.key {
-            key.retarget(member.key_cutoff, member.key_q);
-        }
+        self.key
+            .retarget(member.key_filter, member.key_cutoff, member.key_q);
         self.makeup
             .retarget_by(F::from_unit(member.makeup), Steps::Fixed(self.steps));
     }
@@ -267,7 +259,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
     ///
     /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
-    /// for a compressor on its own signal, through the key filter if the bank has one (the
+    /// for a compressor on its own signal, through the key filter while it is on (the
     /// signal it gains is never filtered). Channel `c` of `input` feeds channel `c` of
     /// `output`. A NaN key sample reads as quiet and an infinite one as the largest finite
     /// level. Frame `i` reads the makeup at the ramp's step `taken + 1 + i`, then the block's
@@ -297,10 +289,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
             let end = start + n;
             let gains = &mut gains[..n];
             // The key's level: the loudest channel at each frame, after the key filter.
-            match &mut self.key {
-                Some(stage) => stage.levels(&key, start..end, gains),
-                None => key_levels(&key, start..end, gains),
-            }
+            self.key.levels(&key, start..end, gains);
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
                 let threshold = signals

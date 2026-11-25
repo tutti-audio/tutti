@@ -307,21 +307,22 @@ proptest! {
     }
 
     /// `Ump::is_panic_controller` and `decode` agree on every packet that
-    /// decodes: a Control Change of All Sound Off or All Notes Off, in either
+    /// decodes: a Control Change of All Sound Off, All Notes Off or a mode
+    /// switch (Omni Off, Omni On, Mono On, Poly On: 124 to 127), in either
     /// protocol.
     #[test]
     fn is_panic_controller_agrees_with_decode(
         mut w in any::<[u32; 4]>(),
         force in 0u8..4,
-        pick in 0u8..3,
+        pick in 0u8..4,
     ) {
         match force {
             0 => w[0] = 0x2000_0000 | (w[0] & 0x0FFF_FFFF),
             1 => w[0] = 0x4000_0000 | (w[0] & 0x0FFF_FFFF),
-            // A Control Change of 120, 123 or a random controller, so the
-            // positive cases are common.
+            // A Control Change of 120, 123, a mode switch or a random
+            // controller, so the positive cases are common.
             2 => {
-                let controller = [120, 123, (w[0] >> 8) & 0x7F][usize::from(pick)];
+                let controller = [120, 123, 124 + (w[1] >> 1) % 4, (w[0] >> 8) & 0x7F][usize::from(pick)];
                 let ty = if w[1] & 1 == 0 { 0x2000_0000 } else { 0x4000_0000 };
                 w[0] = ty | (w[0] & 0x0F0F_00FF) | (0xB << 20) | (controller << 8);
             }
@@ -329,7 +330,7 @@ proptest! {
         }
         if let Ok(message) = Ump(w).decode() {
             let panic = |controller: CCNumber| {
-                controller == CCNumber::ALL_SOUND_OFF || controller == CCNumber::ALL_NOTES_OFF
+                controller == CCNumber::ALL_SOUND_OFF || controller.get() >= CCNumber::ALL_NOTES_OFF.get()
             };
             let by_decode = match message {
                 Message::Midi1(_, Voice1::ControlChange { controller, .. })

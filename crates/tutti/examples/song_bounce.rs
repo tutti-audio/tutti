@@ -90,9 +90,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
     ));
-    let reverb = s
-        .graph()
-        .add(FreeverbNode::from(FreeverbConfig::general_midi()));
+    let reverb = s.graph().add(FreeverbNode::from(FreeverbConfig::new()));
     s.graph().connect(first, filter)?;
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph()

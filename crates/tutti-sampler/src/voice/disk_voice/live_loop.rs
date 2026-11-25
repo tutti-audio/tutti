@@ -209,7 +209,7 @@ impl Live {
 
     /// Window moves and retractions of the voice's ring so far.
     fn moves(&self) -> u64 {
-        self.voice.inner.read.ring().moves()
+        self.voice.live().ring().moves()
     }
 
     /// Frames the voice could not read since the last call.
@@ -657,7 +657,7 @@ fn an_edit_that_changes_nothing_near_the_playhead_is_not_heard() {
     moved.loop_(far);
     memory.source.set_loop(far);
     got.extend(moved.render(1));
-    let at = moved.voice.inner.read.ring().applied().map.at;
+    let at = moved.voice.live().ring().applied().map.at;
     assert_eq!(at, 30_000, "the ring switched where the loops still agreed");
     got.extend(moved.render(599));
     want.extend(memory.render(600));
@@ -777,13 +777,16 @@ fn a_jump_back_behind_a_loop_edit_plays_the_new_loop() {
     assert_same_outside("a jump back behind the switch", &got, &want, &allowed);
 }
 
-/// A sine loop's own largest step, and the most a fade between two unit
-/// sines may add to it per frame (`2 * 15/8 / (fade + 1)`, the smootherstep's
-/// steepest slope over the unit gap).
+/// The largest step of a fade between two unit sines: each sine's own step
+/// (`2 sin(pi / period)`) weighted by the equal-power gains, whose sum is at
+/// most `sqrt(2)`; plus the gains' own motion, `pi/2 * 15/8 / (fade + 1)`
+/// (the smootherstep's steepest slope) times the sines' combined magnitude,
+/// at most `sqrt(2)`.
 fn sine_bound() -> f32 {
-    (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32
-        + 2.0 * 1.875 / (FADE + 1) as f32
-        + 1e-4
+    let root2 = std::f64::consts::SQRT_2;
+    let own = 2.0 * (std::f64::consts::PI / PERIOD as f64).sin();
+    let motion = std::f64::consts::FRAC_PI_2 * 1.875 / (FADE + 1) as f64;
+    (root2 * (own + motion)) as f32 + 1e-4
 }
 
 /// Fades chain without a step: a loop
@@ -902,14 +905,14 @@ fn a_seek_inside_a_block_is_a_jump_on_its_frame() {
     let mut memory = Memory::new(ramp_wave(SR as u32, LEN), None, 1.0, 0.0);
     let mut got = live.render(100);
     let mut want = memory.render(100);
-    assert!(!live.voice.inner.read.fading(), "a fade before any seek");
+    assert!(!live.voice.live().fading(), "a fade before any seek");
     // Back 1 000 frames, inside what the ring keeps behind the reader.
     let target = beats((got.len() + 32) as f64 - 1_000.0);
     let at = got.len() + 32;
     got.extend(live.block_seeking(32, target));
     want.extend(memory.block_seeking(32, target));
     assert!(
-        live.voice.inner.read.fading(),
+        live.voice.live().fading(),
         "read on through a seek inside the block"
     );
     assert_eq!(
@@ -1100,15 +1103,14 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         a.shared_state.stretch_rate(),
         tutti_units::ReadRate::new(0.5)
     );
-    let direction =
-        |voice: &mut DiskVoice<f32>| voice.inner.read.lent_control().map(|c| c.direction);
-    assert_eq!(direction(&mut a), Some(crate::PlayDirection::Reverse));
+    let direction = |voice: &mut DiskVoice<f32>| voice.live_mut().lent_control().direction;
+    assert_eq!(direction(&mut a), crate::PlayDirection::Reverse);
 
     // And nothing of it on the other.
     assert_eq!(b.gain(), tutti_units::Amplitude::new(1.0));
     assert_eq!(b.shared_state.speed(), PlaybackRate::UNITY);
     assert_eq!(b.shared_state.stretch_rate(), tutti_units::ReadRate::UNITY);
-    assert_eq!(direction(&mut b), Some(crate::PlayDirection::Forward));
+    assert_eq!(direction(&mut b), crate::PlayDirection::Forward);
     assert!(
         !Arc::ptr_eq(&a.shared_state, &b.shared_state),
         "the two voices hold one cell"
@@ -1129,7 +1131,7 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, LEN);
     let mut live = Live::new(&path, None, 1.0);
-    let lent = |live: &mut Live| live.voice.inner.read.lent_control().expect("a live voice");
+    let lent = |live: &mut Live| live.voice.live_mut().lent_control();
 
     let forward = lent(&mut live);
     assert_eq!(forward.direction, crate::PlayDirection::Forward);

@@ -137,9 +137,7 @@ fn moving_f64(seed: u64, which: usize, workers: usize) -> Trace {
     weigh(&mut desc, &mut rng);
     drive_mixes(&mut desc, &mut rng);
     let mut harness = Harness::<f64>::with_format(MAX_BLOCK);
-    if workers > 1 {
-        harness.exec.set_pool(Some(common::test_pool(workers)));
-    }
+    common::pooled(&mut harness.exec, workers);
     desc.start(&mut harness);
     harness.switch(
         &desc.spec.validate().expect("generated graphs are valid"),

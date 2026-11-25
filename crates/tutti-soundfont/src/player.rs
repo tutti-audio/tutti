@@ -218,7 +218,7 @@ pub(crate) struct Player<F: Float + SimdLanes> {
     block_read: usize,
     /// One over the chunk's frames, as the mix's ramp step.
     inverse_block_size: F,
-    /// The level under which a gain is not mixed, in the voices' float.
+    /// The level under which a voice's own gain is not mixed, in the voices' float.
     audible_floor: F,
 }
 
@@ -568,17 +568,25 @@ impl<F: Float + SimdLanes> Player<F> {
                 from_right * voice.previous_mix_gain_right,
                 to_right * voice.current_mix_gain_right,
             );
+            // The floor is on the voice's own gain, the loudest of its dry
+            // gains: while it is audible every plane is written, so all five
+            // end on the same chunk, and a send's level only scales.
+            if prev_l.max(cur_l).max(prev_r).max(cur_r) < self.audible_floor {
+                continue;
+            }
             let mut write = |plane: Plane, previous: F, current: F| {
-                if write_block(
+                // A send at exactly zero writes nothing.
+                if previous == F::ZERO && current == F::ZERO {
+                    return;
+                }
+                write_block(
                     previous,
                     current,
                     voice.block(),
                     &mut self.block[plane as usize],
                     self.inverse_block_size,
-                    self.audible_floor,
-                ) {
-                    self.block_heard.insert(plane);
-                }
+                );
+                self.block_heard.insert(plane);
             };
             write(Plane::DryLeft, prev_l, cur_l);
             write(Plane::DryRight, prev_r, cur_r);
@@ -651,27 +659,20 @@ impl<F: Float + SimdLanes> Player<F> {
 }
 
 /// Adds `source` into `destination` at a gain that ramps from `previous_gain`
-/// to `current_gain` across the chunk. Returns whether it wrote anything: not
-/// when the gain stays under the audible floor.
+/// to `current_gain` across the chunk.
 fn write_block<F: Float>(
     previous_gain: F,
     current_gain: F,
     source: &[F],
     destination: &mut [F],
     inverse_block_size: F,
-    audible_floor: F,
-) -> bool {
-    if previous_gain.max(current_gain) < audible_floor {
-        return false;
-    }
-
+) {
     if (current_gain - previous_gain).abs() < F::lit(1.0e-3) {
         multiply_add(current_gain, source, destination);
     } else {
         let step = inverse_block_size * (current_gain - previous_gain);
         multiply_add_slope(previous_gain, step, source, destination);
     }
-    true
 }
 
 /// `destination += a * x`, frame by frame.

@@ -3,6 +3,8 @@
 //! the wiring to the ports it keeps stays as it was, and the next commit
 //! goes through.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::collections::BTreeSet;
 use tutti_buffers::InterleavedMut;
 
@@ -57,10 +59,7 @@ fn direct(node: NodeKey, port: u16) -> Edge {
 }
 
 fn id(sink: InputPort, from: Edge) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(sink),
-        from,
-    }
+    EdgeId::into_port(sink, from)
 }
 
 fn eout(node: NodeKey, port: u16) -> EventOutputPort {
@@ -85,7 +84,6 @@ fn rig() -> (Editor, Executor) {
     for key in [A, X, B] {
         ed.insert(key, "ported", Unforkable(ported(3, 3)));
     }
-    let spec = ed.spec_mut();
     for (at, from) in [
         (inp(X, 0), direct(A, 0)),
         (inp(X, 2), direct(A, 2)),
@@ -100,17 +98,23 @@ fn rig() -> (Editor, Executor) {
             Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
         ),
     ] {
-        spec.connect(at, from);
+        ed.connect_edge(EdgeId::into_port(at, from)).unwrap();
     }
-    spec.topology.set_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(X, 0)),
         PortSource::Node(out(X, 1)),
-    ]);
-    spec.connect_events(ein(X, 0), EventEdge::Direct(eout(A, 0)));
-    spec.connect_events(ein(X, 2), EventEdge::Direct(eout(A, 2)));
-    spec.connect_events(ein(B, 0), EventEdge::Direct(eout(X, 0)));
-    spec.connect_events(ein(B, 2), EventEdge::Direct(eout(X, 2)));
-    spec.connect_events(ein(A, 1), EventEdge::feedback(eout(X, 2), DELAY));
+    ])
+    .unwrap();
+    ed.connect_events(ein(X, 0), EventEdge::Direct(eout(A, 0)))
+        .unwrap();
+    ed.connect_events(ein(X, 2), EventEdge::Direct(eout(A, 2)))
+        .unwrap();
+    ed.connect_events(ein(B, 0), EventEdge::Direct(eout(X, 0)))
+        .unwrap();
+    ed.connect_events(ein(B, 2), EventEdge::Direct(eout(X, 2)))
+        .unwrap();
+    ed.connect_events(ein(A, 1), EventEdge::feedback(eout(X, 2), DELAY))
+        .unwrap();
     // Weighted lanes: one the shape keeps, one it loses.
     ed.set_edge_fade(id(inp(X, 0), direct(A, 0)), EdgeFade::In)
         .expect("the edge exists");
@@ -265,7 +269,7 @@ fn an_edge_already_fading_out_is_not_reported() {
 fn a_driver_on_a_missing_event_output_is_released() {
     let (mut ed, _exec) = rig();
     let lane = id(inp(X, 0), direct(A, 0));
-    ed.spec_mut().connect_edge_gain(lane, eout(X, 2));
+    ed.connect_edge_gain(lane, eout(X, 2)).unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(placed.unwired.gains, vec![(lane, eout(X, 2))]);
     assert_eq!(ed.spec().gains[&lane].source, None);
@@ -353,7 +357,8 @@ fn a_feedback_self_loop_on_a_lost_port_is_listed_once() {
         inp(X, 2),
         Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
     );
-    ed.spec_mut().connect(inp(X, 2), looped.from);
+    ed.connect_edge(EdgeId::into_port(inp(X, 2), looped.from))
+        .unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(
         placed
@@ -374,6 +379,9 @@ fn a_feedback_self_loop_on_a_lost_port_is_listed_once() {
 #[test]
 fn param_drivers_on_lost_ports_are_released_and_listed() {
     let (mut ed, _exec) = rig();
+    // `X` declares a param the narrow shape will not.
+    let declares = Ported(ported(3, 3).0.params(&[UnitParam::Volume]));
+    ed.insert(X, "ported", Unforkable(declares));
     let undeclared = tutti_graph::ParamIn {
         node: X,
         param: UnitAddr::first(UnitParam::Volume),
@@ -382,8 +390,8 @@ fn param_drivers_on_lost_ports_are_released_and_listed() {
         node: B,
         param: tutti_graph::NodeMix::ADDR,
     };
-    ed.spec_mut().connect_param(undeclared, eout(A, 0));
-    ed.spec_mut().connect_param(mix, eout(X, 2));
+    ed.connect_param(undeclared, eout(A, 0)).unwrap();
+    ed.connect_param(mix, eout(X, 2)).unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let mut listed = placed.unwired.params.clone();
     listed.sort();
@@ -417,7 +425,7 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     let banded = Some(Bus::new(stereo(), BusRole::Aux));
     ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)));
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
-    ed.spec_mut().main_output = Some(stereo());
+    ed.declare_main_output(Some(stereo()), ed.spec().main_output_id);
     let main_to_main_output = BusOutputPort::Node(NodeBus::new(y, 0));
     let band0 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(0));
     let band1 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(1));
@@ -464,9 +472,8 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
     ed.insert(X, "const", konst(2));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(out(X, 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(out(X, 0))])
+        .unwrap();
     let mut tap = ed
         .open_tap(
             TapId::of(1),
@@ -506,7 +513,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
 fn a_narrower_reinsert_during_a_main_output_fade_prunes_the_spec_and_not_the_bank() {
     let (mut ed, _exec) = rig();
     ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(64))));
-    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let lost = EdgeId {
         sink: PortSink::Output(1),

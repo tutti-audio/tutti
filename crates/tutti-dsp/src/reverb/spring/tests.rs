@@ -3,6 +3,7 @@ use tutti_rt::SplitMix64;
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
+use crate::tail_probe;
 use tutti_buffers::InputOutput;
 
 const NZ2: ChannelLayout = ChannelLayout::STEREO;
@@ -173,9 +174,9 @@ fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
     }
 }
 
-/// The reported tail covers the ring-out: past it the impulse response is under `TAIL_FLOOR`
-/// (-60 dB) of its peak, and it is no more than the decay and three trips long, the trip
-/// `N + M K (1 + g) / (1 - g) + p / (1 - p)` of the low cascade at full dispersion.
+/// The reported tail covers the ring-out: past it the impulse response is under `TAIL_FLOOR` (-60
+/// dB) of its peak, and it is no more than the decay and three trips long, the trip `N + M K (1 +
+/// g) / (1 - g) + p / (1 - p)` of the low cascade at full dispersion.
 #[test]
 fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips() {
     let lay = layout(40, 0.04);
@@ -195,6 +196,148 @@ fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips(
     let g = LOW_COEFFICIENT;
     let trip = 1920.0 + 160.0 * (1.0 + g) / (1.0 - g) + pole / (1.0 - pole);
     assert!(tail as f64 <= 2.0 * 48_000.0 + 3.0 * trip, "{tail}");
+}
+
+/// The reported tail covers the ring-out of the worst finite inputs: for the default, the
+/// shortest decay with no dispersion and a tone far above Nyquist, the lowest tone, half
+/// dispersion, the longest decay (held at the loop gain's ceiling) on one stage and on eight, the
+/// shortest and the longest loop, and 512 stages, at 8 kHz (a one-stage spring also at 48 kHz and
+/// 44.1 kHz), an impulse, a full-scale noise burst and a full-scale step (twice the slowest trip,
+/// so the loop and every stage are full) stop, and from the reported tail past the last input
+/// frame no frame is above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor
+/// is relative to the response's peak: the step is built up by the loop, whose gain reaches the
+/// ceiling, far past the input.
+#[test]
+fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
+    let slow = [SampleRate::of(8_000.0)];
+    let at = |decay: f64, tone: f64, dispersion: f64| SpringControls {
+        decay: Seconds::new(decay),
+        tone: Hz::new(tone),
+        dispersion: Mix::new(dispersion),
+    };
+    let cases: Vec<(&str, SpringLayout, SpringControls, &[SampleRate])> = vec![
+        (
+            "default",
+            SpringLayout::DEFAULT,
+            SpringControls::DEFAULT,
+            &slow,
+        ),
+        (
+            "shortest decay, no dispersion, tone past Nyquist",
+            SpringLayout::DEFAULT,
+            at(0.1, 1.0e6, 0.0),
+            &slow,
+        ),
+        (
+            "lowest tone",
+            SpringLayout::DEFAULT,
+            at(1.0, 20.0, 1.0),
+            &slow,
+        ),
+        (
+            "half dispersion, tone 500 Hz",
+            SpringLayout::DEFAULT,
+            at(1.0, 500.0, 0.5),
+            &slow,
+        ),
+        (
+            "one stage, longest decay (loop gain at its ceiling)",
+            layout(1, 0.005),
+            at(60.0, 1.0e6, 0.0),
+            &slow,
+        ),
+        (
+            "one stage, 1 s loop",
+            layout(1, 1.0),
+            at(2.0, 4_000.0, 1.0),
+            &slow,
+        ),
+        (
+            "8 stages, longest decay, lowest tone",
+            layout(8, 0.04),
+            at(60.0, 20.0, 1.0),
+            &slow,
+        ),
+        (
+            "512 stages, 1 s loop, shortest decay",
+            layout(512, 1.0),
+            at(0.1, 4_000.0, 1.0),
+            &slow,
+        ),
+    ];
+    // The whole grid runs at 8 kHz; a one-stage spring also runs at 48 kHz and 44.1 kHz, where its
+    // loop of 5 ms rounds to a different frame count (the default spring there costs seconds).
+    let wide = [SampleRate::SR_48K, SampleRate::SR_44K1];
+    let cases = cases.into_iter().chain([(
+        "one stage, 5 ms loop, decay 60 s (the loop rounds differently)",
+        layout(1, 0.005),
+        at(60.0, 4_000.0, 1.0),
+        &wide[..],
+    )]);
+    for (name, lay, c, rates) in cases {
+        for &rate in rates {
+            let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, rate, lay);
+            spring.retarget(&c);
+            spring.jump_to_target();
+            let Tail::Finite(tail) = spring.tail_of(&c) else {
+                panic!("{name}: a finite tail")
+            };
+            let trip = Design::of(lay, rate, &c).trip.ceil() as usize;
+            for (input_name, input) in tail_probe::stimuli::<f64>(2 * trip) {
+                spring.reset();
+                let frames = tail_probe::run_length(input.len(), tail.get(), trip);
+                let y = &render(&mut spring, &[&tail_probe::padded(&input, frames)])[0];
+                let what = format!("{rate:?} {name}, {input_name}");
+                tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[y]);
+            }
+        }
+    }
+}
+
+/// A decay raised to its longest while the short one rings out is covered by the tail a node
+/// reports after the move (the larger of what is owed and the long tail, from the last input
+/// frame, under the ceiling the spring declares): from it past the last input frame no frame is
+/// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the loop at the move decays at the new, slower rate from the move on. A short spring at 8 kHz
+/// keeps the minute of the longest decay small.
+#[test]
+fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
+    let rate = SampleRate::of(8_000.0);
+    let lay = layout(8, 0.04);
+    let at = |decay: f64| SpringControls {
+        decay: Seconds::new(decay),
+        ..SpringControls::DEFAULT
+    };
+    let (short, long) = (at(0.5), at(SpringControls::MAX_DECAY.get()));
+    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, rate, lay);
+    let (Tail::Finite(was), Tail::Finite(now), Tail::Finite(ceiling)) =
+        (spring.tail_of(&short), spring.tail_of(&long), spring.tail())
+    else {
+        panic!("finite tails")
+    };
+    let trip = Design::of(lay, rate, &long).trip.ceil() as usize;
+    for (moved_at, (name, input)) in [0, was.get() / 3].into_iter().flat_map(|at| {
+        tail_probe::stimuli::<f64>(2 * trip)
+            .into_iter()
+            .map(move |s| (at, s))
+    }) {
+        spring.retarget(&short);
+        spring.reset();
+        let head = input.len() + moved_at;
+        let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling.get());
+        let first = render(&mut spring, &[&tail_probe::padded(&input, head)]);
+        spring.retarget(&long);
+        let rest = tail_probe::run_length(input.len(), reported, trip) - head;
+        let second = render(&mut spring, &[&vec![0.0; rest]]);
+        tail_probe::assert_raised_tail_covers(
+            &format!("{name}, decay 0.5 s to 60 s at {moved_at} frames after the input"),
+            input.len(),
+            reported,
+            &[&first[0]],
+            &[&second[0]],
+        );
+    }
 }
 
 /// Each channel is its own spring: input on one channel leaves the other exactly silent.

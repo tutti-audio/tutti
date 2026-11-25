@@ -18,14 +18,14 @@ use tutti_session::{LoadPlugin as Load, PeerState, PluginInstance, Session};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
-pub struct Spec {
+pub(crate) struct Spec {
     plugin: PluginRef,
     hosting: Hosting,
     state: Option<PeerState>,
 }
 
 impl Spec {
-    pub fn new(plugin: PluginRef) -> Self {
+    pub(crate) fn new(plugin: PluginRef) -> Self {
         Self {
             plugin,
             hosting: Hosting::Auto,
@@ -34,7 +34,7 @@ impl Spec {
     }
 
     #[must_use]
-    pub fn hosting(mut self, hosting: Hosting) -> Self {
+    pub(crate) fn hosting(mut self, hosting: Hosting) -> Self {
         self.hosting = hosting;
         self
     }
@@ -42,7 +42,7 @@ impl Spec {
     /// With `state` restored before the plugin is activated (the entry checks
     /// that it is the plugin's own).
     #[must_use]
-    pub fn restoring(mut self, state: PeerState) -> Self {
+    pub(crate) fn restoring(mut self, state: PeerState) -> Self {
         self.state = Some(state);
         self
     }
@@ -57,7 +57,7 @@ impl Spec {
 /// plugin the test did not mean. So the probe asserts none is set, and a test
 /// that sets one [`prime`]s the plugin's file first. Once the probe is done the catalog's
 /// writer is joined, so the helper leaves no thread of its own behind.
-pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
+pub(crate) fn probe(catalog: &mut Catalog, path: &std::path::Path) {
     let set: Vec<_> = std::env::vars_os()
         .filter_map(|(key, _)| key.into_string().ok())
         .filter(|key| key.starts_with("TUTTI_CLAP_PROBE_"))
@@ -79,7 +79,7 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
 
 /// A catalog that probed `plugin`'s file, and the id the ref names in it (the
 /// file's first plugin when the ref names none).
-pub fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) {
+pub(crate) fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) {
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let config =
         CatalogConfig::new(dir.path()).probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
@@ -101,7 +101,7 @@ pub fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) 
 /// # Panics
 ///
 /// When the ref names no plugin, or one of another format.
-pub fn clap_id(plugin: &PluginRef) -> &str {
+pub(crate) fn clap_id(plugin: &PluginRef) -> &str {
     match plugin.id() {
         Some(PluginId::Clap(id)) => id,
         other => panic!("a CLAP plugin: {other:?}"),
@@ -109,7 +109,7 @@ pub fn clap_id(plugin: &PluginRef) -> &str {
 }
 
 /// A plugin loaded and in a node, in one call.
-pub trait LoadPlugin {
+pub(crate) trait LoadPlugin {
     /// Loads `spec` and adds its node.
     ///
     /// # Errors
@@ -150,7 +150,7 @@ static PRIMED: Mutex<Vec<Primed>> = Mutex::new(Vec::new());
 
 /// Probes `plugin`'s file for the loads of this process. A test that sets a
 /// `TUTTI_CLAP_PROBE_*` variable calls it first, before the variable.
-pub fn prime(plugin: &PluginRef) {
+pub(crate) fn prime(plugin: &PluginRef) {
     let mut primed = PRIMED.lock();
     let file = tutti_plugin_db::canonical_path(plugin.path());
     let id = plugin.id().cloned();
@@ -192,7 +192,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin 
 
 /// What a test does with a plugin of its own catalog: `id` in `catalog`, loaded
 /// and in a node.
-pub trait LoadFrom {
+pub(crate) trait LoadFrom {
     /// Loads `id` (hosted as `hosting`, from `state` when given) and adds its
     /// node.
     ///
@@ -247,7 +247,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
 
 /// A load of a known hosting, for a test that pins it: the load is built and
 /// its variant taken.
-pub trait Hosted {
+pub(crate) trait Hosted {
     /// `id` loaded out of process.
     ///
     /// # Panics
@@ -281,7 +281,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> Hosted for 
 
 /// An out-of-process load run to its node on the calling thread: the test's
 /// wait on the future.
-pub trait Block {
+pub(crate) trait Block {
     /// Awaits the load.
     ///
     /// # Errors
@@ -299,7 +299,7 @@ impl Block for LoadOutOfProcess {
 /// A plugin's state or preset work as an app runs it for the plugin's hosting:
 /// on the calling main thread for a plugin in process, awaited for one in a
 /// plugin server.
-pub trait Perform {
+pub(crate) trait Perform {
     /// What the work yields.
     type Output;
 

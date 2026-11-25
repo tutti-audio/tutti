@@ -3,7 +3,10 @@
 //! the parallel executor, and allocation-free on every participant. A closed
 //! tap compiles to no op, and a render is the same with a tap open or closed.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{Interleaved, PlanesMut};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -14,7 +17,7 @@ use tutti_graph::{
     Editor, Executor, ForkCause, ForkSource, ForkTarget, Forked, IntoNode, MissingSource, Node,
     NodeParts, Op, RenderMode, TapReader, TransportPosition,
 };
-use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions, TapSpec};
+use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions};
 use tutti_units::{Beat, Bpm, Frame, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
@@ -54,7 +57,7 @@ fn out(node: u64) -> PortSource {
 /// output channel: different latencies, so the compiler aligns the outputs.
 /// Returns the sources of the six gains.
 fn build(ed: &mut Editor) -> Vec<PortSource> {
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let mut gains = Vec::new();
     for k in 0..CHAINS {
         let (lag, gain) = (10 + k, 20 + k);
@@ -73,18 +76,19 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
                 width: 1,
             }),
         );
-        let t = &mut ed.spec_mut().topology;
-        t.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(lag), 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
-        t.edges.insert(
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(gain), 0),
-            vec![Edge::Direct(out(lag))],
-        );
+            Edge::Direct(out(lag)),
+        ))
+        .unwrap();
         gains.push(out(gain));
     }
-    ed.spec_mut().topology.set_outputs(gains.clone());
+    ed.wire_declared_outputs(gains.clone()).unwrap();
     gains
 }
 
@@ -97,12 +101,10 @@ struct Rig {
 
 fn rig(workers: usize, no_alloc: bool) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     let gains = build(&mut ed);
     Rig {
@@ -140,13 +142,9 @@ fn aligned_at(k: u64, t: u64) -> f32 {
 /// One block; returns the output channels.
 fn block(r: &mut Rig, n: usize, frame: u64) -> Vec<Vec<f32>> {
     let input: Vec<f32> = (0..n).map(|k| input_at(frame + k as u64)).collect();
-    let mut chans = vec![vec![0.0f32; n]; CHAINS as usize];
-    let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-    let ins = [&input[..]];
     // Only the render is inside the gate: this helper's own buffers allocate.
-    r.exec.process(n, &t, &ins, &mut outs);
-    chans
+    common::block_in(&mut r.exec, n, &[&input], CHAINS as usize, &t)
 }
 
 fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
@@ -170,7 +168,7 @@ fn commit(r: &mut Rig) {
 }
 
 /// What a run read: the output channels and each tap, interleaved.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Read {
     outputs: Vec<Vec<f32>>,
     /// The six outputs' sources, aligned.
@@ -285,17 +283,15 @@ fn a_tap_is_aligned_by_the_compiler_and_any_width() {
 /// `assert_no_alloc`, and the one-participant render itself is the analytic one.
 #[test]
 fn the_parallel_taps_are_bit_identical_and_allocation_free() {
-    let mut s = rig(1, false);
-    let serial = run(&mut s, 8);
+    let serial = common::agree_across_workers(
+        [2, 3, 4],
+        |workers| run(&mut rig(workers, workers > 1), 8),
+        Clone::clone,
+    );
     assert!(
         serial.aligned.iter().any(|&x| x != 0.0),
         "the tap carries signal"
     );
-    for workers in [2, 3, 4] {
-        let mut p = rig(workers, true);
-        let par = run(&mut p, 8);
-        assert_eq!(serial, par, "{workers} workers");
-    }
 }
 
 /// The plan's tap ops: one per lane while open, none once closed, and a closed
@@ -920,12 +916,11 @@ fn opening_an_id_again_replaces_the_tap() {
     );
 }
 
-/// A tap's lanes are fixed by how it was opened: editing `TapSpec::Ports`' sources to
-/// another length through the spec is refused at the commit (the writer the
-/// executor holds has that many rings), and opening the id again at another
-/// width replaces the tap at the new one, lanes and all.
+/// Opening a tap's id again at another width replaces the tap at the new
+/// one, lanes and all (the writer the executor holds has the width it was
+/// opened with).
 #[test]
-fn a_tap_cannot_change_its_width_under_its_writer() {
+fn reopening_a_tap_at_another_width_replaces_it() {
     let mut r = rig(1, false);
     let _wide =
         r.ed.open_tap(
@@ -935,19 +930,6 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
         )
         .expect("the sources exist");
     commit(&mut r);
-    let Some(TapSpec::Ports { sources, .. }) = r.ed.spec_mut().topology.taps.get_mut(&TapId::of(1))
-    else {
-        panic!("a ports tap")
-    };
-    sources.push(PortSource::Zero);
-    assert_eq!(
-        r.ed.commit(),
-        Err(tutti_graph::CommitError::TapWidth {
-            tap: TapId::of(1),
-            sources: 4,
-            opened: 3
-        })
-    );
     // Reopening at width 1 replaces it, and the lanes are the new tap's.
     let mut narrow =
         r.ed.open_tap(
@@ -1054,7 +1036,7 @@ fn a_narrowed_node_silences_the_tap_lanes_past_its_width_and_commits() {
 #[test]
 fn a_tap_on_a_main_input_that_goes_missing_reads_silence() {
     let mut r = rig(1, false);
-    r.ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
+    r.ed.resize_inputs(ChannelLayout::STEREO);
     let mut tap =
         r.ed.open_tap(
             TapId::of(1),
@@ -1063,7 +1045,7 @@ fn a_tap_on_a_main_input_that_goes_missing_reads_silence() {
         )
         .expect("both inputs exist when it opens");
     // The graph goes back to one input before anything is committed.
-    r.ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    r.ed.resize_inputs(ChannelLayout::MONO);
     commit(&mut r);
     block(&mut r, 100, 0);
     let mut got = Vec::new();

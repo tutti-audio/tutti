@@ -96,10 +96,11 @@ fn input(
     rig_with(node, ports, max, |ed| {
         let key = NodeKey(3);
         ed.insert(key, "inlet", inlet);
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(1), 0),
             EventEdge::Direct(EventOutputPort::new(key, 0)),
-        );
+        )
+        .unwrap();
     })
 }
 
@@ -403,10 +404,11 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
                 }
                 let key = NodeKey(3 + source);
                 ed.insert(key, "source", inlet);
-                ed.spec_mut().connect_events(
+                ed.connect_events(
                     EventInputPort::new(NodeKey(1), 0),
                     EventEdge::Direct(EventOutputPort::new(key, 0)),
-                );
+                )
+                .unwrap();
             }
         });
     block(&mut exec, 512);
@@ -511,10 +513,12 @@ fn retiring_lanes(
             "out",
             tutti_graph::Unforkable(Heavy(MidiOutNode::new().following(&generation))),
         );
-        rig.editor.spec_mut().connect_events(
-            EventInputPort::new(NodeKey(100 + u64::from(lane)), 0),
-            EventEdge::Direct(EventOutputPort::new(NodeKey(10 + u64::from(lane)), 0)),
-        );
+        rig.editor
+            .connect_events(
+                EventInputPort::new(NodeKey(100 + u64::from(lane)), 0),
+                EventEdge::Direct(EventOutputPort::new(NodeKey(10 + u64::from(lane)), 0)),
+            )
+            .unwrap();
         rig.feed(NodeKey(100 + u64::from(lane)), 0, lane);
         writers.push((writer, generation_writer));
         generations.push(generation);
@@ -1719,10 +1723,11 @@ fn transform_over<N: tutti_graph::IntoNode>(
     }
     rig_with(node, 1, 512, |ed| {
         ed.insert(NodeKey(3), "inlet", inlet);
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(1), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(3), 0)),
-        );
+        )
+        .unwrap();
     })
 }
 

@@ -2,6 +2,7 @@
 //! the queue of Subscription messages, Flow Control, Timeout Wait, media types
 //! and Link actions. Each test names the property of the spec it holds.
 
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use super::super::capabilities::{PeCiMessage, SimultaneousRequests};
@@ -10,7 +11,8 @@ use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
 use super::super::header::{
-    PeEncoding, PeEndedBy, PeHeader, PeReply, PeSetScope, PeStatus, PeSubscription, PeUpdateCommand,
+    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeSetScope, PeStatus, PeSubscription,
+    PeUpdateCommand,
 };
 use super::super::initiator::{PeCall, PeSet};
 use super::super::limits::{MediaType, ResourceName};
@@ -867,6 +869,47 @@ fn only_an_untyped_resource_holds_binary_data() {
     assert_eq!(json_bytes, PeData::LocalOn(PeLocalOn(true)));
 }
 
+// M2-103 §8.3: a media type is declared by type and subtype; the parameters and the
+// case of a request's media type do not make it another type.
+/// Spec: m2-103/8.1#2
+#[test]
+fn a_media_type_is_matched_by_type_and_subtype() {
+    let entry = custom_entry("X-Blob", r#"{"title":"Blob"}"#)
+        .can_set(CanSet::Full)
+        .media_types(vec![MediaType::OCTET_STREAM])
+        .build()
+        .unwrap();
+    let set_of = |text: &str| {
+        let binary = PeBinary::new(MediaType::new(text).unwrap(), vec![1]).unwrap();
+        let data = PeData::Opaque(PeOpaque::binary(custom_name("X-Blob"), binary));
+        ResourceSet::full(super::exchange::target(custom("X-Blob")), data).unwrap()
+    };
+    assert_eq!(
+        set_of("Application/Octet-Stream; x=1").check(&entry),
+        Ok(())
+    );
+    assert!(matches!(
+        set_of("application/x-other; application/octet-stream").check(&entry),
+        Err(RequestRefused::MediaTypeNotDeclared { .. })
+    ));
+    // What is written is the type as it was made.
+    let (written, _) = blob_data("X-Blob", &[1]).to_wire();
+    assert_eq!(written, Some(octets()));
+    assert_eq!(PeData::LocalOn(PeLocalOn(true)).to_wire().0, None);
+}
+
+// M2-103 §6.1.6: Property Data is JSON unless `mediaType` declares another type; a
+// parameter of `application/json` does not make the data another type.
+/// Spec: m2-103/6.1.6#1
+#[test]
+fn json_with_parameters_decodes_as_a_typed_value() {
+    let media = MediaType::new("application/json; charset=utf-8").unwrap();
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&media), b"true"),
+        Ok(PeData::LocalOn(PeLocalOn(true)))
+    );
+}
+
 // M2-103 §10: a Partial Set is for JSON; binary data has no pointers.
 #[test]
 fn a_partial_change_does_not_apply_to_binary_data() {
@@ -1379,5 +1422,82 @@ fn a_link_res_id_has_only_the_characters_of_a_res_id() {
         res_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    );
+}
+
+/// The status of the one reply a Responder gave to an inquiry.
+fn reply_status(actions: &[ResponderAction]) -> PeStatus {
+    let chunks = chunks_of(actions);
+    let [(_, chunk)] = chunks.as_slice() else {
+        panic!("not one reply: {actions:?}");
+    };
+    let Ok(PeHeader::Reply(reply)) = PeHeader::try_from(chunk.header()) else {
+        panic!("not a reply header");
+    };
+    reply.status
+}
+
+// M2-103 §8.6.2 gives `offset` and `limit` to the Get of a List Resource. A Set
+// that carries them is refused whether or not the entry paginates, and nothing is
+// set.
+#[test]
+fn a_set_with_a_page_is_refused_whether_or_not_the_entry_paginates() {
+    let mut store = store();
+    let held = |name: &str| PeData::decode(custom(name), &json("[1,2]")).unwrap();
+    for (name, paginates) in [("X-PagedList", true), ("X-PlainList", false)] {
+        let entry = custom_entry(name, r#"{"title":"List","type":"array"}"#)
+            .can_set(CanSet::Full)
+            .can_paginate(paginates)
+            .build()
+            .unwrap();
+        store.declare(entry);
+        store.put(None, held(name)).unwrap();
+    }
+    let mut link = Link::new(store, 256);
+    for (id, name) in [(1, "X-PagedList"), (2, "X-PlainList")] {
+        let mut request = super::super::header::PeRequest::new(ResourceName::new(name).unwrap());
+        request.page = Some(PePage {
+            offset: 0,
+            limit: NonZeroU32::new(1).unwrap(),
+        });
+        let actions = inquire(
+            &mut link,
+            PeMessageKind::SET_INQUIRY,
+            id,
+            PeHeader::Request(request),
+            b"[3]",
+        );
+        assert_eq!(reply_status(&actions), PeStatus::BadRequest, "{name}");
+        assert_eq!(
+            link.store
+                .get(&super::exchange::target(custom(name)))
+                .cloned(),
+            Some(held(name)),
+            "{name} was set"
+        );
+    }
+}
+
+// M2-103 §14: ResourceList has no entry that declares pagination, Flow Control or
+// Subscription, so a Get of it with a page is 400, with Flow Control 406, and a
+// Start Subscription to it 405.
+#[test]
+fn the_responder_refuses_resource_list_what_it_does_not_declare() {
+    let mut raw = Raw::new();
+    let mut paged = pe_get("ResourceList");
+    paged.page = Some(PePage {
+        offset: 0,
+        limit: NonZeroU32::new(1).unwrap(),
+    });
+    assert_eq!(raw.status(PeCall::Get(paged)), PeStatus::BadRequest);
+    let mut flow = pe_get("ResourceList");
+    flow.flow_control = PeFlowControl::On;
+    assert_eq!(
+        raw.status(PeCall::Get(flow)),
+        PeStatus::FlowControlUnsupported
+    );
+    assert_eq!(
+        raw.status(PeCall::Subscribe(pe_get("ResourceList"))),
+        PeStatus::NotAllowed
     );
 }

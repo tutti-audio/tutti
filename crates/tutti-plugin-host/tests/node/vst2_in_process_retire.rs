@@ -13,6 +13,8 @@
 //! nothing closed on the audio side), then collects on the control thread and reads it again
 //! (1).
 
+use tutti_graph::testing::WireDeclared;
+
 use std::path::PathBuf;
 use tutti_buffers::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
@@ -69,9 +71,8 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     ));
     editor.insert(key, "vst2", Unforkable(unit.bind(tutti_fixtures::tempo())));
     editor
-        .spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))));
+        .wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .unwrap();
     editor.commit().expect("commits");
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
@@ -86,9 +87,8 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
 
     editor.remove(key);
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Zero, PortSource::Zero]);
+        .wire_declared_outputs(vec![PortSource::Zero, PortSource::Zero])
+        .unwrap();
     editor.commit().expect("the removal commits");
     // The executor applies the removal under `RtScope`: the unit moves into the commit box (a
     // drop here would abort the test binary); the blocks that follow render under it too.

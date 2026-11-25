@@ -5,11 +5,13 @@
 //! Each scenario runs on the one-participant executor and on the parallel one, and the
 //! two must log the same events.
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
 
-use common::TestPool;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -19,8 +21,8 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_ump::{
-    Address, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump,
-    Voice1, Voice2,
+    Address, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
+    U14, Ump, Voice1, Voice2,
 };
 use tutti_units::Samples;
 
@@ -155,6 +157,12 @@ fn off61() -> Words {
     m1_off(0, 61)
 }
 
+/// The close of a held key: a MIDI 2.0 Note Off at velocity 0 on group 0,
+/// channel 0, whichever protocol began the note.
+fn close(note: u8) -> Words {
+    m2_off(0, note)
+}
+
 /// A MIDI 1.0 Control Change on channel 0, group 0.
 fn m1_controller(controller: CCNumber, value: u8) -> Words {
     midi::m1_cc(MidiChannel::FIRST, controller, U7::of(value)).0
@@ -194,7 +202,7 @@ impl Rig {
         let log: Log = tutti_fixtures::Record::new();
         let (ed, mut exec) = Editor::with_event_capacity(prep, 64);
         if matches!(mode, Mode::Parallel) {
-            exec.set_pool(Some(TestPool::new(2)));
+            common::pooled_fresh(&mut exec, 2);
         }
         let mut r = Self {
             ed,
@@ -228,12 +236,13 @@ impl Rig {
                 }),
             );
             if lag {
-                ed.spec_mut().topology.edges.insert(
+                ed.connect_edge(EdgeId::into_port(
                     tutti_graph::InputPort::new(NodeKey(s), 0),
-                    vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
+                    tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
                         tutti_graph::OutputPort::new(NodeKey(LAG), 0),
-                    ))],
-                );
+                    )),
+                ))
+                .unwrap();
             }
         }
         r
@@ -246,10 +255,9 @@ impl Rig {
             Some(delay) => EventEdge::feedback(out(f), delay),
             None => EventEdge::Direct(out(f)),
         };
-        let spec = self.ed.spec_mut();
-        spec.events.clear();
+        clear_events(&mut self.ed);
         for &(f, to) in edges {
-            spec.connect_events(at(to), edge(f));
+            self.ed.connect_events(at(to), edge(f)).unwrap();
         }
         self.ed.commit().expect("commits");
         self.exec.apply_pending();
@@ -288,8 +296,7 @@ impl Rig {
 
     /// Render one block of `MAX` frames.
     fn block(&mut self) {
-        let t = TransportPosition::default();
-        self.exec.process(MAX, &t, &[], &mut []);
+        common::block(&mut self.exec, MAX, 0);
         self.frame += MAX as u64;
     }
 
@@ -359,7 +366,7 @@ fn retarget_closes_the_old_sink_and_passes_the_orphan_off() {
     same(&logs);
     assert_eq!(
         sink_words(&logs[0], 2),
-        vec![on60(), off60()],
+        vec![on60(), close(60)],
         "A: note, then its close"
     );
     assert_eq!(
@@ -386,7 +393,7 @@ fn unroute_closes_the_sink() {
     same(&logs);
     assert_eq!(
         sink_words(&logs[0], 2),
-        vec![on60(), on61(), off60(), off61()]
+        vec![on60(), on61(), close(60), close(61)]
     );
 }
 
@@ -407,9 +414,12 @@ fn fan_out_closes_only_the_cut_sink() {
         &[2, 3],
     );
     same(&logs);
-    assert_eq!(sink_words(&logs[0], 2), vec![on60(), off60()]);
+    assert_eq!(sink_words(&logs[0], 2), vec![on60(), close(60)]);
     assert_eq!(sink_words(&logs[0], 3), vec![on60(), off60()]);
-    let a = logs[0].iter().find(|e| e.0 == 2 && e.2 == off60()).unwrap();
+    let a = logs[0]
+        .iter()
+        .find(|e| e.0 == 2 && e.2 == close(60))
+        .unwrap();
     let b = logs[0].iter().find(|e| e.0 == 3 && e.2 == off60()).unwrap();
     assert!(
         a.1 < b.1,
@@ -499,6 +509,32 @@ fn velocity_zero_is_an_off_in_midi1_and_an_on_in_midi2() {
     );
 }
 
+/// A note is one key whichever protocol carried it (M2-104 Appendix D.3
+/// translates the two field for field): an off in the other protocol ends it,
+/// so a cut edge has nothing to close.
+#[test]
+fn an_off_in_the_other_protocol_ends_the_note_so_a_cut_edge_closes_nothing() {
+    let logs = on_all(
+        |r| {
+            r.wire(&[(1, 2)]);
+            r.send(on60());
+            r.send(m2_off(0, 60));
+            r.send(m2_on(0, 61));
+            r.send(off61());
+            r.block();
+            r.wire(&[]);
+            r.block();
+        },
+        &[2],
+    );
+    same(&logs);
+    assert_eq!(
+        sink_words(&logs[0], 2),
+        vec![on60(), m2_off(0, 60), m2_on(0, 61), off61()],
+        "what the source sent, and no close"
+    );
+}
+
 /// Group and channel are part of the key.
 #[test]
 fn group_and_channel_are_part_of_the_key() {
@@ -529,11 +565,12 @@ fn group_and_channel_are_part_of_the_key() {
     assert_eq!(
         &sink_words(&logs[0], 2)[2..],
         &[
-            off60(),
-            voice(Voice1::NoteOff {
-                note: key,
-                velocity: U7::of(0)
-            })
+            close(60),
+            Ump::from(Message::Midi2(
+                address,
+                Voice2::note_off(key, NoteVelocity::MIN)
+            ))
+            .0
         ]
     );
 }
@@ -604,7 +641,7 @@ fn a_cut_edge_releases_every_pedal_and_centres_the_bend() {
             .into_iter()
             .chain([m1_bend(0x2000)])
             .chain(m2_up)
-            .chain([m2_bend(0x8000_0000), off60()])
+            .chain([m2_bend(0x8000_0000), close(60)])
             .collect::<Vec<_>>()
     );
 }
@@ -624,7 +661,7 @@ fn a_replaced_source_closes_its_sinks() {
         &[2],
     );
     same(&logs);
-    assert_eq!(sink_words(&logs[0], 2), vec![on60(), off60()]);
+    assert_eq!(sink_words(&logs[0], 2), vec![on60(), close(60)]);
 }
 
 /// A removed source closes the sinks it fed (executor only).
@@ -636,7 +673,7 @@ fn a_removed_source_closes_its_sinks() {
     r.block();
     r.remove_source();
     r.block();
-    assert_eq!(r.words(2), vec![on60(), off60()]);
+    assert_eq!(r.words(2), vec![on60(), close(60)]);
 }
 
 /// A sink that goes away with the edge: nothing to send, and nothing breaks.
@@ -686,7 +723,7 @@ fn a_close_follows_the_events_in_flight_on_a_delayed_edge() {
         &[2],
     );
     same(&logs);
-    assert_eq!(sink_words(&logs[0], 2), vec![on60(), off60()]);
+    assert_eq!(sink_words(&logs[0], 2), vec![on60(), close(60)]);
     let f: Vec<u64> = logs[0].iter().map(|e| e.1).collect();
     assert!(f[0] <= f[1], "in order: {f:?}");
 }
@@ -730,7 +767,7 @@ fn a_new_delayed_edge_passes_the_orphan_off() {
     );
     same(&logs);
     assert_eq!(sink_words(&logs[0], 3), vec![off60()]);
-    assert_eq!(sink_words(&logs[0], 2), vec![on60(), off60()]);
+    assert_eq!(sink_words(&logs[0], 2), vec![on60(), close(60)]);
 }
 
 /// Two sources into one sink: cutting one closes only its keys.
@@ -750,10 +787,10 @@ fn fan_in_closes_the_cut_sources_keys_only() {
     }
     let both = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = &mut r.ed;
-        let spec = ed.spec_mut();
-        spec.events.clear();
+        clear_events(ed);
         for &(f, to) in edges {
-            spec.connect_events(at(to), EventEdge::Direct(out(f)));
+            ed.connect_events(at(to), EventEdge::Direct(out(f)))
+                .unwrap();
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -767,7 +804,7 @@ fn fan_in_closes_the_cut_sources_keys_only() {
     r.block();
     assert_eq!(
         r.words(2),
-        vec![on60(), on61(), off60()],
+        vec![on60(), on61(), close(60)],
         "only source 1's key closed"
     );
 }
@@ -800,7 +837,7 @@ fn a_crossfaded_source_closes_its_sinks() {
     r.block();
     r.block();
     r.block();
-    assert_eq!(r.words(2), vec![on60(), off60(), on61()]);
+    assert_eq!(r.words(2), vec![on60(), close(60), on61()]);
 }
 
 /// Two sources hold the same key into one sink and one is cut: the sink
@@ -819,10 +856,10 @@ fn fan_in_on_one_key_is_closed_by_either_source() {
     );
     let wire = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = &mut r.ed;
-        ed.spec_mut().events.clear();
+        clear_events(ed);
         for &(f, to) in edges {
-            ed.spec_mut()
-                .connect_events(at(to), EventEdge::Direct(out(f)));
+            ed.connect_events(at(to), EventEdge::Direct(out(f)))
+                .unwrap();
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -834,17 +871,29 @@ fn fan_in_on_one_key_is_closed_by_either_source() {
     r.block();
     wire(&mut r, &[(5, 2)]);
     r.block();
-    assert_eq!(r.words(2), vec![on60(), on60(), off60()]);
+    assert_eq!(r.words(2), vec![on60(), on60(), close(60)]);
 }
 
-/// A re-prepare checks the units out and back; the tables go with them, so a
-/// key held across it is still closed.
+/// A re-prepare gives a unit that keeps its key and generation the held-key
+/// tables it checked out, so cutting its edge still closes the key it held; a
+/// unit replaced before the re-prepare is a new one, and the keys its
+/// predecessor held are closed once, with the resume.
 #[test]
-fn a_key_held_across_a_reprepare_is_closed() {
-    let mut r = Rig::new(Mode::Serial, &[2]);
-    r.wire(&[(1, 2)]);
+fn a_reprepare_gives_a_kept_unit_its_tables_back_and_departs_a_replaced_ones() {
+    let mut r = Rig::new(Mode::Serial, &[2, 3]);
+    let mail4 = Mail::default();
+    let src4 = || {
+        Unforkable(Src {
+            mail: mail4.clone(),
+        })
+    };
+    r.ed.insert(NodeKey(4), "src", src4());
+    r.wire(&[(1, 2), (4, 3)]);
     r.send(on60());
+    mail4.lock().unwrap().push((0, on61()));
     r.block();
+    r.ed.replace(NodeKey(4), src4(), Fade::new(Samples::new(0)))
+        .expect("replaces");
     let (ed, exec) = (&mut r.ed, &mut r.exec);
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
     exec.apply_pending();
@@ -852,9 +901,79 @@ fn a_key_held_across_a_reprepare_is_closed() {
     exec.apply_pending();
     ed.collect();
     r.block();
-    r.wire(&[]);
+    assert_eq!(
+        r.words(3),
+        vec![on61(), close(61)],
+        "the replaced one's keys depart"
+    );
+    assert_eq!(r.words(2), vec![on60()], "the kept one's stay held");
+    r.wire(&[(4, 3)]);
     r.block();
-    assert_eq!(r.words(2), vec![on60(), off60()]);
+    assert_eq!(r.words(2), vec![on60(), close(60)], "its tables came back");
+    assert_eq!(
+        r.words(3),
+        vec![on61(), close(61)],
+        "and nothing closed twice"
+    );
+}
+
+/// A source with a probe that says whether the executor still holds it.
+struct Probed {
+    src: Src,
+    _alive: Arc<()>,
+}
+
+impl Node for Probed {
+    fn shape(&self) -> Shape {
+        self.src.shape()
+    }
+    fn prepare(&mut self, prepare: &Prepare) {
+        self.src.prepare(prepare);
+    }
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        self.src.process(cx, io)
+    }
+    fn reset(&mut self) {
+        self.src.reset();
+    }
+}
+
+/// A unit removed before a re-prepare does not come back: the resume commit
+/// departs its held keys once (the sink is sent one off) and installs nothing
+/// at its index, so the executor lets go of the unit.
+#[test]
+fn a_source_removed_before_a_reprepare_is_closed_once_and_not_installed() {
+    let mut r = Rig::new(Mode::Serial, &[2]);
+    let alive = Arc::new(());
+    r.ed.insert(
+        NodeKey(1),
+        "src",
+        Unforkable(Probed {
+            src: Src {
+                mail: r.mail.clone(),
+            },
+            _alive: Arc::clone(&alive),
+        }),
+    );
+    r.wire(&[(1, 2)]);
+    r.send(on60());
+    r.block();
+    assert_eq!(Arc::strong_count(&alive), 2, "the executor runs the unit");
+    r.ed.remove(NodeKey(1));
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
+    ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
+    exec.apply_pending();
+    ed.collect();
+    exec.apply_pending();
+    ed.collect();
+    assert_eq!(
+        Arc::strong_count(&alive),
+        1,
+        "the unit was freed on the control side, not installed again"
+    );
+    r.block();
+    r.block();
+    assert_eq!(r.words(2), vec![on60(), close(60)]);
 }
 
 /// A feedback edge that is cut: the event in flight is delivered, and the
@@ -873,7 +992,7 @@ fn a_cut_feedback_edge_delivers_what_is_in_flight_then_closes() {
             r.wire(&[]);
             r.block();
             let words = r.words(2);
-            assert_eq!(words, vec![on60(), off60()], "{m:?}");
+            assert_eq!(words, vec![on60(), close(60)], "{m:?}");
             r.log.lock().unwrap().to_vec()
         })
         .collect();
@@ -918,7 +1037,7 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         for sink in [2, 3] {
             assert_eq!(
                 r.words(sink),
-                vec![on60(), on61(), off60(), off61()],
+                vec![on60(), on61(), close(60), close(61)],
                 "{mode:?}: closed once the second fade took over"
             );
         }
@@ -929,7 +1048,7 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         r.block();
         assert_eq!(
             r.words(2).last(),
-            Some(&m1_off(0, 0x3e)),
+            Some(&m2_off(0, 0x3e)),
             "{mode:?}: and closed at its edge"
         );
     }
@@ -967,7 +1086,7 @@ fn a_third_fade_supersedes_the_waiting_one() {
         for sink in [2, 3] {
             assert_eq!(
                 r.words(sink),
-                vec![on60(), on61(), off60(), off61()],
+                vec![on60(), on61(), close(60), close(61)],
                 "{mode:?}: the waiting unit never ran"
             );
         }
@@ -1012,12 +1131,16 @@ fn a_reprepare_with_a_fade_queued_closes_the_stopped_units_keys() {
     for _ in 0..6 {
         r.block();
     }
-    assert_eq!(r.words(2), vec![on60(), off60()], "closed after the resume");
+    assert_eq!(
+        r.words(2),
+        vec![on60(), close(60)],
+        "closed after the resume"
+    );
     r.wire(&[]);
     r.block();
     assert_eq!(
         r.words(2),
-        vec![on60(), off60()],
+        vec![on60(), close(60)],
         "and nothing more is owed"
     );
 }
@@ -1058,6 +1181,48 @@ fn closes_that_do_not_fit_a_block_follow_in_the_next() {
         .filter(|w| (w[0] >> 20) & 0xf == 0x8)
         .count();
     assert_eq!(offs, 200, "every held key is closed");
+}
+
+/// Closes owed to a sink that cannot take them all at once stay owed across
+/// commits, however many blocks have passed since the one that made them:
+/// the next commit moves them on, and each is delivered or counted lost.
+#[test]
+fn closes_still_owed_many_blocks_later_are_delivered_or_counted() {
+    let mut r = Rig::new(Mode::Serial, &[2, 3]);
+    r.wire(&[(1, 2)]);
+    // 16 channels of 100 held keys, 50 a block: more closes than a block's
+    // room takes.
+    for channel in 0..16u8 {
+        for half in 0..2u8 {
+            for note in 0..50u8 {
+                r.send(m1_on(channel, half * 50 + note));
+            }
+            r.block();
+        }
+    }
+    assert_eq!(r.exec.dropped_event_count(), 0, "every key is held");
+    let offs = |r: &Rig| {
+        r.words(2)
+            .iter()
+            .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+            .count()
+    };
+    r.wire(&[]);
+    r.block();
+    // Past the window in which the stager sizes for the cut's buffers, and
+    // with closes still owed, another commit.
+    r.block();
+    r.block();
+    r.block();
+    r.wire(&[(1, 3)]);
+    for _ in 0..60 {
+        r.block();
+    }
+    assert_eq!(
+        offs(&r) as u64 + r.exec.dropped_event_count(),
+        1600,
+        "each held key's close is delivered or counted lost"
+    );
 }
 
 /// A third fade queues while closes are still owed: the owed keys stay
@@ -1150,7 +1315,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
         ed.collect();
     }
     r.block();
-    assert_eq!(r.words(2), vec![on60(), off60()]);
+    assert_eq!(r.words(2), vec![on60(), close(60)]);
 }
 
 /// The first replacement holds `on60()` under a fade of `fade_blocks` blocks; a second waits
@@ -1207,7 +1372,7 @@ fn removing_the_source_around_a_promotion_closes_once() {
         &[2],
         |r| r.remove_source(),
         |r, label| {
-            assert_eq!(r.words(2), vec![on60(), off60()], "removed {label}");
+            assert_eq!(r.words(2), vec![on60(), close(60)], "removed {label}");
         },
     );
 }
@@ -1232,7 +1397,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
             ed.collect();
         },
         |r, label| {
-            assert_eq!(r.words(2), vec![on60(), off60()], "replaced {label}");
+            assert_eq!(r.words(2), vec![on60(), close(60)], "replaced {label}");
         },
     );
 }
@@ -1249,7 +1414,7 @@ fn cutting_an_edge_around_a_promotion_closes_once() {
             for sink in [2, 3] {
                 assert_eq!(
                     r.words(sink),
-                    vec![on60(), off60()],
+                    vec![on60(), close(60)],
                     "sink {sink}, cut {label}"
                 );
             }
@@ -1423,7 +1588,7 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
     exec.apply_pending();
     ed.collect();
     r.block();
-    assert_eq!(r.words(2), vec![on60(), off60()]);
+    assert_eq!(r.words(2), vec![on60(), close(60)]);
 }
 
 /// The source and its sink are both replaced as the edge is cut: the new
@@ -1447,7 +1612,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
             Fade::new(Samples::new(0)),
         )
         .unwrap();
-        ed.spec_mut().events.clear();
+        clear_events(ed);
         ed.commit().unwrap();
         r.exec.apply_pending();
         ed.collect();
@@ -1498,23 +1663,35 @@ fn closes_the_delay_cannot_hold_stay_owed_until_it_can() {
 
 /// A set larger than the delay's FIFO drains over many blocks while the
 /// replacement source plays a note of its own and ends it: the owed closes
-/// never use the FIFO's note-off reserve nor take the room of the source's
-/// block, so the live note and its note off both reach the sink, in order, and
+/// never take the room of the source's block, so the live note and its note off both reach the sink, in order, and
 /// every owed key still closes once.
 #[test]
 fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
+    // The live note is on group 1: the keyboard held owes every key of group 0,
+    // and a note is one key whichever protocol carries it.
+    let address = Address::new(MidiGroup::of(1), MidiChannel::FIRST);
+    let live_on = Ump::from(Message::midi2(
+        address,
+        Voice2::note_on(NoteNumber::of(0), NoteVelocity::MAX),
+    ))
+    .0;
+    let live_off = Ump::from(Message::midi2(
+        address,
+        Voice2::note_off(NoteNumber::of(0), NoteVelocity::MIN),
+    ))
+    .0;
     let run = |mode: Mode| {
         let mut r = Rig::with_lag(mode, &[2], true);
         r.wire(&[(1, 2)]);
         full_keyboard(&mut r);
         r.replace_source();
         r.block();
-        r.send(m2_on(0, 0));
+        r.send(live_on);
         r.block();
         for _ in 0..3 {
             r.block();
         }
-        r.send(m2_off(0, 0));
+        r.send(live_off);
         for _ in 0..300 {
             r.block();
         }
@@ -1524,7 +1701,7 @@ fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
             "{mode:?}: nothing live was refused"
         );
         let words = r.words(2);
-        let live: Vec<usize> = [m2_on(0, 0), m2_off(0, 0)]
+        let live: Vec<usize> = [live_on, live_off]
             .iter()
             .map(|w| {
                 words
@@ -1534,8 +1711,11 @@ fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
             })
             .collect();
         assert!(live[0] < live[1], "{mode:?}: on, then off");
-        let m1: Vec<Words> = words.into_iter().filter(|w| w[0] >> 28 == 2).collect();
-        let (keys, _) = closes(&m1);
+        let group0: Vec<Words> = words
+            .into_iter()
+            .filter(|w| (w[0] >> 24) & 0xf == 0)
+            .collect();
+        let (keys, _) = closes(&group0);
         assert!(
             every_key_once(&keys),
             "{mode:?}: every owed key closed once"
@@ -1573,10 +1753,9 @@ fn a_source_without_note_events_closes_nothing() {
         let ed = &mut r.ed;
         if wired {
             ed.insert(NodeKey(6), "clock", Unforkable(Clock));
-            ed.spec_mut()
-                .connect_events(at(2), EventEdge::Direct(out(6)));
+            ed.connect_events(at(2), EventEdge::Direct(out(6))).unwrap();
         } else {
-            ed.spec_mut().events.clear();
+            clear_events(ed);
         }
         ed.commit().unwrap();
         r.exec.apply_pending();
@@ -1693,13 +1872,11 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prep);
     ed.insert(NodeKey(1), "once", ForkByClone(Once(false, mid_note)));
     ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)));
-    ed.spec_mut()
-        .connect_events(at(2), EventEdge::Direct(out(1)));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![tutti_graph::PortSource::Node(
-            tutti_graph::OutputPort::new(NodeKey(2), 0),
-        )]);
+    ed.connect_events(at(2), EventEdge::Direct(out(1))).unwrap();
+    ed.wire_declared_outputs(vec![tutti_graph::PortSource::Node(
+        tutti_graph::OutputPort::new(NodeKey(2), 0),
+    )])
+    .unwrap();
     ed.commit().unwrap();
     exec.apply_pending();
     ed.collect();
@@ -1729,12 +1906,12 @@ fn a_fork_closes_what_it_has_seen() {
     let t = TransportPosition::default();
     fexec.process(MAX, &t, &[], &mut [&mut out_buf[..]]);
     assert_eq!(sink_words(&log.lock().unwrap(), 2), vec![on60()]);
-    fed.spec_mut().events.clear();
+    clear_events(&mut fed);
     fed.commit().unwrap();
     fexec.apply_pending();
     fed.collect();
     fexec.process(MAX, &t, &[], &mut [&mut out_buf[..]]);
-    assert_eq!(sink_words(&log.lock().unwrap(), 2), vec![on60(), off60()]);
+    assert_eq!(sink_words(&log.lock().unwrap(), 2), vec![on60(), close(60)]);
 }
 
 /// A key held when the graph is forked: the fork starts with empty tables, so
@@ -1756,7 +1933,7 @@ fn a_fork_does_not_close_a_key_held_at_fork_time() {
     let mut out_buf = [0.0f32; MAX];
     let t = TransportPosition::default();
     fexec.process(MAX, &t, &[], &mut [&mut out_buf[..]]);
-    fed.spec_mut().events.clear();
+    clear_events(&mut fed);
     fed.commit().unwrap();
     fexec.apply_pending();
     fed.collect();
@@ -1807,12 +1984,11 @@ mod random {
 
     /// What the sink holds at the end of its stream. An off for a key it does
     /// not hold ends nothing.
-    fn held_at_end(words: &[Words]) -> std::collections::BTreeSet<(u32, u32, u32)> {
+    fn held_at_end(words: &[Words]) -> std::collections::BTreeSet<Key> {
         let mut held = std::collections::BTreeSet::new();
         for w in words {
-            let t = w[0] >> 28;
             let status = (w[0] >> 20) & 0xf;
-            let key = (t, (w[0] >> 16) & 0xf, (w[0] >> 8) & 0x7f);
+            let key = key_of(w);
             match status {
                 0x9 => {
                     held.insert(key);
@@ -1826,10 +2002,11 @@ mod random {
         held
     }
 
-    type Key = (u32, u32, u32);
+    /// Channel and note: a note is one key whichever protocol carried it.
+    type Key = (u32, u32);
 
     fn key_of(w: &Words) -> Key {
-        (w[0] >> 28, (w[0] >> 16) & 0xf, (w[0] >> 8) & 0x7f)
+        ((w[0] >> 16) & 0xf, (w[0] >> 8) & 0x7f)
     }
 
     fn is_on(w: &Words) -> bool {
@@ -1978,16 +2155,13 @@ mod no_alloc {
     fn run(workers: usize) {
         let prep = common::prepare(MAX);
         let (mut ed, mut exec) = Editor::with_event_capacity(prep, 64);
-        if workers > 1 {
-            exec.set_pool(Some(TestPool::new(workers)));
-        }
+        common::pooled_fresh(&mut exec, workers);
         let mail = Mail::new(Vec::with_capacity(64));
         let n = Arc::new(AtomicU64::new(0));
         ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
         for s in [2u64, 3] {
             ed.insert(NodeKey(s), "c", Unforkable(Count(n.clone())));
-            ed.spec_mut()
-                .connect_events(at(s), EventEdge::Direct(out(1)));
+            ed.connect_events(at(s), EventEdge::Direct(out(1))).unwrap();
         }
         ed.commit().unwrap();
         exec.apply_pending();
@@ -2029,5 +2203,14 @@ mod no_alloc {
     #[test]
     fn parallel() {
         run(2);
+    }
+}
+
+/// Takes every event edge out of the editor's graph.
+fn clear_events(ed: &mut Editor) {
+    for (at, edges) in ed.spec().events.clone() {
+        for edge in edges {
+            ed.disconnect_events(at, edge);
+        }
     }
 }

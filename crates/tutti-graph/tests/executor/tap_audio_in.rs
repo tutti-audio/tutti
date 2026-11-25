@@ -1,6 +1,8 @@
 //! A tap's reader is a `Source` (`impl Source for TapReader`), so a pump
 //! or a recorder takes it as it is.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{InterleavedMut, Pull, Source};
@@ -61,7 +63,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
         }),
     );
     let port = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
-    ed.spec_mut().topology.set_outputs(vec![port(0), port(1)]);
+    ed.wire_declared_outputs(vec![port(0), port(1)]).unwrap();
     let reader = ed
         .open_tap(
             TapId::of(1),

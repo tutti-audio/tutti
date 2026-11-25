@@ -544,7 +544,12 @@ pub fn input<'a, F: Float>(
 ///   [`AtomicCell`](tutti_rt::AtomicCell) (a clone shares it, a fork gets its
 ///   own at the value it holds), `cells.mode()` hands it out, and the config
 ///   has a chained option `.mode(Mode::On)`; the node reads `cells.mode().load()`
-///   once per block.
+///   once per block. A setting written `sync @ SyncSetting: LfoSync = LfoSync::Free` (a
+///   [`Setting`](tutti_units::Setting) marker after `@`) is one the session's key
+///   sets and reads (`key.sync()`): the macro writes the node's
+///   [`HasSetting`](crate::HasSetting) for the kind and the cell in
+///   [`ParamNode::settings`](crate::ParamNode::settings), which
+///   [`param_parts`](crate::param_parts) puts in the node's [`NodeParts`](crate::NodeParts).
 ///
 /// - **A published value**, `published { events: ClipEventsKind }`
 ///   (`name: Kind`), is a value a session writes at `update()` and the node
@@ -558,8 +563,8 @@ pub fn input<'a, F: Float>(
 ///   `expr` and gives the config a chained option `.events(value)`. The macro
 ///   writes the node's [`HasPublished`](crate::HasPublished) for the kind, which
 ///   the session's key method for the kind needs, and puts each cell in the
-///   node's [`NodeParts`](crate::NodeParts) with a reclaimer over every
-///   publisher. A published value is no param: it has no address and cannot be
+///   node's [`NodeParts`](crate::NodeParts) as a published entry, which the
+///   session writes and sweeps. A published value is no param: it has no address and cannot be
 ///   modulated.
 ///
 /// - **An option**, `options { seed: u64 = 0 }`, is a plain value of the config
@@ -787,7 +792,7 @@ macro_rules! declare_params {
         $(required { $($req:ident : $rty:ty),* $(,)? })?
         $(params { $($ptoks:tt)* })?
         $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
-        $(settings { $($sname:ident : $sty:ty = $sdefault_value:expr),+ $(,)? })?
+        $(settings { $($sname:ident $(@ $skind:ty)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
         $(published { $($pubtoks:tt)* })?
     }) => {
         $crate::declare_params!(@pub {
@@ -796,7 +801,7 @@ macro_rules! declare_params {
             $cells [$($($ln : $lb,)+)?] [$($($ln,)+)?] [$(marker $($ln,)+)?],
             [$($($req : $rty,)*)?]
             [$($($oname : $oty = $odefault,)+)?]
-            [$($($sname : $sty = $sdefault_value,)+)?]
+            [$($($sname [$($skind)?] : $sty = $sdefault_value,)+)?]
         } { $($($ptoks)*)? } [] [] @ $($($pubtoks)*)?);
     };
 
@@ -881,7 +886,7 @@ macro_rules! declare_params {
         $cells:ident [$($ld:tt)*] [$($lu:tt)*] [$(marker $($lm:ident,)+)?],
         [$($req:ident : $rty:ty,)*]
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
-        [$($sname:ident : $sty:ty = $sdefault:expr,)*]
+        [$($sname:ident [$($skind:ty)?] : $sty:ty = $sdefault:expr,)*]
     } [$(
         [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$default:expr]]
     )*]) => {
@@ -1033,7 +1038,20 @@ macro_rules! declare_params {
                 $crate::Node::<__LaneF>::reset(&mut fork);
                 fork
             }
+
+            fn settings(&self) -> ::std::vec::Vec<$crate::ErasedSetting> {
+                #[allow(unused_mut)]
+                let mut settings = ::std::vec::Vec::new();
+                $($(
+                    settings.push($crate::ErasedSetting::new::<$ty, $skind>(
+                        $crate::__private::Arc::clone(&self.cells.$sname),
+                    ));
+                )?)*
+                settings
+            }
         }
+
+        $($($crate::declare_params!(@keyed $gall $ty, $skind, $sty);)?)*
 
         $($crate::declare_params!(@has $gall $ty, $pk);)*
         $($crate::declare_params!(@has $gall $ty, $dk);)*
@@ -1046,7 +1064,7 @@ macro_rules! declare_params {
 
             fn into_parts(self) -> $crate::NodeParts<$crate::ParamSet, __LaneF> {
                 // The published cells, shared with the node's: the session
-                // writes them and the reclaimer sweeps them.
+                // writes and sweeps them.
                 #[allow(unused_variables, unused_mut)]
                 let cells = self.cells.clone();
                 #[allow(unused_mut)]
@@ -1061,12 +1079,15 @@ macro_rules! declare_params {
                         $crate::__private::Arc::new(cells.$dn.publisher().clone()),
                     );
                 )*
-                let sweep = $crate::__private::Sweep::new()$(.with(&cells.$pn))*$(.with(&cells.$dn))*;
-                if !sweep.is_empty() {
-                    parts.reclaimer = Some(Box::new(sweep));
-                }
                 parts
             }
+        }
+    };
+
+    // `$ty` has a setting of the kind `$kind`, held as the word `$word`.
+    (@keyed [$($g:tt)*] $ty:ty, $kind:ty, $word:ty) => {
+        impl<$($g)*> $crate::HasSetting<$kind> for $ty {
+            type Word = $word;
         }
     };
 
@@ -1157,7 +1178,7 @@ macro_rules! declare_params {
 
         impl<$($g)*> $ty {
             $(
-                #[doc = concat!("The setting `", stringify!($name), "`: `store` on the control side, `load` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
+                #[doc = concat!("The setting `", stringify!($name), "`: `store` on the control side, `load` once per block on the audio side. The owner hands out the cell: a node's settings are set through its key instead, and the session's click through its target.")]
                 pub fn $name(&self) -> &$crate::__private::AtomicCell<$st> {
                     &self.$name
                 }

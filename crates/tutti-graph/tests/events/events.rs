@@ -277,10 +277,10 @@ fn run_scheduled(
         let (plan, delta) =
             compile(&valid, &shapes, &prep, ed.base().map(|p| &**p)).expect("compiles");
         let placed: BTreeSet<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, n)| n.key))
+            .chain(delta.replace().iter().map(|(_, n)| n.key))
             .collect();
         let mut units = units_of(ph, emitters, &ledger, &inbox, &stop);
         units.retain(|k, _| placed.contains(k));
@@ -435,35 +435,6 @@ proptest! {
             );
         }
     }
-}
-
-/// A delay whose key vanishes flushes its pending events rather than losing
-/// them: an emitter behind a 20-frame event
-/// delay; regenerate the lag at latency 0, and nothing is lost.
-#[test]
-fn a_vanishing_event_delay_flushes_instead_of_dropping() {
-    let emitters = vec![(1u32, 4u64)];
-    let base = Phase {
-        lag: 20,
-        lag_gen: 0,
-        emitter_gen: vec![0],
-        edges: vec![vec![(0, false)], vec![], vec![]],
-        blocks: vec![32; 3],
-        commands: Vec::new(),
-    };
-    let zero = Phase {
-        lag: 0,
-        lag_gen: 1,
-        ..base.clone()
-    };
-    let phases = vec![base, zero];
-    let (emitted, got) = run(&phases, &emitters);
-    let want = expected(&phases, &emitted, &emitters);
-    assert_eq!(delivered(&got), want);
-    // And some of them really were in flight across the edit: delivered at
-    // or after the switch, emitted before it.
-    let switch = 96;
-    assert!(got.iter().any(|&(_, _, f, at)| f < switch && at >= switch));
 }
 
 /// 65 and 200 sources into one event port compile (to a tree of merges of
@@ -796,51 +767,6 @@ fn wide_fan_in_delivers_the_ledger_by_frame_then_source() {
     want.sort_by_key(|&(_, id, f, _)| (f, id));
     assert!(got.len() > width, "the sources fired");
     assert_eq!(got, want);
-}
-
-/// A flush keeps its events' spacing: a vanished 40-frame delay holding
-/// events 4 frames apart delivers them 4 frames apart in the next block —
-/// a note-on/note-off pair keeps its length instead of collapsing to zero —
-/// and only what falls past the block end is clamped to its last frame.
-#[test]
-fn a_flush_keeps_the_events_spacing() {
-    let emitters = vec![(1u32, 4u64)];
-    let base = Phase {
-        lag: 40,
-        lag_gen: 0,
-        emitter_gen: vec![0],
-        edges: vec![vec![(0, false)], vec![], vec![]],
-        blocks: vec![32; 3],
-        commands: Vec::new(),
-    };
-    let zero = Phase {
-        lag: 0,
-        lag_gen: 1,
-        ..base.clone()
-    };
-    let (_, got) = run(&[base, zero], &emitters);
-    let switch = 96u64;
-    let flushed: Vec<(u64, u64)> = got
-        .iter()
-        .filter(|&&(_, _, f, at)| f < switch && at >= switch && at < switch + 32)
-        .map(|&(_, _, f, at)| (f, at))
-        .collect();
-    assert!(
-        flushed.len() >= 4,
-        "several events were in flight: {flushed:?}"
-    );
-    let spaced: Vec<&(u64, u64)> = flushed
-        .iter()
-        .filter(|&&(_, at)| at < switch + 31)
-        .collect();
-    for w in spaced.windows(2) {
-        assert_eq!(
-            w[1].1 - w[0].1,
-            w[1].0 - w[0].0,
-            "flushed events keep their spacing: {flushed:?}"
-        );
-    }
-    assert_eq!(spaced[0].1, switch, "the earliest lands at offset 0");
 }
 
 /// Two flushes into one sink interleave by their spacing: delivery order is

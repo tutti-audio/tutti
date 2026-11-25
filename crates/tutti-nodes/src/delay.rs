@@ -10,20 +10,21 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
-    DelaySync, GAIN_RAMP, Lerp,
+    DelaySync, GAIN_RAMP, Lerp, MaxDelay,
 };
-use tutti_graph::{Cost, Shape};
+use tutti_graph::{Cost, ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
-use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds, SyncSetting, Tail};
 
 #[cfg(doc)]
 use tutti_buffers::ChannelTopology;
 #[cfg(doc)]
-use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode, MaxDelay};
+use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode};
 
 use std::sync::Arc;
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::tail_clock::frames_tail;
 
 /// What a [`DelayNode`] is made from: the [`DelayLayout`] of its lines and the controls it
 /// starts at.
@@ -79,8 +80,9 @@ impl DelayConfig {
 /// # Seconds or notes
 ///
 /// The delay is timed in seconds or in notes, and a running delay switches between the two:
-/// [`sync`](KernelNode::sync) is the word it reads, once per block, [`DelaySync::Free`] or
-/// [`DelaySync::Synced`]. It is a setting, not a param: it has no port and is not modulated.
+/// the node's `sync` setting is the word it reads, once per block, [`DelaySync::Free`] or
+/// [`DelaySync::Synced`]; `session.set(key.sync().to(DelaySync::Synced))` sets it. It is a
+/// setting, not a param: it has no port and is not modulated.
 ///
 /// While synced, each channel is delayed by its [`NoteDuration`](tutti_music::NoteDuration) of
 /// the layout ([`DelayLayoutBuilder::notes`](tutti_dsp::DelayLayoutBuilder::notes), a quarter
@@ -122,8 +124,22 @@ impl DelayConfig {
 /// [`ParamSet`](tutti_graph::ParamSet) over those three, and a fork of it starts from the
 /// values last set through it. The graph prepares it at the device rate, which sizes the
 /// lines (`ceil(max_delay * rate)` frames each), before its first block; a re-prepare
-/// empties them. Its tail is [`Tail::Unknown`]: a recirculating
-/// line rings for as long as its feedback says, so the executor never skips it.
+/// empties them.
+///
+/// # The tail
+///
+/// The declared tail is the ceiling: the line at the greatest stable feedback
+/// ([`Feedback::MAX_STABLE`]), or [`Tail::Unbounded`] when that is past
+/// [`MAX_NODE_TAIL`](tutti_graph::MAX_NODE_TAIL) (a line of more than about 87 ms), and
+/// [`Tail::Unknown`] before the node is prepared. The node narrows it each block to what
+/// rings at the controls in force: the first echo and the passes round the loop to fall to
+/// the floor ([`TAIL_FLOOR`](tutti_dsp::TAIL_FLOOR)) at the loop gain `feedback +
+/// cross-feedback`, each as long as the longest channel's delay, the larger over where a ramp
+/// is, where it goes and the controls. A time, feedback or cross-feedback a signal drives is
+/// asked at its longest (the longest line, the stable bound), the others as their cells hold
+/// them. A synced delay rings for the longest the line holds, as the tempo moves without a
+/// control moving. Once the input has been silent for that long the
+/// node cuts the loop off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the lines and the ramps; a line holds
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
@@ -140,16 +156,6 @@ impl<F: Float + Lerp> From<DelayConfig> for DelayNode<F> {
     }
 }
 
-impl<F: Float + Lerp> DelayNode<F> {
-    /// The word that says whether the delay is timed in seconds or in notes, shared with the
-    /// running node and its clones: `store` lands at the node's next block. Clone the `Arc`
-    /// before the node is inserted; a fork holds a word of its own, at the value at the fork.
-    #[must_use]
-    pub fn sync(&self) -> &Arc<AtomicCell<DelaySync>> {
-        &self.params().set().sync
-    }
-}
-
 /// The delay's controls: the time and the feedback, which are read per frame when the
 /// graph drives them, and the cross-feedback.
 ///
@@ -163,17 +169,28 @@ pub struct DelaySet {
 control_set! {
     DelaySet(s): DelayControls = DelayControls { sync: s.sync.load(), ..DelayControls::DEFAULT };
     live: (all);
-    DelayTime => Seconds = time { fast },
-    Feedback => Feedback = feedback { fast },
-    CrossFeedback => Feedback = cross_feedback { whole };
+    DelayTime => Seconds = time { fast, longest = MaxDelay::CAP.get() },
+    Feedback => Feedback = feedback { fast, longest = Feedback::MAX_STABLE.get() },
+    CrossFeedback => Feedback = cross_feedback { whole, longest = Feedback::MAX_STABLE.get() };
 
     fn defaults(&self) -> DelayControls {
         DelayControls::DEFAULT
     }
 
+    fn settings(&self) -> Vec<ErasedSetting> {
+        vec![ErasedSetting::new::<Self, SyncSetting>(Arc::clone(&self.sync))]
+    }
+
     fn detach(&mut self) {
         self.sync = Arc::new(AtomicCell::new(self.sync.load()));
     }
+}
+
+/// The word that says whether the delay is timed in seconds or in notes: the node reads it
+/// once per block, and a store lands at the next. A clone shares it; a fork holds one of its
+/// own, at the value at the fork.
+impl HasSetting<SyncSetting> for DelaySet {
+    type Word = DelaySync;
 }
 
 impl DelaySet {
@@ -189,9 +206,8 @@ impl DelaySet {
 ///
 /// The time and the feedback are read per frame when the graph drives them
 /// ([`ControlSignals`]); a cell that moves lands whole on the stream grid and ramps here.
-/// A recirculating line rings for as long as its feedback says, which is a ceiling the
-/// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
-/// the executor never skips it.
+/// The tail is the ceiling of [`DelayBank::tail`] and what [`DelayBank::tail_of`] narrows it
+/// to at the controls ([`Kernel::tail`], [`Kernel::tail_of`]).
 #[derive(Clone, Debug)]
 pub struct DelayKernel<F: Float> {
     layout: DelayLayout,
@@ -202,8 +218,6 @@ pub struct DelayKernel<F: Float> {
     tempo: Option<Bpm>,
     /// The controls the ramps were last aimed at.
     controls: DelayControls,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + Lerp> DelayKernel<F> {
@@ -215,7 +229,6 @@ impl<F: Float + Lerp> DelayKernel<F> {
             ramps: DelayRamps::new(0),
             tempo: None,
             controls: DelayControls::DEFAULT,
-            applied: false,
         }
     }
 }
@@ -240,18 +253,18 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         self.bank = Some(DelayBank::new(&self.layout, rate));
         self.ramps = DelayRamps::new(steps);
         self.tempo = None;
-        self.applied = false;
     }
 
     /// Keeps the block's tempo, and aims the times again when it moved: a synced delay's
-    /// times move through their ramp, and a free one's targets are the same ones. Before the
-    /// first retarget it is only kept, and lands at once with that retarget.
+    /// times move through their ramp, and a free one's targets are the same ones. It runs
+    /// before the block's controls are read: on the first block after a prepare, a reset or
+    /// a fork, the node's retarget and jump that follow override what this aims.
     fn tempo(&mut self, tempo: Bpm) {
         if self.tempo == Some(tempo) {
             return;
         }
         self.tempo = Some(tempo);
-        if let (Some(bank), true) = (&self.bank, self.applied) {
+        if let Some(bank) = &self.bank {
             bank.retarget(&mut self.ramps, &self.controls, self.tempo);
         }
     }
@@ -260,18 +273,16 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.ramps.jump_to_target();
-        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DelayControls) {
         let Some(bank) = &self.bank else { return };
         bank.retarget(&mut self.ramps, controls, self.tempo);
         self.controls = *controls;
-        if !self.applied {
-            self.ramps.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.ramps.jump_to_target();
     }
 
     fn render(
@@ -283,19 +294,30 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
             time: signals.get(DelaySet::TIME_SIGNAL),
             feedback: signals.get(DelaySet::FEEDBACK_SIGNAL),
         };
-        let rendered = match &mut self.bank {
+        match &mut self.bank {
             Some(bank) => bank.process(&mut self.ramps, signals, block),
             None => Ok(()),
-        };
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        }
     }
 
-    /// A recirculating line rings for as long as its feedback says: unknown, so the graph
-    /// never reads it as none.
+    /// The bank's ceiling (the greatest stable feedback through the longest line), or
+    /// [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
+    /// ([`MAX_NODE_TAIL`](tutti_graph::MAX_NODE_TAIL) at the prepared rate): the node still
+    /// narrows it each block to what rings. Unknown until prepared.
     fn tail(&self) -> Tail {
-        Tail::Unknown
+        match &self.bank {
+            None => Tail::Unknown,
+            Some(bank) => match bank.tail() {
+                Tail::Finite(n) => frames_tail(n.get() as u64, bank.rate()),
+                other => other,
+            },
+        }
+    }
+
+    fn tail_of(&mut self, controls: &DelayControls) -> Tail {
+        self.bank
+            .as_ref()
+            .map_or(Tail::Unknown, |bank| bank.tail_of(&self.ramps, controls))
     }
 }
 
@@ -413,7 +435,6 @@ mod tests {
             (2, 2)
         );
         assert_eq!(shape.latency, Latency::new(Samples::new(0)));
-        assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(
             d.param_base(0),
             Some(0.01),
@@ -811,20 +832,144 @@ mod tests {
         assert_ne!(render(1_056), at_the_point);
     }
 
-    /// The tail is declared unknown and holds: sound goes on after the delay and its
-    /// echoes, and the contract's honest-tail check passes.
+    /// `node` over one block of `x` on every channel, and the tail it reports.
+    fn reported(node: &mut DelayNode<f32>, x: &[f32], params: &[Option<&[f32]>]) -> Option<Tail> {
+        use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+        use tutti_units::Frame;
+
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: RATE,
+            block_len: Samples::new(x.len()),
+            transport: TransportPosition::default(),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        tutti_graph::contract::drive_input(node, &env, Planes::new(&[x, x]).unwrap(), params, &[])
+            .reported_tail
+    }
+
+    /// The delay's ceiling is the line at the greatest stable feedback, past what a graph takes
+    /// as a finite tail at this length of line, so it is unbounded; unprepared it is unknown.
+    /// The node reports what rings at its controls (a stereo pair of 10 frames, feedback 0.5 and
+    /// cross-feedback 0.3: loop gain 0.8, `ceil(ln 1e-3 / ln 0.8) = 31` trips, 32 periods of
+    /// 12 frames), and the contract's honest-tail check passes at it.
     #[test]
-    fn the_tail_is_unknown_and_honest() {
-        let mut node = prepared(
+    fn the_node_reports_the_loops_tail_under_an_unbounded_ceiling() {
+        let live =
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                     .controls(controls(frames(10.0), 0.5, 0.3)),
+            );
+        assert_eq!(live.shape().tail, Tail::Unknown, "until it is prepared");
+        let mut node = prepared(live, RATE, 64);
+        assert_eq!(node.shape().tail, Tail::Unbounded);
+        let trips = (1e-3f64.ln() / 0.8f64.ln()).ceil() as usize;
+        let want = (1 + trips) * (10 + 2);
+        let Some(Tail::Finite(got)) = reported(&mut node, &click(64), &[]) else {
+            panic!("a finite reported tail")
+        };
+        assert!(got.get().abs_diff(want) <= 1, "{got:?}, wanted {want}");
+        assert_declared_tail(&mut node, RATE);
+    }
+
+    /// The node over a stereo pair at `controls`, prepared at [`RATE`].
+    fn node_at(controls: DelayControls) -> DelayNode<f32> {
+        prepared(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX)).controls(controls),
+            ),
+            RATE,
+            64,
+        )
+    }
+
+    /// A feedback a signal drives may take any value after the block, so the block reports what
+    /// the loop rings at the stable bound (its stated longest feedback) with the other controls
+    /// as the cells hold them, whatever the signal's value: the figure of the same node with that
+    /// feedback in its cell, finite for a delay of 10 frames, and past the cell alone at no
+    /// feedback, the one echo of a stereo pair of 10 frames (12 frames).
+    #[test]
+    fn a_driven_feedback_reports_the_figure_at_the_stable_bound() {
+        let driven = vec![0.1f32; 64];
+        let Some(Tail::Finite(at_bound)) = reported(
+            &mut node_at(controls(frames(10.0), 0.99, 0.0)),
+            &click(64),
+            &[],
+        ) else {
+            panic!("a finite figure at the stable bound")
+        };
+        let mut node = node_at(controls(frames(10.0), 0.0, 0.0));
+        assert_eq!(
+            reported(&mut node, &click(64), &[None, Some(&driven)]),
+            Some(Tail::Finite(at_bound))
+        );
+        let Some(Tail::Finite(cell)) = reported(
+            &mut node_at(controls(frames(10.0), 0.0, 0.0)),
+            &click(64),
+            &[],
+        ) else {
+            panic!("a finite reported tail")
+        };
+        assert!(cell.get().abs_diff(12) <= 1, "the cell alone: {cell:?}");
+        assert!(at_bound > cell);
+    }
+
+    /// A time a signal drives may take any value after the block, so the block reports what the
+    /// loop rings at the longest line (the time's stated longest value, which the line clamps
+    /// to its own length) with the feedback as the cell holds it: the figure of the same node
+    /// with the longest time in its cell, finite at a feedback of 0.5, past the figure of the
+    /// short time in the cell.
+    #[test]
+    fn a_driven_time_reports_the_figure_at_the_longest_line() {
+        let driven = vec![frames(5.0) as f32; 64];
+        let figure = |time: f64| {
+            let Some(Tail::Finite(n)) =
+                reported(&mut node_at(controls(time, 0.5, 0.0)), &click(64), &[])
+            else {
+                panic!("a finite figure at a feedback of 0.5")
+            };
+            n
+        };
+        let longest = figure(MaxDelay::CAP.get());
+        let mut node = node_at(controls(frames(10.0), 0.5, 0.0));
+        assert_eq!(
+            reported(&mut node, &click(64), &[Some(&driven)]),
+            Some(Tail::Finite(longest))
+        );
+        assert!(longest > figure(frames(10.0)));
+    }
+
+    /// The time, the feedback and the cross-feedback never ring shorter as they move to their
+    /// stated longest values (the longest line and the stable bound), whatever the other two are.
+    #[test]
+    fn the_tail_is_longest_at_the_stated_time_and_feedbacks() {
+        use tutti_buffers::MaxBlock;
+        let set = DelaySet {
+            sync: Arc::new(AtomicCell::new(DelaySync::Free)),
+        };
+        let mut kernel = DelayKernel::<f64>::new(DelayLayout::new(ChannelTopology::STEREO, MAX));
+        kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
+        crate::test_support::assert_tail_longest_at_stated(
+            &mut kernel,
+            &set,
+            &[(0.0, MaxDelay::CAP.get()), (0.0, 0.99), (0.0, 0.99)],
+        );
+    }
+
+    /// A feedback at the stable bound on half a second of delay rings past what a graph takes
+    /// as a finite tail (688 trips of 0.5 s), so the node reports it unbounded and never parks.
+    #[test]
+    fn a_stable_bound_feedback_reports_an_unbounded_tail() {
+        let mut node = prepared(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(512.0), 0.99, 0.0)),
             ),
             RATE,
             64,
         );
-        assert_eq!(node.shape().tail, Tail::Unknown);
-        assert_declared_tail(&mut node, RATE);
+        assert_eq!(reported(&mut node, &click(64), &[]), Some(Tail::Unbounded));
     }
 
     /// `node` over one block of `x` under a playing transport at `bpm`.
@@ -889,6 +1034,14 @@ mod tests {
         }
     }
 
+    /// The cell of the node's sync setting, as the session's key reaches it.
+    fn sync_word(node: &DelayNode<f32>) -> tutti_graph::ErasedSetting {
+        tutti_graph::ParamNode::<f32>::settings(node)
+            .into_iter()
+            .find(|setting| setting.kind() == tutti_units::SettingKind::Sync)
+            .expect("a delay has a sync setting")
+    }
+
     /// The sync word is read by the running node: a delay at 0.25 s (256 frames) echoes there
     /// while free; after the word is stored as synced its time moves to its quarter note at
     /// 120 bpm (512 frames) at 1/8 frame a frame, which takes 2048 frames, and an impulse after
@@ -898,7 +1051,7 @@ mod tests {
         let layout = DelayLayout::new(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)));
         let config = DelayConfig::new(layout).controls(controls(frames(256.0), 0.0, 0.0));
         let mut node = prepared(DelayNode::<f32>::from(config), RATE, 4096);
-        let sync = Arc::clone(node.sync());
+        let sync = sync_word(&node);
         let echo_of = |node: &mut DelayNode<f32>| -> Vec<usize> {
             block_at(node, 120.0, true, &click(2048))
                 .iter()
@@ -909,7 +1062,7 @@ mod tests {
         };
         assert_eq!(echo_of(&mut node), [256]);
         for (word, echo) in [(DelaySync::Synced, 512), (DelaySync::Free, 256)] {
-            sync.store(word);
+            assert!(sync.store(word));
             // The move: 256 frames of delay at 1/8 a frame, with room.
             block_at(&mut node, 120.0, true, &[0.0; 4096]);
             assert_eq!(echo_of(&mut node), [echo], "after a switch to {word:?}");
@@ -926,8 +1079,8 @@ mod tests {
             ..DelayControls::DEFAULT
         }));
         let (fork, clone) = (node.fork_fresh(), node.clone());
-        node.sync().store(DelaySync::Free);
-        assert_eq!(fork.sync().load(), DelaySync::Synced);
-        assert_eq!(clone.sync().load(), DelaySync::Free);
+        assert!(sync_word(&node).store(DelaySync::Free));
+        assert_eq!(sync_word(&fork).load(), Some(DelaySync::Synced));
+        assert_eq!(sync_word(&clone).load(), Some(DelaySync::Free));
     }
 }

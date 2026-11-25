@@ -115,7 +115,7 @@ pub struct OverviewParameter {
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it,
 /// though all 52 units measured do.
-pub fn set_context_name(unit: &Unit, name: &str) -> Result<()> {
+pub(crate) fn set_context_name(unit: &Unit, name: &str) -> Result<()> {
     Ok(unit.set_string::<ContextName>(Scope::GLOBAL, Element::ZERO, name)?)
 }
 
@@ -131,7 +131,7 @@ pub fn set_context_name(unit: &Unit, name: &str) -> Result<()> {
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it.
-pub fn context_name(unit: &Unit) -> Result<Option<String>> {
+pub(crate) fn context_name(unit: &Unit) -> Result<Option<String>> {
     // Copy rule, as in `nick_name`: the returned CFString is +1 and owned there.
     Ok(unit.copy_string::<ContextName>(Scope::GLOBAL, Element::ZERO)?)
 }
@@ -144,7 +144,7 @@ pub fn context_name(unit: &Unit) -> Result<Option<String>> {
 ///
 /// # Errors
 /// As [`set_context_name`].
-pub fn set_nick_name(unit: &Unit, name: &str) -> Result<()> {
+pub(crate) fn set_nick_name(unit: &Unit, name: &str) -> Result<()> {
     Ok(unit.set_string::<NickName>(Scope::GLOBAL, Element::ZERO, name)?)
 }
 
@@ -156,7 +156,7 @@ pub fn set_nick_name(unit: &Unit, name: &str) -> Result<()> {
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it.
-pub fn nick_name(unit: &Unit) -> Result<Option<String>> {
+pub(crate) fn nick_name(unit: &Unit) -> Result<Option<String>> {
     // Copy rule: `AudioUnitGetProperty` on a CFString property returns a +1
     // reference the host owns; `Unit::copy_string` takes and releases it.
     Ok(unit.copy_string::<NickName>(Scope::GLOBAL, Element::ZERO)?)
@@ -185,7 +185,7 @@ pub fn nick_name(unit: &Unit) -> Result<Option<String>> {
 /// `kAudioUnitErr_InvalidProperty` from the 26 of 52 units that do not
 /// implement it, which is the common case and not an error condition for a host
 /// — fall back to [`crate::parameters`].
-pub fn parameters_for_overview(unit: &Unit) -> Result<Vec<OverviewParameter>> {
+pub(crate) fn parameters_for_overview(unit: &Unit) -> Result<Vec<OverviewParameter>> {
     // Trailing bytes short of a whole struct are dropped rather than trusted:
     // decoding a partial struct would read uninitialised padding as a
     // parameter id.
@@ -208,7 +208,7 @@ pub fn parameters_for_overview(unit: &Unit) -> Result<Vec<OverviewParameter>> {
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it.
-pub fn icon_location(unit: &Unit) -> Result<Option<String>> {
+pub(crate) fn icon_location(unit: &Unit) -> Result<Option<String>> {
     // Copy rule, as in `nick_name`: the returned CFURL is +1 and owned there.
     Ok(unit.copy_url_path::<IconLocation>(Scope::GLOBAL, Element::ZERO)?)
 }

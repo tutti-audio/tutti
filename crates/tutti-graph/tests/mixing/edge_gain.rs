@@ -7,6 +7,8 @@
 //! written out in the test. A render is compared with another only as the
 //! parallel executor against the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_graph::testing as common;
 
@@ -19,8 +21,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
     GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
-    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::Gain;
 
@@ -52,10 +53,7 @@ fn amp(v: f32) -> Gain {
 
 /// Edge `node → (sink, 0)` of a pass-through sink.
 fn port_edge(sink: u64, from: u64) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(at(sink, 0)),
-        from: direct(from),
-    }
+    EdgeId::into_port(at(sink, 0), direct(from))
 }
 
 /// Edge `node → output 0`.
@@ -263,79 +261,70 @@ fn a_weighted_sum_is_the_documented_fold() {
     }
 }
 
-/// A wide weighted fan-in is a chain and still one flat fold: 100 lanes with
-/// weights of many kinds (unity, zero, negative, fractions), at both sinks,
-/// is the fold written out over all of them. Some lanes are plain (no entry),
-/// as the chain's own continuation addend is.
+/// A wide weighted fan-in is a chain and still one flat fold: 2, 8 and 100
+/// lanes (the last a chain) with weights of many kinds (unity, zero, negative,
+/// fractions), at both sinks, is the fold written out over all of them. Some
+/// lanes are plain (no entry), as the chain's own continuation addend is. With
+/// no entry at all the same fan-in has no weighted op, and one entry makes the
+/// sum a weighted one.
 #[test]
 fn a_wide_weighted_fan_in_is_one_flat_fold() {
-    let n = 100usize;
-    let values: Vec<f32> = (0..n)
-        .map(|k| ((k * 37 % 11) as f32 + 1.0) * 0.1 * 10f32.powi((k % 5) as i32))
-        .collect();
-    let weights: Vec<f32> = (0..n)
-        .map(|k| match k % 7 {
-            0 => 1.0,
-            1 => 0.0,
-            2 => -0.5,
-            3 => 0.3,
-            4 => 1.75,
-            5 => -1.0,
-            _ => 0.1,
-        })
-        .collect();
-    // Every third lane is plain: weight 1.0 and no entry.
-    let entries: Vec<bool> = (0..n).map(|k| k % 3 != 0).collect();
-    let applied: Vec<f32> = weights
-        .iter()
-        .zip(&entries)
-        .map(|(&w, &e)| if e { w } else { 1.0 })
-        .collect();
-    let want = weighted_fold(&values, &applied);
-    for at_port in [false, true] {
-        let fan = Fan::new(&values, at_port);
-        let mut spec = GraphSpec::new(fan.topology.clone());
-        let mut bases = Vec::new();
-        for k in 0..n {
-            if entries[k] {
-                spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::default());
-                bases.push((fan.edge(k as u64 + 1), amp(weights[k])));
-            }
-        }
-        let graph = Weighed {
-            graph: spec.validate().expect("valid"),
-            bases,
-        };
-        let plan = fan.plan(&graph);
-        // 64, then 63 per op: two ops, both carrying a weighted lane.
-        assert_eq!(weighted_ops(&plan) + plain_sums(&plan), 2);
-        for channel in render_both(&graph, &fan.kinds, 1) {
-            assert!(
-                channel.iter().all(|&x| x.to_bits() == want.to_bits()),
-                "at_port {at_port}"
-            );
-        }
-    }
-}
-
-/// A weight of exactly `1.0` is the plain sum, bit for bit, for fan-ins of 2,
-/// 8 and 100 (the last a chain): the same values rendered with an entry of
-/// `1.0` on every edge and with none.
-#[test]
-fn unity_weights_equal_the_unweighted_sum() {
     for n in [2usize, 8, 100] {
         let values: Vec<f32> = (0..n)
-            .map(|k| ((k * 29 % 13) as f32 - 6.0) * 0.173 + 0.01 * k as f32)
+            .map(|k| ((k * 37 % 11) as f32 + 1.0) * 0.1 * 10f32.powi((k % 5) as i32))
             .collect();
+        let weights: Vec<f32> = (0..n)
+            .map(|k| match k % 7 {
+                0 => 1.0,
+                1 => 0.0,
+                2 => -0.5,
+                3 => 0.3,
+                4 => 1.75,
+                5 => -1.0,
+                _ => 0.1,
+            })
+            .collect();
+        // Every third lane is plain: weight 1.0 and no entry.
+        let entries: Vec<bool> = (0..n).map(|k| k % 3 != 0).collect();
+        let applied: Vec<f32> = weights
+            .iter()
+            .zip(&entries)
+            .map(|(&w, &e)| if e { w } else { 1.0 })
+            .collect();
+        let want = weighted_fold(&values, &applied);
+        // 64 addends to an op, then 63 per op after the first: one op up to
+        // 64 lanes, two for 100.
+        let ops = if n <= 64 { 1 } else { 2 };
         for at_port in [false, true] {
             let fan = Fan::new(&values, at_port);
-            let plain = fan.plain();
-            let unity = fan.spec(&vec![1.0; n]);
-            assert_eq!(weighted_ops(&fan.plan(&plain)), 0);
-            assert!(weighted_ops(&fan.plan(&unity)) >= 1);
-            let a = render_both(&plain, &fan.kinds, 3);
-            let b = render_both(&unity, &fan.kinds, 3);
-            assert_eq!(bits(&a), bits(&b), "n = {n}, at_port {at_port}");
+            let plain = fan.plan(&fan.plain());
+            assert_eq!(weighted_ops(&plain), 0, "n {n}, at_port {at_port}");
+            assert_eq!(plain_sums(&plain), ops, "n {n}, at_port {at_port}");
+            let mut spec = GraphSpec::new(fan.topology.clone());
+            let mut bases = Vec::new();
+            for k in 0..n {
+                if entries[k] {
+                    spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::default());
+                    bases.push((fan.edge(k as u64 + 1), amp(weights[k])));
+                }
+            }
+            let graph = Weighed {
+                graph: spec.validate().expect("valid"),
+                bases,
+            };
+            let plan = fan.plan(&graph);
+            assert!(weighted_ops(&plan) >= 1, "n {n}, at_port {at_port}");
+            assert_eq!(
+                weighted_ops(&plan) + plain_sums(&plan),
+                ops,
+                "n {n}, at_port {at_port}"
+            );
+            for channel in render_both(&graph, &fan.kinds, 1) {
+                assert!(
+                    channel.iter().all(|&x| x.to_bits() == want.to_bits()),
+                    "n {n}, at_port {at_port}"
+                );
+            }
         }
     }
 }
@@ -571,7 +560,8 @@ impl Rig {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
         ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
-        ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
+        ed.wire_declared_outputs([out(1)]).unwrap();
+        ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
         ed.set_edge_gain(output_edge(1), amp(base))
             .expect("the edge exists");
         ed.commit().expect("commits");
@@ -581,13 +571,7 @@ impl Rig {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }
@@ -645,7 +629,7 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
     rig.exec.apply_pending();
     let got = rig.block();
     assert_eq!(got[0], (0.0 + 0.25 * 1.0) + 3.0 * 2.0, "its first block");
-    rig.ed.spec_mut().clear_edge_gain(output_edge(2));
+    rig.ed.clear_edge_gain(output_edge(2));
     rig.ed.commit().expect("commits");
     assert!(!Arc::ptr_eq(&with_both, &rig.plan()), "a removed one too");
 }
@@ -666,7 +650,7 @@ fn a_gain_set_before_a_recompile_keeps_its_base() {
 
     rig.ed
         .insert(key(3), "three", Unforkable(TestNode::new(dc(4.0))));
-    rig.ed.spec_mut().topology.outputs[0].push(out(3));
+    rig.ed.connect_edge(output_edge(3)).unwrap();
     rig.ed.commit().expect("commits");
     rig.exec.apply_pending();
     assert!(!Arc::ptr_eq(&plan, &rig.plan()), "a recompile");
@@ -780,8 +764,8 @@ fn removing_an_edge_removes_its_entry() {
         .set_edge_gain(output_edge(2), amp(1.0))
         .expect("an edge");
     rig.ed.remove(key(1));
-    assert!(rig.ed.spec_mut().gains.contains_key(&output_edge(2)));
-    assert!(!rig.ed.spec_mut().gains.contains_key(&output_edge(1)));
+    assert!(rig.ed.spec().gains.contains_key(&output_edge(2)));
+    assert!(!rig.ed.spec().gains.contains_key(&output_edge(1)));
     rig.ed.commit().expect("commits without the stale entry");
 }
 
@@ -800,7 +784,7 @@ fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
     let old = rig.ed.edge_gain_range_cell(id).expect("a cell");
     assert_eq!(old.current(), held);
 
-    rig.ed.spec_mut().clear_edge_gain(id);
+    rig.ed.clear_edge_gain(id);
     assert!(rig.ed.edge_gain_range_cell(id).is_none(), "dropped");
     rig.ed.set_edge_gain(id, amp(0.25)).expect("an edge");
     let new = rig.ed.edge_gain_range_cell(id).expect("a cell");
@@ -816,26 +800,6 @@ fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
         got.iter().all(|&x| x == (0.0 + 0.25 * 1.0) + 2.0),
         "the audio reads the new base"
     );
-}
-
-/// An entry written raw through `spec_mut` on a connected edge is a lane at
-/// the editor's values, unity and the default range: a commit makes its cell
-/// and renders the plain sum, never a panic.
-#[test]
-fn a_raw_entry_commits_as_a_unity_lane() {
-    let mut rig = Rig::new(0.5);
-    let id = output_edge(2);
-    rig.ed.spec_mut().set_edge_gain(id, EdgeGain::default());
-    rig.ed.commit().expect("commits");
-    rig.exec.apply_pending();
-    rig.block();
-    let got = rig.block();
-    assert!(
-        got.iter().all(|&x| x == (0.0 + 0.5 * 1.0) + 2.0 * 1.0),
-        "the raw lane weighs unity"
-    );
-    assert_eq!(rig.ed.edge_gain(id), Some(amp(1.0)));
-    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
 }
 
 // ---------------------------------------------------------------------------
@@ -914,11 +878,12 @@ impl Mixer {
             }),
         );
         for k in 1..=n {
-            ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
+            ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+                .unwrap();
             ed.set_edge_gain(port_edge(n + 1, k), amp(weights[k as usize - 1]))
                 .expect("the edge exists");
         }
-        ed.spec_mut().topology.set_outputs(vec![out(n + 1)]);
+        ed.wire_declared_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -931,13 +896,7 @@ impl Mixer {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }
@@ -1094,7 +1053,8 @@ fn a_fork_carries_the_edge_gains() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.insert(key(2), "b", ForkByClone(Level(2.0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
+    ed.wire_declared_outputs([out(1)]).unwrap();
+    ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.set_edge_gain(output_edge(2), amp(-2.0))
         .expect("an edge");
@@ -1132,7 +1092,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1)]];
+    ed.wire_declared_outputs([out(1)]).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.commit().expect("commits");
     let knob = ed.edge_gain_cell(output_edge(1)).expect("a cell once sent");

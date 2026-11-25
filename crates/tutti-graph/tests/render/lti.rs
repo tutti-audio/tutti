@@ -208,13 +208,7 @@ impl Builder {
             let mut aligned = s.series.shifted(arrival - s.departure);
             if self.rng.chance(30) {
                 let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
-                weights.push((
-                    EdgeId {
-                        sink: PortSink::Port(at),
-                        from: edge,
-                    },
-                    w,
-                ));
+                weights.push((EdgeId::into_port(at, edge), w));
                 aligned = aligned.scaled(w);
             }
             sum = sum.plus(&aligned);
@@ -377,13 +371,8 @@ impl Builder {
                 let mut aligned = s.series.shifted(time - s.departure);
                 if self.rng.chance(30) {
                     let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
-                    self.weights.push((
-                        EdgeId {
-                            sink: PortSink::Output(ch as u16),
-                            from: Edge::Direct(source),
-                        },
-                        w,
-                    ));
+                    self.weights
+                        .push((EdgeId::into_output(ch as u16, source), w));
                     aligned = aligned.scaled(w);
                 }
                 sum = sum.plus(&aligned);
@@ -521,15 +510,15 @@ fn placed<F: Word>(built: &Built, workers: usize) -> Harness<F> {
         let unit = Unforkable(TestNode::<F>::in_format(kind.clone()));
         harness.editor.insert(key, "test", unit);
     }
-    let spec = harness.editor.spec_mut();
-    spec.topology.edges.clone_from(&built.topology.edges);
-    spec.topology.outputs.clone_from(&built.topology.outputs);
-    spec.topology.inputs = built.topology.inputs;
-    for &(id, _) in &built.weights {
-        spec.set_edge_gain(id, EdgeGain::default());
-    }
+    common::wire_like(
+        &mut harness.editor,
+        &tutti_graph::GraphSpec::new(built.topology.clone()),
+    );
     for &(id, w) in &built.weights {
-        harness.start_edge_gain(id, Gain::new(w));
+        harness
+            .editor
+            .set_edge_gain(id, Gain::new(w))
+            .expect("the edge exists");
     }
     for &(key, mode) in &built.modes {
         harness.start_mode(key, mode);
@@ -549,10 +538,11 @@ fn edit<F: Word>(harness: &mut Harness<F>, decoy: NodeKey, edit: Edit) {
     match edit {
         Edit::Insert(latency) | Edit::Replace(latency) => {
             ed.insert(decoy, "decoy", lag(latency));
-            ed.spec_mut().topology.edges.insert(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(decoy, 0),
-                vec![Edge::Direct(PortSource::MainInput(0))],
-            );
+                Edge::Direct(PortSource::MainInput(0)),
+            ))
+            .unwrap();
             ed.commit().expect("the decoy commits");
         }
         Edit::Remove => {

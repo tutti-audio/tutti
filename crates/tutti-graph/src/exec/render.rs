@@ -14,7 +14,7 @@ use crate::compile::ids::{PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
-use crate::exec::par::Block;
+use crate::exec::par::{Block, BlockInputs};
 use crate::exec::slots::SlotFlags;
 use crate::node::play::PlayClock;
 use crate::node::time::{Env, TransportChanges, TransportPosition};
@@ -34,8 +34,8 @@ pub(super) fn end_fades<F: Float>(
     has_inject: &mut TableSlice<PlanUnitId, bool>,
     dropped: &mut Dropped,
 ) {
-    for rec in &plan.nodes.recs {
-        let Some(u) = store[rec.store.0 as usize].as_mut() else {
+    for (unit, pu) in plan.units.iter_enumerated() {
+        let Some(u) = store[pu.idx.0 as usize].as_mut() else {
             continue;
         };
         if !u.fade.as_ref().is_some_and(|x| x.done >= x.len) {
@@ -50,9 +50,7 @@ pub(super) fn end_fades<F: Float>(
             // `rebuild` sized for it, ahead of anything already waiting
             // there. Rotated into place, so nothing allocates.
             if !next.chase.is_empty()
-                && let Some(inj) = inject
-                    .iter_mut()
-                    .find(|i| i.unit == rec.unit && i.port == 0)
+                && let Some(inj) = inject.iter_mut().find(|i| i.unit == unit && i.port == 0)
             {
                 // Only as much as the buffer's room takes; the rest is lost
                 // and charged to the unit.
@@ -61,10 +59,10 @@ pub(super) fn end_fades<F: Float>(
                 inj.events.rotate_right(room);
                 let lost = next.chase.len() - room;
                 if lost > 0 {
-                    dropped.at_node(rec.unit, u32::try_from(lost).unwrap_or(u32::MAX));
+                    dropped.at_node(unit, u32::try_from(lost).unwrap_or(u32::MAX));
                 }
                 inj.live = true;
-                has_inject[rec.unit] = true;
+                has_inject[unit] = true;
             }
             next.chase.clear();
             next.out = Some(std::mem::replace(&mut u.node, incoming));
@@ -324,8 +322,8 @@ impl<F: Float> Executor<F> {
                 lane.snapshot();
             }
             // And every unit its mode (`mode.rs`), for the same reason.
-            for rec in &plan.nodes.recs {
-                if let Some(u) = store[rec.store.0 as usize].as_mut() {
+            for pu in &plan.units {
+                if let Some(u) = store[pu.idx.0 as usize].as_mut() {
                     u.mode.snapshot();
                 }
             }
@@ -353,16 +351,20 @@ impl<F: Float> Executor<F> {
                 par.as_mut().expect("a staged plan carries its par"),
                 pool.as_ref(),
                 Block {
+                    read: BlockInputs {
+                        plan,
+                        env: &env,
+                        history,
+                        meter,
+                        tempo,
+                        frames,
+                        max,
+                        cap,
+                        declick: plan.prepare.declick(),
+                        inputs,
+                        due,
+                    },
                     dropped: &mut *dropped,
-                    plan,
-                    env: &env,
-                    history,
-                    meter,
-                    tempo,
-                    frames,
-                    max,
-                    cap,
-                    inputs,
                     // The claim table is sized for the plan's width; slices
                     // past it are ignored.
                     outputs: &mut outputs[..plan.rendered_outputs()],
@@ -381,7 +383,6 @@ impl<F: Float> Executor<F> {
                     inject,
                     has_inject,
                     has_due,
-                    due,
                     logs: &mut logs.lanes[..],
                     log_claims: &mut logs.claims,
                 },

@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::compile::ids::AudioSlotId;
-use crate::compile::plan::NodePorts;
+use crate::compile::plan::PortSlots;
 use crate::model::mode::{MixState, NodeMode};
 
 /// [`node_dispatch`] for a unit that is not plain steady Active: toggle if
@@ -25,17 +25,17 @@ pub(super) fn moded_node_op<
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
-    let (rec, plan, frames) = (head.rec, head.plan, head.frames);
-    let ports = rec.ports(&plan.nodes);
-    let NodePorts { ain, aout, .. } = ports;
+    let (plan, frames) = (head.plan, head.frames);
+    let ports = head.ports.slots(&plan.nodes);
+    let PortSlots { ain, aout, .. } = ports;
 
     // The mix's lane, before anything reads the block's mix (it moves while
     // the node is parked too, as the mix's snapshot does).
-    let source = plan.program.param_ports[rec.params.range()]
+    let source = plan.program.param_ports[head.ports.params.range()]
         .last()
         .filter(|p| p.is_mix())
         .map(|p| (p.from, &st.events.pev(p.slot)[..]));
-    let declick = plan.prepare.declick();
+    let declick = head.declick;
     u.mode.mix.drive_step(frames, declick, source);
 
     let want = u.mode.seen();
@@ -121,14 +121,13 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u: &mut Unit<F>,
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    NodePorts {
+    PortSlots {
         ain,
         aout,
         ein,
         eout,
-    }: NodePorts<'_>,
+    }: PortSlots<'_>,
 ) {
-    let rec = head.rec;
     // A parked node is not processed, so a wake raised meanwhile is consumed
     // here, as its discarded events are.
     u.node.take_wake();
@@ -137,7 +136,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
-    if !rec.params.is_empty() || u.params.busy() {
+    if !head.ports.params.is_empty() || u.params.busy() {
         run_params(u, head, st);
     }
     if !u.mode.is_stale() {
@@ -172,7 +171,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
         st.events.slot_mut(s).clear();
     }
     if !ein.is_empty() {
-        let unit = rec.unit;
+        let unit = head.unit;
         if *st.has_inject {
             for inj in st.inject.iter_mut().filter(|i| i.unit == unit) {
                 inj.discard();

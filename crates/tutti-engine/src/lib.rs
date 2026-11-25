@@ -91,8 +91,9 @@
 //! // only its block's `Env`, so a clone of it is a fork.
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
-//! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort::new(beats, port))));
+//! editor
+//!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(beats, port))))
+//!     .expect("the ports exist");
 //! editor.commit().expect("the graph compiles");
 //!
 //! let engine = Engine::new(&transport, &mut editor, executor).expect("within the limits");
@@ -162,7 +163,7 @@ pub use routing::{
     OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,
 };
 pub use stream::{
-    OutputQuantum, OutputSpec, OutputStream, QuantumOutOfRange, RunningStream, StartError,
-    StreamDriver,
+    OpenedOutput, OutputQuantum, OutputSpec, OutputStream, QuantumOutOfRange, RunningStream,
+    StartError, StreamDriver,
 };
 pub use timer::{DEFAULT_BLOCK, TimerDriver, TimerError, TimerRunning};

@@ -30,6 +30,8 @@
 //! 4. Only the latest window is heard. Two moves between blocks play the
 //!    second; [`the_latest_placement_wins`] pins it.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Mono;
@@ -79,9 +81,8 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle<f32>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

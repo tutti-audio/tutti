@@ -146,9 +146,7 @@ where
         let chorus = graph.add(ModDelayNode::<C::Float>::from(
             ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO),
         ));
-        let reverb = graph.add(FreeverbNode::<C::Float>::from(
-            FreeverbConfig::general_midi(),
-        ));
+        let reverb = graph.add(FreeverbNode::<C::Float>::from(FreeverbConfig::new()));
         let strip = graph.add(BusStripNode::from(BusStripConfig::new(
             ChannelTopology::STEREO,
         )));

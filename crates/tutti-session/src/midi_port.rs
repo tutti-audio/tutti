@@ -28,7 +28,8 @@
 //! the port opens: it releases the notes its device holds before it goes, and
 //! survives an unplug and a replug, so what is wired to it stays wired. An
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
-//! whose events the session sends to the device each update.
+//! whose events the session sends to the device each update; the clips
+//! feeding it send their setup again when its device returns.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -48,7 +49,7 @@ use tutti_midi_runtime::{
 };
 use tutti_rt::{Bell, Counter, Gauge, Mutex};
 use tutti_ump::StreamConfig;
-use tutti_units::Losses;
+use tutti_units::{Frame, Losses};
 use tutti_units::{Resyncs, Seconds};
 
 use crate::apply::{Cut, Sealed};
@@ -60,6 +61,7 @@ use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
     Subscription, at_peer, resolve,
 };
+use crate::midi_record::Record;
 use crate::{
     EventInputPort, EventOutputPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId,
     Presence, Resource, ResourceFact, Session, SessionEvent,
@@ -244,13 +246,6 @@ impl MidiOutputInfo {
 }
 
 // --- The shared record ---
-
-/// What the session writes and the handles read: the last known snapshot and
-/// presence of one port.
-struct Cell<I> {
-    info: Arc<I>,
-    presence: Presence<PortCause>,
-}
 
 /// An input port's record: shared by its handles and the session's
 /// table.
@@ -514,17 +509,35 @@ impl InputShared {
     }
 }
 
-/// An output port's record.
+/// An output port's record: shared by its handles and the session's table.
+///
+/// The one lock is `record`; nothing is taken while holding it.
 pub(crate) struct OutputShared {
     id: PeerResourceId,
-    cell: Mutex<Cell<MidiOutputInfo>>,
+    record: Mutex<OutputRecord>,
     /// What the port did not send, counted by the session.
     losses: LossReaders,
 }
 
+/// What the session writes and the handles of an output read: the last snapshot
+/// of the port and its presence.
+struct OutputRecord {
+    info: Arc<MidiOutputInfo>,
+    /// A published copy of the port's link, for the handles on other threads:
+    /// written only by the session thread, at the end of a transition
+    /// ([`OutputShared::publish`]), and derived from the link then. Nothing
+    /// decides it but the link.
+    presence: Presence<PortCause>,
+}
+
 impl OutputShared {
-    fn read<R>(&self, read: impl FnOnce(&Cell<MidiOutputInfo>) -> R) -> R {
-        read(&self.cell.lock())
+    /// The port reads `presence`; whether that differs from what the handles
+    /// read.
+    fn publish(&self, presence: Presence<PortCause>) -> bool {
+        let mut record = self.record.lock();
+        let differs = record.presence != presence;
+        record.presence = presence;
+        differs
     }
 }
 
@@ -613,8 +626,7 @@ impl MidiInput {
     /// output never carries it.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.claim.shared.cells.lost.get()
-            + self.claim.shared.input.losses()
+        self.claim.shared.input.losses()
             + self.claim.shared.cells.inlet.get()
             + self.claim.shared.cells.ci_refused.get()
     }
@@ -710,11 +722,11 @@ impl Peer for MidiOutput {
     type Cause = PortCause;
 
     fn info(&self) -> Arc<MidiOutputInfo> {
-        self.claim.shared.read(|cell| Arc::clone(&cell.info))
+        Arc::clone(&self.claim.shared.record.lock().info)
     }
 
     fn presence(&self) -> Presence<PortCause> {
-        self.claim.shared.read(|cell| cell.presence)
+        self.claim.shared.record.lock().presence
     }
 }
 
@@ -1048,10 +1060,86 @@ impl UmpOut<OpenOutput> {
     pub(crate) fn destination_mut(&mut self) -> &mut OpenOutput {
         &mut self.destination
     }
+}
 
-    /// The stamp stream, which outlives the output it stamped for.
-    pub(crate) fn into_stream(self) -> JrStream {
-        self.stream
+/// The session's side of an output port's link to its device: open, or away
+/// with the stamp stream to carry on.
+enum OutLink {
+    /// The device's output is open.
+    Open(Box<OutOpen>),
+    /// No device output, for `cause`. `stream` is the stamp stream the next
+    /// output carries on: a port that was never open holds a fresh one.
+    Away { stream: JrStream, cause: PortCause },
+}
+
+/// An open device output with its stamp stream, and what it had counted of its
+/// own losses when they were last folded into the port's.
+struct OutOpen {
+    out: UmpOut<OpenOutput>,
+    seen: Losses,
+}
+
+impl OutLink {
+    /// The link to `device`, carrying on `stream`; its losses count from zero.
+    fn open(device: OpenOutput, stream: JrStream) -> Self {
+        Self::Open(Box::new(OutOpen {
+            out: UmpOut::resumed(device, stream),
+            seen: Losses::NONE,
+        }))
+    }
+
+    /// What the handles read of this link.
+    const fn presence(&self) -> Presence<PortCause> {
+        match self {
+            Self::Open(_) => Presence::Live,
+            Self::Away { cause, .. } => Presence::Lost(*cause),
+        }
+    }
+
+    /// The open device's output with its stamp stream.
+    fn open_mut(&mut self) -> Option<&mut UmpOut<OpenOutput>> {
+        match self {
+            Self::Open(open) => Some(&mut open.out),
+            Self::Away { .. } => None,
+        }
+    }
+
+    /// The open device's output.
+    fn device(&self) -> Option<&OpenOutput> {
+        match self {
+            Self::Open(open) => Some(open.out.destination()),
+            Self::Away { .. } => None,
+        }
+    }
+
+    /// Counts into `losses` what the open device's output refused or lost
+    /// since the last call: a device counts its own, which a send's return does
+    /// not carry.
+    fn fold_losses(&mut self, losses: &mut LossWriters) {
+        if let Self::Open(open) = self {
+            let now = open.out.destination().losses();
+            losses.lost(now.lost.saturating_sub(open.seen.lost));
+            losses.refused(now.refused.saturating_sub(open.seen.refused));
+            open.seen = now;
+        }
+    }
+
+    /// The device output closes for `cause`: what it counted is folded into
+    /// `losses` and its stamp stream is kept for the device's return.
+    fn lose(&mut self, losses: &mut LossWriters, cause: PortCause) {
+        self.fold_losses(losses);
+        if let Self::Open(open) = self {
+            let stream = open.out.stream;
+            *self = Self::Away { stream, cause };
+        }
+    }
+
+    /// The stamp stream follows the graph to `rate`.
+    fn set_rate(&mut self, rate: tutti_units::SampleRate) {
+        match self {
+            Self::Open(open) => open.out.set_rate(rate),
+            Self::Away { stream, .. } => *stream = stream.at_rate(rate),
+        }
     }
 }
 
@@ -1068,15 +1156,11 @@ struct OutputPort {
     /// Whether each device output the port opens sends Active Sensing.
     active_sensing: bool,
     losses: LossWriters,
-    /// What the open device's output had counted of its own losses when they
-    /// were last folded into `losses`.
-    device_seen: Losses,
-    /// The open device's output with its stamp stream; `None` while the device
-    /// is away.
-    out: Option<UmpOut<OpenOutput>>,
-    /// The stamp stream of an output that was closed, which the next one carries
-    /// on.
-    parked: Option<JrStream>,
+    /// What the port has been sent, whether its device is open or away: a
+    /// device that returns is caught up from it.
+    record: Record,
+    /// The port's link to its device.
+    link: OutLink,
     /// The proof the open brought, which every reopen of the port's device takes.
     started: Started,
 }
@@ -1145,20 +1229,6 @@ impl std::ops::BitOrAssign for Edits {
 
 fn changed(out: &mut Vec<SessionEvent>, id: PeerResourceId, fact: ResourceFact) {
     out.push(SessionEvent::Peer(PeerEvent::ResourceChanged { id, fact }));
-}
-
-/// Sets a record's presence, saying so once when it changed.
-fn set_presence<I>(
-    cell: &Mutex<Cell<I>>,
-    id: PeerResourceId,
-    presence: Presence<PortCause>,
-    out: &mut Vec<SessionEvent>,
-) {
-    let mut cell = cell.lock();
-    if cell.presence != presence {
-        cell.presence = presence;
-        changed(out, id, ResourceFact::Presence);
-    }
 }
 
 /// The snapshot of the open input `device`, as the OS layer reads it now.
@@ -1395,7 +1465,6 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
-        rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
         polled: Vec<tutti_midi_hardware::Polled>,
         out: &mut Vec<SessionEvent>,
@@ -1409,7 +1478,7 @@ impl Ports {
                     edits |= self.lose(io, graph, &device, out);
                 }
                 tutti_midi_device::DeviceEvent::Added(device) => {
-                    edits |= self.restore(io, graph, rate, &device, out);
+                    edits |= self.restore(io, graph, &device, out);
                 }
                 _ => {}
             }
@@ -1468,18 +1537,13 @@ impl Ports {
             .iter_mut()
             .map(|going| &mut going.going);
         for port in self.outputs.iter_mut().chain(going) {
-            let held = port.out.as_ref().map(UmpOut::destination);
-            if held.is_some_and(|open| *open.id() == device.id) {
-                port.fold_device_losses();
-                // The stamp stream is kept for the device's return.
-                port.parked = port.out.take().map(UmpOut::into_stream);
-                port.device_seen = Losses::NONE;
-                set_presence(
-                    &port.shared.cell,
-                    port.shared.id,
-                    Presence::Lost(PortCause::Unplugged),
-                    out,
-                );
+            if port
+                .link
+                .device()
+                .is_some_and(|open| *open.id() == device.id)
+            {
+                port.link.lose(&mut port.losses, PortCause::Unplugged);
+                port.publish(out);
             }
         }
         edits
@@ -1493,7 +1557,6 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
-        rate: tutti_units::SampleRate,
         arrived: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
@@ -1534,23 +1597,24 @@ impl Ports {
             edits.graph = true;
         }
         for port in &mut self.outputs {
-            if port.out.is_some() || !arrived.direction.is_output() || !is_arrived(io, &port.saved)
-            {
+            let OutLink::Away { stream, .. } = port.link else {
+                continue;
+            };
+            if !arrived.direction.is_output() || !is_arrived(io, &port.saved) {
                 continue;
             }
-            let presence =
-                match open_device_output(io, port.started, &arrived.id, port.active_sensing) {
-                    Ok(device) => {
-                        port.out = Some(match port.parked.take() {
-                            Some(stream) => UmpOut::resumed(device, stream),
-                            None => UmpOut::new(device, rate),
-                        });
-                        port.refresh(out);
-                        Presence::Live
-                    }
-                    Err(_) => Presence::Lost(PortCause::ReopenFailed),
-                };
-            set_presence(&port.shared.cell, port.shared.id, presence, out);
+            port.link = match open_device_output(io, port.started, &arrived.id, port.active_sensing)
+            {
+                Ok(device) => OutLink::open(device, stream),
+                Err(_) => OutLink::Away {
+                    stream,
+                    cause: PortCause::ReopenFailed,
+                },
+            };
+            // The device lost its setup: it hears what the port said.
+            port.catch_up();
+            port.refresh(out);
+            port.publish(out);
         }
         edits
     }
@@ -1580,8 +1644,8 @@ impl Ports {
             // The output follows what its device settled, at once: the
             // `MidiOut` phase that drains next stamps by it.
             for port in &mut self.outputs {
-                if let Some(device) = port.out.as_mut().map(UmpOut::destination_mut) {
-                    device.follow(&polled);
+                if let Some(out) = port.link.open_mut() {
+                    out.destination_mut().follow(&polled);
                 }
             }
             let device = match &polled {
@@ -1717,37 +1781,54 @@ impl Sweepable for OutputPort {
 impl OutputPort {
     /// Reads the tap dry to the device, and counts what did not go.
     fn drain(&mut self, timing: Option<&crate::midi::OutputTiming>) {
-        crate::midi::drain_events(&mut self.tap, self.out.as_mut(), &mut self.losses, timing);
-        self.fold_device_losses();
+        crate::midi::drain_events(
+            &mut self.tap,
+            self.link.open_mut(),
+            &mut self.record,
+            &mut self.losses,
+            timing,
+        );
+        self.link.fold_losses(&mut self.losses);
     }
 
-    /// Counts what the device's output refused or lost after taking since the
-    /// last call: a device counts its own, which a send's return does not carry.
-    fn fold_device_losses(&mut self) {
-        let Some(device) = self.out.as_ref().map(UmpOut::destination) else {
+    /// Sends the open device what the port has said, all at once and before any
+    /// later event: the record ([`Record::catch_up`]) is the state of every
+    /// event drained so far, and the next drain follows it.
+    fn catch_up(&mut self) {
+        let Some(out) = self.link.open_mut() else {
             return;
         };
-        let now = device.losses();
-        self.losses
-            .lost(now.lost.saturating_sub(self.device_seen.lost));
-        self.losses
-            .refused(now.refused.saturating_sub(self.device_seen.refused));
-        self.device_seen = now;
+        let events: Vec<_> = self
+            .record
+            .catch_up()
+            .into_iter()
+            .map(|ump| (Frame::ZERO, ump))
+            .collect();
+        let refused = out.send_frames(&events, None) as u64;
+        self.losses.refused(refused);
     }
 
     /// Takes in the output's Protocol and JR Timestamps as they are now.
     fn refresh(&self, out: &mut Vec<SessionEvent>) {
-        let Some(device) = self.out.as_ref().map(UmpOut::destination) else {
+        let Some(device) = self.link.device() else {
             return;
         };
         let config = device.config();
-        let mut cell = self.shared.cell.lock();
-        if cell.info.config != config || cell.info.device.id != *device.id() {
-            cell.info = Arc::new(MidiOutputInfo {
-                device: cell.info.device.clone(),
+        let mut record = self.shared.record.lock();
+        if record.info.config != config || record.info.device.id != *device.id() {
+            record.info = Arc::new(MidiOutputInfo {
+                device: record.info.device.clone(),
                 config,
             });
             changed(out, self.shared.id, ResourceFact::Info);
+        }
+    }
+
+    /// Publishes the link: the handles read its presence, and the update says
+    /// so when that changed.
+    fn publish(&self, out: &mut Vec<SessionEvent>) {
+        if self.shared.publish(self.link.presence()) {
+            changed(out, self.shared.id, ResourceFact::Presence);
         }
     }
 }
@@ -1894,12 +1975,18 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let (node, tap, departure) = self.add_output_node();
         let config = device.as_ref().map(tutti_midi_hardware::OpenOutput::config);
         let info = found.clone().unwrap_or_else(|| saved.clone());
-        let live = device.is_some();
+        let link = match device {
+            Some(device) => OutLink::open(device, crate::midi::fresh_stream(rate)),
+            None => OutLink::Away {
+                stream: crate::midi::fresh_stream(rate),
+                cause: PortCause::Unplugged,
+            },
+        };
         let (losses, readers) = loss_cells();
         let shared = Arc::new(OutputShared {
             id,
             losses: readers,
-            cell: Mutex::new(Cell {
+            record: Mutex::new(OutputRecord {
                 info: Arc::new(MidiOutputInfo {
                     device: info,
                     config: config.unwrap_or(StreamConfig {
@@ -1908,11 +1995,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                         tx_jr: false,
                     }),
                 }),
-                presence: if live {
-                    Presence::Live
-                } else {
-                    Presence::Lost(PortCause::Unplugged)
-                },
+                presence: link.presence(),
             }),
         });
         let (claim, held) = Held::new(Arc::clone(&shared), node);
@@ -1925,9 +2008,8 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             saved,
             active_sensing,
             losses,
-            device_seen: Losses::NONE,
-            out: device.map(|device| UmpOut::new(device, rate)),
-            parked: None,
+            record: Record::default(),
+            link,
             started,
         });
         Ok(MidiOutput { claim })
@@ -1954,17 +2036,14 @@ impl Ports {
             if port.tap.rate() != graph.prepared().sample_rate() {
                 crate::midi::drain_events(
                     &mut port.tap,
-                    port.out.as_mut(),
+                    port.link.open_mut(),
+                    &mut port.record,
                     &mut port.losses,
                     timing,
                 );
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
                     port.tap = tap;
-                    let rate = graph.prepared().sample_rate();
-                    if let Some(out) = port.out.as_mut() {
-                        out.set_rate(rate);
-                    }
-                    port.parked = port.parked.map(|stream| stream.at_rate(rate));
+                    port.link.set_rate(graph.prepared().sample_rate());
                     edited = true;
                 }
             }
@@ -1998,12 +2077,7 @@ impl Ports {
             &mut self.retiring_outputs,
             graph,
             |port| port.drain(timing),
-            |port| {
-                port.out
-                    .as_ref()
-                    .map(UmpOut::destination)
-                    .is_some_and(|open| open.id() == device)
-            },
+            |port| port.link.device().is_some_and(|open| open.id() == device),
         );
     }
 

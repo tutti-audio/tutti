@@ -9,10 +9,14 @@
 //! hand-written node over `MultibandBank` (the crossover and a `CompressorBank` a band), see
 //! its file.
 //!
-//! [`CompressorNode`] and [`GateNode`] take a typed [`KeySource`](tutti_dsp::KeySource): an
+//! [`CompressorNode`] and [`GateNode`] take a typed [`KeySource`]: an
 //! **external sidechain** (their level detector reads separate inputs, so the signal
 //! being measured need not be the signal being shaped) or their own signal. [`MultibandCompressorNode`] runs one compressor per
 //! band of a Linkwitz-Riley crossover, each detecting on its own band.
+
+use tutti_buffers::ChannelTopology;
+use tutti_dsp::KeySource;
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 
 mod brickwall;
 mod compressor;
@@ -35,3 +39,16 @@ pub use multiband::{
 pub use transient::{
     TransientShaperConfig, TransientShaperKernel, TransientShaperNode, TransientShaperSet,
 };
+
+/// The shape of a keyed dynamics node: the `input` bus, then, for a
+/// [`KeySource::Sidechain`], the key bus as wide; one output bus where the input is.
+fn keyed_shape(input: ChannelTopology, key: KeySource) -> Shape {
+    let main = Buses::main(input);
+    let inputs = match key {
+        KeySource::Own => main,
+        KeySource::Sidechain => main
+            .with(Bus::new(input, BusRole::Sidechain))
+            .expect("a main bus and a key are two buses"),
+    };
+    Shape::buses(inputs, Buses::main(input)).cost(Cost::Moderate)
+}

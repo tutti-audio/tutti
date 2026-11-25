@@ -7,6 +7,8 @@
 //! inside the CPAL callback, so the engine refuses such a main output on the control
 //! thread instead; these run in both profiles on purpose.
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::support;
 
 use support::Sine;
@@ -29,13 +31,14 @@ fn main_output(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor
         MaxBlock::of(Samples::new(256)),
     ));
     ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
-    ed.spec_mut().topology.set_outputs((0..outputs).map(|ch| {
+    ed.wire_declared_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
             PortSource::Node(OutputPort::new(NodeKey(1), 0))
         } else {
             PortSource::Zero
         }
-    }));
+    }))
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

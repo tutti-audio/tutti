@@ -8,12 +8,12 @@
 //! it); a chunk's length is computed from the body it frames ([`chunk`]),
 //! never patched in afterwards.
 
-use tutti_ump::{Message, Midi1Bytes};
+use tutti_ump::Midi1Bytes;
 
 use super::SmfDivision;
 use crate::TracksError;
 use crate::file::with_extra;
-use crate::file::{FileEvent, Lead, Meta, SmfFormat, SysEx, Tick, Track};
+use crate::file::{Lead, Meta, SmfEvent, SmfFormat, SysEx, Tick, Track};
 
 /// The widest value a variable-length quantity holds: 28 bits.
 const VLQ_MAX: u64 = 0x0FFF_FFFF;
@@ -116,31 +116,27 @@ fn counted_len(lead: usize, len: usize) -> Result<usize, TracksError> {
     Ok(lead + vlq_len(len as u64) + len)
 }
 
-/// One event as bytes. `None` for what an SMF cannot hold (a packet other than
-/// MIDI 1.0 channel voice): the constructor has refused it.
-fn encode(event: &FileEvent) -> Option<Encoded> {
+/// One event as bytes.
+fn encode(event: &SmfEvent) -> Encoded {
     match event {
-        FileEvent::Message(Message::Midi1(address, voice)) => {
-            Some(Encoded::Channel(voice.bytes(address.channel)))
-        }
-        FileEvent::SysEx(SysEx::Complete(data)) => Some(Encoded::Other(counted(
+        SmfEvent::Channel { channel, message } => Encoded::Channel(message.bytes(*channel)),
+        SmfEvent::SysEx(SysEx::Complete(data)) => Encoded::Other(counted(
             &[0xF0],
             &data
                 .iter()
                 .map(|b| b.get())
                 .chain([0xF7])
                 .collect::<Vec<u8>>(),
-        ))),
-        FileEvent::SysEx(SysEx::Start(data)) => Some(Encoded::Other(counted(
+        )),
+        SmfEvent::SysEx(SysEx::Start(data)) => Encoded::Other(counted(
             &[0xF0],
             &data.iter().map(|b| b.get()).collect::<Vec<u8>>(),
-        ))),
-        FileEvent::Escape(data) => Some(Encoded::Other(counted(&[0xF7], data))),
-        FileEvent::Meta(meta) => {
+        )),
+        SmfEvent::Escape(data) => Encoded::Other(counted(&[0xF7], data)),
+        SmfEvent::Meta(meta) => {
             let (kind, data) = meta_parts(meta);
-            Some(Encoded::Other(counted(&[0xFF, kind], &data)))
+            Encoded::Other(counted(&[0xFF, kind], &data))
         }
-        FileEvent::Message(_) | FileEvent::Unknown(_) => None,
     }
 }
 
@@ -155,22 +151,15 @@ fn delta(from: Tick, to: Tick) -> impl Iterator<Item = u8> {
 
 /// Folds one event onto the body: its delta, then its bytes without a status
 /// byte the running status already holds.
-fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Fold {
-    let Some(encoded) = encode(event) else {
-        return (out, running, at);
-    };
-    let Some((&status, data)) = encoded.bytes().split_first() else {
-        return (out, running, at);
-    };
+fn append((mut out, running, at): Fold, (tick, event): &(Tick, SmfEvent)) -> Fold {
+    let encoded = encode(event);
+    let bytes = encoded.bytes();
+    let status = bytes.first().copied();
     let is_channel = matches!(encoded, Encoded::Channel(_));
+    let elided = usize::from(is_channel && status == running);
     out.extend(delta(at, *tick));
-    out.extend(
-        (!(is_channel && running == Some(status)))
-            .then_some(status)
-            .into_iter()
-            .chain(data.iter().copied()),
-    );
-    (out, is_channel.then_some(status), *tick)
+    out.extend(&bytes[elided..]);
+    (out, status.filter(|_| is_channel), *tick)
 }
 
 /// A track's body: its events, then End of Track at its `end`.
@@ -183,9 +172,9 @@ fn body(track: &Track, leads: &[Lead]) -> Vec<u8> {
             std::iter::once(0).chain(counted(&[0xFF, kind], &data))
         })
         .collect();
-    let (out, _, at) = track.events.iter().fold((opening, None, Tick(0)), append);
+    let (out, _, at) = track.events().iter().fold((opening, None, Tick(0)), append);
     out.into_iter()
-        .chain(delta(at, track.end))
+        .chain(delta(at, track.end()))
         .chain([0xFF, 0x2F, 0x00])
         .collect()
 }
@@ -208,7 +197,7 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
 /// # Errors
 ///
 /// [`TracksError::TooLarge`] for an event or a chunk past its length field. A
-/// caller has checked the rest ([`MidiFile`](crate::MidiFile)'s constructor):
+/// caller has checked the rest ([`StandardMidiFile`](crate::StandardMidiFile)'s constructor):
 /// events in order, a delta that fits the wire's 28 bits, only group-0 MIDI
 /// 1.0 messages, at most 65535 tracks.
 pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), TracksError> {
@@ -219,40 +208,39 @@ pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), Track
             // The delta of 0, `FF`, the type, the length, the data.
             total += 1 + counted_len(2, lead.wire().1.len())? as u64;
         }
-        for (tick, event) in &track.events {
+        for (tick, event) in track.events() {
             total += vlq_len(tick.0.saturating_sub(at.0)) as u64;
             at = *tick;
             let bytes = match event {
-                FileEvent::Message(Message::Midi1(address, voice)) => {
-                    let bytes = voice.bytes(address.channel);
+                SmfEvent::Channel { channel, message } => {
+                    let bytes = message.bytes(*channel);
                     let status = bytes.as_slice().first().copied();
                     let elided = usize::from(status.is_some() && status == running);
                     running = status;
                     bytes.as_slice().len() - elided
                 }
-                FileEvent::SysEx(SysEx::Complete(data)) => {
+                SmfEvent::SysEx(SysEx::Complete(data)) => {
                     running = None;
                     // The `F7` the writer adds.
                     counted_len(1, data.len() + 1)?
                 }
-                FileEvent::SysEx(SysEx::Start(data)) => {
+                SmfEvent::SysEx(SysEx::Start(data)) => {
                     running = None;
                     counted_len(1, data.len())?
                 }
-                FileEvent::Escape(data) => {
+                SmfEvent::Escape(data) => {
                     running = None;
                     counted_len(1, data.len())?
                 }
-                FileEvent::Meta(meta) => {
+                SmfEvent::Meta(meta) => {
                     running = None;
                     counted_len(2, meta_parts(meta).1.len())?
                 }
-                FileEvent::Message(_) | FileEvent::Unknown(_) => 0,
             };
             total += bytes as u64;
         }
         // The End of Track: its delta, `FF 2F 00`.
-        total += (vlq_len(track.end.0.saturating_sub(at.0)) + 3) as u64;
+        total += (vlq_len(track.end().0.saturating_sub(at.0)) + 3) as u64;
         if total > u64::from(u32::MAX) {
             return Err(TracksError::TooLarge);
         }

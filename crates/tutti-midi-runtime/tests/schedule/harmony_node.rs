@@ -6,6 +6,8 @@
 //! Every test renders a harmony node into a sink that logs each harmony
 //! event with its absolute frame. 120 BPM at 48 kHz: a beat is 24 000 frames.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::MaxBlock;
 
 use crate::common::{beat_of, connect, rolling};
@@ -77,9 +79,8 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
         tutti_graph::ForkByClone(Sink(seen.clone())),
     );
     connect(&mut ed, 1, 2);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec, controls, seen)
 }

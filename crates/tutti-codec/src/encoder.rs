@@ -177,8 +177,8 @@ impl<W: Write + Seek> Encoder<W> {
     /// when a WAV file reaches its size limit, after the frames that fit were
     /// written; [`EncodeError::Encoding`] when the codec rejects the block. After an
     /// error the file is not a complete take: [`finish`](Self::finish) still
-    /// closes what was written for a caller that keeps it, and
-    /// [`abort`](Self::abort) discards it.
+    /// closes what was written for a caller that keeps it, and dropping the
+    /// encoder discards it.
     pub fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let written = self.write_block(block);
         if let Err(e) = &written {
@@ -215,9 +215,6 @@ impl<W: Write + Seek> Encoder<W> {
         sink.flush()?;
         Ok(sink)
     }
-
-    /// Discards the encoder, dropping the sink with what was written.
-    pub fn abort(self) {}
 }
 
 /// An encoder that writes a file beside its path and moves it into place
@@ -289,13 +286,6 @@ impl FileEncoder {
     pub fn create_planned(spec: &Spec, target: impl Into<Staged>, frames: Samples) -> Result<Self> {
         check_planned(spec, frames)?;
         Self::create(spec, target)
-    }
-
-    /// As [`Encoder::limit_frames`].
-    #[must_use]
-    pub fn limit_frames(mut self, frames: u64) -> Self {
-        self.encoder = self.encoder.limit_frames(frames);
-        self
     }
 
     /// As [`Encoder::write`].
@@ -376,10 +366,6 @@ impl FileEncoder {
             }),
         }
     }
-
-    /// Discards the file and leaves what was at its path alone. Dropping the
-    /// encoder does the same.
-    pub fn abort(self) {}
 }
 
 /// The encoder's file closed, flushed and its header lengths written from the

@@ -106,6 +106,16 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ),
     (
         "tutti_timeline",
+        "Recording",
+        "a take's start or stop of the transport's recording; only a take sends it, so an app never names it",
+    ),
+    (
+        "tutti_timeline",
+        "Roll",
+        "what a motion command does to the roll; the session's transport handle reads it, an app never needs it",
+    ),
+    (
+        "tutti_timeline",
         "OfflineClock",
         "the export render's clock; `ExportClock` wraps it",
     ),
@@ -379,6 +389,14 @@ fn exports(lib: &str) -> Vec<Ty> {
 }
 
 /// The `tutti_` crates the umbrella exports from, sorted.
+/// The `(crate, name)` of each item `lib.rs` re-exports from a `tutti_` crate.
+pub(super) fn export_names(lib: &str) -> Vec<(String, String)> {
+    exports(lib)
+        .into_iter()
+        .map(|t| (t.krate, t.name))
+        .collect()
+}
+
 pub(crate) fn reexported_crates(lib: &str) -> Vec<String> {
     let set: BTreeSet<String> = exports(lib).into_iter().map(|t| t.krate).collect();
     set.into_iter().collect()

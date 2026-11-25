@@ -676,8 +676,8 @@ pub use edges::event_inlet::{
 pub use edges::event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
 pub use edit::builder::{GraphBuilder, Renderer};
 pub use edit::editor::{
-    CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,
-    Unwired,
+    CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Unwired,
+    WireError,
 };
 pub use event::sorted::{EventOrderError, SortedEvents, SubBlocks};
 pub use event::types::{Event, EventKind, Harmony, HarmonyKind, UmpAt};
@@ -698,6 +698,7 @@ pub use node::fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
+pub use node::setting::{ErasedSetting, HasSetting, SettingCell};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
@@ -706,8 +707,8 @@ pub use compile::ids::{
     PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, TaskId,
 };
 pub use compile::latency::{
-    ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
-    OutputDelay, PortFeed, delays, plan as latency_plan,
+    ChannelFeed, Compensation, Delays, Feed, LatencyGraph, MAX_NODE_LATENCY, PortFeed, delays,
+    plan as latency_plan,
 };
 pub use compile::main_output::{
     MainOutputBank, MainOutputError, MainOutputId, fold_to_channels, fold_to_topology,
@@ -716,7 +717,7 @@ pub use compile::main_output::{
 pub use compile::plan::{
     AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, Delta, EventDelay, EventDelayKey,
     EventFeedbackKey, EventSlotCapacity, FeedbackSpec, GainPortOp, InputBound, Op, ParamPortOp,
-    Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+    Placement, Plan, PlanUnit, Rewired, Span, UnitIdx, Value,
 };
 pub use compile::preroll::PrerollTable;
 pub use compile::tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
@@ -772,7 +773,6 @@ pub use tutti_units::PlayReading;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::exec::published::Sweep;
     pub use crate::node::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };

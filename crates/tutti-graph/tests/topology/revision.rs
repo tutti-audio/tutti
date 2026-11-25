@@ -6,13 +6,15 @@
 //! so a call that changes the graph without moving it would leave the
 //! reconcile behind (a lane on a removed node, a range cell never fetched).
 
+use tutti_graph::testing::declare_outputs;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Fade, FadeLaw, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status, Unforkable,
 };
-use tutti_graph::{OutputPort, PortSource};
+use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
 use tutti_units::{Latency, SampleRate, Samples, UnitParam};
 
 struct Out;
@@ -55,10 +57,16 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
     moves(&mut ed, "insert", |ed| {
         ed.insert(one, "out", Unforkable(Out));
     });
-    moves(&mut ed, "spec_mut", |ed| {
-        ed.spec_mut()
-            .topology
-            .set_outputs(vec![PortSource::Node(OutputPort::new(one, 0))]);
+    moves(&mut ed, "resize_outputs", |ed| {
+        declare_outputs(ed, ChannelLayout::from_count(1));
+    });
+    moves(&mut ed, "connect_edge", |ed| {
+        let from = Edge::Direct(PortSource::Node(OutputPort::new(one, 0)));
+        ed.connect_edge(EdgeId {
+            sink: PortSink::Output(0),
+            from,
+        })
+        .expect("wires");
     });
     moves(&mut ed, "a commit that sends", |ed| {
         ed.commit().expect("commits");

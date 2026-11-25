@@ -93,7 +93,7 @@ use crate::PlaceError;
 ///
 /// Pure arithmetic: no allocation, no locks — safe on the audio thread.
 #[inline]
-pub fn window_position(
+pub(crate) fn window_position(
     transport: &tutti_graph::TransportPosition,
     start_beat: Beat,
     duration: Option<BeatDuration>,
@@ -412,7 +412,7 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 /// - a wave already in the frame's order and width is read channel for
 ///   channel, with no fold.
 #[inline]
-pub fn read_frame<F: Float>(
+pub(crate) fn read_frame<F: Float>(
     wave: &Arc<Wave<F>>,
     place: &Place<F>,
     position: SamplePosition,
@@ -529,7 +529,7 @@ pub(crate) fn read_looped_frame<F: Float>(
         let tap = taps[t];
         let tail = wave.at(c, tap.frame);
         match tap.fade {
-            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead), w),
+            Some((lead, out, inn)) => tail * out + wave.at(c, lead) * inn,
             None => tail,
         }
     });
@@ -552,7 +552,7 @@ pub(crate) fn read_looped_frame<F: Float>(
 /// frame of any width other than the one the spread was built for. A width past
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MonoSpread<F: Float> {
+pub(crate) struct MonoSpread<F: Float> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
     /// destination.
     fold: Option<Fold<F>>,
@@ -560,13 +560,13 @@ pub struct MonoSpread<F: Float> {
 
 impl<F: Float> MonoSpread<F> {
     /// A mono sample to every channel of the frame.
-    pub const FAN: Self = Self { fold: None };
+    pub(crate) const FAN: Self = Self { fold: None };
 
     /// The spread of a mono source into a frame of `width` channels.
     ///
     /// Control side: it allocates.
     #[must_use]
-    pub fn to(width: ChannelLayout) -> Self {
+    pub(crate) fn to(width: ChannelLayout) -> Self {
         // A reader never emits past `MAX_CHANNELS` (the channels above
         // it are silent), so the spread is of the frame it does emit.
         let width = ChannelLayout::from_count(width.count().min(crate::MAX_SAMPLER_WIDTH));
@@ -657,7 +657,7 @@ impl<F: Float> MonoSpread<F> {
 /// The stack a wave's channels are gathered into when a fold reads them: twice
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), and more than the 20 speakers
 /// the vocabulary names, so any placed wave fits.
-pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
+pub(crate) const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 
 /// Where the channels of a wave go in a frame of some width.
 ///
@@ -671,7 +671,7 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 /// The frame is the one a reader writes: its width is the node's, at most
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Place<F: Float> {
+pub(crate) enum Place<F: Float> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
     Native(MonoSpread<F>),
     /// A wave that is not mono and not already the frame's order and width,
@@ -686,12 +686,12 @@ impl<F: Float> Place<F> {
     /// frame is the wave's own width (the streamer's ring writers, which carry the file as it is) and for a
     /// test; a wave of another width than the frame is a bug there.
     #[cfg(test)]
-    pub const FAN: Self = Self::Native(MonoSpread::FAN);
+    pub(crate) const FAN: Self = Self::Native(MonoSpread::FAN);
 
     /// A wave read as it stands, a mono one placed by the lone-centre rule for
     /// a frame of `width` ([`MonoSpread::to`]). Control side: it allocates.
     #[must_use]
-    pub fn new(width: ChannelLayout) -> Self {
+    pub(crate) fn new(width: ChannelLayout) -> Self {
         Self::Native(MonoSpread::to(width))
     }
 
@@ -709,7 +709,10 @@ impl<F: Float> Place<F> {
     /// - [`PlaceError::Fold`] with [`FoldError::Unplaced`] for a wave wider
     ///   than the frame where either has no channel order (10 channels into 8,
     ///   a 5.1 file into 5): its extra channels would be dropped.
-    pub fn for_wave<S: Sample>(wave: &Wave<S>, width: ChannelLayout) -> Result<Self, PlaceError> {
+    pub(crate) fn for_wave<S: Sample>(
+        wave: &Wave<S>,
+        width: ChannelLayout,
+    ) -> Result<Self, PlaceError> {
         Self::for_channels(&wave.channel_set(), width)
     }
 
@@ -722,7 +725,10 @@ impl<F: Float> Place<F> {
     /// # Errors
     ///
     /// As [`for_wave`](Self::for_wave).
-    pub fn for_channels(channels: &ChannelSet, width: ChannelLayout) -> Result<Self, PlaceError> {
+    pub(crate) fn for_channels(
+        channels: &ChannelSet,
+        width: ChannelLayout,
+    ) -> Result<Self, PlaceError> {
         let frame = ChannelLayout::from_count(width.count().min(crate::MAX_SAMPLER_WIDTH));
         let Some(topology) = channels.topology() else {
             return Self::folded(Fold::by_index(channels.width(), frame)?, frame);

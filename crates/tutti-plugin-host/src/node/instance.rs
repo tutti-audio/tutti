@@ -10,15 +10,16 @@
 //! pending for the main thread is run by the pump, and the Processor comes
 //! back at the audio thread's next poll.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
-    PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
-    RateRefusalCause, RenderMode, RenderModeSupport, SampleRate, Samples, State, Successor, Widths,
-    standing,
+    Behind, Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
+    PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, ProcessWake, Processor,
+    RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport, SampleRate, Samples,
+    State, Successor, Widths, standing,
 };
 use tutti_rt::Mutex;
 use tutti_rt::Rt;
@@ -60,6 +61,8 @@ pub(super) enum Trouble {
         rate: SampleRate,
         /// Why.
         reason: Arc<PluginError>,
+        /// Whether the plugin runs again at what it accepted.
+        recovery: Recovery,
     },
     /// The plugin would not stop: it runs as it was.
     #[error("{reason}")]
@@ -80,6 +83,121 @@ impl Trouble {
         match self {
             Self::Refused { reason, .. } | Self::Stuck { reason } | Self::Lost { reason } => reason,
         }
+    }
+}
+
+/// What a refused rate left the plugin as: a refusal a served plugin already
+/// typed keeps its cause, and otherwise the core's recovery says whether the
+/// plugin runs at the rate it accepted or is deactivated.
+fn refusal_cause(reason: &PluginError, recovery: &Recovery) -> RateRefusalCause {
+    if let PluginError::Bridge(bridge) = reason
+        && let IpcError::RateRefused(refusal) = &**bridge
+    {
+        return refusal.cause.clone();
+    }
+    let reason = reason.to_string();
+    match recovery {
+        Recovery::RolledBack { running } => RateRefusalCause::RolledBack {
+            running: running.rate(),
+            reason,
+        },
+        Recovery::Inactive | Recovery::RollbackRefused { .. } => {
+            RateRefusalCause::Deactivated { reason }
+        }
+    }
+}
+
+/// Why the plugin does not run at the graph's rate, until it takes one.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Silence {
+    /// It refused the rate, and the host was told
+    /// ([`PluginInvalidation::RateRefused`]).
+    Refused {
+        /// The rate it runs at meanwhile: the one it accepted, rolled back to.
+        /// `None` when it is deactivated, or once a rate was asked for again.
+        running: Option<SampleRate>,
+    },
+    /// Its restart would not stop, and the host was told
+    /// ([`PluginInvalidation::Stuck`]).
+    Stuck {
+        /// The rate it runs at meanwhile, the one the graph left; `None` once
+        /// a rate was asked for again.
+        running: Option<SampleRate>,
+    },
+    /// A fork's rate was not told to the plugin: its `prepare` ran off the
+    /// main thread. Nothing runs at another rate; the host was told nothing.
+    Unprepared,
+}
+
+impl Silence {
+    /// The rate the plugin runs at meanwhile.
+    fn running(self) -> Option<SampleRate> {
+        match self {
+            Self::Refused { running } | Self::Stuck { running } => running,
+            Self::Unprepared => None,
+        }
+    }
+
+    /// The same, once a rate was asked for again: it settles at the graph's.
+    fn asked_again(self) -> Self {
+        match self {
+            Self::Refused { .. } => Self::Refused { running: None },
+            Self::Stuck { .. } => Self::Stuck { running: None },
+            Self::Unprepared => Self::Unprepared,
+        }
+    }
+}
+
+/// Where a node binds its [`Wake`](tutti_graph::Wake): the instance raises it
+/// to call the node that holds the Processor when a recall waits, or the plugin
+/// asked to be processed again ([`ProcessRequest`]).
+pub(super) type WakeSlot = Mutex<Option<tutti_graph::Wake>>;
+
+/// The plugin's request to be processed again (CLAP's `request_process`), kept
+/// on the instance for the plugin's life: the closure the plugin's host holds
+/// raises it from any thread and touches nothing else, so it never waits and
+/// names no node. The node that holds the Processor [`take`](Self::take)s it
+/// in its block; the control side's pump takes it at each tick and calls that
+/// node's wake, which answers a node the executor parked one update later.
+///
+/// `Relaxed`: no data is behind the flag; a request read one block late is
+/// answered one block late.
+#[derive(Debug, Default)]
+pub(super) struct ProcessRequest(AtomicBool);
+
+impl ProcessRequest {
+    /// The plugin asks to be processed again. Any thread; wait-free.
+    fn raise(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the plugin asked since the last take, which clears it.
+    pub(super) fn take(&self) -> bool {
+        self.0.swap(false, Ordering::Relaxed)
+    }
+}
+
+/// Whether the plugin runs at a rate other than the graph's, because it
+/// did not take the graph's: published by the instance with its refusal
+/// ([`Instance::silence`]) and cleared with the rate taken
+/// ([`Instance::restored`]), and readable with no lock by the nodes over the
+/// instance. A node renders silence while it holds:
+/// a plugin at the wrong rate would sound pitch-shifted.
+///
+/// `Relaxed`: no data is behind the flag. The Processor reaches a node through
+/// its handoff, never on the strength of this bool, so a read one block late is
+/// a block at the old state.
+#[derive(Debug, Default)]
+pub(super) struct Silenced(AtomicBool);
+
+impl Silenced {
+    /// Whether the nodes render silence.
+    pub(super) fn holds(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn set(&self, silenced: bool) {
+        self.0.store(silenced, Ordering::Relaxed);
     }
 }
 
@@ -137,10 +255,6 @@ pub(super) struct Instance<L: Loaded> {
     /// The widths the plugin processes audio in, as read before its
     /// activation (for a plugin its shell activated, the width it runs at).
     widths: Widths,
-    /// What the plugin runs at, or was last asked to. Its `mode` follows the
-    /// live render mode ([`set_render_mode`](Self::set_render_mode)), so
-    /// a rate change activates in the mode the plugin was told.
-    prepare: Prepare,
     /// What the pump has not yet reported.
     changes: Changes,
     /// What the control side has not yet been told about the plugin, in the
@@ -148,8 +262,27 @@ pub(super) struct Instance<L: Loaded> {
     /// restart that would not stop, the plugin's death. Read by
     /// [`take_reports`](Self::take_reports).
     reports: Vec<PluginInvalidation>,
-    /// The last rate change was refused (the reports say so once).
-    rate_refused: bool,
+    /// The last rate change was refused (the reports say so once), and where
+    /// the plugin runs until a rate is taken.
+    silence: Option<Silence>,
+    /// The render mode the last prepare of the graph carried (realtime before
+    /// one): a prepare tells the plugin its mode only when the one it carries
+    /// changed, so a re-prepare at the same mode leaves what the session
+    /// announced since.
+    graph_mode: RenderMode,
+    /// The nodes over this instance render silence while a refusal stands.
+    silenced: Arc<Silenced>,
+    /// The wake of the node whose realtime end holds the Processor: raised
+    /// after a recall, which only that node's next call answers, and for a
+    /// request to be processed. A successor node binds its own slot, which
+    /// becomes this one when the Processor moves to its end.
+    wake: Arc<WakeSlot>,
+    /// What the plugin's request to be processed raises, bound to the plugin
+    /// for its life.
+    requested: Arc<ProcessRequest>,
+    /// The slot of the successor [`commit`](Self::commit) named, until the
+    /// Processor has moved to its end.
+    incoming_wake: Option<Arc<WakeSlot>>,
     /// A successor was committed ([`commit`](Self::commit)).
     committed: bool,
     /// Whether the plugin is lost, and why, readable with no lock.
@@ -232,16 +365,21 @@ impl<L: Loaded> Instance<L> {
             hand,
             origin,
             widths,
-            prepare,
             changes: Changes::default(),
             reports: Vec::new(),
-            rate_refused: false,
+            silence: None,
+            graph_mode: RenderMode::Realtime,
+            silenced: Arc::default(),
+            wake: Arc::default(),
+            requested: Arc::default(),
+            incoming_wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
             midi_map: MidiMapSlot::new(&wiring),
             midi_map_stale: false,
         };
+        this.bind_process_request();
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(trouble) = refused {
             return Err(IpcError::ActivationFailed(Arc::clone(trouble.reason())));
@@ -268,24 +406,38 @@ impl<L: Loaded> Instance<L> {
         let (mut hand, rt) = Hand::threaded();
         let (lifecycle, state) =
             Lifecycle::adopt(processor, controller, prepare, wiring, &mut hand);
-        let this = Self {
+        let mut this = Self {
             lifecycle,
             state,
             hand,
             origin: None,
             widths: Widths::new(prepare.format() == FloatWidth::F64),
-            prepare,
             changes: Changes::default(),
             reports: Vec::new(),
-            rate_refused: false,
+            silence: None,
+            graph_mode: RenderMode::Realtime,
+            silenced: Arc::default(),
+            wake: Arc::default(),
+            requested: Arc::default(),
+            incoming_wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
             midi_map: MidiMapSlot::new(wiring),
             midi_map_stale: false,
         };
+        this.bind_process_request();
         this.publish_figures();
         (this, rt)
+    }
+
+    /// Binds the plugin's request to be processed to this instance's flag, once
+    /// and for the plugin's life (a format host keeps its first binding).
+    fn bind_process_request(&mut self) {
+        let requested = Arc::clone(&self.requested);
+        if let Some(control) = self.lifecycle.control() {
+            control.bind_wake(ProcessWake::new(move || requested.raise()));
+        }
     }
 
     /// The widths the plugin processes audio in: read before its activation
@@ -294,10 +446,19 @@ impl<L: Loaded> Instance<L> {
         self.widths
     }
 
+    /// What the plugin is being asked to run at: the lifecycle's wanted
+    /// `Prepare`, which a request for one setting builds on. A plugin is
+    /// activated when an instance is built, so there always is one.
+    fn wanted(&self) -> Prepare {
+        self.state
+            .wanted()
+            .expect("an instance is activated when it is built")
+    }
+
     /// The width the Processor runs at: it stays through a rate or a mode
     /// change, which reactivate with the same [`Prepare`] but for those.
     pub(super) fn width(&self) -> FloatWidth {
-        self.prepare.format()
+        self.wanted().format()
     }
 
     /// Steps `event` and keeps what it told; what stopped it from taking
@@ -320,10 +481,15 @@ impl<L: Loaded> Instance<L> {
                     Notice::TailChanged(tail) => changes.tail = Some(tail),
                     Notice::IoChanged => changes.io = true,
                     Notice::Transport(request) => changes.transport.push(request),
-                    Notice::Refused { rate, reason } => {
+                    Notice::Refused {
+                        rate,
+                        reason,
+                        recovery,
+                    } => {
                         trouble = Some(Trouble::Refused {
                             rate,
-                            reason: Arc::new(reason),
+                            reason,
+                            recovery,
                         });
                     }
                     Notice::Stuck { reason } => {
@@ -336,6 +502,9 @@ impl<L: Loaded> Instance<L> {
                             reason: reason.to_string(),
                         });
                     }
+                    Notice::ModeRefused { mode } => {
+                        reports.push(PluginInvalidation::RenderModeNotApplied { mode });
+                    }
                     Notice::Lost { reason } => {
                         trouble = Some(Trouble::Lost {
                             reason: Arc::new(reason),
@@ -347,6 +516,17 @@ impl<L: Loaded> Instance<L> {
                     | Notice::ParamTitlesChanged => {}
                 });
         self.publish_figures();
+        // A plan parked for the Processor has raised its recall; the realtime
+        // end hands it back at the node's next call, which a parked node does
+        // not get unless woken. Raised after the recall, never before.
+        if self.incoming_wake.is_some() && !self.hand.pending() {
+            self.wake = self.incoming_wake.take().unwrap_or_default();
+        }
+        if self.state.is_parked()
+            && let Some(wake) = &*self.wake.lock()
+        {
+            wake.notify();
+        }
         if std::mem::take(&mut self.midi_map_stale) {
             self.declare_midi_map(main);
             self.reports.push(PluginInvalidation::MidiMap);
@@ -421,12 +601,16 @@ impl<L: Loaded> Instance<L> {
     /// # Errors
     ///
     /// [`RebindError::NotRunning`] for a plugin that is not active (loaded,
-    /// refused or lost): there is no Processor to move.
+    /// refused or lost), or that runs at the rate it accepted after refusing
+    /// the graph's: a successor would render at the wrong rate, so there is no
+    /// Processor to move until a rate is taken. Once one is
+    /// ([`restored`](Self::restored)) the session's next update that retries
+    /// the rebind succeeds, with no action by the app.
     /// [`RebindError::Restarting`] while the plugin's own restart or a request
     /// still to be read is under way: the layout the lifecycle holds is not the
     /// one the plugin will run with, so the caller pumps and tries again.
     pub(super) fn ready_to_rehand(&self) -> Result<(), RebindError> {
-        if !self.state.renders() {
+        if !self.state.renders() || self.silence.is_some() {
             return Err(RebindError::NotRunning);
         }
         if !self.state.is_quiet() || self.state.is_parked() {
@@ -458,8 +642,14 @@ impl<L: Loaded> Instance<L> {
     /// the successor's. A plugin that refuses the restart renders nothing until
     /// one it takes: the refusal is kept for the control side, as a rate's is
     /// ([`take_reports`](Self::take_reports)).
-    pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<L::Processor>) {
+    pub(super) fn commit(
+        &mut self,
+        main: MainThreadMarker,
+        successor: Successor<L::Processor>,
+        wake: Arc<WakeSlot>,
+    ) {
         self.hand.install(successor);
+        self.incoming_wake = Some(wake);
         if let Some(trouble) = self.drive(main, Event::Op(HostOp::Relend)) {
             self.note(trouble);
         }
@@ -485,6 +675,23 @@ impl<L: Loaded> Instance<L> {
         Arc::clone(&self.lost)
     }
 
+    /// The slot the node that holds the Processor binds its wake in.
+    pub(super) fn wake_slot(&self) -> Arc<WakeSlot> {
+        Arc::clone(&self.wake)
+    }
+
+    /// The plugin's request to be processed again, which the node that holds
+    /// the Processor takes in its block.
+    pub(super) fn process_request(&self) -> Arc<ProcessRequest> {
+        Arc::clone(&self.requested)
+    }
+
+    /// The flag the nodes over this instance read to render silence while a
+    /// refused rate stands.
+    pub(super) fn silenced(&self) -> Arc<Silenced> {
+        Arc::clone(&self.silenced)
+    }
+
     /// Reports that `mode` was not applied because the node was prepared off
     /// the main thread ([`PluginInvalidation::RenderModeNotApplied`]).
     pub(super) fn note_mode_not_applied(&mut self, mode: RenderMode) {
@@ -492,25 +699,57 @@ impl<L: Loaded> Instance<L> {
             .push(PluginInvalidation::RenderModeNotApplied { mode });
     }
 
-    /// The render mode the plugin runs in, or was last told.
-    pub(super) fn render_mode(&self) -> RenderMode {
-        self.prepare.mode()
+    /// The Processor in hand was told the wanted rate, block ceiling and
+    /// callback size: in flight until the plugin answers.
+    pub(super) fn retune_asked(&mut self) {
+        self.state.retune_asked();
     }
 
-    /// Tells the plugin its render mode, and keeps the mode a rate change
-    /// activates it in. Main thread.
+    /// The render mode the plugin runs in, or is being changed to.
+    pub(super) fn render_mode(&self) -> RenderMode {
+        self.wanted().mode()
+    }
+
+    /// Wants the plugin in `mode` and tells it with `tell`, which needs no main
+    /// thread; the lifecycle records the tell, so its answer settles it. `false`
+    /// when the plugin is lost or `tell` queues nothing, with the want as it was.
+    ///
+    /// `tell` runs under the instance's lock, so the lock order is instance,
+    /// then bridge. No bridge listener callback takes the instance lock: the
+    /// listener writes the answers into `Events::told`, which the pump drains
+    /// under its own lock.
+    pub(super) fn announce_mode(
+        &mut self,
+        mode: RenderMode,
+        tell: impl FnOnce(RenderMode) -> bool,
+    ) -> bool {
+        if self.lifecycle.is_poisoned() {
+            return false;
+        }
+        if !tell(mode) {
+            return false;
+        }
+        self.want(|w| w.with_mode(mode));
+        self.state.mode_asked(mode);
+        true
+    }
+
+    /// Asks for the plugin to run in `mode`. Main thread.
     ///
     /// What happens is the plugin's
-    /// [`render_mode_support`](tutti_plugin_types::Control::render_mode_support):
-    /// a `Live` plugin is told; an `OnActivation` one is reconfigured through
-    /// the lifecycle, the activation carrying the mode and the Processor
-    /// changing at the pump, as a rate change's does; an `Unsupported` one is
-    /// left running, the mode kept for its next activation. Returns whether
-    /// the plugin now runs in `mode` (or is on its way to it).
+    /// [`render_mode_support`](tutti_plugin_types::Control::render_mode_support)
+    /// ([`reconcile`](Self::reconcile)): a `Live` plugin is told and answers in
+    /// the call, a `Served` one is told and answers later (`pump`), an
+    /// `OnActivation` one is reconfigured through the lifecycle, the
+    /// activation carrying the mode and the Processor changing at the pump, as
+    /// a rate change's does, and a refused activation is rolled back to the
+    /// mode it accepted; an `Unsupported` one is left running, the mode kept
+    /// for its next activation. Returns whether the plugin runs in `mode` or
+    /// is on its way to it.
     ///
     /// With `rt`, the node's own realtime end out of any executor (a fork
     /// being built), a reconfiguration runs here to the end, as
-    /// [`set_sample_rate`](Self::set_sample_rate)'s does: the Processor is
+    /// [`reconfigure`](Self::reconfigure)'s does: the Processor is
     /// lent again on return, so the node's first block has one. Without, the
     /// recall waits for the audio thread's next poll and a later
     /// [`pump`](Self::pump) finishes it.
@@ -520,69 +759,149 @@ impl<L: Loaded> Instance<L> {
         mode: RenderMode,
         rt: Option<&mut Rt<L::Processor>>,
     ) -> bool {
-        self.prepare = self.prepare.with_mode(mode);
-        self.state.set_mode(mode);
-        if let Some(control) = self.lifecycle.control() {
-            match control.render_mode_support(main) {
-                RenderModeSupport::Live => return control.set_render_mode(main, mode),
-                RenderModeSupport::Unsupported => return false,
-                RenderModeSupport::OnActivation => {}
-            }
-        }
         if self.lifecycle.is_poisoned() {
             return false;
         }
-        let mut refused = self.drive(main, Event::Op(HostOp::Reconfigure(self.prepare)));
-        if let Some(rt) = rt {
-            // The recall raised above: the realtime end hands the Processor
-            // back, the tick runs the parked plan, and the reactivated
-            // Processor is lent and taken.
-            let _ = rt.poll(Processor::stop);
-            refused = refused.or(self.drive(main, Event::Tick));
-            let _ = rt.poll(Processor::stop);
+        self.want(|w| w.with_mode(mode));
+        let reconciled = self.reconcile(Some(main), rt).is_ok();
+        reconciled
+            && self.mode_support(Some(main)) != Some(RenderModeSupport::Unsupported)
+            && self.render_mode() == mode
+    }
+
+    /// The render mode a prepare of the graph carries, told to the plugin when
+    /// it is not the one the previous prepare carried and not the one the plugin
+    /// runs in. Off the main thread nothing is told and nothing is recorded,
+    /// so the next prepare on it tells it; the handle's subscribers hear it as
+    /// a rate's refusal is. `rt` as for [`reconcile`](Self::reconcile).
+    pub(super) fn follow_graph_mode(
+        &mut self,
+        main: Option<MainThreadMarker>,
+        mode: RenderMode,
+        rt: Option<&mut Rt<L::Processor>>,
+    ) {
+        if self.graph_mode == mode {
+            return;
         }
-        match refused {
-            None => {
+        if self.render_mode() != mode {
+            let Some(main) = main else {
+                self.note_mode_not_applied(mode);
+                return;
+            };
+            self.set_render_mode(main, mode, rt);
+        }
+        self.graph_mode = mode;
+    }
+
+    /// Records what the graph wants: `change` applied to the wanted `Prepare`.
+    /// Nothing is activated until [`reconcile`](Self::reconcile) runs.
+    pub(super) fn want(&mut self, change: impl FnOnce(Prepare) -> Prepare) {
+        self.state.want(change(self.wanted()));
+    }
+
+    /// The graph asks for a rate again: a refusal of an earlier ask settles at
+    /// what the graph runs at now, whichever the plugin runs at.
+    pub(super) fn rate_asked(&mut self) {
+        if let Some(silence) = self.silence {
+            self.silence(silence.asked_again());
+        }
+    }
+
+    /// How the plugin takes a render mode, when the main thread can ask.
+    fn mode_support(&mut self, main: Option<MainThreadMarker>) -> Option<RenderModeSupport> {
+        let main = main?;
+        self.lifecycle
+            .control()
+            .map(|c| c.render_mode_support(main))
+    }
+
+    /// How far the plugin is from what the host wants ([`State::behind`]); the
+    /// render mode counts only where the main thread can tell a plugin it.
+    fn behind(&mut self, main: Option<MainThreadMarker>) -> Behind {
+        let support = self
+            .mode_support(main)
+            .unwrap_or(RenderModeSupport::Unsupported);
+        self.state
+            .behind(<L::Processor as Processor>::RETUNE.is_some(), support)
+    }
+
+    /// Brings the plugin to what the host wants, by the cheapest step
+    /// ([`behind`](Self::behind)): a mode a plugin takes live is told it, and
+    /// anything an activation takes activates it again, when nothing is under
+    /// way; otherwise a refusal the graph has left is settled. Without the
+    /// main thread nothing can be told or activated. The nodes render silence
+    /// only when the rate differs (the output would be at the wrong pitch)
+    /// until a pump on the main thread activates the plugin (the instance's
+    /// tick, the node's `prepare`); a larger block ceiling alone leaves the
+    /// plugin audible, its blocks split to the ceiling it was told.
+    ///
+    /// With `rt`, the node's own realtime end out of any executor (its
+    /// `prepare`), the exchange runs to the end here; without, the recall waits
+    /// for the audio thread's next poll and a later [`pump`](Self::pump)
+    /// finishes it.
+    ///
+    /// # Errors
+    ///
+    /// Why the plugin did not take the rate, as [`reconfigure`](Self::reconfigure) says.
+    pub(super) fn reconcile(
+        &mut self,
+        main: Option<MainThreadMarker>,
+        rt: Option<&mut Rt<L::Processor>>,
+    ) -> Result<(), String> {
+        if self.lifecycle.is_poisoned() || self.state.is_busy() {
+            return Ok(());
+        }
+        match self.behind(main) {
+            Behind::No => {
                 self.settle();
-                true
+                Ok(())
             }
-            Some(trouble) => {
-                self.note(trouble);
-                false
+            Behind::Mode(mode) => {
+                // `behind` answers a mode only with the main thread in hand.
+                if let Some(main) = main
+                    && let Some(trouble) = self.drive(main, Event::Op(HostOp::SetMode(mode)))
+                {
+                    self.note(trouble);
+                }
+                Ok(())
+            }
+            Behind::Restart => {
+                let Some(main) = main else {
+                    let wrong_rate = self.state.wanted().map(|w| w.rate())
+                        != self.state.applied().map(|a| a.rate());
+                    if wrong_rate && self.silence.is_none() {
+                        self.silence(Silence::Unprepared);
+                    }
+                    return Ok(());
+                };
+                self.reconfigure(main, rt)
             }
         }
     }
 
-    /// Tells the plugin its rate: a recall, a rejoin and an activation at the
-    /// new [`Prepare`], which is how VST2 takes one (`effSetSampleRate`
-    /// between `effMainsChanged` brackets). Main thread.
+    /// A recall, a rejoin and an activation at the wanted [`Prepare`], which is
+    /// how VST2 takes a rate (`effSetSampleRate` between `effMainsChanged`
+    /// brackets). Main thread.
     ///
-    /// With `rt`, the node's own realtime end out of any executor (its
-    /// `prepare`), the whole exchange runs here and the new Processor is in
-    /// `rt` on return. Without, the recall waits for the audio thread's next
-    /// poll and a later [`pump`](Self::pump) finishes it.
-    ///
-    /// A plugin that refuses the rate renders nothing until a rate it takes, as every format does.
-    /// The figures it recomputes are read after the activation.
+    /// A plugin that refuses renders nothing until a rate it takes, as every
+    /// format does. The figures it recomputes are read after the activation.
     ///
     /// # Errors
     ///
-    /// Why the plugin did not take the rate, worded as the other formats word
-    /// it (`standing`: where the plugin stands). What went wrong is also kept
-    /// for [`take_reports`](Self::take_reports), by its kind: a refusal of the
-    /// rate, a restart that would not stop, or the plugin's death. That is how
-    /// the control side hears of one the audio thread's pending rate caused.
+    /// Why the plugin did not take it, worded as the other formats word a
+    /// refusal (`standing`: where the plugin stands). What went wrong is also
+    /// kept for [`take_reports`](Self::take_reports), by its kind: a refusal, a
+    /// restart that would not stop, or the plugin's death.
     ///
-    /// A rate that is taken after a refusal is reported taken
+    /// A rate taken after a refusal is reported taken
     /// (`PluginInvalidation::RateRestored`) when the plugin renders at it: at
     /// once with `rt`, and at the pump that finishes the parked plan without.
-    pub(super) fn set_sample_rate(
+    fn reconfigure(
         &mut self,
         main: MainThreadMarker,
-        rate: SampleRate,
         rt: Option<&mut Rt<L::Processor>>,
     ) -> Result<(), String> {
-        let wanted = self.prepare.with_rate(rate);
+        let wanted = self.wanted();
         let mut outcome = self.drive(main, Event::Op(HostOp::Reconfigure(wanted)));
         if let Some(rt) = rt {
             // The recall raised above: the realtime end hands the Processor
@@ -605,12 +924,11 @@ impl<L: Loaded> Instance<L> {
                     }
                     trouble => trouble,
                 };
-                let reason = self.worded(rate, &trouble);
+                let reason = self.worded(wanted.rate(), &trouble);
                 self.note(trouble);
                 Err(reason)
             }
             None => {
-                self.prepare = wanted;
                 self.settle();
                 Ok(())
             }
@@ -623,12 +941,12 @@ impl<L: Loaded> Instance<L> {
             Trouble::Refused { reason, .. } => format!(
                 "plugin refused sample rate {} ({}): {reason}",
                 rate.get(),
-                standing(self.state.renders(), self.prepare.rate())
+                standing(self.state.renders(), self.wanted().rate())
             ),
             Trouble::Stuck { reason } => format!(
                 "plugin would not stop for sample rate {} ({}): {reason}",
                 rate.get(),
-                standing(self.state.renders(), self.prepare.rate())
+                standing(self.state.renders(), self.wanted().rate())
             ),
             Trouble::Lost { reason } => format!(
                 "plugin was lost changing to sample rate {}: {reason}",
@@ -646,15 +964,27 @@ impl<L: Loaded> Instance<L> {
             return;
         }
         match trouble {
-            Trouble::Refused { rate, reason } => {
-                self.rate_refused = true;
+            Trouble::Refused {
+                rate,
+                reason,
+                recovery,
+            } => {
+                let cause = refusal_cause(&reason, &recovery);
+                let running = match &cause {
+                    RateRefusalCause::RolledBack { running, .. } => Some(*running),
+                    _ => None,
+                };
+                self.silence(Silence::Refused { running });
                 self.reports
                     .push(PluginInvalidation::RateRefused(RateRefusal::new(
-                        rate,
-                        self.refusal_cause(&reason),
+                        rate, cause,
                     )));
             }
             Trouble::Stuck { reason } => {
+                // Running as it was, at a rate the graph has left.
+                self.silence(Silence::Stuck {
+                    running: Some(self.wanted().rate()),
+                });
                 self.reports.push(PluginInvalidation::Stuck {
                     reason: reason.to_string(),
                 });
@@ -663,33 +993,32 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// What a refused rate left the plugin as: a refusal a served plugin
-    /// already typed keeps its cause, and a loader's own failure is the plugin
-    /// running at the rate it had when it renders still, deactivated when it
-    /// does not.
-    fn refusal_cause(&self, reason: &PluginError) -> RateRefusalCause {
-        if let PluginError::Bridge(bridge) = reason
-            && let IpcError::RateRefused(refusal) = &**bridge
-        {
-            return refusal.cause.clone();
-        }
-        let reason = reason.to_string();
-        if self.state.renders() {
-            RateRefusalCause::RolledBack {
-                running: self.prepare.rate(),
-                reason,
-            }
-        } else {
-            RateRefusalCause::Deactivated { reason }
-        }
+    /// The plugin does not run at the graph's rate, for the reason `silence`
+    /// says: the nodes render silence. The one place the reason is stored and
+    /// published.
+    pub(super) fn silence(&mut self, silence: Silence) {
+        self.silence = Some(silence);
+        self.silenced.set(true);
     }
 
-    /// The plugin runs again after refusing a rate: reported once.
+    /// The plugin runs at the graph's rate again: the nodes render, and the
+    /// host is told once when it was told of a refused rate (a stuck restart
+    /// or an unprepared fork was announced as no refusal). The one place the
+    /// reason is cleared and published.
+    ///
+    /// The order is fixed: the recall of the Processor activated at the old
+    /// rate is answered by the node's `rt.poll` (the node is woken for it),
+    /// and the tick that follows deactivates, activates at the new rate and
+    /// lends the new Processor; [`settle`](Self::settle) runs after that tick,
+    /// with nothing planned, so the mute is cleared only when the old
+    /// Processor has been returned and the one at the new rate is lent. A
+    /// node therefore never renders with the Processor rolled back to the old
+    /// rate once the mute is down.
     fn restored(&mut self) {
-        if self.rate_refused {
-            self.rate_refused = false;
+        if let Some(Silence::Refused { .. }) = self.silence.take() {
             self.reports.push(PluginInvalidation::RateRestored);
         }
+        self.silenced.set(false);
     }
 
     /// What the control side has not yet been told about the plugin, once: a
@@ -710,8 +1039,15 @@ impl<L: Loaded> Instance<L> {
     pub(super) fn pump(&mut self, main: MainThreadMarker) -> Changes {
         self.midi_map.reclaim();
         let mut asked = Vec::new();
+        let mut told = Vec::new();
         if let Some(control) = self.lifecycle.control() {
             control.take_requests(main, &mut asked);
+            control.take_answers(main, &mut told);
+        }
+        for answer in told {
+            if let Some(trouble) = self.drive(main, Event::Answered(answer)) {
+                self.note(trouble);
+            }
         }
         // The plugin's own signal, reported as it was raised: its pin counts or
         // latency may have moved, and the handle's `Io` says so even when the
@@ -727,7 +1063,18 @@ impl<L: Loaded> Instance<L> {
         }
         match self.drive(main, Event::Tick) {
             Some(trouble) => self.note(trouble),
-            None => self.settle(),
+            None => {
+                // Whatever the host wanted while the plugin could not be
+                // activated (off the main thread, or mid-restart).
+                let _ = self.reconcile(Some(main), None);
+            }
+        }
+        // A request no block took: the node that holds the Processor may be
+        // parked, which only its wake answers.
+        if self.requested.take()
+            && let Some(wake) = &*self.wake.lock()
+        {
+            wake.notify();
         }
         let mut changes = std::mem::take(&mut self.changes);
         changes.reports = self.take_reports();
@@ -735,10 +1082,20 @@ impl<L: Loaded> Instance<L> {
     }
 
     /// A plugin that refused a rate has taken one when it renders again with
-    /// no plan under way: a parked change that was waiting for the audio
-    /// thread's Processor has finished, or the plugin's own restart ran.
+    /// no plan under way, at the wanted rate, other than the one it was rolled
+    /// back to (a want the refusal kept is still to be told, not taken):
+    /// a parked change that was waiting for the audio thread's Processor has
+    /// finished. Its own restart, or an activation for a render mode, runs
+    /// at the rolled-back rate and takes none.
     fn settle(&mut self) {
-        if self.rate_refused && self.state.renders() && !self.state.is_busy() {
+        let Some(silence) = self.silence else {
+            return;
+        };
+        if self.state.renders()
+            && !self.state.is_busy()
+            && self.state.applied().map(|a| a.rate()) == Some(self.wanted().rate())
+            && silence.running() != Some(self.wanted().rate())
+        {
             self.restored();
         }
     }
@@ -758,24 +1115,16 @@ impl<L: Loaded> Instance<L> {
         self.state.renders()
     }
 
-    /// The rate the plugin runs at, or was last asked to.
+    /// The rate the plugin runs at, or is being changed to.
     #[cfg(test)]
     pub(super) fn rate(&self) -> SampleRate {
-        self.prepare.rate()
+        self.wanted().rate()
     }
 
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again.
     pub(super) fn origin(&self) -> Option<&PluginRef> {
         self.origin.as_ref()
-    }
-
-    /// The rate a Processor that follows the graph (`Processor::retune`) took
-    /// live: the activation a later reconfiguration starts from is at it, and
-    /// a refusal of the rate before it is over.
-    pub(super) fn retuned(&mut self, rate: SampleRate) {
-        self.prepare = self.prepare.with_rate(rate);
-        self.restored();
     }
 }
 
@@ -785,6 +1134,18 @@ mod tests {
     use tutti_vst2_host::Vst2Loaded;
 
     use super::*;
+
+    /// What the node's `prepare` does for a rate: wanted, then reconciled.
+    fn ask<L: Loaded>(
+        instance: &mut Instance<L>,
+        main: MainThreadMarker,
+        rate: SampleRate,
+        rt: Option<&mut Rt<L::Processor>>,
+    ) -> Result<(), String> {
+        instance.want(|w| w.with_rate(rate));
+        instance.rate_asked();
+        instance.reconcile(Some(main), rt)
+    }
 
     /// **A load with no block is refused** as an unsupported block (a rate is a
     /// `SampleRate`, so it cannot be none).
@@ -876,7 +1237,7 @@ mod tests {
     /// `RateRestored` are for a refusal and the recovery from one).
     #[test]
     fn a_rate_the_plugin_takes_reports_nothing() {
-        let (mut instance, _rt, _) = Instance::<Vst2Loaded>::load(
+        let (mut instance, mut rt, _) = Instance::<Vst2Loaded>::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
             &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
@@ -887,10 +1248,17 @@ mod tests {
         )
         .expect("loads");
         assert!(instance.take_reports().is_empty(), "nothing to report yet");
-        instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, None)
-            .expect("a real rate is taken");
-        assert_eq!(instance.prepare.rate(), SampleRate::SR_96K);
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect("a real rate is taken");
+        assert_eq!(
+            instance.state.applied().map(|p| p.rate()),
+            Some(SampleRate::SR_96K)
+        );
         assert!(instance.take_reports().is_empty(), "a plain change");
         assert!(instance.renders());
         assert!(!instance.lost_latch().is_lost());
@@ -915,15 +1283,63 @@ mod tests {
         )
         .expect("loads");
         assert!(rt.poll(Processor::stop).is_some(), "lent at the load");
-        instance
-            .set_sample_rate(main, SampleRate::SR_96K, None)
-            .expect("the change starts");
+        ask(&mut instance, main, SampleRate::SR_96K, None).expect("the change starts");
         assert!(rt.poll(Processor::stop).is_none(), "handed back");
         assert!(instance.state.is_parked(), "waits for the Processor");
         let _ = instance.pump(main);
         assert!(instance.renders());
         assert_eq!(instance.rate(), SampleRate::SR_96K);
         assert!(rt.poll(Processor::stop).is_some(), "the new Processor");
+    }
+
+    /// **What the host wants while the plugin cannot be activated (no main
+    /// thread) is applied by the next pump**, with no editor open and no other
+    /// call: the nodes are silent until then, and the activation carries the
+    /// wanted rate and callback size.
+    #[test]
+    fn a_rate_and_callback_size_wanted_without_the_main_thread_are_applied_by_the_next_pump() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        let quantum = MaxBlock::of(Samples::new(32));
+        instance.want(|w| w.with_rate(SampleRate::SR_96K).with_quantum(quantum));
+        instance.rate_asked();
+        instance.reconcile(None, None).expect("nothing is refused");
+        assert!(!cycled(&fake), "no main thread: nothing activated");
+        assert!(instance.silenced().holds(), "silent until it is applied");
+
+        let _ = instance.pump(main_thread());
+        let _ = rt.poll(Processor::stop);
+        let _ = instance.pump(main_thread());
+        assert!(
+            fake.calls()
+                .iter()
+                .any(|c| matches!(c, tutti_plugin_types::fake::Call::Activate(rate, _) if *rate == SampleRate::SR_96K))
+        );
+        assert_eq!(fake.activated_quantum(), Some(Samples::new(32)));
+        assert!(instance.renders() && !instance.silenced().holds());
+    }
+
+    /// **A block ceiling above the one the plugin was told activates it again
+    /// at the ceiling; a lower one leaves it running.**
+    #[test]
+    fn a_block_ceiling_above_the_plugins_activates_it_again_at_it() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        let block = |n| MaxBlock::of(Samples::new(n));
+        instance.want(|w| w.with_max_block(block(32)));
+        instance
+            .reconcile(Some(main_thread()), Some(&mut rt))
+            .expect("nothing is refused");
+        assert!(!cycled(&fake), "the plugin was told 64, enough for 32");
+        instance.want(|w| w.with_max_block(block(256)));
+        instance
+            .reconcile(Some(main_thread()), Some(&mut rt))
+            .expect("nothing is refused");
+        assert!(
+            fake.calls()
+                .iter()
+                .any(|c| matches!(c, tutti_plugin_types::fake::Call::Activate(_, b) if *b == Samples::new(256))),
+            "{:?}",
+            fake.calls()
+        );
     }
 
     /// An active fake taking the render mode as `support` says, adopted with
@@ -1032,49 +1448,79 @@ mod tests {
     fn a_restart_that_would_not_stop_is_stuck_not_a_refused_rate() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.stick_deactivations(1);
-        let why = instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("the fake will not stop");
+        let why = ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("the fake will not stop");
         assert!(why.contains("would not stop"), "{why}");
         let reports = instance.take_reports();
         assert!(
             matches!(reports.as_slice(), [PluginInvalidation::Stuck { .. }]),
             "{reports:?}"
         );
-        assert!(!instance.rate_refused);
+        assert!(instance.silenced().holds(), "the graph has left the rate");
         assert!(instance.renders(), "as it was");
     }
 
-    /// **A refused rate is reported with the rate that was refused, and the
-    /// recovery is reported once, when the plugin renders again** (here by its
-    /// activation for a render mode, not by a rate change that would have
-    /// reported it).
+    /// **A refused rate is rolled back: the plugin runs again at the rate it
+    /// accepted, the refusal names the refused rate and the one it runs at,
+    /// and a rate it takes later is reported once.** The activations that
+    /// follow the refusal at the accepted rate (a render mode's) are not a
+    /// recovery.
     #[test]
-    fn a_refusal_names_the_rate_and_the_recovery_is_reported_when_it_renders_again() {
+    fn a_refused_rate_is_rolled_back_and_the_rate_taken_after_it_is_reported_once() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.refuse_rate(Some(SampleRate::SR_96K));
-        instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("refused");
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("refused");
         let reports = instance.take_reports();
         assert!(
             matches!(
                 reports.as_slice(),
                 [PluginInvalidation::RateRefused(refusal)] if refusal.rate == SampleRate::SR_96K
-                    && matches!(refusal.cause, RateRefusalCause::Deactivated { .. })
+                    && matches!(
+                        refusal.cause,
+                        RateRefusalCause::RolledBack { running, .. } if running == SampleRate::SR_48K
+                    )
             ),
             "{reports:?}"
         );
-        assert!(!instance.renders());
+        assert!(instance.renders(), "active again at the accepted rate");
+        assert_eq!(instance.rate(), SampleRate::SR_48K);
+        assert!(
+            instance.silenced().holds(),
+            "the nodes stay silent: the graph runs at another rate"
+        );
+
+        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
+        assert!(
+            instance.pump(main_thread()).reports.is_empty(),
+            "an activation at the rolled-back rate takes no rate"
+        );
 
         fake.refuse_rate(None);
-        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
-        assert!(instance.renders(), "the activation for the mode ran");
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect("taken");
         let reports = instance.take_reports();
         assert!(
             matches!(reports.as_slice(), [PluginInvalidation::RateRestored]),
             "{reports:?}"
         );
+        assert_eq!(instance.rate(), SampleRate::SR_96K);
+        assert!(!instance.silenced().holds());
         assert!(instance.pump(main_thread()).reports.is_empty(), "told once");
     }
 
@@ -1085,9 +1531,13 @@ mod tests {
     fn a_panic_during_a_restart_reports_the_death_and_no_refusal() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.panic_in_activate(true);
-        let why = instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("the plugin is lost");
+        let why = ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("the plugin is lost");
         assert!(
             why.starts_with("plugin was lost changing to sample rate 96000"),
             "{why}"

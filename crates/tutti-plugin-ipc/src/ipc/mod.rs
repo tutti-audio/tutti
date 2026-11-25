@@ -26,7 +26,7 @@
 //! a caller with no token reaches the same bridge through
 //! [`Ipc::bridge`] / [`IpcController::bridge`]. Nothing in this module hops to
 //! the main thread. A rate, a block ceiling and a quantum are taken without a
-//! restart through [`Processor::retune`](tutti_plugin_types::Processor::retune), which is what lets a graph node
+//! restart through [`Processor::RETUNE`](tutti_plugin_types::Processor::RETUNE), which is what lets a graph node
 //! prepare a served plugin off the main thread.
 //!
 //! # Reopening
@@ -57,7 +57,7 @@ use tutti_plugin_types::{
     ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
     PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
-    WaitSwitch, Widths,
+    Told, WaitSwitch, Widths,
 };
 use tutti_rt::AtomicCell;
 use tutti_units::ParamId;
@@ -170,6 +170,10 @@ struct Events {
     latency: AtomicUsize,
     tail: Mutex<PluginTail>,
     requests: Mutex<Vec<Request>>,
+    /// What the server answered to the rate and render mode the host told it,
+    /// oldest first, until the control side takes them
+    /// ([`Control::take_answers`](tutti_plugin_types::Control::take_answers)).
+    told: Mutex<Vec<Told>>,
     forward: Mutex<Option<IpcListener>>,
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
@@ -244,6 +248,7 @@ impl Events {
             IpcEvent::IoLayout(layout) => {
                 *self.layout.lock() = Some(layout.clone());
             }
+            IpcEvent::Told(told) => self.told.lock().push(told.clone()),
             // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
             // lays out the slab, the pipeline and the node for the buses the
             // layout above names; the pump that takes the request reports it.
@@ -530,6 +535,7 @@ impl Ipc {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
             tail: Mutex::new(loaded.tail),
             requests: Mutex::new(Vec::new()),
+            told: Mutex::new(Vec::new()),
             forward: Mutex::new(None),
             wake: OnceLock::new(),
             declared: DeclaredCache::default(),
@@ -689,7 +695,7 @@ impl Ipc {
     /// Watches this plugin as a fork: the returned [`OfflineWait`] holds what
     /// the pipeline latches and the latency the fork's graph is planned
     /// against. A retune settles the server's queued rate and mode changes and
-    /// records that latency (`IpcProcessor::retune`), live as offline: the
+    /// records that latency (`IpcProcessor::retune_live`), live as offline: the
     /// health reports a later move as a fault.
     ///
     /// The pipeline waits for each chunk, up to the configuration's timeout,
@@ -756,7 +762,8 @@ impl Ipc {
         self.link.format
     }
 
-    /// The rate the server runs at.
+    /// The rate the pipeline's blocks are at: the last one asked of the
+    /// server, which a standing refusal says it does not run at.
     pub fn rate(&self) -> SampleRate {
         self.link.rate()
     }
@@ -881,8 +888,8 @@ impl Ipc {
     ///
     /// # Errors
     ///
-    /// Never, today: the pipeline is built, and a rate is told to the server
-    /// by a queued command that cannot be refused here.
+    /// The server refused the rate: the plugin comes back loaded, still at the
+    /// rate it ran at.
     pub fn activate_anywhere(
         self,
         prepare: Prepare,
@@ -931,9 +938,26 @@ impl Ipc {
             }
         };
         let rate = prepare.rate();
-        if rate != link.rate() {
-            let _ = link.bridge.audio().set_sample_rate(rate);
-            link.set_rate(rate);
+        // The server hears the rate whenever it may not run at it: a rate the
+        // link was not at, or one a refusal stands against (a retune moves
+        // the link's rate when it asks). Its answer is the activation's: a
+        // refusal is `Refused`, and nothing else reports it.
+        if rate != link.rate() || link.bridge.audio().rate_refusal().is_some() {
+            match link.bridge.audio().set_sample_rate_now(rate) {
+                Ok(()) => link.set_rate(rate),
+                Err(refusal) => {
+                    return Err(Refused {
+                        plugin: Some(Self {
+                            link,
+                            slab,
+                            replies: Box::new(Exclusive::new(replies)),
+                            next_seq,
+                            slab_unsure,
+                        }),
+                        reason: PluginError::Bridge(Box::new(IpcError::RateRefused(refusal))),
+                    });
+                }
+            }
         }
         // The widths are the slab's own, which is the snapshot's: one source.
         let mut batcher = Batcher::new(
@@ -946,7 +970,10 @@ impl Ipc {
         )
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
-        batcher.prepare(Samples::new(prepare.max_block().get()), None);
+        batcher.prepare(
+            Samples::new(prepare.max_block().get()),
+            prepare.quantum().map(tutti_plugin_types::MaxBlock::samples),
+        );
         if let Some(Watch { wait }) = link.watch() {
             // A wait already latched (a reactivation after a give-up or a
             // death) stays on the live bound: the batcher collects at once, and
@@ -994,7 +1021,7 @@ impl Loaded for Ipc {
 
     /// Builds the pipeline for `prepare`'s block and the Processor over it.
     /// The server is told no rate here: it was launched at one, and a node
-    /// that follows another tells it through [`Processor::retune`](tutti_plugin_types::Processor::retune).
+    /// that follows another tells it through [`Processor::RETUNE`](tutti_plugin_types::Processor::RETUNE).
     fn activate(
         self,
         _main: MainThreadMarker,

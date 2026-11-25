@@ -98,39 +98,39 @@ pub use initiator::{
 #[cfg(feature = "serde")]
 pub use pe::SavedStateError;
 pub use pe::{
-    ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
-    ChunkNo, ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, CommonState, ConfirmIcon,
-    ConfirmType, Confirmation, ControllerIndexError, CtrlControl, CtrlKind, CtrlRange,
-    CtrlValueKind, CustomResource, EntryError, ExtensionError, GetStateError, InvalidValue,
-    JsonPointer, LinkRole, ListedTwice, MAX_LIST_ENTRIES, MediaType, ModeId, NotABodyLimit,
-    NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode, NotAPriority, NotARequestId,
-    NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit, NotSignificantBits,
-    NotUnixSeconds, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
-    PE_TIMEOUT, PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate,
-    PartialValue, PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
-    PeBasicChannelRx, PeBasicChannelTx, PeBinary, PeBodyError, PeBuffered, PeCacheScope,
-    PeCacheTime, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
-    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
-    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
-    PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
-    PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
-    PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
-    PeProgramList, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused,
-    PeReply, PeRequest, PeRequestId, PeResource, PeResourceList, PeResponse, PeSet, PeSetScope,
-    PeSettings, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep,
-    PeSubscribed, PeSubscription, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
-    PeUpdateCommand, PeVersion, Place, Priority, PropertyName, PropertyNameError, PublishError,
-    RefusedAt, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry,
-    ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
-    ResourceInitiator, ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
-    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName,
-    SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SavedState,
-    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StandardResource,
-    StateDevice, StateId, StateRev, StateSize, StateStamp, StateVerdict, StepCount, StoreError,
-    StreamLimit, SubscribeId, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
-    UntypedResource, UpdateKind, WrongDevice, decode_body, encode_body, mcoded7, split_message,
+    ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChunkNo,
+    ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, CommonState, ConfirmIcon, ConfirmType,
+    Confirmation, ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
+    CustomResource, EntryError, ExtensionError, GetStateError, InvalidValue, JsonPointer, LinkRole,
+    ListedTwice, MAX_LIST_ENTRIES, MediaType, ModeId, NotABodyLimit, NotABufferLimit, NotAChunkNo,
+    NotAPeChannel, NotAPeMidiMode, NotAPriority, NotARequestId, NotASimultaneousRequests,
+    NotAStateSize, NotAStepCount, NotAStreamLimit, NotSignificantBits, NotUnixSeconds, OpaqueBody,
+    PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PaginationFault,
+    ParamPath, ParamPathError, PartialError, PartialUpdate, PartialValue, PeAction, PeAllCtrlEntry,
+    PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBinary,
+    PeBodyError, PeBuffered, PeCacheScope, PeCacheTime, PeCall, PeCapabilities,
+    PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry,
+    PeChannelList, PeChannelMode, PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn,
+    PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError,
+    PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions,
+    PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeGet, PeHeader, PeHeaderError,
+    PeHeaderTooLong, PeHeld, PeInitiator, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
+    PeMessage, PeMessageKind, PeMidiMode, PeModeEntry, PeModeList, PeNotification, PeObject,
+    PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList, PeReassembler, PeReassemblyError,
+    PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId, PeResource,
+    PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState, PeStateEntry,
+    PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription, PeTerminator,
+    PeText, PeTextError, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Place, Priority,
+    PropertyName, PropertyNameError, PublishError, RefusedAt, RequestRefused, ResIdUse,
+    ResourceAction, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+    ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder,
+    ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
+    RestoreError, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY,
+    SUB_ID2_PE_NOTIFY, SavedState, SelectorAction, SetBody, SignificantBits, SimpleAction,
+    SimultaneousRequests, StandardResource, StateDevice, StateId, StateRev, StateSize, StateStamp,
+    StateVerdict, StepCount, StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds,
+    UnlistedText, UnmodelledResource, UntypedResource, UpdateKind, WrongDevice, decode_body,
+    encode_body, mcoded7, split_message,
 };
 pub use process::{
     ChannelControllers, DataControl, NotADataControl, NoteData, ProcessFeatures, ReportScope,
@@ -139,13 +139,14 @@ pub use process::{
 };
 pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, ReportRequest};
 pub use profile::{
-    ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
-    NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId, ProfileList,
-    ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState, ProfileTarget,
-    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
-    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
-    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
-    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
+    ChannelsDetail, CountedVersion, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
+    NotCountedVersion, NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError,
+    ProfileFormat, ProfileId, ProfileList, ProfileLists, ProfileOnRequest, ProfileSpecific,
+    ProfileState, ProfileTarget, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
+    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
+    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
+    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
+    StandardProfile,
 };
 pub use profile_details::ProfileDetails;
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
@@ -445,17 +446,24 @@ fn encode_preamble(
 #[non_exhaustive]
 pub enum CiMessage {
     /// Discovery, the opening handshake advertising identity and capabilities
-    /// (M2-101 §5.5). Always to the Broadcast MUID.
+    /// (M2-101 §5.5). Always to the Broadcast MUID. Its Message Format Version is
+    /// the one its `data` has ([`DiscoveryData::output_path_id`]).
     Discovery {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// The Device ID.
+        device_id: CiDeviceId,
+        /// MUID of the sender.
+        source: Muid,
         /// Advertised identity and capabilities, and the initiator's Output Path ID.
         data: DiscoveryData,
     },
     /// Reply to Discovery (M2-101 §5.6): the same device body, to the initiator.
+    /// Its Message Format Version is the one its `data` has
+    /// ([`ReplyData::version_2`]).
     DiscoveryReply {
-        /// Addressing preamble.
-        header: CiHeader,
+        /// The Device ID.
+        device_id: CiDeviceId,
+        /// MUID of the sender.
+        source: Muid,
         /// The initiator, whose MUID the Discovery came from.
         to: Muid,
         /// Advertised identity and capabilities, the echoed Output Path ID and
@@ -588,13 +596,11 @@ pub enum CiMessage {
     SetProfileOn {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
+        /// The Message Format Version, the address and the Channels requested
+        /// there: a Version 1 sender has no count field.
+        format: ProfileFormat,
         /// The device asked.
         to: Muid,
-        /// The address and the Channels requested there. A Version 1 sender has
-        /// no count field and it reads as 0.
-        target: ProfileTarget,
         /// The Profile to enable.
         profile: ProfileId,
     },
@@ -612,12 +618,10 @@ pub enum CiMessage {
     ProfileEnabled {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
-        /// The address and `Number Channels enabled` there: 0 for a Group or
-        /// Function Block address, and for a Version 1 sender, which has no
-        /// such field.
-        target: ProfileTarget,
+        /// The Message Format Version, the address and `Number Channels
+        /// enabled` there: 0 for a Group or Function Block address, and none
+        /// for a Version 1 sender, which has no such field.
+        format: ProfileFormat,
         /// The Profile.
         profile: ProfileId,
     },
@@ -626,11 +630,9 @@ pub enum CiMessage {
     ProfileDisabled {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
-        /// The address and `Number Channels disabled` there: as
-        /// [`ProfileEnabled`](Self::ProfileEnabled).
-        target: ProfileTarget,
+        /// The Message Format Version, the address and `Number Channels
+        /// disabled` there: as [`ProfileEnabled`](Self::ProfileEnabled).
+        format: ProfileFormat,
         /// The Profile.
         profile: ProfileId,
     },
@@ -695,26 +697,11 @@ impl CiMessage {
     #[must_use]
     pub fn header(&self) -> CiHeader {
         match self {
-            CiMessage::SetProfileOn {
-                source,
-                ci_version,
-                target,
-                ..
-            }
-            | CiMessage::ProfileEnabled {
-                source,
-                ci_version,
-                target,
-                ..
-            }
-            | CiMessage::ProfileDisabled {
-                source,
-                ci_version,
-                target,
-                ..
-            } => CiHeader {
-                device_id: target.address(),
-                ci_version: *ci_version,
+            CiMessage::SetProfileOn { source, format, .. }
+            | CiMessage::ProfileEnabled { source, format, .. }
+            | CiMessage::ProfileDisabled { source, format, .. } => CiHeader {
+                device_id: format.address(),
+                ci_version: format.ci_version(),
                 source: *source,
             },
             CiMessage::ProcessCapabilitiesInquiry {
@@ -743,9 +730,26 @@ impl CiMessage {
                 ci_version: *ci_version,
                 source: *source,
             },
-            CiMessage::Discovery { header, .. }
-            | CiMessage::DiscoveryReply { header, .. }
-            | CiMessage::InvalidateMuid { header, .. }
+            CiMessage::Discovery {
+                device_id,
+                source,
+                data,
+            } => CiHeader {
+                device_id: *device_id,
+                ci_version: data.ci_version(),
+                source: *source,
+            },
+            CiMessage::DiscoveryReply {
+                device_id,
+                source,
+                data,
+                ..
+            } => CiHeader {
+                device_id: *device_id,
+                ci_version: data.ci_version(),
+                source: *source,
+            },
+            CiMessage::InvalidateMuid { header, .. }
             | CiMessage::EndpointInquiry { header, .. }
             | CiMessage::EndpointReply { header, .. }
             | CiMessage::Ack { header, .. }
@@ -863,19 +867,19 @@ impl CiMessage {
             CiMessage::MessageReportReply { scope, .. } => out.extend(scope.bitmap_bytes()),
             CiMessage::ProfileReply { profiles, .. } => profiles.encode_body(out),
             CiMessage::SetProfileOn {
-                profile, target, ..
-            } => profile::encode_with_count(*profile, target.channels(), out),
+                profile, format, ..
+            } => format.encode_body(*profile, out),
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
                 out.extend(profile.to_bytes());
                 out.extend([0, 0]);
             }
             CiMessage::ProfileEnabled {
-                profile, target, ..
+                profile, format, ..
             }
             | CiMessage::ProfileDisabled {
-                profile, target, ..
-            } => profile::encode_with_count(*profile, target.channels(), out),
+                profile, format, ..
+            } => format.encode_body(*profile, out),
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
             }
@@ -981,13 +985,23 @@ impl CiMessage {
         };
         let message = match (sub_id2, unicast) {
             (SUB_ID2_DISCOVERY, None) => {
-                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery { header, data })
+                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery {
+                    device_id: header.device_id,
+                    source: header.source,
+                    data,
+                })
             }
             (SUB_ID2_INVALIDATE_MUID, None) => {
                 read::target_body(body).map(|target| CiMessage::InvalidateMuid { header, target })
             }
-            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => ReplyData::decode_body(body)
-                .map(|data| CiMessage::DiscoveryReply { header, to, data }),
+            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => {
+                ReplyData::decode_body(body).map(|data| CiMessage::DiscoveryReply {
+                    device_id: header.device_id,
+                    source: header.source,
+                    to,
+                    data,
+                })
+            }
             (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
                 None => None,
                 Some(raw) => match EndpointStatus::new(raw) {
@@ -1060,14 +1074,14 @@ impl CiMessage {
                     profiles,
                 })
             }
-            (SUB_ID2_SET_PROFILE_ON, Some(to)) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::SetProfileOn {
+            (SUB_ID2_SET_PROFILE_ON, Some(to)) => {
+                read::format_body(header, body).map(|(format, profile)| CiMessage::SetProfileOn {
                     source: header.source,
-                    ci_version: header.ci_version,
+                    format,
                     to,
-                    target,
                     profile,
-                }),
+                })
+            }
             (SUB_ID2_SET_PROFILE_OFF, Some(to)) => {
                 read::profile_body(body).map(|profile| CiMessage::SetProfileOff {
                     header,
@@ -1075,20 +1089,22 @@ impl CiMessage {
                     profile,
                 })
             }
-            (SUB_ID2_PROFILE_ENABLED, None) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::ProfileEnabled {
+            (SUB_ID2_PROFILE_ENABLED, None) => {
+                read::format_body(header, body).map(|(format, profile)| CiMessage::ProfileEnabled {
                     source: header.source,
-                    ci_version: header.ci_version,
-                    target,
+                    format,
                     profile,
-                }),
-            (SUB_ID2_PROFILE_DISABLED, None) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::ProfileDisabled {
-                    source: header.source,
-                    ci_version: header.ci_version,
-                    target,
-                    profile,
-                }),
+                })
+            }
+            (SUB_ID2_PROFILE_DISABLED, None) => {
+                read::format_body(header, body).map(|(format, profile)| {
+                    CiMessage::ProfileDisabled {
+                        source: header.source,
+                        format,
+                        profile,
+                    }
+                })
+            }
             (SUB_ID2_PROFILE_ADDED, None) => {
                 read::profile_body(body).map(|profile| CiMessage::ProfileAdded { header, profile })
             }

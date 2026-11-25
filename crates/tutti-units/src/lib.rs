@@ -126,7 +126,10 @@ pub use real::Real;
 pub use samples::Samples;
 pub use tail::Tail;
 pub use text::{Text, TextError};
-pub use unit_param::{ParamAddr, ParamId, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
+pub use unit_param::{
+    KeyFilterSetting, ParamAddr, ParamId, ParamKey, Setting, SettingKind, SyncSetting, UnitAddr,
+    UnitParam, UnitParamOutOfRange,
+};
 pub use units::Quantity;
 pub use units::{
     Amplitude, ArcDegrees, Azimuth, Balance, Ballistics, Beat, BeatDuration, BeatsPerCycle,

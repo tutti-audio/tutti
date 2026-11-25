@@ -59,7 +59,7 @@ use tutti_au_host::component::{AuComponentInfo, AuType, enumerate_components_of_
 
 /// Manufacturer code for every probe component. Distinct from `appl` so a probe
 /// can never be mistaken for a corpus unit, and vice versa.
-pub const PROBE_MANUFACTURER: u32 = u32::from_be_bytes(*b"Ttti");
+pub(crate) const PROBE_MANUFACTURER: u32 = u32::from_be_bytes(*b"Ttti");
 
 /// The latency, in samples, a [`Misbehaviour::LiesAboutLatency`] probe claims.
 ///
@@ -67,14 +67,14 @@ pub const PROBE_MANUFACTURER: u32 = u32::from_be_bytes(*b"Ttti");
 /// buffer from the claim walks far off the end rather than merely reading a
 /// little stale data — the difference between a test that crashes loudly and one
 /// that passes while corrupt.
-pub const LIED_LATENCY_SAMPLES: u32 = 9_001;
+pub(crate) const LIED_LATENCY_SAMPLES: u32 = 9_001;
 
 /// The element count a [`Misbehaviour::OverReportsElementCount`] probe claims on
 /// every scope, while owning exactly one element per scope.
 ///
 /// This is the classic crash: the host asks `ElementCount`, believes 64, and
 /// indexes bus properties up to 64 against a unit whose array holds one.
-pub const LYING_ELEMENT_COUNT: u32 = 64;
+pub(crate) const LYING_ELEMENT_COUNT: u32 = 64;
 
 /// The constant sample a well-behaved probe render writes into every output
 /// channel.
@@ -82,14 +82,14 @@ pub const LYING_ELEMENT_COUNT: u32 = 64;
 /// Non-zero on purpose: rendering silence would make "the probe rendered
 /// correctly" and "the probe wrote nothing" produce identical buffers, which is
 /// exactly how a writes-nothing test goes vacuous.
-pub const PROBE_RENDER_LEVEL: f32 = 0.5;
+pub(crate) const PROBE_RENDER_LEVEL: f32 = 0.5;
 
 /// Poison value the host's scratch is pre-filled with before a render that is
 /// expected to write nothing.
 ///
 /// Distinct from both silence and [`PROBE_RENDER_LEVEL`] so the three outcomes —
 /// correct render, silence, leaked scratch — are all distinguishable.
-pub const STALE_POISON: f32 = -0.75;
+pub(crate) const STALE_POISON: f32 = -0.75;
 
 /// The ceiling a [`Misbehaviour::ClampsBlockSize`] probe silently clamps every
 /// `MaximumFramesPerSlice` write down to.
@@ -97,7 +97,7 @@ pub const STALE_POISON: f32 = -0.75;
 /// Small enough that the sizes the suites open at (64, 512, 1024, 4096) sit on
 /// both sides of it, so the same probe exercises the accepted branch and the
 /// clamped one without a second component.
-pub const CLAMPED_MAX_FRAMES: u32 = 128;
+pub(crate) const CLAMPED_MAX_FRAMES: u32 = 128;
 
 /// Vendor-private property id: the `mSampleTime` of the most recent render, as
 /// the probe received it.
@@ -110,7 +110,7 @@ pub const CLAMPED_MAX_FRAMES: u32 = 128;
 /// The id is above `kAudioUnitProperty_LastRenderSampleTime` (65000) and far
 /// above every id `types.rs` names, which is the range Apple leaves to
 /// third-party units. Read it with [`last_render_sample_time`].
-pub const PROBE_PROPERTY_LAST_RENDER_TIME: u32 = 0x5474_7469;
+pub(crate) const PROBE_PROPERTY_LAST_RENDER_TIME: u32 = 0x5474_7469;
 
 /// Count of renders the probe has seen, as a vendor-private property.
 ///
@@ -118,7 +118,7 @@ pub const PROBE_PROPERTY_LAST_RENDER_TIME: u32 = 0x5474_7469;
 /// timestamp is 0 because the cursor restarted" from "the timestamp is 0
 /// because no render happened" — the two are the same `f64` and only the count
 /// separates them. Read it with [`render_count`].
-pub const PROBE_PROPERTY_RENDER_COUNT: u32 = 0x5474_746A;
+pub(crate) const PROBE_PROPERTY_RENDER_COUNT: u32 = 0x5474_746A;
 
 /// The `mSampleTime` the probe was handed on its most recent render.
 ///
@@ -128,7 +128,7 @@ pub const PROBE_PROPERTY_RENDER_COUNT: u32 = 0x5474_746A;
 /// # Panics
 /// If the probe refuses the property, which would mean the component answering
 /// is not this file's probe.
-pub fn last_render_sample_time(au: &Au) -> f64 {
+pub(crate) fn last_render_sample_time(au: &Au) -> f64 {
     // SAFETY: `unit().as_raw()` is live for `&au`, and the probe answers this id with
     // exactly one `f64` (see `probe_get_property`).
     unsafe { read_probe_property::<f64>(au, PROBE_PROPERTY_LAST_RENDER_TIME) }
@@ -138,7 +138,7 @@ pub fn last_render_sample_time(au: &Au) -> f64 {
 ///
 /// # Panics
 /// As [`last_render_sample_time`].
-pub fn render_count(au: &Au) -> u32 {
+pub(crate) fn render_count(au: &Au) -> u32 {
     // SAFETY: as above; the probe answers this id with exactly one `u32`.
     unsafe { read_probe_property::<u32>(au, PROBE_PROPERTY_RENDER_COUNT) }
 }
@@ -156,10 +156,10 @@ pub fn render_count(au: &Au) -> u32 {
 /// Writing it does two things, in the order a real AU does them: it updates the
 /// value first, then posts, so a listener that re-reads on notification sees the
 /// new figure rather than racing the write. See [`set_latency_seconds`].
-pub const PROBE_PROPERTY_SET_LATENCY: u32 = 0x5474_746B;
+pub(crate) const PROBE_PROPERTY_SET_LATENCY: u32 = 0x5474_746B;
 
 /// As [`PROBE_PROPERTY_SET_LATENCY`], for `kAudioUnitProperty_TailTime`.
-pub const PROBE_PROPERTY_SET_TAIL: u32 = 0x5474_746C;
+pub(crate) const PROBE_PROPERTY_SET_TAIL: u32 = 0x5474_746C;
 
 /// Vendor-private, **writable**: post a `kAudioUnitProperty_ParameterList`
 /// change notification.
@@ -167,7 +167,7 @@ pub const PROBE_PROPERTY_SET_TAIL: u32 = 0x5474_746C;
 /// Takes a `u32` count of parameters the probe should then report, so the change
 /// a host observes is the list actually moving rather than a bare notification
 /// about nothing.
-pub const PROBE_PROPERTY_SET_PARAM_COUNT: u32 = 0x5474_746D;
+pub(crate) const PROBE_PROPERTY_SET_PARAM_COUNT: u32 = 0x5474_746D;
 
 /// Vendor-private, **readable**: the last `kAudioUnitProperty_PresentationLatency`
 /// the probe was told, for the `(scope, element)` this is read at.
@@ -183,7 +183,7 @@ pub const PROBE_PROPERTY_SET_PARAM_COUNT: u32 = 0x5474_746D;
 /// address yet — so "never told" is not spelled the same way as "told zero",
 /// which matters because zero is a meaningful value here ("no latency or an
 /// unknown latency").
-pub const PROBE_PROPERTY_LAST_PRESENTATION_LATENCY: u32 = 0x5474_746E;
+pub(crate) const PROBE_PROPERTY_LAST_PRESENTATION_LATENCY: u32 = 0x5474_746E;
 
 /// Vendor-private, **readable**: what the probe's last render got when it
 /// pulled the host's transport through the `kAudioUnitProperty_HostCallbacks`
@@ -192,11 +192,11 @@ pub const PROBE_PROPERTY_LAST_PRESENTATION_LATENCY: u32 = 0x5474_746E;
 /// No Apple unit calls those procs, so without a unit that does there is no
 /// observation of what an AU *receives* through AudioToolbox: the suite could
 /// only call the procs itself. Read it with [`last_host_pull`].
-pub const PROBE_PROPERTY_HOST_PULL: u32 = 0x5474_746F;
+pub(crate) const PROBE_PROPERTY_HOST_PULL: u32 = 0x5474_746F;
 
 /// `HostPull::*_status` for a proc the probe never called, distinct from every
 /// OSStatus a proc can return.
-pub const NOT_CALLED: i32 = i32::MIN;
+pub(crate) const NOT_CALLED: i32 = i32::MIN;
 
 /// What a render pulled from the host's transport procs.
 ///
@@ -206,7 +206,7 @@ pub const NOT_CALLED: i32 = i32::MIN;
 /// (`NaN`, `u32::MAX`, `0xFF`), never a reading.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct HostPull {
+pub(crate) struct HostPull {
     /// Renders that found host callbacks installed and pulled. Zero until the
     /// host installs them, which is what makes "the host never installed" an
     /// observable fact rather than an absent one.
@@ -258,7 +258,7 @@ impl HostPull {
 /// # Panics
 /// If the probe refuses the property, which would mean the component answering
 /// is not this file's probe.
-pub fn last_host_pull(au: &Au) -> HostPull {
+pub(crate) fn last_host_pull(au: &Au) -> HostPull {
     // SAFETY: `unit().as_raw()` is live for `&au`; the probe answers this id with
     // exactly one `HostPull`.
     unsafe { read_probe_property::<HostPull>(au, PROBE_PROPERTY_HOST_PULL) }
@@ -342,7 +342,7 @@ unsafe fn pull_host_transport(p: &mut Probe) {
 /// registered unit implements `kAudioUnitProperty_DependentParameters` at all,
 /// including the 28 that do carry a meta flag. See
 /// [`tutti_au_host::parameters::dependents_of`].
-pub const PROBE_META_PARAM_ID: u32 = 0;
+pub(crate) const PROBE_META_PARAM_ID: u32 = 0;
 
 /// The dependents the probe declares for [`PROBE_META_PARAM_ID`], as
 /// `(scope, parameter id)`.
@@ -352,7 +352,7 @@ pub const PROBE_META_PARAM_ID: u32 = 0;
 /// sorted, would still satisfy a fixture whose scopes were all `Global` or whose
 /// ids happened to ascend. `kAudioUnitScope_Input` is 1 and `_Output` is 2, both
 /// distinct from the ids here for the same reason.
-pub const PROBE_DEPENDENT_PARAMS: &[(u32, u32)] = &[
+pub(crate) const PROBE_DEPENDENT_PARAMS: &[(u32, u32)] = &[
     (sys::kAudioUnitScope_Output, 7),
     (sys::kAudioUnitScope_Input, 3),
     (sys::kAudioUnitScope_Global, 1),
@@ -367,7 +367,7 @@ pub const PROBE_DEPENDENT_PARAMS: &[(u32, u32)] = &[
 /// # Panics
 /// If the probe refuses the read, which would mean the component answering is
 /// not this file's probe.
-pub fn last_presentation_latency(au: &Au, scope: u32, element: u32) -> Option<f64> {
+pub(crate) fn last_presentation_latency(au: &Au, scope: u32, element: u32) -> Option<f64> {
     let mut out = f64::NAN;
     let mut size = std::mem::size_of::<f64>() as u32;
     // SAFETY: `unit().as_raw()` is live for `&au`; the probe answers exactly one `f64`
@@ -395,17 +395,17 @@ pub fn last_presentation_latency(au: &Au, scope: u32, element: u32) -> Option<f6
 /// arm a later change has to be distinguishable *from*. A zero would classify as
 /// `PluginTail::None` and make "the tail changed" and "the tail was always none"
 /// the same observation.
-pub const PROBE_INITIAL_TAIL_SECONDS: f64 = 0.25;
+pub(crate) const PROBE_INITIAL_TAIL_SECONDS: f64 = 0.25;
 
 /// How many parameters a probe declares before any test moves the count.
-pub const PROBE_INITIAL_PARAM_COUNT: u32 = 2;
+pub(crate) const PROBE_INITIAL_PARAM_COUNT: u32 = 2;
 
 /// Move the probe's reported latency to `seconds` and post the notification.
 ///
 /// # Panics
 /// If the probe refuses the write, which would mean the component answering is
 /// not this file's probe.
-pub fn set_latency_seconds(au: &Au, seconds: f64) {
+pub(crate) fn set_latency_seconds(au: &Au, seconds: f64) {
     // SAFETY: `unit().as_raw()` is live for `&au`; the probe accepts exactly one `f64`
     // at this id (see `probe_set_property`).
     unsafe { write_probe_property(au, PROBE_PROPERTY_SET_LATENCY, seconds) }
@@ -415,7 +415,7 @@ pub fn set_latency_seconds(au: &Au, seconds: f64) {
 ///
 /// # Panics
 /// As [`set_latency_seconds`].
-pub fn set_tail_seconds(au: &Au, seconds: f64) {
+pub(crate) fn set_tail_seconds(au: &Au, seconds: f64) {
     // SAFETY: as above.
     unsafe { write_probe_property(au, PROBE_PROPERTY_SET_TAIL, seconds) }
 }
@@ -424,7 +424,7 @@ pub fn set_tail_seconds(au: &Au, seconds: f64) {
 ///
 /// # Panics
 /// As [`set_latency_seconds`].
-pub fn set_param_count(au: &Au, count: u32) {
+pub(crate) fn set_param_count(au: &Au, count: u32) {
     // SAFETY: as above, with a `u32`.
     unsafe { write_probe_property(au, PROBE_PROPERTY_SET_PARAM_COUNT, count) }
 }
@@ -477,7 +477,7 @@ unsafe fn read_probe_property<T>(au: &Au, id: u32) -> T {
 /// Each variant is registered as its own AudioComponent under the subtype code
 /// [`Misbehaviour::sub_type`] returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Misbehaviour {
+pub(crate) enum Misbehaviour {
     /// Behaves correctly. The control: every assertion about a misbehaving probe
     /// is only meaningful if the same host code path succeeds against this one.
     None,
@@ -557,7 +557,7 @@ impl Misbehaviour {
     ///
     /// Distinct per variant so behaviour is selected by *which component the
     /// test opens*, never by mutating shared state.
-    pub const fn sub_type(self) -> &'static [u8; 4] {
+    pub(crate) const fn sub_type(self) -> &'static [u8; 4] {
         match self {
             Self::None => b"pgd0",
             Self::FailsInitialize => b"pini",
@@ -577,7 +577,7 @@ impl Misbehaviour {
     }
 
     /// Human label, for assertion messages only — never used for lookup.
-    pub const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::None => "well-behaved probe",
             Self::FailsInitialize => "probe that fails initialize",
@@ -598,7 +598,7 @@ impl Misbehaviour {
 
     /// Every variant, so a test can assert a property across all of them rather
     /// than picking one representative.
-    pub const ALL: &'static [Misbehaviour] = &[
+    pub(crate) const ALL: &'static [Misbehaviour] = &[
         Misbehaviour::None,
         Misbehaviour::FailsInitialize,
         Misbehaviour::LiesAboutLatency,
@@ -622,7 +622,7 @@ impl Misbehaviour {
     /// AudioComponent registry is broken, not that an optional plugin is
     /// missing, and a suite that skipped here would report `ok` having tested
     /// nothing.
-    pub fn require(self) -> AuComponentInfo {
+    pub(crate) fn require(self) -> AuComponentInfo {
         register_all();
         let wanted = u32::from_be_bytes(*self.sub_type());
         enumerate_components_of_type(AuType::Effect)
@@ -644,7 +644,7 @@ impl Misbehaviour {
     /// Not initialized because several probes are *about* the initialize
     /// transition; tests that want a running unit call
     /// [`open_initialized`](Self::open_initialized).
-    pub fn open(self, rate: tutti_units::SampleRate, block: u32) -> Au {
+    pub(crate) fn open(self, rate: tutti_units::SampleRate, block: u32) -> Au {
         self.try_open(rate, block)
             .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", self.label()))
     }
@@ -655,13 +655,17 @@ impl Misbehaviour {
     /// happens *after* construction, but a config the AU declines makes the
     /// constructor itself the thing under test — and a panicking opener can only
     /// assert that a load succeeded, never that it was correctly refused.
-    pub fn try_open(self, rate: tutti_units::SampleRate, block: u32) -> tutti_au_host::Result<Au> {
+    pub(crate) fn try_open(
+        self,
+        rate: tutti_units::SampleRate,
+        block: u32,
+    ) -> tutti_au_host::Result<Au> {
         let info = self.require();
         Au::new(info.component, rate, block)
     }
 
     /// Instantiate and initialize, panicking if either step fails.
-    pub fn open_initialized(self, rate: tutti_units::SampleRate, block: u32) -> Au {
+    pub(crate) fn open_initialized(self, rate: tutti_units::SampleRate, block: u32) -> Au {
         let mut au = self.open(rate, block);
         au.initialize()
             .unwrap_or_else(|e| panic!("{}: initialize failed: {e:?}", self.label()));
@@ -1191,7 +1195,7 @@ unsafe extern "C" fn probe_get_property(
 /// automation against these, so a `[0, 1]` range would make a normalized value
 /// and its plain value identical and hide any table that had gone stale. The
 /// span widens with the id so two parameters cannot be confused either.
-pub fn probe_param_bounds(id: u32) -> (f32, f32) {
+pub(crate) fn probe_param_bounds(id: u32) -> (f32, f32) {
     (0.0, 100.0 * (id + 1) as f32)
 }
 

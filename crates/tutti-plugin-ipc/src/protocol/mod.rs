@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 66;
+pub const PROTOCOL_VERSION: u32 = 68;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -83,12 +83,12 @@ pub use envelope::{
     ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, GetCurrentPreset,
     GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
     GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
-    LoadState, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized, ParameterPlain,
-    ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn,
-    PresetList, PresetLoaded, ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap,
-    SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
-    SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState, StateLoaded,
-    StateReady, StateStaged, Wiring, Working, serve,
+    LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
+    ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded,
+    PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, ReqId, Request, SampleRateSet,
+    SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate,
+    SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState,
+    StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
 };
 pub use frame::Framed;
 pub use message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
@@ -305,7 +305,8 @@ mod tests {
 
     /// **The audio, news and frame enums' tags are their declaration order, pinned
     /// here as literals.** The control messages' are pinned in
-    /// `every_control_message_is_pinned_to_its_row`.
+    /// `every_control_request_is_pinned_to_its_row` and
+    /// `every_control_reply_is_pinned_to_its_row`.
     ///
     /// postcard encodes an enum as a leading varint discriminant over
     /// declaration order, so inserting a variant mid-enum silently renumbers
@@ -315,7 +316,6 @@ mod tests {
     /// change of order fails here until the version moves and the pins with it.
     #[test]
     fn the_wire_tags_are_the_declaration_order() {
-        use tutti_plugin_types::RenderMode;
         let tag = |bytes: Vec<u8>| {
             assert!(bytes[0] < 0x80, "a one-byte varint tag");
             bytes[0]
@@ -356,16 +356,10 @@ mod tests {
             11
         );
         assert_eq!(
-            news(News::RenderModeNotApplied {
-                mode: RenderMode::Realtime
-            }),
-            12
-        );
-        assert_eq!(
             news(News::PluginWouldNotStop {
                 reason: String::new()
             }),
-            13
+            12
         );
         assert_eq!(
             news(News::ServerLosses {
@@ -373,7 +367,7 @@ mod tests {
                 edits_refused: 0,
                 refused_off_thread_calls: tutti_units::Calls::ZERO
             }),
-            14
+            13
         );
         assert_eq!(news(News::ProcessRequested), 9);
 
@@ -399,6 +393,11 @@ mod tests {
             }),
             3
         );
+
+        let outcome = |m: ModeOutcome| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(outcome(ModeOutcome::Took), 0);
+        assert_eq!(outcome(ModeOutcome::Refused), 1);
+        assert_eq!(outcome(ModeOutcome::Unsupported), 2);
     }
 
     /// One request per row of the message table, named, in the table's order.
@@ -469,12 +468,6 @@ mod tests {
                 },
             ),
             ("Shutdown", ControlRequest::Shutdown),
-            (
-                "SetRenderMode",
-                ControlRequest::SetRenderMode {
-                    mode: RenderMode::Realtime,
-                },
-            ),
             ("GetPresetList", ControlRequest::GetPresetList),
             (
                 "LoadPreset",
@@ -548,6 +541,12 @@ mod tests {
                 ControlRequest::ArmPluginMidiLearn { armed: true },
             ),
             ("GetWiring", ControlRequest::GetWiring),
+            (
+                "SetRenderMode",
+                ControlRequest::SetRenderMode {
+                    mode: RenderMode::Realtime,
+                },
+            ),
         ]
     }
 
@@ -644,6 +643,13 @@ mod tests {
                 },
             ),
             (
+                "SetRenderMode",
+                ControlReply::RenderModeSet {
+                    mode: tutti_plugin_types::RenderMode::Realtime,
+                    outcome: ModeOutcome::Took,
+                },
+            ),
+            (
                 "Error",
                 ControlReply::Error {
                     error: ServerError::StateWithoutObject,
@@ -719,23 +725,23 @@ mod tests {
                 param_id,
                 text: "ab".into(),
             }),
-            [14, 3, 2, b'a', b'b'],
-            "row 14: `param_id`, `text`"
+            [13, 3, 2, b'a', b'b'],
+            "row 13: `param_id`, `text`"
         );
         assert_eq!(
             bytes(ControlRequest::GetParameterNormalized {
                 param_id,
                 plain: 0.5,
             }),
-            [17, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
-            "row 17: `param_id`, `plain`"
+            [16, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
+            "row 16: `param_id`, `plain`"
         );
         assert_eq!(
             bytes(ControlRequest::ArmPluginMidiLearn { armed: true }),
-            [24, 1],
-            "row 24: `armed`"
+            [23, 1],
+            "row 23: `armed`"
         );
-        assert_eq!(bytes(ControlRequest::GetWiring), [25], "row 25: no fields");
+        assert_eq!(bytes(ControlRequest::GetWiring), [24], "row 24: no fields");
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {

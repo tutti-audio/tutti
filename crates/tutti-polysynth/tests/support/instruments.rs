@@ -13,7 +13,7 @@ use tutti_voicing::VoiceConfig;
 
 use super::Hand;
 
-pub fn modal() -> ModalVoiceConfig {
+pub(crate) fn modal() -> ModalVoiceConfig {
     let mode = |frequency, decay, gain| Mode {
         frequency: Hz::new(frequency),
         decay: Seconds::new(decay),
@@ -23,15 +23,15 @@ pub fn modal() -> ModalVoiceConfig {
     ModalVoiceConfig::new(Modes::try_from(&modes[..]).unwrap())
 }
 
-pub fn karplus() -> KarplusVoiceConfig {
+pub(crate) fn karplus() -> KarplusVoiceConfig {
     KarplusVoiceConfig::new()
 }
 
-pub fn waveguide() -> WaveguideVoiceConfig {
+pub(crate) fn waveguide() -> WaveguideVoiceConfig {
     WaveguideVoiceConfig::new()
 }
 
-pub fn additive() -> AdditiveVoiceConfig {
+pub(crate) fn additive() -> AdditiveVoiceConfig {
     let partial = |ratio, amplitude| {
         Partial::new(
             FrequencyRatio::new(ratio).unwrap(),
@@ -60,7 +60,7 @@ macro_rules! each_voice {
 pub(crate) use each_voice;
 
 /// An instrument of `voice`, with `rules`, prepared at 48 kHz.
-pub fn hand<V: InstrumentVoice<Float = f32>>(
+pub(crate) fn hand<V: InstrumentVoice<Float = f32>>(
     voice: V::Config,
     rules: VoiceConfig,
 ) -> Hand<NoteInstrument<V>> {
@@ -68,6 +68,6 @@ pub fn hand<V: InstrumentVoice<Float = f32>>(
 }
 
 /// `VoiceConfig::poly` of `voices` voices.
-pub fn poly(voices: usize) -> VoiceConfig {
+pub(crate) fn poly(voices: usize) -> VoiceConfig {
     VoiceConfig::poly(NonZeroUsize::new(voices).unwrap())
 }

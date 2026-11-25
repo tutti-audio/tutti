@@ -1,6 +1,6 @@
 //! The feedback delay network's audio-thread path allocates nothing at any corner of its
-//! controls: each layout (the fewest lines at the shortest decay, the most at the longest, one
-//! that can freeze), each control at both ends of its range while it moves every block, and
+//! controls: each layout (the fewest lines at the shortest decay, the most at the longest),
+//! each control at both ends of its range while it moves every block, and
 //! the two corners of all of them together. The node is driven alone in a graph by
 //! `tutti_graph::contract::BlockRig`: its `prepare` (which sizes the lines, the pre-delay and
 //! the scratch a design is made in) runs when the rig is built, outside the gate; the gate
@@ -14,8 +14,8 @@ use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{
-    FdnConfig, FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig,
-    PlateReverbNode, SpringReverbConfig, SpringReverbNode,
+    FdnConfig, FdnControls, FdnLayout, FdnNode, FdnNodeControls, FreezeControls, MaxDecay,
+    PlateReverbConfig, PlateReverbNode, SpringReverbConfig, SpringReverbNode,
 };
 use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
@@ -30,13 +30,13 @@ struct Control {
     hi: f32,
 }
 
-fn controls(freezable: bool) -> Vec<Control> {
+fn controls() -> Vec<Control> {
     let on = |param: UnitParam, lo, hi| Control {
         addr: UnitAddr::first(param),
         lo,
         hi,
     };
-    let mut all = vec![
+    let all = vec![
         Control {
             addr: UnitAddr::new(UnitParam::Decay, 0),
             lo: 0.05,
@@ -63,10 +63,8 @@ fn controls(freezable: bool) -> Vec<Control> {
             lo: -120.0,
             hi: 24.0,
         },
+        on(UnitParam::Freeze, 0.0, 1.0),
     ];
-    if freezable {
-        all.push(on(UnitParam::Freeze, 0.0, 1.0));
-    }
     all
 }
 
@@ -128,12 +126,12 @@ fn the_fdn_node_process_is_allocation_free() {
 #[test]
 fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
     let layouts = [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), FreezeMode::Decaying).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
-        FdnLayout::new(16, MaxDecay::of(Seconds::new(60.0)), FreezeMode::Freezable).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05))).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT).unwrap(),
+        FdnLayout::new(16, MaxDecay::of(Seconds::new(60.0))).unwrap(),
     ];
     for layout in layouts {
-        let all = controls(layout.freeze_mode() == FreezeMode::Freezable);
+        let all = controls();
         // One control moving between its ends, the rest at the default.
         for c in &all {
             gate(layout, 200, |set, i| {
@@ -174,7 +172,10 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
 /// status, on an alternating input of `amplitude`.
 fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<FdnNode<f32>> {
     let mut rig = Direct::new(
-        FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(controls)),
+        FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(FdnNodeControls {
+            network: controls,
+            kind: FreezeControls::DEFAULT,
+        })),
         SampleRate::SR_48K,
         64,
     );
@@ -216,9 +217,9 @@ fn the_fdn_parks_and_wakes_without_allocating() {
         ..FdnControls::DEFAULT
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.1)), FreezeMode::Decaying).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
-        FdnLayout::new(16, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.1))).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT).unwrap(),
+        FdnLayout::new(16, MaxDecay::DEFAULT).unwrap(),
     ] {
         let mut rig = direct(layout, short, 0.5);
         for _ in 0..32 {
@@ -264,8 +265,8 @@ fn the_fdn_with_its_signals_fed_is_allocation_free() {
             .collect()
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), FreezeMode::Decaying).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05))).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT).unwrap(),
     ] {
         for up in [true, false] {
             let mut rig = direct(layout, FdnControls::DEFAULT, 0.5);
@@ -294,23 +295,19 @@ fn the_fdn_with_its_signals_fed_is_allocation_free() {
 /// or a panic, which is the property it pins, and it is the last thing the node is asked to do.
 #[test]
 fn the_fdn_renders_non_finite_input_without_allocating() {
-    for layout in [
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
-    ] {
-        let mut rig = direct(layout, FdnControls::DEFAULT, 0.5);
-        for _ in 0..32 {
-            rig.block();
-        }
-        for c in rig.inputs_mut().iter_mut() {
-            let c = c.into_samples_mut();
-            c[0] = f32::NAN;
-            c[1] = f32::INFINITY;
-            c[2] = f32::NEG_INFINITY;
-        }
-        for _ in 0..200 {
-            rig.block();
-        }
+    let layout = FdnLayout::new(8, MaxDecay::DEFAULT).unwrap();
+    let mut rig = direct(layout, FdnControls::DEFAULT, 0.5);
+    for _ in 0..32 {
+        rig.block();
+    }
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
+        c[0] = f32::NAN;
+        c[1] = f32::INFINITY;
+        c[2] = f32::NEG_INFINITY;
+    }
+    for _ in 0..200 {
+        rig.block();
     }
 }
 

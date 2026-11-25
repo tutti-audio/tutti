@@ -7,8 +7,11 @@
 //! the driver's steps give at each frame, written out in the test. The
 //! parallel executor is compared against the one-participant one, bit for bit.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_graph::testing as common;
+use tutti_graph::testing::wire_like;
 
 use std::collections::BTreeMap;
 
@@ -345,18 +348,16 @@ fn a_fading_lane_survives_a_re_prepare_to_a_rate_of_the_same_declick() {
             .editor
             .insert(k, "unit", Unforkable(TestNode::new(kind.clone())));
     }
-    let spec = harness.editor.spec_mut();
-    spec.topology.edges = rig.spec.topology.edges.clone();
-    spec.topology.outputs = rig.spec.topology.outputs.clone();
-    spec.connect_edge_gain(id, lane_out(2));
-    harness.start_edge_gain(id, amp(base));
+    wire_like(&mut harness.editor, &rig.spec);
+    harness
+        .editor
+        .set_edge_gain(id, amp(base))
+        .expect("the edge exists");
+    harness.editor.connect_edge_gain(id, lane_out(2)).unwrap();
     harness.outputs = 1;
     land(&mut harness);
     run(&mut harness, 2);
-    harness
-        .editor
-        .spec_mut()
-        .disconnect_edge_gain(id, lane_out(2));
+    harness.editor.disconnect_edge_gain(id, lane_out(2));
     land(&mut harness);
     let mut got = run(&mut harness, 1);
 
@@ -538,10 +539,7 @@ fn a_late_lane_raises_the_output_time() {
 fn connect_edge_gain_refusals() {
     // 1. No such edge.
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Port);
-    let ghost = EdgeId {
-        sink: PortSink::Port(at_port(3)),
-        from: Edge::Direct(out(2)),
-    };
+    let ghost = EdgeId::into_port(at_port(3), Edge::Direct(out(2)));
     rig.spec.connect_edge_gain(ghost, lane_out(2));
     assert!(matches!(
         rig.spec.validate().unwrap_err()[..],
@@ -608,7 +606,7 @@ fn connect_edge_gain_refusals() {
 }
 
 /// `connect_edge_gain` and `disconnect_edge_gain` work as the param port's
-/// do: the first returns the source it replaced, the second says whether the
+/// do: the first replaces the source it had, the second says whether the
 /// source was the one given and keeps the entry; a source is structural
 /// (a commit recompiles), a range is a control (`set_edge_gain_range`: no
 /// plan, and the cell a control lane reads moves with it).
@@ -617,11 +615,9 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "dc", Unforkable(common::TestNode::new(dc(1.0))));
     ed.insert(key(2), "driver", Forkable(driver(0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1)]];
-    let id = EdgeId {
-        sink: PortSink::Output(0),
-        from: Edge::Direct(out(1)),
-    };
+    ed.insert(key(3), "driver", Forkable(driver(0)));
+    ed.wire_declared_outputs([out(1)]).unwrap();
+    let id = EdgeId::into_output(0, out(1));
     ed.set_edge_gain(id, amp(1.0)).expect("the edge exists");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -629,11 +625,14 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     let plain = ed.base().expect("a plan").clone();
     let reader = ed.edge_gain_range_cell(id).expect("a lane's cell");
 
-    assert_eq!(ed.spec_mut().connect_edge_gain(id, lane_out(2)), None);
+    assert_eq!(ed.spec().gains[&id].source, None);
+    ed.connect_edge_gain(id, lane_out(3)).unwrap();
+    assert_eq!(ed.spec().gains[&id].source, Some(lane_out(3)));
+    ed.connect_edge_gain(id, lane_out(2)).unwrap();
     assert_eq!(
-        ed.spec_mut().connect_edge_gain(id, lane_out(2)),
+        ed.spec().gains[&id].source,
         Some(lane_out(2)),
-        "replaces, and says what it replaced"
+        "a second source replaces the first"
     );
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -655,14 +654,11 @@ fn a_source_is_structural_and_a_range_is_a_control() {
         "a range sends no plan"
     );
 
-    assert!(
-        !ed.spec_mut().disconnect_edge_gain(id, lane_out(1)),
-        "not its source"
-    );
-    assert!(ed.spec_mut().disconnect_edge_gain(id, lane_out(2)));
+    assert!(!ed.disconnect_edge_gain(id, lane_out(1)), "not its source");
+    assert!(ed.disconnect_edge_gain(id, lane_out(2)));
     assert!(ed.spec().gains.contains_key(&id), "the entry stays");
     // Removing the lane's node undrives the lane and keeps the edge.
-    ed.spec_mut().connect_edge_gain(id, lane_out(2));
+    ed.connect_edge_gain(id, lane_out(2)).unwrap();
     ed.remove(key(2));
     assert_eq!(ed.spec().gains[&id].source, None);
     ed.commit().expect("commits");
@@ -677,13 +673,10 @@ fn a_fork_carries_the_driven_lane() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "dc", Forkable(dc(1.0)));
     ed.insert(key(2), "driver", Forkable(driver(0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1)]];
-    let id = EdgeId {
-        sink: PortSink::Output(0),
-        from: Edge::Direct(out(1)),
-    };
+    ed.wire_declared_outputs([out(1)]).unwrap();
+    let id = EdgeId::into_output(0, out(1));
     ed.set_edge_gain(id, amp(1.0)).expect("edge");
-    ed.spec_mut().connect_edge_gain(id, lane_out(2));
+    ed.connect_edge_gain(id, lane_out(2)).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

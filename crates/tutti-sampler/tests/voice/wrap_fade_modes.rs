@@ -12,6 +12,8 @@
 //! start steps across the wrap by less than a cut's step, which the wave
 //! gives analytically.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
@@ -88,7 +90,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
             outputs.push(PortSource::Node(OutputPort::new(key, port)));
         }
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

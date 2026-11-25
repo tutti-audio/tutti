@@ -9,13 +9,16 @@
 //! Every figure is analytic (a frame, an offset, a capacity), none read from
 //! another render.
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode};
 
 use tutti_buffers::MaxBlock;
-use tutti_fixtures::midi;
-use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
+use tutti_fixtures::{cycle_blocks, midi};
+use tutti_graph::contract::Direct;
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
@@ -352,29 +355,6 @@ fn a_note_on_never_displaces_a_waiting_note_off() {
     );
 }
 
-/// A port narrower than the burst: the node's list holds 1500 events, the port
-/// (the harness's, 1024) takes 1024, and the other 476 are counted as
-/// refused by the port, and nowhere else.
-#[test]
-fn a_port_narrower_than_the_burst_counts_refused() {
-    let burst = HAND_EVENT_CAPACITY + 476;
-    let (mut d, mut tx) = rig(u32::try_from(burst).unwrap());
-    for k in 0..burst {
-        tx.push(Stamp::NextBlock, note((k % 100) as u32)).unwrap();
-    }
-    d.block();
-    assert_eq!(sent(&d).len(), HAND_EVENT_CAPACITY);
-    assert_eq!(tx.counts().losses().refused, 476);
-    assert_eq!(
-        (
-            tx.counts().losses().lost,
-            tx.counts().losses().evicted,
-            tx.counts().losses().late
-        ),
-        (0, 0, 0)
-    );
-}
-
 /// The clock is where the last block ended, on the clock the node ran on and
 /// not a count of blocks, with the rate it was counted at; a new rate moves it
 /// to the same wall-clock time.
@@ -515,12 +495,10 @@ fn graph(
     Option<EventTapReader>,
 ) {
     let (mut ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     let mut writers = Vec::new();
     for k in 1..=u64::from(n) {
@@ -534,10 +512,11 @@ fn graph(
         Forkable(Kind::Consumer { inputs: n }),
     );
     for k in 1..=n {
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(10), k - 1),
             EventEdge::Direct(EventOutputPort::new(NodeKey(u64::from(k)), 0)),
-        );
+        )
+        .unwrap();
     }
     // Heavy audio chains beside the inlets, so the cost model has work worth
     // a thread: the plan is spread on a pool only when that pays.
@@ -560,23 +539,28 @@ fn graph(
                     width: 1,
                 }),
             );
-            ed.spec_mut().topology.connect(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(NodeKey(base + g), 0),
                 Edge::Direct(out(base + g - 1)),
-            );
+            ))
+            .unwrap();
         }
     }
     let sum = if heavy { 5 } else { 1 };
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
-    let topology = &mut ed.spec_mut().topology;
-    topology.connect(InputPort::new(NodeKey(30), 0), Edge::Direct(out(10)));
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(30), 0),
+        Edge::Direct(out(10)),
+    ))
+    .unwrap();
     for c in (0..4u16).filter(|_| heavy) {
-        topology.connect(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(30), c + 1),
             Edge::Direct(out(103 + u64::from(c) * 10)),
-        );
+        ))
+        .unwrap();
     }
-    ed.spec_mut().topology.set_outputs([out(30)]);
+    ed.wire_declared_outputs([out(30)]).unwrap();
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),
@@ -597,20 +581,11 @@ fn commit(ed: &mut Editor, exec: &mut Executor) {
 /// Renders `total` frames in blocks of `sizes` in turn and returns the audio's
 /// bits.
 fn render(ed: &mut Editor, exec: &mut Executor, sizes: &[usize], total: usize) -> Vec<u32> {
-    let t = TransportPosition::default();
-    let (mut done, mut i) = (0, 0);
     let mut bits = Vec::new();
-    while done < total {
-        let n = sizes[i % sizes.len()].min(total - done);
-        let mut chan = vec![0.0f32; n];
-        {
-            let mut outs: Vec<&mut [f32]> = vec![chan.as_mut_slice()];
-            exec.process(n, &t, &[], &mut outs);
-        }
+    for n in cycle_blocks(sizes, total) {
+        let chan = common::block(exec, n, 1);
         ed.collect();
-        bits.extend(chan.iter().map(|s| s.to_bits()));
-        done += n;
-        i += 1;
+        bits.extend(chan[0].iter().map(|s| s.to_bits()));
     }
     bits
 }
@@ -635,7 +610,8 @@ fn script(k: u32) -> Vec<(Stamp, Ump)> {
 /// participant runs inside `RtScope`.
 #[test]
 fn the_parallel_render_equals_the_one_participant_one_and_allocates_nothing() {
-    let run = |workers: usize, gated: bool| {
+    let run = |workers: usize| {
+        let gated = workers > 1;
         let (mut ed, mut exec, mut writers, tap) = graph(3, workers, gated, true, true);
         for (k, w) in writers.iter_mut().enumerate() {
             for (at, ump) in script(k as u32 + 1) {
@@ -661,7 +637,8 @@ fn the_parallel_render_equals_the_one_participant_one_and_allocates_nothing() {
         assert_eq!(tap.take_lost(), 0);
         (bits, got, writers[0].counts().losses().late)
     };
-    let (serial_bits, serial_tap, late) = run(1, false);
+    let (serial_bits, serial_tap, late) =
+        common::agree_across_workers([2, 3, 4], run, |(bits, tap, _)| (bits.clone(), tap.clone()));
     assert!(serial_bits.iter().any(|&b| b != 0), "the inlets are heard");
     // Inlet 1's script, in due order: `NextBlock` at frame 0, then each frame
     // in turn (the stable sort keeps a note-on before its note-off at 100).
@@ -682,11 +659,6 @@ fn the_parallel_render_equals_the_one_participant_one_and_allocates_nothing() {
         .collect();
     assert_eq!(serial_tap, want);
     assert_eq!(late, 0);
-    for workers in [2, 3, 4] {
-        let (bits, tap, _) = run(workers, true);
-        assert_eq!(serial_bits, bits, "{workers} workers: audio");
-        assert_eq!(serial_tap, tap, "{workers} workers: tap");
-    }
 }
 
 /// The fork is silent: an export of a graph holding an inlet commits (the

@@ -6,6 +6,8 @@
 //! runs as a child of this binary (the pattern of `tutti-fixtures`'
 //! `rt_alloc_check`) and the test reads the child's exit status.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::process::Command;
 
 use tutti_buffers::ChannelLayout;
@@ -42,15 +44,14 @@ impl Node for Allocating {
 /// pool of `participants` (`1`: one-participant), rendered for a few blocks.
 fn render(mode: RenderMode, participants: usize) {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(BLOCK).with_render_mode(mode));
-    if participants > 1 {
-        exec.set_pool(Some(common::test_pool(participants)));
-    }
+    common::pooled(&mut exec, participants);
     for k in 0..SOURCES as u64 {
         ed.insert(NodeKey(k), "alloc", Unforkable(Allocating));
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..SOURCES as u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
+    ed.wire_declared_outputs(
+        (0..SOURCES as u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

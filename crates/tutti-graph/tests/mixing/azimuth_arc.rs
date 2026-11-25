@@ -8,12 +8,13 @@
 //!   and a value past the bound is clamped;
 //! - a bounded range of a circular param written crossed is refused.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, Executor, FadeLaw, Io, Law, Node, NodeKey, ParamEvent, ParamIn,
-    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status,
-    TransportPosition, Unforkable,
+    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{ArcDegrees, Azimuth, SampleRate, Samples, UnitParam};
@@ -102,11 +103,11 @@ fn graph(
     let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
-    let s = ed.spec_mut();
-    s.topology
-        .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))));
+    ed.wire_declared_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))))
+        .unwrap();
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
-        s.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0));
+        ed.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0))
+            .unwrap();
     }
     for &(p, r) in ranges {
         ed.set_param_range(at(p), r).expect("a range");
@@ -116,16 +117,9 @@ fn graph(
 
 /// `frames` frames in one block: the two outputs.
 fn render(ed: &mut Editor, exec: &mut Executor, frames: usize) -> [Vec<f32>; 2] {
-    let mut a = vec![0.0; frames];
-    let mut b = vec![0.0; frames];
-    exec.process(
-        frames,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut a[..], &mut b[..]],
-    );
+    let out = common::block(exec, frames, 2);
     ed.collect();
-    [a, b]
+    out.try_into().expect("two outputs")
 }
 
 /// One sender of the same segment to both params (their raw values), at frame 0.
@@ -303,9 +297,7 @@ impl Node for Heavy {
 /// executor); every probe reads the same.
 fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
-    if workers > 1 {
-        exec.set_pool(Some(common::test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let probe = |k: u64| NodeKey(PROBE + k);
     for k in 0..WIDTH {
         ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
@@ -317,14 +309,11 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))));
+    ed.wire_declared_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))))
+        .unwrap();
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
-        let mut chans = vec![vec![0.0f32; frames]; WIDTH as usize];
-        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(frames, &TransportPosition::default(), &[], &mut outs);
+        let chans = common::block(exec, frames, WIDTH as usize);
         ed.collect();
         chans
     };
@@ -334,13 +323,14 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "undriven reads the base"
     );
     for k in 0..WIDTH {
-        ed.spec_mut().connect_param(
+        ed.connect_param(
             ParamIn {
                 node: probe(k),
                 param: UnitParam::Azimuth.into(),
             },
             EventOutputPort::new(NodeKey(SENDER), 0),
-        );
+        )
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

@@ -1,6 +1,9 @@
 //! `Editor::replace`: swapping a running node's unit with a crossfade. The
 //! rules are in `src/fade.rs`; each test here pins one.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -31,15 +34,15 @@ fn gain(g: f32) -> TestNode {
 /// 0, committed and applied.
 fn gain_graph(g: f32) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(128));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(NODE, "gain", Unforkable(gain(g)));
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -169,7 +172,7 @@ impl Node for DropProbe {
 #[test]
 fn the_outgoing_unit_retires_on_the_control_thread() {
     let (mut ed, mut exec) = Editor::new(prepare(128));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let dropped = Arc::new(AtomicU8::new(0));
     ed.insert(
         NODE,
@@ -179,13 +182,13 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
             dropped: Arc::clone(&dropped),
         }),
     );
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     dc(&mut exec, 16);
     ed.collect();
@@ -260,8 +263,8 @@ fn a_remove_beside_a_fade_retires_at_once() {
 
 /// A replace whose unit differs in shape is refused, naming the key, and
 /// changes nothing: other ports, another latency, another in-place
-/// acceptance, or another declared event capacity. A node with nothing
-/// running is refused too. And the verifier refuses the same fade handed
+/// acceptance, or another declared event capacity. A node not in the spec is
+/// refused by name too. And the verifier refuses the same fade handed
 /// over in a delta built by hand.
 #[test]
 fn a_shape_mismatch_is_refused() {
@@ -285,7 +288,7 @@ fn a_shape_mismatch_is_refused() {
     assert_eq!(
         ed.replace(NodeKey(9), Unforkable(gain(1.0)), fade)
             .map(|placed| placed.controls),
-        Err(CommitError::NotRunning { node: NodeKey(9) })
+        Err(CommitError::NoSuchNode { node: NodeKey(9) })
     );
     ed.commit().expect("nothing changed");
     assert_eq!(
@@ -304,10 +307,15 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.spec_mut()
-        .topology
-        .outputs
-        .push(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
+    {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
+        ed.connect_edge(EdgeId::into_output(
+            channel,
+            PortSource::Node(OutputPort::new(lagged, 0)),
+        ))
+        .unwrap()
+    };
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -356,9 +364,8 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -376,7 +383,7 @@ fn a_shape_mismatch_is_refused() {
     let valid = spec.validate().expect("valid");
     let (plan, mut delta) =
         compile(&valid, &shapes, &prepare(128), ed.base().map(|p| &**p)).expect("compiles");
-    delta.fades = vec![(lagged, fade)];
+    delta.attach(vec![(lagged, fade)], Vec::new());
     let units: BTreeMap<NodeKey, Box<dyn Node>> =
         [(lagged, Box::new(TestNode::new(later)) as Box<dyn Node>)]
             .into_iter()
@@ -492,13 +499,13 @@ fn events_go_to_the_incoming_unit_only() {
     );
     ed.insert(NODE, "count", Unforkable(EventCount(Arc::clone(&old))));
     let to = EventInputPort::new(NODE, 0);
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         to,
         tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(emitter, 0)),
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    )
+    .unwrap();
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
     let mut out = vec![0.0f32; 64];
@@ -634,7 +641,7 @@ fn a_replace_takes_the_incoming_units_kind() {
     ] {
         let (mut ed, _exec) = gain_graph(1.0);
         assert_eq!(ed.spec().topology.nodes[&NODE].kind, "gain");
-        ed.replace_or_swap(NODE, Unforkable(incoming), fade)
+        ed.replace(NODE, Unforkable(incoming), fade)
             .expect("not poisoned, not re-preparing");
         assert_eq!(
             ed.spec().topology.nodes[&NODE].kind,
@@ -644,19 +651,19 @@ fn a_replace_takes_the_incoming_units_kind() {
     }
 }
 
-/// **`replace_or_swap` fades where `replace` would, and swaps only a cut or
+/// **`replace` fades where `replace` would, and swaps only a cut or
 /// a node that is not running**: a unit that fits the running one fades in;
 /// one that does not (here: a latency the plan was not compiled for) is
 /// refused under a fade and lands whole on the next commit under a zero fade,
 /// as an insert at the key does; so does a replace of a node that is not
 /// running yet.
 #[test]
-fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
+fn replace_fades_when_it_fits_and_swaps_when_it_does_not() {
     let fade = Fade::new(Samples::new(100));
 
     let (mut ed, mut exec) = gain_graph(1.0);
     dc(&mut exec, 20);
-    ed.replace_or_swap(NODE, Unforkable(gain(3.0)), fade)
+    ed.replace(NODE, Unforkable(gain(3.0)), fade)
         .expect("not poisoned, not re-preparing");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 1, "a fitting unit fades");
@@ -671,7 +678,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
     dc(&mut exec, 20);
     let lagged = || Unforkable(TestNode::new(Kind::Lag { latency: 3 }));
     assert!(
-        ed.replace_or_swap(NODE, lagged(), fade)
+        ed.replace(NODE, lagged(), fade)
             .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE)),
         "a fade over a shape change is refused"
     );
@@ -680,7 +687,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
         "gain",
         "a refusal changes nothing"
     );
-    ed.replace_or_swap(NODE, lagged(), Fade::new(Samples::ZERO))
+    ed.replace(NODE, lagged(), Fade::new(Samples::ZERO))
         .expect("a cut over a shape change is a swap");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 0, "nothing to fade from");
@@ -694,7 +701,7 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
     // Not running yet: inserted and replaced before any commit.
     let (mut ed, _exec) = Editor::new(prepare(128));
     ed.insert(NodeKey(5), "gain", Unforkable(gain(1.0)));
-    ed.replace_or_swap(NodeKey(5), Unforkable(gain(2.0)), fade)
+    ed.replace(NodeKey(5), Unforkable(gain(2.0)), fade)
         .expect("swaps");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 0);
@@ -722,11 +729,11 @@ fn a_remove_after_a_declicked_remove_cuts_the_leaving_node() {
     assert_eq!(ed.collect(), vec![NODE], "the unit came back");
 }
 
-/// **`fade_fits` answers what `replace_or_swap` does**: true for a shape that
+/// **`fade_fits` answers what `replace` does**: true for a shape that
 /// fits (the swap fades), false for another (a fade is refused), `None` for a
 /// node that is not there.
 #[test]
-fn fade_fits_agrees_with_replace_or_swap() {
+fn fade_fits_agrees_with_replace() {
     use tutti_graph::Node;
     let fade = Fade::new(Samples::new(100));
     let (mut ed, mut exec) = gain_graph(1.0);
@@ -736,8 +743,8 @@ fn fade_fits_agrees_with_replace_or_swap() {
     assert_eq!(ed.fade_fits(NODE, &fitting.shape()), Some(true));
     assert_eq!(ed.fade_fits(NODE, &other.shape()), Some(false));
     assert_eq!(ed.fade_fits(NodeKey(9), &fitting.shape()), None);
-    assert!(ed.replace_or_swap(NODE, Unforkable(other), fade).is_err());
-    ed.replace_or_swap(NODE, Unforkable(fitting), fade)
+    assert!(ed.replace(NODE, Unforkable(other), fade).is_err());
+    ed.replace(NODE, Unforkable(fitting), fade)
         .expect("a fitting shape fades");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 1);

@@ -1,14 +1,17 @@
 //! What the executor holds for a plan: its units, delay rings and
 //! injections, and the state a plan's ops run against.
 
+use crate::node::shape::Shape;
 use tutti_buffers::Float;
 use tutti_rt::CappedVec;
 use tutti_units::{Samples, Tail};
 
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::Flags;
-use crate::NodeKey;
+use super::tail_elapsed;
 use crate::compile::ids::{Generation, PlanUnitId, Table};
+use crate::compile::plan::{NodePorts, UnitIdx};
+use crate::compile::tail::Owed;
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -74,22 +77,90 @@ impl<F: Float> Unit<F> {
     }
 }
 
+impl<F: Float> Unit<F> {
+    /// Whether the executor skips this unit on a block whose inputs are
+    /// silent: a node without event inputs when its last call left every
+    /// output silent and its latency plus its tail (the last report, else the
+    /// declared tail) has elapsed in quiet input; one with event inputs when
+    /// its last call said [`Status::Idle`](crate::Status::Idle). A node
+    /// with no audio inputs is never parked on its tail.
+    pub(super) fn at_rest(&self, np: &NodePorts, shape: &Shape) -> bool {
+        if np.ein == 0 {
+            np.ain != 0
+                && self.last_quiet
+                && tail_elapsed(
+                    match self.reported {
+                        None => shape.park_after(),
+                        Some(t) => Tail::Finite(shape.latency.samples()).then(t),
+                    },
+                    self.quiet,
+                )
+        } else {
+            self.last_idle
+        }
+    }
+
+    /// What this unit adds to the graph's tail between blocks.
+    ///
+    /// `fed` is its declared ceiling: a report is about the input already
+    /// heard, so it says nothing of what an upstream node's remaining output
+    /// will excite. `alone` is what it owes if nothing more arrives:
+    ///
+    /// - a node with event inputs: nothing once its last call said
+    ///   [`Status::Idle`](crate::Status::Idle), else its ceiling;
+    /// - a node with no audio inputs: its last report, else its ceiling;
+    /// - otherwise nothing when [at rest](Self::at_rest), else the part of its
+    ///   latency and report (else ceiling) that quiet input has not covered,
+    ///   never more than the tail itself. `quiet` counts whole blocks of quiet
+    ///   input, so the figure errs long by less than a block. A unit not at
+    ///   rest whose figure is covered (its last output was not silent) owes the
+    ///   whole tail.
+    pub(super) fn owed(&self, np: &NodePorts, shape: &Shape) -> Owed {
+        let full = self.reported.unwrap_or(shape.tail);
+        let alone = if np.ein != 0 {
+            if self.last_idle {
+                Tail::None
+            } else {
+                shape.tail
+            }
+        } else if np.ain == 0 {
+            full
+        } else if self.at_rest(np, shape) {
+            Tail::None
+        } else {
+            match full {
+                Tail::Finite(t) => {
+                    let left = (shape.latency.samples() + t)
+                        .remaining_after(self.quiet)
+                        .min(t);
+                    Tail::Finite(if left == Samples::ZERO { t } else { left })
+                }
+                other => other,
+            }
+        };
+        Owed {
+            alone,
+            fed: shape.tail,
+        }
+    }
+}
+
 /// What a commit takes away from the keys held at a node: the tables of the
-/// keys retired or replaced, and the keys replaced.
+/// units retired or replaced, by the store index they held.
 #[derive(Default)]
 pub(super) struct Gone {
-    pub(super) held: CappedVec<(NodeKey, Tables)>,
+    pub(super) held: CappedVec<(UnitIdx, Tables)>,
     /// Emptied tables to free on the control side.
     pub(super) spare: CappedVec<Tables>,
-    pub(super) replaced: CappedVec<NodeKey>,
     /// What each replaced node wrote for its successor (`Node::chase`):
-    /// the key, its span of `chase_events` and what its buffer refused.
-    pub(super) chased: CappedVec<(NodeKey, std::ops::Range<usize>, u32)>,
+    /// the successor's row, its span of `chase_events` and what its buffer
+    /// refused.
+    pub(super) chased: CappedVec<(PlanUnitId, std::ops::Range<usize>, u32)>,
     /// The executor's chase buffer, lent for the commit.
     pub(super) chase_events: CappedVec<Event>,
-    /// What a chase held for a successor behind a running fade refused, by
-    /// key, counted once the new plan says where the node is.
-    pub(super) held_refused: CappedVec<(NodeKey, u32)>,
+    /// What a chase held for a successor behind a running fade refused,
+    /// counted once the new plan is in place.
+    pub(super) held_refused: CappedVec<(PlanUnitId, u32)>,
 }
 
 impl Gone {
@@ -98,7 +169,6 @@ impl Gone {
         [
             self.held.refused(),
             self.spare.refused(),
-            self.replaced.refused(),
             self.chased.refused(),
             self.held_refused.refused(),
         ]
@@ -220,7 +290,7 @@ pub(super) struct State<F: Float = f32> {
     pub(super) event_taps: Vec<Option<EventTapWriter>>,
     /// One set of cells per planned meter (`None`: nobody opened it).
     pub(super) meters: Vec<Option<MeterWriter>>,
-    /// One state per entry of `Plan::sum_lanes`: a weighted lane's weight
+    /// One state per entry of the plan's sum lanes: a weighted lane's weight
     /// across blocks, or a plain addend's none.
     pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,

@@ -4,17 +4,19 @@
 //! commit that applies them, is the same on the parallel executor, and the
 //! commit reports exactly the nodes whose answer moved.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_graph::testing as common;
 
-use common::{Kind, TestNode, WORKERS, prepare, test_pool};
+use common::{Kind, TestNode, WORKERS, prepare};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor, FeedbackFrom,
-    InputPort, Io, Node, NodeBus, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
-    Shape, Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
+    InputPort, Io, Node, NodeBus, NodeKey, OutputPort, PortSource, Prepare, Rewired, Shape, Status,
+    TapAlign, TapId, TapOptions, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
 
@@ -111,9 +113,7 @@ fn wired(inputs: u64, outputs: u64) -> Wired {
 }
 
 fn render(exec: &mut Executor, outs: usize) {
-    let mut bufs = vec![vec![0.0f32; 16]; outs];
-    let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(16, &TransportPosition::default(), &[], &mut refs);
+    common::block(exec, 16, outs);
 }
 
 /// Commits, applies and renders one block, returning what the commit
@@ -130,9 +130,7 @@ fn step(ed: &mut Editor, exec: &mut Executor, seen: &Seen, outs: usize) -> (Vec<
 /// steps' reports and reads.
 fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     let (mut ed, mut exec) = Editor::new(prepare(16));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let seen = Arc::new(Seen::default());
     ed.insert(
         SRC,
@@ -166,9 +164,9 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     // Nothing changed: the commit sends nothing and reports nothing.
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     // Main input 0, then the aux input.
-    ed.spec_mut().connect(at(0), from(0));
+    ed.connect_edge(EdgeId::into_port(at(0), from(0))).unwrap();
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.spec_mut().connect(at(2), from(1));
+    ed.connect_edge(EdgeId::into_port(at(2), from(1))).unwrap();
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     // A tap alone consumes main output 1; a main output takes aux out.
     let tap = ed
@@ -179,15 +177,14 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(out(PROBE, 2))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(out(PROBE, 2))])
+        .unwrap();
     steps.push(step(&mut ed, &mut exec, &seen, 1));
     // Back to nothing: the last source of each input goes, the output
     // leaves, the tap closes.
-    ed.spec_mut().disconnect(at(0), from(0));
-    ed.spec_mut().disconnect(at(2), from(1));
-    ed.spec_mut().topology.set_outputs(vec![]);
+    ed.disconnect_edge(EdgeId::into_port(at(0), from(0)));
+    ed.disconnect_edge(EdgeId::into_port(at(2), from(1)));
+    ed.wire_declared_outputs(vec![]).unwrap();
     ed.close_tap(TapId::of(1)).expect("open");
     drop(tap);
     steps.push(step(&mut ed, &mut exec, &seen, 0));
@@ -269,10 +266,7 @@ fn a_commit_reports_the_nodes_whose_wiring_moved_and_no_others() {
 
 #[test]
 fn the_parallel_executor_reads_the_one_participant_masks() {
-    let serial = scenario(1);
-    for workers in WORKERS {
-        assert_eq!(scenario(workers), serial, "{workers} workers");
-    }
+    common::agree_across_workers(WORKERS, scenario, Clone::clone);
 }
 
 /// A hand-built `Io` has no plan: every port reads wired, so a node that
@@ -347,10 +341,11 @@ fn a_bus_edge_marks_every_channel_port_of_its_bus() {
 #[test]
 fn a_feedback_edge_marks_the_input_and_the_source_output() {
     let (mut ed, mut exec, a, _b) = pair();
-    ed.spec_mut().connect(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(PROBE, 1),
         Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples::new(16))),
-    );
+    ))
+    .unwrap();
     let report = ed.commit().expect("commits");
     render(&mut exec, 0);
     assert_eq!(a.read(), (0b10, 0b01, 0, 0));
@@ -387,10 +382,11 @@ fn a_shape_with_64_ports_reads_bit_63() {
         })),
     );
     ed.insert(PROBE, "wide", Unforkable(Wide(Arc::clone(&seen))));
-    ed.spec_mut().connect(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(PROBE, 63),
         Edge::Direct(PortSource::Node(out(SRC, 63))),
-    );
+    ))
+    .unwrap();
     let _tap = ed
         .open_tap(
             TapId::of(1),
@@ -424,14 +420,11 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
     );
     let from = Edge::Direct(PortSource::Node(out(SRC, 0)));
     let sink = InputPort::new(PROBE, 0);
-    ed.spec_mut().connect(sink, from);
+    ed.connect_edge(EdgeId::into_port(sink, from)).unwrap();
     let _ = ed.commit().expect("commits");
     render(&mut exec, 0);
     ed.collect();
-    let id = EdgeId {
-        sink: PortSink::Port(sink),
-        from,
-    };
+    let id = EdgeId::into_port(sink, from);
     (ed, exec, seen, id)
 }
 
@@ -474,11 +467,8 @@ fn a_fade_in_counts_as_wired_at_once() {
     let (mut ed, mut exec, seen, _) = heard_edge();
     let sink = InputPort::new(PROBE, 1);
     let from = Edge::Direct(PortSource::Node(out(SRC, 1)));
-    ed.spec_mut().connect(sink, from);
-    let id = EdgeId {
-        sink: PortSink::Port(sink),
-        from,
-    };
+    ed.connect_edge(EdgeId::into_port(sink, from)).unwrap();
+    let id = EdgeId::into_port(sink, from);
     ed.set_edge_fade(id, EdgeFade::In).expect("an edge");
     let report = ed.commit().expect("commits");
     render(&mut exec, 0);

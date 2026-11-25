@@ -6,6 +6,8 @@
 //! closed form instead of sampled. That is what makes the sample-format matrix
 //! assertable.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -17,20 +19,21 @@ use tutti_graph::{
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
-pub const SAMPLE_RATE: f64 = 48_000.0;
+pub(crate) const SAMPLE_RATE: f64 = 48_000.0;
 
 /// A graph emitting a constant `level` on **every** one of `outputs` channels.
-pub fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>> {
+pub(crate) fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>> {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let (mut ed, exec) = Editor::<F>::with_format(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level.to_f64())));
-    ed.spec_mut().topology.set_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
-    ]);
+    ])
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // The editor outlives nothing here: a test process is the whole lifetime,

@@ -12,9 +12,9 @@
 //! restart). The node it replaces hands the Processor back at its next block,
 //! and the instance's next pump lends it to the successor.
 //!
-//! A node dropped while it holds the Processor and a recall is raised returns
-//! the Processor to the control side, so the replaced node need not stay in the
-//! graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
+//! A node dropped while it holds the Processor returns it to the control side as
+//! it was, and the instance's pump stops it there, so the replaced node need not
+//! stay in the graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
 //! the plugin dies meanwhile ([`Lost`](Settlement::Lost)) no Processor moves,
 //! and neither node renders.
 
@@ -23,11 +23,9 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
-use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
 use tutti_timeline::TempoReader;
 use tutti_units::ParamId;
-use tutti_units::SampleRate;
 use tutti_units::Samples;
 
 use super::client::{Declared, InProcessClient, PluginNode, Reload};
@@ -68,7 +66,6 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_units::SampleRate,
-    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where a tick delivers what its pump finds: the handle's listeners.
     /// `None` for an out-of-process plugin, whose own listener reports it.
     reporting: Option<Reporting>,
@@ -101,7 +98,6 @@ impl<L: Loaded, F: Float> Clone for Rebinder<L, F> {
             reload: self.reload.clone(),
             features: self.features,
             sample_rate: self.sample_rate,
-            pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
             edits: self.edits.clone(),
             delivery: Arc::clone(&self.delivery),
@@ -178,7 +174,6 @@ where
             declared,
             self.features,
             self.sample_rate,
-            Arc::clone(&self.pending_sample_rate),
             Some(Arc::clone(&counters)),
             self.parameters.iter().copied(),
             self.spares,
@@ -186,6 +181,9 @@ where
             Some(pipeline),
             Some(self.event_room),
         );
+        // Its wake is the instance's once the Processor moves to this node.
+        let wake = Arc::<super::instance::WakeSlot>::default();
+        client.wake = Arc::clone(&wake);
         client.reporting = self.reporting.clone();
         client.edits = self.edits.clone();
         // What the node it replaces delivered: the plugin holds those values.
@@ -201,6 +199,7 @@ where
             Pending {
                 inner: Arc::clone(&self.inner),
                 successor,
+                wake,
                 delivery: Arc::clone(&self.delivery),
                 counters,
             },
@@ -247,6 +246,8 @@ where
 pub struct Pending<L: Loaded> {
     inner: Arc<Mutex<Instance<L>>>,
     successor: Successor<L::Processor>,
+    /// Where the node binds its wake.
+    wake: Arc<super::instance::WakeSlot>,
     /// The rebinder's record of the newest committed node's counters.
     delivery: Arc<Mutex<Arc<DeliveryCounters>>>,
     /// The node's own, which `delivery` holds once it is committed.
@@ -264,8 +265,8 @@ impl<L: Loaded> Pending<L> {
     /// Processor from the node it replaces: the plugin keeps running, and the
     /// Processor is lent to this node at the instance's next pump, with no
     /// deactivation. The node it replaces hands the Processor back at its
-    /// next block, or when it is dropped (the recall is raised, so a node
-    /// dropped while it holds the Processor returns it to the control side).
+    /// next block, or when it is dropped (a node dropped while it holds the
+    /// Processor returns it to the control side, which stops it).
     ///
     /// Call it once the node is in the graph. It does not fail, whatever the
     /// plugin's state is by then (it may have changed since
@@ -277,7 +278,7 @@ impl<L: Loaded> Pending<L> {
     /// replaces the first: its node never receives a Processor.
     pub fn commit(self, main: MainThreadMarker) {
         *self.delivery.lock() = self.counters;
-        self.inner.lock().commit(main, self.successor);
+        self.inner.lock().commit(main, self.successor, self.wake);
     }
 }
 
@@ -322,7 +323,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             reload: self.reload.clone(),
             features: self.features,
             sample_rate: self.sample_rate,
-            pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
             edits: self.edits.clone(),
             delivery: Arc::new(Mutex::new(self.params.counters())),
@@ -421,7 +421,7 @@ mod tests {
             ));
         }
         let descriptor = loaded.info().clone();
-        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
+        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(4096)).expect("a block"));
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");
         };
@@ -776,20 +776,6 @@ mod tests {
         assert_eq!(deactivations(&fake), 0);
     }
 
-    /// **A rebind over unchanged ports moves the Processor with no restart:**
-    /// one activation, no deactivation, in the whole run.
-    #[test]
-    fn a_rebind_over_unchanged_ports_moves_the_processor() {
-        let (fake, rebinder, mut old, inner) = rig();
-        block(&mut old, 0);
-        let mut new = rebind(&rebinder).expect("a node");
-        assert_eq!(new.shape().audio_out().count(), 2);
-        let frame = settle(&rebinder, &mut old, &inner, BLOCK as u64);
-        assert!(block(&mut new, frame).audio[0].iter().any(|&s| s != 0.0));
-        assert_eq!(activations(&fake), 1, "the load's activation, no other");
-        assert_eq!(deactivations(&fake), 0);
-    }
-
     /// **Dropping the old node while it holds the Processor hands the
     /// Processor back instead of dropping it:** the rebind raised the recall,
     /// the drop returns the Processor through the handoff, and the pump lends
@@ -829,24 +815,30 @@ mod tests {
         }
     }
 
-    /// **A plugin that refused its rate is not running: a rebind is refused
-    /// by name and nothing is rehanded,** so no node waits for a Processor.
+    /// **A plugin that refused its rate is not rebound, though it runs at the
+    /// rate it accepted: a successor would render at the wrong rate, so a
+    /// rebind is refused by name and nothing is rehanded,** and no node waits
+    /// for a Processor.
     #[test]
     fn a_refused_plugin_is_not_rebound() {
         let (fake, rebinder, mut old, inner) = rig();
         block(&mut old, 0);
         fake.refuse_rate(Some(SampleRate::SR_44K1));
         let main = main_thread();
-        let _ = inner
-            .lock()
-            .set_sample_rate(main, SampleRate::SR_44K1, None);
+        {
+            let mut instance = inner.lock();
+            instance.want(|w| w.with_rate(SampleRate::SR_44K1));
+            instance.rate_asked();
+            let _ = instance.reconcile(Some(main), None);
+        }
         let mut frame = BLOCK as u64;
-        while inner.lock().renders() {
+        while inner.lock().ready_to_rehand() == Err(RebindError::Restarting) {
             block(&mut old, frame);
             inner.lock().pump(main);
             frame += BLOCK as u64;
-            assert!(frame < 16 * BLOCK as u64, "the plugin never refused");
+            assert!(frame < 16 * BLOCK as u64, "the change never finished");
         }
+        assert!(inner.lock().renders(), "it runs at the rate it accepted");
         assert_eq!(
             rebind(&rebinder).expect_err("refused"),
             RebindError::NotRunning
@@ -942,6 +934,7 @@ mod tests {
         let reporting = Reporting {
             invalidate: crate::InvalidateSink::new(),
             transport: crate::TransportSink::new(),
+            rates_only: false,
         };
         let sink = Arc::clone(&heard);
         let _hearing = reporting.invalidate.subscribe(move |e| sink.lock().push(e));

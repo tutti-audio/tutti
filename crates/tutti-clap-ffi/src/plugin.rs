@@ -101,6 +101,7 @@ use clap_sys::ext::track_info::{
 use clap_sys::ext::voice_info::{CLAP_EXT_VOICE_INFO, clap_plugin_voice_info};
 use clap_sys::plugin::clap_plugin;
 
+use crate::gui::EditorKind;
 use crate::host::Host;
 use crate::library::{Bundle, LoadError, Stage};
 use crate::roles::ThreadRoles;
@@ -230,10 +231,11 @@ impl Core {
 /// (or, for the ones CLAP also allows elsewhere, noted on the method).
 pub struct Plugin {
     core: Arc<Core>,
-    /// Whether `gui.create` has run and `gui.destroy` has not: the order
-    /// CLAP requires every other `clap.gui` entry to follow, kept here so a
-    /// caller cannot break it.
-    pub(crate) gui_created: bool,
+    /// The editor `gui.create` made and `gui.destroy` has not ended, `None`
+    /// before and after: the order CLAP requires every other `clap.gui` entry
+    /// to follow, kept here so a caller cannot break it, and the kind the
+    /// `[!floating]` entries are gated on.
+    pub(crate) gui: Option<EditorKind>,
     /// The scale the editor was opened with or last given: what a size in the
     /// other unit is converted at.
     pub(crate) gui_scale: ContentScale,
@@ -397,7 +399,7 @@ impl Plugin {
         });
         Ok(Self {
             core,
-            gui_created: false,
+            gui: None,
             gui_scale: ContentScale::IDENTITY,
             _host: ManuallyDrop::new(host),
             _bundle: ManuallyDrop::new(bundle),
@@ -1146,7 +1148,7 @@ impl Drop for Plugin {
             };
             let moved = Plugin {
                 core: Arc::clone(&self.core),
-                gui_created: self.gui_created,
+                gui: self.gui,
                 gui_scale: self.gui_scale,
                 _host: ManuallyDrop::new(host),
                 _bundle: ManuallyDrop::new(bundle),

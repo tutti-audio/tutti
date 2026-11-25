@@ -50,7 +50,6 @@ tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = f
 # a map that changes, how long the playhead took from a clip's start to now is
 # the map's, not the current tempo's.
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
-tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 # `spawn_named`, `PriorityRequest`: the disk streamer's thread.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The streamer task yields to its drive between cycles.
@@ -72,6 +71,8 @@ rayon = "1.10"
 atomic_float = "1.1"
 
 [dev-dependencies]
+# The graph-clock tests drive a transport over the sampler's voices.
+tutti-timeline = { path = "../tutti-timeline" }
 # Finds the repo's `assets/` for the tests.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 criterion.workspace = true
@@ -86,7 +87,7 @@ tutti-codec = { path = "../tutti-codec", features = ["decode-wav", "decode-flac"
 # Stimulus nodes (`tutti_nodes::testing`).
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # `contract` for the node harnesses (`drive_input`, `Direct`, `BlockRig`).
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 # The engine the clock tests render through.
 tutti-engine = { path = "../tutti-engine" }
 # `ControlProgram`, for a control lane on a voice's gain port

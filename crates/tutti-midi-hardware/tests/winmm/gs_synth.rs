@@ -3,7 +3,7 @@ use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::Devices;
 
 /// The built-in synth's listing, or a failure that lists the outputs.
-pub fn synth(devices: &Devices) -> DeviceInfo {
+pub(crate) fn synth(devices: &Devices) -> DeviceInfo {
     let outputs: Vec<_> = devices
         .list()
         .into_iter()

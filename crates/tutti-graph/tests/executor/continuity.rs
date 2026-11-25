@@ -23,16 +23,18 @@
 //!
 //! Each runs on one participant and on a pool.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_graph::testing::{self as common, Harness, Kind, TestNode, input_signal, prepare};
 use tutti_graph::{
-    Cx, Edge, EdgeGain, EdgeId, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort,
-    Executor, Fade, FadeLaw, FeedbackFrom, InEvents, InputPort, Io, MeterId, MeterSpec, Node,
-    NodeKey, OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions,
-    TransportPosition, Unforkable,
+    Cx, Edge, EdgeId, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
+    Fade, FadeLaw, FeedbackFrom, InEvents, InputPort, Io, MeterId, MeterSpec, Node, NodeKey,
+    OutputPort, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TransportPosition,
+    Unforkable,
 };
 use tutti_ump::Ump;
 use tutti_units::{Frame, Gain, Latency, SampleRate, Samples, Tail};
@@ -176,7 +178,8 @@ impl Config {
     /// The delays this wiring has, each with its length.
     fn keys(&self) -> BTreeMap<Key, Samples> {
         let mut keys = BTreeMap::new();
-        if self.emitter && self.direct {
+        // A latency of 0 is no delay: the edge has no FIFO.
+        if self.emitter && self.direct && self.event_latency.get() > 0 {
             keys.insert(Key::Direct, self.event_latency);
         }
         if let Some(d) = self.event_feedback {
@@ -232,9 +235,14 @@ const DELAYS: [Option<usize>; 4] = [
 
 fn random_op(rng: &mut Rng, cfg: &Config) -> Op {
     let latency = |rng: &mut Rng| Samples::new(1 + rng.below(60) as usize);
+    // 0 makes the event delay vanish while its edge stays.
+    let event_latency = |rng: &mut Rng| match rng.below(6) {
+        0 => Samples::new(0),
+        _ => latency(rng),
+    };
     let delay = |rng: &mut Rng| DELAYS[rng.below(4) as usize].map(Samples::new);
     match rng.below(7) {
-        0 => Op::EventLatency(latency(rng)),
+        0 => Op::EventLatency(event_latency(rng)),
         1 => Op::AudioLatency(latency(rng)),
         2 if cfg.emitter => Op::Direct(!cfg.direct),
         3 => Op::Emitter(!cfg.emitter),
@@ -271,11 +279,14 @@ struct Model {
     seen: Seen,
 }
 
-/// What a script exercised: events flushed by a vanished FIFO, FIFOs retuned
-/// while holding events, audio rings retuned or recreated.
+/// What a script exercised: events flushed by a vanished FIFO, FIFOs whose
+/// latency went to 0 while holding two events or more (spacing shows only
+/// between two), FIFOs retuned while holding events,
+/// audio rings retuned or recreated.
 #[derive(Clone, Copy, Debug, Default)]
 struct Seen {
     flushed: usize,
+    zeroed_holding: usize,
     retuned_holding: usize,
     ring_retunes: usize,
     ring_vanished: usize,
@@ -301,6 +312,9 @@ impl Model {
                 // the block's last frame.
                 let first = fifo.queued.first().map(|e| e + fifo.len.get() as u64);
                 self.seen.flushed += fifo.queued.len();
+                self.seen.zeroed_holding += usize::from(
+                    *key == Key::Direct && new.emitter && new.direct && fifo.queued.len() >= 2,
+                );
                 for e in fifo.queued {
                     let spacing = e + fifo.len.get() as u64 - first.unwrap_or_default();
                     self.want
@@ -345,6 +359,11 @@ impl Model {
     fn advance(&mut self, cfg: &Config, at: u64, n: u64) {
         for f in at..at + n {
             match f % 16 {
+                // With no delay, the edge delivers on the emission frame.
+                1 if cfg.emitter && cfg.direct && cfg.event_latency.get() == 0 => {
+                    self.sent += 1;
+                    self.want.push((f as u32, 0, Frame::new(f)));
+                }
                 1 if cfg.emitter => self.send(&[Key::Direct], f),
                 2 => {
                     let keys: Vec<Key> = self
@@ -462,27 +481,28 @@ fn rig(workers: usize, inbox: &Inbox) -> Harness {
         let (key, unit) = node(key, kind);
         ed.insert(key, "unit", unit);
     }
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let input = vec![Edge::Direct(PortSource::MainInput(0))];
-    let edges = &mut spec.topology.edges;
-    edges.insert(InputPort::new(LAG, 0), input.clone());
-    edges.insert(InputPort::new(GAIN, 0), input.clone());
-    edges.insert(InputPort::new(SUM, 0), vec![Edge::Direct(audio(LAG))]);
-    edges.insert(InputPort::new(SUM, 1), input);
-    edges.insert(
+    common::feed_input(ed, InputPort::new(LAG, 0), input.clone());
+    common::feed_input(ed, InputPort::new(GAIN, 0), input.clone());
+    common::feed_input(ed, InputPort::new(SUM, 0), vec![Edge::Direct(audio(LAG))]);
+    common::feed_input(ed, InputPort::new(SUM, 1), input);
+    common::feed_input(
+        ed,
         InputPort::new(SUM, 2),
         vec![Edge::Feedback(FeedbackFrom::new(
             OutputPort::new(GAIN, 0),
             Samples::new(MAX_BLOCK),
         ))],
     );
-    spec.topology.set_outputs(vec![audio(SUM)]);
-    spec.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)));
+    ed.wire_declared_outputs(vec![audio(SUM)]).unwrap();
+    ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
+        .unwrap();
     let at = EventInputPort::new(REC, 0);
-    spec.connect_events(at, EventEdge::Direct(src(EA)));
-    spec.connect_events(at, EventEdge::Direct(src(EL)));
-    spec.connect_events(at, EventEdge::feedback(src(EB), Samples::new(MAX_BLOCK)));
+    ed.connect_events(at, EventEdge::Direct(src(EA))).unwrap();
+    ed.connect_events(at, EventEdge::Direct(src(EL))).unwrap();
+    ed.connect_events(at, EventEdge::feedback(src(EB), Samples::new(MAX_BLOCK)))
+        .unwrap();
     land(&mut harness);
     harness.outputs = 1;
     harness.inputs = 1;
@@ -497,11 +517,11 @@ fn apply(harness: &mut Harness, op: Op) {
     match op {
         Op::EventLatency(l) => ed.set_latency(EL, latency(l)).expect("sets"),
         Op::AudioLatency(l) => ed.set_latency(LAG, latency(l)).expect("sets"),
-        Op::Direct(true) => ed
-            .spec_mut()
-            .connect_events(sink, EventEdge::Direct(src(EA))),
+        Op::Direct(true) => {
+            ed.connect_events(sink, EventEdge::Direct(src(EA))).unwrap();
+        }
         Op::Direct(false) => {
-            ed.spec_mut().disconnect_events(sink, src(EA));
+            ed.disconnect_events(sink, EventEdge::Direct(src(EA)));
         }
         Op::Emitter(true) => {
             let (key, unit) = node(EA, emitter(1));
@@ -510,32 +530,42 @@ fn apply(harness: &mut Harness, op: Op) {
         Op::Emitter(false) => ed.remove(EA),
         Op::Ring(on) => {
             let at = InputPort::new(SUM, 1);
-            let edges = &mut ed.spec_mut().topology.edges;
             if on {
-                edges.insert(at, vec![Edge::Direct(PortSource::MainInput(0))]);
+                common::feed_input(ed, at, vec![Edge::Direct(PortSource::MainInput(0))]);
             } else {
-                edges.remove(&at);
+                common::feed_input(ed, at, Vec::new());
             }
         }
         Op::EventFeedback(d) => {
-            let spec = ed.spec_mut();
-            spec.disconnect_events(sink, src(EB));
+            let held: Vec<EventEdge> = ed
+                .spec()
+                .events
+                .get(&sink)
+                .into_iter()
+                .flatten()
+                .filter(|e| e.from() == src(EB))
+                .copied()
+                .collect();
+            for edge in held {
+                ed.disconnect_events(sink, edge);
+            }
             if let Some(d) = d {
-                spec.connect_events(sink, EventEdge::feedback(src(EB), d));
+                ed.connect_events(sink, EventEdge::feedback(src(EB), d))
+                    .unwrap();
             }
         }
         Op::AudioFeedback(d) => {
             let at = InputPort::new(SUM, 2);
-            let edges = &mut ed.spec_mut().topology.edges;
             match d {
-                Some(d) => edges.insert(
+                Some(d) => common::feed_input(
+                    ed,
                     at,
                     vec![Edge::Feedback(FeedbackFrom::new(
                         OutputPort::new(GAIN, 0),
                         d,
                     ))],
                 ),
-                None => edges.remove(&at),
+                None => common::feed_input(ed, at, Vec::new()),
             };
         }
     }
@@ -621,7 +651,8 @@ proptest! {
 }
 
 /// The scripts are not vacuous: over a fixed range of seeds they flush events
-/// out of vanished FIFOs, retune FIFOs that hold events, and retune and drop
+/// out of vanished FIFOs (a latency gone to 0 among them), retune FIFOs that
+/// hold events, and retune and drop
 /// audio rings.
 #[test]
 fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
@@ -629,11 +660,17 @@ fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
     for seed in 0..128u64 {
         let one = per_key_model(seed, (seed % 5) as usize, 1);
         seen.flushed += one.flushed;
+        seen.zeroed_holding += one.zeroed_holding;
         seen.retuned_holding += one.retuned_holding;
         seen.ring_retunes += one.ring_retunes;
         seen.ring_vanished += one.ring_vanished;
     }
     assert!(seen.flushed > 100, "{seen:?}");
+    // A delay that vanishes because its latency went to 0 is flushed by the
+    // loop every vanished delay goes through, so `flushed` is the spacing's
+    // main witness; this one says the latency-to-0 way in is taken with a
+    // spacing to keep.
+    assert!(seen.zeroed_holding > 0, "{seen:?}");
     assert!(seen.retuned_holding > 25, "{seen:?}");
     assert!(seen.ring_retunes > 25, "{seen:?}");
     assert!(seen.ring_vanished > 50, "{seen:?}");
@@ -664,11 +701,11 @@ fn flush_order(workers: usize) {
         ed.insert(key, "unit", unit);
     }
     ed.insert(REC, "recorder", Unforkable(Recorder(inbox.clone())));
-    let spec = ed.spec_mut();
-    spec.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)));
+    ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
+        .unwrap();
     let at = EventInputPort::new(REC, 0);
     for from in [SECOND, FIRST, EL] {
-        spec.connect_events(at, EventEdge::Direct(src(from)));
+        ed.connect_events(at, EventEdge::Direct(src(from))).unwrap();
     }
     land(&mut harness);
     let run = |harness: &mut Harness| {
@@ -680,9 +717,12 @@ fn flush_order(workers: usize) {
         run(&mut harness);
     }
     let seen = inbox.lock().unwrap().len();
-    let spec = harness.editor.spec_mut();
-    spec.disconnect_events(at, src(SECOND));
-    spec.disconnect_events(at, src(FIRST));
+    harness
+        .editor
+        .disconnect_events(at, tutti_graph::EventEdge::Direct(src(SECOND)));
+    harness
+        .editor
+        .disconnect_events(at, tutti_graph::EventEdge::Direct(src(FIRST)));
     land(&mut harness);
     run(&mut harness);
     let got: Vec<_> = inbox.lock().unwrap().to_vec()[seen..].to_vec();
@@ -762,14 +802,14 @@ fn bank_continues_the_old_history(workers: usize) {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: LATENCY })),
     );
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.spec_mut().topology.edges.insert(
+    ed.resize_inputs(ChannelLayout::MONO);
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(LAG_NODE, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)]);
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
+        .unwrap();
     ed.commit().expect("commits");
     // Impulses at 162 (in the ring when the commit lands at 192), 197 and 282.
     let impulses = [(162usize, 1.0f32), (197, 0.5), (282, 0.25)];
@@ -809,8 +849,8 @@ fn bank_continues_the_old_history(workers: usize) {
         Fade::new(Samples::new(8 * BLOCK)).law(FadeLaw::EqualAmplitude),
     ));
     let id = ed.spec().main_output_id.next();
-    ed.spec_mut().main_output_id = id;
-    ed.spec_mut().topology.set_outputs(vec![audio(NEW)]);
+    ed.declare_main_output(ed.spec().main_output, id);
+    ed.wire_declared_outputs(vec![audio(NEW)]).unwrap();
     ed.commit().expect("declares the new main output");
     for b in 3..5 {
         let bufs = step(&mut ed, &mut exec, b * BLOCK);
@@ -901,35 +941,34 @@ fn a_rate_change(workers: usize) {
         ed.insert(key, "unit", unit);
     }
     ed.insert(SINK, "recorder", Unforkable(Recorder(inbox.clone())));
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let input = vec![Edge::Direct(PortSource::MainInput(0))];
     let weighted = InputPort::new(SUM_NODE, 0);
-    let edges = &mut spec.topology.edges;
-    edges.insert(InputPort::new(LAG_NODE, 0), input.clone());
-    edges.insert(InputPort::new(GAIN_NODE, 0), input);
-    edges.insert(weighted, vec![Edge::Direct(audio(LAG_NODE))]);
-    edges.insert(
+    common::feed_input(ed, InputPort::new(LAG_NODE, 0), input.clone());
+    common::feed_input(ed, InputPort::new(GAIN_NODE, 0), input);
+    common::feed_input(ed, weighted, vec![Edge::Direct(audio(LAG_NODE))]);
+    common::feed_input(
+        ed,
         InputPort::new(SUM_NODE, 1),
         vec![Edge::Feedback(FeedbackFrom::new(
             OutputPort::new(GAIN_NODE, 0),
             Samples::new(MAX_BLOCK),
         ))],
     );
-    spec.topology.set_outputs(vec![audio(SUM_NODE)]);
+    ed.wire_declared_outputs(vec![audio(SUM_NODE)]).unwrap();
     let sink = EventInputPort::new(SINK, 0);
-    spec.connect_events(sink, EventEdge::Direct(src(EMIT)));
-    spec.connect_events(sink, EventEdge::Direct(src(EVENT_LAG)));
-    spec.connect_events(
+    ed.connect_events(sink, EventEdge::Direct(src(EMIT)))
+        .unwrap();
+    ed.connect_events(sink, EventEdge::Direct(src(EVENT_LAG)))
+        .unwrap();
+    ed.connect_events(
         EventInputPort::new(EVENT_LAG, 0),
         EventEdge::Direct(src(EMIT)),
-    );
-    let lane = EdgeId {
-        sink: PortSink::Port(weighted),
-        from: Edge::Direct(audio(LAG_NODE)),
-    };
-    spec.set_edge_gain(lane, EdgeGain::default());
-    harness.start_edge_gain(lane, Gain::new(0.5));
+    )
+    .unwrap();
+    let lane = EdgeId::into_port(weighted, Edge::Direct(audio(LAG_NODE)));
+    ed.set_edge_gain(lane, Gain::new(0.5))
+        .expect("the edge exists");
     let mut tap = harness
         .editor
         .open_tap(

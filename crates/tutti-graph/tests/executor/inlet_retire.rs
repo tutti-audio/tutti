@@ -3,6 +3,8 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
@@ -22,16 +24,13 @@ fn inlet() -> (InletNode, tutti_graph::TapWriter) {
 fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     for _ in 0..blocks {
-        let mut chans = vec![vec![0.0f32; 64]; 2];
-        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(64, &t, &[], &mut outs);
+        tutti_graph::testing::block_in(exec, 64, &[], 2, &t);
     }
 }
 
 fn outputs(ed: &mut Editor) {
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))));
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))))
+        .unwrap();
 }
 
 /// Replacing an inlet through a cut and through a crossfade, then removing
@@ -64,9 +63,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     }
 
     ed.remove(KEY);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Zero; 2]);
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
+        .unwrap();
     ed.commit().expect("compiles");
     exec.apply_pending();
     render(&mut exec, 2);

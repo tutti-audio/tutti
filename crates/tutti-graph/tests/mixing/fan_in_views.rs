@@ -10,8 +10,8 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InputDelay, InputPort, NodeKey, NodeSpec, OutputDelay, OutputPort,
-    PortSource, Topology, delays, graph_tail, latency_plan,
+    Edge, FeedbackFrom, InputPort, NodeKey, NodeSpec, OutputPort, PortSource, Topology, delays,
+    graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -66,23 +66,14 @@ fn sources() -> Topology {
     t
 }
 
-fn sorted_inputs(t: &Topology) -> Vec<InputDelay<NodeKey>> {
-    let mut v = delays(t, SampleRate::SR_48K).inputs().to_vec();
-    v.sort();
-    v
+/// How long `from`'s output waits to meet `to`'s arrival.
+fn waits(d: &tutti_graph::Delays<NodeKey>, from: NodeKey, to: NodeKey) -> Samples {
+    d.departure(from).align_to(d.arrival(to))
 }
 
-fn input(node: NodeKey, port: u16, feed: Feed<NodeKey>, by: Samples) -> InputDelay<NodeKey> {
-    InputDelay {
-        node,
-        port,
-        feed,
-        by,
-    }
-}
-
-fn output(channel: usize, feed: Feed<NodeKey>, by: Samples) -> OutputDelay<NodeKey> {
-    OutputDelay { channel, feed, by }
+/// How long `from`'s output waits to meet the output time.
+fn waits_to_output(d: &tutti_graph::Delays<NodeKey>, from: NodeKey) -> Samples {
+    d.departure(from).align_to(d.compensation().total())
 }
 
 /// **A fan-in port aligns each source on its own.** Port 0 sums `SLOW`
@@ -107,12 +98,8 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
     );
     assert_eq!(d.departure(SINK), Samples::new(300), "a sum has no latency");
     assert_eq!(
-        sorted_inputs(&t),
-        vec![
-            input(SINK, 0, Feed::Node(MID), Samples::new(200)),
-            input(SINK, 0, Feed::Node(DRY), Samples::new(300)),
-            input(SINK, 1, Feed::Node(MID), Samples::new(200)),
-        ]
+        [SLOW, MID, DRY].map(|from| waits(&d, from, SINK)),
+        [0, 200, 300].map(Samples::new)
     );
     assert_eq!(
         latency_plan(&t, SampleRate::SR_48K).total(),
@@ -130,25 +117,9 @@ fn a_main_input_source_of_a_fan_in_waits_for_the_slowest() {
     t.connect(at(SINK, 0), Edge::Direct(PortSource::MainInput(0)));
     t.set_outputs([PortSource::Node(out(SINK, 0))]);
 
-    assert_eq!(
-        sorted_inputs(&t),
-        vec![input(SINK, 0, Feed::Outside, Samples::new(100))]
-    );
-}
-
-/// Two outputs of one node into one port are one feed, and one delay.
-#[test]
-fn two_ports_of_one_node_into_a_port_are_one_delay() {
-    let mut t = sources();
-    t.nodes.insert(MID, spec(0, 2).latency(Samples::new(100)));
-    t.connect(at(SINK, 0), direct(SLOW));
-    t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 0))));
-    t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 1))));
-
-    assert_eq!(
-        sorted_inputs(&t),
-        vec![input(SINK, 0, Feed::Node(MID), Samples::new(200))]
-    );
+    let d = delays(&t, SampleRate::SR_48K);
+    // The main input departs at zero.
+    assert_eq!(d.arrival(SINK), Samples::new(100));
 }
 
 /// A feedback addend carries last block's value: it is `Feed::None`, adds
@@ -163,7 +134,6 @@ fn a_feedback_addend_is_not_aligned_and_does_not_delay() {
     );
     let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(d.arrival(SINK), Samples::new(100));
-    assert!(d.inputs().is_empty());
 }
 
 /// **A fan-in output channel aligns each source to the output time**, and the
@@ -181,13 +151,8 @@ fn each_source_of_a_fan_in_output_is_delayed_to_the_output_time() {
     t.outputs[0].push(PortSource::Node(out(DRY, 0)));
 
     let d = delays(&t, SampleRate::SR_48K);
-    assert_eq!(
-        d.outputs(),
-        &[
-            output(0, Feed::Node(DRY), Samples::new(300)),
-            output(1, Feed::Node(MID), Samples::new(200)),
-        ]
-    );
+    assert_eq!(waits_to_output(&d, DRY), Samples::new(300));
+    assert_eq!(waits_to_output(&d, MID), Samples::new(200));
     let c = d.compensation();
     assert_eq!(c.total(), Samples::new(300));
     assert_eq!(c.channels(), &[Samples::new(0), Samples::new(200)]);

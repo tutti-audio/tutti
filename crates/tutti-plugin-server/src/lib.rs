@@ -177,7 +177,7 @@ pub(crate) mod test_utils {
     /// kept for the process: a switch set before a load must stay resident
     /// for the instance loaded after it.
     #[cfg(feature = "clap")]
-    pub fn clap() -> &'static ClapProbe {
+    pub(crate) fn clap() -> &'static ClapProbe {
         static PROBE: OnceLock<ClapProbe> = OnceLock::new();
         PROBE.get_or_init(|| {
             ClapProbe::open(
@@ -190,7 +190,7 @@ pub(crate) mod test_utils {
     /// Taken by every test that loads a real plugin — CLAP, VST3 and, on macOS,
     /// AU. A plugin's entry point may touch process globals, so loads are kept
     /// one at a time in tests.
-    pub static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
     /// The reference VST3 bundle's parent directory, forwarded from
     /// `tutti-vst3-host` by `build.rs`. Empty when that crate built no probe.
@@ -210,7 +210,7 @@ pub(crate) mod test_utils {
     ///
     /// If the probe is absent — see above. The message names the likely cause.
     #[cfg(feature = "vst3")]
-    pub fn vst3_probe_path() -> &'static str {
+    pub(crate) fn vst3_probe_path() -> &'static str {
         static RESOLVED: OnceLock<String> = OnceLock::new();
         RESOLVED
             .get_or_init(|| {
@@ -248,7 +248,7 @@ pub(crate) mod test_utils {
     /// If absent. It is built from the in-repo SDK submodule by the same
     /// `cargo test`, so that is a build failure.
     #[cfg(feature = "vst3")]
-    pub fn vst3_program_sample_path() -> &'static str {
+    pub(crate) fn vst3_program_sample_path() -> &'static str {
         static RESOLVED: OnceLock<String> = OnceLock::new();
         RESOLVED
             .get_or_init(|| {
@@ -293,7 +293,7 @@ pub(crate) mod test_utils {
     /// Mirrors `tutti_clap_test_plugin::RenderMode`; kept as a bare constant
     /// because the value crosses a `dlopen` boundary as a `u32`.
     #[cfg(feature = "clap")]
-    pub const CLAP_PROBE_RENDER_TAG_ONLY: u32 = 2;
+    pub(crate) const CLAP_PROBE_RENDER_TAG_ONLY: u32 = 2;
 
     /// Set the reference plugin's render mode.
     ///
@@ -307,7 +307,7 @@ pub(crate) mod test_utils {
     /// in the *dynamic library*, and a value stored through the rlib's copy
     /// would be a different static that `process` never reads.
     #[cfg(feature = "clap")]
-    pub fn set_clap_probe_render_mode(mode: u32) {
+    pub(crate) fn set_clap_probe_render_mode(mode: u32) {
         clap().set(ClapSwitch::RenderMode, mode);
     }
 
@@ -329,7 +329,7 @@ pub(crate) mod test_utils {
     /// the returned guard drops returns this.
     #[cfg(feature = "clap")]
     #[must_use = "the plugin goes back to its default when the guard drops"]
-    pub struct Restore(Reset);
+    pub(crate) struct Restore(Reset);
 
     #[cfg(feature = "clap")]
     impl Drop for Restore {
@@ -355,7 +355,7 @@ pub(crate) mod test_utils {
     /// *dynamic library*, and a value stored through the rlib's copy would be a
     /// different static the plugin never reads.
     #[cfg(feature = "clap")]
-    pub fn clap_switch_until_drop(switch: ClapSwitch, value: u32, default: u32) -> Restore {
+    pub(crate) fn clap_switch_until_drop(switch: ClapSwitch, value: u32, default: u32) -> Restore {
         clap().set(switch, value);
         Restore(Reset::Switch(switch, default))
     }
@@ -363,7 +363,7 @@ pub(crate) mod test_utils {
     /// [`set_clap_probe_render_mode`] until the returned guard drops, which
     /// puts the plugin back to `Inert`.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_render_mode(mode: u32) -> Restore {
+    pub(crate) fn clap_probe_render_mode(mode: u32) -> Restore {
         clap_switch_until_drop(
             ClapSwitch::RenderMode,
             mode,
@@ -376,7 +376,7 @@ pub(crate) mod test_utils {
     /// which restores `Continue`. `Error` makes every block fail inside the
     /// plugin, a failure of the plugin's own and not of the block's shape.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_status_mode(mode: tutti_clap_test_plugin::StatusMode) -> Restore {
+    pub(crate) fn clap_probe_status_mode(mode: tutti_clap_test_plugin::StatusMode) -> Restore {
         clap_switch_until_drop(
             ClapSwitch::StatusMode,
             mode as u32,
@@ -389,7 +389,7 @@ pub(crate) mod test_utils {
     /// drops, which restores `SymmetricStereo`. Call before loading: the host
     /// reads the layout once, at load.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_port_layout(mode: u32) -> Restore {
+    pub(crate) fn clap_probe_port_layout(mode: u32) -> Restore {
         clap_switch_until_drop(
             ClapSwitch::PortLayout,
             mode,
@@ -402,7 +402,7 @@ pub(crate) mod test_utils {
     /// until the returned guard drops, which restores the f32-only default.
     /// Call before loading: the host reads the port flags once, at load.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_ports_64bit(mask: u32) -> Restore {
+    pub(crate) fn clap_probe_ports_64bit(mask: u32) -> Restore {
         clap_switch_until_drop(ClapSwitch::Ports64Bit, mask, 0)
     }
 
@@ -410,7 +410,7 @@ pub(crate) mod test_utils {
     /// `on_main_thread` (see `tutti_test_plugin_request_ports_rescan`) until
     /// the returned guard drops, which clears a call not yet made.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_request_ports_rescan(flags: u32) -> Restore {
+    pub(crate) fn clap_probe_request_ports_rescan(flags: u32) -> Restore {
         clap_switch_until_drop(ClapSwitch::RequestPortsRescan, flags, 0)
     }
 
@@ -418,7 +418,7 @@ pub(crate) mod test_utils {
     /// `process`, until the returned guard drops (which clears a call not yet
     /// made).
     #[cfg(feature = "clap")]
-    pub fn clap_probe_request_restart() -> Restore {
+    pub(crate) fn clap_probe_request_restart() -> Restore {
         clap_probe_thread_command(tutti_clap_test_plugin::CMD_REQUEST_RESTART)
     }
 
@@ -427,7 +427,7 @@ pub(crate) mod test_utils {
     /// clears one not yet run: `on_main_thread` for the timer commands,
     /// `process` for the restart ones.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_thread_command(cmd: u32) -> Restore {
+    pub(crate) fn clap_probe_thread_command(cmd: u32) -> Restore {
         clap().thread_command(cmd);
         Restore(Reset::ThreadCommand)
     }
@@ -436,7 +436,7 @@ pub(crate) mod test_utils {
     /// `tutti_clap_test_plugin::PARAM_CMD_*` says at its next `on_main_thread`,
     /// until the returned guard drops, which clears one not yet made.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_param_command(cmd: u32) -> Restore {
+    pub(crate) fn clap_probe_param_command(cmd: u32) -> Restore {
         clap().param_command(cmd);
         Restore(Reset::ParamCommand)
     }
@@ -445,27 +445,27 @@ pub(crate) mod test_utils {
     /// activation on (see `tutti_test_plugin_set_latency_at_activation`), until
     /// the returned guard drops. The plugin does not call `changed()`.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_latency_at_activation(extra: u32) -> Restore {
+    pub(crate) fn clap_probe_latency_at_activation(extra: u32) -> Restore {
         clap_switch_until_drop(ClapSwitch::LatencyAtActivation, extra, 0)
     }
 
     /// Make the reference plugin call `latency.changed()` from inside every
     /// `activate`, until the returned guard drops.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_latency_changed_in_activate() -> Restore {
+    pub(crate) fn clap_probe_latency_changed_in_activate() -> Restore {
         clap_switch_until_drop(ClapSwitch::LatencyChangedInActivate, 1, 0)
     }
 
     /// What the reference plugin recorded of its threading and timer calls
     /// since the last reset.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_thread_capture() -> tutti_clap_test_plugin::ThreadCapture {
+    pub(crate) fn clap_probe_thread_capture() -> tutti_clap_test_plugin::ThreadCapture {
         clap().thread_capture()
     }
 
     /// Zeroes [`clap_probe_thread_capture`].
     #[cfg(feature = "clap")]
-    pub fn clap_probe_thread_reset() {
+    pub(crate) fn clap_probe_thread_reset() {
         clap().thread_reset();
     }
 
@@ -473,20 +473,20 @@ pub(crate) mod test_utils {
     /// [`clap_probe_reset_activation_count`]: one per activation, so a
     /// re-activation shows as one more.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_activation_count() -> u32 {
+    pub(crate) fn clap_probe_activation_count() -> u32 {
         clap().activation_count()
     }
 
     /// Zeroes [`clap_probe_activation_count`].
     #[cfg(feature = "clap")]
-    pub fn clap_probe_reset_activation_count() {
+    pub(crate) fn clap_probe_reset_activation_count() {
         clap().reset_activation();
     }
 
     /// Make the reference plugin's `activate` refuse `rate` until the returned
     /// guard drops, which lifts the refusal.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_refuse_rate(rate: f64) -> Restore {
+    pub(crate) fn clap_probe_refuse_rate(rate: f64) -> Restore {
         clap().set_activate_refusal(rate.to_bits());
         Restore(Reset::ActivateRefusal)
     }
@@ -494,7 +494,7 @@ pub(crate) mod test_utils {
     /// The rate of the reference plugin's most recent accepted `activate`
     /// since [`clap_probe_reset_activation_count`], if any.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_last_accepted_rate() -> Option<f64> {
+    pub(crate) fn clap_probe_last_accepted_rate() -> Option<f64> {
         clap().last_accepted_rate()
     }
 
@@ -502,8 +502,16 @@ pub(crate) mod test_utils {
     /// drops, which restores it. Call before loading: the host asks for the
     /// plugin's extensions once, at load.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_without_tail() -> Restore {
+    pub(crate) fn clap_probe_without_tail() -> Restore {
         clap_switch_until_drop(ClapSwitch::TailExtension, 0, 1)
+    }
+
+    /// Make the reference plugin withhold `clap.render` until the returned
+    /// guard drops, which restores it. Call before loading: the host asks for
+    /// the plugin's extensions once, at load.
+    #[cfg(feature = "clap")]
+    pub(crate) fn clap_probe_without_render() -> Restore {
+        clap_switch_until_drop(ClapSwitch::RenderExtension, 0, 1)
     }
 
     /// Absolute path to `tutti-clap-test-plugin`, the reference CLAP cdylib the
@@ -515,7 +523,7 @@ pub(crate) mod test_utils {
     /// Resolution (newest candidate wins) and the panic-on-absence rule are
     /// `tutti_fixtures`'s; see that crate for why each matters.
     #[cfg(feature = "clap")]
-    pub fn clap_probe_path() -> &'static str {
+    pub(crate) fn clap_probe_path() -> &'static str {
         static RESOLVED: OnceLock<String> = OnceLock::new();
         RESOLVED
             .get_or_init(|| {

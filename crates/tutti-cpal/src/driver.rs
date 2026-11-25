@@ -296,16 +296,6 @@ where
         self.origin.opened_name()
     }
 
-    /// Selects a device for the next [`restart`](Self::restart).
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) on a
-    /// driver built from a bare spec, which has no device to select.
-    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<&mut Self> {
-        self.origin.target_mut()?.1.select(sel);
-        Ok(self)
-    }
-
     /// Stops any running stream and starts a new one on a driver of the
     /// caller's choosing, at the current [`spec`](OutputStream::spec).
     ///

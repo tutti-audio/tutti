@@ -11,9 +11,11 @@ use crate::common::blocks;
 use std::time::Duration;
 use tutti_platform::Instant;
 
+use tutti_graph::{EventCapacity, EventTapOptions, TapAlign};
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::SysexDeviceId;
+use tutti_midi_runtime::MidiInputPorts;
 use tutti_session::{
     ClockKind, FollowClock, FollowKind, FollowMachineControl, FollowTempo, MidiError, MidiEvent,
     MidiInput, Session, SessionEvent, UnfollowCause,
@@ -121,7 +123,8 @@ fn midi_events(s: &mut Session) -> Vec<MidiEvent> {
         .collect()
 }
 
-/// **A follower whose input node is removed ends at the next re-rate.** It is
+/// **A follower whose input node is removed ends on the update after the
+/// removal is applied.** It is
 /// reported once with its kind and the cause, it no longer follows, a follower
 /// that owned the tempo no longer refuses another, and the tempo is the app's
 /// 120 bpm again, not the 90 bpm the source had set.
@@ -180,14 +183,20 @@ fn a_follower_whose_input_is_gone_ends_and_releases_what_it_held() {
 
         let node = r.first.node();
         let _ = r.s.remove(node);
-        let _ = r.s.update();
-        r.s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-        let mut events = Vec::new();
-        for _ in 0..4 {
-            events.extend(midi_events(&mut r.s));
-            blocks(&mut r.s, 8);
-        }
+        // The update sends the removal, the block applies it, the next update
+        // finds the tap's source gone; later updates add nothing.
+        let mut events = midi_events(&mut r.s);
+        assert!(
+            events.is_empty(),
+            "{}: not before the removal is applied",
+            f.name
+        );
+        blocks(&mut r.s, 1);
         events.extend(midi_events(&mut r.s));
+        for _ in 0..4 {
+            blocks(&mut r.s, 8);
+            events.extend(midi_events(&mut r.s));
+        }
 
         let ended: Vec<_> = events
             .iter()
@@ -245,11 +254,67 @@ fn an_ended_tempo_follower_publishes_the_base_again() {
     let node = r.first.node();
     let _ = r.s.remove(node);
     let _ = r.s.update();
-    r.s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    for _ in 0..4 {
-        let _ = r.s.update();
-        blocks(&mut r.s, 8);
+    blocks(&mut r.s, 1);
+    let _ = r.s.update();
+    assert_eq!(
+        crate::tempo::effective(&r.s).constant_tempo(),
+        Some(Bpm::of(120.0)),
+        "the app's tempo again"
+    );
+}
+
+/// **What the tap held is applied before the follower ends.** A tempo source's
+/// Set Tempo that reached the tap before the node was removed is followed, then
+/// the follower ends, and the tempo is the app's again.
+#[test]
+fn a_follower_applies_what_its_tap_held_before_it_ends() {
+    let mut r = rig();
+    (FOLLOWERS[0].follow)(&mut r);
+    let _ = r.s.update();
+    let port = MidiInputPorts::FIRST_GROUP
+        .channelless(r.first.node(), G)
+        .expect("the group is heard");
+    let mut witness =
+        r.s.graph()
+            .taps()
+            .open_event(
+                port,
+                EventTapOptions::new(EventCapacity::of(16)).align(TapAlign::Raw),
+            )
+            .expect("the port exists");
+    let _ = r.s.update();
+    let field = FlexTempo::new((6.0e9 / 90.0) as u32);
+    assert!(r.fake.send_input(
+        EndpointId::from_raw(1),
+        Message::Flex(G, Flex::SetTempo(field)).into(),
+        Instant::now()
+    ));
+    // The witness hears the message once it is in the input's ring; the session
+    // is not updated meanwhile, so the follower has not read it.
+    let mut arrived = false;
+    for _ in 0..400 {
+        blocks(&mut r.s, 1);
+        arrived = witness.drain().next().is_some();
+        if arrived {
+            break;
+        }
     }
+    assert!(arrived, "the message reached the input");
+    let node = r.first.node();
+    let _ = r.s.remove(node);
+    let mut events = midi_events(&mut r.s);
+    blocks(&mut r.s, 1);
+    events.extend(midi_events(&mut r.s));
+    let followed = events
+        .iter()
+        .position(|e| matches!(e, MidiEvent::TempoFollowed { .. }));
+    let ended = events
+        .iter()
+        .position(|e| matches!(e, MidiEvent::Unfollowed { .. }));
+    assert!(
+        matches!((followed, ended), (Some(f), Some(e)) if f < e),
+        "followed, then ended; got {events:?}"
+    );
     assert_eq!(
         crate::tempo::effective(&r.s).constant_tempo(),
         Some(Bpm::of(120.0)),

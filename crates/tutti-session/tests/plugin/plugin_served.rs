@@ -285,52 +285,6 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
     ));
 }
 
-/// **An initial state is restored before the plugin is read, and two loads of
-/// one id are two plugins.** A value set on one plugin and saved is the
-/// value the other loads with; their servers are two processes.
-#[test]
-fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
-    const CUTOFF: ParamId = ParamId::new(101);
-    let (catalog, _dir) = catalog();
-    let mut s = session(true);
-    let (first, a) = in_a_node(&mut s, &catalog, &first_id());
-    let set = Normalized::of(0.9);
-    let target = s
-        .plugin_view(a)
-        .unwrap()
-        .params()
-        .get(CUTOFF)
-        .expect("the plugin declares the parameter")
-        .target();
-
-    s.set(target.to(set)).unwrap();
-    let state = s
-        .save_state(&a, tutti_plugin_types::StateUse::Project)
-        .unwrap()
-        .perform(tutti_fixtures::main_thread())
-        .expect("a state");
-
-    let mut load = s.load_out_of_process(&first_id(), &catalog);
-    load.initial_state(state).expect("its own plugin's state");
-    let second = load.block().expect("the plugin loads");
-    let second_handle = second.instance();
-    let b = s.apply(second).unwrap();
-    let read = s
-        .plugin_view(b)
-        .unwrap()
-        .params()
-        .get(CUTOFF)
-        .unwrap()
-        .normalized();
-    assert!(
-        (read.get() - set.get()).abs() < 1e-6,
-        "the state's value, not the default: {read:?}"
-    );
-    let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
-    assert_ne!(pid(a), pid(b), "two plugins, two servers");
-    assert_ne!(first.id(), second_handle.id());
-}
-
 /// **A served plugin arrives with its parameters read.** The load future awaits the
 /// read the server's replies feed, so the node's mirror is ready the moment the session
 /// adds it, with no `update` between: an app never sees a loaded plugin whose
@@ -415,7 +369,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let main = tutti_fixtures::main_thread();
     let (catalog, _dir) = catalog();
     let mut s = session(true);
-    let (_, a) = in_a_node(&mut s, &catalog, &first_id());
+    let (first, a) = in_a_node(&mut s, &catalog, &first_id());
     let (_, gone) = in_a_node(&mut s, &catalog, &first_id());
     s.remove(gone).unwrap();
 
@@ -483,8 +437,9 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
 
     let mut load = s.load_out_of_process(&first_id(), &catalog);
     load.initial_state(state).expect("its own plugin's state");
-    let b = load.block().expect("the plugin loads");
-    let b = s.apply(b).unwrap();
+    let second = load.block().expect("the plugin loads");
+    let second_handle = second.instance();
+    let b = s.apply(second).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -496,6 +451,10 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
         (read.get() - set.get()).abs() < 1e-6,
         "the saved value, not the default: {read:?}"
     );
+    // Two loads of one id are two plugins, in two servers.
+    let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
+    assert_ne!(pid(a), pid(b), "two plugins, two servers");
+    assert_ne!(first.id(), second_handle.id());
 }
 
 /// **A restored state applied after crash recovery replaced the node's plugin is
@@ -597,6 +556,18 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
     let own = s.apply(returned).expect("the returned node adds");
     assert_ne!(own, node);
     assert!(matches!(handle.presence(), Presence::Live));
+
+    // A refusal leaves the node able to take a plugin that fits.
+    let before = pid_of(&s, node);
+    layout("0");
+    let fitting = load(&s, &catalog, &second_id());
+    s.swap_plugin(node, fitting, tutti_fixtures::main_thread())
+        .expect("a plugin that fits swaps in");
+    assert_eq!(
+        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
+        tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
+    );
+    assert_ne!(pid_of(&s, node), before, "in a server of its own");
 }
 
 /// **A swap replaces the plugin at the node, at the same key.** The node is the
@@ -733,34 +704,6 @@ fn a_swap_to_the_same_totals_in_other_buses_is_refused() {
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
-}
-
-/// **After a refused swap a plugin that fits swaps in**: the node kept its
-/// plugin, and a second load that fits is the node's.
-#[test]
-fn after_a_refused_swap_a_fitting_plugin_swaps_in() {
-    let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
-    let main = tutti_fixtures::main_thread();
-    let first = pid_of(&s, node);
-    layout("1");
-    let wide = load(&s, &catalog, &second_id());
-    assert!(matches!(
-        s.swap_plugin(node, wide, main),
-        Err(SwapPluginError::Ports { .. })
-    ));
-
-    // The next server has the node's layout.
-    layout("0");
-    let fitting = load(&s, &catalog, &second_id());
-    s.swap_plugin(node, fitting, main)
-        .expect("a plugin that fits swaps in");
-    let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
-    assert_eq!(
-        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
-        second
-    );
-    assert_ne!(pid_of(&s, node), first, "another server");
 }
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
@@ -945,15 +888,17 @@ mod process {
     }
 }
 
-/// **The node's dropped events keep accumulating across a reload of the
-/// plugin at it.** A block of 300 notes is cut by the graph to the node's
-/// declared input bound (`MIDI_STACK_BOUND`): the rest is reported as
-/// `EventsDropped` at the node, and only that. The server is terminated and
-/// recovery reloads the plugin at the same key; a second block of 300 is cut
-/// the same, so the node's reports total twice the cut. The cut is the graph's,
-/// not the plugin's, so `losses()` stays empty throughout.
+/// **A reloaded plugin's node is cut to the same input bound, and reports it.**
+/// A block of 300 notes is cut by the graph to the node's declared input bound
+/// (`MIDI_STACK_BOUND`): the rest is reported as `EventsDropped` at the node, and
+/// only that. The server is terminated and recovery reloads the plugin at the same
+/// key; the reload reports no cut of its own, and a second block of 300 is cut by
+/// the same bound. The cut is the graph's, not the plugin's, so `losses()` stays
+/// empty throughout: each chunk is answered before the next thing happens to its
+/// server, since a chunk the server is killed under, or falls behind on, is a real
+/// loss of its 256 events and is counted as one.
 #[test]
-fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
+fn a_reloaded_plugins_node_is_cut_to_the_same_input_bound() {
     use tutti_fixtures::midi;
     use tutti_graph::EventCapacity;
     use tutti_session::{MainOutput, Stamp};
@@ -984,21 +929,35 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         .unwrap();
     let notes = || (0..300).map(|i| midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF));
     let losses = |s: &Session| s.plugin_view(node).unwrap().losses();
+    let answered = |s: &Session| {
+        tutti_fixtures::wait_until(
+            "the chunk in flight to be answered",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                s.plugin_view(node)
+                    .unwrap()
+                    .diagnostics()
+                    .chunk_in_flight_answered()
+            },
+        );
+    };
     let _ = pump(&mut s);
     assert_eq!(losses(&s), Losses::NONE, "nothing sent yet");
 
     // The cut is charged in the block that rendered it, reported by the next update.
-    let mut dropped = 0;
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
-    dropped += dropped_at(pump(&mut s), node.into());
-    assert_eq!(dropped, cut);
+    answered(&s);
+    assert_eq!(dropped_at(pump(&mut s), node.into()), cut);
     assert_eq!(
         losses(&s),
         Losses::NONE,
         "the graph's cut, not the plugin's"
     );
 
+    // The server has answered every chunk it was sent, so its death takes
+    // none of the node's events with it.
+    answered(&s);
     let first = pid_of(&s, node).expect("served");
     s.plugin_view(node)
         .unwrap()
@@ -1011,37 +970,23 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         pid_of(s, node).is_some_and(|pid| pid != first)
             && matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running)
     });
-    dropped += dropped_at(pump(&mut s), node.into());
-    assert_eq!(dropped, cut, "the reload drops nothing more");
+    assert_eq!(
+        dropped_at(pump(&mut s), node.into()),
+        0,
+        "the reload reports no cut of its own"
+    );
 
+    answered(&s);
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
-    dropped += dropped_at(pump(&mut s), node.into());
+    answered(&s);
     assert_eq!(
-        dropped,
-        cut + cut,
-        "the reloaded plugin's node is cut the same: the reports add"
+        dropped_at(pump(&mut s), node.into()),
+        cut,
+        "the reloaded plugin's node is cut to the same bound"
     );
+    answered(&s);
     assert_eq!(losses(&s), Losses::NONE);
-}
-
-/// **The arm is the node's hosting**: a plugin in a plugin server hands out the
-/// out-of-process value for a save, a restore and a preset load.
-#[test]
-fn state_and_preset_work_for_a_served_plugin_is_out_of_process() {
-    let (catalog, _dir) = catalog();
-    let mut s = session(false);
-    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
-    let save = s.save_state(&node, StateUse::Project).unwrap();
-    assert!(matches!(save, SaveState::OutOfProcess(_)), "{save:?}");
-    let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
-    let restore = s.restore_state(&node, state).unwrap();
-    assert!(
-        matches!(restore, RestoreState::OutOfProcess(_)),
-        "{restore:?}"
-    );
-    let load = s.load_preset_file(&node, "/x.tutti-preset").unwrap();
-    assert!(matches!(load, LoadPreset::OutOfProcess(_)), "{load:?}");
 }
 
 fn block_on_save(save: SaveState) -> PeerState {
@@ -1089,6 +1034,12 @@ fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
     assert!(
         (read.get() - set.get()).abs() < 1e-6,
         "the saved value, not the default: {read:?}"
+    );
+
+    let preset = s.load_preset_file(&a, "/x.tutti-preset").unwrap();
+    assert!(
+        matches!(preset, LoadPreset::OutOfProcess(_)),
+        "a served plugin's preset load is awaited: {preset:?}"
     );
 }
 

@@ -88,8 +88,8 @@ struct Pending<F: Float> {
 /// editor is built.
 ///
 /// What the calls here do not spell, such as a resolution mark
-/// ([`GraphSpec::require_resolution`]), is set on the built editor's
-/// [`spec_mut`](crate::Editor::spec_mut) before its first commit.
+/// ([`GraphSpec::require_resolution`]), is written on the built editor with
+/// its own call ([`Editor::require_resolution`]) before its first commit.
 ///
 /// # Panics, not errors
 ///
@@ -237,6 +237,7 @@ impl<F: Float> GraphBuilder<F> {
             params,
             reclaimer,
             published,
+            settings,
         } = node.into_parts();
         let unit = NodeParts {
             node,
@@ -245,6 +246,7 @@ impl<F: Float> GraphBuilder<F> {
             params,
             reclaimer,
             published,
+            settings,
         };
         (self.insert(N::kind(), unit), controls)
     }
@@ -678,8 +680,8 @@ impl<F: Float> GraphBuilder<F> {
     /// has nothing in flight.
     ///
     /// The path is the public one — [`Editor::new`], one [`Editor::insert`]
-    /// per node in the order they were added, the wiring copied into
-    /// [`Editor::spec_mut`], [`Editor::commit`] — so an error is the
+    /// per node in the order they were added, the wiring copied across,
+    /// [`Editor::commit`] — so an error is the
     /// editor's own.
     ///
     /// # Errors
@@ -878,6 +880,7 @@ impl<F: Float> Renderer<F> {
             params,
             reclaimer,
             published,
+            settings,
         } = node.into_parts();
         let shape = node.shape();
         let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
@@ -888,6 +891,7 @@ impl<F: Float> Renderer<F> {
             params,
             reclaimer,
             published,
+            settings,
         };
         let key = g.insert(N::kind(), unit);
         for c in 0..usize::from(shape.audio_in().count()) {

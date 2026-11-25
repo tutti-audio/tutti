@@ -11,10 +11,12 @@ use tutti_platform::Instant;
 
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
+use tutti_midi_runtime::MidiClipNode;
 use tutti_timeline::MotionCommand;
 use tutti_units::{Losses, SampleRate, Samples};
 
 use super::TransportPart;
+use crate::Key;
 use crate::builder::{Options, Parts};
 use crate::graph::Graph;
 use crate::midi::MidiState;
@@ -107,6 +109,16 @@ impl MidiPart {
     #[must_use = "the clip's other node is still in the graph"]
     pub(crate) fn forget_node(&mut self, node: NodeKey) -> Option<NodeKey> {
         self.state.forget_node(node)
+    }
+
+    /// Each of `gained` that is a clip player node sends its new receiver the
+    /// clip's setup.
+    pub(crate) fn receivers_gained<F: Float>(&self, graph: &Graph<F>, gained: &[NodeKey]) {
+        for &node in gained {
+            if let Some(controls) = graph.controls(&Key::<MidiClipNode>::new(node)) {
+                controls.receiver_changed();
+            }
+        }
     }
 
     /// `Phase::MidiOut`: drains every output's tap. Whether the graph was edited.

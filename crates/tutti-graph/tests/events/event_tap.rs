@@ -15,17 +15,20 @@
 //! and mute) is not in the graph yet, so a bypassed source's silence is
 //! M1's to test.
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
 
-use tutti_fixtures::midi;
+use tutti_fixtures::{cycle_blocks, midi};
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
     ForkByClone, ForkCause, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
     Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, RenderMode, Shape,
-    Status, TapAlign, TapEvent, TransportPosition, Unforkable, note_off_room,
+    Status, TapAlign, TapEvent, Unforkable, note_off_room,
 };
 use tutti_graph::{NodeMode, Scheduled};
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1};
@@ -66,6 +69,12 @@ fn on(key: u32) -> Ump {
 
 fn off(key: u32) -> Ump {
     midi::m1_note_off(MidiChannel::FIRST, key as u8, U7::of(0))
+}
+
+/// The close of a held key: a MIDI 2.0 Note Off at velocity 0, whichever
+/// protocol began the note.
+fn close(key: u32) -> Ump {
+    midi::note_off(MidiChannel::FIRST, key as u8, 0)
 }
 
 /// What a port of the script node carries: the script's packet with word 1
@@ -154,12 +163,10 @@ struct Rig {
 /// (so the graph's output time is `m` frames).
 fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     ed.insert(
         NodeKey(90),
@@ -170,9 +177,12 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
         }),
     );
     ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
-    let t = &mut ed.spec_mut().topology;
-    t.connect(InputPort::new(NodeKey(91), 0), Edge::Direct(out(90)));
-    t.set_outputs([out(91)]);
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(91), 0),
+        Edge::Direct(out(90)),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs([out(91)]).unwrap();
     Rig {
         ed,
         exec,
@@ -193,18 +203,9 @@ fn commit(r: &mut Rig) {
 /// Renders `total` frames in blocks of `sizes` taken in turn (the last one cut
 /// to fit), starting at the executor's current frame.
 fn render(r: &mut Rig, sizes: &[usize], total: usize) {
-    let t = TransportPosition::default();
-    let (mut done, mut i) = (0, 0);
-    while done < total {
-        let n = sizes[i % sizes.len()].min(total - done);
-        let mut chan = vec![0.0f32; n];
-        {
-            let mut outs: Vec<&mut [f32]> = vec![chan.as_mut_slice()];
-            r.exec.process(n, &t, &[], &mut outs);
-        }
+    for n in cycle_blocks(sizes, total) {
+        common::block(&mut r.exec, n, 1);
         r.ed.collect();
-        done += n;
-        i += 1;
     }
 }
 
@@ -493,6 +494,118 @@ fn a_removed_node_reads_nothing_and_a_reused_key_is_not_read() {
     assert_eq!(tap.take_lost(), 0);
 }
 
+/// An event tap says its source is gone exactly as an audio tap does: once the
+/// commit that removes the node it is on (an output's node, or an input's) has
+/// been applied, and not before. What the ring held is still read after, and a
+/// node replaced at the same key (here by one with fewer ports) never ends it.
+#[test]
+fn an_event_tap_reads_source_gone_once_its_node_is_removed() {
+    let mut r = rig(1, false, 0);
+    let s = Script::new(vec![(10, on(1)), (150, on(2))]).ports(2);
+    script(&mut r, 1, s.clone());
+    let heard = tutti_fixtures::Record::new();
+    r.ed.insert(
+        NodeKey(3),
+        "probe",
+        ForkByClone(Probe {
+            heard,
+            ports: 1,
+            capacity: 0,
+            audible: false,
+        }),
+    );
+    r.ed.connect_events(
+        EventInputPort::new(NodeKey(3), 0),
+        EventEdge::Direct(port(1, 0)),
+    )
+    .unwrap();
+    let options = || EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw);
+    let mut output =
+        r.ed.open_event_tap(EventTapId::of(1), port(1, 1), options())
+            .unwrap();
+    let input =
+        r.ed.open_event_tap(
+            EventTapId::of(2),
+            EventInputPort::new(NodeKey(3), 0),
+            options(),
+        )
+        .unwrap();
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(!output.source_gone() && !input.source_gone());
+
+    // A replacement at the same key, narrower, is not a removal.
+    script(&mut r, 1, s.clone().ports(1));
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(!output.source_gone(), "a replaced node's tap does not end");
+
+    // Output tap: removed in the editor but not committed, then committed.
+    script(&mut r, 1, s.ports(2));
+    commit(&mut r);
+    r.ed.remove(NodeKey(1));
+    render(&mut r, &[100], 100);
+    assert!(
+        !output.source_gone(),
+        "not before a commit applies the removal"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(output.source_gone(), "the node it was on is gone for good");
+    assert!(!input.source_gone(), "the input's node is still there");
+    assert_eq!(
+        drain(&mut output),
+        vec![at(10, on_port(on(1), 1))],
+        "what the ring held is read first"
+    );
+
+    // Opening the id again ends the reader it replaces, once that commit runs.
+    let again =
+        r.ed.open_event_tap(
+            EventTapId::of(2),
+            EventInputPort::new(NodeKey(3), 0),
+            options(),
+        )
+        .unwrap();
+    assert!(
+        !input.source_gone(),
+        "not before the commit that replaces it"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(input.source_gone(), "the replaced reader ends");
+    assert!(!again.source_gone());
+
+    // Input tap: ends when the node it is on is removed.
+    r.ed.remove(NodeKey(3));
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(again.source_gone());
+}
+
+/// A tap closed by its id ends the reader still held, once the commit that
+/// leaves it out has been applied.
+#[test]
+fn a_closed_event_tap_ends_its_reader() {
+    let mut r = rig(1, false, 0);
+    script(&mut r, 1, Script::new(vec![(10, on(1))]));
+    let options = EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw);
+    let reader =
+        r.ed.open_event_tap(EventTapId::of(1), port(1, 0), options)
+            .unwrap();
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    r.ed.close_event_tap(EventTapId::of(1)).unwrap();
+    render(&mut r, &[100], 100);
+    assert!(
+        !reader.source_gone(),
+        "not before the commit that leaves it out"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(reader.source_gone());
+}
+
 /// A source behind a node of declared latency L = 15, beside an output path of
 /// latency M = 40: the raw tap reads the script's own frames, the aligned one
 /// the script's plus the compiler's gap (M - L = 25, an analytic figure); a
@@ -767,10 +880,11 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
         }),
     );
     for from in [1, 2] {
-        r.ed.spec_mut().connect_events(
+        r.ed.connect_events(
             EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
-        );
+        )
+        .unwrap();
     }
     heard
 }
@@ -827,8 +941,10 @@ fn an_input_tap_reads_what_the_node_heard() {
 fn an_input_tap_of_one_source_and_of_none() {
     let mut r = rig(1, false, 0);
     let heard = fan_in(&mut r, 2);
-    r.ed.spec_mut()
-        .disconnect_events(EventInputPort::new(NodeKey(3), 0), port(2, 0));
+    r.ed.disconnect_events(
+        EventInputPort::new(NodeKey(3), 0),
+        tutti_graph::EventEdge::Direct(port(2, 0)),
+    );
     let mut one =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -877,10 +993,11 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
         }),
     );
     for from in [1, 2] {
-        r.ed.spec_mut().connect_events(
+        r.ed.connect_events(
             EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
-        );
+        )
+        .unwrap();
     }
     let mut tap =
         r.ed.open_event_tap(
@@ -986,8 +1103,11 @@ fn run_busy(r: &mut Rig) -> Vec<Vec<TapEvent>> {
 /// one-participant run itself is checked against the script and the compensation.
 #[test]
 fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
-    let mut s = rig(1, false, 40);
-    let serial = run_busy(&mut s);
+    let serial = common::agree_across_workers(
+        [2, 3, 4],
+        |workers| run_busy(&mut rig(workers, workers > 1, 40)),
+        Vec::clone,
+    );
     assert!(
         serial.iter().all(|t| !t.is_empty()),
         "every tap carries events"
@@ -1000,10 +1120,6 @@ fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
         .map(|(f, u)| at(f, on_port(u, 0)))
         .collect();
     assert_eq!(serial[0], first);
-    for workers in [2, 3, 4] {
-        let mut p = rig(workers, true, 40);
-        assert_eq!(serial, run_busy(&mut p), "{workers} workers");
-    }
 }
 
 /// MIDI 1.0 sustain pedal (CC 64) at `value`.
@@ -1053,8 +1169,8 @@ fn cut_edges(workers: usize, pairs: u64) -> Vec<Cut> {
             }),
         );
         let input = EventInputPort::new(NodeKey(20 + i), 0);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(10 + i, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(10 + i, 0)))
+            .unwrap();
         let open = |r: &mut Rig, id, align| {
             r.ed.open_event_tap(
                 EventTapId::of(id),
@@ -1071,7 +1187,7 @@ fn cut_edges(workers: usize, pairs: u64) -> Vec<Cut> {
     render(&mut r, &[64], 64);
     for i in 0..pairs {
         let input = EventInputPort::new(NodeKey(20 + i), 0);
-        assert!(r.ed.spec_mut().disconnect_events(input, port(10 + i, 0)));
+        assert!(r.ed.disconnect_events(input, tutti_graph::EventEdge::Direct(port(10 + i, 0))));
     }
     commit(&mut r);
     assert_eq!(r.exec.is_parallel(), workers > 1 && pairs > 1);
@@ -1099,7 +1215,7 @@ fn the_closes_of_a_cut_edge_reach_every_input_tap_on_any_number_of_workers() {
         at(7, bend(0)),
         at(64, pedal(0)),
         at(64, bend(0x2000)),
-        at(64, off(60)),
+        at(64, close(60)),
     ];
     let later: Vec<TapEvent> = expect
         .iter()
@@ -1136,8 +1252,8 @@ fn an_input_tap_carries_a_scheduled_event() {
             }),
         );
         let input = EventInputPort::new(NodeKey(3), 0);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(1, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1189,8 +1305,8 @@ fn a_bypassed_nodes_input_tap_carries_its_closes() {
             }),
         );
         let input = EventInputPort::new(NodeKey(3), 0);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(1, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1205,7 +1321,7 @@ fn a_bypassed_nodes_input_tap_carries_its_closes() {
         commit(&mut r);
         render(&mut r, &[64], 192);
         let by = if align == TapAlign::Raw { 0 } else { 40 };
-        let node = vec![at(3, on_port(on(60), 0)), at(64, off(60))];
+        let node = vec![at(3, on_port(on(60), 0)), at(64, close(60))];
         assert_eq!(heard.lock().unwrap().to_vec(), node, "{align:?}");
         let tapped: Vec<TapEvent> = node.iter().map(|e| at(e.frame.get() + by, e.ump)).collect();
         assert_eq!(drain(&mut tap), tapped, "{align:?}");
@@ -1264,8 +1380,8 @@ fn bounded(workers: usize, pairs: u64) -> Vec<Cut> {
             }),
         );
         let input = EventInputPort::new(NodeKey(20 + i), 0);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(10 + i, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(10 + i, 0)))
+            .unwrap();
         let open = |r: &mut Rig, id, align| {
             r.ed.open_event_tap(
                 EventTapId::of(id),
@@ -1465,8 +1581,8 @@ fn a_parked_nodes_input_tap_carries_nothing() {
             }),
         );
         let input = EventInputPort::new(NodeKey(3), 0);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(1, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+            .unwrap();
         let mut tap =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -1484,7 +1600,7 @@ fn a_parked_nodes_input_tap_carries_nothing() {
         let mut node: Vec<TapEvent> = (0..120u32)
             .map(|k| at(64 * u64::from(k) + 3, on_port(on(k), 0)))
             .collect();
-        node.extend((0..120u32).map(|k| at(64 * (120 + u64::from(k)), off(k))));
+        node.extend((0..120u32).map(|k| at(64 * (120 + u64::from(k)), close(k))));
         assert_eq!(heard.lock().unwrap().to_vec(), node, "{align:?}");
         let tapped: Vec<TapEvent> = node.iter().map(|e| at(e.frame.get() + by, e.ump)).collect();
         assert_eq!(
@@ -1535,8 +1651,8 @@ fn a_skipped_nodes_input_tap_carries_nothing_after_its_events() {
         }),
     );
     let input = EventInputPort::new(NodeKey(3), 0);
-    r.ed.spec_mut()
-        .connect_events(input, EventEdge::Direct(port(1, 0)));
+    r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+        .unwrap();
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1574,8 +1690,8 @@ fn an_aligned_tap_of_a_feedback_fed_input_is_delayed() {
         }),
     );
     let input = EventInputPort::new(NodeKey(3), 0);
-    r.ed.spec_mut()
-        .connect_events(input, EventEdge::feedback(port(1, 0), Samples::new(512)));
+    r.ed.connect_events(input, EventEdge::feedback(port(1, 0), Samples::new(512)))
+        .unwrap();
     let open = |r: &mut Rig, id, align| {
         r.ed.open_event_tap(
             EventTapId::of(id),
@@ -1618,8 +1734,8 @@ fn an_input_tap_carries_the_events_a_removed_delay_flushes() {
     );
     let input = EventInputPort::new(NodeKey(3), 0);
     for from in [1, 2] {
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(from, 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(from, 0)))
+            .unwrap();
     }
     let mut raw =
         r.ed.open_event_tap(
@@ -1631,7 +1747,7 @@ fn an_input_tap_carries_the_events_a_removed_delay_flushes() {
     commit(&mut r);
     render(&mut r, &[64], 64);
     assert!(heard.lock().unwrap().is_empty(), "both still in the delay");
-    assert!(r.ed.spec_mut().disconnect_events(input, port(1, 0)));
+    assert!(r.ed.disconnect_events(input, tutti_graph::EventEdge::Direct(port(1, 0))));
     commit(&mut r);
     render(&mut r, &[64], 128);
     let flushed = vec![at(64, on_port(on(1), 0)), at(65, on_port(off(1), 0))];
@@ -1662,10 +1778,11 @@ fn a_full_width_event_node_holds_its_claims_on_the_pool() {
     script(&mut r, 2, Script::new(vec![(4, on(2))]));
     r.ed.insert(NodeKey(3), "wide", Unforkable(Wide));
     for p in 0..64 {
-        r.ed.spec_mut().connect_events(
+        r.ed.connect_events(
             EventInputPort::new(NodeKey(3), p),
             EventEdge::Direct(port(1, p)),
-        );
+        )
+        .unwrap();
     }
     let mut tap =
         r.ed.open_event_tap(
@@ -1711,8 +1828,8 @@ fn a_bypassed_node_is_sent_a_blocks_worth_of_closes() {
         }),
     );
     let input = EventInputPort::new(NodeKey(3), 0);
-    r.ed.spec_mut()
-        .connect_events(input, EventEdge::Direct(port(1, 0)));
+    r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+        .unwrap();
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1764,8 +1881,8 @@ fn a_lone_source_is_copied_whole_and_a_command_is_merged_beside_it() {
         }),
     );
     let input = EventInputPort::new(NodeKey(3), 0);
-    r.ed.spec_mut()
-        .connect_events(input, EventEdge::Direct(port(1, 0)));
+    r.ed.connect_events(input, EventEdge::Direct(port(1, 0)))
+        .unwrap();
     let mut raw =
         r.ed.open_event_tap(
             EventTapId::of(1),
@@ -1861,10 +1978,11 @@ fn two_bounded(workers: usize) -> (Vec<Vec<TapEvent>>, Vec<Vec<TapEvent>>, u64) 
             audible: false,
         }),
     );
-    r.ed.spec_mut().connect_events(
+    r.ed.connect_events(
         EventInputPort::new(NodeKey(31), 0),
         EventEdge::Direct(port(30, 0)),
-    );
+    )
+    .unwrap();
     let heard = [tutti_fixtures::Record::new(), tutti_fixtures::Record::new()];
     r.ed.insert(
         NodeKey(20),
@@ -1877,8 +1995,8 @@ fn two_bounded(workers: usize) -> (Vec<Vec<TapEvent>>, Vec<Vec<TapEvent>>, u64) 
     let mut taps = Vec::new();
     for p in 0..2u16 {
         let input = EventInputPort::new(NodeKey(20), p);
-        r.ed.spec_mut()
-            .connect_events(input, EventEdge::Direct(port(10 + u64::from(p), 0)));
+        r.ed.connect_events(input, EventEdge::Direct(port(10 + u64::from(p), 0)))
+            .unwrap();
         taps.push(
             r.ed.open_event_tap(
                 EventTapId::of(u64::from(p) + 1),

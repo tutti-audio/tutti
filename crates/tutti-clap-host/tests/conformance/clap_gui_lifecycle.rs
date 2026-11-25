@@ -25,7 +25,7 @@ use crate::support;
 use support::main_thread;
 
 use dpi::{LogicalSize, PhysicalSize, Size};
-use tutti_clap_host::{ClapLoaded, ContentScale, LoadOptions};
+use tutti_clap_host::{ClapError, ClapLoaded, ContentScale, LoadOptions};
 use tutti_clap_test_plugin::{
     GUI_ASPECT_H, GUI_ASPECT_W, GUI_CALL_ADJUST_SIZE, GUI_CALL_CAN_RESIZE, GUI_CALL_CREATE,
     GUI_CALL_DESTROY, GUI_CALL_GET_RESIZE_HINTS, GUI_CALL_GET_SIZE, GUI_CALL_HIDE,
@@ -36,7 +36,7 @@ use tutti_clap_test_plugin::{
     GuiCapture, GuiMode,
 };
 use tutti_fixtures::StandInWindow;
-use tutti_plugin_types::{Control, EditorWindow};
+use tutti_plugin_types::{Control, EditorCapabilities, EditorError, EditorWindow, PluginError};
 
 /// Serializes whole scenarios — set mode → reset → load → drive → read — so one
 /// test cannot observe another's calls or run against another's selected
@@ -198,7 +198,9 @@ fn calls(cap: &GuiCapture) -> Vec<u32> {
 
 /// The baseline: a plugin that really can embed an editor is reported as having
 /// one. Here so the three negative cases below cannot be satisfied by a
-/// `has_editor` that simply returns `false`.
+/// `has_editor` that simply returns `false`. The probe answers
+/// `is_api_supported` false for any api string but its own platform's, so a
+/// host that hardcoded one platform's api reports "no editor" on the others.
 #[test]
 fn has_editor_true_for_embeddable_plugin() {
     let probe = Probe::acquire(GuiMode::Embeddable);
@@ -318,24 +320,6 @@ fn has_editor_does_not_create_a_gui() {
     );
 }
 
-/// The platform API constant must be the *current platform's*, not a hardcoded
-/// `"x11"`.
-///
-/// The probe answers `is_api_supported` false for any api string but its own
-/// platform's, so a host that hardcoded X11 reports "no editor" on macOS and
-/// Windows — a total loss of plugin GUIs that a Linux-only CI never sees.
-#[test]
-fn has_editor_asks_about_the_current_platform_api() {
-    let probe = Probe::acquire(GuiMode::Embeddable);
-    let loaded = probe.load();
-
-    assert!(
-        loaded.has_editor(main_thread()),
-        "the probe returns false for any api string but its own platform's, so \
-         a host asking about the wrong platform lands here"
-    );
-}
-
 // ===========================================================================
 // open_editor — the embed sequence, against a real plugin.
 // ===========================================================================
@@ -373,7 +357,11 @@ fn expected_embed_sequence() -> Vec<u32> {
 ///
 /// `polling.rs`'s in-crate test asserts this order against a hand-written
 /// vtable; what it cannot show is that the host reaches that code with a
-/// correctly-built `clap_window`, which the `set_parent` assertions add.
+/// correctly-built `clap_window`, which the `set_parent` assertions add. The
+/// factor passed to `open_editor` is the one a physical-pixel api's plugin is
+/// sent; `ext/gui.h:56-60` has a logical-pixel api (`cocoa`, `uikit`) sent no
+/// `set_scale` at all, which a host that applied the factor twice would open
+/// at 2x.
 /// Spec: clap.ext.gui.is_api_supported, clap.ext.gui.create, clap.ext.gui.get_size, clap.ext.gui.set_parent, clap.ext.gui.show
 #[test]
 fn open_editor_runs_the_spec_embed_sequence() {
@@ -384,7 +372,7 @@ fn open_editor_runs_the_spec_embed_sequence() {
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
-            ContentScale::IDENTITY,
+            ContentScale::new(2.0).expect("a scale"),
         )
         .expect("embeddable plugin opens");
 
@@ -405,6 +393,19 @@ fn open_editor_runs_the_spec_embed_sequence() {
     );
     assert!(cap.created, "create ran");
     assert_eq!(cap.create_balance, 1, "exactly one live editor");
+    // `last_scale` is 0.0 when the host correctly skipped `set_scale` on a
+    // logical-pixel api, and the host's factor when it sent it: 2.0, so a
+    // placeholder 1.0 cannot pass.
+    assert_eq!(
+        cap.last_scale,
+        if PLATFORM_USES_LOGICAL_PIXELS {
+            0.0
+        } else {
+            2.0
+        },
+        "the plugin is sent the scale the host opened the editor at, and none on a \
+         logical-pixel api"
+    );
     assert!(
         cap.set_parent_window_non_null,
         "the host must hand the plugin a real `clap_window`"
@@ -452,66 +453,6 @@ fn set_editor_scale_reaches_the_plugin_on_a_physical_pixel_api_only() {
     }
 }
 
-/// `ext/gui.h:56-57` on `cocoa`, and `:59-60` on `uikit`: "uses
-/// logical size, don't call clap_plugin_gui->set_scale()". `set_scale` itself
-/// repeats it at `:141`. A logical-pixel api has already folded the display's
-/// backing-scale factor into every coordinate, so a host that sets it too
-/// applies the factor twice and a Retina editor opens at 2×.
-///
-/// On a physical-pixel api the factor the host passes to `open_editor` is
-/// the one the plugin is sent: 2.0 here, so a placeholder 1.0 (the identity,
-/// which hid both bugs) cannot pass.
-///
-/// Read `last_scale` alongside the call log, because they answer different
-/// questions: `last_scale` is 0.0 both when the host correctly skipped the call
-/// and when the probe was never asked anything at all. The `created` assertion
-/// rules the second out.
-#[test]
-fn open_editor_calls_set_scale_only_on_a_physical_pixel_api() {
-    let probe = Probe::acquire(GuiMode::Embeddable);
-    let mut loaded = probe.load();
-
-    let _opened = loaded
-        .open_editor(
-            main_thread(),
-            StandInWindow.handle(),
-            ContentScale::new(2.0).expect("a scale"),
-        )
-        .expect("embeddable plugin opens");
-
-    let cap = probe.capture();
-    assert!(
-        cap.created,
-        "the embed sequence must have run at all, or every assertion below is \
-         vacuous"
-    );
-
-    let called = calls(&cap).contains(&GUI_CALL_SET_SCALE);
-    if PLATFORM_USES_LOGICAL_PIXELS {
-        assert!(
-            !called,
-            "this platform embeds with a logical-pixel api, which the spec says \
-             must not be sent set_scale — the factor is already applied"
-        );
-        assert_eq!(
-            cap.last_scale, 0.0,
-            "and no scale reached the plugin (0.0 is the probe's never-called \
-             sentinel)"
-        );
-    } else {
-        assert!(
-            called,
-            "this platform embeds with a physical-pixel api, which needs the \
-             host's scale — skipping it leaves the editor at 1× on a HiDPI \
-             display"
-        );
-        assert_eq!(
-            cap.last_scale, 2.0,
-            "the plugin is sent the scale the host opened the editor at"
-        );
-    }
-}
-
 /// A floating-only plugin is refused at the first gate, before `create`.
 ///
 /// `create` on a plugin that just said it cannot do embedded is undefined
@@ -543,8 +484,8 @@ fn open_editor_refuses_floating_only_before_create() {
     assert!(!cap.created, "no gui resources were allocated");
 }
 
-/// Opening twice must not leak an editor: the host closes the first before the
-/// second, leaving exactly one live.
+/// Closing destroys the editor exactly once, and closing again destroys
+/// nothing.
 ///
 /// Asserted through the probe's create/destroy balance rather than a flag,
 /// because "created twice, destroyed once" and "created once" look identical to
@@ -1193,41 +1134,82 @@ fn the_floating_path_asks_only_the_floating_question() {
     );
 }
 
-/// No geometry call is made on a floating window.
-///
-/// `set_scale`, `set_parent`, `can_resize`, `adjust_size` and `set_size` are all
-/// marked `[main-thread & !floating]` in `ext/gui.h`. A host that calls them
-/// anyway is misbehaving against a window it does not own, and plugins with a
-/// validation layer print exactly that.
-///
-/// `get_size` is legal while floating but is not asked either — see
-/// `open_floating_editor`'s doc for why reporting a size the host cannot apply
-/// is worse than reporting none.
+/// `ext/gui.h`: `adjust_size` and `set_size` are `[main-thread & !floating]`, so
+/// a resize of a floating editor is refused before the plugin is called.
 #[test]
-fn a_floating_editor_is_asked_for_no_geometry() {
+fn a_floating_editor_is_not_resized() {
     let probe = Probe::acquire(GuiMode::FloatingOnly);
     let mut loaded = probe.load();
-
     loaded
         .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
         .expect("floating open should succeed");
+    gui_reset();
 
-    let observed = calls(&probe.capture());
-    for (id, name) in [
-        (GUI_CALL_SET_SCALE, "set_scale"),
-        (GUI_CALL_SET_PARENT, "set_parent"),
-        (GUI_CALL_GET_SIZE, "get_size"),
-        (GUI_CALL_CAN_RESIZE, "can_resize"),
-        (GUI_CALL_ADJUST_SIZE, "adjust_size"),
-        (GUI_CALL_SET_SIZE, "set_size"),
-    ] {
-        assert!(
-            !observed.contains(&id),
-            "{name} must not be called on a floating window — the header marks \
-             it !floating, or the answer describes a window the host cannot lay \
-             out"
-        );
-    }
+    let err = loaded
+        .resize_editor(main_thread(), native_size(GUI_WIDTH, GUI_HEIGHT))
+        .expect_err("a floating editor's size is the plugin's");
+
+    assert!(
+        matches!(err, ClapError::FloatingEditor),
+        "the error names the floating editor, got: {err}"
+    );
+    // The caller of the shared vocabulary's resize gets the typed refusal, not
+    // a plugin failure's text.
+    assert!(matches!(
+        EditorWindow::set_editor_size(
+            &mut loaded,
+            main_thread(),
+            native_size(GUI_WIDTH, GUI_HEIGHT)
+        ),
+        Err(PluginError::Editor(EditorError::FloatingEditor))
+    ));
+    assert!(
+        calls(&probe.capture()).is_empty(),
+        "no size call reaches a floating window"
+    );
+}
+
+/// `ext/gui.h`: `can_resize` and `get_resize_hints` are
+/// `[main-thread & !floating]`: a floating editor reports no resizing and no
+/// hints without the plugin being asked.
+#[test]
+fn a_floating_editor_reports_no_resize_capabilities_without_asking() {
+    let probe = Probe::acquire(GuiMode::FloatingOnly);
+    let mut loaded = probe.load();
+    loaded
+        .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
+        .expect("floating open should succeed");
+    gui_reset();
+
+    let caps = loaded.editor_capabilities(main_thread());
+
+    assert_eq!(caps, EditorCapabilities::default());
+    assert!(!caps.resize.resizable);
+    assert!(
+        calls(&probe.capture()).is_empty(),
+        "neither can_resize nor get_resize_hints is called on a floating window"
+    );
+}
+
+/// `ext/gui.h`: `set_scale` is plain `[main-thread]`, so a floating editor is
+/// still told its window's scale (on a physical-pixel window api).
+#[test]
+fn a_floating_editor_is_told_its_scale() {
+    let probe = Probe::acquire(GuiMode::FloatingOnly);
+    let mut loaded = probe.load();
+    loaded
+        .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
+        .expect("floating open should succeed");
+    gui_reset();
+
+    let _ = loaded.rescale_editor(main_thread(), ContentScale::new(2.0).expect("a scale"));
+
+    assert_eq!(
+        calls(&probe.capture()).contains(&GUI_CALL_SET_SCALE),
+        !PLATFORM_USES_LOGICAL_PIXELS,
+        "set_scale is allowed on a floating window, and sent where the api counts \
+         in physical pixels"
+    );
 }
 
 /// The suggested title reaches the plugin verbatim.

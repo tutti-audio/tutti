@@ -1,7 +1,7 @@
 //! The `published` block of the cells form of `declare_params!`: one cell per
 //! entry, a config option for an entry with a default, the node's own reader,
-//! and the parts a session reads (each cell under its kind, and a reclaimer
-//! over every publisher).
+//! and the parts a session reads (each cell under its kind, which sweeps
+//! itself; no reclaimer).
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
@@ -96,29 +96,23 @@ fn the_parts_carry_each_cell_under_its_kind_and_a_write_reaches_the_node() {
     assert_eq!(*probe.events().lend(), Numbers(vec![9]));
 }
 
-/// The parts' reclaimer sweeps every publisher: the value a block held across
-/// a replacement is freed by it once the block is done.
+/// Each published entry sweeps its own cell, and the parts hand no reclaimer:
+/// the value a block held across a replacement is freed by the entry once the
+/// block is done.
 #[test]
-fn the_reclaimer_frees_what_a_block_held_across_a_replacement() {
+fn an_entry_frees_what_a_block_held_across_a_replacement() {
     let node = Holder::from(HolderConfig::new());
     let mut block = node.cells.clone();
     let parts = IntoNode::<f32>::into_parts(node);
-    let reclaimer = parts
-        .reclaimer
-        .expect("a node that publishes has a reclaimer");
-    let cell = parts.published[1]
-        .cell::<ChangesKind>()
-        .expect("the declared value");
+    assert!(parts.reclaimer.is_none(), "the entries are the sweep");
+    let entry = &parts.published[1];
+    let cell = entry.cell::<ChangesKind>().expect("the declared value");
     {
         let _held = block.changes().lend();
         cell.replace(&Numbers(vec![3]));
-        assert_eq!(
-            reclaimer.reclaim(),
-            1,
-            "the block still holds the first value"
-        );
+        assert_eq!(entry.reclaim(), 1, "the block still holds the first value");
     }
-    assert_eq!(reclaimer.reclaim(), 0, "freed once the block is done");
+    assert_eq!(entry.reclaim(), 0, "freed once the block is done");
 }
 
 /// A fork starts from the value published at the fork, with cells of its own.

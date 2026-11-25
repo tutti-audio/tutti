@@ -13,10 +13,10 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
-    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
-    OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
+    BusRole, Cx, ErasedSetting, HasParam, HasParams, HasSetting, InBus, IntoNode, Io, MAX_PORTS,
+    Node, NodeParts, Offset, OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Tail};
+use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -88,8 +88,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// latency and the tail.
     fn shape(&self) -> Shape;
 
-    /// Prepares for `rate` and blocks of at most `max_block` frames. Control side. The
-    /// first [`retarget`](Self::retarget) after it lands at once.
+    /// Prepares for `rate` and blocks of at most `max_block` frames. Control side.
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock);
 
     /// Back to silence. Audio thread: no allocation.
@@ -106,6 +105,13 @@ pub trait Kernel: Clone + Send + 'static {
     /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
+
+    /// Puts every running coefficient (the ramps, blends and glides
+    /// [`retarget`](Self::retarget) aims) on its target at once. The node calls it right
+    /// after the first `retarget` since a prepare, a reset or a fork, so the first design
+    /// sounds whole instead of ramping in from silence's coefficients. A kernel with
+    /// nothing running implements it empty. Audio thread: no allocation.
+    fn jump_to_target(&mut self);
 
     /// Runs the block's input into its output, with the controls a port drives per frame in
     /// `signals`. The node gives it the main buses' views at the width of the kernel's
@@ -155,7 +161,10 @@ pub trait Kernel: Clone + Send + 'static {
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
     /// the ceiling. It may design into the kernel's own scratch, and must not change the
-    /// audio state: lines, ramps and phase are as they were. Audio thread: no allocation.
+    /// audio state: lines, ramps and phase are as they were. It is asked at the controls a
+    /// control row states as its longest ([`Ring::LongestAt`](crate::Ring::LongestAt)), so the
+    /// figure must not fall as that control moves toward the stated value, whatever the other
+    /// controls are. Audio thread: no allocation.
     fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
         self.tail()
     }
@@ -178,10 +187,13 @@ pub trait Kernel: Clone + Send + 'static {
 ///
 /// A kernel that declares a finite or unbounded [`tail`](Kernel::tail) rings for at most
 /// that long, and the node holds it to it. Each block it narrows the declared ceiling to
-/// what the controls in force ring ([`Kernel::tail_of`], the longest of what a driven port
-/// takes in the block), held at the longer figure until a shorter decay has been heard
-/// out, and reports it ([`Io::report_tail`]). Once the input has been silent for the
-/// reported tail plus the latency, the node cuts the output off, resets the kernel and parks
+/// what the controls in force ring ([`Kernel::tail_of`] at the block's last frame). While a
+/// control signal drives a control the tail reads, which may take any value later, it is
+/// what rings with each driven control at its longest value and the others as their cells
+/// hold them ([`Ring::LongestAt`](crate::Ring::LongestAt)), or the ceiling itself when a driven
+/// control states none ([`Control::ring`](crate::Control::ring)). The figure is held at the
+/// longer one until a shorter decay has been heard out, and reported ([`Io::report_tail`]). Once the input has
+/// been silent for the reported tail plus the latency, the node cuts the output off, resets the kernel and parks
 /// ([`Status::Idle`]): what rings is below the kernel's floor, and a parked node is a fresh
 /// one when it wakes (its stream clock restarts with it).
 ///
@@ -268,6 +280,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
 ///     fn reset(&mut self) {}
 ///     fn retarget(&mut self, _: &()) {}
+///     fn jump_to_target(&mut self) {}
 ///     fn render(
 ///         &mut self,
 ///         block: &mut InputOutput<'_, f32>,
@@ -334,11 +347,6 @@ impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
 }
 
 impl<K: Kernel> KernelNode<K> {
-    /// The node's cells and the set that addresses them.
-    pub(crate) fn params(&self) -> &Params<K::Set> {
-        &self.params
-    }
-
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
     /// before the node goes live.
@@ -380,6 +388,7 @@ impl<K: Kernel> KernelNode<K> {
         if let Some(t) = &mut self.tuned {
             t.position = 0;
             t.dirty = false;
+            t.applied = None;
             if let Some(clock) = &mut t.clock {
                 clock.clear();
             }
@@ -404,15 +413,22 @@ impl<K: Kernel> KernelNode<K> {
         let Some(clock) = &mut t.clock else {
             return size;
         };
+        // A driven control the tail reads may take any value later, and its block's values
+        // do not cover that: the block reports the most the kernel rings with each driven
+        // control at its longest value ([`Ring::LongestAt`]), or the ceiling when one has none.
+        // The figure follows which ports are driven, never the values they carry. It is asked
+        // before the target's, so a kernel that keeps its last design holds the target's for
+        // the retarget that follows.
+        let driven = self.params.ring_driven(io).then(|| {
+            tail_frames(match self.params.longest(io) {
+                Some(longest) => self.kernel.tail_of(&longest),
+                None => self.kernel.tail(),
+            })
+        });
         if moved {
             t.current = tail_frames(self.kernel.tail_of(target));
         }
-        let mut current = t.current;
-        if let Some(longest) = self.params.longest(io)
-            && Some(longest) != t.applied
-        {
-            current = current.max(tail_frames(self.kernel.tail_of(&longest)));
-        }
+        let current = driven.unwrap_or(t.current);
         let last_input = (0..inputs)
             .filter_map(|c| {
                 io.input(c)[..size]
@@ -539,8 +555,10 @@ impl<K: Kernel> KernelNode<K> {
 
     fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
         self.kernel.retarget(&controls);
-        if let Some(t) = &mut self.tuned {
-            t.applied = Some(controls);
+        if let Some(t) = &mut self.tuned
+            && t.applied.replace(controls).is_none()
+        {
+            self.kernel.jump_to_target();
         }
     }
 }
@@ -827,6 +845,7 @@ impl<K: Kernel> Clone for KernelNode<K> {
                     clock
                 }),
                 dirty: false,
+                applied: None,
                 ..t
             }),
         }
@@ -836,6 +855,10 @@ impl<K: Kernel> Clone for KernelNode<K> {
 impl<K: Kernel> ParamNode<K::Float> for KernelNode<K> {
     fn param_set(&self) -> ParamSet {
         self.params.bind(ParamSet::builder()).build()
+    }
+
+    fn settings(&self) -> Vec<ErasedSetting> {
+        self.params.set().settings()
     }
 
     /// A clone with every cell detached (at its value now) and silent.
@@ -857,6 +880,14 @@ where
 
 impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasControls<P> {}
 
+/// A kernel node has the settings its [`ControlSet`] declares.
+impl<K: Kernel, S: Setting> HasSetting<S> for KernelNode<K>
+where
+    K::Set: HasSetting<S>,
+{
+    type Word = <K::Set as HasSetting<S>>::Word;
+}
+
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts from the values
 /// last set through it ([`tutti_graph::param_parts`]).
 impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
@@ -873,12 +904,11 @@ mod latency_tail;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DelayConfig, DelayNode};
+    use crate::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_buffers::ChannelTopology;
-    use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
-    use tutti_units::{Frame, Seconds};
+    use tutti_units::{Frame, Hz, Q};
 
     /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
     /// unequal length are each read to their own end.
@@ -904,25 +934,25 @@ mod tests {
         assert_eq!(first_non_finite(short_first.into_iter()), Some((0, 0)));
     }
 
-    /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
+    /// A kernel whose tail is only declared is left alone: a resonant filter (tail unknown) that has
     /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and
-    /// never narrows its tail, and keeps its echoes.
+    /// never narrows its tail, and keeps ringing.
     #[test]
     fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(
-                    ChannelTopology::MONO,
-                    MaxDelay::of(Seconds::new(0.01)),
-                ))
-                .controls(DelayControls {
-                    feedback: tutti_units::Feedback::new(0.5),
-                    ..DelayControls::DEFAULT
-                }),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(8.0)),
             ),
             rate,
             64,
+        );
+        assert_eq!(
+            node.shape().tail,
+            Tail::Unknown,
+            "the example declares an unknown tail"
         );
         let mut x = vec![0.0f32; 64];
         let mut heard = false;
@@ -991,6 +1021,7 @@ mod tests {
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
             fn reset(&mut self) {}
             fn retarget(&mut self, _: &Gain) {}
+            fn jump_to_target(&mut self) {}
             fn render(
                 &mut self,
                 _: &mut InputOutput<'_, f32>,
@@ -1062,6 +1093,7 @@ mod tests {
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
             fn reset(&mut self) {}
             fn retarget(&mut self, _: &Gain) {}
+            fn jump_to_target(&mut self) {}
             fn render(
                 &mut self,
                 block: &mut InputOutput<'_, f32>,
@@ -1136,6 +1168,7 @@ mod tests {
             self.heard.calls.fetch_add(1, Relaxed);
         }
         fn retarget(&mut self, _: &NoControls) {}
+        fn jump_to_target(&mut self) {}
         fn render(
             &mut self,
             block: &mut InputOutput<'_, f32>,
@@ -1206,5 +1239,54 @@ mod tests {
         );
         assert_eq!(f64::from_bits(heard.last.load(Relaxed)), 75.0);
         assert_eq!(heard.calls.load(Relaxed), 2);
+    }
+
+    /// The first design after a prepare, a reset, a re-prepare or a fork lands whole, whatever
+    /// the run before moved: a side-only pair `(1, -1)` through a stereo width of `w` reads
+    /// `w` on the left from frame 0, where a ramp from the width before would still be
+    /// climbing.
+    #[test]
+    fn the_first_design_after_a_prepare_a_reset_or_a_fork_lands_whole() {
+        use crate::test_support::{RATE, drive_block, prepared as prepared_node};
+        use crate::{StereoWidthConfig, StereoWidthNode};
+        use tutti_graph::{Node, ParamNode, Prepare};
+        use tutti_units::{StereoWidth, UnitParam};
+
+        let (l, r) = ([1.0f32; 64], [-1.0f32; 64]);
+        let set = |n: &StereoWidthNode<f32>, w: f64| {
+            assert!(n.param_set().set(UnitParam::StereoWidth, w))
+        };
+        let lands = |n: &mut dyn Node, what: &str| {
+            let out = drive_block(n, &[&l, &r]);
+            assert!(
+                out[0].iter().all(|&y| (y - 0.25).abs() < 1e-6),
+                "{what}: {:?}",
+                &out[0][..4]
+            );
+        };
+        let mut n = prepared_node(StereoWidthNode::<f32>::from(
+            StereoWidthConfig::new().width(StereoWidth::new(0.25)),
+        ));
+        lands(&mut n, "prepare");
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        n.reset();
+        lands(&mut n, "reset");
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        n.prepare(&Prepare::new(
+            RATE,
+            MaxBlock::of(tutti_units::Samples::new(1024)),
+        ));
+        lands(&mut n, "re-prepare");
+        // A fork taken while the live node is mid-ramp is a clone, not a reset.
+        set(&n, 1.5);
+        drive_block(&mut n, &[&[1.0; 2_000], &[-1.0; 2_000]]);
+        set(&n, 0.25);
+        drive_block(&mut n, &[&[1.0; 4], &[-1.0; 4]]);
+        let mut fork = n.fork_fresh();
+        lands(&mut fork, "fork");
     }
 }

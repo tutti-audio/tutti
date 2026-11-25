@@ -8,8 +8,8 @@
 //! centred bends through the injection path that flushes a vanished delay.
 //! Nodes know nothing of this.
 //!
-//! The tables are [`tutti_ump::Held`]: a bitset over the 16-bit
-//! [`NoteKey`](tutti_ump::NoteKey) (8 KiB) and a word per lane (1 KiB),
+//! The tables are [`tutti_ump::Held`]: a bitset over the 15-bit
+//! [`NoteKey`](tutti_ump::NoteKey) (4 KiB) and a word per lane (1 KiB),
 //! allocated on the control side with the commit that places the unit and never
 //! grown. A node's op writes only its own unit's
 //! tables, so a parallel block needs no new claim.

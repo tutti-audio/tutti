@@ -11,13 +11,17 @@
 //! on random graphs as well; this file is the direct comparison, on one graph
 //! that has everything at once.
 
+use tutti_graph::testing::WireDeclared;
+
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::feed_input;
 use tutti_graph::{Curvature, Exponent};
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
-use common::{Kind, TestNode, WORKERS, bits, test_pool};
+use common::{Kind, TestNode, WORKERS, bits};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{cycle_blocks, fixed_blocks};
 use tutti_graph::NodeKey;
@@ -197,7 +201,7 @@ fn consumer_in(port: u16) -> EventInputPort {
 /// Sum [50] ← in, ← feedback of Smooth [51] (256 frames) ; Smooth [51] ← [50] ─ out 4
 /// ```
 fn build(ed: &mut Editor) {
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let gain = |g| Forkable(Kind::Gain { gain: g, width: 1 });
     ed.insert(NodeKey(2), "lag5", Forkable(Kind::Lag { latency: 5 }));
     ed.insert(NodeKey(3), "lag17", Forkable(Kind::Lag { latency: 17 }));
@@ -257,51 +261,61 @@ fn build(ed: &mut Editor) {
     );
     ed.insert(NodeKey(50), "fbsum", Forkable(Kind::Sum { inputs: 2 }));
     ed.insert(NodeKey(51), "fbsmooth", Forkable(Kind::Smooth));
-    let spec = ed.spec_mut();
-    let t = &mut spec.topology;
     let g = Edge::Direct(PortSource::MainInput(0));
     for k in [2, 3, 4, 5, 6, 30, 50] {
-        t.edges.insert(at(k, 0), vec![g]);
+        ed.connect_edge(EdgeId::into_port(at(k, 0), g)).unwrap();
     }
-    t.edges.insert(at(7, 0), vec![from(6, 0)]);
-    t.edges.insert(at(8, 0), vec![from(2, 0)]);
-    t.edges.insert(at(8, 1), vec![from(3, 0)]);
-    t.edges.insert(at(8, 2), vec![from(4, 0)]);
-    t.edges.insert(at(9, 0), vec![from(8, 0)]);
-    t.edges.insert(at(9, 1), vec![from(5, 0)]);
-    t.edges.insert(at(9, 2), vec![from(7, 0)]);
-    t.edges.insert(at(41, 0), vec![from(9, 0)]);
-    t.edges.insert(at(41, 1), vec![from(5, 0)]);
-    t.edges.insert(
+    ed.connect_edge(EdgeId::into_port(at(7, 0), from(6, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 0), from(2, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 1), from(3, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(8, 2), from(4, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(9, 0), from(8, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(9, 1), from(5, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(9, 2), from(7, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(41, 0), from(9, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(41, 1), from(5, 0)))
+        .unwrap();
+    ed.connect_edge(EdgeId::into_port(
         at(50, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(
-            out(51, 0),
-            Samples::new(256),
-        ))],
-    );
-    t.edges.insert(at(51, 0), vec![from(50, 0)]);
-    t.set_outputs(vec![
+        Edge::Feedback(FeedbackFrom::new(out(51, 0), Samples::new(256))),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(at(51, 0), from(50, 0)))
+        .unwrap();
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(9, 0)),
         PortSource::Node(out(40, 0)),
         PortSource::Node(out(41, 1)),
         PortSource::Node(out(30, 0)),
         PortSource::Node(out(51, 0)),
-    ]);
+    ])
+    .unwrap();
     for (to, src) in [
         (consumer_in(0), 20),
         (consumer_in(0), 22),
         (consumer_in(1), 21),
     ] {
-        spec.connect_events(to, EventEdge::Direct(ev_out(src)));
+        ed.connect_events(to, EventEdge::Direct(ev_out(src)))
+            .unwrap();
     }
-    spec.connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(22), 0),
         EventEdge::Direct(ev_out(20)),
-    );
-    spec.connect_events(
+    )
+    .unwrap();
+    ed.connect_events(
         EventInputPort::new(NodeKey(41), 0),
         EventEdge::Direct(ev_out(21)),
-    );
+    )
+    .unwrap();
     let cut = ParamIn {
         node: NodeKey(30),
         param: tutti_units::UnitParam::Cutoff.into(),
@@ -310,8 +324,8 @@ fn build(ed: &mut Editor) {
         node: NodeKey(30),
         param: tutti_units::UnitParam::Q.into(),
     };
-    spec.connect_param(cut, ev_out(31));
-    spec.connect_param(q, ev_out(32));
+    ed.connect_param(cut, ev_out(31)).unwrap();
+    ed.connect_param(q, ev_out(32)).unwrap();
     ed.commit().expect("the graph commits");
 }
 
@@ -431,9 +445,7 @@ fn render_wide(
 
 fn with_pool(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     build(&mut ed);
     exec.apply_pending();
     ed.collect();
@@ -446,24 +458,18 @@ fn with_pool(workers: usize) -> (Editor, Executor) {
 #[test]
 fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec) = with_pool(1);
-        let serial = render(&mut ed, &mut exec, &blocks);
+        let serial = common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec) = with_pool(workers);
+                render(&mut ed, &mut exec, &blocks)
+            },
+            |r| bits(r),
+        );
         assert!(
             serial.iter().all(|c| c.iter().any(|&x| x != 0.0)),
             "every output carries signal"
         );
-        for workers in WORKERS {
-            let (mut ed, mut exec) = with_pool(workers);
-            let parallel = render(&mut ed, &mut exec, &blocks);
-            for (c, (s, p)) in serial.iter().zip(&parallel).enumerate() {
-                assert_eq!(
-                    bits(std::slice::from_ref(s)),
-                    bits(std::slice::from_ref(p)),
-                    "output {c} diverges with {workers} workers, blocks {:?}…",
-                    &blocks[..blocks.len().min(4)]
-                );
-            }
-        }
     }
 }
 
@@ -473,13 +479,14 @@ fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
 #[test]
 fn extra_output_slices_are_ignored_on_every_path() {
     let blocks = [MAX_BLOCK, 7, 64];
-    let (mut ed, mut exec) = with_pool(1);
-    let serial = render_wide(&mut ed, &mut exec, &blocks, false, 1);
-    for workers in WORKERS {
-        let (mut ed, mut exec) = with_pool(workers);
-        let parallel = render_wide(&mut ed, &mut exec, &blocks, false, 1);
-        assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-    }
+    common::agree_across_workers(
+        WORKERS,
+        |workers| {
+            let (mut ed, mut exec) = with_pool(workers);
+            render_wide(&mut ed, &mut exec, &blocks, false, 1)
+        },
+        |r| bits(r),
+    );
 }
 
 /// Param ranges moved between blocks, with no commit, render the same
@@ -541,22 +548,22 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
                 pre.with_render_mode(RenderMode::Offline),
             )
             .expect("every node forks");
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         (ed, exec)
     };
     for blocks in [vec![256; 12], schedules(256).pop().expect("ragged")] {
-        let (mut ed, mut exec) = fork(1);
-        exec.apply_pending();
-        let serial = render(&mut ed, &mut exec, &blocks);
-        for workers in WORKERS {
-            let (mut ed, mut exec) = fork(workers);
-            exec.apply_pending();
-            assert!(exec.is_parallel());
-            let parallel = render(&mut ed, &mut exec, &blocks);
-            assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-        }
+        common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec) = fork(workers);
+                exec.apply_pending();
+                if workers > 1 {
+                    assert!(exec.is_parallel());
+                }
+                render(&mut ed, &mut exec, &blocks)
+            },
+            |r| bits(r),
+        );
     }
 }
 
@@ -579,8 +586,8 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         fn reset(&mut self) {}
     }
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    exec.set_pool(Some(test_pool(4)));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    common::pooled(&mut exec, 4);
+    ed.resize_inputs(ChannelLayout::MONO);
     // One node panics; the other five are fine, so every participant but
     // the one that caught the panic would keep waiting for its task.
     ed.insert(NodeKey(1), "boom", tutti_graph::Unforkable(Boom));
@@ -595,14 +602,14 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         );
     }
     for k in 1..=6 {
-        ed.spec_mut()
-            .topology
-            .edges
-            .insert(at(k, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
+        ed.connect_edge(EdgeId::into_port(
+            at(k, 0),
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))));
+    ed.wire_declared_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))))
+        .unwrap();
     ed.commit().expect("commits");
     let input = vec![0.5f32; MAX_BLOCK];
     let mut chans = vec![vec![0.0f32; MAX_BLOCK]; 6];
@@ -710,7 +717,7 @@ fn the_executor_waits_by_its_pools_budget() {
         inner: common::TestPool::with_waits(2, waits),
         times: Arc::clone(&times),
     })));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     // The slow node, and a gain beside it, so the plan has two tasks to
     // spread; then a gain after the slow node, which keeps the block alive
     // until the slow task finishes.
@@ -729,14 +736,18 @@ fn the_executor_waits_by_its_pools_budget() {
             })),
         );
     }
-    let edges = &mut ed.spec_mut().topology.edges;
-    edges.insert(at(1, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
-    edges.insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
-    edges.insert(at(3, 0), vec![Edge::Direct(PortSource::Node(out(1, 0)))]);
-    ed.spec_mut().topology.set_outputs(vec![
+    feed_input(&mut ed, at(1, 0), [Edge::Direct(PortSource::MainInput(0))]);
+    feed_input(&mut ed, at(2, 0), [Edge::Direct(PortSource::MainInput(0))]);
+    feed_input(
+        &mut ed,
+        at(3, 0),
+        [Edge::Direct(PortSource::Node(out(1, 0)))],
+    );
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(2, 0)),
         PortSource::Node(out(3, 0)),
-    ]);
+    ])
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     assert!(exec.is_parallel(), "the block spreads");
@@ -787,9 +798,7 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
     ];
     let build = |workers: usize| {
         let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let mut calls = Vec::new();
         let mut outputs = Vec::new();
         for (i, (pulse, ring, ceiling, report)) in RINGERS.into_iter().enumerate() {
@@ -798,13 +807,11 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
             calls.push(Arc::clone(&ringer.calls));
             ed.insert(src, "pulse", Unforkable(Burst::new(pulse)));
             ed.insert(fx, "ringer", Unforkable(ringer));
-            ed.spec_mut()
-                .topology
-                .edges
-                .insert(at(fx.0, 0), vec![from(src.0, 0)]);
+            ed.connect_edge(EdgeId::into_port(at(fx.0, 0), from(src.0, 0)))
+                .unwrap();
             outputs.push(PortSource::Node(out(fx.0, 0)));
         }
-        ed.spec_mut().topology.set_outputs(outputs);
+        ed.wire_declared_outputs(outputs).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -825,8 +832,14 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
         all
     };
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec, serial_calls) = build(1);
-        let serial = render(&mut exec, &mut ed, &blocks);
+        let (serial, serial_calls) = common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec, calls) = build(workers);
+                (render(&mut exec, &mut ed, &blocks), calls)
+            },
+            |(audio, _)| bits(audio),
+        );
         for (c, (pulse, ring, _, _)) in RINGERS.into_iter().enumerate() {
             let last = serial[c].iter().rposition(|&x| x != 0.0).expect("rings");
             assert_eq!(last, pulse + ring - 2, "ringer {c} rang its whole tail");
@@ -844,16 +857,6 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
             assert!(
                 silent > 200 + 500,
                 "the unreporting ringer waited its ceiling"
-            );
-        }
-        for workers in WORKERS {
-            let (mut ed, mut exec, _) = build(workers);
-            let parallel = render(&mut exec, &mut ed, &blocks);
-            assert_eq!(
-                bits(&serial),
-                bits(&parallel),
-                "{workers} workers, blocks {:?}…",
-                &blocks[..blocks.len().min(4)]
             );
         }
     }

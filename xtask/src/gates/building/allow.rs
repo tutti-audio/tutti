@@ -21,7 +21,6 @@ pub(super) const FFI: &str = "crates/*-ffi/";
 const GRAPH: &str = "crates/tutti-graph/";
 
 pub(super) const CTOR: &[Rule] = &[Rule::CtorResult];
-const CHAIN: &[Rule] = &[Rule::ChainResult];
 const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 pub(super) const WIDTH: &[Rule] = &[Rule::ConfigWidth];
@@ -109,18 +108,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "Decorrelator::new",
         CTOR,
         "builds `VelvetNoise::new` per channel: the same density-against-rate validity",
-    ),
-    ty(
-        "crates/tutti-dsp/src/waveshape.rs",
-        "Waveshape::antialiasing",
-        CHAIN,
-        "an antialiasing order is valid for a curve: validity of the kind and the order together, which neither type can carry",
-    ),
-    ty(
-        "crates/tutti-nodes/src/distortion.rs",
-        "DistortionConfig::antialiasing",
-        CHAIN,
-        "the same validity as `Waveshape::antialiasing`: the config holds the kind the order must be valid for",
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
@@ -235,18 +222,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "NetworkLink::bind",
         CTOR,
         "binding a UDP socket: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-plugin-ipc/src/transport/sys/unix.rs",
-        "Watch::of",
-        CTOR,
-        "duplicating a descriptor: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-plugin-ipc/src/transport/sys/windows.rs",
-        "Watch::of",
-        CTOR,
-        "duplicating a handle: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-au-host/",
@@ -577,18 +552,48 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-file/src/file.rs",
-        "MidiFile::smf",
+        "StandardMidiFile::new",
         CTOR,
         "the tracks, format and division are valid together (one track in format 0, tempo events that make a map): validity of several inputs, which no one type can carry",
     ),
     ty(
-        "crates/tutti-midi-file/src/file.rs",
-        "MidiFile::clip",
+        "crates/tutti-midi-file/src/clip.rs",
+        "ClipHeader::push",
+        &[Rule::ChainResult],
+        "a message's tick is valid only against the last message already held: validity of the argument with the state, which no type of the tick can carry",
+    ),
+    ty(
+        "crates/tutti-midi-file/src/clip.rs",
+        "ClipSequence::push",
+        &[Rule::ChainResult],
+        "an event's tick is valid only against the last event already held: validity of the argument with the state, which no type of the tick can carry",
+    ),
+    ty(
+        "crates/tutti-midi-file/src/clip.rs",
+        "ClipFile::from_bytes",
         CTOR,
-        "a clip is valid only for a track whose events and header hold the Clip File's rules together: validity of the track's contents",
+        "decoding a Clip File from its bytes: the failure is the bytes', not a value's",
     ),
     ty(
         "crates/tutti-midi-file/src/file.rs",
+        "StandardMidiFile::from_bytes",
+        CTOR,
+        "decoding a Standard MIDI File from its bytes: the failure is the bytes', not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-file/src/midi_file.rs",
+        "MidiFile::from_bytes",
+        CTOR,
+        "decoding a MIDI file of either kind from its bytes: the failure is the bytes', not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-file/src/clip.rs",
+        "ClipFile::new",
+        CTOR,
+        "a clip is valid only for a header and a sequence whose messages hold the Clip File's rules together: validity of the contents",
+    ),
+    ty(
+        "crates/tutti-midi-file/src/midi_file.rs",
         "MidiFile::read",
         CTOR,
         "reading a MIDI file from a source: the failure is the source's or its bytes', not a value's",
@@ -644,6 +649,18 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ty(
         "crates/tutti-plugin-types/src/lifecycle.rs",
         "Prepare::with_format",
+        &[Rule::WithPrefix],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/lifecycle.rs",
+        "Prepare::with_max_block",
+        &[Rule::WithPrefix],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/lifecycle.rs",
+        "Prepare::with_quantum",
         &[Rule::WithPrefix],
         COPY_WITH_ONE_FIELD,
     ),

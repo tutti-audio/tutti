@@ -63,8 +63,8 @@ use crate::compile::{CompileError, Shapes};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
-use crate::exec::command::{CommandId, ScheduleError, Scheduled, command_channel};
-use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
+use crate::exec::command::{CommandId, ScheduleError, Scheduled};
+use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager};
 use crate::model::bus_edge::{BusError, BusFold, BusOutputPort, Lowering, NodeBus};
 use crate::model::gain::EdgeFade;
 use crate::model::spec::{EventInputPort, GraphSpec, ValidGraph};
@@ -77,21 +77,25 @@ use tutti_buffers::Float;
 mod cells;
 mod commit;
 mod controls;
+#[cfg(test)]
+mod corrupted;
+mod entries;
 mod errors;
 mod lifecycle;
-mod link;
+pub(crate) mod link;
 mod nodes;
 mod outlets;
-mod placements;
+#[cfg(test)]
+mod structure;
 mod taps;
 mod unwired;
-use cells::LiveCells;
-pub use commit::Rewired;
-pub use errors::{CloseError, CommitError, MissingSource};
+mod wiring;
+use cells::GainCells;
+use entries::Entries;
+pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
-use link::Link;
+use link::{EditLink, link};
 use outlets::Outlets;
-use placements::Placements;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Gain;
 pub use unwired::{Inserted, Unwired};
@@ -153,7 +157,8 @@ impl Limits {
 /// [`Editor::new`] builds the editor and its executor together, from one
 /// [`Prepare`]. Nodes are added with [`insert`](Self::insert) (which
 /// prepares the unit and returns its typed controls), wired through
-/// [`spec_mut`](Self::spec_mut), and shipped with [`commit`](Self::commit),
+/// [`connect_edge`](Self::connect_edge), [`wire_outputs`](Self::wire_outputs) and the calls beside them, and shipped
+/// with [`commit`](Self::commit),
 /// which validates and compiles the spec against the plan sent last and
 /// sends a commit — the new [`Plan`] and only the units that changed — over a
 /// preallocated queue. The executor installs it at the start of its next
@@ -178,7 +183,7 @@ impl Limits {
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
-/// use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
+/// use tutti_graph::{OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
@@ -187,14 +192,11 @@ impl Limits {
 /// struct Half;
 /// impl Node for Half {
 ///     fn shape(&self) -> Shape {
-///         Shape::through_unassigned(ChannelLayout::MONO)
+///         Shape::source_unassigned(ChannelLayout::MONO)
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-///         let (ins, mut outs) = io.split();
-///         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
-///             *o = 0.5 * i;
-///         }
+///         io.output(0).fill(0.5);
 ///         Status::Modified
 ///     }
 ///     fn reset(&mut self) {}
@@ -203,33 +205,42 @@ impl Limits {
 /// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
-/// let topology = &mut editor.spec_mut().topology;
-/// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InputPort::new(half, 0), Edge::Direct(PortSource::MainInput(0)));
-/// topology.set_outputs([PortSource::Node(OutputPort::new(half, 0))]);
+/// editor
+///     .wire_outputs([PortSource::Node(OutputPort::new(half, 0))])
+///     .expect("the node exists");
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:
-/// let input = [1.0_f32; 64];
 /// let mut output = [0.0_f32; 64];
 /// let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
-/// executor.process(64, &transport, &[&input], &mut [&mut output]);
+/// executor.process(64, &transport, &[], &mut [&mut output]);
 /// assert_eq!(output[0], 0.5);
 /// ```
 pub struct Editor<F: Float = f32> {
     /// The rings to the paired executor.
-    link: Link<F>,
+    link: EditLink<F>,
     prepare: Prepare,
-    spec: GraphSpec,
-    shapes: Shapes,
-    /// Each key's record: the unit waiting for the next commit, its wake
-    /// and fork source, the crossfade or latency cut the commit carries,
-    /// whether it is leaving, and its generation count.
-    placements: Placements<F>,
+    /// The graph value. Written only through [`spec_mut`](Self::spec_mut)
+    /// (or [`write()`], which it calls): a write that bypassed it would leave
+    /// [`structure`](Self::structure) behind the spec.
+    spec: Arc<GraphSpec>,
+    /// The shapes the units declared. Written only through
+    /// [`shapes_mut`](Self::shapes_mut) (or [`write()`]).
+    shapes: Arc<Shapes>,
+    /// Moves on every write of the spec or the shapes (placing a unit,
+    /// staging a crossfade or a latency cut, opening an outlet and leaving
+    /// each make one in the same call): what
+    /// [`Committed::structure`](lifecycle::Committed::structure) is compared
+    /// with, so a commit that finds the two equal has nothing to compile.
+    /// Never moves on a value control. [`revision`](Self::revision) is
+    /// another fact: anything changed, values included.
+    structure: u64,
+    /// Each key ever placed: its record ([`Entry`](entries)).
+    entries: Entries<F>,
     /// The open taps: each reader's width and end latch.
     taps: Outlets<TapId, TapWriter<F>, TapOpened>,
     /// The open event taps.
-    event_taps: Outlets<EventTapId, EventTapWriter, ()>,
+    event_taps: Outlets<EventTapId, EventTapWriter, Arc<crate::edges::tap::TapEnd>>,
     /// The open meters: each one's lane capacity.
     meters: Outlets<MeterId, MeterWriter, usize>,
     /// Where the compile lifecycle stands: the plan sent last (what the
@@ -242,15 +253,11 @@ pub struct Editor<F: Float = f32> {
     /// Events per event slot per block, as the executor was built with: a
     /// fork gets the same.
     event_capacity: usize,
-    /// On a **fork** only: the health probe each forked unit's source handed
-    /// over, by key (see `src/node/fork.rs`, "When a forked unit fails").
-    fork_health: Vec<(NodeKey, Arc<dyn ForkHealth>)>,
-    /// The cells shared with running units: param ranges, lane gains,
-    /// modes. Written from the spec by every commit, and by the controls
-    /// ([`set_param_range`](Self::set_param_range),
-    /// [`set_edge_gain`](Self::set_edge_gain), [`set_mode`](Self::set_mode)
-    /// ...) at once.
-    cells: LiveCells,
+    /// The gain cells shared with the running executor, one per weighted
+    /// lane. Written from the values by every commit, and by the controls
+    /// ([`set_edge_gain`](Self::set_edge_gain) ...) at once. A unit's param
+    /// range and mode cells are its entry's.
+    gains: GainCells,
     /// Each node's mode and mix, each port's range, and each gain lane's base
     /// and range: what a unit placed by a commit starts in, and what a fork
     /// starts every unit in. Never in the spec, whose commits they do not
@@ -344,25 +351,14 @@ impl MainOutputState {
         })
     }
 
-    /// A plan carrying `bank` (a main output of generation `main_output`) was
-    /// sent as commit `seq`. A plan that carries the crossfade the last one
-    /// carried continues it: the executor keeps its progress, and it ends
-    /// under the seq that began it.
-    fn sent(
-        &mut self,
-        bank: Option<crate::MainOutputBank>,
-        main_output: crate::MainOutputId,
-        seq: u64,
-    ) {
+    /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
+    /// the crossfade the last one carried keeps it: the executor keeps its
+    /// progress, and it ends under the seq that began it.
+    fn sent(&mut self, bank: Option<crate::MainOutputBank>, seq: u64) {
         self.bank = bank.map(|bank| {
             self.bank
-                .filter(|b| !b.ended && b.old == bank.old && b.main_output == main_output)
-                .unwrap_or(SentBank {
-                    seq,
-                    old: bank.old,
-                    main_output,
-                    ended: false,
-                })
+                .filter(|_| bank.continues)
+                .unwrap_or(SentBank { seq, ended: false })
         });
         if self.bank.is_none() {
             self.fading = None;
@@ -372,7 +368,7 @@ impl MainOutputState {
 
 /// The old main output of a crossfade in progress, as the commit that began it
 /// found it: what each commit while the crossfade runs compiles the bank from.
-/// It holds a clone of the committed spec and shapes until the crossfade ends.
+/// It shares the committed spec and shapes until the crossfade ends.
 #[derive(Clone)]
 struct Fading {
     /// The old main output's spec and shapes.
@@ -394,10 +390,6 @@ struct SentBank {
     /// Its `seq`, or that of the commit that began the crossfade it
     /// continues.
     seq: u64,
-    /// The main output that fades out.
-    old: crate::MainOutputId,
-    /// The main output that fades in.
-    main_output: crate::MainOutputId,
     /// Whether the executor has rendered its crossfade through.
     ended: bool,
 }
@@ -407,13 +399,12 @@ impl<F: Float> std::fmt::Debug for Editor<F> {
         f.debug_struct("Editor")
             .field("link", &self.link)
             .field("prepare", &self.prepare)
-            .field("placements", &self.placements)
+            .field("entries", &self.entries)
             .field("planned", &self.life.plan().is_some())
             .field("committed", &self.life.committed().is_some())
             .field("poisoned", &self.poison_cause())
             .field("limits", &self.limits)
             .field("event_capacity", &self.event_capacity)
-            .field("param_ranges", &self.cells.ranges.len())
             .field("revision", &self.revision)
             .finish_non_exhaustive()
     }
@@ -462,34 +453,29 @@ impl<F: Float> Editor<F> {
     /// way to build an [`Executor`].
     #[must_use]
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
-        let (channels, ends) = channels();
-        let (commands, command_rx) = command_channel();
-        let stager = Stager::new(
-            cap,
-            channels.readings.pool.clone(),
-            channels.readings.rendered.clone(),
-        );
+        let (link, exec_link) = link();
+        let stager = link.stager(cap);
         let editor = Self {
-            link: Link::new(channels, commands),
+            link,
             prepare,
-            spec: GraphSpec::default(),
-            shapes: Shapes::new(),
-            placements: Placements::new(),
+            spec: Arc::default(),
+            shapes: Arc::default(),
+            structure: 0,
+            entries: Entries::new(),
             taps: Outlets::new(),
             event_taps: Outlets::new(),
             meters: Outlets::new(),
             life: Lifecycle::Unplanned,
             limits: Limits::NONE,
             event_capacity: cap,
-            fork_health: Vec::new(),
-            cells: LiveCells::new(),
+            gains: GainCells::default(),
             values: GraphValues::default(),
             revision: 0,
             stager,
             main_output: MainOutputState::new(),
             bells: None,
         };
-        (editor, Executor::new(prepare, cap, ends, command_rx))
+        (editor, Executor::new(prepare, cap, exec_link))
     }
 
     /// What units are prepared for now — after a
@@ -586,38 +572,29 @@ impl<F: Float> Editor<F> {
         self.link.take_unreported()
     }
 
-    /// Owned items the executor's apply had no room to hand back, since the
-    /// editor was built: each was leaked rather than freed on the audio
-    /// thread. Control thread; cumulative, read when [`collect`](Self::collect)
-    /// has taken back what the executor returned.
-    ///
-    /// A nonzero count is a tutti bug worth reporting: the lists an apply
-    /// fills are sized with the commit, so none should ever be too small.
-    #[must_use]
-    pub fn leaked_items(&self) -> u64 {
-        self.link.leaked()
-    }
-
     /// The graph value.
     pub fn spec(&self) -> &GraphSpec {
         &self.spec
     }
 
-    /// The graph value, for wiring. Nodes are added with
-    /// [`insert`](Self::insert), not here, so every node has a unit.
-    /// Moves the [`revision`](Self::revision), whether or not the borrow
-    /// writes.
-    ///
-    /// A gain entry is declared by the editor, which makes its cell
-    /// ([`set_edge_gain`](Self::set_edge_gain),
-    /// [`set_edge_gain_range`](Self::set_edge_gain_range),
-    /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
-    /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
-    /// and never write [`GraphSpec::gains`] through this borrow. A commit
-    /// that finds an entry without its cell makes one from the values.
-    pub fn spec_mut(&mut self) -> &mut GraphSpec {
+    /// The graph value, for the editor's own edits and the tests inside the
+    /// crate: the one write path to the spec, with [`write()`], which it calls
+    /// for a caller that holds other fields too. No other `&mut` path to the
+    /// spec or the shapes exists (no `Arc::get_mut`, no second
+    /// `Arc::make_mut`), so [`structure`](Self::structure) moves with every
+    /// write. Every edit an outside caller makes goes through a typed call
+    /// ([`connect_edge`](Self::connect_edge), [`insert`](Self::insert) and
+    /// the rest), which checks it and takes this only when it changes
+    /// something. Moves the revision, whether or not the borrow writes.
+    pub(crate) fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
-        &mut self.spec
+        write(&mut self.spec, &mut self.structure)
+    }
+
+    /// The shapes, for a write: as [`spec_mut`](Self::spec_mut).
+    pub(crate) fn shapes_mut(&mut self) -> &mut Shapes {
+        self.touch();
+        write(&mut self.shapes, &mut self.structure)
     }
 
     /// The values: each node's mode and mix, each port's range, and each gain
@@ -635,7 +612,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// A count that moves whenever anything the editor shows a reader may
-    /// have changed: the spec ([`spec_mut`](Self::spec_mut) included), the
+    /// have changed: the spec (any wiring call), the
     /// shapes and generations, the plan sent last ([`base`](Self::base)),
     /// a param range or its cells, the [`Prepare`]. Equal revisions mean
     /// none of those changed in between, so a control-side pass that is a
@@ -688,8 +665,7 @@ impl<F: Float> Editor<F> {
     pub fn connect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> Result<(), BusError> {
         self.spec
             .check_bus_edge(&self.shapes, from, to, BusFold::Speakers)?;
-        self.touch();
-        self.spec.connect_bus(from, to);
+        self.spec_mut().connect_bus(from, to);
         Ok(())
     }
 
@@ -697,8 +673,7 @@ impl<F: Float> Editor<F> {
     /// it at the next commit, and the author's own edges and gains stay.
     /// Returns whether it was declared.
     pub fn disconnect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> bool {
-        self.touch();
-        self.spec.disconnect_bus(from, to)
+        self.spec_mut().disconnect_bus(from, to)
     }
 
     /// Declares the bus edge `from -> main_output`: the output bus `from` feeds the
@@ -716,16 +691,14 @@ impl<F: Float> Editor<F> {
     pub fn connect_bus_to_main_output(&mut self, from: BusOutputPort) -> Result<(), BusError> {
         self.spec
             .check_main_output_bus_edge(&self.shapes, from, BusFold::Speakers)?;
-        self.touch();
-        self.spec.connect_bus_to_main_output(from);
+        self.spec_mut().connect_bus_to_main_output(from);
         Ok(())
     }
 
     /// Removes the bus edge `from -> main_output`, its lanes with it. Returns
     /// whether it was declared.
     pub fn disconnect_bus_from_main_output(&mut self, from: BusOutputPort) -> bool {
-        self.touch();
-        self.spec.disconnect_bus_from_main_output(from)
+        self.spec_mut().disconnect_bus_from_main_output(from)
     }
 
     /// The spec with its bus edges lowered against the shapes as they stand:
@@ -794,17 +767,17 @@ impl<F: Float> Editor<F> {
     /// Where `key`'s forks come from, and the generation of the unit that
     /// handed it over, if it is forkable.
     pub(crate) fn fork_source(&self, key: NodeKey) -> Option<(u32, &dyn ForkSource<F>)> {
-        self.placements.fork_source(key)
+        self.entries.fork_source(key)
     }
 
     /// Watch `health` for the forked unit at `key` (`Editor::fork` only).
     pub(crate) fn watch_fork(&mut self, key: NodeKey, health: Arc<dyn ForkHealth>) {
-        self.fork_health.push((key, health));
+        self.entries.watch_fork(key, health);
     }
 
     /// The forked units' probes, in key order.
-    pub(crate) fn fork_probes(&self) -> &[(NodeKey, Arc<dyn ForkHealth>)] {
-        &self.fork_health
+    pub(crate) fn fork_probes(&self) -> impl Iterator<Item = (NodeKey, &dyn ForkHealth)> {
+        self.entries.fork_probes()
     }
 
     /// Events per event slot per block, as the executor was built with.
@@ -916,6 +889,14 @@ impl<F: Float> Editor<F> {
     }
 }
 
+/// The one `&mut` path to the spec or the shapes: moves `structure`, and
+/// copies the value first when a [`Committed`](lifecycle::Committed) or a
+/// crossfade still shares it, so what they hold never changes.
+fn write<'a, T: Clone>(slot: &'a mut Arc<T>, structure: &mut u64) -> &'a mut T {
+    *structure += 1;
+    Arc::make_mut(slot)
+}
+
 /// The weighted lanes a lowering made, by edge: the fold's weight and the fade
 /// the lane runs.
 type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
@@ -924,5 +905,5 @@ type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 /// Each is built into the commit and comes back once on the fade-return
 /// ring (`Commit::build`).
 fn starting(delta: &Delta) -> usize {
-    delta.fades.iter().filter(|(_, f)| !f.is_cut()).count()
+    delta.fades().iter().filter(|(_, f)| !f.is_cut()).count()
 }

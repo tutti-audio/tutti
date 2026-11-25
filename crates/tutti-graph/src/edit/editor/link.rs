@@ -6,13 +6,19 @@ use crate::edges::tap::TapEnd;
 use tutti_units::At;
 
 use super::CommitError;
-use crate::exec::command::{CommandId, CommandTx, ScheduleError, Scheduled};
-use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
+use crate::exec::command::{CommandId, CommandTx, ScheduleError, Scheduled, command_channel};
+use crate::exec::loss::{EventLoss, RING_CAPACITY};
+use crate::exec::{
+    Commit, CommitSeq, Crossfade, EDGE_FADE_CAPACITY, ExecLink, FADE_CAPACITY, Participants,
+    QUEUE_CAPACITY, Rendered, Stager,
+};
 use crate::model::gain::EdgeFade;
 use crate::model::spec::EventInputPort;
+use crate::node::play::Played;
 use crate::{EdgeId, Executor};
 use tutti_buffers::Float;
-use tutti_rt::PushError;
+use tutti_rt::{Counter, Gauge, Overflow, PushError, RingReader, RingWriter, counter, gauge, ring};
+use tutti_units::{Blocks, PlayReading};
 
 /// The control end of the rings to the paired executor, and the counts that
 /// keep every push within them.
@@ -20,9 +26,27 @@ use tutti_rt::PushError;
 /// At most [`QUEUE_CAPACITY`] commits are out (sent and not yet handed back),
 /// and the crossfades they start hold at most [`FADE_CAPACITY`] slots on the
 /// fade-return ring, so a push this link makes after its check never fails.
-pub(super) struct Link<F: Float> {
-    channels: Channels<F>,
+pub(crate) struct EditLink<F: Float> {
+    to_executor: RingWriter<Box<Commit<F>>>,
+    returned: RingReader<Box<Commit<F>>>,
+    /// Crossfades coming back (see the `exec` module docs, "Crossfades").
+    faded: RingReader<Box<Crossfade<F>>>,
+    /// Where the executor says which ports lost events.
+    losses: RingReader<EventLoss>,
+    /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
+    edge_fades: RingReader<(EdgeId, EdgeFade)>,
     commands: CommandTx,
+    /// The executor's play clock, as it last published it.
+    played: Gauge<Played>,
+    /// Refusals the log and the ring could not name.
+    unreported: Counter<u64>,
+    /// The executor's pool participants, and the blocks it has rendered
+    /// (`Stager`).
+    participants: Gauge<Participants>,
+    rendered: Gauge<Rendered>,
+    /// The `seq` of the commit whose main output crossfade the executor last
+    /// finished (`Editor::finish_fades`).
+    fade_ended: Gauge<CommitSeq>,
     /// Commits sent and not yet handed back.
     out: usize,
     /// Crossfades sent (started or waiting) and not yet handed back: the
@@ -40,24 +64,70 @@ pub(super) struct Link<F: Float> {
     /// Items the executor's apply could not return, summed from each list as
     /// its box or crossfade came back.
     leaked: u64,
+    /// What `leaked` read at the last [`take_leaked`](Self::take_leaked).
+    leaked_seen: u64,
     /// What the executor's `unreported` counter read at the last
     /// [`take_unreported`](Self::take_unreported).
     unreported_seen: u64,
 }
 
-impl<F: Float> Link<F> {
-    pub(super) fn new(channels: Channels<F>, commands: CommandTx) -> Self {
-        Self {
-            channels,
+/// The two ends of the link between an editor and its executor: the editor's
+/// and the executor's.
+pub(crate) fn link<F: Float>() -> (EditLink<F>, ExecLink<F>) {
+    let (to_executor, queue) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY, Overflow::Refuse);
+    let (back, returned) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
+    let (fade_back, faded) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
+    let (losses_tx, losses) = ring::<EventLoss>(RING_CAPACITY, Overflow::Refuse);
+    let (edge_fades_tx, edge_fades) =
+        ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
+    let (commands, command_rx) = command_channel();
+    let (played_tx, played) = gauge(Played(PlayReading::default()));
+    let (unreported_tx, unreported) = counter::<u64>();
+    let (participants_tx, participants) = gauge(Participants(0));
+    let (rendered_tx, rendered) = gauge(Rendered(Blocks::ZERO));
+    let (fade_ended_tx, fade_ended) = gauge(CommitSeq(0));
+    (
+        EditLink {
+            to_executor,
+            returned,
+            faded,
+            losses,
+            edge_fades,
             commands,
+            played,
+            unreported,
+            participants,
+            rendered,
+            fade_ended,
             out: 0,
             fades_out: 0,
             sent: 0,
             acked: 0,
             ending_taps: Vec::new(),
             leaked: 0,
+            leaked_seen: 0,
             unreported_seen: 0,
-        }
+        },
+        ExecLink {
+            queue,
+            back,
+            fade_back,
+            losses: losses_tx,
+            edge_fades: edge_fades_tx,
+            commands: command_rx,
+            played: played_tx,
+            unreported: unreported_tx,
+            participants: participants_tx,
+            rendered: rendered_tx,
+            fade_ended: fade_ended_tx,
+        },
+    )
+}
+
+impl<F: Float> EditLink<F> {
+    /// A stager for this link's executor, reading the gauges it publishes.
+    pub(crate) fn stager(&self, event_cap: usize) -> Stager {
+        Stager::new(event_cap, self.participants.clone(), self.rendered.clone())
     }
 
     /// `Backpressure` when [`QUEUE_CAPACITY`] commits are out.
@@ -80,7 +150,7 @@ impl<F: Float> Link<F> {
     /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
     pub(super) fn main_output_fade_ended(&self) -> u64 {
-        self.channels.readings.main_output_fade_ended.get().0
+        self.fade_ended.get().0
     }
 
     /// The sequence number the next commit sends with.
@@ -92,7 +162,7 @@ impl<F: Float> Link<F> {
     /// [`check_room`](Self::check_room) and
     /// [`check_fade_room`](Self::check_fade_room). A tap ending since the
     /// last commit is left out of this one.
-    pub(super) fn send(&mut self, commit: Box<Commit<F>>, fades: usize) {
+    pub(crate) fn send(&mut self, commit: Box<Commit<F>>, fades: usize) {
         self.fades_out += fades;
         debug_assert!(self.fades_out <= FADE_CAPACITY);
         self.push(commit);
@@ -113,7 +183,7 @@ impl<F: Float> Link<F> {
         // With the executor gone nothing applies the commit, and it counts as
         // sent all the same, so the credits run out as they would behind a
         // stalled one.
-        if let Err(refused) = self.channels.to_executor.push(commit) {
+        if let Err(refused) = self.to_executor.push(commit) {
             assert_eq!(
                 refused.error,
                 PushError::Disconnected,
@@ -126,7 +196,7 @@ impl<F: Float> Link<F> {
 
     /// The next commit the executor handed back, applied.
     pub(super) fn pop_returned(&mut self) -> Option<Box<Commit<F>>> {
-        let done = self.channels.returned.pop()?;
+        let done = self.returned.pop()?;
         self.out -= 1;
         self.acked += 1;
         self.leaked = self.leaked.saturating_add(done.refused() as u64);
@@ -155,7 +225,7 @@ impl<F: Float> Link<F> {
 
     /// The next crossfade the executor handed back.
     pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade<F>>> {
-        let x = self.channels.faded.pop()?;
+        let x = self.faded.pop()?;
         self.fades_out -= 1;
         self.leaked = self.leaked.saturating_add(x.refused() as u64);
         Some(x)
@@ -163,30 +233,29 @@ impl<F: Float> Link<F> {
 
     /// The next edge whose declick fade ended, by the kind that did.
     pub(super) fn pop_edge_fade(&mut self) -> Option<(EdgeId, EdgeFade)> {
-        self.channels.edge_fades.pop()
+        self.edge_fades.pop()
     }
 
     /// The next port that lost events.
     pub(super) fn pop_loss(&mut self) -> Option<crate::EventLoss> {
-        self.channels.losses.pop()
+        self.losses.pop()
     }
 
     /// Refusals since the last call that no loss names.
     pub(super) fn take_unreported(&mut self) -> u64 {
-        self.channels
-            .readings
-            .unreported
-            .take_since(&mut self.unreported_seen)
+        self.unreported.take_since(&mut self.unreported_seen)
     }
 
-    /// Items the executor's apply leaked, since the editor was built.
-    pub(super) fn leaked(&self) -> u64 {
-        self.leaked
+    /// Items the executor's apply leaked since the last call.
+    pub(super) fn take_leaked(&mut self) -> u64 {
+        let new = self.leaked - self.leaked_seen;
+        self.leaked_seen = self.leaked;
+        new
     }
 
     /// The executor's play clock, as it last published it.
     pub(super) fn play_reading(&self) -> crate::PlayReading {
-        self.channels.readings.play.get().0
+        self.played.get().0
     }
 
     /// Commits sent and not yet handed back.
@@ -235,9 +304,9 @@ impl<F: Float> Link<F> {
     }
 }
 
-impl<F: Float> std::fmt::Debug for Link<F> {
+impl<F: Float> std::fmt::Debug for EditLink<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Link")
+        f.debug_struct("EditLink")
             .field("out", &self.out)
             .field("fades_out", &self.fades_out)
             .field("sent", &self.sent)

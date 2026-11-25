@@ -137,6 +137,8 @@ mod midi_port;
 #[path = "midi_port_none.rs"]
 mod midi_port;
 #[cfg(feature = "midi")]
+mod midi_record;
+#[cfg(feature = "midi")]
 mod midi_sink;
 mod modulation;
 mod params;
@@ -262,8 +264,8 @@ pub use midi_follow::{
 pub use midi_held::HeldReader;
 #[cfg(feature = "midi")]
 pub use midi_load::{
-    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-    NoCommonTimelineError, TrackError,
+    LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, NoCommonTimelineError, TrackError,
+    Unplayed,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
@@ -292,7 +294,7 @@ pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
+    RouteInfo, RouteSpec, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
 };
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
@@ -343,7 +345,7 @@ pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
     Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
-    TakeEvent, TakeFile, TakeId, TakePlacement, TakeTarget, Window,
+    TakeEvent, TakeFile, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
@@ -363,6 +365,8 @@ pub use tutti_graph::{
 pub use tutti_graph::{
     CloseError, CommitError, EventCapacity, NodeMode, PassError, Stamp, Wired, WiredMask,
 };
+#[cfg(feature = "capture")]
+pub use tutti_timeline::TakeId;
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]

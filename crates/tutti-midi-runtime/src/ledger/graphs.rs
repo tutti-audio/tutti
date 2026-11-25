@@ -10,6 +10,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_graph::EdgeId;
 use tutti_rt::Mutex;
 
 use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
@@ -21,6 +22,7 @@ use tutti_buffers::Float;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
+use tutti_graph::testing::WireDeclared;
 use tutti_graph::{
     Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkSource,
     ForkTarget, Forked, InEvents, IntoNode, Io, Node, NodeParts, Offset, OutEvents, Prepare,
@@ -72,10 +74,11 @@ mod common {
 
     /// Wires event output 0 of node `from` to event input 0 of node `to`.
     pub(super) fn connect(ed: &mut Editor, from: u64, to: u64) {
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(to), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
-        );
+        )
+        .unwrap();
     }
 }
 
@@ -221,9 +224,9 @@ impl<F: Float> Node<F> for Latent {
 }
 
 fn disconnect(ed: &mut Editor, from: u64, to: u64) {
-    assert!(ed.spec_mut().disconnect_events(
+    assert!(ed.disconnect_events(
         EventInputPort::new(NodeKey(to), 0),
-        EventOutputPort::new(NodeKey(from), 0)
+        tutti_graph::EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0))
     ));
 }
 
@@ -691,13 +694,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     );
     sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(NodeKey(2), 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(
-            NodeKey(4),
-            0,
-        )))],
-    );
+        Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(4), 0))),
+    ))
+    .unwrap();
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
     assert_eq!(a.lock().held.len(), 1, "the note reached A");
@@ -747,9 +748,8 @@ fn forkable_rig() -> (
         },
     );
     connect(&mut ed, 1, 2);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .unwrap();
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)
 }

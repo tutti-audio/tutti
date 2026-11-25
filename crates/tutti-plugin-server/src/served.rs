@@ -15,18 +15,19 @@
 //! each [`Notice`] of the core as the [`News`] that carries it.
 
 use crate::ties::{Patience, Ties};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::News;
+use tutti_plugin_ipc::{ModeOutcome, News};
 use tutti_plugin_types::{
     AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
     LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, MidiAssignment, MidiMapApplied, Notice,
     OutOfProcess, ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo,
     PluginLearnError, PluginPreset, PluginRef, PluginResult, PluginWiring, Prepare, PresetId,
-    ProcessWake, RateRefusal, RateRefusalCause, RenderMode, RenderModeSupport, Request, SampleRate,
-    Samples, Seat, ServerLosses, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    ProcessWake, RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport, Request,
+    SampleRate, Samples, Seat, ServerLosses, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
@@ -118,8 +119,8 @@ pub(crate) trait ServerPlugin {
         main: MainThreadMarker,
         rate: SampleRate,
     ) -> Result<(), RateRefusal>;
-    /// Tells the plugin its render mode; whether it now runs in it.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool;
+    /// Tells the plugin its render mode, and what it made of it.
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome;
     /// How many parameters the plugin has.
     fn parameter_count(&self, main: MainThreadMarker) -> usize;
     /// Every parameter.
@@ -412,7 +413,7 @@ impl<L: ServerSide> Server<L> {
         }
         if this.state.stage() != Stage::Active {
             return Err(activation_failed(
-                refusal.map_or_else(|| "refused".to_string(), |r| r.to_string()),
+                refusal.map_or_else(|| "refused".to_string(), |r| r.reason.to_string()),
             ));
         }
         this.refresh_wiring(main);
@@ -424,7 +425,7 @@ impl<L: ServerSide> Server<L> {
 
     /// Steps one event through the core, applying its effects. Returns the
     /// reason of a refusal it told, if any.
-    fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<PluginError> {
+    fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<Failure> {
         let mut told = Vec::new();
         // Taken, not cloned: a clone copies the layout's `Vec`s. The state put
         // in its place is built without allocating and is replaced below.
@@ -449,15 +450,18 @@ impl<L: ServerSide> Server<L> {
     /// thread returns it at its next wake and says so ([`Settle`](crate::ties::Settle)),
     /// which ends this wait. Bounded by [`HOME_PATIENCE`]: a render thread stuck
     /// inside the plugin leaves the plan parked and the refusal says so.
-    fn drive_settled(&mut self, main: MainThreadMarker, event: Event) -> Option<PluginError> {
+    fn drive_settled(&mut self, main: MainThreadMarker, event: Event) -> Option<Failure> {
         let mut refusal = self.drive(main, event);
         let patience = Patience::new(Instant::now(), HOME_PATIENCE);
         while self.state.is_parked() {
             if patience.left(Instant::now()).is_none() {
                 return refusal.or_else(|| {
-                    Some(PluginError::Other(
-                        "the render thread did not hand the processor back".to_string(),
-                    ))
+                    Some(Failure {
+                        reason: Arc::new(PluginError::Other(
+                            "the render thread did not hand the processor back".to_string(),
+                        )),
+                        recovery: Recovery::Inactive,
+                    })
                 });
             }
             // Read before the tick that collects: a return after it moves the
@@ -507,7 +511,7 @@ impl<L: ServerSide> Server<L> {
 
     /// Turns a notice into what the host hears, keeping the cached wiring in
     /// step. Returns the reason when the notice is a refusal.
-    fn absorb(&mut self, main: MainThreadMarker, notice: Notice) -> Option<PluginError> {
+    fn absorb(&mut self, main: MainThreadMarker, notice: Notice) -> Option<Failure> {
         match notice {
             Notice::LatencyChanged(samples) => {
                 self.wiring.latency_samples = samples;
@@ -547,13 +551,17 @@ impl<L: ServerSide> Server<L> {
             // The wire carries no note-expression change, and nothing here acts
             // on one: the host reads the list when it opens a session.
             Notice::NoteExpressionChanged => {}
-            Notice::Refused { rate, reason } => {
+            Notice::Refused {
+                rate,
+                reason,
+                recovery,
+            } => {
                 tracing::warn!("plugin refused {} Hz: {reason}", rate.get());
                 // Whether the host must re-read the instance depends on whether
                 // a rollback revives it: `finish_refusals` decides.
                 self.refresh_wiring(main);
                 self.refused = true;
-                return Some(reason);
+                return Some(Failure { reason, recovery });
             }
             Notice::Stuck { reason } => {
                 tracing::warn!("plugin would not stop: {reason}");
@@ -561,6 +569,8 @@ impl<L: ServerSide> Server<L> {
                     reason: reason.to_string(),
                 });
             }
+            // The mode's reply says it.
+            Notice::ModeRefused { .. } => {}
             Notice::StateNotRestored { reason } => {
                 tracing::warn!("plugin did not restore its state after a reload: {reason}");
                 self.events.push(News::PluginStateNotRestored {
@@ -573,7 +583,10 @@ impl<L: ServerSide> Server<L> {
                 // `is_lost` (see `main_loop::serve_every`), so the host sees its
                 // process exit as a crash.
                 tracing::error!("plugin lost: {reason}");
-                return Some(reason);
+                return Some(Failure {
+                    reason: Arc::new(reason),
+                    recovery: Recovery::Inactive,
+                });
             }
         }
         None
@@ -688,15 +701,9 @@ impl<L: ServerSide> Server<L> {
     }
 
     /// Deactivates and activates at `wanted`, as a rate or mode change does.
-    /// A refusal is rolled back: the plugin is activated again at the
-    /// configuration it already accepted. Returns the refusal and whether the
-    /// rollback took, or `Ok` when `wanted` did.
-    fn reconfigure(
-        &mut self,
-        main: MainThreadMarker,
-        previous: Prepare,
-        wanted: Prepare,
-    ) -> Result<(), (PluginError, bool)> {
+    /// The core activates again at the configuration the plugin accepted when
+    /// `wanted` is refused, and the failure says whether that took.
+    fn reconfigure(&mut self, main: MainThreadMarker, wanted: Prepare) -> Result<(), Failure> {
         let result = match self.drive_settled(main, Event::Op(HostOp::Reconfigure(wanted))) {
             None => {
                 // The plugin may take another layout, or another latency, at
@@ -704,21 +711,17 @@ impl<L: ServerSide> Server<L> {
                 self.refresh_wiring(main);
                 Ok(())
             }
-            Some(reason) => {
-                // Put back what the plugin accepted once.
-                let rolled_back = self
-                    .drive(main, Event::Op(HostOp::Activate(previous)))
-                    .is_none()
-                    && self.is_active();
-                if rolled_back {
-                    self.refresh_wiring(main);
-                }
-                Err((reason, rolled_back))
-            }
+            Some(failure) => Err(failure),
         };
         self.finish_refusals();
         result
     }
+}
+
+/// What a refusal or a loss told: why, and where the plugin stands.
+struct Failure {
+    reason: Arc<PluginError>,
+    recovery: Recovery,
 }
 
 impl<L: ServerSide> ServerPlugin for Server<L> {
@@ -784,8 +787,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// The rate the plugin already runs at is a no-op, so a per-frame caller
     /// does not tear it down sixty times a second.
     ///
-    /// A refusal is rolled back: the plugin is activated again at the
-    /// configuration it already accepted, and the error says it is running
+    /// A refusal is rolled back by the core: the plugin is activated again at
+    /// the configuration it already accepted, and the error says it is running
     /// there. (The session still renders nothing after an error, because its
     /// clock follows the rate the host asked for.) When the rollback is refused
     /// too the plugin is left loaded and silent, and the host is told with an
@@ -795,25 +798,25 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         main: MainThreadMarker,
         rate: SampleRate,
     ) -> Result<(), RateRefusal> {
-        let Some(previous) = self.state.prepare() else {
+        let Some(previous) = self.state.applied() else {
             return Err(RateRefusal::new(rate, RateRefusalCause::Unconfigured));
         };
         if self.is_active() && previous.rate() == rate {
             return Ok(());
         }
-        let wanted = previous.with_rate(rate);
-        self.reconfigure(main, previous, wanted)
-            .map_err(|(reason, rolled_back)| {
-                let reason = reason.to_string();
+        self.reconfigure(main, previous.with_rate(rate))
+            .map_err(|failure| {
+                let reason = failure.reason.to_string();
                 RateRefusal::new(
                     rate,
-                    if rolled_back {
-                        RateRefusalCause::RolledBack {
-                            running: previous.rate(),
+                    match failure.recovery {
+                        Recovery::RolledBack { running } => RateRefusalCause::RolledBack {
+                            running: running.rate(),
                             reason,
+                        },
+                        Recovery::Inactive | Recovery::RollbackRefused { .. } => {
+                            RateRefusalCause::Deactivated { reason }
                         }
-                    } else {
-                        RateRefusalCause::Deactivated { reason }
                     },
                 )
             })
@@ -824,41 +827,45 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// `OnActivation` one (VST3's `setupProcessing`, AU's
     /// `AudioUnitInitialize`) is activated again in the mode, keeping its
     /// instance and state, and a refusal is rolled back to the mode it was
-    /// running in; an `Unsupported` one is left running and answers `false`.
-    /// The mode is kept for every later activation (a restart, a rate change)
-    /// either way.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
-        let Some(previous) = self.state.prepare() else {
-            return false;
+    /// running in; an `Unsupported` one is left running and answers
+    /// [`Unsupported`](ModeOutcome::Unsupported) every time it is asked,
+    /// whatever mode it was last asked. The mode is kept for every later
+    /// activation (a restart, a rate change) either way. A plugin not prepared
+    /// has nothing to tell: [`Refused`](ModeOutcome::Refused).
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome {
+        let Some(previous) = self.state.applied() else {
+            return ModeOutcome::Refused;
         };
-        if previous.mode() == mode && self.is_active() {
-            return true;
-        }
+        let unchanged = previous.mode() == mode && self.is_active();
         let Some(control) = self.lifecycle.control() else {
-            return false;
+            return ModeOutcome::Refused;
         };
         match control.render_mode_support(main) {
-            RenderModeSupport::Live => {
-                let took = control.set_render_mode(main, mode);
-                if took {
-                    self.state.set_mode(mode);
-                } else {
-                    self.events.push(News::RenderModeNotApplied { mode });
-                }
-                took
-            }
             RenderModeSupport::Unsupported => {
-                self.state.set_mode(mode);
-                false
+                self.state.want(previous.with_mode(mode));
+                ModeOutcome::Unsupported
+            }
+            _ if unchanged => ModeOutcome::Took,
+            RenderModeSupport::Live => {
+                let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
+                let running = self.state.applied().map(|applied| applied.mode());
+                if running == Some(mode) {
+                    ModeOutcome::Took
+                } else {
+                    // Refused, or not told (the plugin is not active): the
+                    // plugin runs as it did, and what the server wants goes
+                    // back with the answer.
+                    if let (Some(wanted), Some(running)) = (self.state.wanted(), running) {
+                        self.state.want(wanted.with_mode(running));
+                    }
+                    ModeOutcome::Refused
+                }
             }
             RenderModeSupport::OnActivation => {
-                let took = self
-                    .reconfigure(main, previous, previous.with_mode(mode))
-                    .is_ok();
-                if !took {
-                    self.events.push(News::RenderModeNotApplied { mode });
+                match self.reconfigure(main, previous.with_mode(mode)) {
+                    Ok(()) => ModeOutcome::Took,
+                    Err(_) => ModeOutcome::Refused,
                 }
-                took
             }
         }
     }

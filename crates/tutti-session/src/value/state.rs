@@ -10,7 +10,9 @@ use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{DeclaredUnit, EffectiveCell, ErasedPublished, NodeKey, ParamSet, PassError};
+use tutti_graph::{
+    DeclaredUnit, EffectiveCell, ErasedPublished, ErasedSetting, NodeKey, ParamSet, PassError,
+};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
@@ -154,7 +156,7 @@ thread_local! {
 /// The value lock and the table behind it. Control side: the audio thread
 /// never touches either.
 #[derive(Default)]
-pub struct ValueTable {
+pub(crate) struct ValueTable {
     params: Mutex<Params>,
     /// What the output policy is checked against, which the graph publishes.
     /// A lock of its own: a check reads it under the value lock.
@@ -174,7 +176,7 @@ impl fmt::Debug for ValueTable {
 }
 
 /// The value lock, held; released and forgotten by this thread when dropped.
-pub struct Held<'a> {
+pub(crate) struct Held<'a> {
     guard: MutexGuard<'a, Params>,
     token: usize,
 }
@@ -351,14 +353,23 @@ impl ValueTable {
         }
     }
 
-    /// Registers the published values of `node`, from what its parts said of
-    /// it. Control thread.
-    pub(crate) fn provide_node(&self, node: NodeKey, published: &[ErasedPublished]) {
-        self.params.lock().slots.extend(
+    /// Registers the published values and settings of `node`, from what its
+    /// parts said of it. Control thread.
+    pub(crate) fn provide_node(
+        &self,
+        node: NodeKey,
+        published: &[ErasedPublished],
+        settings: &[ErasedSetting],
+    ) {
+        let mut params = self.params.lock();
+        params.slots.extend(
             published
                 .iter()
                 .filter_map(|entry| slot::slot_of(node, entry)),
         );
+        params
+            .slots
+            .extend(settings.iter().map(|entry| slot::setting_of(node, entry)));
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
@@ -569,7 +580,7 @@ impl ValueTable {
 /// The session's value state, one `Arc` independent of the clock: a clock
 /// switch moves it and never rebuilds it. [`Values`] hold it weakly, so the
 /// session's owners are the state's owners.
-pub struct ValueState<K> {
+pub(crate) struct ValueState<K> {
     table: Arc<ValueTable>,
     key: PhantomData<fn() -> K>,
 }

@@ -10,7 +10,7 @@ use tutti_nodes::{
 use tutti_units::{Db, Hz, Q, Resonance, UnitParam};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[
+pub(crate) const ROWS: &[fn()] = &[
     held,
     svf_cutoff_moving,
     ladder_cutoff_and_drive_moving,

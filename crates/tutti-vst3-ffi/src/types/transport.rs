@@ -60,8 +60,8 @@ bitflags::bitflags! {
 ///   engine's plugin node reports one whenever the tempo is usable. See
 ///   `TransportPosition::samples`.
 /// - `position.continuous_samples` → `continousTimeSamples` (the monotonic
-///   clock that does not reset on loop; falls back to `position.samples` when
-///   unset, i.e. `0`)
+///   clock that does not reset on loop), sent as the count it is: `0` is the
+///   clock's first frame
 /// - `position.beat` → `projectTimeMusic`
 /// - `bar.start` → `barPositionMusic`
 /// - `loop_region` (when present) → `cycleStartMusic`/`cycleEndMusic`
@@ -167,14 +167,11 @@ pub fn to_process_context(
 
     if wants(need::NEED_CONTINOUS_TIME_SAMPLES) {
         // The continuous clock is monotonic across loop/cycle boundaries and is
-        // distinct from `projectTimeSamples`, which jumps back on a loop. Hosts
-        // that don't keep a separate continuous counter leave it `0` (unset);
-        // fall back to `samples` there so their behaviour is unchanged.
-        ctx.continousTimeSamples = if t.position.continuous_samples != 0 {
-            t.position.continuous_samples
-        } else {
-            t.position.samples.unwrap_or(0)
-        };
+        // distinct from `projectTimeSamples`, which jumps back on a loop. Its
+        // count is sent as it is: `0` is the first frame of the clock, never a
+        // sign to send project time, which would step the clock backward at the
+        // next block.
+        ctx.continousTimeSamples = t.position.continuous_samples;
     }
     if wants(need::NEED_SYSTEM_TIME)
         && let Some(ns) = t.system_time_ns
@@ -231,6 +228,7 @@ mod tests {
     fn populated_transport() -> TransportInfo {
         TransportInfo::new(SampleRate::of(48_000.0))
             .position_samples(1_234)
+            .continuous_samples(5_678)
             .beat(Beat::new(4.0))
             .bar(Beat::new(8.0), Default::default())
             .loop_region(LoopRegion::new(
@@ -264,6 +262,15 @@ mod tests {
             "an infinite musical position must not be flagged valid"
         );
 
+        let mut t = populated_transport();
+        t.bar.start = Beat::new(f64::NAN);
+        let ctx = to_process_context(&t, all);
+        assert_eq!(
+            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kBarPositionValid),
+            0,
+            "a NaN bar position must not be flagged valid"
+        );
+
         // The gate must not fire on good values — otherwise it would pass by
         // clearing every bit unconditionally.
         let ctx = to_process_context(&populated_transport(), all);
@@ -275,6 +282,10 @@ mod tests {
             ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kProjectTimeMusicValid),
             0
         );
+        assert_ne!(
+            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kBarPositionValid),
+            0
+        );
     }
 
     #[test]
@@ -284,7 +295,7 @@ mod tests {
 
         assert_eq!(ctx.sampleRate, 48_000.0);
         assert_eq!(ctx.projectTimeSamples, 1_234);
-        assert_eq!(ctx.continousTimeSamples, 1_234);
+        assert_eq!(ctx.continousTimeSamples, 5_678);
         assert_eq!(ctx.projectTimeMusic, 4.0);
         assert_eq!(ctx.barPositionMusic, 8.0);
         assert_eq!(ctx.cycleStartMusic, 2.0);
@@ -293,33 +304,14 @@ mod tests {
         assert_eq!(ctx.timeSigNumerator, 7);
         assert_eq!(ctx.timeSigDenominator, 8);
 
-        // All the validity flags + transport-state bits set.
+        // The transport-state bits (the validity bits are pinned per field below).
         let s = ctx.state;
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kPlaying), 0);
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kRecording), 0);
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kCycleActive), 0);
-        assert_ne!(
-            s & crate::sdk_enum_u32(StatesAndFlags_::kProjectTimeMusicValid),
-            0
-        );
-        assert_ne!(
-            s & crate::sdk_enum_u32(StatesAndFlags_::kBarPositionValid),
-            0
-        );
-        assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kTempoValid), 0);
-        assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kTimeSigValid), 0);
-        assert_ne!(
-            s & crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid),
-            0,
-            "continousTimeSamples is filled, so kContTimeValid must be set"
-        );
 
-        // The host clock, and the MIDI clock: 4.0 quarters is on a clock.
-        assert_eq!(ctx.systemTime, 9_000_000_000);
-        assert_ne!(
-            s & crate::sdk_enum_u32(StatesAndFlags_::kSystemTimeValid),
-            0
-        );
+        // The MIDI clock grid: 4.0 quarters is on a clock, so the distance is 0
+        // and still flagged.
         assert_eq!(ctx.samplesToNextClock, 0);
         assert_ne!(s & crate::sdk_enum_u32(StatesAndFlags_::kClockValid), 0);
 
@@ -365,7 +357,7 @@ mod tests {
                 "timeSig",
                 need::NEED_TIME_SIGNATURE,
                 crate::sdk_enum_u32(StatesAndFlags_::kTimeSigValid),
-                |c| c.timeSigNumerator != 0,
+                |c| c.timeSigNumerator != 0 || c.timeSigDenominator != 0,
             ),
             (
                 "continousTimeSamples",
@@ -383,7 +375,7 @@ mod tests {
                 "cycleStartMusic",
                 need::NEED_CYCLE_MUSIC,
                 crate::sdk_enum_u32(StatesAndFlags_::kCycleValid),
-                |c| c.cycleStartMusic != 0.0,
+                |c| c.cycleStartMusic != 0.0 || c.cycleEndMusic != 0.0,
             ),
         ];
 
@@ -396,6 +388,15 @@ mod tests {
                 "{name}: filled but its *Valid bit is clear — a spec-correct \
                  plugin ignores the field, so the feature is dead"
             );
+
+            // Exactly that bit, and no other field filled.
+            assert_eq!(on.state, *valid_bit, "{name}: another bit rode with it");
+            for (other, _, _, other_filled) in cases {
+                assert!(
+                    other == name || !other_filled(&on),
+                    "{name}: requesting it also filled {other}"
+                );
+            }
 
             // The inverse: nothing requested → field untouched, bit clear.
             let off = to_process_context(&t, need::empty());
@@ -460,81 +461,16 @@ mod tests {
         assert_eq!(cycle_only.cycleEndMusic, 6.0);
     }
 
-    /// Requesting only tempo fills `tempo` + `kTempoValid` and nothing else
-    /// gated — time signature stays zeroed and its valid bit stays clear.
+    /// **The continuous clock's first frame is sent as 0, not as project
+    /// time.** A node's clock starts at 0 wherever the playhead is, and its next
+    /// block continues from the block's length: project time in its place would
+    /// make `continousTimeSamples` step backward, which the field never does.
     #[test]
-    fn tempo_only_trims_the_rest() {
-        let t = populated_transport();
-        let ctx = to_process_context(&t, need::NEED_TEMPO);
-
-        // Requested.
-        assert_eq!(ctx.tempo, 128.0);
-        assert_ne!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kTempoValid),
-            0
-        );
-
-        // Not requested → left zeroed, valid bit clear.
-        assert_eq!(ctx.timeSigNumerator, 0);
-        assert_eq!(ctx.timeSigDenominator, 0);
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kTimeSigValid),
-            0
-        );
-        assert_eq!(ctx.barPositionMusic, 0.0);
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kBarPositionValid),
-            0
-        );
+    fn a_continuous_clock_at_zero_is_sent_as_zero() {
+        let first = populated_transport().continuous_samples(0);
+        let ctx = to_process_context(&first, need::NEED_CONTINOUS_TIME_SAMPLES);
+        assert_eq!(ctx.projectTimeSamples, 1_234);
         assert_eq!(ctx.continousTimeSamples, 0);
-
-        // Transport-state not requested → no play/record/cycle bits.
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kPlaying),
-            0
-        );
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kCycleActive),
-            0
-        );
-    }
-
-    /// A loop scenario: the continuous clock has advanced past where the
-    /// project clock jumped back to, so `continousTimeSamples` must reflect the
-    /// monotonic counter, distinct from `projectTimeSamples`.
-    #[test]
-    fn continuous_samples_distinct_on_loop() {
-        let mut t = populated_transport();
-        // Project time looped back to 1_234; the monotonic clock kept counting.
-        t.position.continuous_samples = 100_000;
-        let ctx = to_process_context(&t, need::NEED_CONTINOUS_TIME_SAMPLES);
-
-        assert_eq!(ctx.projectTimeSamples, 1_234);
-        assert_eq!(ctx.continousTimeSamples, 100_000);
-        assert_ne!(ctx.projectTimeSamples, ctx.continousTimeSamples);
-        assert_ne!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid),
-            0,
-            "without kContTimeValid the plugin ignores continousTimeSamples"
-        );
-    }
-
-    /// A host with no separate continuous clock leaves `continuous_samples`
-    /// unset (`0`); the continuous field then mirrors `projectTimeSamples`, so
-    /// nothing regresses for such hosts.
-    #[test]
-    fn continuous_samples_falls_back_when_unset() {
-        let t = populated_transport(); // continuous_samples defaults to 0
-        assert_eq!(t.position.continuous_samples, 0);
-        let ctx = to_process_context(&t, need::NEED_CONTINOUS_TIME_SAMPLES);
-
-        assert_eq!(ctx.projectTimeSamples, 1_234);
-        assert_eq!(ctx.continousTimeSamples, 1_234);
-        assert_eq!(ctx.projectTimeSamples, ctx.continousTimeSamples);
-        assert_ne!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid),
-            0
-        );
     }
 
     /// Always-on fields (sampleRate, projectTimeSamples) are populated even
@@ -546,8 +482,6 @@ mod tests {
 
         assert_eq!(ctx.sampleRate, 48_000.0);
         assert_eq!(ctx.projectTimeSamples, 1_234);
-        // Everything gated is gone.
-        assert_eq!(ctx.tempo, 0.0);
         assert_eq!(ctx.state, 0);
     }
 

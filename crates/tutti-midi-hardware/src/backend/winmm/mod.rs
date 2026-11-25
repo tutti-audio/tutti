@@ -56,13 +56,13 @@ use tutti_winmm_ffi::{Input, InputPort, Output, OutputPort, Port, PortKind, port
 /// The Windows [`MidiEndpoints`] implementation. Holds nothing: winmm is
 /// asked afresh at each call.
 #[derive(Debug)]
-pub struct WinMmEndpoints {
+pub(super) struct WinMmEndpoints {
     executor: Executor,
 }
 
 impl WinMmEndpoints {
     /// The winmm backend, whose device poll is a task on `executor`.
-    pub fn new(executor: &Executor) -> Self {
+    pub(super) fn new(executor: &Executor) -> Self {
         Self {
             executor: executor.clone(),
         }

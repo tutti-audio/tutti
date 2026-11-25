@@ -67,10 +67,12 @@ impl Rig {
             editor.insert(input_node, "in", MidiInputNode::new());
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
-            editor.spec_mut().connect_events(
-                EventInputPort::new(input_node, 0),
-                EventEdge::Direct(EventOutputPort::new(key, 0)),
-            );
+            editor
+                .connect_events(
+                    EventInputPort::new(input_node, 0),
+                    EventEdge::Direct(EventOutputPort::new(key, 0)),
+                )
+                .unwrap();
         }
         let out = editor
             .open_event_tap(
@@ -198,7 +200,7 @@ fn hardware_input_over_capacity_is_allocation_free() {
         }
     });
     assert!(
-        readers.iter().all(|input| input.lost.get().lost > 0),
+        readers.iter().all(|input| input.inlet.get().lost > 0),
         "the rings were full"
     );
 }

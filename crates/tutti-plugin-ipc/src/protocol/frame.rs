@@ -81,7 +81,10 @@ const fn too_large(len: usize, cap: usize) -> FrameTooLarge {
 /// # Errors
 ///
 /// [`FrameTooLarge`] when `body_len` is over `cap`.
-pub fn encode_prefix(body_len: usize, cap: usize) -> std::result::Result<[u8; 4], FrameTooLarge> {
+pub(crate) fn encode_prefix(
+    body_len: usize,
+    cap: usize,
+) -> std::result::Result<[u8; 4], FrameTooLarge> {
     if body_len > cap {
         return Err(too_large(body_len, cap));
     }
@@ -95,7 +98,10 @@ pub fn encode_prefix(body_len: usize, cap: usize) -> std::result::Result<[u8; 4]
 ///
 /// [`FrameTooLarge`] when it is over `cap`; no body is to be
 /// read or allocated for it.
-pub fn decode_prefix(prefix: [u8; 4], cap: usize) -> std::result::Result<usize, FrameTooLarge> {
+pub(crate) fn decode_prefix(
+    prefix: [u8; 4],
+    cap: usize,
+) -> std::result::Result<usize, FrameTooLarge> {
     let len = u32::from_be_bytes(prefix) as usize;
     if len > cap {
         return Err(too_large(len, cap));
@@ -109,7 +115,7 @@ pub fn decode_prefix(prefix: [u8; 4], cap: usize) -> std::result::Result<usize, 
 ///
 /// A codec error for a body that does not decode, or that has bytes left
 /// after the message: either is a protocol-version skew the handshake missed.
-pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> IpcResult<T> {
+pub(crate) fn decode_body<T: DeserializeOwned>(body: &[u8]) -> IpcResult<T> {
     match postcard::take_from_bytes(body).map_err(codec)? {
         (msg, []) => Ok(msg),
         (_, rest) => Err(IpcError::TrailingBytes {

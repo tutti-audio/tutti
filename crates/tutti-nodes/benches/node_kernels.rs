@@ -1,7 +1,8 @@
 //! **What does one block of each per-sample kernel cost, at 64 and 1024
 //! frames?**
 //!
-//! The nodes here are the waveshaper, the Moog ladder, the brickwall clip,
+//! The nodes here are the state-variable filter (held and gliding, at widths 1, 2 and 6, in
+//! blocks of 64 and 512), the waveshaper, the Moog ladder, the brickwall clip,
 //! the width adapter, the dynamics (the lookahead limiter, the gate and the
 //! compressor) and the ring-buffer family (the feedback delay, the lookahead
 //! limiter's ring and the convolver's dry
@@ -16,11 +17,14 @@
 //!
 //! ```text
 //! cargo bench -p tutti-nodes --bench node_kernels
-//! //! ```
+//! ```
+
+use tutti_graph::testing::WireDeclared;
 
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, MaxBlock};
 use tutti_dsp::LadderSaturation;
+use tutti_graph::EdgeId;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::Node;
@@ -30,15 +34,16 @@ use tutti_nodes::{
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
     GateControls, GateNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
-    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
-    TubeStageNode,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, SvfFilterConfig,
+    SvfFilterNode, SvfType, TubeStageConfig, TubeStageNode, Waveshape,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
-    CompressionRatio, Db, Drive, Feedback, Hz, Resonance, SampleRate, Samples, Seconds,
+    CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
 };
 
 const BLOCKS: [usize; 2] = [64, 1024];
+const SVF_BLOCKS: [usize; 2] = [64, 512];
 const SR: SampleRate = SampleRate::SR_48K;
 
 /// Broadband input from a seeded `SplitMix64`.
@@ -61,8 +66,20 @@ fn run<N: Node>(
     make: impl Fn() -> N,
     fed: Option<fn(usize) -> Vec<f32>>,
 ) {
+    run_blocks(c, group, case, &BLOCKS, make, fed);
+}
+
+/// [`run`] over `blocks`.
+fn run_blocks<N: Node>(
+    c: &mut Criterion,
+    group: &str,
+    case: &str,
+    blocks: &[usize],
+    make: impl Fn() -> N,
+    fed: Option<fn(usize) -> Vec<f32>>,
+) {
     let mut g = c.benchmark_group(group);
-    for block in BLOCKS {
+    for &block in blocks {
         let mut d = Direct::new(make(), SR, block);
         let shape = d.node.shape();
         let width = shape.audio_in().count().max(shape.audio_out().count()) as usize;
@@ -99,16 +116,16 @@ fn channel_sum(c: &mut Criterion) {
         for block in BLOCKS {
             let (mut ed, mut exec) =
                 Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
-            ed.spec_mut().topology.inputs = ChannelLayout::from(sources * width);
-            ed.spec_mut()
-                .topology
-                .set_outputs(vec![PortSource::Zero; width as usize]);
+            ed.resize_inputs(ChannelLayout::from(sources * width));
+            ed.wire_declared_outputs(vec![PortSource::Zero; width as usize])
+                .unwrap();
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.spec_mut().topology.connect_output(
-                        channel as usize,
+                    ed.connect_edge(EdgeId::into_output(
+                        (channel as usize) as u16,
                         PortSource::MainInput(k * width + channel),
-                    );
+                    ))
+                    .unwrap();
                 }
             }
             ed.commit().expect("commits");
@@ -151,7 +168,7 @@ fn distortion(c: &mut Criterion) {
         "tanh_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -163,7 +180,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -180,7 +197,8 @@ fn distortion(c: &mut Criterion) {
             case,
             || {
                 DistortionNode::<f32>::from(
-                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                    DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(kind))
+                        .drive(Drive::new(2.0)),
                 )
             },
             None,
@@ -192,7 +210,8 @@ fn distortion(c: &mut Criterion) {
         "hardclip_6",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(6u16, ShapeKind::HardClip).drive(Drive::new(2.0)),
+                DistortionConfig::new(6u16, Waveshape::new(ShapeKind::HardClip))
+                    .drive(Drive::new(2.0)),
             )
         },
         None,
@@ -203,7 +222,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2_fed",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -336,6 +355,35 @@ fn delay(c: &mut Criterion) {
         },
         None,
     );
+}
+
+/// A cutoff that moves every frame, between 200 Hz and 4 kHz.
+fn cutoff_sweep(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| 200.0 + 3_800.0 * i as f32 / n as f32)
+        .collect()
+}
+
+/// The low-pass SVF at 1 kHz, held and with the cutoff gliding per frame, at widths 1, 2 and 6.
+fn svf(c: &mut Criterion) {
+    for width in [1u16, 2, 6] {
+        let make = move || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(width, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
+            )
+        };
+        run_blocks(c, "svf", &format!("held_{width}"), &SVF_BLOCKS, make, None);
+        run_blocks(
+            c,
+            "svf",
+            &format!("gliding_{width}"),
+            &SVF_BLOCKS,
+            make,
+            Some(cutoff_sweep),
+        );
+    }
 }
 
 fn limiter(c: &mut Criterion) {
@@ -516,7 +564,7 @@ fn reverb(c: &mut Criterion) {
         c,
         "reverb",
         "freeverb",
-        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        || FreeverbNode::<f32>::from(FreeverbConfig::new()),
         None,
     );
     run(
@@ -526,6 +574,28 @@ fn reverb(c: &mut Criterion) {
         || FdnNode::<f32>::from(FdnConfig::new().layout(tutti_nodes::FdnLayout::default())),
         None,
     );
+    fdn_retarget_rising(c);
+}
+
+/// A retarget of the FDN bank on a decay profile that rises with frequency (the mid band 2 s
+/// over a 0.05 s low band): the design searches the response's peak, which a monotone profile
+/// does not. The size alternates so every call designs.
+fn fdn_retarget_rising(c: &mut Criterion) {
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeControls};
+
+    let mut bank = FdnBank::<f32, FdnLayout>::new(&FdnLayout::default(), SR);
+    let mut ramps = bank.ramps();
+    let mut controls = FdnControls::DEFAULT;
+    controls.decay = [Seconds::new(2.0), Seconds::new(0.05), Seconds::new(2.0)];
+    let mut sizes = [0.5, 0.51].into_iter().cycle();
+    let mut g = c.benchmark_group("reverb");
+    g.bench_function("fdn_retarget_rising", |b| {
+        b.iter(|| {
+            controls.size = tutti_units::Mix::new(sizes.next().unwrap_or(0.5));
+            bank.retarget(&mut ramps, black_box(&controls), &FreezeControls::DEFAULT);
+        })
+    });
+    g.finish();
 }
 /// The tube stage's solve at the default 4 times oversampling, over noise at the default drive.
 fn tube_stage(c: &mut Criterion) {
@@ -557,6 +627,7 @@ criterion_group!(
     ladder,
     brickwall,
     delay,
+    svf,
     limiter,
     dynamics,
     reverb,

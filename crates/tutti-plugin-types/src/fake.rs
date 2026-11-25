@@ -264,6 +264,8 @@ struct Shared {
     only_32_bit: AtomicBool,
     /// The width of the last activation: 0 before one, else 1 (32-bit) or 2.
     activated: AtomicU8,
+    /// The callback size of the last activation, in frames (0: none).
+    quantum: AtomicUsize,
     /// Blocks processed at 32-bit, and at 64-bit.
     blocks_32: AtomicU64,
     blocks_64: AtomicU64,
@@ -283,6 +285,8 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
+    /// What the host bound for the plugin's request to be processed again.
+    process_wake: std::sync::OnceLock<crate::ProcessWake>,
     /// The edits the fake reports the host did not hear
     /// (`FakePlugin::drop_reported_edits`).
     dropped_edits: AtomicU64,
@@ -378,6 +382,7 @@ impl FakePlugin {
             sleeps_over_sound: AtomicBool::new(false),
             only_32_bit: AtomicBool::new(false),
             activated: AtomicU8::new(0),
+            quantum: AtomicUsize::new(0),
             blocks_32: AtomicU64::new(0),
             blocks_64: AtomicU64::new(0),
             editor: AtomicBool::new(false),
@@ -386,6 +391,7 @@ impl FakePlugin {
             event_input: AtomicU32::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
+            process_wake: std::sync::OnceLock::new(),
             dropped_edits: AtomicU64::new(0),
             refused_off_thread: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
@@ -521,6 +527,16 @@ impl FakePlugin {
         }
     }
 
+    /// The device callback size the host activated the fake with, as it sent
+    /// it: `None` before an activation, or when none was known.
+    #[must_use]
+    pub fn activated_quantum(&self) -> Option<Samples> {
+        match self.0.quantum.load(Ordering::Relaxed) {
+            0 => None,
+            frames => Some(Samples::new(frames)),
+        }
+    }
+
     /// How many blocks the host sent the fake at `width`, as the block's own
     /// sample type said.
     #[must_use]
@@ -569,6 +585,14 @@ impl FakePlugin {
     /// ([`Control::dropped_reported_edits`]).
     pub fn drop_reported_edits(&self, n: u64) {
         self.0.dropped_edits.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// The plugin asks to be processed again, as CLAP's `request_process`: raises
+    /// the wake the host bound ([`Control::bind_wake`]), and nothing before one is.
+    pub fn request_process(&self) {
+        if let Some(wake) = self.0.process_wake.get() {
+            wake.raise();
+        }
     }
 
     /// The plugin reports `n` more callbacks the host refused for their thread
@@ -839,13 +863,17 @@ macro_rules! fake_control {
 
             /// Takes the mode where the fake is [`RenderModeSupport::Live`],
             /// recording it for [`FakePlugin::told_render_mode`].
-            fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
+            fn set_render_mode(
+                &mut self,
+                main: MainThreadMarker,
+                mode: RenderMode,
+            ) -> $crate::ModeTold {
                 if self.render_mode_support(main) != RenderModeSupport::Live {
-                    return false;
+                    return $crate::ModeTold::Unsupported;
                 }
                 let code = if mode.is_offline() { 2 } else { 1 };
                 self.shared.told_mode.store(code, Ordering::Relaxed);
-                true
+                $crate::ModeTold::Took
             }
 
             /// The fake reports no edits outside a block.
@@ -861,6 +889,11 @@ macro_rules! fake_control {
             /// As [`FakePlugin::refuse_off_thread_calls`] counted them.
             fn refused_off_thread_calls(&self) -> tutti_units::Calls {
                 tutti_units::Calls::new(self.shared.refused_off_thread.load(Ordering::Relaxed))
+            }
+
+            /// The first binding stands, as in a format host.
+            fn bind_wake(&self, wake: crate::ProcessWake) {
+                let _ = self.shared.process_wake.set(wake);
             }
         }
 
@@ -977,6 +1010,9 @@ impl Loaded for FakeLoaded {
             },
             Ordering::Relaxed,
         );
+        shared
+            .quantum
+            .store(prepare.quantum().map_or(0, |q| q.get()), Ordering::Relaxed);
         shared.log.push(Call::Activate(
             prepare.rate(),
             prepare.max_block().samples(),

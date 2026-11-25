@@ -37,9 +37,7 @@
 //! note already started always has its row, so a full table never strands one.
 
 use tutti_graph::{Event, EventWriter, Offset};
-use tutti_ump::{
-    HeldControllers, Message, NoteKey, NoteKeyEvent, NoteVelocity, Protocol, Ump, Voice2,
-};
+use tutti_ump::{HeldControllers, Message, NoteKey, NoteKeyEvent, NoteVelocity, Ump, Voice2};
 
 /// The off a ledger owes `key`: a MIDI 2.0 Note Off at velocity 0 on its Group,
 /// Channel and Note Number.
@@ -58,16 +56,12 @@ pub(crate) enum Class {
 
 impl Class {
     pub(crate) fn of(ump: Ump) -> Self {
-        let (Some(address), Some(event)) = (ump.address(), ump.note_key_event()) else {
-            return Self::Other;
-        };
         // A note is one key whichever protocol carried it: a MIDI 1.0 On is
         // ended by a MIDI 2.0 Off of the same Group, Channel and Note Number.
-        let key = |key: NoteKey| NoteKey::new(Protocol::Midi2, address, key.note());
-        match event {
-            NoteKeyEvent::On(k) => key(k).map_or(Self::Other, Self::On),
-            NoteKeyEvent::Off(k) => key(k).map_or(Self::Other, Self::Off),
-            NoteKeyEvent::Sustain { .. } => Self::Other,
+        match ump.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => Self::On(key),
+            Some(NoteKeyEvent::Off(key)) => Self::Off(key),
+            Some(NoteKeyEvent::Sustain { .. }) | None => Self::Other,
         }
     }
 }
@@ -124,7 +118,7 @@ impl<T> std::fmt::Debug for NoteLedger<T> {
 impl<T: Copy + PartialEq> NoteLedger<T> {
     /// A ledger for up to `capacity` keys at once. Control thread: allocates.
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             entries: Vec::with_capacity(capacity),
             capacity,
@@ -141,7 +135,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
 
     /// Forgets every note: the node was reset, and whatever it fed is reset
     /// with it.
-    pub fn forget(&mut self) {
+    pub(crate) fn forget(&mut self) {
         self.entries.clear();
         self.owing = 0;
         self.controllers.clear();
@@ -150,7 +144,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
     /// The handle a block sends through. Everything owed goes out first, at
     /// `first`, the block's first frame: a node cannot write a note before it
     /// has paid what it owes, because this is how it gets the handle.
-    pub fn block<'l, 'w>(
+    pub(crate) fn block<'l, 'w>(
         &'l mut self,
         out: &'l mut EventWriter<'w>,
         first: Offset,
@@ -257,6 +251,19 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         });
     }
 
+    /// How many events the port holds this block.
+    pub(crate) fn written(&self) -> usize {
+        self.out.len()
+    }
+
+    /// Counts `n` events the caller left out whole, as the port counts a
+    /// refusal ([`EventWriter::count_skipped`]).
+    pub(crate) fn count_lost(&self, n: usize) {
+        for _ in 0..n {
+            self.out.count_skipped();
+        }
+    }
+
     /// Writes `ump` at `at`. A note message is kept track of: a note-on the
     /// port took is sounding, one it refused marks its key so that note's off
     /// is skipped, an off it refused is owed. `owner` says which note a
@@ -265,7 +272,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     /// A note-on of a key that sounds ends the sounding note first, on the
     /// same frame, and takes the key. A tagged off ends the key only when its
     /// owner owns it, and is swallowed otherwise.
-    pub fn send(&mut self, at: Offset, ump: impl Into<Ump>, owner: Option<T>) {
+    pub(crate) fn send(&mut self, at: Offset, ump: impl Into<Ump>, owner: Option<T>) {
         let ump = ump.into();
         match Class::of(ump) {
             Class::Other => {
@@ -399,7 +406,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     /// one the rest are not tried (it is full), but each is owed and counted:
     /// a note that gets no off is a lost event whether or not its push was
     /// attempted.
-    pub fn release_all(&mut self, at: Offset) {
+    pub(crate) fn release_all(&mut self, at: Offset) {
         let mut full = false;
         self.ledger.entries.retain_mut(|e| {
             // What was refused belongs to the pass that is ending.

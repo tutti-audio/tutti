@@ -14,15 +14,15 @@
 //! - [`compile_routes`] turns inbound routing rules into which of the input
 //!   node's ports each listener takes.
 
-pub mod device_generation;
-pub mod input_inlets;
-pub mod input_node;
-pub mod keys;
-pub mod mpe_translator;
+pub(crate) mod device_generation;
+pub(crate) mod input_inlets;
+pub(crate) mod input_node;
+pub(crate) mod keys;
+pub(crate) mod mpe_translator;
 pub(crate) mod order;
 mod route;
 mod sensing;
-pub mod transform_node;
+pub(crate) mod transform_node;
 
 pub use device_generation::{DeviceGeneration, GenerationWriter};
 pub use input_inlets::{

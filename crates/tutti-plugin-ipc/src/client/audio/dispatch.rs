@@ -17,8 +17,8 @@ use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
-    StateReady,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
+    Request, StateReady,
 };
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -27,7 +27,9 @@ use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
-use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, ServerLosses};
+use tutti_plugin_types::{
+    MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told,
+};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -1027,12 +1029,47 @@ pub(super) fn handle_setting(
             applied.send(());
         }
         Setting::RenderMode(mode) => {
-            tell(
-                &mut lane.stream,
-                &mut lane.state,
+            // As a rate: the plugin may activate again to take the mode, and
+            // the requests behind it on this lane wait for it. Unlike a rate,
+            // no answer within the window (restarting at each sign of life) is
+            // the server failing, not a refusal: the lane ends, and the bridge
+            // is lost, so a late answer is never read and applies nothing.
+            let budget = lifecycle.timeouts().rate;
+            let Lane { stream, state } = lane;
+            let id = ask(
+                stream,
+                state,
                 ControlRequest::SetRenderMode { mode },
+                Abandoned::Discard,
+                budget,
+                budget,
             )?;
-            fence(lane, inbox, lifecycle)?;
+            loop {
+                match wait_for(stream, inbox, state, id, Some(RATE_SLICE))? {
+                    Waited::Pending => {
+                        if !lifecycle.is_running() {
+                            return Ok(());
+                        }
+                    }
+                    Waited::GaveUp => {
+                        return Err(IpcError::Timeout {
+                            operation: "a render mode",
+                            after: budget,
+                            partial: false,
+                        });
+                    }
+                    Waited::Reply(ControlReply::RenderModeSet { mode, outcome }) => {
+                        inbox.told(mode_told(mode, outcome));
+                        break;
+                    }
+                    Waited::Reply(other) => {
+                        return Err(IpcError::UnexpectedMessage {
+                            expected: "RenderModeSet",
+                            got: format!("{other:?}").into(),
+                        });
+                    }
+                }
+            }
             applied.send(());
         }
         Setting::Fence => {
@@ -1099,25 +1136,34 @@ fn read_state(state: &mut ControlState, reply: ControlReply) -> Outcome {
 }
 
 /// Record the plugin's answer to a rate change: the refusal while it refuses,
-/// cleared (and heard, if there was one) when it takes the rate.
+/// cleared when it takes the rate, and told to the host either way.
 pub(super) fn apply_rate_reply(
     lifecycle: &Lifecycle,
     inbox: &mut Unsolicited,
     rate: SampleRate,
     refusal: Option<RateRefusalCause>,
 ) {
-    match refusal {
+    let told = match refusal {
         Some(cause) => {
             let refusal = RateRefusal::new(rate, cause);
             lifecycle.set_rate_refusal(Some(refusal.clone()));
-            inbox.rate_refusal(Some(refusal));
+            Told::RateRefused(refusal)
         }
         None => {
-            if lifecycle.is_rate_refused() {
-                lifecycle.set_rate_refusal(None);
-                inbox.rate_refusal(None);
-            }
+            lifecycle.set_rate_refusal(None);
+            Told::RateTook(rate)
         }
+    };
+    inbox.told(told);
+}
+
+/// What the server's reply to a render mode says the plugin did. A plugin with
+/// no mode runs as it did, which the host that asked it had no reason to
+/// expect: it did not take it.
+fn mode_told(mode: RenderMode, outcome: ModeOutcome) -> Told {
+    match outcome {
+        ModeOutcome::Took => Told::ModeTook(mode),
+        ModeOutcome::Refused | ModeOutcome::Unsupported => Told::ModeRefused(mode),
     }
 }
 
@@ -1138,7 +1184,6 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
         News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
-        News::RenderModeNotApplied { mode } => inbox.render_mode_not_applied(mode),
         News::PluginWouldNotStop { reason } => inbox.would_not_stop(reason),
         News::ServerLosses {
             commands_refused,
@@ -1160,6 +1205,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::channels::COMMAND_QUEUE_SIZE;
     use super::*;
     use tutti_plugin_types::Timeouts;
     use tutti_units::Chunks;
@@ -1172,18 +1218,6 @@ mod tests {
             midi_out: Default::default(),
             status: Default::default(),
             refused: false,
-        }
-    }
-
-    fn state_ready(id: u64) -> ControlFrame {
-        ControlFrame::Reply {
-            id: ReqId::new(id),
-            reply: ControlReply::StateReady {
-                len: 0,
-                blob: tutti_plugin_ipc_ffi::Blob::create(&[])
-                    .expect("an empty blob")
-                    .wire(),
-            },
         }
     }
 
@@ -1295,6 +1329,26 @@ mod tests {
         }
     }
 
+    /// **A reply to a request this lane has open but is not awaiting is the
+    /// server's fault**: block 2 answered while block 1 is the one waited on.
+    #[test]
+    fn an_answer_to_another_open_block_is_a_fault() {
+        let (mut state, _replies, channels) = audio_state();
+        for seq in [1, 2] {
+            state.conv.open(
+                AudioKey::Block(seq),
+                AbandonedAudio::Block,
+                Instant::now(),
+                WINDOW,
+                WINDOW,
+            );
+        }
+        assert!(matches!(
+            state.hear(processed(2), AudioKey::Block(1), &channels),
+            Err(IpcError::ProtocolError(_))
+        ));
+    }
+
     /// **A second `Hello`, and a `LaneOpened` nobody asked for, are the server's
     /// fault** on a control connection that is in use: the version is said once,
     /// and a lane is opened only by a request.
@@ -1331,25 +1385,18 @@ mod tests {
         id
     }
 
-    /// **A query's late reply and a stalled state's late answer are dropped by
-    /// their ids, and the answer to the next request is its own**, however the
-    /// frames interleave.
+    /// **A late control reply is dropped by its id, and the answer to the next
+    /// request is its own.**
     #[test]
-    fn late_control_frames_are_dropped_by_id_and_the_answer_is_its_own() {
+    fn a_late_control_reply_is_dropped_and_the_next_answer_is_its_own() {
         let mut state = control_state();
         let mut inbox = Unsolicited::new();
         let query = open(&mut state, 1, Abandoned::Discard);
-        let save = open(&mut state, 2, Abandoned::Discard);
         state.give_up(query).unwrap();
-        state.give_up(save).unwrap();
         let next = open(&mut state, 3, Abandoned::Discard);
 
         assert!(matches!(
             state.hear(value(1), Some(next), Instant::now(), &mut inbox),
-            Ok(None)
-        ));
-        assert!(matches!(
-            state.hear(state_ready(2), Some(next), Instant::now(), &mut inbox),
             Ok(None)
         ));
         let list = ControlFrame::Reply {
@@ -1362,70 +1409,57 @@ mod tests {
             state.hear(list, Some(next), Instant::now(), &mut inbox),
             Ok(Some(ControlReply::ParameterList { .. }))
         ));
-        assert!(
-            state
-                .hear(state_ready(2), None, Instant::now(), &mut inbox)
-                .is_err(),
-            "the state's answer had ended"
-        );
     }
 
-    /// **A state request slower than its window lives on the server's beats, under
-    /// the ceiling, and without them is due at the window**: constructed instants,
-    /// no clock. The window and the ceiling are the ones the state handlers open
-    /// a request with.
+    /// **A state request opened with the state's window lives on the server's
+    /// beats, a window after the last one, and never past its ceiling.** The
+    /// window and the ceiling are the ones `Deadline::State` hands the lane;
+    /// the beats come every two seconds short of the window, so five of them
+    /// carry the request past three windows.
     #[test]
-    fn a_state_request_slower_than_its_window_lives_on_beats_under_the_ceiling() {
-        let timeouts = Timeouts::default();
-        let (window, ceiling) = (timeouts.state, timeouts.state_ceiling());
+    fn a_state_request_lives_on_beats_past_its_window_and_stops_at_the_ceiling() {
+        let (window, ceiling) =
+            super::super::messages::Deadline::State.window(&Timeouts::default());
         let start = Instant::now();
         let at = |secs: u64| start + Duration::from_secs(secs);
-        let working = |id| ControlFrame::Working {
-            id,
-            stage: crate::Working::Opening,
-        };
-        let open = |state: &mut ControlState| {
-            let id = ReqId::new(1);
-            state
-                .conv
-                .open(id, Abandoned::Discard, start, window, ceiling);
-            id
-        };
+        let mut state = control_state();
         let mut inbox = Unsolicited::new();
-
-        // Without beats: due at the window.
-        let mut silent = control_state();
-        let id = open(&mut silent);
-        assert!(!silent.conv.is_due(id, at(window.as_secs() - 1)));
-        assert!(silent.conv.is_due(id, at(window.as_secs())));
-
-        // With a beat every few seconds: alive well past the window, due a window
-        // after the last beat, and never past the ceiling.
-        let mut beaten = control_state();
-        let id = open(&mut beaten);
+        let id = ReqId::new(1);
+        state
+            .conv
+            .open(id, Abandoned::Discard, start, window, ceiling);
+        let beat = window.as_secs() - 2;
         for step in 1..=5u64 {
-            let now = at(step * (window.as_secs() - 2));
-            assert!(!beaten.conv.is_due(id, now), "beat {step} came in time");
+            let now = at(step * beat);
+            assert!(!state.conv.is_due(id, now), "beat {step} came in time");
+            let working = ControlFrame::Working {
+                id,
+                stage: crate::Working::Opening,
+            };
             assert!(matches!(
-                beaten.hear(working(id), Some(id), now, &mut inbox),
+                state.hear(working, Some(id), now, &mut inbox),
                 Ok(None)
             ));
         }
-        assert!(window.as_secs() * 3 < ceiling.as_secs());
-        let last = at(5 * (window.as_secs() - 2));
+        assert!(5 * beat > 3 * window.as_secs(), "past three windows");
+        let last = at(5 * beat);
         assert!(
-            !beaten
+            !state
                 .conv
                 .is_due(id, last + window - Duration::from_secs(1))
         );
-        assert!(beaten.conv.is_due(id, last + window));
+        assert!(state.conv.is_due(id, last + window));
+        let working = ControlFrame::Working {
+            id,
+            stage: crate::Working::Opening,
+        };
         assert!(
-            beaten
-                .hear(working(id), Some(id), at(ceiling.as_secs() - 1), &mut inbox)
+            state
+                .hear(working, Some(id), at(ceiling.as_secs() - 1), &mut inbox)
                 .is_ok()
         );
         assert!(
-            beaten.conv.is_due(id, at(ceiling.as_secs())),
+            state.conv.is_due(id, at(ceiling.as_secs())),
             "the ceiling stands"
         );
     }
@@ -1457,6 +1491,13 @@ mod tests {
                 )
                 .is_err(),
             "an error for a request nobody made"
+        );
+        let second = open(&mut state, 2, Abandoned::Discard);
+        assert!(
+            state
+                .hear(error(second), Some(first), Instant::now(), &mut inbox)
+                .is_err(),
+            "an error for an open request that is not the one awaited"
         );
     }
 
@@ -1634,78 +1675,51 @@ mod tests {
         Duration::from_secs_f64(num_samples as f64 / rate.get())
     }
 
-    /// A fixed 500 ms timeout sits ~750x above the audio thread's 667 us budget
-    /// at 64 frames / 48 kHz. While the bridge thread blocks in `recv_reply` it
-    /// dequeues nothing, so the audio thread's one-command-per-block fills the
-    /// 128-slot queue and one slow reply becomes a sustained run of silence.
-    /// The timeout is therefore bound to a few block periods.
+    /// **The timeout outlasts the ring**: the bridge waits at least as long as
+    /// the ring takes to recycle a slot ([`MAX_BEHIND`] block periods), or it
+    /// would abandon a block whose reply is still wanted.
     #[test]
-    fn timeout_is_a_small_multiple_of_the_block_period() {
+    fn the_timeout_outlasts_the_ring() {
         for rate in RATES {
             for n in BLOCKS {
                 let t = process_timeout(n, rate);
-                let p = period(n, rate);
-                let limit = p * PROCESS_TIMEOUT_PERIODS;
+                let ring = period(n, rate) * MAX_BEHIND as u32;
                 assert!(
-                    t <= limit.max(MIN_PROCESS_TIMEOUT),
-                    "n={n} rate={rate}: timeout {t:?} exceeds {PROCESS_TIMEOUT_PERIODS} periods ({limit:?})"
-                );
-                assert!(
-                    t >= limit,
-                    "n={n} rate={rate}: timeout {t:?} is under {PROCESS_TIMEOUT_PERIODS} periods ({limit:?})"
+                    t >= ring,
+                    "n={n} rate={rate}: timeout {t:?} is under the ring's lifetime {ring:?}"
                 );
             }
         }
     }
 
-    /// The bridge's patience must outlast the ring, or it would abandon blocks
-    /// whose slots are still live — declaring a plugin unresponsive while its
-    /// reply was still wanted.
-    ///
-    /// Bounded against the ring depth rather than the audio thread's wait
-    /// budget: the audio thread never waits, so there is nothing to outlast on
-    /// that side.
+    /// **One slow reply cannot fill the command queue**: while the bridge thread
+    /// waits it dequeues nothing and the audio thread queues one command per
+    /// block, so the wait must stay under [`COMMAND_QUEUE_SIZE`] block periods.
+    /// A fixed 500 ms against a 64-frame block at 48 kHz is some 750 periods.
     #[test]
-    fn timeout_keeps_the_bridge_within_the_ring_depth() {
+    fn one_slow_reply_cannot_fill_the_command_queue() {
         for rate in RATES {
             for n in BLOCKS {
                 let t = process_timeout(n, rate);
-                let ring_lifetime = period(n, rate) * MAX_BEHIND as u32;
+                let queue = period(n, rate) * COMMAND_QUEUE_SIZE as u32;
                 assert!(
-                    t >= ring_lifetime,
-                    "n={n} rate={rate}: timeout {t:?} gives up before the slot \
-                     is recycled ({ring_lifetime:?})"
+                    t < queue,
+                    "n={n} rate={rate}: timeout {t:?} lets the audio thread fill the \
+                     {COMMAND_QUEUE_SIZE}-slot queue ({queue:?})"
                 );
             }
         }
     }
 
-    /// The block just submitted is never stale — dropping it would turn every
-    /// block into silence, the opposite of the fix.
+    /// **The floor is 2 ms**: at the shortest block and highest rate the period
+    /// is 333 us, under the scheduler's wake latency, so the timeout is the
+    /// floor and not a few periods of it.
     #[test]
-    fn the_newest_block_is_never_stale() {
-        assert!(!is_stale(10, 10));
-    }
-
-    /// Anything still inside the ring is sent: its slot has not been recycled,
-    /// so its output can still be collected.
-    #[test]
-    fn blocks_still_inside_the_ring_are_sent() {
-        for behind in 0..=MAX_BEHIND {
-            assert!(
-                !is_stale(10 - behind, 10),
-                "{behind} block(s) behind is still within the ring"
-            );
-        }
-    }
-
-    /// Past the ring depth the slot has been overwritten, so no reply can land
-    /// anywhere useful.
-    #[test]
-    fn blocks_past_the_ring_are_dropped() {
-        assert!(is_stale(10 - MAX_BEHIND - 1, 10));
-        assert!(is_stale(0, 10));
-        assert!(is_stale(0, 1_000));
+    fn the_timeout_never_drops_under_two_milliseconds() {
+        assert_eq!(
+            process_timeout(64, SampleRate::SR_192K),
+            Duration::from_millis(2)
+        );
     }
 
     /// A backlog collapses to the live blocks in one pass rather than being

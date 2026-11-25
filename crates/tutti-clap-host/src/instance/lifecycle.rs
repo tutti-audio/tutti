@@ -52,6 +52,9 @@ pub(crate) fn plugin_error(error: ClapError) -> PluginError {
         ClapError::EditorError(reason) => {
             PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
         }
+        ClapError::FloatingEditor => {
+            PluginError::Editor(tutti_plugin_types::EditorError::FloatingEditor)
+        }
         other => PluginError::Other(other.to_string()),
     }
 }
@@ -196,18 +199,13 @@ impl ClapLoaded {
         // (`ClapProcessor::output_param_points_dropped`).
         reserve_output_queues(&mut scratch, &table, max_frames);
         // A UMP Group is an input note port: each port's own dialect.
-        let ports = self
-            .midi_note_ports(main)
-            .and_then(|ports| Ok((ports, self.midi_capable_ports(main)?)));
-        let (ports, capable) = match ports {
-            Ok(both) => both,
+        let ports = match self.note_sends(main) {
+            Ok(ports) => ports,
             Err(e) => return Err(refuse(self, ClapError::NotSupported(e.to_string()))),
         };
         if let Err(e) = scratch.input_events.set_note_ports(&ports) {
             return Err(refuse(self, ClapError::NotSupported(e.to_string())));
         }
-        // `clap_event_midi` only to a port that declares the MIDI dialect.
-        scratch.input_events.set_midi_capable_ports(&capable);
         scratch
             .in_note_expressions
             .reserve_exact(INPUT_NOTE_EXPRESSIONS);

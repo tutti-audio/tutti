@@ -2,21 +2,23 @@
 //! laid out by hand from M2-116 (the structure rules are about *order*, which
 //! only a hand-built stream can get wrong on purpose).
 
-use crate::common::{self, metrical, track};
-use crate::common::{encoded, read_bytes};
+use crate::common;
+use crate::common::{encoded, encoded_clip, read_bytes, read_clip};
 
 use tutti_fixtures::midi;
 use tutti_midi_ci::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick, Track,
-    TracksError,
+    ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipSequence,
+    MidiFile, MidiFileKind, ReadError, SmfDivision, SmfEvent, SmfParseError, SmfReadError,
+    StandardMidiFile, Tick,
 };
+use tutti_music::{Meter, TimeSignature};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, DeltaTicks, Flex, FlexTempo, JrTicks, Message, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, Stream, TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
-use tutti_units::{Beat, Bpm, Seconds};
+use tutti_units::{BarNumber, Beat, Bpm, Seconds};
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -85,8 +87,8 @@ fn valid() -> Vec<Ump> {
 /// What reading a clip made of `parts` refused: the index of the packet whose
 /// first word is the word the error names, and the rule broken.
 fn clip_error(parts: &[Ump]) -> (usize, ClipFileError) {
-    match read_bytes(clip(parts)) {
-        Err(ReadError::Clip { word, cause }) => {
+    match read_clip(clip(parts)) {
+        Err(ClipReadError::Parse { word, cause }) => {
             let mut at = 0;
             let packet = parts
                 .iter()
@@ -104,35 +106,30 @@ fn clip_error(parts: &[Ump]) -> (usize, ClipFileError) {
     }
 }
 
-fn packet(m: Message) -> FileEvent {
-    FileEvent::Message(m)
+/// The sequence of `events`, each `(tick, packet)`.
+fn sequence(events: Vec<(u64, Ump)>) -> ClipSequence {
+    events.into_iter().map(|(t, e)| (Tick(t), e)).collect()
 }
 
 /// Spec: m2-116/3.2.2#1, m2-116/hdr/1, m2-116/hdr/2, m2-116/hdr/3, m2-116/hdr/4, m2-116/hdr/5, m2-116/hdr/6, m2-116/hdr/7, m2-116/hdr/8, m2-116/5#2
 #[test]
 fn a_clip_reads_at_absolute_ticks() {
-    let file = read_bytes(clip(&valid())).unwrap();
+    let file = read_clip(clip(&valid())).unwrap();
     assert_eq!(
-        MidiFileKind::detect(encoded(&file)).unwrap(),
+        MidiFileKind::detect(encoded_clip(&file)).unwrap(),
         Some(MidiFileKind::ClipFile)
     );
-    assert_eq!(metrical(&file).ticks_per_quarter(), DIVISION);
-    let events = &file.tracks()[0].events();
+    assert_eq!(file.ticks_per_quarter(), DIVISION);
+    let events = &file.sequence().events();
     assert_eq!(events.len(), 2, "structure is not an event");
     assert_eq!(events[0].0, Tick(0));
     assert_eq!(events[1].0, Tick(96));
-    assert_eq!(
-        events[0].1,
-        FileEvent::Message(on(60, 0xABCD).decode().unwrap())
-    );
-    assert_eq!(metrical(&file).beat_at(events[1].0), Beat::new(1.0));
+    assert_eq!(events[0].1, on(60, 0xABCD));
+    assert_eq!(events[1].0.beats(file.ticks_per_quarter()), Beat::new(1.0));
     // The clip's length is the delta before End of Clip.
-    assert_eq!(
-        metrical(&file).beat_at(metrical(&file).end()),
-        Beat::new(2.0)
-    );
+    assert_eq!(file.end().beats(file.ticks_per_quarter()), Beat::new(2.0));
     // And a clip's notes keep all 16 bits.
-    let notes: Vec<_> = file.tracks()[0].notes();
+    let notes: Vec<_> = file.sequence().notes();
     assert_eq!(notes.len(), 1);
     assert_eq!((notes[0].start, notes[0].end), (Tick(0), Tick(96)));
     assert_eq!(notes[0].velocity, NoteVelocity::new(0xABCD));
@@ -147,9 +144,9 @@ fn the_clip_length_is_the_delta_before_end_of_clip() {
     let mut parts = valid();
     let n = parts.len();
     parts[n - 2] = dcs(4 * u32::from(TPQ));
-    let file = read_bytes(clip(&parts)).unwrap();
-    assert_eq!(file.tracks()[0].end(), Tick(5 * u64::from(TPQ)));
-    let again = read_bytes(encoded(&file)).unwrap();
+    let file = read_clip(clip(&parts)).unwrap();
+    assert_eq!(file.end(), Tick(5 * u64::from(TPQ)));
+    let again = read_clip(encoded_clip(&file)).unwrap();
     assert_eq!(again, file);
 }
 
@@ -180,10 +177,10 @@ fn a_gap_past_the_dcs_field_round_trips() {
         dcs(0),
         end(),
     ];
-    let file = read_bytes(clip(&parts)).unwrap();
-    assert_eq!(file.tracks()[0].events()[2].0, Tick(u64::from(gap)));
-    let written = encoded(&file);
-    assert_eq!(read_bytes(&written).unwrap(), file);
+    let file = read_clip(clip(&parts)).unwrap();
+    assert_eq!(file.sequence().events()[2].0, Tick(u64::from(gap)));
+    let written = encoded_clip(&file);
+    assert_eq!(read_clip(&written).unwrap(), file);
 }
 
 #[test]
@@ -193,13 +190,10 @@ fn a_packet_no_definition_covers_survives() {
     let mut parts = valid();
     parts.insert(6, reserved);
     parts.insert(6, dcs(0));
-    let file = read_bytes(clip(&parts)).unwrap();
-    let kept = file.tracks()[0]
-        .events()
-        .iter()
-        .any(|(_, e)| matches!(e, FileEvent::Unknown(u) if u.0 == reserved));
-    assert!(kept, "{:?}", file.tracks()[0].events());
-    assert_eq!(read_bytes(encoded(&file)).unwrap(), file);
+    let file = read_clip(clip(&parts)).unwrap();
+    let kept = file.sequence().events().iter().any(|(_, e)| *e == reserved);
+    assert!(kept, "{:?}", file.sequence().events());
+    assert_eq!(read_clip(encoded_clip(&file)).unwrap(), file);
 }
 
 /// **The tempo map is the Set Tempo messages** (Flex Data, M2-116 section
@@ -209,7 +203,7 @@ fn a_packet_no_definition_covers_survives() {
 #[test]
 fn the_tempo_map_is_the_set_tempo_messages() {
     let q = u32::from(TPQ);
-    let file = read_bytes(clip(&[
+    let file = read_clip(clip(&[
         dcs(0),
         dctpq(TPQ),
         dcs(0),
@@ -223,19 +217,92 @@ fn the_tempo_map_is_the_set_tempo_messages() {
     ]))
     .unwrap();
     let close = |a: Seconds, b: f64| assert!((a.get() - b).abs() < 1e-9, "{a:?} vs {b}");
-    close(metrical(&file).seconds_at(Tick(4 * u64::from(q))), 2.0);
-    close(metrical(&file).seconds_at(Tick(8 * u64::from(q))), 6.0);
-    assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat::new(5.0)),
-        Bpm::of(60.0)
-    );
+    close(file.seconds_at(Tick(4 * u64::from(q))), 2.0);
+    close(file.seconds_at(Tick(8 * u64::from(q))), 6.0);
+    assert_eq!(file.tempo_map().tempo_at(Beat::new(5.0)), Bpm::of(60.0));
     // The messages are events, kept.
-    assert_eq!(file.tracks()[0].events().len(), 2);
+    assert_eq!(file.sequence().events().len(), 2);
 
-    let bare = read_bytes(clip(&valid())).unwrap();
+    let bare = read_clip(clip(&valid())).unwrap();
+    assert_eq!(bare.tempo_map().constant_tempo(), Some(Bpm::of(120.0)));
+}
+
+/// **The meter map is the Set Time Signature messages** (Flex Data, M2-104
+/// section 7.5.4; M2-116 section 6.1.2 lets the sequence hold several): 3/4 from
+/// the start, then 6/8 at beat 3, the downbeat of bar 2. Bars of 3 quarters
+/// are the same length in both signatures, so bar 2 starts at beat 3.
+/// Spec: m2-116/6.1.2#4
+#[test]
+fn the_meter_map_is_the_set_time_signature_messages() {
+    let q = u32::from(TPQ);
+    let file = read_clip(clip(&[
+        dcs(0),
+        dctpq(TPQ),
+        dcs(0),
+        start(),
+        dcs(0),
+        signature(3, 2),
+        dcs(3 * q),
+        signature(6, 3),
+        dcs(3 * q),
+        end(),
+    ]))
+    .unwrap();
+    let map = file.meter_map();
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(3, 4));
+    assert_eq!(map.at(Beat::new(2.9)), TimeSignature::of(3, 4));
+    assert_eq!(map.at(Beat::new(3.0)), TimeSignature::of(6, 8));
+    assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(3.0));
+    assert!(file.refused_time_signatures().is_empty());
+
+    let bare = read_clip(clip(&valid())).unwrap();
+    assert_eq!(bare.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
+}
+
+/// **A header Set Time Signature is the meter from beat 0** (M2-116 section
+/// 6.1.2), as the header's Set Tempo is the tempo from tick 0; one the sequence
+/// states at tick 0 replaces it.
+/// Spec: m2-116/6.1.2#1
+#[test]
+fn a_header_set_time_signature_is_the_meter_from_beat_zero() {
+    let header = [dcs(0), set_tempo(100.0), dcs(0), time_signature()];
+    let held = read_clip(clip(&with_header(&header))).unwrap();
+    assert_eq!(held.meter_map().at(Beat::new(0.0)), TimeSignature::of(3, 4));
+
+    let mut parts = vec![dcs(0), dctpq(TPQ)];
+    parts.extend(header);
+    parts.extend([dcs(0), start(), dcs(0), signature(6, 3), dcs(0), end()]);
+    let replaced = read_clip(clip(&parts)).unwrap();
+    let map = replaced.meter_map();
+    assert_eq!(map.changes().len(), 1);
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(6, 8));
+}
+
+/// A Flex denominator field of 0 is non-standard (M2-104 section 7.5.4): the
+/// message makes no meter change and is listed as the wire states it.
+#[test]
+fn a_flex_time_signature_denominator_of_zero_is_refused() {
+    let file = read_clip(clip(&[
+        dcs(0),
+        dctpq(TPQ),
+        dcs(0),
+        start(),
+        dcs(0),
+        signature(3, 0),
+        dcs(0),
+        end(),
+    ]))
+    .unwrap();
+    assert_eq!(file.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
+    let refused = file.refused_time_signatures();
+    assert_eq!(refused.len(), 1);
     assert_eq!(
-        metrical(&bare).tempo_map().constant_tempo(),
-        Some(Bpm::of(120.0))
+        (
+            refused[0].beat,
+            refused[0].numerator,
+            refused[0].denominator_power
+        ),
+        (Beat::new(0.0), 3, 0)
     );
 }
 
@@ -292,8 +359,8 @@ fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     assert_eq!(clip_error(&parts), (0, ClipFileError::ZeroDctpq));
     for ticks in [1, u16::MAX] {
         parts[1] = dctpq(ticks);
-        let file = read_bytes(clip(&parts)).unwrap();
-        assert_eq!(metrical(&file).ticks_per_quarter().get(), ticks);
+        let file = read_clip(clip(&parts)).unwrap();
+        assert_eq!(file.ticks_per_quarter().get(), ticks);
     }
 }
 
@@ -318,14 +385,14 @@ fn a_wall_clock_clip_has_a_millisecond_tick() {
         dcs(0),
         end(),
     ];
-    let file = read_bytes(clip(&parts)).unwrap();
-    let events = &file.tracks()[0].events();
+    let file = read_clip(clip(&parts)).unwrap();
+    let events = &file.sequence().events();
     let note = events
         .iter()
-        .find(|(_, e)| matches!(e, FileEvent::Message(Message::Midi2(..))))
+        .find(|(_, e)| matches!(e.decode(), Ok(Message::Midi2(..))))
         .unwrap();
     assert_eq!(note.0, Tick(2500));
-    let seconds = metrical(&file).seconds_at(note.0).get();
+    let seconds = file.seconds_at(note.0).get();
     assert!((seconds - 2.5).abs() < 1e-9, "{seconds}");
 }
 
@@ -355,7 +422,7 @@ fn clockstamps_and_jr_messages_do_not_count_as_content() {
         dcs(5),
     ];
     parts.extend(valid());
-    assert!(read_bytes(clip(&parts)).is_ok());
+    assert!(read_clip(clip(&parts)).is_ok());
 }
 
 /// Spec: m2-116/5#1
@@ -363,15 +430,40 @@ fn clockstamps_and_jr_messages_do_not_count_as_content() {
 fn the_magic_alignment_and_a_cut_packet_are_refused() {
     let good = clip(&valid());
     assert!(matches!(
-        read_bytes(b"SMF2CLI"),
+        MidiFile::from_bytes(b"SMF2CLI"),
         Err(ReadError::UnknownFormat)
     ));
+    // A Clip File's own reader names the magic it did not find.
+    assert_eq!(
+        ClipFile::from_bytes(b"SMF2CLI"),
+        Err(ClipReadError::Parse {
+            word: 0,
+            cause: ClipFileError::BadMagic,
+        })
+    );
+    // And the Standard MIDI File's reader names what it did not find: its header
+    // chunk.
+    assert_eq!(
+        StandardMidiFile::from_bytes(&good),
+        Err(SmfReadError::Parse {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::MissingHeader,
+        })
+    );
+    assert_eq!(
+        ClipFile::from_bytes(b"MThd\0\0\0\x06\0\0\0\x01\0\x60"),
+        Err(ClipReadError::Parse {
+            word: 0,
+            cause: ClipFileError::BadMagic,
+        })
+    );
     let mut odd = good.clone();
     odd.push(0);
     assert!(matches!(
-        read_bytes(&odd),
+        read_clip(&odd),
         // The word the stray byte starts.
-        Err(ReadError::Clip {
+        Err(ClipReadError::Parse {
             word,
             cause: ClipFileError::Unaligned,
         }) if word == (good.len() - 8) / 4
@@ -379,9 +471,9 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
     // End of Clip is a 128-bit message: cut it to one word.
     let cut = &good[..good.len() - 12];
     assert!(matches!(
-        read_bytes(cut),
+        read_clip(cut),
         // The one word of the cut packet is past the whole packets.
-        Err(ReadError::Clip {
+        Err(ClipReadError::Parse {
             word,
             cause: ClipFileError::MessageCutOff,
         }) if word == (cut.len() - 8) / 4 - 1
@@ -392,10 +484,10 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
 #[test]
 fn no_prefix_of_a_valid_clip_is_accepted() {
     let bytes = clip(&valid());
-    assert!(read_bytes(&bytes).is_ok());
+    assert!(read_clip(&bytes).is_ok());
     for n in 0..bytes.len() {
         assert!(
-            read_bytes(&bytes[..n]).is_err(),
+            read_clip(&bytes[..n]).is_err(),
             "the first {n} of {} bytes were accepted",
             bytes.len()
         );
@@ -406,15 +498,7 @@ fn no_prefix_of_a_valid_clip_is_accepted() {
 
 #[test]
 fn what_a_clip_cannot_hold_is_refused() {
-    let one = |event| MidiFile::clip(DIVISION, track(vec![(0, event)]));
-    assert!(matches!(
-        one(FileEvent::SysEx(common::complete(&[1]))),
-        Err(TracksError::Refused { .. })
-    ));
-    assert!(matches!(
-        one(FileEvent::Meta(Meta::tempo(Bpm::of(120.0)).unwrap())),
-        Err(TracksError::Refused { .. })
-    ));
+    let one = |event| ClipFile::new(DIVISION, ClipHeader::new(), sequence(vec![(0, event)]));
     // The file's own structure is not an event.
     for structure in [
         Message::Stream(Stream::StartOfClip),
@@ -423,8 +507,11 @@ fn what_a_clip_cannot_hold_is_refused() {
         Message::Utility(Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(1))),
     ] {
         assert!(matches!(
-            one(packet(structure)),
-            Err(TracksError::Refused { .. })
+            one(structure.into()),
+            Err(ClipBuildError::Refused {
+                part: ClipPart::Sequence,
+                ..
+            })
         ));
     }
 }
@@ -435,18 +522,19 @@ fn what_a_clip_cannot_hold_is_refused() {
 #[test]
 fn a_gap_past_a_u32_round_trips() {
     let at = u64::from(u32::MAX) + 1;
-    let file = MidiFile::clip(
+    let file = ClipFile::new(
         DIVISION,
-        Track::new()
-            .push(Tick(at), packet(on(60, 1).decode().unwrap()))
+        ClipHeader::new(),
+        ClipSequence::new()
+            .push(Tick(at), on(60, 1))
             .unwrap()
             .ending_at(Tick(at + 7)),
     )
     .unwrap();
-    let bytes = encoded(&file);
+    let bytes = encoded_clip(&file);
     // 4096 restarts of two words each, and the Delta Clockstamps around them.
     assert!(bytes.len() > 4096 * 8);
-    assert_eq!(read_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_clip(&bytes).unwrap(), file);
 }
 
 /// A gap whose Null restarts would not fit 4 GB is refused when the clip is
@@ -454,19 +542,22 @@ fn a_gap_past_a_u32_round_trips() {
 #[test]
 fn a_gap_too_long_to_write_is_too_large() {
     assert_eq!(
-        MidiFile::clip(DIVISION, Track::new().ending_at(Tick(u64::MAX)),),
-        Err(TracksError::TooLarge)
+        ClipFile::new(
+            DIVISION,
+            ClipHeader::new(),
+            ClipSequence::new().ending_at(Tick(u64::MAX))
+        ),
+        Err(ClipBuildError::TooLarge)
     );
 }
 
 // ---- notes ----------------------------------------------------------------
 
 fn notes_of(events: Vec<(u64, Ump)>) -> Vec<tutti_midi_file::PairedNote> {
-    let events = events
-        .into_iter()
-        .map(|(t, u)| (t, packet(u.decode().unwrap())))
-        .collect();
-    MidiFile::clip(DIVISION, track(events)).unwrap().tracks()[0].notes()
+    ClipFile::new(DIVISION, ClipHeader::new(), sequence(events))
+        .unwrap()
+        .sequence()
+        .notes()
 }
 
 #[test]
@@ -499,23 +590,36 @@ fn a_midi2_note_on_at_velocity_zero_is_neither_start_nor_end() {
 fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     let message = |on: bool| {
         let (note, velocity) = (NoteNumber::of(64), U7::of(90));
-        Message::Midi1(
-            Address::first(MidiChannel::FIRST),
-            if on {
-                Voice1::NoteOn { note, velocity }
-            } else {
-                Voice1::NoteOff { note, velocity }
-            },
-        )
+        if on {
+            Voice1::NoteOn { note, velocity }
+        } else {
+            Voice1::NoteOff { note, velocity }
+        }
     };
-    let events = || vec![(0, packet(message(true))), (96, packet(message(false)))];
-    let smf = crate::common::format0(SMF_DIVISION, track(events())).unwrap();
-    let clip = MidiFile::clip(DIVISION, track(events())).unwrap();
-    let read = |f: &MidiFile| read_bytes(encoded(f)).unwrap();
-    let (a, b) = (read(&smf), read(&clip));
-    assert_eq!(a.tracks()[0].notes(), b.tracks()[0].notes());
+    let smf_event = |on| SmfEvent::Channel {
+        channel: MidiChannel::FIRST,
+        message: message(on),
+    };
+    let packet = |on| Message::Midi1(Address::first(MidiChannel::FIRST), message(on));
+    let smf = crate::common::format0(
+        SMF_DIVISION,
+        common::track(vec![(0, smf_event(true)), (96, smf_event(false))]),
+    )
+    .unwrap();
+    let clip = ClipFile::new(
+        DIVISION,
+        ClipHeader::new(),
+        sequence(vec![(0, packet(true).into()), (96, packet(false).into())]),
+    )
+    .unwrap();
+    let a = read_bytes(encoded(&smf)).unwrap();
+    let b = read_clip(encoded_clip(&clip)).unwrap();
+    assert_eq!(a.tracks()[0].notes(), b.sequence().notes());
     // The file's Set Tempo and Time Signature come first.
-    assert_eq!(a.tracks()[0].events()[2], b.tracks()[0].events()[0]);
+    assert_eq!(
+        a.tracks()[0].events()[2].1.packet(),
+        Some(b.sequence().events()[0].1)
+    );
 }
 
 // ---- the configuration header (M2-116 sections 6 to 6.1.2) ----------------
@@ -568,16 +672,23 @@ fn program_change() -> Ump {
     .into()
 }
 
-fn time_signature() -> Ump {
+/// A Flex Data Set Time Signature (M2-104 section 7.5.4): the denominator
+/// field is the power of two, 2 for a quarter and 3 for an eighth.
+fn signature(numerator: u8, denominator: u8) -> Ump {
     Message::Flex(
         MidiGroup::FIRST,
         Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
-            numerator: 3,
-            denominator: 2,
+            numerator,
+            denominator,
             thirty_seconds: 8,
         }),
     )
     .into()
+}
+
+/// 3/4 as a Flex Data Set Time Signature.
+fn time_signature() -> Ump {
+    signature(3, 2)
 }
 
 /// A clip whose header after the DCTPQ is `header` (each behind a DCS of 0
@@ -606,12 +717,12 @@ fn set_profile_on_before_the_dctpq_is_accepted() {
     let messages = then(&[&set_profile_on(), &set_profile_on_of(MPE)]);
     let mut parts = messages.clone();
     parts.extend(with_header(&[]));
-    let file = read_bytes(clip(&parts)).unwrap();
-    let header = &file.tracks()[0].header();
+    let file = read_clip(clip(&parts)).unwrap();
+    let header = file.header().messages();
     assert_eq!(header.len(), messages.len());
     assert!(header.iter().all(|(t, _)| *t == Tick(0)));
     // The write puts them before the DCTPQ again, with no DCS between.
-    let written = encoded(&file);
+    let written = encoded_clip(&file);
     let mut expected = MAGIC.to_vec();
     for ump in then(&[&messages, &[dcs(0), dctpq(TPQ)]]) {
         for w in ump.words() {
@@ -619,7 +730,7 @@ fn set_profile_on_before_the_dctpq_is_accepted() {
         }
     }
     assert!(written.starts_with(&expected));
-    assert_eq!(read_bytes(&written).unwrap(), file);
+    assert_eq!(read_clip(&written).unwrap(), file);
 }
 
 /// Anything else before the DCTPQ is not allowed: a note, or a SysEx that is
@@ -650,7 +761,7 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
         },
     ));
     let sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7D, 1, 2, 3]);
-    let file = read_bytes(clip(&with_header(&[
+    let file = read_clip(clip(&with_header(&[
         dcs(0),
         program_change(),
         dcs(10),
@@ -659,17 +770,13 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
         sysex,
     ])))
     .unwrap();
-    let track = &file.tracks()[0];
-    let ticks: Vec<u64> = track.header().iter().map(|(t, _)| t.0).collect();
+    let ticks: Vec<u64> = file.header().messages().iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 10, 15]);
-    assert_eq!(
-        track.header()[2].1,
-        FileEvent::Message(sysex.decode().unwrap())
-    );
+    assert_eq!(file.header().messages()[2].1, sysex);
     // Not on the sequence's timeline, not sounding at bar 1.
-    assert_eq!(track.events().len(), 2);
-    assert_eq!(metrical(&file).events().count(), 2);
-    assert_eq!(read_bytes(encoded(&file)).unwrap(), file);
+    assert_eq!(file.sequence().events().len(), 2);
+    assert_eq!(file.timeline().packets.len(), 2);
+    assert_eq!(read_clip(encoded_clip(&file)).unwrap(), file);
 }
 
 /// Spec: m2-116/6.1#3, m2-116/6.1.1#3
@@ -693,7 +800,7 @@ fn a_header_set_tempo_not_first_or_not_at_delta_zero_is_misplaced() {
     assert_eq!(clip_error(&late), (2, ClipFileError::MisplacedHeaderTempo));
     // Sharing the DCTPQ's DCS (no DCS of its own) is first at delta 0.
     let sharing = with_header(&[set_tempo(100.0)]);
-    assert!(read_bytes(clip(&sharing)).is_ok());
+    assert!(read_clip(clip(&sharing)).is_ok());
 }
 
 /// Spec: m2-116/6.1#3, m2-116/6.1.2#3
@@ -738,7 +845,7 @@ fn a_header_time_signature_must_follow_the_set_tempo_immediately() {
         with_header(&[dcs(0), set_tempo(100.0), dcs(0), time_signature()]),
         with_header(&[dcs(0), time_signature()]),
     ] {
-        assert!(read_bytes(clip(&ok)).is_ok());
+        assert!(read_clip(clip(&ok)).is_ok());
     }
 }
 
@@ -758,28 +865,14 @@ fn the_header_set_tempo_is_the_tempo_from_the_start_of_the_sequence() {
         start(),
     ];
     parts.extend([dcs(q), set_tempo(50.0), dcs(q), on(60, 1), dcs(0), end()]);
-    let file = read_bytes(clip(&parts)).unwrap();
-    let map = metrical(&file).tempo_map();
+    let file = read_clip(clip(&parts)).unwrap();
+    let map = file.tempo_map();
     assert_eq!(map.tempo_at(Beat::new(0.5)), Bpm::of(100.0));
     assert_eq!(map.tempo_at(Beat::new(1.5)), Bpm::of(50.0));
     // One beat at 100 BPM (0.6 s) and one at 50 (1.2 s).
     let close = |a: Seconds, b: f64| assert!((a.get() - b).abs() < 1e-9, "{a:?} vs {b}");
-    close(metrical(&file).seconds_at(Tick(2 * u64::from(q))), 1.8);
-    assert_eq!(file.tracks()[0].header().len(), 1);
-}
-
-/// An SMF has no configuration header: a track with one is refused.
-/// Spec: m2-116/6.1#3
-#[test]
-fn an_smf_holds_no_header() {
-    let with_profile = Track::new().profile_on(ProfileOnRequest {
-        target: ProfileTarget::Group,
-        profile: ProfileId::MPE,
-    });
-    assert!(matches!(
-        crate::common::format0(SMF_DIVISION, with_profile),
-        Err(TracksError::HeaderInSmf { track: 0 })
-    ));
+    close(file.seconds_at(Tick(2 * u64::from(q))), 1.8);
+    assert_eq!(file.header().messages().len(), 1);
 }
 
 /// Section 3.2.2: a gap past 1,048,575 ticks is written as a DCS of 1,048,575
@@ -788,11 +881,8 @@ fn an_smf_holds_no_header() {
 #[test]
 fn a_long_gap_is_written_as_dcs_then_a_null() {
     let gap: u32 = 2 * 0x000F_FFFF + 3;
-    let track = track(vec![
-        (0, packet(on(60, 1).decode().unwrap())),
-        (u64::from(gap), packet(off(60).decode().unwrap())),
-    ]);
-    let bytes = encoded(&MidiFile::clip(DIVISION, track).unwrap());
+    let sequence = sequence(vec![(0, on(60, 1)), (u64::from(gap), off(60))]);
+    let bytes = encoded_clip(&ClipFile::new(DIVISION, ClipHeader::new(), sequence).unwrap());
     let words: Vec<u32> = bytes[8..]
         .chunks(4)
         .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
@@ -840,11 +930,11 @@ fn the_dctpq_has_a_zero_delta_clockstamp_before_it() {
         parts.extend_from_slice(&tail);
         parts
     };
-    assert!(read_bytes(clip(&with(&[dcs(0)]))).is_ok());
+    assert!(read_clip(clip(&with(&[dcs(0)]))).is_ok());
     assert_eq!(clip_error(&with(&[])), (0, ClipFileError::DctpqDelta));
     assert_eq!(clip_error(&with(&[dcs(5)])), (0, ClipFileError::DctpqDelta));
     // It follows the Set Profile On messages, and its DCS is the one after them.
-    assert!(read_bytes(clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
+    assert!(read_clip(clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&set_profile_on(), &[dcs(2)]]))),
         (set_profile_on().len(), ClipFileError::DctpqDelta)
@@ -862,7 +952,7 @@ fn a_set_profile_on_has_no_delta_clockstamp_before_it() {
         parts.extend_from_slice(&after);
         parts
     };
-    assert!(read_bytes(clip(&with(&set_profile_on()))).is_ok());
+    assert!(read_clip(clip(&with(&set_profile_on()))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&[dcs(0)], &set_profile_on()]))),
         (1, ClipFileError::ProfileOnDelta)
@@ -924,12 +1014,9 @@ fn property_exchange_is_refused_everywhere() {
                 (2, ClipFileError::PropertyExchange)
             );
             // The writer's gate refuses it too.
-            let track = track(vec![(0, packet(pe.decode().unwrap()))]);
-            assert!(
-                matches!(
-                    MidiFile::clip(DIVISION, track),
-                    Err(TracksError::Refused { .. })
-                ),
+            assert_eq!(
+                ClipFile::new(DIVISION, ClipHeader::new(), sequence(vec![(0, pe)])),
+                Err(ClipBuildError::Format(ClipFileError::PropertyExchange)),
                 "{sub_id2:#x}"
             );
         }
@@ -947,7 +1034,7 @@ fn property_exchange_is_refused_everywhere() {
             dcs(0),
             end(),
         ];
-        assert!(read_bytes(clip(&parts)).is_ok(), "{sub_id2:#x}");
+        assert!(read_clip(clip(&parts)).is_ok(), "{sub_id2:#x}");
     }
 }
 
@@ -968,28 +1055,28 @@ fn the_header_keeps_its_duration() {
         dcs(0),
         end(),
     ];
-    let file = read_bytes(clip(&parts)).unwrap();
-    let track = &file.tracks()[0];
-    assert_eq!(track.header().len(), 1);
-    assert_eq!(track.header()[0].0, Tick(4));
-    assert_eq!(track.header_end(), Tick(30));
+    let file = read_clip(clip(&parts)).unwrap();
+    let header = file.header();
+    assert_eq!(header.messages().len(), 1);
+    assert_eq!(header.messages()[0].0, Tick(4));
+    assert_eq!(header.end(), Tick(30));
     // Written back with the same Delta Clockstamp before Start of Clip.
-    let bytes = encoded(&file);
+    let bytes = encoded_clip(&file);
     let written = packets_of(&bytes);
     let at = written.iter().position(|&u| u == start()).unwrap();
     assert_eq!(written[at - 1], dcs(26));
-    assert_eq!(read_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_clip(&bytes).unwrap(), file);
     // A header with no message has its duration too.
     let empty = [dcs(0), dctpq(TPQ), dcs(12), start(), dcs(0), end()];
-    let file = read_bytes(clip(&empty)).unwrap();
-    assert_eq!(file.tracks()[0].header_end(), Tick(12));
-    assert_eq!(read_bytes(encoded(&file)).unwrap(), file);
+    let file = read_clip(clip(&empty)).unwrap();
+    assert_eq!(file.header().end(), Tick(12));
+    assert_eq!(read_clip(encoded_clip(&file)).unwrap(), file);
     // None, as in `valid`, is zero.
-    let file = read_bytes(clip(&valid())).unwrap();
-    assert_eq!(file.tracks()[0].header_end(), Tick(0));
+    let file = read_clip(clip(&valid())).unwrap();
+    assert_eq!(file.header().end(), Tick(0));
 }
 
-fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, FileEvent)> {
+fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, Ump)> {
     use tutti_ump::{
         FlexAddress, FlexTextKind, LyricKind, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
         Text, flex_lyric_packets, flex_text_packets,
@@ -1013,9 +1100,7 @@ fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, FileEve
         FlexTextKind::Arranger => plain(PlainTextKind::Arranger),
         other => panic!("{other:?}"),
     };
-    umps.into_iter()
-        .map(|ump| (Tick(10), packet(ump.decode().unwrap())))
-        .collect()
+    umps.into_iter().map(|ump| (Tick(10), ump)).collect()
 }
 
 /// M2-104 sections 7.5.10 and 7.5.12: in a Clip File all parts of a Lyric
@@ -1032,13 +1117,15 @@ fn the_parts_of_a_lyric_or_ruby_message_share_one_delta_clockstamp() {
     for (kind, shared) in [(Lyrics, true), (Ruby, true), (Composer, false)] {
         let events = text_packets(kind, syllable);
         assert_eq!(events.len(), 2);
-        let bytes = MidiFile::clip(DIVISION, events.iter().cloned().collect::<Track>()).unwrap();
-        let bytes = encoded(&bytes);
+        let bytes = ClipFile::new(
+            DIVISION,
+            ClipHeader::new(),
+            events.iter().copied().collect::<ClipSequence>(),
+        )
+        .unwrap();
+        let bytes = encoded_clip(&bytes);
         let written = packets_of(&bytes);
-        let first = written
-            .iter()
-            .position(|&u| u == Ump::from(*events[0].1.message().unwrap()))
-            .unwrap();
+        let first = written.iter().position(|&u| u == events[0].1).unwrap();
         assert_eq!(
             is_dcs(written[first + 1]),
             !shared,
@@ -1049,21 +1136,23 @@ fn the_parts_of_a_lyric_or_ruby_message_share_one_delta_clockstamp() {
             "{kind:?}: a DCS before the first"
         );
         // Either way it reads back as the same events at the same ticks.
-        let back = read_bytes(&bytes).unwrap();
-        assert_eq!(back.tracks()[0].events(), events, "{kind:?}");
+        let back = read_clip(&bytes).unwrap();
+        assert_eq!(back.sequence().events(), events, "{kind:?}");
     }
     // Two separate Lyric messages at one tick are two messages: each its own DCS.
     let mut two = text_packets(Lyrics, "one");
     two.extend(text_packets(Lyrics, "two"));
-    let bytes = MidiFile::clip(DIVISION, two.iter().cloned().collect::<Track>()).unwrap();
-    let bytes = encoded(&bytes);
+    let bytes = ClipFile::new(
+        DIVISION,
+        ClipHeader::new(),
+        two.iter().copied().collect::<ClipSequence>(),
+    )
+    .unwrap();
+    let bytes = encoded_clip(&bytes);
     let written = packets_of(&bytes);
-    let first = written
-        .iter()
-        .position(|&u| u == Ump::from(*two[0].1.message().unwrap()))
-        .unwrap();
+    let first = written.iter().position(|&u| u == two[0].1).unwrap();
     assert!(is_dcs(written[first + 1]));
-    assert_eq!(read_bytes(&bytes).unwrap().tracks()[0].events(), two);
+    assert_eq!(read_clip(&bytes).unwrap().sequence().events(), two);
 }
 
 /// A Set Profile On message is complete before the DCTPQ: a Start with no End,
@@ -1087,9 +1176,9 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
     // The first word of a 64-bit Note On.
     bytes.extend_from_slice(&on(60, 1).words()[0].to_be_bytes());
     assert!(matches!(
-        read_bytes(&bytes),
+        read_clip(&bytes),
         // The first word of the Note On, after the clip's words.
-        Err(ReadError::Clip {
+        Err(ClipReadError::Parse {
             word,
             cause: ClipFileError::TrailingData,
         }) if word == (clip(&valid()).len() - 8) / 4
@@ -1105,14 +1194,14 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
 #[test]
 fn a_written_clip_stamps_every_message_and_ends_the_header_at_start_of_clip() {
     let sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7D, 1, 2, 3]);
-    let file = read_bytes(clip(&with_header(&[
+    let file = read_clip(clip(&with_header(&[
         dcs(0),
         program_change(),
         dcs(10),
         sysex,
     ])))
     .unwrap();
-    let packets = packets_of(&encoded(&file));
+    let packets = packets_of(&encoded_clip(&file));
     let position = |want: Ump| packets.iter().position(|p| *p == want).unwrap();
     let (s, e) = (position(start()), position(end()));
     assert!(is_dcs(packets[s - 1]), "Start of Clip has a DCS before it");
@@ -1139,16 +1228,16 @@ fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
     let mut parts = vec![dcs(0), dctpq(TPQ), dcs(0), start(), dcs(0)];
     parts.extend(at_zero);
     parts.extend([dcs(u32::from(TPQ)), off(64), dcs(0), end()]);
-    let file = read_bytes(clip(&parts)).unwrap();
-    let events = &file.tracks()[0].events();
+    let file = read_clip(clip(&parts)).unwrap();
+    let events = &file.sequence().events();
     assert_eq!(events.len(), 5);
     let ticks: Vec<Tick> = events.iter().map(|e| e.0).collect();
     assert_eq!(ticks, [Tick(0), Tick(0), Tick(0), Tick(0), Tick(96)]);
     for (event, want) in events.iter().zip(at_zero) {
-        assert_eq!(event.1, FileEvent::Message(want.decode().unwrap()));
+        assert_eq!(event.1, want);
     }
-    let back = read_bytes(encoded(&file)).unwrap();
-    assert_eq!(back.tracks()[0].events(), *events);
+    let back = read_clip(encoded_clip(&file)).unwrap();
+    assert_eq!(back.sequence().events(), *events);
 }
 
 /// M2-104 section 7.5.2: within a Group, between the Start and the End of a
@@ -1161,39 +1250,45 @@ fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
 /// Spec: m2-104/7.5.2#2, m2-104/7.5.2#3
 #[test]
 fn a_flex_message_is_not_interrupted_in_a_clip() {
-    use tutti_midi_file::TracksError;
     use tutti_ump::FlexTextKind::{Arranger, Composer};
     use tutti_ump::System;
     // 25 bytes: a Start, a Continue and an End, at ticks 10, 20 and 30.
     let text = "0123456789ab0123456789abX";
-    let at = |tick: u64, (_, event): (Tick, FileEvent)| (Tick(tick), event);
-    let parts = |kind| -> Vec<(Tick, FileEvent)> {
+    let at = |tick: u64, (_, event): (Tick, Ump)| (Tick(tick), event);
+    let parts = |kind| -> Vec<(Tick, Ump)> {
         text_packets(kind, text)
             .into_iter()
             .zip([10, 20, 30])
             .map(|(e, tick)| at(tick, e))
             .collect()
     };
-    let build = |events: Vec<(Tick, FileEvent)>| {
-        MidiFile::clip(
+    let build = |events: Vec<(Tick, Ump)>| {
+        ClipFile::new(
             DIVISION,
-            events.into_iter().collect::<Track>().ending_at(Tick(100)),
+            ClipHeader::new(),
+            events
+                .into_iter()
+                .collect::<ClipSequence>()
+                .ending_at(Tick(100)),
         )
     };
     let interrupted = |events| match build(events) {
-        Err(TracksError::TextInterrupted { at }) => Some(at),
+        Err(ClipBuildError::TextInterrupted {
+            part: ClipPart::Sequence,
+            at,
+        }) => Some(at),
         Ok(_) => None,
         Err(other) => panic!("{other:?}"),
     };
     let composer = parts(Composer);
-    let note = (Tick(15), packet(on(60, 1).decode().unwrap()));
+    let note = (Tick(15), on(60, 1));
     let real_time = |system, tick| {
         (
             Tick(tick),
-            packet(Message::System(MidiGroup::FIRST, system)),
+            Ump::from(Message::System(MidiGroup::FIRST, system)),
         )
     };
-    let with = |extra: (Tick, FileEvent)| {
+    let with = |extra: (Tick, Ump)| {
         let mut events = composer.clone();
         events.insert(1, extra);
         events
@@ -1201,9 +1296,9 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
 
     assert_eq!(interrupted(composer.clone()), None);
     // A note of the Group, between Start and Continue or Continue and End.
-    assert_eq!(interrupted(with(note.clone())), Some(Tick(15)));
+    assert_eq!(interrupted(with(note)), Some(Tick(15)));
     let mut between_continue_and_end = composer.clone();
-    between_continue_and_end.insert(2, (Tick(25), note.1.clone()));
+    between_continue_and_end.insert(2, (Tick(25), note.1));
     assert_eq!(interrupted(between_continue_and_end), Some(Tick(25)));
     // Every System Real Time message is allowed, of any Group.
     for system in [
@@ -1217,7 +1312,7 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
         assert_eq!(interrupted(with(real_time(system, 15))), None, "{system:?}");
     }
     let mut other_group_clock = real_time(System::TimingClock, 15);
-    other_group_clock.1 = packet(Message::System(MidiGroup::of(9), System::TimingClock));
+    other_group_clock.1 = Message::System(MidiGroup::of(9), System::TimingClock).into();
     assert_eq!(interrupted(with(other_group_clock)), None);
     // A System Common message is not real time.
     assert_eq!(
@@ -1226,8 +1321,8 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
     );
     // A note of another Group, and a message of another Group, are not in
     // the way.
-    let mut other_note = note.clone();
-    other_note.1 = packet(Message::Midi1(
+    let mut other_note = note;
+    other_note.1 = Message::Midi1(
         Address {
             group: MidiGroup::of(4),
             channel: MidiChannel::of(0),
@@ -1236,10 +1331,11 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
             note: NoteNumber::of(60),
             velocity: U7::of(1),
         },
-    ));
+    )
+    .into();
     assert_eq!(interrupted(with(other_note)), None);
-    let mut elsewhere = with(note.clone());
-    elsewhere[1].1 = packet(Message::Flex(
+    let mut elsewhere = with(note);
+    elsewhere[1].1 = Message::Flex(
         MidiGroup::of(1),
         Flex::Text {
             address: tutti_ump::FlexAddress::Group,
@@ -1247,11 +1343,12 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
             form: tutti_ump::Form::Complete,
             bytes: *b"other group!",
         },
-    ));
+    )
+    .into();
     assert_eq!(interrupted(elsewhere), None);
     // A Complete message of the Group, or a Start of another text, interrupts.
-    let mut complete = with((Tick(15), composer[2].1.clone()));
-    complete[1].1 = packet(Message::Flex(
+    let mut complete = with((Tick(15), composer[2].1));
+    complete[1].1 = Message::Flex(
         MidiGroup::FIRST,
         Flex::Text {
             address: tutti_ump::FlexAddress::Group,
@@ -1259,7 +1356,8 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
             form: tutti_ump::Form::Complete,
             bytes: *b"interrupting",
         },
-    ));
+    )
+    .into();
     assert_eq!(interrupted(complete), Some(Tick(15)));
     // A message that never ends is reported at the last event; a Continue or
     // End with no Start, or of another text, at its own tick.
@@ -1272,10 +1370,10 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
 }
 
 /// The header of a clip made of `leading`, the DCTPQ and nothing else, read.
-fn read_with_leading(leading: &[Ump]) -> Result<MidiFile, ReadError> {
+fn read_with_leading(leading: &[Ump]) -> Result<ClipFile, ClipReadError> {
     let mut parts = leading.to_vec();
     parts.extend(with_header(&[]));
-    read_bytes(clip(&parts))
+    read_clip(clip(&parts))
 }
 
 /// Section 6.2: the header's Set Profile On names the Profile the sequence
@@ -1291,7 +1389,7 @@ fn the_headers_profile_is_read_typed() {
     ]))
     .unwrap();
     assert_eq!(
-        file.tracks()[0].profiles(),
+        file.header().profiles(),
         vec![
             ProfileOnRequest {
                 target: ProfileTarget::Group,
@@ -1311,8 +1409,8 @@ fn the_headers_profile_is_read_typed() {
         ]
     );
     // The write keeps them.
-    let back = read_bytes(encoded(&file)).unwrap();
-    assert_eq!(back.tracks()[0].profiles(), file.tracks()[0].profiles());
+    let back = read_clip(encoded_clip(&file)).unwrap();
+    assert_eq!(back.header().profiles(), file.header().profiles());
 }
 
 /// A header whose Set Profile On is Message Format Version 1, which has no
@@ -1322,7 +1420,7 @@ fn the_headers_profile_is_read_typed() {
 fn a_version_1_set_profile_on_loads_with_no_channels() {
     let file = read_with_leading(&profile_payload(0x03, 1, MPE, &[])).unwrap();
     assert_eq!(
-        file.tracks()[0].profiles(),
+        file.header().profiles(),
         vec![ProfileOnRequest {
             target: ProfileTarget::Channel {
                 channel: MidiChannel::of(3),
@@ -1338,7 +1436,7 @@ fn a_version_1_set_profile_on_loads_with_no_channels() {
 #[test]
 fn a_header_without_a_set_profile_on_has_no_profile() {
     let file = read_with_leading(&[]).unwrap();
-    assert!(file.tracks()[0].profiles().is_empty());
+    assert!(file.header().profiles().is_empty());
 }
 
 /// A Set Profile On that is not one is refused when the file is read, and the
@@ -1349,7 +1447,7 @@ fn a_malformed_set_profile_on_is_refused_by_its_fault() {
     let bad = profile_payload(0x7E, 2, MPE, &[3, 0]);
     assert!(matches!(
         read_with_leading(&bad),
-        Err(ReadError::Tracks(TracksError::Header(
+        Err(ClipReadError::Build(ClipBuildError::Format(
             ClipFileError::ProfileOn(NotSetProfileOn::ChannelsForBlock(3))
         )))
     ));
@@ -1367,40 +1465,37 @@ fn a_profile_is_written_at_the_start_of_the_header() {
         target: ProfileTarget::Group,
         profile: ProfileId::MPE,
     };
-    let with_program = read_bytes(clip(&with_header(&[dcs(0), program_change()]))).unwrap();
-    let track = with_program.tracks()[0].clone().profile_on(on);
-    assert_eq!(track.profiles(), vec![on]);
-    assert_eq!(track.header().len(), set_profile_on_of(MPE).len() + 1);
-    let file = MidiFile::clip(DIVISION, track).unwrap();
-    let bytes = encoded(&file);
+    let with_program = read_clip(clip(&with_header(&[dcs(0), program_change()]))).unwrap();
+    let header = with_program.header().clone().profile_on(on);
+    assert_eq!(header.profiles(), vec![on]);
+    assert_eq!(header.messages().len(), set_profile_on_of(MPE).len() + 1);
+    let file = ClipFile::new(DIVISION, header, with_program.sequence().clone()).unwrap();
+    let bytes = encoded_clip(&file);
     let want = clip(&then(&[
         &set_profile_on_of(MPE),
         &[dcs(0), dctpq(TPQ), dcs(0)],
     ]));
     assert!(bytes.starts_with(&want));
-    assert_eq!(read_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_clip(&bytes).unwrap(), file);
     // A second Profile goes after the first and before the other messages.
     let second = ProfileOnRequest {
         target: ProfileTarget::FunctionBlock,
         profile: ProfileId::GM2_FUNCTION_BLOCK,
     };
-    let both = file.tracks()[0].clone().profile_on(second);
+    let both = file.header().clone().profile_on(second);
     assert_eq!(both.profiles(), vec![on, second]);
-    assert_eq!(
-        both.header().last().unwrap().1,
-        packet(program_change().decode().unwrap())
-    );
+    assert_eq!(both.messages().last().unwrap().1, program_change());
 }
 
 /// The events at tick 0 of a clip of `header_end`, as the file writes them.
-fn written_after_start(events: Vec<Ump>, header_end: u32) -> (Vec<Ump>, MidiFile) {
+fn written_after_start(events: Vec<Ump>, header_end: u32) -> (Vec<Ump>, ClipFile) {
     let mut parts = vec![dcs(0), dctpq(TPQ), dcs(header_end), start()];
     for event in events {
         parts.extend([dcs(0), event]);
     }
     parts.extend([dcs(0), end()]);
-    let file = read_bytes(clip(&parts)).unwrap();
-    let packets = packets_of(&encoded(&file));
+    let file = read_clip(clip(&parts)).unwrap();
+    let packets = packets_of(&encoded_clip(&file));
     let s = packets.iter().position(|p| *p == start()).unwrap();
     (packets[s - 1..].to_vec(), file)
 }
@@ -1427,10 +1522,10 @@ fn the_first_tempo_and_signature_use_the_delta_clockstamp_before_start_of_clip()
             on(60, 1)
         ]
     );
-    let events = &file.tracks()[0].events();
+    let events = &file.sequence().events();
     assert!(events.iter().all(|(tick, _)| *tick == Tick(0)));
-    assert_eq!(file.tracks()[0].header_end(), Tick(5));
-    assert_eq!(read_bytes(encoded(&file)).unwrap(), file);
+    assert_eq!(file.header().end(), Tick(5));
+    assert_eq!(read_clip(encoded_clip(&file)).unwrap(), file);
 }
 
 /// With no Set Tempo the Set Time Signature is the one that follows Start of
@@ -1465,8 +1560,108 @@ fn a_set_tempo_with_its_own_zero_delta_clockstamp_reads_at_tick_zero() {
         dcs(0),
         end(),
     ];
-    let file = read_bytes(clip(&parts)).unwrap();
-    let ticks: Vec<_> = file.tracks()[0].events().iter().map(|e| e.0).collect();
+    let file = read_clip(clip(&parts)).unwrap();
+    let ticks: Vec<_> = file.sequence().events().iter().map(|e| e.0).collect();
     assert_eq!(ticks, [Tick(0), Tick(0)]);
-    assert_eq!(file.tracks()[0].header_end(), Tick(5));
+    assert_eq!(file.header().end(), Tick(5));
+}
+
+/// A packet no definition covers has no message to play: the timeline lists it
+/// apart from the packets, and drops nothing.
+/// Spec: m2-116/7#3
+#[test]
+fn a_packet_no_definition_covers_is_listed_not_played() {
+    // Message type 0x6 is reserved: nothing decodes it.
+    let reserved = Ump([0x6001_2345, 0, 0, 0]);
+    let known: Ump = Message::Midi2(
+        MidiChannel::FIRST.into(),
+        tutti_ump::Voice2::ChannelPressure(ControlValue::MIN),
+    )
+    .into();
+    let clip = ClipFile::new(
+        DIVISION,
+        ClipHeader::new(),
+        ClipSequence::new()
+            .push(Tick(0), reserved)
+            .unwrap()
+            .push(Tick(96), known)
+            .unwrap(),
+    )
+    .unwrap();
+    let timeline = read_clip(encoded_clip(&clip)).unwrap().timeline();
+    assert_eq!(timeline.packets, [(Beat::new(1.0), known)]);
+    assert_eq!(
+        timeline.unknown,
+        [(Beat::new(0.0), tutti_ump::Unknown(reserved))]
+    );
+}
+
+/// A Clip File's packets are the timeline as they are stored (a MIDI 2.0 note
+/// stays MIDI 2.0), and its configuration header is not on it.
+/// Spec: m2-116/6#3
+#[test]
+fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
+    let note: Ump = Message::Midi2(
+        MidiChannel::FIRST.into(),
+        tutti_ump::Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
+    )
+    .into();
+    let header = ClipHeader::new().profile_on(ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    });
+    assert!(!header.messages().is_empty());
+    let sequence = ClipSequence::new().push(Tick(48), note).unwrap();
+    let file = ClipFile::new(DIVISION, header, sequence).unwrap();
+    assert_eq!(file.timeline().packets, [(Beat::new(0.5), note)]);
+}
+
+/// A header message is used when the tempo map or the meter is built from it: a
+/// Set Tempo with a tempo, and a Set Time Signature (held, or refused and listed
+/// by the clip). Any other message, and a Set Tempo of 0 (M2-104 section 7.5.3:
+/// no tempo), configures the receiver, except the leading Set Profile On
+/// messages, which are the header's profiles.
+#[test]
+fn a_headers_setup_messages_are_all_but_the_profiles_the_tempo_and_the_meter() {
+    let zero_tempo: Ump = Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(0))).into();
+    let metronome: Ump = Message::Flex(
+        MidiGroup::FIRST,
+        Flex::SetMetronome(tutti_ump::Metronome {
+            clocks_per_click: 24,
+            accents: tutti_ump::BarAccents::Undivided(std::num::NonZeroU8::new(3).unwrap()),
+            subdivision_1: 0,
+            subdivision_2: 0,
+        }),
+    )
+    .into();
+    let messages = [
+        set_tempo(100.0),
+        zero_tempo,
+        time_signature(),
+        // A denominator field of 0 is refused by the meter.
+        signature(3, 0),
+        program_change(),
+        metronome,
+    ];
+    let profile = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
+    let header = messages
+        .into_iter()
+        .fold(ClipHeader::new().profile_on(profile), |h, m| {
+            h.push(Tick(0), m).unwrap()
+        });
+    // The Set Profile On packets lead; the six pushed messages follow them.
+    assert_eq!(header.profiles(), [profile]);
+    assert!(!header.profile_messages().is_empty());
+    assert_eq!(header.profile_messages().len() + 6, header.messages().len());
+    assert_eq!(
+        header.setup_messages().collect::<Vec<_>>(),
+        [
+            (Tick(0), zero_tempo),
+            (Tick(0), program_change()),
+            (Tick(0), metronome)
+        ]
+    );
 }

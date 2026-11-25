@@ -2,6 +2,8 @@
 //! clip-to-output lanes pack into fewer tasks than undeclared ones, and on a
 //! pool every event leaves on the frame the one-participant walk sends it on.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
@@ -129,7 +131,7 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             common::connect(&mut ed, source.0, sink.0);
         }
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

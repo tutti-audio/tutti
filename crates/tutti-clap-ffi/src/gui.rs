@@ -64,6 +64,11 @@ pub enum GuiError {
     /// called.
     #[error("the editor is already created")]
     AlreadyCreated,
+    /// A size entry (`adjust_size`, `set_size`) for a floating editor, whose
+    /// window the plugin sizes (`[main-thread & !floating]`); the plugin was
+    /// not called.
+    #[error("a floating editor is sized by the plugin")]
+    FloatingEditor,
 }
 
 /// What opening an embedded editor produced.
@@ -435,7 +440,7 @@ impl Plugin {
         scale: ContentScale,
     ) -> Result<EmbedOutcome, GuiError> {
         let gui = self.gui()?;
-        if self.gui_created {
+        if self.gui.is_some() {
             return Err(GuiError::AlreadyCreated);
         }
         let (api, handle) = (
@@ -447,7 +452,7 @@ impl Plugin {
         let outcome = unsafe { embed_editor_sequence(gui, self.raw(), api, handle, scale) };
         match outcome {
             Ok(done) => {
-                self.gui_created = done.did_create;
+                self.gui = done.did_create.then_some(EditorKind::Embedded);
                 self.gui_scale = scale;
             }
             // `create` ran and `set_parent` refused: the editor exists but
@@ -477,25 +482,30 @@ impl Plugin {
         title: &CStr,
     ) -> Result<bool, GuiError> {
         let gui = self.gui()?;
-        if self.gui_created {
+        if self.gui.is_some() {
             return Err(GuiError::AlreadyCreated);
         }
         let api = platform::WINDOW_API.as_ptr();
         let transient = transient.map(|w| platform::handle(w.as_ptr()));
         // SAFETY: as `open_embedded`; `title` is nul-terminated.
         let created = unsafe { floating_editor_sequence(gui, self.raw(), api, transient, title) }?;
-        self.gui_created = created;
+        self.gui = created.then_some(EditorKind::Floating);
         Ok(created)
     }
 
     /// `can_resize` and `get_resize_hints`, `None` without a `clap.gui` or
-    /// before `create` (CLAP orders every `clap.gui` method after it).
+    /// before `create` (CLAP orders every `clap.gui` method after it). A
+    /// floating editor is not resizable by the host and has no hints:
+    /// both entries are `[!floating]`, so the plugin is not asked.
     #[must_use]
     pub fn gui_hints(&self, _main: MainThreadMarker) -> Option<EditorCapabilities> {
-        let gui = self.gui_ext().filter(|_| self.gui_created)?;
-        // SAFETY: the instance is live and `gui` is its `clap.gui`; a
-        // `[main-thread]` call on the main-thread half.
-        Some(unsafe { query_editor_capabilities(gui, self.raw()) })
+        let gui = self.gui_ext()?;
+        match self.gui? {
+            EditorKind::Floating => Some(EditorCapabilities::default()),
+            // SAFETY: the instance is live and `gui` is its `clap.gui`; a
+            // `[main-thread]` call on the main-thread half.
+            EditorKind::Embedded => Some(unsafe { query_editor_capabilities(gui, self.raw()) }),
+        }
     }
 
     /// Asks the plugin to adjust `requested` to a size it can take, then sets
@@ -504,16 +514,19 @@ impl Plugin {
     /// with or was last given.
     ///
     /// # Errors
-    /// No `clap.gui`, no editor created, no usable adjusted size, no
-    /// `set_size`, or a refused `set_size`.
+    /// No `clap.gui`, no editor created, [`GuiError::FloatingEditor`] for a
+    /// floating one, no usable adjusted size, no `set_size`, or a refused
+    /// `set_size`.
     pub fn resize_gui(
         &mut self,
         _main: MainThreadMarker,
         requested: Size,
     ) -> Result<Size, GuiError> {
         let gui = self.gui()?;
-        if !self.gui_created {
-            return Err(GuiError::NotCreated);
+        match self.gui {
+            None => return Err(GuiError::NotCreated),
+            Some(EditorKind::Floating) => return Err(GuiError::FloatingEditor),
+            Some(EditorKind::Embedded) => {}
         }
         // SAFETY: `&mut self` is the main-thread half of a live instance and
         // `gui` its `clap.gui`; these entries take no window API.
@@ -544,7 +557,7 @@ impl Plugin {
         scale: ContentScale,
     ) -> Result<bool, GuiError> {
         let gui = self.gui()?;
-        if !self.gui_created {
+        if self.gui.is_none() {
             return Err(GuiError::NotCreated);
         }
         let api = platform::WINDOW_API.as_ptr();
@@ -561,6 +574,13 @@ impl Plugin {
         Ok(taken)
     }
 
+    /// The kind of editor `create` made and `destroy` has not ended, `None`
+    /// when there is none.
+    #[must_use]
+    pub fn editor_kind(&self, _main: MainThreadMarker) -> Option<EditorKind> {
+        self.gui
+    }
+
     /// Hides the editor (unless its window is already gone) and destroys it. A
     /// no-op before `create` and after `destroy`, so `destroy` runs once.
     pub fn close_gui(&mut self, _main: MainThreadMarker, window_destroyed: bool) {
@@ -570,10 +590,9 @@ impl Plugin {
     /// [`close_gui`](Self::close_gui) without a token, for `Drop`, which checks
     /// the thread itself.
     pub(crate) fn destroy_gui(&mut self, window_destroyed: bool) {
-        if !self.gui_created {
+        if self.gui.take().is_none() {
             return;
         }
-        self.gui_created = false;
         let Some(gui) = self.gui_ext() else { return };
         // SAFETY: as `resize_gui`.
         let call = unsafe { GuiCall::new(gui, self.raw(), std::ptr::null()) };
@@ -870,7 +889,7 @@ mod embed_sequence_tests {
     }
 
     /// Querying capabilities on a created editor calls the vtable; the
-    /// `gui_created` gate in `editor_capabilities` is what keeps it from happening
+    /// editor gate in `editor_capabilities` is what keeps it from happening
     /// before that.
     ///
     /// The hazard is a missing precondition, not a wrong call sequence: the

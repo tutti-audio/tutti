@@ -33,8 +33,6 @@ use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
-use tutti_rt::AtomicCell;
-use tutti_units::SampleRate;
 
 use tutti_rt::Mutex;
 
@@ -56,10 +54,6 @@ use tutti_units::ParamId;
 pub(crate) struct ControlBackend<L: InProcess> {
     pub(super) inner: Arc<Mutex<Instance<L>>>,
     pub(crate) param_sink: ParameterChangeSink,
-    /// The cell the audio unit parks a rate change in, shared with the
-    /// node. Drained here because telling a plugin its rate deactivates and
-    /// activates it, which allocates.
-    pub(crate) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// The host's parameter writes, which the node drains at the head of its
     /// next block (`host_edits`).
     pub(super) edits: super::host_edits::EditPost,
@@ -84,6 +78,9 @@ pub(crate) struct ControlBackend<L: InProcess> {
 pub(crate) struct Reporting {
     pub(crate) invalidate: crate::InvalidateSink,
     pub(crate) transport: crate::TransportSink,
+    /// Deliver only what the instance reports of a rate (a refusal, its
+    /// restoring): an out-of-process plugin's own listener reports the rest.
+    pub(crate) rates_only: bool,
 }
 
 impl Reporting {
@@ -101,7 +98,18 @@ impl Reporting {
             reports,
         } = changes;
         for report in reports {
-            self.invalidate.fire(report);
+            if !self.rates_only
+                || matches!(
+                    report,
+                    tutti_plugin_types::PluginInvalidation::RateRefused(_)
+                        | tutti_plugin_types::PluginInvalidation::RateRestored
+                )
+            {
+                self.invalidate.fire(report);
+            }
+        }
+        if self.rates_only {
+            return;
         }
         if let Some(samples) = latency {
             self.invalidate
@@ -469,12 +477,6 @@ where
     }
 
     fn editor_idle(&self, main: MainThreadMarker) {
-        // Before the lock below, not inside it: the drain takes the same lock
-        // and would deadlock under that guard. This runs on the main thread,
-        // every editor frame, which is what makes it the delivery point for the
-        // rate the audio thread had to park.
-        super::client::drain_sample_rate(main, &self.pending_sample_rate, &self.inner);
-
         let (changes, param_changes) = {
             let mut instance = self.inner.lock();
             // What the plugin changed about itself since the last pump: the
@@ -616,9 +618,8 @@ mod off_main_tests {
         AutomationMode, AutomationModeError, MainWork, MainWorkHandle, RenderMode, StateError,
         StateUse,
     };
-    use tutti_units::Normalized;
     use tutti_units::ParamId;
-    use tutti_units::SampleRate;
+    use tutti_units::{Normalized, SampleRate};
     use tutti_vst2_host::Vst2Loaded;
 
     use crate::PluginHandle;

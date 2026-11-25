@@ -56,7 +56,7 @@ use super::segment_points::SegmentPoints;
     reason = "the two plugin nodes keep the delivery and the segments in \
               different places; a struct over them would exist only for this call"
 )]
-pub fn take(
+pub(crate) fn take(
     events: &[Event],
     params_in: &[ParamEvent],
     from: usize,

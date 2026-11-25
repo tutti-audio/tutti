@@ -34,6 +34,117 @@ use tutti_units::{Frame, Latency, SampleRate, Samples, Tail};
 
 pub const RATE: SampleRate = SampleRate::SR_48K;
 
+/// Makes `edges` exactly the sources of audio input `at`, through the editor's
+/// wiring calls.
+pub fn feed_input<F: Float>(
+    ed: &mut Editor<F>,
+    at: crate::InputPort,
+    edges: impl IntoIterator<Item = crate::Edge>,
+) {
+    let held = ed
+        .spec()
+        .topology
+        .edges
+        .get(&at)
+        .cloned()
+        .unwrap_or_default();
+    for from in held {
+        ed.disconnect_edge(crate::EdgeId::into_port(at, from));
+    }
+    for from in edges {
+        ed.connect_edge(crate::EdgeId::into_port(at, from)).unwrap();
+    }
+}
+
+/// Declares the main output `width` channels wide on a bare editor (test
+/// support; a session declares it through its builder). Returns whether the
+/// width changed.
+pub fn declare_outputs<F: Float>(ed: &mut Editor<F>, width: ChannelLayout) -> bool {
+    ed.resize_outputs(width)
+}
+
+/// Wiring for tests that start from a bare editor.
+pub trait WireDeclared {
+    /// Makes the main output as wide as there are `sources` and wires
+    /// channel `c` to the `c`th of them, as [`Editor::wire_outputs`] does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Editor::wire_outputs`].
+    fn wire_declared_outputs(
+        &mut self,
+        sources: impl IntoIterator<Item = crate::PortSource>,
+    ) -> Result<(), crate::WireError>;
+}
+
+impl<F: Float> WireDeclared for Editor<F> {
+    fn wire_declared_outputs(
+        &mut self,
+        sources: impl IntoIterator<Item = crate::PortSource>,
+    ) -> Result<(), crate::WireError> {
+        self.wire_outputs(sources)
+    }
+}
+
+/// Makes `sources` exactly the sources of main output `channel`, widening the
+/// main output to reach it.
+pub fn feed_output<F: Float>(
+    ed: &mut Editor<F>,
+    channel: u16,
+    sources: impl IntoIterator<Item = crate::PortSource>,
+) {
+    if ed.spec().topology.outputs.len() <= usize::from(channel) {
+        declare_outputs(ed, ChannelLayout::from_count(channel + 1));
+    }
+    let held = ed.spec().topology.outputs[usize::from(channel)].clone();
+    for from in held {
+        ed.disconnect_edge(crate::EdgeId::into_output(channel, from));
+    }
+    for from in sources {
+        ed.connect_edge(crate::EdgeId::into_output(channel, from))
+            .unwrap();
+    }
+}
+
+/// Wires `ed`'s nodes as `spec` wires its own: the main input width, every
+/// audio edge, every main output source and every event edge, and nothing
+/// else. It goes through the editor's typed calls, so it panics on a spec
+/// that names a node or port the editor lacks and cannot build an invalid
+/// graph. A test that builds a `GraphSpec` only to copy it into an editor
+/// should build through the editor instead.
+pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
+    ed.resize_inputs(spec.topology.inputs);
+    let ports: Vec<_> = ed.spec().topology.edges.keys().copied().collect();
+    for at in ports {
+        if !spec.topology.edges.contains_key(&at) {
+            feed_input(ed, at, []);
+        }
+    }
+    let held: Vec<_> = ed
+        .spec()
+        .events
+        .iter()
+        .map(|(at, e)| (*at, e.clone()))
+        .collect();
+    for (at, edges) in held {
+        for edge in edges {
+            ed.disconnect_events(at, edge);
+        }
+    }
+    for (at, edges) in &spec.topology.edges {
+        feed_input(ed, *at, edges.iter().copied());
+    }
+    for (channel, sources) in spec.topology.outputs.iter().enumerate() {
+        feed_output(ed, channel as u16, sources.iter().copied());
+    }
+    declare_outputs(ed, ChannelLayout::clamped(spec.topology.outputs.len()));
+    for (at, edges) in &spec.events {
+        for edge in edges {
+            ed.connect_events(*at, *edge).unwrap();
+        }
+    }
+}
+
 /// [`DECLICK`](crate::DECLICK) in frames at [`RATE`].
 pub fn declick() -> usize {
     crate::declick_frames(RATE).get()
@@ -783,7 +894,7 @@ impl<F: Float> Harness<F> {
         let (plan, mut delta) =
             compile(graph, &shapes, &prepare(self.max_block), self.plan.as_ref())
                 .expect("compiles");
-        delta.cuts = plan
+        let cuts = plan
             .units()
             .iter()
             .filter(|now| {
@@ -796,23 +907,20 @@ impl<F: Float> Harness<F> {
                             && was.shape.latency != now.shape.latency
                     })
             })
-            .map(|u| crate::Placement {
-                key: u.key,
-                generation: u.generation,
-                idx: u.idx,
-            })
+            .map(crate::PlanUnit::placement)
             .collect();
         plan.verify().expect("verifies");
-        delta.fades = delta
-            .replace
+        let fades = delta
+            .replace()
             .iter()
             .filter_map(|&(_, new)| fades.get(&new.key).map(|&f| (new.key, f)))
             .collect();
+        delta.attach(fades, cuts);
         let placed: Vec<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, n)| n.key))
+            .chain(delta.replace().iter().map(|(_, n)| n.key))
             .collect();
         self.outputs = graph.topology().outputs.len();
         self.inputs = graph.topology().inputs.count() as usize;
@@ -1035,6 +1143,28 @@ pub fn pooled_fresh<F: Float>(exec: &mut Executor<F>, workers: usize) {
     if workers > 1 {
         exec.set_pool(Some(TestPool::new(workers)));
     }
+}
+
+/// One raw block of `frames` on `exec`: the default (stopped) transport, no
+/// input, `outs` zero-filled output channels, returned. It calls
+/// `Executor::process` once and does not apply pending commits or collect.
+pub fn block<F: Float>(exec: &mut Executor<F>, frames: usize, outs: usize) -> Vec<Vec<F>> {
+    block_in(exec, frames, &[], outs, &TransportPosition::default())
+}
+
+/// [`block`] over `inputs` (each `frames` long) and `transport`. Asserts
+/// nothing; the buffers are allocated outside the executor's own gate.
+pub fn block_in<F: Float>(
+    exec: &mut Executor<F>,
+    frames: usize,
+    inputs: &[&[F]],
+    outs: usize,
+    transport: &TransportPosition,
+) -> Vec<Vec<F>> {
+    let mut chans = vec![vec![F::ZERO; frames]; outs];
+    let mut refs: Vec<&mut [F]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
+    exec.process(frames, transport, inputs, &mut refs);
+    chans
 }
 
 /// Call `render(1)`, the serial render, then `render(w)` for each `w` of

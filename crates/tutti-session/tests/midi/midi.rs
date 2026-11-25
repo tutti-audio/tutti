@@ -7,7 +7,7 @@
 use crate::common::OpenPorts as _;
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 #[cfg(feature = "midi-hardware")]
-use crate::common::{every_input_port, input_ports, with_input};
+use crate::common::{every_input_port, input_ports, next_block, with_input};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
@@ -88,12 +88,12 @@ const RATE: f64 = 48_000.0;
 
 /// Plays the transport from beat 0 and renders `frames` frames in 512-frame
 /// blocks.
-fn roll(s: &mut Session, frames: usize) {
+pub(crate) fn roll(s: &mut Session, frames: usize) {
     play(s);
     blocks(s, frames.div_ceil(512));
 }
 
-fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
+pub(crate) fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
     seen.lock()
         .unwrap()
         .iter()
@@ -241,7 +241,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 #[test]
 fn a_loaded_track_plays_its_events_at_their_beats() {
     use tutti_midi_file::SmfDivision;
-    use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
+    use tutti_midi_file::{Layout, LeadTrack, StandardMidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(960),
@@ -250,7 +250,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
         NoteNumber::of(62),
         U7::of(100),
     );
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         SmfDivision::per_quarter(480),
         Layout::Format0(LeadTrack::new(track)),
     )
@@ -614,25 +614,16 @@ fn a_refusing_sink_counts_what_it_refused() {
     assert!(sink.losses().refused > before, "and the count only rises");
 }
 
-/// **The session's own MIDI nodes go in through `add`**, so the reclaim
-/// phase sweeps their published cells: a clip `play_clip` made (its events)
-/// and an input port's input node (its MPE mode). What each reclaimer frees is
-/// pinned in `tutti-midi-runtime` with a held loan, and the sweep of the
-/// graph's reclaimers in `tests/wiring/graph.rs`.
+/// **The session's own input node goes in through `add` with a reclaimer**
+/// (its MPE request cell is no published entry), and a tap has none. A clip
+/// `play_clip` made is swept as a published entry: what the entries and the
+/// reclaimers free is pinned in `tests/wiring/cells_node.rs` and
+/// `tests/wiring/graph.rs`, and the clip's cell in `tutti-midi-runtime`.
 #[cfg(feature = "midi-hardware")]
 #[test]
-fn the_sessions_midi_nodes_keep_their_reclaimers() {
+fn the_sessions_input_node_keeps_a_reclaimer_and_a_tap_none() {
     let (mut s, input) = with_input(None);
     let (synth, _) = tap(&mut s);
-    s.midi()
-        .play_clip(
-            synth,
-            Beat::new(0.0),
-            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
-        )
-        .expect("the tap takes MIDI");
-    let clip = s.midi().clip(synth).expect("the target's clip");
-    assert!(s.graph_ref().testing().keeps_reclaimer(clip), "the clip's");
     assert!(
         s.graph_ref().testing().keeps_reclaimer(input),
         "the input node's"
@@ -793,7 +784,7 @@ fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
     let (mut s, fake, seen) = keyboards();
     let _ports = connect(&mut s, &["keys"]);
     roll(&mut s, 1_024);
-    assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
+    assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), next_block()));
     roll(&mut s, 8_192);
     let heard = note_ons(&seen);
     assert_eq!(heard.len(), 1, "once: {heard:?}");
@@ -856,7 +847,7 @@ fn a_dropped_port_ends_its_held_key_once() {
     let (mut s, fake, seen) = keyboards();
     let ports = connect(&mut s, &["keys"]);
     roll(&mut s, 1_024);
-    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), next_block()));
     roll(&mut s, 8_192);
     assert_eq!(note_ons(&seen).len(), 1);
     drop(ports);
@@ -1066,7 +1057,7 @@ fn a_port_that_loses_events_is_reported() {
 fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
-        CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
+        CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::BlockName;
@@ -1141,16 +1132,17 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
             let SysexStep::Complete(done) = assembler.push(ump) else {
                 continue;
             };
-            if let Decoded::Message(CiMessage::Discovery { header, .. }) =
+            if let Decoded::Message(CiMessage::Discovery { source: from, .. }) =
                 CiMessage::decode(assembler.message(done).payload())
                 && !replied
             {
                 replied = true;
-                source = Some(header.source);
+                source = Some(from);
                 // The later MUID answers first: the list is still by MUID.
                 let reply = CiMessage::DiscoveryReply {
-                    header: CiHeader::new(later),
-                    to: header.source,
+                    device_id: CiDeviceId::FunctionBlock,
+                    source: later,
+                    to: from,
                     data,
                 };
                 answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
@@ -1163,7 +1155,8 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                 .first()
                 .map(|p| (p.peer_id().muid, p.id()));
             let reply = CiMessage::DiscoveryReply {
-                header: CiHeader::new(peer),
+                device_id: CiDeviceId::FunctionBlock,
+                source: peer,
                 to: source.expect("the session sent a Discovery"),
                 data,
             };
@@ -1310,7 +1303,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                 continue;
             };
             match CiMessage::decode(assembler.message(done).payload()) {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROFILE_CONFIGURATION,
@@ -1318,8 +1311,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(peer),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: peer,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1348,13 +1342,12 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
-                    set_on.push((target.address(), target.channels()));
+                Decoded::Message(CiMessage::SetProfileOn { format, .. }) => {
+                    set_on.push((format.address(), format.channels().expect("version 2")));
                     answers.extend(
                         CiMessage::ProfileEnabled {
                             source: peer,
-                            ci_version: CI_VERSION,
-                            target,
+                            format,
                             profile,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1551,9 +1544,9 @@ impl MpePeer {
     ) {
         use tutti_midi_ci::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DeviceBody,
-            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
-            ProfileTarget, ReplyData, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
-            SUB_ID2_SET_PROFILE_ON,
+            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileFormat, ProfileId, ProfileList,
+            ProfileLists, ProfileTarget, ReplyData, SUB_ID2_MESSAGE_REPORT_INQUIRY,
+            SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1573,8 +1566,9 @@ impl MpePeer {
             };
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
             match &decoded {
-                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
-                    self.asked.push(Asked::On(target.channels()));
+                Decoded::Message(CiMessage::SetProfileOn { format, .. }) => {
+                    self.asked
+                        .push(Asked::On(format.channels().expect("version 2")));
                 }
                 Decoded::Message(CiMessage::SetProfileOff { .. }) => self.asked.push(Asked::Off),
                 Decoded::Message(CiMessage::MessageReportInquiry { scope, .. }) => {
@@ -1583,7 +1577,7 @@ impl MpePeer {
                 _ => {}
             }
             match decoded {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         DeviceIdentity {
                             manufacturer: ManufacturerId::of(0x41),
@@ -1596,8 +1590,9 @@ impl MpePeer {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(self.muid),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: self.muid,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1626,13 +1621,12 @@ impl MpePeer {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn { source, target, .. }) => {
+                Decoded::Message(CiMessage::SetProfileOn { source, format, .. }) => {
                     match self.switch {
                         Reply::Answer => answers.extend(
                             CiMessage::ProfileEnabled {
                                 source: self.muid,
-                                ci_version: CI_VERSION,
-                                target,
+                                format,
                                 profile: ProfileId::MPE,
                             }
                             .packets(MidiGroup::FIRST)
@@ -1640,7 +1634,7 @@ impl MpePeer {
                         ),
                         Reply::Refuse => answers.extend(
                             CiMessage::Nak {
-                                header: at(target.address()),
+                                header: at(format.address()),
                                 to: source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_SET_PROFILE_ON),
@@ -1657,15 +1651,14 @@ impl MpePeer {
                     Reply::Answer => answers.extend(
                         CiMessage::ProfileDisabled {
                             source: self.muid,
-                            ci_version: CI_VERSION,
-                            target: match header.device_id {
+                            format: ProfileFormat::current(match header.device_id {
                                 CiDeviceId::Channel(channel) => ProfileTarget::Channel {
                                     channel,
                                     channels: tutti_midi_ci::ProfileChannels::of(4),
                                 },
                                 CiDeviceId::Group => ProfileTarget::Group,
                                 CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
-                            },
+                            }),
                             profile: ProfileId::MPE,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1841,7 +1834,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let raw = EndpointId::from_raw(MpePeer::RAW);
 
     // Not enabled: Omni Off on channel 3 passes.
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
 
@@ -1882,7 +1875,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             "member {channel}"
         );
     }
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 1, "the Profile prohibits it on a Member");
 
@@ -1906,7 +1899,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .mpe_zones(),
         None
     );
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");
 }
@@ -2014,7 +2007,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                 continue;
             };
             match CiMessage::decode(assembler.message(done).payload()) {
-                Decoded::Message(CiMessage::Discovery { header, .. }) => {
+                Decoded::Message(CiMessage::Discovery { source, .. }) => {
                     let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROCESS_INQUIRY,
@@ -2022,8 +2015,9 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(peer),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: peer,
+                            to: source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)

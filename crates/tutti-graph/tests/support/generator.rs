@@ -20,30 +20,30 @@ use tutti_graph::{
 use tutti_rt::SplitMix64;
 use tutti_units::{Gain, Samples};
 
-pub const MAX_BLOCK: usize = 128;
+pub(crate) const MAX_BLOCK: usize = 128;
 
 /// A seeded stream: the graph is a pure function of the seed, so a failing
 /// proptest case replays exactly.
 #[derive(Clone)]
-pub struct Rng(SplitMix64);
+pub(crate) struct Rng(SplitMix64);
 
 impl Rng {
-    pub fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self(SplitMix64::new(seed))
     }
-    pub fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         self.0.next_u64() % n.max(1)
     }
-    pub fn chance(&mut self, percent: u64) -> bool {
+    pub(crate) fn chance(&mut self, percent: u64) -> bool {
         self.below(100) < percent
     }
-    pub fn pick<T: Copy>(&mut self, xs: &[T]) -> Option<T> {
+    pub(crate) fn pick<T: Copy>(&mut self, xs: &[T]) -> Option<T> {
         (!xs.is_empty()).then(|| xs[self.below(xs.len() as u64) as usize])
     }
 }
 
 #[derive(Clone)]
-pub struct Desc {
+pub(crate) struct Desc {
     pub kinds: BTreeMap<NodeKey, Kind>,
     /// Creation order. Direct edges only ever run earlier → later in it, so
     /// every generated graph is acyclic without feedback.
@@ -68,7 +68,7 @@ pub struct Desc {
     pub port_ranges: BTreeMap<tutti_graph::ParamIn, tutti_graph::ParamRange>,
 }
 
-pub fn random_kind(rng: &mut Rng) -> Kind {
+pub(crate) fn random_kind(rng: &mut Rng) -> Kind {
     // Latency-bearing nodes and multi-input sinks are weighted up: PDC only
     // happens where paths of different latency meet.
     match rng.below(17) {
@@ -108,7 +108,7 @@ pub fn random_kind(rng: &mut Rng) -> Kind {
 
 /// An event sink, half the time declaring an input bound of a few events a
 /// block (`Shape::event_input_capacity`), so its merge drops what is past it.
-pub fn consumer_kind(rng: &mut Rng) -> Kind {
+pub(crate) fn consumer_kind(rng: &mut Rng) -> Kind {
     let inputs = 1 + rng.below(2) as u16;
     if rng.chance(50) {
         Kind::BoundedConsumer {
@@ -123,7 +123,7 @@ pub fn consumer_kind(rng: &mut Rng) -> Kind {
 /// An emitter declaring its event capacity, often below its burst, so the
 /// writer refuses events every burst. Its period is at least `MAX_BLOCK`, so
 /// it keeps its declared rate (see `Kind::Burst`).
-pub fn burst_kind(rng: &mut Rng) -> Kind {
+pub(crate) fn burst_kind(rng: &mut Rng) -> Kind {
     Kind::Burst {
         period: MAX_BLOCK as u64 + rng.below(200),
         phase: rng.below(MAX_BLOCK as u64),
@@ -132,11 +132,11 @@ pub fn burst_kind(rng: &mut Rng) -> Kind {
     }
 }
 
-pub fn shape(kind: &Kind) -> tutti_graph::Shape {
+pub(crate) fn shape(kind: &Kind) -> tutti_graph::Shape {
     common::TestNode::new(kind.clone()).shape()
 }
 
-pub fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutputPort> {
+pub(crate) fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutputPort> {
     among
         .iter()
         .flat_map(|&k| {
@@ -146,7 +146,7 @@ pub fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutputPort> {
         .collect()
 }
 
-pub fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOutputPort> {
+pub(crate) fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOutputPort> {
     among
         .iter()
         .flat_map(|&k| {
@@ -156,7 +156,7 @@ pub fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOutputPort> {
 }
 
 /// (Re)wire every input of the node at creation index `j`.
-pub fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
+pub(crate) fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
     let key = desc.order[j];
     let s = shape(&desc.kinds[&key]);
     let earlier: Vec<NodeKey> = desc.order[..j].to_vec();
@@ -254,14 +254,14 @@ pub fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
     }
 }
 
-pub fn spec_for(kind: &Kind) -> NodeSpec {
+pub(crate) fn spec_for(kind: &Kind) -> NodeSpec {
     let s = shape(kind);
     NodeSpec::new("test", s.audio_in(), s.audio_out())
         .latency(s.latency.samples())
         .tail(s.tail)
 }
 
-pub fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
+pub(crate) fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
     let all = desc.order.clone();
     let outs = audio_outs(desc, &all);
     let width = u64::from(desc.spec.topology.inputs.count());
@@ -292,7 +292,7 @@ pub fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
     }
 }
 
-pub fn fresh_key(desc: &mut Desc, rng: &mut Rng) -> NodeKey {
+pub(crate) fn fresh_key(desc: &mut Desc, rng: &mut Rng) -> NodeKey {
     loop {
         let k = NodeKey(rng.below(1000));
         if desc.used.insert(k) {
@@ -301,7 +301,7 @@ pub fn fresh_key(desc: &mut Desc, rng: &mut Rng) -> NodeKey {
     }
 }
 
-pub fn random_graph(seed: u64) -> Desc {
+pub(crate) fn random_graph(seed: u64) -> Desc {
     let mut rng = Rng::new(seed);
     let mut desc = Desc {
         kinds: BTreeMap::new(),
@@ -352,7 +352,7 @@ pub fn random_graph(seed: u64) -> Desc {
 
 /// An edit of `desc`: remove a node, add one, regenerate one, rewire some
 /// ports — keeping every other key, so their state must carry.
-pub fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
+pub(crate) fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
     let mut d = desc.clone();
     if d.order.len() > 1 && rng.chance(35) {
         let victim = d.order.remove(rng.below(d.order.len() as u64) as usize);
@@ -422,7 +422,7 @@ pub fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
 
 /// Block lengths for a run: fixed 1, 7, 64 or 100, or a different length
 /// every block.
-pub fn schedule(which: usize, seed: u64, frames: usize) -> Vec<usize> {
+pub(crate) fn schedule(which: usize, seed: u64, frames: usize) -> Vec<usize> {
     let mut rng = Rng::new(seed ^ 0xB10C);
     let mut out = Vec::new();
     let mut total = 0;
@@ -443,7 +443,7 @@ pub fn schedule(which: usize, seed: u64, frames: usize) -> Vec<usize> {
 /// Declared costs for `desc`'s nodes, a pure function of the seed: about
 /// two in three declare `Cost::Light`, a few `Cost::Moderate`, the rest
 /// nothing (`Cost::Heavy`) — so cheap siblings pack beside heavy tasks that keep the plan parallel.
-pub fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
+pub(crate) fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
     let mut rng = Rng::new(seed ^ 0xC057);
     desc.kinds
         .keys()

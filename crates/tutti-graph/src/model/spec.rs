@@ -139,7 +139,8 @@ impl EventEdge {
 /// and outputs) plus event edges, param modulation and unit generations.
 ///
 /// Plain data — `Clone`, `Eq` and `Hash` — built and edited on the control
-/// thread, usually through [`Editor::spec_mut`](crate::Editor::spec_mut).
+/// thread, by hand or through the editor's wiring calls
+/// ([`Editor::connect_edge`](crate::Editor::connect_edge) and the calls beside it).
 /// [`validate`](Self::validate) checks what can be checked without the
 /// nodes' shapes and returns a [`ValidGraph`], which is what
 /// [`compile`](fn@crate::compile) takes.
@@ -460,7 +461,11 @@ impl GraphSpec {
     ///   the param's own value, sample-accurate, from the source's first
     ///   event on (a first ramp starts from the base at its frame, also
     ///   when it replaces a segment sent first on that frame); before
-    ///   it, the port reads its base. Automation replaces the knob, as in
+    ///   it, a source with nothing to say is not a source: outside the
+    ///   connect's declick the port reads
+    ///   [`ParamInput::Base`](crate::ParamInput::Base), as unconnected,
+    ///   and delivers frames from the block of the source's first event
+    ///   on. Automation replaces the knob, as in
     ///   every DAW. Other events are ignored.
     /// - **An undriven param resolves to its base, never to 0.** A port with
     ///   no source this block reads
@@ -645,6 +650,7 @@ impl GraphSpec {
                 required_resolution: self.required_resolution.clone(),
                 params: self.params.clone(),
                 gains: self.gains.clone(),
+                main_output_id: self.main_output_id,
                 main_output_bank: None,
             }),
             _ => Err(errs),
@@ -726,6 +732,7 @@ pub struct ValidGraph {
     required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
     params: BTreeMap<ParamIn, EventOutputPort>,
     gains: BTreeMap<EdgeId, EdgeGain>,
+    main_output_id: crate::MainOutputId,
     main_output_bank: Option<crate::MainOutputBank>,
 }
 
@@ -745,6 +752,11 @@ impl ValidGraph {
     /// change is crossfading.
     pub fn main_output_bank(&self) -> Option<crate::MainOutputBank> {
         self.main_output_bank
+    }
+
+    /// The id of the main output the spec declared.
+    pub(crate) fn main_output_id(&self) -> crate::MainOutputId {
+        self.main_output_id
     }
 
     /// The checked topology.

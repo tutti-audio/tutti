@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
-use crate::common::{MF, Seen, blocks, note, play, tap};
+use crate::common::{MF, Seen, blocks, headed_clip, note, play, program, tap, volume};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_midi_device::{Capabilities, DeviceInfo, Endpoint, EndpointId, PortDirection, Supports};
@@ -18,7 +18,8 @@ use tutti_session::{
     PortCause, Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
 };
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, U7, Voice2,
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, U7,
+    Ump, Voice2,
 };
 use tutti_units::{Beat, BeatDuration, SampleRate};
 
@@ -1117,6 +1118,132 @@ fn an_output_port_follows_its_device_through_an_unplug() {
         !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
         "it sends again"
     );
+}
+
+/// A session over a fake OS with the output `Synth` (endpoint 10) open, fed by
+/// a `headed_clip`: its node, and the clip's node.
+fn clip_into_synth() -> (Session, FakeCounters, MidiOutput) {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    let clip = s.graph().add(MidiClipNode::new([]));
+    s.set(clip.events().to(headed_clip())).expect("sets");
+    s.graph()
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
+        .expect("the port's node takes events");
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let _ = s.update();
+    (s, fake, out)
+}
+
+/// What the clip puts on the wire: its header and chase, from what the device
+/// was sent.
+fn setup_sent(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
+    fake.take_sent(EndpointId::from_raw(10))
+        .into_iter()
+        .filter(|u| [program(1), volume(), program(5)].contains(u))
+        .collect()
+}
+
+/// **A device that returns to a port a clip plays into is caught up to the
+/// state the port said, once, when it returns.** The device lost its program and
+/// controllers with its power; the port's record has the last program and the
+/// volume (the header's program 1 was replaced by the clip's program 5), and the
+/// returned device hears them at the return: program first, then the
+/// controller, the record's catch-up order (the channel's bank and program, then
+/// its controllers).
+#[test]
+fn a_returned_output_device_is_caught_up_to_the_ports_state_once() {
+    let (mut s, fake, out) = clip_into_synth();
+    play(&s);
+    blocks(&mut s, 2);
+    let _ = s.update();
+    assert_eq!(
+        setup_sent(&fake),
+        [program(1), volume(), program(5)],
+        "the device hears the setup at the start"
+    );
+
+    unplug(&fake, 10);
+    let _ = s.update();
+    blocks(&mut s, 2);
+    let _ = s.update();
+    let _ = setup_sent(&fake);
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(out.presence(), Presence::Live);
+    assert_eq!(
+        setup_sent(&fake),
+        [program(5), volume()],
+        "the returned device hears the state at the return"
+    );
+    blocks(&mut s, 4);
+    let _ = s.update();
+    assert_eq!(setup_sent(&fake), [], "once");
+}
+
+/// **What a live source sent through the port comes back with the device**: a
+/// program, a controller and a key held down, whichever node sent them, in the
+/// record's catch-up order: the program, the controller, then the key (held notes
+/// last, so each sounds on its channel's patch).
+#[test]
+fn a_returned_output_device_hears_what_a_live_source_sent_through_the_port() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    let mut keys = s.midi().input(out.node()).expect("the output takes MIDI");
+    let _ = s.update();
+    let note: Ump = Message::midi2(
+        MidiChannel::FIRST,
+        Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0x8000)),
+    )
+    .into();
+    for ump in [note, volume(), program(5)] {
+        keys.push(Stamp::NextBlock, ump).expect("room");
+    }
+    blocks(&mut s, 2);
+    let _ = s.update();
+    let heard = |fake: &FakeCounters| -> Vec<Ump> {
+        fake.take_sent(EndpointId::from_raw(10))
+            .into_iter()
+            .filter(|u| [program(5), volume(), note].contains(u))
+            .collect()
+    };
+    assert_eq!(heard(&fake), [note, volume(), program(5)], "as sent");
+
+    unplug(&fake, 10);
+    let _ = s.update();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(
+        heard(&fake),
+        [program(5), volume(), note],
+        "the program and controller, then the key that is down"
+    );
+}
+
+/// **A replug while stopped sends nothing, as the port has said nothing; the
+/// next start sends the header once.**
+#[test]
+fn a_returned_output_device_while_stopped_hears_the_header_at_the_start() {
+    let (mut s, fake, _out) = clip_into_synth();
+    blocks(&mut s, 2);
+    unplug(&fake, 10);
+    let _ = s.update();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    blocks(&mut s, 2);
+    let _ = s.update();
+    assert_eq!(setup_sent(&fake), [], "stopped: nothing");
+    play(&s);
+    blocks(&mut s, 2);
+    let _ = s.update();
+    assert_eq!(setup_sent(&fake), [program(1), volume(), program(5)]);
 }
 
 /// **A port is a peer**: its id is the one in the events about it, and two

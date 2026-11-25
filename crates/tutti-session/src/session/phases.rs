@@ -196,6 +196,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // First of the landings, so what a take reported is in this update's
                 // events.
                 self.inputs.land_takes(out);
+                // A take's stop the transport's queue refused, sent now that
+                // the renders since have freed room.
+                #[cfg(feature = "capture")]
+                self.transport.handle.send_owed_stops();
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its
@@ -209,6 +213,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // shapes are new (a lookahead is a time, so a rate change moves
                 // latencies): its figures are published at the commit.
                 self.graph.collect_noting_resume();
+                self.tell_gained_receivers();
                 self.sync_main_output_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
@@ -302,8 +307,17 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let committed = self.graph.commit();
         if committed == Committed::Sent {
             self.graph.publish_sent();
+            // A graph rendered locally applied the commit at once.
+            self.tell_gained_receivers();
         }
         committed
+    }
+
+    /// Tells the nodes that gained a receiver, once the executor has applied the
+    /// commit holding it: they send it their setup from their next block.
+    fn tell_gained_receivers(&mut self) {
+        let gained = self.graph.take_applied_receivers();
+        self.midi.receivers_gained(&self.graph, &gained);
     }
 
     /// [`commit`](Self::commit), a refusal pushed onto `out`: whether it sent.

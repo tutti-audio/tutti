@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_RAMP, Ramp};
-use tutti_graph::{DeclaredUnit, Io, MAX_PARAM_PORTS, ParamSetBuilder};
+use tutti_graph::{DeclaredUnit, ErasedSetting, Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
@@ -50,12 +50,6 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// [`flatten`](Self::flatten).
     fn assemble(&self, v: &[f64]) -> Self::Controls;
 
-    /// The controls that ring longest, given each one's lowest and highest value
-    /// in the block. Only a design that parks asks; the default is the highest.
-    fn longest(&self, _lowest: &Self::Controls, highest: &Self::Controls) -> Self::Controls {
-        *highest
-    }
-
     /// How the reader takes control `k` (`k < addrs().len()`): whether it ramps, lands
     /// whole or is read per frame, and which values it accepts. [`Control::RAMP`] by
     /// default; `control_set!` writes it from each row's flags, so a control is
@@ -68,6 +62,14 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// designed from, to design again: the dead-band. Exact inequality by default.
     fn moved(&self, applied: &Self::Controls, target: &Self::Controls) -> bool {
         applied != target
+    }
+
+    /// The cells of the settings the set holds, each under its kind: what a session's key
+    /// sets and reads. Allocates; called on the control side when the node's parts are built.
+    /// None by default; a set that holds one also implements
+    /// [`HasSetting`](tutti_graph::HasSetting) for its kind.
+    fn settings(&self) -> Vec<ErasedSetting> {
+        Vec::new()
     }
 
     /// Stops sharing what the set shares besides the cells (a setting's word), keeping its
@@ -126,12 +128,34 @@ pub enum ControlValid {
 }
 
 /// How the reader takes one control: what a `control_set!` row declares.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Control {
     /// How it is read.
     pub read: ControlRead,
     /// Which values it accepts.
     pub valid: ControlValid,
+    /// What the kernel's [`tail_of`](crate::Kernel::tail_of) does with it.
+    pub ring: Ring,
+}
+
+/// What a control does to the kernel's ring-out ([`Control::ring`]): whether
+/// [`tail_of`](crate::Kernel::tail_of) reads it and, if so, where it is longest. A control
+/// counts as driven for every block its port delivers frames: through a connect or disconnect
+/// declick, and from its source's first event on; a source that has not spoken leaves the port
+/// on its base. A driven port may take any value later, so the node reports the most the
+/// kernel rings over the driven controls' whole range, the others as their cells set them
+/// ([`KernelNode`](crate::KernelNode)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Ring {
+    /// The tail never reads it: driving it leaves the ring-out as it is.
+    Never,
+    /// The tail is non-decreasing toward this raw value (the `f64` the cell and the port
+    /// carry, in the control's unit), whatever the other controls are: the value is the end of
+    /// the range, or any value at or past the point the kernel clamps it at.
+    LongestAt(f64),
+    /// The tail reads it and the longest value is not stated: driving it reports the kernel's
+    /// ceiling ([`Kernel::tail`](crate::Kernel::tail)).
+    Unstated,
 }
 
 impl Control {
@@ -139,6 +163,7 @@ impl Control {
     pub const RAMP: Self = Self {
         read: ControlRead::Ramp,
         valid: ControlValid::Finite,
+        ring: Ring::Unstated,
     };
 
     /// The row flag `whole`: a moved cell lands whole.
@@ -155,6 +180,27 @@ impl Control {
     pub(crate) const fn fast(self) -> Self {
         Self {
             read: ControlRead::Fast,
+            ..self
+        }
+    }
+
+    /// The row flag `no_ring`: the kernel's tail never reads this control, so driving it
+    /// leaves the ring-out as it is. A control without a ring flag is read by the tail and
+    /// [`Ring::Unstated`]: forgetting the flag errs long.
+    #[must_use]
+    pub(crate) const fn no_ring(self) -> Self {
+        Self {
+            ring: Ring::Never,
+            ..self
+        }
+    }
+
+    /// The row flag `longest = raw`: the tail is longest at `raw`, the port's own raw scale
+    /// ([`Ring::LongestAt`]).
+    #[must_use]
+    pub(crate) const fn longest(self, raw: f64) -> Self {
+        Self {
+            ring: Ring::LongestAt(raw),
             ..self
         }
     }
@@ -226,22 +272,26 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// The first line names the set, its binding (`s`, for the next expressions)
 /// and its `Controls`, with the controls [`assemble`](ControlSet::assemble)
 /// starts from (the parts the ports do not carry). `live` is how many of the
-/// rows the set has (`all`, or an expression: a design that cannot freeze
-/// leaves off the freeze). A row is `Kind => Unit = field`, a single control;
+/// rows the set has (`all`, or an expression: a graphic EQ has a row for
+/// each of its bands). A row is `Kind => Unit = field`, a single control, where `field` may be
+/// a path of fields (`inner.field`, as the FDN's `network.decay[0]` and `kind.pitch`);
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row `Kind => Unit = field via Ranged` is a
 /// range-checked field: it reads as `field.get()` and a cell becomes `Ranged::held(cell)`, the
 /// hold of a live value that has no caller to refuse it to. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
 /// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
-/// than [`MAX_SIGNALS`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
-/// not one of these does not compile.
+/// than [`MAX_SIGNALS`] do not compile), `not_nan` (accepts `+-inf`), `no_ring` (the
+/// kernel's tail never reads it) and `longest = raw` (the tail is longest at that raw value of
+/// the control, in the unit's raw scale; see [`Ring`]). A row with neither of the last two is
+/// read by the tail with no longest value stated. A flag that is not one of these does not
+/// compile.
 macro_rules! control_set {
     (
         $set:ident($s:ident): $controls:ty = $base:expr;
         live: ($($live:tt)+);
-        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $([$pi:literal])? $(via $ranged:ty)?
-            $({ $($flag:ident),* })?),+ ;
+        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $(. $g:ident)* $([$pi:literal])? $(via $ranged:ty)?
+            $({ $($flag:ident $(= $val:expr)?),* })?),+ ;
         $($items:tt)*
     ) => {
         impl $crate::params::ControlSet for $set {
@@ -264,7 +314,7 @@ macro_rules! control_set {
 
             fn control(&self, k: usize) -> $crate::params::Control {
                 const ALL: &[$crate::params::Control] = &[$(
-                    $crate::params::Control::RAMP $($(.$flag())*)?
+                    $crate::params::Control::RAMP $($(.$flag($($val)?))*)?
                 ),+];
                 const _: () = assert!(
                     $crate::params::Control::fast_count(ALL) <= $crate::MAX_SIGNALS,
@@ -276,7 +326,7 @@ macro_rules! control_set {
             fn flatten(&self, c: &$controls, out: &mut [f64]) {
                 let all = [$(
                     <$unit as tutti_graph::ParamValue>::to_cell(
-                        control_set!(@read c.$f $([$pi])? $(via $ranged)?)
+                        control_set!(@read c . $f $(. $g)* $([$pi])? $(via $ranged)?)
                     )
                 ),+];
                 out.copy_from_slice(&all[..out.len()]);
@@ -289,7 +339,7 @@ macro_rules! control_set {
                 let mut cells = v.iter().copied();
                 $(
                     if let Some(x) = cells.next() {
-                        c.$f $([$pi])? = control_set!(@write $unit, x $(, via $ranged)?);
+                        c.$f $(. $g)* $([$pi])? = control_set!(@write $unit, x $(, via $ranged)?);
                     }
                 )+
                 c
@@ -299,8 +349,10 @@ macro_rules! control_set {
         }
         $( control_set!(@has $set; $kind $([$ix])? => $unit); )+
     };
-    (@read $c:ident . $f:ident $([$pi:literal])? via $ranged:ty) => { $c.$f $([$pi])?.get() };
-    (@read $c:ident . $f:ident $([$pi:literal])?) => { $c.$f $([$pi])? };
+    (@read $c:ident . $f:ident $(. $g:ident)* $([$pi:literal])? via $ranged:ty) => {
+        $c.$f $(. $g)* $([$pi])?.get()
+    };
+    (@read $c:ident . $f:ident $(. $g:ident)* $([$pi:literal])?) => { $c.$f $(. $g)* $([$pi])? };
     (@write $unit:ty, $x:ident, via $ranged:ty) => {
         <$ranged>::held(<$unit as tutti_graph::ParamValue>::from_cell($x))
     };
@@ -478,27 +530,33 @@ impl<S: ControlSet> Params<S> {
         self.primed = true;
     }
 
-    /// Each control's lowest and highest value in the block (the cell's where no
-    /// control signal drives it), or `None` when no control signal does.
-    fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
-        let mut out = [[0.0; MAX_CONTROLS]; 2];
-        let mut driven = false;
-        for (k, cell) in self.cells.iter().enumerate() {
-            let signal = io.param(k).frames();
-            driven |= signal.is_some();
-            let base = cell.load(Acquire);
-            let fold = |pick: fn(f64, f64) -> f64| {
-                signal
-                    .into_iter()
-                    .flatten()
-                    .map(|&v| -> f64 { v.into() })
-                    .filter(|v| v.is_finite())
-                    .fold(base, pick)
+    /// Whether a control signal drives a control the tail reads ([`Control::ring`] is not
+    /// [`Ring::Never`]) in the block, a fast one included.
+    pub(crate) fn ring_driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
+        (0..self.cells.len())
+            .any(|k| self.controls[k].ring != Ring::Never && io.param(k).frames().is_some())
+    }
+
+    /// The controls the tail is longest at, given which ports drive a control in the block:
+    /// each driven control with a [`Ring::LongestAt`] at that value, every other as its cell
+    /// holds it. `None` when a driven control the tail reads has no value stated. It depends
+    /// on which ports are driven, not on the values they carry. A cell written during the
+    /// block is read as written.
+    pub(crate) fn longest<G: Float>(&mut self, io: &Io<'_, G>) -> Option<S::Controls> {
+        let n = self.cells.len();
+        let mut value = [0.0f64; MAX_CONTROLS];
+        for (k, v) in value[..n].iter_mut().enumerate() {
+            let control = self.controls[k];
+            *v = match control.ring {
+                Ring::LongestAt(raw) if io.param(k).frames().is_some() => raw,
+                Ring::Unstated if io.param(k).frames().is_some() => return None,
+                _ => {
+                    let x = self.cells[k].load(Relaxed);
+                    self.good[k].read_if(x, control.accepts(x))
+                }
             };
-            out[0][k] = fold(f64::min);
-            out[1][k] = fold(f64::max);
         }
-        driven.then_some(out)
+        Some(self.set.assemble(&value[..n]))
     }
 
     /// The addresses of the cells, in port order.
@@ -588,17 +646,6 @@ impl<S: ControlSet> Params<S> {
             *signal = io.param(k).frames();
         }
         signals
-    }
-
-    /// The controls that ring longest among the values a modulated port takes anywhere
-    /// in the block, or `None` when nothing is modulated.
-    pub(crate) fn longest<G: Float>(&self, io: &Io<'_, G>) -> Option<S::Controls> {
-        let [lowest, highest] = self.extremes(io)?;
-        let n = self.cells.len();
-        Some(self.set.longest(
-            &self.set.assemble(&lowest[..n]),
-            &self.set.assemble(&highest[..n]),
-        ))
     }
 
     /// Stops sharing the cells, keeping their values: a fork's own.

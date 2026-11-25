@@ -4,7 +4,10 @@
 //! fewer tasks than undeclared ones, and the render on a pool is bit for bit
 //! the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::Interleaved;
+use tutti_graph::EdgeId;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
@@ -94,7 +97,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     }
     let sources = READS + STRETCHED;
     // Two silent main outputs, which the fan-in below fills.
-    ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
+    ed.wire_declared_outputs([PortSource::Zero; 2]).unwrap();
     let mut outputs = Vec::new();
     for k in 0..sources {
         let key = NodeKey(k + 1);
@@ -117,14 +120,15 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
             if bus {
                 // The graph's fan-in: output channel `c` holds every
                 // source's port `c`, and the graph sums them.
-                ed.spec_mut().topology.connect_output(c as usize, from);
+                ed.connect_edge(EdgeId::into_output((c as usize) as u16, from))
+                    .unwrap();
             } else {
                 outputs.push(from);
             }
         }
     }
     if !bus {
-        ed.spec_mut().topology.set_outputs(outputs);
+        ed.wire_declared_outputs(outputs).unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

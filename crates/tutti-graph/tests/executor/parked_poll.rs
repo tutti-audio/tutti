@@ -3,6 +3,8 @@
 //! that is not parked, and `process` is not called meanwhile. A real recall
 //! (a `tutti_rt` handoff) is answered under `RtScope`.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, NodeKey, NodeMode, OutputPort, PortSource, Prepare, Shape,
-    Status, TransportPosition, Unforkable,
+    Status, Unforkable,
 };
 use tutti_rt::{Handoff, Rt, handoff};
 
@@ -76,9 +78,8 @@ fn rig() -> Rig {
             returned: Arc::clone(&returned),
         }),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -93,13 +94,7 @@ fn rig() -> Rig {
 }
 
 fn render(exec: &mut Executor) {
-    let mut out = [0.0f32; BLOCK];
-    exec.process(
-        BLOCK,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut out[..]],
-    );
+    common::block(exec, BLOCK, 1);
 }
 
 fn apply(r: &mut Rig) {
@@ -166,15 +161,13 @@ fn a_recall_is_answered_by_a_parked_node_without_allocating() {
     park(&mut r);
     assert!(r.hand.recall().is_none(), "the node holds it");
     assert_eq!(count(&r.returned), 0);
-    let mut out = [0.0f32; BLOCK];
-    r.exec.process(
-        BLOCK,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut out[..]],
-    );
+    render(&mut r.exec);
     assert_eq!(count(&r.returned), 1, "stopped once on its way back");
-    assert_eq!(r.hand.take(), Some(7), "returned to the control side");
+    assert_eq!(
+        r.hand.take(),
+        Some(tutti_rt::Handback::Recalled(7)),
+        "returned to the control side"
+    );
 }
 
 /// Four holders on four outputs, two of them bypassed, rendered for a while on
@@ -182,9 +175,7 @@ fn a_recall_is_answered_by_a_parked_node_without_allocating() {
 /// `(processed, parked)` counts.
 fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(common::test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let mut counts = Vec::new();
     let mut outputs = Vec::new();
     for k in 1..=4u64 {
@@ -203,7 +194,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
         outputs.push(PortSource::Node(OutputPort::new(NodeKey(k), 0)));
         counts.push((processed, parked));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -215,10 +206,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
     ed.collect();
     let mut heard = Vec::new();
     for _ in 0..60 {
-        let mut bufs = vec![vec![0.0f32; BLOCK]; 4];
-        let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
-        heard.extend(common::bits(&bufs));
+        heard.extend(common::bits(&common::block(&mut exec, BLOCK, 4)));
     }
     (
         heard,
@@ -231,16 +219,12 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
 /// never, on every worker count.
 #[test]
 fn a_parked_poll_on_the_pool_renders_what_the_one_participant_executor_does() {
-    let (serial, serial_counts) = four_holders(1);
+    let (_, serial_counts) =
+        common::agree_across_workers(common::WORKERS, four_holders, Clone::clone);
     assert!(
         serial_counts[1].1 > 0 && serial_counts[3].1 > 0,
         "polled parked"
     );
     assert_eq!(serial_counts[0].1, 0, "an active node is not polled parked");
     assert!(serial_counts[1].0 < 60, "a parked node is not processed");
-    for workers in common::WORKERS {
-        let (parallel, counts) = four_holders(workers);
-        assert_eq!(parallel, serial, "{workers} workers: the same bits");
-        assert_eq!(counts, serial_counts, "{workers} workers: the same calls");
-    }
 }

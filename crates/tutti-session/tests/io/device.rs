@@ -1299,6 +1299,94 @@ fn quantum_requests(events: &[SessionEvent]) -> Vec<OutputQuantum> {
         .collect()
 }
 
+/// A manual driver whose stream reports `opened` as its callback size, whatever
+/// the spec asked for.
+struct OpensAt {
+    inner: ManualStreamDriver,
+    opened: OutputQuantum,
+}
+
+impl tutti_engine::StreamDriver for OpensAt {
+    type Running = <ManualStreamDriver as tutti_engine::StreamDriver>::Running;
+    type Error = std::convert::Infallible;
+
+    fn open(
+        self,
+        spec: &OutputSpec,
+        block: tutti_engine::OutputBlock,
+        faults: std::sync::Arc<tutti_engine::StreamFaults>,
+    ) -> Result<tutti_engine::OpenedOutput<Self::Running>, Self::Error> {
+        let opened = self.inner.open(spec, block, faults)?;
+        Ok(tutti_engine::OpenedOutput {
+            quantum: Some(self.opened),
+            ..opened
+        })
+    }
+}
+
+/// **A stream that opened at another size than the graph is prepared for is
+/// still asked to move.** The device was asked for 512 frames and its stream
+/// reports, and delivers, 480: the stream's spec says 480 and the graph is
+/// prepared for 512, the size requested. The rule compares what is delivered
+/// with what the graph is prepared for, so it asks for a restart onto 480; read
+/// against the stream's spec it would find delivered and stated equal and ask
+/// for nothing.
+#[test]
+fn a_stream_that_opened_at_another_size_than_the_graph_is_prepared_for_is_still_asked_to_move() {
+    let (inner, stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(
+            spec_with_quantum(48_000.0, 512),
+            OpensAt {
+                inner,
+                opened: OutputQuantum::of(480),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        session.device().spec().quantum,
+        Some(OutputQuantum::of(480)),
+        "the stream says what it opened at"
+    );
+    assert_eq!(
+        session.graph_ref().testing().prepared().quantum(),
+        Some(MaxBlock::of(Samples::new(512))),
+        "the graph is prepared for the request"
+    );
+
+    let base = Instant::now();
+    let mut asked = Vec::new();
+    let mut ms = 0;
+    while asked.is_empty() && ms < 100 {
+        stream.render_block(Samples::new(480)).expect("open");
+        ms += 1;
+        asked.extend(quantum_requests(&poll(&mut session, base, ms)));
+    }
+    assert_eq!(
+        asked,
+        [OutputQuantum::of(480)],
+        "asked to move to the size delivered"
+    );
+
+    // The host runs it; the graph and the stream then agree, and callbacks of
+    // that size ask for nothing.
+    let (driver, new) = ManualStreamDriver::new();
+    session
+        .restart_on(spec_with_quantum(48_000.0, 480), driver, None, None)
+        .unwrap();
+    assert_eq!(
+        session.graph_ref().testing().prepared().quantum(),
+        Some(MaxBlock::of(Samples::new(480)))
+    );
+    let mut later = poll(&mut session, base, 200);
+    for step in 0..50 {
+        new.render_block(Samples::new(480)).expect("open");
+        later.extend(poll(&mut session, base, 201 + step));
+    }
+    assert!(quantum_requests(&later).is_empty(), "{later:?}");
+}
+
 /// **Callbacks that settle at another size than the one asked for move the
 /// graph and the stream to it, once.** The device was opened asking for 512
 /// frames and the backend delivers 480: the session asks for a restart onto

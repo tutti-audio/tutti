@@ -6,11 +6,14 @@
 //! `no_alloc/block_no_alloc.rs` keeps its own copy, deliberately: every line
 //! it runs before the gate has to be auditable in one file.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{AudioCallbackState, Engine, OutputSpec};
+use tutti_graph::EdgeId;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
@@ -19,13 +22,13 @@ use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 
-pub const SAMPLE_RATE: f64 = 48_000.0;
+pub(crate) const SAMPLE_RATE: f64 = 48_000.0;
 
 /// An engine over `transport` rendering the graph `build` wires into
 /// a fresh editor (prepared for 512-frame blocks at [`SAMPLE_RATE`]). The
 /// editor is leaked: a test process is the whole lifetime, and nothing here
 /// commits again.
-pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> Engine {
+pub(crate) fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> Engine {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(512)),
@@ -38,17 +41,16 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
 }
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
-pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs]);
+pub(crate) fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
+        .unwrap();
 }
 
 /// A rolling transport driving a sine through a filter, at `outputs` width.
 ///
 /// The graph has to actually render: a graph with nothing wired renders
 /// silence, and any assertion over it is vacuous.
-pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
+pub(crate) fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let engine = graph_engine(&transport, |ed| {
         let (source, filter) = (NodeKey(1), NodeKey(2));
@@ -62,10 +64,11 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
                     .q(Q::new(0.7)),
             ),
         );
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(filter, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+        ))
+        .unwrap();
         fan(ed, filter, outputs);
     });
     let state = AudioCallbackState::new(engine);
@@ -82,7 +85,7 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
 /// frame carries the same known value, so an expected result can be computed
 /// in closed form instead of sampled. That is what makes the sample-format
 /// matrix assertable.
-pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
+pub(crate) fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
         ed.insert(NodeKey(1), "dc", Const::mono(level));
         fan(ed, NodeKey(1), outputs);
@@ -91,7 +94,7 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
 }
 
 /// A spec with no device behind it, at `channels` width and `format`.
-pub fn spec(channels: usize, format: SampleFormat) -> OutputSpec {
+pub(crate) fn spec(channels: usize, format: SampleFormat) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(SAMPLE_RATE),
         ChannelLayout::try_from(channels).expect("a test width is small"),

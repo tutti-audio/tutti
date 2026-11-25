@@ -971,6 +971,28 @@ mod tests {
         ));
     }
 
+    /// **A render mode told to a server with no plugin is refused**, as a
+    /// plugin not yet prepared refuses it: there is nothing to run in the mode.
+    #[test]
+    fn a_render_mode_with_no_plugin_is_refused() {
+        let mut s = Rig::new();
+        let r = s
+            .handle(
+                main_thread(),
+                ControlRequest::SetRenderMode {
+                    mode: tutti_plugin_types::RenderMode::Offline,
+                },
+            )
+            .into_reply();
+        assert!(matches!(
+            r,
+            ControlReply::RenderModeSet {
+                mode: tutti_plugin_types::RenderMode::Offline,
+                outcome: tutti_plugin_ipc::ModeOutcome::Refused,
+            }
+        ));
+    }
+
     /// A `LoadState` with no plugin loaded answers, and answers with a refusal.
     ///
     /// Answering `Reaction::None` — silence — is the failure this pins. The host
@@ -1413,9 +1435,9 @@ mod tests {
             matches!(
                 &refused,
                 ControlReply::SampleRateSet { rate, refusal: Some(e) }
-                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. })
+                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. })
             ),
-            "the host is told, with a reason: {refused:?}"
+            "the rollback is refused too (the 64-bit ports are gone at the accepted rate as well), so the plugin is deactivated: {refused:?}"
         );
         assert!(s.rate_refused.is_some());
         assert!(

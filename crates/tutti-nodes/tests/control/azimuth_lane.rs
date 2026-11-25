@@ -5,7 +5,10 @@
 //!
 //! Against closed forms written here, never another render.
 
+use tutti_graph::testing::declare_outputs;
+
 use std::sync::Arc;
+use tutti_graph::EdgeId;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -70,10 +73,15 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(PROBE), "probe", ForkByClone(Probe));
     for c in 0..2 {
-        ed.spec_mut()
-            .topology
-            .outputs
-            .push(vec![PortSource::Node(OutputPort::new(NodeKey(PROBE), c))]);
+        {
+            let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+            declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
+            ed.connect_edge(EdgeId::into_output(
+                channel,
+                PortSource::Node(OutputPort::new(NodeKey(PROBE), c)),
+            ))
+            .unwrap()
+        };
     }
     ed.set_param_range(at(UnitParam::Azimuth), azimuth)
         .expect("a probe");
@@ -92,8 +100,8 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
             .range(ed.param_range_cell(at(param)).expect("committed")),
     );
     ed.insert(NodeKey(key), "lane", node);
-    ed.spec_mut()
-        .connect_param(at(param), EventOutputPort::new(NodeKey(key), 0));
+    ed.connect_param(at(param), EventOutputPort::new(NodeKey(key), 0))
+        .unwrap();
 }
 
 /// Rolls `blocks` blocks of `n` frames from `start`; each output's frames.

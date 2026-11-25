@@ -11,11 +11,15 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
 use tutti_fixtures::{Record, Shared};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::wire_like;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -902,7 +906,7 @@ struct Solo {
 impl Solo {
     fn new(inputs: u16) -> Self {
         let (mut ed, exec) = Editor::new(prepare(MAX_BLOCK));
-        ed.spec_mut().topology.inputs = ChannelLayout::from_count(inputs);
+        ed.resize_inputs(ChannelLayout::from_count(inputs));
         Self { ed, exec, frame: 0 }
     }
 
@@ -911,7 +915,9 @@ impl Solo {
     }
 
     fn wire(&mut self, f: impl FnOnce(&mut Topology)) {
-        f(&mut self.ed.spec_mut().topology);
+        let mut topology = self.ed.spec().topology.clone();
+        f(&mut topology);
+        wire_like(&mut self.ed, &tutti_graph::GraphSpec::new(topology));
     }
 
     fn commit(&mut self) {
@@ -1093,7 +1099,8 @@ fn un_bypass_resets_once_and_old_state_is_never_heard() {
 
 const ON60: [u32; 4] = [0x2090_3C64, 0, 0, 0];
 const ON62: [u32; 4] = [0x2090_3E64, 0, 0, 0];
-const OFF60: [u32; 4] = [0x2080_3C00, 0, 0, 0];
+/// What closes a held `ON60`: a MIDI 2.0 Note Off at velocity 0.
+const CLOSE60: [u32; 4] = [0x4080_3C00, 0, 0, 0];
 
 /// A note source: sends what its mailbox holds, as one block's events.
 struct Src {
@@ -1153,9 +1160,8 @@ fn a_held_input_note_is_closed_on_bypass() {
         t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(2), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1165,7 +1171,7 @@ fn a_held_input_note_is_closed_on_bypass() {
     let seen: Vec<[u32; 4]> = p.events.lock().unwrap().iter().map(|e| e.1).collect();
     assert_eq!(
         seen,
-        vec![ON60, OFF60],
+        vec![ON60, CLOSE60],
         "the off, and not the later note-on"
     );
     // Called for the 2 blocks, and the 4 of the fade; the off was delivered
@@ -1196,9 +1202,8 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
         t.connect(at(3, 0), direct(2));
         t.set_outputs(vec![out(3, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(3), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(3), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(5, BLOCK, &|_| 0.0);
@@ -1210,7 +1215,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
     s.mode(3, NodeMode::Bypassed);
     s.run(8, BLOCK, &|_| 0.0);
     let seen: Vec<[u32; 4]> = p.events.lock().unwrap().iter().map(|e| e.1).collect();
-    assert_eq!(seen, vec![ON60, OFF60]);
+    assert_eq!(seen, vec![ON60, CLOSE60]);
 }
 
 /// **A bypassed source closes what it holds downstream**: a note source
@@ -1235,9 +1240,8 @@ fn a_bypassed_source_closes_its_notes() {
         t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(2), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1254,7 +1258,7 @@ fn a_bypassed_source_closes_its_notes() {
     let seen: Vec<(u64, [u32; 4])> = sink.events.lock().unwrap().to_vec();
     assert_eq!(
         seen.iter().map(|e| e.1).collect::<Vec<_>>(),
-        vec![ON60, OFF60]
+        vec![ON60, CLOSE60]
     );
     assert_eq!(seen[1].0, 6 * BLOCK as u64, "in the first parked block");
     mail.lock().unwrap().push(ON62);
@@ -1286,8 +1290,9 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                 width: 1,
             })),
         );
-        ed.spec_mut().topology.connect(at(2, 0), direct(1));
-        ed.spec_mut().topology.set_outputs(vec![out(2, 0)]);
+        ed.connect_edge(EdgeId::into_port(at(2, 0), direct(1)))
+            .unwrap();
+        ed.wire_declared_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1372,12 +1377,14 @@ fn modes_name_nodes() {
 #[test]
 fn a_fork_copies_the_mode_and_starts_steady() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

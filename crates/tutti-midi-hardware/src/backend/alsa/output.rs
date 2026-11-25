@@ -19,7 +19,7 @@ use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_ump::Ump;
 
 /// An open ALSA output, as a [`MidiOut`].
-pub struct AlsaOutput {
+pub(super) struct AlsaOutput {
     /// The client and its port, which are only valid together.
     ///
     /// Behind a `Mutex` because `MidiOut::queue` takes `&self` and a `Client`
@@ -147,7 +147,7 @@ impl DeviceOut for AlsaOutput {
 ///
 /// [`MidiHardwareError::Os`] if the sequencer cannot be opened, the
 /// port created, or the subscription to `id` made.
-pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+pub(super) fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
     Ok(Box::new(connect(id)?))
 }
 

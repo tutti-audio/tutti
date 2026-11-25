@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
+use tutti_graph::testing::declare_outputs;
 use tutti_tempo::TempoMap;
 use tutti_timeline::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::Ump;
@@ -30,11 +31,7 @@ fn render(
     ch: usize,
     frames: usize,
 ) -> Vec<Vec<f32>> {
-    let plan = crate::render::RenderPlan {
-        total: Samples::new(frames),
-        output_length: Samples::new(frames),
-        latency: Samples::new(0),
-    };
+    let plan = crate::render::RenderPlan::of_frames(Samples::new(frames));
     let layout = ChannelLayout::try_from(ch).expect("a test width is small");
     let mut out = Vec::new();
     with_source(graph, RATE, clock, |src| {
@@ -83,11 +80,7 @@ fn drive_reported(
     token: &CancelToken,
     report: &mut dyn FnMut(&Progress),
 ) -> (Outcome<()>, usize) {
-    let plan = crate::render::RenderPlan {
-        total: Samples::new(frames),
-        output_length: Samples::new(frames),
-        latency: Samples::new(0),
-    };
+    let plan = crate::render::RenderPlan::of_frames(Samples::new(frames));
     let mut consumed = 0;
     let outcome = with_source(&mut mono_dc(0.5), RATE, &FrozenClock, |src| {
         drive(
@@ -195,7 +188,7 @@ fn a_spec_narrowed_without_a_commit_still_renders_the_committed_width() {
     let (mut editor, executor) = g.build(RenderGraph::prepare(RATE)).expect("builds");
     let committed = editor.spec().topology.outputs.len();
     assert!(committed >= 2, "a stereo graph has two outputs");
-    editor.spec_mut().topology.outputs.truncate(1);
+    declare_outputs(&mut editor, ChannelLayout::from_count(1));
     let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
     let frames = render(&mut graph, &FrozenClock, 2, 16);
     assert!(frames.iter().all(|f| f[0] == 0.5 && f[1] == 0.5));
@@ -388,11 +381,7 @@ mod loss {
     }
 
     fn lost_in_one_block(graph: &mut RenderGraph) -> u64 {
-        let plan = crate::render::RenderPlan {
-            total: Samples::new(GRAPH_MAX_BLOCK.get()),
-            output_length: Samples::new(GRAPH_MAX_BLOCK.get()),
-            latency: Samples::new(0),
-        };
+        let plan = crate::render::RenderPlan::of_frames(Samples::new(GRAPH_MAX_BLOCK.get()));
         with_source(graph, RATE, &FrozenClock, |src| {
             drive(
                 src,

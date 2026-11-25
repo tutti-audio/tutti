@@ -159,7 +159,7 @@ fn listed(id: &str) -> UmpEndpointInfo {
 /// MIDI 1.0 port field and SysEx 8 streams are the ones given. The endpoint
 /// carries the Device Identity and Product Instance Id it was created with
 /// (§7.1.3, §7.1.5).
-pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
+pub(crate) fn an_endpoint_lists_the_blocks_it_was_created_with() {
     let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
@@ -203,7 +203,7 @@ pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
 
 /// **The numbers `blocks` reports are the numbers CoreMIDI lists**: the first
 /// block's absolute number, then the second's, in the order registered.
-pub fn the_block_numbers_read_back_are_the_numbers_coremidi_lists() {
+pub(crate) fn the_block_numbers_read_back_are_the_numbers_coremidi_lists() {
     let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
@@ -223,7 +223,7 @@ pub fn the_block_numbers_read_back_are_the_numbers_coremidi_lists() {
 
 /// A block that declares a MIDI-CI version is refused by name before any
 /// endpoint exists: `MIDIUMPMutableFunctionBlock` has no such field.
-pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
+pub(crate) fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     let ci = block(OsFunctionBlock {
         midi_ci_version: 2,
         ..base(0)
@@ -251,7 +251,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 /// **The longest Product Instance Id, 42 characters, is listed back intact**
 /// (M2-104 §7.1.5): `ProductInstanceId` makes a longer one unwritable, and
 /// CoreMIDI accepts the longest.
-pub fn a_42_character_instance_id_is_listed_back_intact() {
+pub(crate) fn a_42_character_instance_id_is_listed_back_intact() {
     let longest = format!("{:x<42}", tutti_fixtures::unique_name("t"));
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
     let created = finish(CreateUmpEndpoint::new(
@@ -278,7 +278,7 @@ pub fn a_42_character_instance_id_is_listed_back_intact() {
 /// a UMP Endpoint is a source and a destination). CoreMIDI sends the endpoint
 /// messages of its own first (MIDI-CI Discovery), so the callback is read until
 /// the one sent arrives.
-pub fn an_endpoint_receives_what_is_sent_to_its_destination() {
+pub(crate) fn an_endpoint_receives_what_is_sent_to_its_destination() {
     let (tx, rx) = mpsc::channel();
     let Some((endpoint, id)) = endpoint(move |_, ump| {
         let _ = tx.send(ump);
@@ -306,7 +306,7 @@ pub fn an_endpoint_receives_what_is_sent_to_its_destination() {
 /// What the sender publishes reaches an input port connected to the endpoint's
 /// source. CoreMIDI sends messages of its own first, so the port is read until
 /// the one sent arrives.
-pub fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
+pub(crate) fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
     let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
@@ -344,7 +344,7 @@ pub fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
 /// drop, every send after the drop returned is `EndpointGone`, and none is any other
 /// error. (A send racing the dispose is excluded by the sender's lock; it cannot be
 /// observed, since CoreMIDI accepts a send on a disposed reference silently.)
-pub fn a_sender_on_another_thread_sees_the_endpoint_go_by_name() {
+pub(crate) fn a_sender_on_another_thread_sees_the_endpoint_go_by_name() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     let Some((endpoint, _)) = endpoint(|_, _| {}) else {
@@ -387,7 +387,7 @@ pub fn a_sender_on_another_thread_sees_the_endpoint_go_by_name() {
 
 /// A send on a sender whose endpoint was dropped is refused by name, and its
 /// counters still read.
-pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
+pub(crate) fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let Some((endpoint, _)) = endpoint(|_, _| {}) else {
         return;
     };
@@ -399,7 +399,7 @@ pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
 }
 
 /// Runs every case on the main thread, as `harness = false` does.
-pub fn cases() {
+pub(crate) fn cases() {
     tutti_fixtures::main_thread_cases(tutti_fixtures::cases![
         an_endpoint_lists_the_blocks_it_was_created_with,
         the_block_numbers_read_back_are_the_numbers_coremidi_lists,

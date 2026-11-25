@@ -46,7 +46,7 @@ use tutti_units::{Latency, SampleRate, Samples};
 /// A bound plugin as the only node of a graph: the main inputs feed
 /// its inputs in order, its outputs feed the main outputs. The executor
 /// hands the node its `Env` and its whole block, as the engine does.
-pub struct Rig {
+pub(crate) struct Rig {
     renderer: Renderer,
     key: NodeKey,
     /// What inserting the plugin handed back.
@@ -57,7 +57,7 @@ pub struct Rig {
 
 impl Rig {
     /// `client` in a graph prepared for `rate` and blocks of `block` frames.
-    pub fn new(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
+    pub(crate) fn new(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
         Self::prepared(
             client,
             Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(block))),
@@ -67,7 +67,7 @@ impl Rig {
     /// An offline fork `client` in a graph prepared [`tutti_graph::RenderMode::Offline`]
     /// for `rate` and blocks of `block` frames: the mode that makes a fork wait
     /// for each chunk.
-    pub fn offline(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
+    pub(crate) fn offline(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
         Self::prepared(
             client,
             Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(block)))
@@ -76,13 +76,13 @@ impl Rig {
     }
 
     /// `client` in a graph prepared with `prepare` (a device quantum, say).
-    pub fn prepared(client: PluginClient<Bound>, prepare: Prepare) -> Self {
+    pub(crate) fn prepared(client: PluginClient<Bound>, prepare: Prepare) -> Self {
         Self::prepared_with(client, prepare, Vec::new())
     }
 
     /// As [`prepared`](Self::prepared), with `lanes` (foreign control
     /// lanes, one per parameter) feeding the plugin's event input.
-    pub fn prepared_with(
+    pub(crate) fn prepared_with(
         client: PluginClient<Bound>,
         prepare: Prepare,
         lanes: Vec<tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::ForeignLane>>,
@@ -93,7 +93,7 @@ impl Rig {
     /// As [`prepared_with`](Self::prepared_with), with a keyboard: a
     /// an event inlet feeding the plugin's event input too, and its writer.
     #[allow(dead_code)]
-    pub fn prepared_with_keys(
+    pub(crate) fn prepared_with_keys(
         client: PluginClient<Bound>,
         prepare: Prepare,
         lanes: Vec<tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::ForeignLane>>,
@@ -145,7 +145,7 @@ impl Rig {
     /// # Panics
     ///
     /// If the plugin has no audio input (nothing to put a path in front of).
-    pub fn behind(client: PluginClient<Bound>, prepare: Prepare, latency: Latency) -> Self {
+    pub(crate) fn behind(client: PluginClient<Bound>, prepare: Prepare, latency: Latency) -> Self {
         let (inputs, outputs) = (client.inputs(), client.outputs());
         assert!(inputs > 0, "the plugin has an audio input");
         let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
@@ -168,7 +168,7 @@ impl Rig {
 
     /// Renders like [`run`](Self::run), then waits until the server has
     /// answered the chunk the block submitted, so the next block plays it.
-    pub fn run_answered(
+    pub(crate) fn run_answered(
         &mut self,
         frames: usize,
         input: impl Fn(usize, usize) -> f32,
@@ -180,18 +180,22 @@ impl Rig {
 
     /// The graph's main audio inputs: the plugin's, unless it is
     /// [`behind`](Self::behind) a latent path.
-    pub fn inputs(&self) -> usize {
+    pub(crate) fn inputs(&self) -> usize {
         self.inputs
     }
 
     /// The plugin's audio outputs.
-    pub fn outputs(&self) -> usize {
+    pub(crate) fn outputs(&self) -> usize {
         self.outputs
     }
 
     /// Render `frames`, input channel `c` frame `i` being `input(c, i)`; one
     /// `Vec` per output channel.
-    pub fn run(&mut self, frames: usize, input: impl Fn(usize, usize) -> f32) -> Vec<Vec<f32>> {
+    pub(crate) fn run(
+        &mut self,
+        frames: usize,
+        input: impl Fn(usize, usize) -> f32,
+    ) -> Vec<Vec<f32>> {
         if self.inputs == 0 {
             return self.renderer.render(frames);
         }
@@ -203,33 +207,33 @@ impl Rig {
     }
 
     /// The node's latency as the graph compiles it: its declared `Shape`.
-    pub fn latency(&self) -> Samples {
+    pub(crate) fn latency(&self) -> Samples {
         self.renderer.editor().spec().topology.nodes[&self.key].latency
     }
 
     /// The renderer, to set the transport or edit the graph.
-    pub fn renderer(&mut self) -> &mut Renderer {
+    pub(crate) fn renderer(&mut self) -> &mut Renderer {
         &mut self.renderer
     }
 
     /// The plugin's key in the graph.
-    pub fn key(&self) -> NodeKey {
+    pub(crate) fn key(&self) -> NodeKey {
         self.key
     }
 }
 
 /// The rate the out-of-process suites run at.
-pub const SAMPLE_RATE: f64 = 48_000.0;
+pub(crate) const SAMPLE_RATE: f64 = 48_000.0;
 /// The block the out-of-process suites run.
-pub const BLOCK: usize = 64;
+pub(crate) const BLOCK: usize = 64;
 
 /// One block's worth of wall time: the audio callback's deadline.
-pub const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
+pub(crate) const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
 
 /// The pace a live driving loop keeps. The pipeline never waits for a reply,
 /// so an unpaced loop starves the subprocess and every block reads back
 /// silence.
-pub const PACE: Duration = PERIOD.saturating_mul(20);
+pub(crate) const PACE: Duration = PERIOD.saturating_mul(20);
 
 /// Waits until the server has answered the chunk the node submitted last
 /// (`PluginControls::chunk_in_flight_answered`), for at most [`HANG_GUARD`](tutti_fixtures::HANG_GUARD).
@@ -237,7 +241,7 @@ pub const PACE: Duration = PERIOD.saturating_mul(20);
 /// # Panics
 ///
 /// If it is not answered within [`HANG_GUARD`](tutti_fixtures::HANG_GUARD).
-pub fn await_answer(controls: &PluginControls) {
+pub(crate) fn await_answer(controls: &PluginControls) {
     await_answer_or(controls, "the server to answer the chunk in flight", || {
         false
     });
@@ -249,7 +253,7 @@ pub fn await_answer(controls: &PluginControls) {
 /// # Panics
 ///
 /// If neither happens within [`HANG_GUARD`](tutti_fixtures::HANG_GUARD), naming `what` was waited for.
-pub fn await_answer_or(controls: &PluginControls, what: &str, mut or: impl FnMut() -> bool) {
+pub(crate) fn await_answer_or(controls: &PluginControls, what: &str, mut or: impl FnMut() -> bool) {
     tutti_fixtures::wait_until(what, tutti_fixtures::HANG_GUARD, || {
         controls.chunk_in_flight_answered() || or()
     });
@@ -263,7 +267,7 @@ pub fn await_answer_or(controls: &PluginControls, what: &str, mut or: impl FnMut
 /// `tutti-plugin-server` depends on `tutti-plugin`, so it is not a
 /// dev-dependency and running these tests does not build it
 /// (`CLAUDE.md`, "Build `plugin-server` first").
-pub fn plugin_server_path() -> &'static str {
+pub(crate) fn plugin_server_path() -> &'static str {
     static RESOLVED: OnceLock<String> = OnceLock::new();
     RESOLVED
         .get_or_init(|| {
@@ -280,14 +284,14 @@ pub fn plugin_server_path() -> &'static str {
 /// Mirrors `tutti_clap_test_plugin::RenderMode`. Pinned against the plugin's own
 /// enum by `probe_render_modes_match_the_plugin`, so the duplication cannot
 /// silently drift into selecting a different renderer than the caller asked for.
-pub mod render {
-    pub const INERT: u32 = 0;
-    pub const TAG_PASSTHROUGH: u32 = 1;
-    pub const TAG_ONLY: u32 = 2;
-    pub const LATENCY: u32 = 3;
-    pub const NOTES: u32 = 4;
-    pub const TRANSPORT: u32 = 5;
-    pub const WOKEN: u32 = 6;
+pub(crate) mod render {
+    pub(crate) const INERT: u32 = 0;
+    pub(crate) const TAG_PASSTHROUGH: u32 = 1;
+    pub(crate) const TAG_ONLY: u32 = 2;
+    pub(crate) const LATENCY: u32 = 3;
+    pub(crate) const NOTES: u32 = 4;
+    pub(crate) const TRANSPORT: u32 = 5;
+    pub(crate) const WOKEN: u32 = 6;
 }
 
 /// Environment the probe reads **in the subprocess**, on load.
@@ -299,38 +303,38 @@ pub mod render {
 /// configured for this one's behaviour.
 ///
 /// Only valid while [`exclusive`] is held: `set_var` is process-global.
-pub struct ProbeEnv {
+pub(crate) struct ProbeEnv {
     keys: Vec<&'static str>,
 }
 
 impl ProbeEnv {
     /// An empty environment — the probe's own defaults.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { keys: Vec::new() }
     }
 
     /// What the plugin writes into its outputs. See [`render`].
-    pub fn render_mode(mut self, mode: u32) -> Self {
+    pub(crate) fn render_mode(mut self, mode: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_RENDER_MODE", mode.to_string());
         self
     }
 
     /// Makes the plugin answer `clap.preset-load`.
-    pub fn preset_load(mut self) -> Self {
+    pub(crate) fn preset_load(mut self) -> Self {
         self.set("TUTTI_CLAP_PROBE_PRESET_LOAD", "1".to_string());
         self
     }
 
     /// What the plugin returns from `process` (`tutti_clap_test_plugin::StatusMode`
     /// as a number).
-    pub fn status_mode(mut self, mode: u32) -> Self {
+    pub(crate) fn status_mode(mut self, mode: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_STATUS_MODE", mode.to_string());
         self
     }
 
     /// A thread of the plugin calls `host.request_process()` once the file at
     /// `path` exists, and deletes it.
-    pub fn request_process_file(mut self, path: &std::path::Path) -> Self {
+    pub(crate) fn request_process_file(mut self, path: &std::path::Path) -> Self {
         self.set(
             "TUTTI_CLAP_PROBE_REQUEST_PROCESS_FILE",
             path.display().to_string(),
@@ -340,26 +344,39 @@ impl ProbeEnv {
 
     /// Make `activate` refuse this sample rate (Hz), so a host that asks the
     /// plugin to run at it is refused, and any other rate is accepted.
-    pub fn refuse_rate(mut self, hz: f64) -> Self {
+    pub(crate) fn refuse_rate(mut self, hz: f64) -> Self {
         self.set("TUTTI_CLAP_PROBE_REFUSE_RATE", hz.to_string());
         self
     }
 
+    /// Withhold the `clap.render` extension: a plugin whose rendering does not
+    /// depend on the mode.
+    pub(crate) fn without_render(mut self) -> Self {
+        self.set("TUTTI_CLAP_PROBE_RENDER_EXTENSION", "0".to_string());
+        self
+    }
+
+    /// Make `clap.render.set` refuse the offline mode.
+    pub(crate) fn refuse_offline(mut self) -> Self {
+        self.set("TUTTI_CLAP_PROBE_REFUSE_OFFLINE", "1".to_string());
+        self
+    }
+
     /// Apply `kParamGain`-equivalent gain to the rendered output.
-    pub fn gain_enabled(mut self, on: bool) -> Self {
+    pub(crate) fn gain_enabled(mut self, on: bool) -> Self {
         self.set("TUTTI_CLAP_PROBE_APPLY_GAIN", u8::from(on).to_string());
         self
     }
 
     /// Abort the process on the `n`th `process()` call (1-based). `0` disables.
-    pub fn crash_on_block(mut self, n: u32) -> Self {
+    pub(crate) fn crash_on_block(mut self, n: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", n.to_string());
         self
     }
 
     /// Park `process()` on an atomic from the `n`th call (1-based) until
     /// released. `0` disables.
-    pub fn block_from(mut self, n: u32) -> Self {
+    pub(crate) fn block_from(mut self, n: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_BLOCK_FROM", n.to_string());
         self
     }
@@ -368,7 +385,7 @@ impl ProbeEnv {
     /// that answers every block, late. A sleep rather than
     /// [`block_from`](Self::block_from)'s spin, so many stalled instances do
     /// not take the host's cores.
-    pub fn stall_every_block(mut self, stall: std::time::Duration) -> Self {
+    pub(crate) fn stall_every_block(mut self, stall: std::time::Duration) -> Self {
         let us = u32::try_from(stall.as_micros()).expect("a stall under an hour");
         self.set("TUTTI_CLAP_PROBE_STALL_US", us.to_string());
         self
@@ -377,13 +394,13 @@ impl ProbeEnv {
     /// Make the plugin take a state only in `clap.state-context` `context`
     /// (CLAP's value: 2 duplicate, 3 project), saved for that same context:
     /// any other load is refused.
-    pub fn load_only_context(mut self, context: u32) -> Self {
+    pub(crate) fn load_only_context(mut self, context: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_LOAD_ONLY_CONTEXT", context.to_string());
         self
     }
 
     /// Make the plugin's `clap.state` save refuse.
-    pub fn refuse_state_save(mut self, on: bool) -> Self {
+    pub(crate) fn refuse_state_save(mut self, on: bool) -> Self {
         self.set(
             "TUTTI_CLAP_PROBE_REFUSE_STATE_SAVE",
             u8::from(on).to_string(),
@@ -393,20 +410,20 @@ impl ProbeEnv {
 
     /// Add `frames` to the plugin's latency (and its `Latency`-mode delay)
     /// while it renders offline, telling the host through `clap.latency`.
-    pub fn offline_extra_latency(mut self, frames: u32) -> Self {
+    pub(crate) fn offline_extra_latency(mut self, frames: u32) -> Self {
         self.set("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", frames.to_string());
         self
     }
 
     /// Make the plugin advertise `n` extra parameters after its table (ids from
     /// `tutti_clap_test_plugin::EXTRA_PARAM_BASE`).
-    pub fn extra_params(mut self, n: usize) -> Self {
+    pub(crate) fn extra_params(mut self, n: usize) -> Self {
         self.set("TUTTI_CLAP_PROBE_EXTRA_PARAMS", n.to_string());
         self
     }
 
     /// Make the plugin's `clap.state` load refuse.
-    pub fn refuse_state_load(mut self, on: bool) -> Self {
+    pub(crate) fn refuse_state_load(mut self, on: bool) -> Self {
         self.set(
             "TUTTI_CLAP_PROBE_REFUSE_STATE_LOAD",
             u8::from(on).to_string(),
@@ -444,7 +461,7 @@ impl Drop for ProbeEnv {
 ///
 /// The handle must outlive the client (they share the subprocess guard), which
 /// is why both are returned together rather than the caller keeping one.
-pub struct LoadedProbe {
+pub(crate) struct LoadedProbe {
     pub client: PluginClient,
     pub handle: PluginHandle,
 }
@@ -461,13 +478,13 @@ pub struct LoadedProbe {
 ///
 /// If the load fails — these tests are about what a *loaded* plugin does, so a
 /// failure to load is a broken fixture rather than an outcome worth asserting.
-pub fn load_probe(sample_rate: f64) -> LoadedProbe {
+pub(crate) fn load_probe(sample_rate: f64) -> LoadedProbe {
     load_probe_with(IpcConfig::new(), sample_rate)
 }
 
 /// [`load_probe`] with a bridge config of the caller's (shorter
 /// `Timeouts`, say).
-pub fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
+pub(crate) fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
     // SAFETY: `exclusive()` is held; see `ProbeEnv::set`.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server_path()) };
 
@@ -500,7 +517,7 @@ pub fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
 /// process. That error goes the loud way (a false leak, never a false pass),
 /// and it needs a pid to wrap round between a drop and this check.
 #[cfg(unix)]
-pub fn is_alive(pid: u32) -> bool {
+pub(crate) fn is_alive(pid: u32) -> bool {
     let pid = libc::pid_t::try_from(pid).expect("a pid fits pid_t");
     // SAFETY: signal 0 performs only the existence and permission check.
     if unsafe { libc::kill(pid, 0) } == 0 {
@@ -512,7 +529,7 @@ pub fn is_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-pub fn is_alive(pid: u32) -> bool {
+pub(crate) fn is_alive(pid: u32) -> bool {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,

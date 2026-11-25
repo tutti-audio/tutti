@@ -21,6 +21,8 @@
 //!
 //! The allocation gate is in `rt_no_alloc_engine.rs`.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::bits;
@@ -42,7 +44,7 @@ use tutti_graph::{
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport, TransportCommand,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, Recording, Timeline, Transport, TransportCommand,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
@@ -57,9 +59,8 @@ fn prepare(max_block: usize) -> Prepare {
 
 /// Wire main outputs `0..width` to `node`'s outputs.
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))));
+    ed.wire_declared_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))))
+        .unwrap();
 }
 
 /// Render `blocks` (frame counts) through `engine` into one interleaved
@@ -436,29 +437,34 @@ impl Node for RecLog {
     fn reset(&mut self) {}
 }
 
-/// The engine hands a graph node the session's recording state in its `Env`
-/// (`Transport::recording`), read once per block: what a hosted plugin's
-/// transport snapshot reports as recording, now that it is a function of
-/// `Env`.
+/// **A take's start is the node's `Env` recording from its frame, and its
+/// stop ends it.** A start at frame 300 and a stop at frame 700 of 256-frame
+/// blocks: each block's first frame (`env.transport`) and last
+/// (`transport_at`) read recording exactly when the command's frame is at or
+/// before it, so the flag turns on inside block 1 and off inside block 2.
 #[test]
-fn the_recording_flag_reaches_a_nodes_env() {
+fn a_takes_recording_commands_reach_a_nodes_env_on_their_frame() {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Record::new();
     let (engine, _ed) = graph_engine(&transport, 256, Unforkable(RecLog(log.clone())), 1);
-    transport.motion().send(MotionCommand::Play).expect("room");
-    render(&engine, ChannelLayout::MONO, &[256; 2]);
-    transport.settings().set_recording(true);
-    render(&engine, ChannelLayout::MONO, &[256; 2]);
-    transport.settings().set_recording(false);
-    render(&engine, ChannelLayout::MONO, &[256]);
+    let take = transport.motion().next_take_id();
+    transport
+        .motion()
+        .schedule(At::Frame(Frame::new(300)), Recording::Start(take))
+        .expect("room");
+    transport
+        .motion()
+        .schedule(At::Frame(Frame::new(700)), Recording::Stop(take))
+        .expect("room");
+    render(&engine, ChannelLayout::MONO, &[256; 4]);
     let log = log.lock().expect("log");
     assert_eq!(
         log.as_slice(),
         vec![
+            // 0..256, 256..512 (starts at 300), 512..768 (stops at 700), 768..
             (false, false),
-            (false, false),
-            (true, true),
-            (true, true),
+            (false, true),
+            (true, false),
             (false, false)
         ]
     );
@@ -1015,9 +1021,10 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     // One past the cap, off a three-channel node's ports, repeated: a legal
     // graph, wider than the scratch.
     let wide = MAX_CHANNELS + 1;
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_declared_outputs(
         (0..wide as u16).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
-    );
+    )
+    .unwrap();
     ed.commit().expect("no limits yet");
     assert!(matches!(
         Engine::new(&transport, &mut ed, exec),
@@ -1027,9 +1034,10 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
 
     let (engine, mut ed) = graph_engine(&transport, 256, Unforkable(Clocked), 3);
     render(&engine, ChannelLayout::STEREO, &[256]);
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_declared_outputs(
         (0..MAX_CHANNELS as u16 + 1).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
-    );
+    )
+    .unwrap();
     assert!(matches!(
         ed.commit(),
         Err(CommitError::TooManyOutputs { outputs, limit })

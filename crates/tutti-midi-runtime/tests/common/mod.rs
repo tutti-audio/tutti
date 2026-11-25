@@ -17,43 +17,44 @@ use tutti_units::{Beat, Bpm};
 const FRAMES_PER_BEAT: f64 = 24_000.0;
 
 /// The beat `frame` frames in.
-pub fn beat_of(frame: u64) -> Beat {
+pub(crate) fn beat_of(frame: u64) -> Beat {
     Beat::new(frame as f64 / FRAMES_PER_BEAT)
 }
 
 /// Rolling at 120 BPM from `frame`.
-pub fn rolling(frame: u64) -> TransportPosition {
+pub(crate) fn rolling(frame: u64) -> TransportPosition {
     TransportPosition::new(true, Bpm::of(120.0), beat_of(frame), None)
 }
 
 /// `event` on `frame`.
-pub fn at(frame: u64, event: Ump) -> TimedMidiEvent {
+pub(crate) fn at(frame: u64, event: Ump) -> TimedMidiEvent {
     TimedMidiEvent::new(beat_of(frame), event).unwrap()
 }
 
 /// A full-velocity Note On of key `n` on the first Group and Channel.
-pub fn on(n: u8) -> Ump {
+pub(crate) fn on(n: u8) -> Ump {
     midi::note_on(MidiChannel::FIRST, n, 0xFFFF)
 }
 
 /// A Note Off of key `n` on the first Group and Channel.
-pub fn off(n: u8) -> Ump {
+pub(crate) fn off(n: u8) -> Ump {
     midi::note_off(MidiChannel::FIRST, n, 0)
 }
 
 /// Wires event output 0 of node `from` to event input 0 of node `to`.
-pub fn connect(ed: &mut Editor, from: u64, to: u64) {
-    ed.spec_mut().connect_events(
+pub(crate) fn connect(ed: &mut Editor, from: u64, to: u64) {
+    ed.connect_events(
         EventInputPort::new(NodeKey(to), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
-    );
+    )
+    .unwrap();
 }
 
 /// The ring's capacity the deleted node had, in events.
 const SINK_CAPACITY: tutti_graph::EventCapacity = tutti_graph::EventCapacity::of(1024);
 
 /// The readers of the taps [`sink`] opened.
-pub struct Sink {
+pub(crate) struct Sink {
     taps: Vec<EventTapReader>,
     lost: u64,
 }
@@ -61,7 +62,7 @@ pub struct Sink {
 /// Opens a raw tap of [`SINK_CAPACITY`] on each `(node, port)` of `sources`,
 /// ids `first_id` upward, and returns their readers as one sink. Every source
 /// node is in `ed` already; commit after.
-pub fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
+pub(crate) fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
     let taps = sources
         .iter()
         .zip(first_id..)
@@ -81,7 +82,7 @@ impl Sink {
     /// Pops up to `out.len()` events, tap by tap, oldest first within a tap;
     /// each stamp is the event's frame on the graph's clock, truncated to
     /// 32 bits as the node's was. Allocates nothing.
-    pub fn poll_into(&mut self, out: &mut [(u32, Ump)]) -> usize {
+    pub(crate) fn poll_into(&mut self, out: &mut [(u32, Ump)]) -> usize {
         let mut n = 0;
         let mut chunk = [TapEvent {
             frame: tutti_units::Frame::ZERO,
@@ -105,7 +106,7 @@ impl Sink {
 
     /// Events the taps refused for want of room, since the last call summed
     /// into the running total.
-    pub fn dropped(&mut self) -> u64 {
+    pub(crate) fn dropped(&mut self) -> u64 {
         self.lost += self.taps.iter().map(EventTapReader::take_lost).sum::<u64>();
         self.lost
     }

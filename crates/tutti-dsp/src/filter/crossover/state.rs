@@ -134,7 +134,7 @@ impl<F: Float + SimdLanes> Section<F> {
 /// The state of one channel of a crossover tree: the sections' words, apart from the
 /// coefficients that run them ([`CrossoverBlend`](super::CrossoverBlend)).
 #[derive(Clone, Copy, Debug)]
-pub struct CrossoverState<F> {
+pub(crate) struct CrossoverState<F> {
     /// Per split, the first stage of its low-pass and high-pass, which share the state.
     first: [Section<F>; MAX_SPLITS],
     /// Per split, the second stage of its low-pass and of its high-pass.

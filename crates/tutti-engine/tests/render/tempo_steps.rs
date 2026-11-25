@@ -8,6 +8,8 @@
 //! (block-size independence; live equals offline), and those are also held to
 //! the arithmetic.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
@@ -75,9 +77,8 @@ fn graph(log: &Log) -> (Editor, Executor) {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

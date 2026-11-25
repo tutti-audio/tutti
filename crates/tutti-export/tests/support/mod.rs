@@ -21,7 +21,8 @@ use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
-    Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, Written, render_one,
+    Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, TailPolicy, Written,
+    render_one,
 };
 use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
@@ -29,11 +30,11 @@ use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The render stage: what to produce, and for how long.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RenderConfig {
+pub(crate) struct RenderConfig {
     pub sample_rate: SampleRate,
     pub duration_seconds: Seconds,
     pub latency: Samples,
-    pub tail: Samples,
+    pub tail: TailPolicy,
     pub on_event_loss: EventLossPolicy,
 }
 
@@ -43,7 +44,7 @@ impl Default for RenderConfig {
             sample_rate: SampleRate::SR_44K1,
             duration_seconds: Seconds::new(0.0),
             latency: Samples::new(0),
-            tail: Samples::new(0),
+            tail: TailPolicy::Frames(Samples::ZERO),
             on_event_loss: EventLossPolicy::default(),
         }
     }
@@ -51,7 +52,7 @@ impl Default for RenderConfig {
 
 /// The encode stage: what file to write.
 #[derive(Debug, Clone, PartialEq)]
-pub struct EncodeConfig {
+pub(crate) struct EncodeConfig {
     pub format: Format,
     pub channels: ChannelLayout,
     pub topology: Option<ChannelTopology>,
@@ -69,7 +70,7 @@ impl Default for EncodeConfig {
 
 /// One render and one file.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExportConfig {
+pub(crate) struct ExportConfig {
     pub render: RenderConfig,
     pub encode: EncodeConfig,
     pub resample: Option<Resample>,
@@ -92,13 +93,13 @@ impl Default for ExportConfig {
 impl ExportConfig {
     /// The job this config describes: the duration rounded to the nearest
     /// frame, and a render of no audible span (a tail alone) the tail's length.
-    pub fn job(&self) -> Result<Job> {
+    pub(crate) fn job(&self) -> Result<Job> {
         let r = &self.render;
         let secs = r.duration_seconds.get();
         assert!(secs.is_finite() && secs >= 0.0, "a test names a length");
         let duration = Samples::new((secs * r.sample_rate.get()).round() as usize);
         let (length, tail) = if duration == Samples::new(0) {
-            (r.tail, Samples::new(0))
+            (r.tail.bound(), TailPolicy::Frames(Samples::ZERO))
         } else {
             (duration, r.tail)
         };
@@ -109,7 +110,7 @@ impl ExportConfig {
 
     /// The file at `path`, normalized by `normalize` (measured on this
     /// output) when given.
-    pub fn file_target(
+    pub(crate) fn file_target(
         &self,
         path: impl Into<PathBuf>,
         normalize: Option<Normalize>,
@@ -139,7 +140,7 @@ impl ExportConfig {
     }
 
     /// The planes: `encode.channels` wide.
-    pub fn buffer_target(&self) -> BufferTarget {
+    pub(crate) fn buffer_target(&self) -> BufferTarget {
         let target = BufferTarget::new(self.encode.channels);
         match &self.encode.topology {
             Some(topology) => target.topology(*topology),
@@ -147,13 +148,13 @@ impl ExportConfig {
         }
     }
 
-    pub fn buffers_job(&self) -> Result<Job> {
+    pub(crate) fn buffers_job(&self) -> Result<Job> {
         self.job()
     }
 }
 
 /// [`tutti_export::write_buffers`] into the file `config` describes at `path`.
-pub fn write_buffers(
+pub(crate) fn write_buffers(
     rendered: &Rendered,
     config: &ExportConfig,
     path: impl AsRef<Path>,
@@ -168,7 +169,7 @@ pub fn write_buffers(
 /// The main output of `live`, forked offline at `rate` and assembled: what an
 /// export gets from a live graph (the session's fork, without its pool or
 /// main output).
-pub fn fork_offline(live: &Editor, rate: SampleRate) -> RenderGraph {
+pub(crate) fn fork_offline(live: &Editor, rate: SampleRate) -> RenderGraph {
     let (editor, executor) = live
         .fork(ForkTarget::MainOutput, RenderGraph::prepare(rate))
         .expect("every node here is forkable");
@@ -200,7 +201,7 @@ fn render_output(
 }
 
 /// `config`'s render into a file at `path`.
-pub fn render_to_file(
+pub(crate) fn render_to_file(
     graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
@@ -212,7 +213,7 @@ pub fn render_to_file(
 }
 
 /// `config`'s render into memory (not resampled, not dithered).
-pub fn render_to_buffers(
+pub(crate) fn render_to_buffers(
     graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
@@ -223,7 +224,7 @@ pub fn render_to_buffers(
 }
 
 /// `config`'s render into a file at `path`, normalized by `normalize`.
-pub fn render_normalized_to_file(
+pub(crate) fn render_normalized_to_file(
     graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
@@ -238,7 +239,7 @@ pub fn render_normalized_to_file(
 /// `config`'s render into a file at `path` (normalized when `normalize` is
 /// set), under `control`: the outcome as the render returns it, for a test that
 /// cancels or watches.
-pub fn render_file_under(
+pub(crate) fn render_file_under(
     mut graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
@@ -253,7 +254,7 @@ pub fn render_file_under(
 }
 
 /// `config`'s render into memory under `control`, as the render returns it.
-pub fn render_buffers_under(
+pub(crate) fn render_buffers_under(
     mut graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
