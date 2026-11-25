@@ -27,7 +27,9 @@ use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
-use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told};
+use tutti_plugin_types::{
+    MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told,
+};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};

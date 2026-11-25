@@ -211,10 +211,6 @@ pub(crate) enum Action {
     /// an `AudioReply` inlines a ~5 KB MIDI vec, and an unboxed variant would
     /// make every `Action` that large.
     Audio(Box<AudioReply>),
-    /// Say something unprompted on the control connection.
-    Event(News),
-    /// Say several things unprompted, in order.
-    Events(Vec<News>),
     /// Say several things unprompted, in order, then answer.
     EventsThenReply(Vec<News>, Box<ControlReply>),
     /// Answer nothing and keep the connection open (a hung server).
@@ -267,18 +263,6 @@ fn serve_lane<Req: Wire>(
             Action::Audio(m) => {
                 if send_bridge_msg(&stream, &*m).is_err() {
                     return;
-                }
-            }
-            Action::Event(event) => {
-                if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
-                    return;
-                }
-            }
-            Action::Events(events) => {
-                for event in events {
-                    if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
-                        return;
-                    }
                 }
             }
             Action::EventsThenReply(events, reply) => {

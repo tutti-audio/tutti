@@ -83,12 +83,12 @@ pub use envelope::{
     ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, GetCurrentPreset,
     GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
     GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
-    LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized, ParameterPlain,
-    ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn,
-    PresetList, PresetLoaded, ReqId, Request, RenderModeSet, SampleRateSet, SaveState, SetAppMidiMap,
-    SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
-    SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState, StateLoaded,
-    StateReady, StateStaged, Wiring, Working, serve,
+    LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
+    ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded,
+    PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, ReqId, Request, SampleRateSet,
+    SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate,
+    SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState,
+    StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
 };
 pub use frame::Framed;
 pub use message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
@@ -316,7 +316,6 @@ mod tests {
     /// change of order fails here until the version moves and the pins with it.
     #[test]
     fn the_wire_tags_are_the_declaration_order() {
-        use tutti_plugin_types::RenderMode;
         let tag = |bytes: Vec<u8>| {
             assert!(bytes[0] < 0x80, "a one-byte varint tag");
             bytes[0]

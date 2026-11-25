@@ -641,9 +641,8 @@ fn a_failed_forks_server_is_reaped() {
 
 /// A live graph holding the plugin at key 9 on the main output, to export from.
 fn bound(client: PluginClient) -> PluginClient<Bound> {
-    client.bind(
-        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
-    )
+    client
+        .bind(tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"))
 }
 
 fn live_graph(client: PluginClient<Bound>) -> (Editor, tutti_graph::Executor) {
@@ -652,11 +651,7 @@ fn live_graph(client: PluginClient<Bound>) -> (Editor, tutti_graph::Executor) {
         MaxBlock::of(Samples::new(BLOCK)),
     ));
     let key = NodeKey(9);
-    let _controls = live.insert(
-        key,
-        "plugin",
-        client,
-    );
+    let _controls = live.insert(key, "plugin", client);
     live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     (live, exec)

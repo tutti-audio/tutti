@@ -17,8 +17,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
     Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
-    RenderModeSupport, Told,
-    PluginError, PluginWiring, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
+    PluginError, PluginWiring, Prepare, Rebuilt, Refused, RenderModeSupport, Reply, SampleRate,
+    State, Stuck, Told, step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.

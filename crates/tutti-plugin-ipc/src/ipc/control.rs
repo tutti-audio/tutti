@@ -13,7 +13,8 @@ use tutti_plugin_types::{
     MainThreadMarker, MidiAssignment, MidiMapApplied, OwnBypass, ParameterInfo, PipelineCounts,
     PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult,
     PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request,
-    StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle, bypass_value,
+    StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
+    bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;

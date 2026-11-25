@@ -733,7 +733,9 @@ impl<L: Loaded> Instance<L> {
     /// How the plugin takes a render mode, when the main thread can ask.
     fn mode_support(&mut self, main: Option<MainThreadMarker>) -> Option<RenderModeSupport> {
         let main = main?;
-        self.lifecycle.control().map(|c| c.render_mode_support(main))
+        self.lifecycle
+            .control()
+            .map(|c| c.render_mode_support(main))
     }
 
     /// How far the plugin is from what the host wants ([`State::behind`]); the

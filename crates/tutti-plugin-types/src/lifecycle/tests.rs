@@ -1026,7 +1026,10 @@ fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field
         .with_quantum(MaxBlock::of(Samples::new(32)));
     let mut s = active(REST, p);
     s.want(live);
-    assert_eq!(s.behind(false, RenderModeSupport::Unsupported), Behind::Restart);
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Unsupported),
+        Behind::Restart
+    );
     assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
     let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_96K)));
     assert_eq!(s.applied(), Some(live));
@@ -1902,7 +1905,10 @@ fn a_live_mode_is_told_once_and_a_taken_answer_applies_it_without_a_restart() {
     assert!(fx.is_empty());
     assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
     assert_eq!(s.stage(), Stage::Active);
-    assert!(go(s.clone(), Event::Tick).1.is_empty(), "nothing is planned");
+    assert!(
+        go(s.clone(), Event::Tick).1.is_empty(),
+        "nothing is planned"
+    );
 
     let s = req(s, Request::Restart);
     let (s, _) = go(s, Event::Tick);

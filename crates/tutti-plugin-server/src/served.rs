@@ -843,7 +843,11 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         match control.render_mode_support(main) {
             RenderModeSupport::Live | RenderModeSupport::Served => {
                 let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
-                if self.state.applied().is_some_and(|applied| applied.mode() == mode) {
+                if self
+                    .state
+                    .applied()
+                    .is_some_and(|applied| applied.mode() == mode)
+                {
                     ModeOutcome::Took
                 } else {
                     ModeOutcome::Refused
