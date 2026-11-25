@@ -294,7 +294,7 @@ pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteSpec, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
+    RouteInfo, RouteSpec, SourceError, SourceInfo, SourceName, TargetName,
 };
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
@@ -334,7 +334,6 @@ pub use recovery::{
 pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
-pub use session::ModInput;
 pub use session::{
     AppKey, MainOutputTopologyStatus, PHASES, Phase, PhaseCx, Session, SessionEvent,
 };

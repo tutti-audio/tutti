@@ -542,7 +542,7 @@ fn modulation::ParamRef::unit_at
 fn modulation::RouteSpec::curve
 fn modulation::RouteSpec::new
 fn modulation::RouteSpec::polarity
-fn modulation::declare_targets
+fn modulation::RouteSpec::scaling
 fn peer::Presence::cause
 fn peer::Presence::is_live
 fn peer_state::OtherPeer::expected
@@ -690,7 +690,6 @@ fn session::main_output::Session::main_output_topology_status
 fn session::main_output::Session::output_device
 fn session::main_output::Session::requested_main_output_topology
 fn session::phases::PhaseCx::at
-fn session::phases::PhaseCx::with_mods
 fn session::phases::Session::commit
 fn session::phases::Session::run_phase
 fn session::phases::Session::update
@@ -1005,7 +1004,6 @@ struct sampler::OpenStream
 struct sampler::OpenedStream
 struct session::Session
 struct session::parts::midi::MidiNodes
-struct session::phases::ModInput
 struct session::phases::PhaseCx
 struct switch::ClockError
 struct take::Punch

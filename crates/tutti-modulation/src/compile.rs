@@ -60,9 +60,8 @@ pub const RATE_ANCHOR_MARGIN: Samples = Samples::new(3 * LARGEST_BLOCK_FRAMES);
 /// re-anchors at [`RATE_ANCHOR_MARGIN`] instead (see `anchored`).
 const ANCHOR_REUSE_MIN: Samples = Samples::new(2 * LARGEST_BLOCK_FRAMES);
 
-/// A source's key: the host's identity for it. Only compared. The session's own
-/// declarations name a source with a
-/// minted `ModSourceId` instead, and a host's keys are for `ModInput`.
+/// A source's key: the declarer's identity for it. Only compared. The session
+/// names a source with a minted `ModSourceId` and keys it by that number.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SourceKey(pub u64);
 

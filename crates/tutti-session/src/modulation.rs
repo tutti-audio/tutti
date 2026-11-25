@@ -1,8 +1,7 @@
 //! Modulation in the session: the reconcile loop of `tutti-nodes`'
 //! [`Modulation`](tutti_nodes::Modulation), run by [`Phase::Modulation`] over
-//! either the session's own declarations
-//! ([`Session::mods_mut`](crate::Session::mods_mut)) or a host's
-//! ([`ModInput`](crate::ModInput)).
+//! the session's own declarations
+//! ([`Session::mods_mut`](crate::Session::mods_mut)).
 //!
 //! Per update:
 //!
@@ -372,6 +371,9 @@ pub enum RouteError {
     /// The route's source was removed (or is another session's).
     #[error(transparent)]
     NoSuchSource(NoSuchModSource),
+    /// The route to scale was removed (or is another session's).
+    #[error(transparent)]
+    NoSuchRoute(NoSuchModRoute),
     /// The source already has a route into `target`: a route is named by its
     /// source and target ([`DepthTarget::of`](crate::DepthTarget::of)), so a
     /// second between the two would have no name.
@@ -382,21 +384,15 @@ pub enum RouteError {
     },
 }
 
-/// Why the session refused modulation. What it names is in the keys the
-/// declarer used: a host's own (design 015 §4.7), or the reconciler's for the session's own
-/// declarations, which a [`Problem`] puts in terms of nodes and params.
+/// Why the session refused modulation. What it names is in the reconciler's
+/// keys, which a [`Problem`] puts in terms of nodes and params.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ModRefusal {
-    /// The declarations do not apply (doc 014 §8.2). The graph keeps what
-    /// the last apply that succeeded built.
+    /// The declarations do not apply. The graph keeps what the last apply
+    /// that succeeded built.
     #[error("{0}")]
     Apply(ReconcileError),
-    /// A host passed its declarations ([`ModInput`](crate::ModInput)) while
-    /// [`Session::mods_mut`](crate::Session::mods_mut) holds some: a session has one
-    /// declarer. Nothing applied.
-    #[error("a host passed its modulation while the session holds its own: one declarer")]
-    TwoDeclarers,
 }
 
 impl ModRefusal {
@@ -458,8 +454,8 @@ impl ModRefusal {
     }
 }
 
-/// The targets of a set of declarations, as `tutti_modulation` takes them, from a
-/// host's ranges and automations: a range and an automation on one target
+/// The targets of a set of declarations, as `tutti_modulation` takes them, from
+/// ranges and automations: a range and an automation on one target
 /// make one [`TargetDecl`]; an automation with no range is unclamped
 /// (`±∞`); an automation whose curve is `None` (a recording take is open on
 /// it) declares the target with no automation, so its knob plays.
@@ -468,7 +464,7 @@ impl ModRefusal {
 /// never merged (which one won would be the host's iteration order): both go
 /// in, and the compile refuses the pair as
 /// `ProgramCompileError::DuplicateTarget`, the one refusal path.
-pub fn declare_targets(
+fn declare_targets(
     ranges: impl IntoIterator<Item = (TargetKey, f64, f64)>,
     automation: impl IntoIterator<Item = (TargetKey, Option<Arc<dyn Curve>>)>,
 ) -> Vec<(TargetKey, TargetDecl)> {
@@ -606,23 +602,19 @@ impl<U: crate::Scalar> OpenTake for AutomationTake<U> {
 }
 
 /// A modulation target as a [`Problem`] names it: a node's param, the mix of
-/// a node or an edge's gain when the session's own declarations
-/// ([`Session::mods_mut`](crate::Session::mods_mut)) made it, and the host's
-/// own key when a host's ([`ModInput`](crate::ModInput)) did.
+/// a node or an edge's gain, as the session's declarations
+/// ([`Session::mods_mut`](crate::Session::mods_mut)) named it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum TargetName {
     /// A target the session's declarations named.
     Own(ModTarget),
-    /// A target a host's declarations named, by the host's key.
-    Host(TargetKey),
 }
 
 impl std::fmt::Display for TargetName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Own(target) => target.fmt(f),
-            Self::Host(key) => write!(f, "the host's target {key:?}"),
         }
     }
 }
@@ -638,8 +630,6 @@ pub enum SourceName {
         /// The node it follows (a follower's input, a note envelope's MIDI).
         fed_by: Option<NodeKey>,
     },
-    /// A source a host declared, by the host's key.
-    Host(SourceKey),
 }
 
 impl std::fmt::Display for SourceName {
@@ -649,7 +639,6 @@ impl std::fmt::Display for SourceName {
                 fed_by: Some(node), ..
             } => write!(f, "the source fed by node {}", node.0),
             Self::Own { id, fed_by: None } => write!(f, "source {id}"),
-            Self::Host(key) => write!(f, "the host's source {key:?}"),
         }
     }
 }
@@ -704,48 +693,33 @@ impl std::fmt::Display for Problem {
 
 impl std::error::Error for Problem {}
 
-/// What names a key in a [`Problem`]: the session's own declarations, or a
-/// host's keys, which only the host can read.
-#[derive(Clone, Copy)]
-enum Names<'a> {
-    Own(&'a OwnMods),
-    Host,
-}
+impl OwnMods {
+    /// The target a reconciler key names, as a [`Problem`] reports it.
+    fn target_name(&self, key: TargetKey) -> Option<TargetName> {
+        self.target_of(key).map(TargetName::Own)
+    }
 
-impl Names<'_> {
-    fn target(self, key: TargetKey) -> TargetName {
-        match self {
-            Self::Own(own) => own
-                .target_of(key)
-                .map_or(TargetName::Host(key), TargetName::Own),
-            Self::Host => TargetName::Host(key),
+    fn source_name(&self, key: SourceKey) -> SourceName {
+        SourceName::Own {
+            id: source_id(key),
+            fed_by: self.sources.get(&key).and_then(|s| match s.feed {
+                Some(OwnFeed::Audio(node) | OwnFeed::Events(node, _)) => Some(node),
+                None => None,
+            }),
         }
     }
 
-    fn source(self, key: SourceKey) -> SourceName {
-        match self {
-            Self::Own(own) => SourceName::Own {
-                id: source_id(key),
-                fed_by: own.sources.get(&key).and_then(|s| match s.feed {
-                    Some(OwnFeed::Audio(node) | OwnFeed::Events(node, _)) => Some(node),
-                    None => None,
-                }),
-            },
-            Self::Host => SourceName::Host(key),
-        }
-    }
-
-    fn refused(self, cause: ModRefusal) -> Problem {
-        let at = cause.target().map(|t| self.target(t)).or_else(|| {
-            let route = cause.route()?;
-            match self {
-                Self::Own(own) => match own.routes.get(&route)?.decl.to {
-                    RouteTarget::Param(t) => Some(self.target(t)),
+    fn refused(&self, cause: ModRefusal) -> Problem {
+        let at = cause
+            .target()
+            .and_then(|t| self.target_name(t))
+            .or_else(|| {
+                let route = cause.route()?;
+                match self.routes.get(&route)?.decl.to {
+                    RouteTarget::Param(t) => self.target_name(t),
                     RouteTarget::Depth(_) => None,
-                },
-                Self::Host => None,
-            }
-        });
+                }
+            });
         Problem::Refused { cause, at }
     }
 }
@@ -829,7 +803,7 @@ impl ModState {
     fn applied(
         &mut self,
         applied: Result<tutti_nodes::Applied, ReconcileError>,
-        names: Names<'_>,
+        names: &OwnMods,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) {
@@ -843,11 +817,13 @@ impl ModState {
                 self.unresolved_since = applied
                     .unresolved_targets
                     .iter()
-                    .map(|&target| {
+                    .filter_map(|&target| {
+                        // A target whose declaration is gone has nothing to name.
+                        let name = names.target_name(target)?;
                         let (from, mut warned) = since.remove(&target).unwrap_or((now, false));
                         let waited = now.saturating_duration_since(from);
                         let problem = Problem::Unresolved {
-                            target: names.target(target),
+                            target: name,
                             waited,
                         };
                         if !warned && waited >= warn_after {
@@ -856,12 +832,12 @@ impl ModState {
                             out.push(crate::SessionEvent::Modulation(problem.clone()));
                         }
                         unresolved.push(problem);
-                        (target, (from, warned))
+                        Some((target, (from, warned)))
                     })
                     .collect();
                 unresolved.extend(applied.unresolved_sources.iter().map(|&source| {
                     Problem::Unfed {
-                        source: names.source(source),
+                        source: names.source_name(source),
                     }
                 }));
                 self.unresolved = unresolved;
@@ -907,6 +883,8 @@ struct OwnSource {
 #[derive(Debug)]
 struct OwnRoute {
     decl: RouteDecl,
+    /// What the route modulates: for a route that scales another's depth
+    /// ([`RouteSpec::scaling`]), the scaled route's target.
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
@@ -1213,11 +1191,26 @@ impl OwnMods {
             .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Param(t) if gone(&t)))
             .map(|(&k, _)| k)
             .collect();
-        let lost: Vec<_> = lost
-            .into_iter()
-            .filter_map(|key| Some((key, self.routes.remove(&key)?)))
-            .collect();
+        let lost = self.take_routes(lost);
         self.retire_routes(lost);
+    }
+
+    /// Removes `keys` and the routes that scale them, returning what went.
+    fn take_routes(
+        &mut self,
+        keys: impl IntoIterator<Item = RouteKey>,
+    ) -> Vec<(RouteKey, OwnRoute)> {
+        let mut gone: BTreeSet<RouteKey> = keys.into_iter().collect();
+        let scales: Vec<RouteKey> = self
+            .routes
+            .iter()
+            .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Depth(s) if gone.contains(&s)))
+            .map(|(&k, _)| k)
+            .collect();
+        gone.extend(scales);
+        gone.into_iter()
+            .filter_map(|key| Some((key, self.routes.remove(&key)?)))
+            .collect()
     }
 }
 
@@ -1259,76 +1252,40 @@ impl ModSession {
         }
     }
 
-    /// Applies the declarations: the host's, or with `None` the session's
-    /// own. What the apply stages is the update's commit's.
+    /// Applies the declarations. What the apply stages is the update's
+    /// commit's.
     fn apply<F: Float>(
         &mut self,
         graph: &mut Graph<F>,
-        host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) {
-        let applied = match host {
-            Some(input) => {
-                graph.modulate(&mut self.state.modulation, &input.declarations, input.keys)
-            }
-            None => {
-                self.own.build();
-                let own = self.own.built.as_ref().expect("built");
-                graph.modulate(
-                    &mut self.state.modulation,
-                    &own.borrow(),
-                    &OwnKeys(&self.own),
-                )
-            }
-        };
-        let names = if host.is_some() {
-            Names::Host
-        } else {
-            Names::Own(&self.own)
-        };
-        self.state.applied(applied, names, now, out);
+        self.own.build();
+        let own = self.own.built.as_ref().expect("built");
+        let applied = graph.modulate(
+            &mut self.state.modulation,
+            &own.borrow(),
+            &OwnKeys(&self.own),
+        );
+        self.state.applied(applied, &self.own, now, out);
         // Every lane this apply built or dropped is in `state` now: the
         // plugins' driven parameters follow it in the same update.
         #[cfg(feature = "plugin")]
         graph.refresh_driven(&self.state);
     }
 
-    /// Whether this phase has a declarer: `false` when a host passed its
-    /// own while the session holds some (refused), or when there is nothing
-    /// to apply and nothing was ever applied.
-    fn declarer(
-        &mut self,
-        host: Option<crate::ModInput<'_>>,
-        out: &mut Vec<crate::SessionEvent>,
-    ) -> bool {
-        if host.is_some() && !self.own.is_empty() {
-            self.state.refuse(
-                Problem::Refused {
-                    cause: ModRefusal::TwoDeclarers,
-                    at: None,
-                },
-                out,
-            );
-            return false;
-        }
-        host.is_some() || !self.own.is_empty() || self.state.applied
-    }
-
     /// `Phase::Modulation`: closes the session's own takes that are finished,
-    /// then applies.
+    /// then applies, when something is declared or was ever applied (taking
+    /// every declaration away tears down what they built).
     pub(crate) fn modulation_phase<F: Float>(
         &mut self,
         graph: &mut Graph<F>,
-        host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) {
-        if host.is_none() {
-            self.own.close_takes();
-        }
-        if self.declarer(host, out) {
-            self.apply(graph, host, now, out);
+        self.own.close_takes();
+        if !self.own.is_empty() || self.state.applied {
+            self.apply(graph, now, out);
         }
     }
 
@@ -1341,13 +1298,21 @@ impl ModSession {
     }
 }
 
+/// What a route declared by [`RouteSpec`] drives.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Aim {
+    Target(ModTarget),
+    /// The depth of another route.
+    Depth(ModRouteId),
+}
+
 /// A route to declare: what [`Mods::route`] takes. A route is `depth` of
 /// `target`'s range, bipolar and linear until [`polarity`](Self::polarity) and
 /// [`curve`](Self::curve) say otherwise.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RouteSpec {
     source: ModSourceId,
-    target: ModTarget,
+    aim: Aim,
     depth: Bipolar,
     polarity: Polarity,
     curve: Law,
@@ -1359,7 +1324,24 @@ impl RouteSpec {
     pub fn new(source: ModSourceId, target: impl Into<ModTarget>, depth: Bipolar) -> Self {
         Self {
             source,
-            target: target.into(),
+            aim: Aim::Target(target.into()),
+            depth,
+            polarity: Polarity::Bipolar,
+            curve: Law::Linear,
+        }
+    }
+
+    /// A route from `source` into the depth of `route`, at `depth` of it: the
+    /// route's depth is scaled by `source`'s value. `source` is a time
+    /// function (an LFO or a macro); the route and its source are too, and a
+    /// route has at most one such scale. The scale goes when `route` does.
+    /// [`Mods::route`] refuses it with [`RouteError::NoSuchRoute`] when `route`
+    /// is not declared.
+    #[must_use]
+    pub fn scaling(source: ModSourceId, route: ModRouteId, depth: Bipolar) -> Self {
+        Self {
+            source,
+            aim: Aim::Depth(route),
             depth,
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
@@ -1389,8 +1371,11 @@ pub struct RouteInfo {
     pub id: ModRouteId,
     /// The source it reads.
     pub source: ModSourceId,
-    /// What it drives.
+    /// What it drives: for a route that scales another's depth, that route's
+    /// target.
     pub target: ModTarget,
+    /// The route whose depth it scales ([`RouteSpec::scaling`]), if it is one.
+    pub scales: Option<ModRouteId>,
     /// Its depth, a fraction of the target's range.
     pub depth: Bipolar,
     /// How the source's value maps onto the span.
@@ -1492,6 +1477,10 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
+            scales: match self.decl.to {
+                RouteTarget::Depth(scaled) => Some(route_id(scaled)),
+                RouteTarget::Param(_) => None,
+            },
             depth: self.decl.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
@@ -1518,10 +1507,6 @@ impl OwnSource {
 /// [`ParamRef`]. [`Session::mods_mut`](crate::Session::mods_mut) hands it out;
 /// the next update applies what it holds. Reading is [`ModsView`]
 /// ([`Mods::view`], or [`Session::mods`](crate::Session::mods)).
-///
-/// A session has one declarer: while this holds anything, a host's
-/// [`ModInput`](crate::ModInput) is refused
-/// ([`ModRefusal::TwoDeclarers`]).
 #[derive(Debug)]
 pub struct Mods<'a> {
     pub(crate) own: &'a mut OwnMods,
@@ -1625,10 +1610,7 @@ impl Mods<'_> {
             .filter(|(_, r)| r.decl.source == key)
             .map(|(&k, _)| k)
             .collect();
-        let lost: Vec<_> = lost
-            .into_iter()
-            .filter_map(|key| Some((key, self.own.routes.remove(&key)?)))
-            .collect();
+        let lost = self.own.take_routes(lost);
         self.own.retire_routes(lost);
         Ok(())
     }
@@ -1644,38 +1626,48 @@ impl Mods<'_> {
     ///
     /// [`RouteError::UndeclaredRange`], naming the target, when no range was
     /// declared for it; [`RouteError::NoSuchSource`] when the source was
-    /// removed. Nothing is added.
+    /// removed; [`RouteError::NoSuchRoute`] when a [`RouteSpec::scaling`]
+    /// route names one that is not declared. Nothing is added.
     pub fn route(&mut self, spec: RouteSpec) -> Result<ModRouteId, RouteError> {
         let source = SourceKey(spec.source.get());
         if !self.own.sources.contains_key(&source) {
             return Err(RouteError::NoSuchSource(NoSuchModSource(spec.source)));
         }
-        let target_key = self.own.key_of(spec.target);
-        if !self.own.ranges.contains_key(&target_key) {
-            return Err(RouteError::UndeclaredRange {
-                target: spec.target,
-            });
-        }
+        let (target, to) = match spec.aim {
+            Aim::Depth(scaled) => {
+                let inner = self
+                    .own
+                    .routes
+                    .get(&RouteKey(scaled.get()))
+                    .ok_or(RouteError::NoSuchRoute(NoSuchModRoute(scaled)))?;
+                (inner.target, RouteTarget::Depth(RouteKey(scaled.get())))
+            }
+            Aim::Target(target) => {
+                let target_key = self.own.key_of(target);
+                if !self.own.ranges.contains_key(&target_key) {
+                    return Err(RouteError::UndeclaredRange { target });
+                }
+                (target, RouteTarget::Param(target_key))
+            }
+        };
         if self
             .own
             .routes
             .values()
-            .any(|r| r.decl.source == source && r.target == spec.target)
+            .any(|r| r.decl.source == source && r.target == target)
         {
-            return Err(RouteError::Duplicate {
-                target: spec.target,
-            });
+            return Err(RouteError::Duplicate { target });
         }
         let key = RouteKey(self.own.mint());
         let route = OwnRoute {
             decl: RouteDecl {
                 source,
-                to: RouteTarget::Param(target_key),
+                to,
                 depth: Param::new(spec.depth),
                 polarity: spec.polarity,
                 curve: spec.curve,
             },
-            target: spec.target,
+            target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
         };
@@ -1692,13 +1684,12 @@ impl Mods<'_> {
     /// already, or went with its source); nothing changes.
     pub fn remove_route(&mut self, id: ModRouteId) -> Result<(), NoSuchModRoute> {
         let key = RouteKey(id.get());
-        match self.own.routes.remove(&key) {
-            Some(route) => {
-                self.own.retire_routes([(key, route)]);
-                Ok(())
-            }
-            None => Err(NoSuchModRoute(id)),
+        if !self.own.routes.contains_key(&key) {
+            return Err(NoSuchModRoute(id));
         }
+        let lost = self.own.take_routes([key]);
+        self.own.retire_routes(lost);
+        Ok(())
     }
 
     /// Declares `target`'s range, `range.start..=range.end` in its own unit:

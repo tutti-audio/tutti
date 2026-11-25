@@ -1,12 +1,10 @@
-//! The update's steps: [`Phase`] and [`PHASES`] name them, [`PhaseCx`] and [`ModInput`] carry what
+//! The update's steps: [`Phase`] and [`PHASES`] name them, [`PhaseCx`] carries what
 //! a phase reads besides the session, and `Session::update` and `run_phase` run them,
 //! reporting what they found as [`SessionEvent`]s.
 
-use std::fmt::{self, Debug, Formatter};
 use tutti_platform::Instant;
 
 use tutti_engine::OutputQuantum;
-use tutti_modulation::Declarations;
 use tutti_platform::MainThreadMarker;
 
 use super::parts::MidiPart;
@@ -46,9 +44,8 @@ pub enum Phase {
     /// harmony node's changes, a modulation route's polarity and curve, an
     /// LFO's rate, a macro's value), together and in a fixed order: the
     /// tempo, the meter, the loop, then the rest by what they are on. Then
-    /// modulation's apply: the declarations (the host's, `PhaseCx::mods`,
-    /// or the session's own, `Session::mods_mut`, with the published values
-    /// in them) onto the graph, staging what is new for the commit, so a
+    /// modulation's apply: the declarations (`Session::mods_mut`, with the
+    /// published values in them) onto the graph, staging what is new for the commit, so a
     /// program value lands as one republish in the update that wrote it. A
     /// refusal is `SessionEvent::Modulation`.
     Modulation,
@@ -96,16 +93,12 @@ pub const PHASES: &[Phase] = &[
 
 /// What one phase reads besides the session.
 #[derive(Clone, Copy, Debug)]
-pub struct PhaseCx<'a> {
+pub struct PhaseCx {
     /// The time thresholds are measured on (a test passes its own). On the OS
     /// clock: it is also the time the MIDI outputs are drained at, which their
     /// sends are timed against, so it may be stale by the phases that ran
     /// before the drain.
     pub now: Instant,
-    /// The host's modulation declarations and the resolver for its keys;
-    /// `None`: the session's own ([`Session::mods_mut`]). Read by the
-    /// [`Modulation`](Phase::Modulation) phase.
-    pub mods: Option<ModInput<'a>>,
     /// The proof the calling thread is the main thread, when it is: the work
     /// only that thread may do (the retired plugins' drops, the editors'
     /// service, the work other threads handed over)
@@ -114,46 +107,19 @@ pub struct PhaseCx<'a> {
     pub main: Option<MainThreadMarker>,
 }
 
-impl PhaseCx<'_> {
-    /// A context at `now`, with the session's own declarations, on the thread
+impl PhaseCx {
+    /// A context at `now`, on the thread
     /// the OS says is the main one, if this is it.
     pub fn at(now: Instant) -> Self {
         Self {
             now,
-            mods: None,
             main: MainThreadMarker::new(),
         }
     }
 }
 
-impl<'a> PhaseCx<'a> {
-    /// The same context with the host's declarations.
-    #[must_use]
-    pub fn with_mods(mut self, mods: ModInput<'a>) -> Self {
-        self.mods = Some(mods);
-        self
-    }
-}
-
-/// A host's modulation declarations, borrowed for one phase, and how its
-/// keys resolve to nodes.
-#[derive(Clone, Copy)]
-pub struct ModInput<'a> {
-    /// The declarations, as `tutti_modulation` takes them.
-    pub declarations: Declarations<'a>,
-    /// The host's keys, resolved.
-    pub keys: &'a dyn tutti_nodes::ModHost,
-}
-
-impl Debug for ModInput<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ModInput").finish_non_exhaustive()
-    }
-}
-
 impl<K: AppKey, C: Clock> Session<K, C> {
-    /// Runs every phase in [`PHASES`] order at `Instant::now()` with the
-    /// session's own declarations, and returns what it found.
+    /// Runs every phase in [`PHASES`] order at `Instant::now()`, and returns what it found.
     ///
     /// This is the one update. What only the main thread may do (dropping the
     /// plugins the session retired, closing the editors of those, servicing
@@ -176,7 +142,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.update_in(cx)
     }
 
-    pub(super) fn update_in(&mut self, cx: PhaseCx<'_>) -> Vec<SessionEvent> {
+    pub(super) fn update_in(&mut self, cx: PhaseCx) -> Vec<SessionEvent> {
         let mut out = Vec::new();
         for &phase in PHASES {
             self.run_phase(phase, cx, &mut out);
@@ -186,7 +152,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// Runs one phase, pushing what it found onto `out`. A host running the
     /// phases itself runs them in [`PHASES`] order, once each per update.
-    pub fn run_phase(&mut self, phase: Phase, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
+    pub fn run_phase(&mut self, phase: Phase, cx: PhaseCx, out: &mut Vec<SessionEvent>) {
         match phase {
             Phase::Collect => {
                 // The bells wake what the audio thread rang for, and the polled
@@ -240,8 +206,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // after it read the rest.
                 self.values.publish_pending();
                 self.graph.apply_controls();
-                self.mods
-                    .modulation_phase(&mut self.graph, cx.mods, cx.now, out);
+                self.mods.modulation_phase(&mut self.graph, cx.now, out);
             }
             Phase::MidiOut => {
                 if self.midi.out_phase(&mut self.graph, cx.now) {

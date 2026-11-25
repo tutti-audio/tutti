@@ -2576,7 +2576,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// `Phase::Plugins`. See the module docs.
-    pub(crate) fn plugins_phase(&mut self, cx: crate::PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
+    pub(crate) fn plugins_phase(&mut self, cx: crate::PhaseCx, out: &mut Vec<SessionEvent>) {
         self.graph.graveyard.warn_if_piling();
         self.graph.reconcile_own_bypass();
         let now = cx.now;
