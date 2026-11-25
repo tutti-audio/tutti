@@ -2,6 +2,7 @@
 //! when it may) over the fake plugin, whose log says which Processor ran what.
 
 use std::sync::Arc;
+use tutti_units::ParamId;
 
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{main_thread, midi};
@@ -33,6 +34,8 @@ struct Rig {
     inner: Arc<Mutex<Instance<FakeLoaded>>>,
     rebinder: Rebinder<FakeLoaded>,
     fake: FakePlugin,
+    /// The host's parameter writes to the plugin.
+    post: super::host_edits::EditPost,
     key: NodeKey,
     events: EventInletWriter,
     frame: u64,
@@ -51,6 +54,7 @@ impl Rig {
     fn new() -> Self {
         let (fake, loaded) = FakePlugin::new();
         fake.ring_out(1);
+        fake.declare(&[(ParamId::new(1), false)]);
         let main = main_thread();
         let wiring = loaded.wiring(main);
         let descriptor = loaded.info().clone();
@@ -58,17 +62,19 @@ impl Rig {
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");
         };
-        let client = client_over::<FakeLoaded, f32>(
+        let mut client = client_over::<FakeLoaded, f32>(
             processor,
             controller,
             prepare,
             descriptor,
             &wiring,
-            [],
+            [ParamId::new(1)],
             0,
             None,
         )
         .expect("the fake is narrow");
+        let (post, port) = super::host_edits::host_edits([ParamId::new(1)]);
+        client.edits = Some(port);
         let (inner, rebinder) = (Arc::clone(&client.inner), client.rebinder(tempo()));
         let layout = ChannelLayout::from_count(2);
         let mut graph = GraphBuilder::new(ChannelLayout::EMPTY, layout);
@@ -89,6 +95,7 @@ impl Rig {
             inner,
             rebinder,
             fake,
+            post,
             key,
             events,
             frame: 0,
@@ -370,4 +377,21 @@ fn a_muted_node_counts_the_midi_it_is_given_as_lost() {
         .map(|l| l.count)
         .sum();
     assert_eq!(lost, 3);
+}
+
+/// **A host parameter write wakes a node the executor parked.** The fake sleeps,
+/// so the node is parked after a block that gave it nothing; a write is not an
+/// input of its ports, and the block after it still calls the plugin.
+#[test]
+fn a_host_write_wakes_a_parked_node() {
+    let mut rig = Rig::new();
+    rig.rest();
+    let before = rig.processed();
+    rig.block();
+    assert_eq!(rig.processed(), before, "the parked node is not called");
+    rig.post
+        .write(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("a declared parameter");
+    rig.block();
+    assert!(rig.processed() > before, "the write called the parked node");
 }

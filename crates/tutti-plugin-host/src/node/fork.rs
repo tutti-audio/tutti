@@ -144,7 +144,7 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,
-    /// The host's parameter writes no block has taken: applied before the state
+    /// The host's parameter writes no block has taken: settled before the state
     /// is read, so the fork starts from them.
     edits: Option<super::host_edits::EditPost>,
     /// The width the live node renders at, which the second instance is
@@ -193,8 +193,12 @@ where
             let control = instance
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
-            if let Some(edits) = &self.edits {
-                edits.flush(main, control);
+            if let Some(edits) = &self.edits
+                && edits.settle(main, control, edits.mark()).is_pending()
+            {
+                // A node is draining the writes now: a fork taken without them
+                // would not hold them, so none is made, and a retry may be.
+                return Err(PluginForkError::SaveState(StateError::Busy));
             }
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).

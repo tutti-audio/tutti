@@ -44,12 +44,32 @@ pub trait MainThreadControl: Send + Sync {
     /// is lost.
     fn lend(&self, f: &mut dyn FnMut(&mut dyn Control));
 
-    /// A state or preset load is about to replace the values the host's
-    /// parameter writes so far were made against: those writes are made stale,
-    /// so none lands after the load. Called before the load runs; the default
-    /// is for a control whose writes are not held apart from the plugin (a
-    /// out-of-process plugin's `Control` resets its own).
-    fn before_restore(&self) {}
+    /// How many of the host's parameter writes have been made: the mark a read
+    /// or a save takes at its call, and [`settle`](Self::settle) waits for the
+    /// plugin to have. The default is for a control whose writes are not held
+    /// apart from the plugin (an out-of-process plugin's flushes its own
+    /// before it answers).
+    fn writes(&self) -> tutti_rt::Generation {
+        tutti_rt::Generation::new(0)
+    }
+
+    /// Applies the host's writes no block has taken, so a call made once it is
+    /// `Ready` sees every write up to `mark`. `Pending` while a node holds the
+    /// writes' reader for a drain: ask again. Never waits.
+    fn settle(&self, _main: MainThreadMarker, _mark: tutti_rt::Generation) -> std::task::Poll<()> {
+        std::task::Poll::Ready(())
+    }
+
+    /// Runs `f`, a state or preset load, on the plugin's `Control`, or does not
+    /// run it when the plugin is lost. The values the host's parameter writes
+    /// so far were made against are replaced by it: those writes are made
+    /// stale, so none lands after the load, and a write made while `f` runs is
+    /// held and applies after it. The default is for a control whose writes are
+    /// not held apart from the plugin (an out-of-process plugin's `Control`
+    /// resets its own).
+    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) {
+        self.lend(f);
+    }
 
     /// The editor's tick, which an in-process plugin pairs with the pump of
     /// what the plugin changed about itself.
@@ -81,6 +101,17 @@ fn lent<R>(control: &dyn MainThreadControl, f: impl FnOnce(&mut dyn Control) -> 
     let mut f = Some(f);
     let mut answer = None;
     control.lend(&mut |c| answer = f.take().map(|f| f(c)));
+    answer
+}
+
+/// [`lent`] for a state or preset load ([`MainThreadControl::restoring`]).
+fn lent_restoring<R>(
+    control: &dyn MainThreadControl,
+    f: impl FnOnce(&mut dyn Control) -> R,
+) -> Option<R> {
+    let mut f = Some(f);
+    let mut answer = None;
+    control.restoring(&mut |c| answer = f.take().map(|f| f(c)));
     answer
 }
 
@@ -351,10 +382,23 @@ impl PluginHandle {
         self.any_thread.save_state(state_use)
     }
 
+    /// How many parameter writes the host has made to the plugin: the mark a
+    /// [`save_state_on`](Self::save_state_on) made now must see through.
+    #[must_use]
+    pub fn writes(&self) -> tutti_rt::Generation {
+        self.control
+            .as_deref()
+            .map_or(tutti_rt::Generation::new(0), MainThreadControl::writes)
+    }
+
     /// Serializes the plugin's state for `state_use` on the main thread
     /// ([`Control::save_state`]): an out-of-process plugin's round trip runs on this
-    /// thread, an in-process plugin's is a direct call. Unlike
-    /// [`save_state`](Self::save_state) it never waits for another thread.
+    /// thread, an in-process plugin's is a direct call. It never waits for
+    /// another thread.
+    ///
+    /// `Pending` until every parameter write made before `mark` (taken with
+    /// [`writes`](Self::writes) at the call) is the plugin's: a node that is
+    /// draining them holds them for the length of a drain, so ask again.
     ///
     /// # Errors
     ///
@@ -365,15 +409,20 @@ impl PluginHandle {
         &self,
         main: MainThreadMarker,
         state_use: StateUse,
-    ) -> Result<Vec<u8>, StateError> {
+        mark: tutti_rt::Generation,
+    ) -> std::task::Poll<Result<Vec<u8>, StateError>> {
+        use std::task::Poll;
         let Some(control) = self.control.as_deref() else {
-            return Err(StateError::NoStateRoute);
+            return Poll::Ready(Err(StateError::NoStateRoute));
         };
-        match lent(control, |c| c.save_state(main, state_use)) {
+        if control.settle(main, mark).is_pending() {
+            return Poll::Pending;
+        }
+        Poll::Ready(match lent(control, |c| c.save_state(main, state_use)) {
             Some(Ok(bytes)) => Ok(bytes),
             Some(Err(error)) => Err(error.into()),
             None => Err(StateError::PluginCrashed),
-        }
+        })
     }
 
     /// Tells the plugin whether it renders offline and returns whether it
@@ -591,6 +640,13 @@ impl PluginHandle {
         self.health.block_counts()
     }
 
+    /// Host parameter writes the plugin did not take. See
+    /// [`Health::refused_edits`].
+    #[must_use]
+    pub fn refused_edits(&self) -> u64 {
+        self.health.refused_edits()
+    }
+
     /// Ends the plugin's server process. The bridge then latches `cause`
     /// (unless it died of something else first), so [`status`](Self::status)
     /// turns [`Dead`](PluginStatus::Dead) as for any crash. Nothing for an
@@ -640,8 +696,7 @@ impl PluginHandle {
         let Some(control) = self.control.as_deref() else {
             return Err(StateError::NoStateRoute);
         };
-        control.before_restore();
-        match lent(control, |c| {
+        match lent_restoring(control, |c| {
             c.load_state(main, data, tutti_plugin_types::StateUse::Project)
         }) {
             Some(Ok(())) => Ok(()),
@@ -675,8 +730,7 @@ impl PluginHandle {
     /// UI selection where it was), [`PresetError::Lost`] when it is gone.
     pub fn load_preset(&self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         let control = self.control.as_deref().ok_or(PresetError::Unsupported)?;
-        control.before_restore();
-        match lent(control, |c| c.load_preset(main, id)) {
+        match lent_restoring(control, |c| c.load_preset(main, id)) {
             Some(true) => Ok(()),
             Some(false) => Err(PresetError::Refused),
             None => Err(PresetError::Lost),
@@ -1268,6 +1322,10 @@ mod tests {
             fn block_counts(&self) -> PipelineCounts {
                 PipelineCounts::default()
             }
+            fn refused_edits(&self) -> u64 {
+                0
+            }
+
             fn terminate(&self, _reason: TerminationReason) {}
         }
 

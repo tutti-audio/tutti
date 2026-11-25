@@ -196,6 +196,12 @@ pub trait Health: Send + Sync {
     /// does not. An in-process plugin has no budget to miss.
     fn block_counts(&self) -> PipelineCounts;
 
+    /// Host parameter writes the plugin did not take, over its life: a write
+    /// refused when it was applied (a read-only or withdrawn parameter), and
+    /// one made to a plugin that was already lost. A served plugin's is the
+    /// server's count, as it last told.
+    fn refused_edits(&self) -> u64;
+
     /// Ends the plugin's server process, latching
     /// [`PluginFailure::Terminated`] with `reason` as why it is dead
     /// (unless it already died of something else). An in-process
