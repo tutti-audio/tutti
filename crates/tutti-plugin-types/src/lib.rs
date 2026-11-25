@@ -383,7 +383,7 @@ pub use probe_failure::{MeasureFailure, ProbeError, ProbeRefusal, Unmeasured};
 #[cfg(feature = "probe-wire")]
 pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};
-pub use render_mode::RenderModeSupport;
+pub use render_mode::{ModeTold, RenderModeSupport};
 pub use sysex::{SYSEX_MESSAGE_CAPACITY, push_sysex, sysex_assembler, sysex_packets};
 pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,

@@ -16,9 +16,9 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
-    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, MaxBlock, Notice,
-    PluginError, PluginWiring, Prepare, Processor, Rebuilt, Refused, Reply, SampleRate, Samples,
-    State, Stuck, Told, step,
+    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, ModeTold, Notice,
+    PluginError, PluginWiring, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, Told,
+    step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.
@@ -52,7 +52,7 @@ impl<P> Hand<P> {
 
     /// The end for a user that renders on a realtime thread, and that
     /// thread's end, which polls between blocks ([`tutti_rt::Rt::poll`], with
-    /// [`Processor::stop`] as its last step).
+    /// [`Processor::stop`](crate::Processor::stop) as its last step).
     #[must_use]
     pub fn threaded() -> (Self, tutti_rt::Rt<P>)
     where
@@ -259,7 +259,6 @@ impl<L: Loaded> Lifecycle<L> {
                     | Effect::Rebuild
                     | Effect::Recall
                     | Effect::SetMode(_)
-                    | Effect::Retune(_)
                     | Effect::ReadParams(_)
                     | Effect::RebuildMidiMapping
                     | Effect::RunMainThread
@@ -366,30 +365,14 @@ impl<L: Loaded> Lifecycle<L> {
             | Effect::Recall => {
                 unreachable!("transitions and moves are applied by `apply`")
             }
-            Effect::Retune(prepare) => {
-                if let Some(retune) = <L::Processor as Processor>::RETUNE
-                    && let Some(processor) = self.processor()
-                {
-                    retune(
-                        processor,
-                        prepare.rate(),
-                        Samples::new(prepare.max_block().get()),
-                        prepare.quantum().map(MaxBlock::samples),
-                    );
-                }
-                Reply::Done
-            }
             Effect::SetMode(mode) => match self.control() {
-                Some(control) => {
-                    let told = control.set_render_mode(main, mode);
-                    if control.answers_later() {
-                        Reply::Asked
-                    } else if told {
-                        Reply::Answered(Told::ModeTook(mode))
-                    } else {
+                Some(control) => match control.set_render_mode(main, mode) {
+                    ModeTold::Took => Reply::Answered(Told::ModeTook(mode)),
+                    ModeTold::Refused | ModeTold::Unsupported => {
                         Reply::Answered(Told::ModeRefused(mode))
                     }
-                }
+                    ModeTold::Asked => Reply::Asked,
+                },
                 None => Reply::NotActive,
             },
             Effect::ReadLatency => match self {

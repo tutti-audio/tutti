@@ -116,6 +116,7 @@ enum probe_failure::ProbeRefusal
 enum probe_wire::ProbeOutcome
 enum process::BlockStatus
 enum rate_refusal::RateRefusalCause
+enum render_mode::ModeTold
 enum render_mode::RenderModeSupport
 enum server_error::ServerError
 enum state_frame::Opened

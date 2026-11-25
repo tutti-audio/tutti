@@ -794,17 +794,6 @@ impl<L: Loaded> Instance<L> {
                 }
                 Ok(())
             }
-            Behind::Retune => {
-                // The Processor is told by the control side: recalled if the
-                // audio thread holds it, told, and lent again. Never dropped:
-                // a plan waiting for the recall is finished by the pump.
-                if let Some(main) = main
-                    && let Some(trouble) = self.exchange(main, HostOp::Retune, rt)
-                {
-                    self.note(trouble);
-                }
-                Ok(())
-            }
             Behind::Restart => {
                 let Some(main) = main else {
                     let wrong_rate = self.state.wanted().map(|w| w.rate())
@@ -817,26 +806,6 @@ impl<L: Loaded> Instance<L> {
                 self.reconfigure(main, rt)
             }
         }
-    }
-
-    /// Steps `op`, and with `rt` (the node's own realtime end out of any
-    /// executor) runs the exchange it plans to the end: the realtime end hands
-    /// the Processor back, the tick runs the parked plan, and the Processor is
-    /// lent and taken. What stopped it, if something did.
-    fn exchange(
-        &mut self,
-        main: MainThreadMarker,
-        op: HostOp,
-        rt: Option<&mut Rt<L::Processor>>,
-    ) -> Option<Trouble> {
-        let outcome = self.drive(main, Event::Op(op));
-        let Some(rt) = rt else {
-            return outcome;
-        };
-        let _ = rt.poll(Processor::stop);
-        let ticked = self.drive(main, Event::Tick);
-        let _ = rt.poll(Processor::stop);
-        outcome.or(ticked)
     }
 
     /// A recall, a rejoin and an activation at the wanted [`Prepare`], which is
@@ -862,7 +831,16 @@ impl<L: Loaded> Instance<L> {
         rt: Option<&mut Rt<L::Processor>>,
     ) -> Result<(), String> {
         let wanted = self.wanted();
-        let outcome = self.exchange(main, HostOp::Reconfigure(wanted), rt);
+        let mut outcome = self.drive(main, Event::Op(HostOp::Reconfigure(wanted)));
+        if let Some(rt) = rt {
+            // The recall raised above: the realtime end hands the Processor
+            // back, the tick runs the parked plan, and the new Processor is
+            // lent and taken.
+            let _ = rt.poll(Processor::stop);
+            let ticked = self.drive(main, Event::Tick);
+            outcome = outcome.or(ticked);
+            let _ = rt.poll(Processor::stop);
+        }
         match outcome {
             Some(trouble) => {
                 // A plugin that died on the way is lost, whatever its last

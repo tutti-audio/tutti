@@ -285,7 +285,7 @@ pub enum Event {
     Returned,
     /// The plugin answered a setting the host told it without waiting
     /// ([`Processor::RETUNE`](crate::Processor::RETUNE), or a render mode it
-    /// [answers later](crate::Control::answers_later)).
+    /// [answers later](crate::ModeTold::Asked)).
     Answered(Told),
     /// The process hosting the plugin is gone.
     Died,
@@ -319,9 +319,6 @@ pub enum Behind {
     /// Only the render mode differs, and the plugin takes it live
     /// ([`HostOp::SetMode`]).
     Mode(RenderMode),
-    /// The rate, block ceiling or callback size differs, and the plugin's
-    /// Processor takes them live ([`HostOp::Retune`]).
-    Retune,
     /// Something an activation takes differs ([`HostOp::Reconfigure`]).
     Restart,
 }
@@ -341,11 +338,6 @@ pub enum HostOp {
     /// that is not active the mode waits in the wanted [`Prepare`] for the next
     /// activation.
     SetMode(RenderMode),
-    /// Bring the Processor back, tell it the wanted rate, block ceiling and
-    /// callback size ([`Processor::RETUNE`](crate::Processor::RETUNE)) and lend
-    /// it again, with no deactivation. The plugin answers the rate
-    /// ([`Event::Answered`]).
-    Retune,
     /// Rejoin the halves and stop rendering.
     Deactivate,
     /// Bring the Processor back to the main thread and lend it again, with
@@ -429,9 +421,6 @@ pub enum Effect {
     /// Tell the plugin its render mode. Answered by [`Reply::Answered`], or
     /// by [`Reply::Asked`] when the plugin answers later ([`Event::Answered`]).
     SetMode(RenderMode),
-    /// Tell the Processor in hand the rate, block ceiling and callback size of
-    /// this `Prepare` ([`Processor::RETUNE`](crate::Processor::RETUNE)).
-    Retune(Prepare),
     /// Read the latency from the plugin.
     ReadLatency,
     /// Read the tail from the plugin.
@@ -614,7 +603,6 @@ enum Task {
     Activate(Prepare),
     ReadParams(RescanScope),
     RebuildMidiMapping,
-    Retune,
     Lend,
 }
 
@@ -829,11 +817,12 @@ impl State {
     /// that closes it.
     ///
     /// `retunes` is whether its Processor takes the rate, block ceiling and
-    /// callback size live ([`RETUNE`](crate::Processor::RETUNE)): a difference
-    /// in them is [`Behind::Retune`] until the Processor is told, and an
-    /// answer makes it what the plugin has. Without, a difference in any field
-    /// but the callback size and the render mode needs an activation, which
-    /// no field added to a [`Prepare`] escapes. `support` is how the plugin
+    /// callback size live ([`RETUNE`](crate::Processor::RETUNE)): the node
+    /// tells it, and a difference in them is [`Behind::Restart`] only while the
+    /// Processor has not been told ([`retune_asked`](Self::retune_asked)); an
+    /// answer makes it what the plugin has. A difference in any other field but
+    /// the callback size and the render mode needs an activation, which no
+    /// field added to a [`Prepare`] escapes. `support` is how the plugin
     /// takes a render mode: a plugin that takes it live is told
     /// ([`Behind::Mode`]) until it answers, one that reads it at activation
     /// restarts, and one with no mode is never behind in it.
@@ -843,15 +832,9 @@ impl State {
             return Behind::No;
         };
         let (w, a) = (wanted.restart_key(applied), applied.restart_key(applied));
-        let live_differs = wanted.live() != applied.live();
-        if retunes {
-            if w.with_live(a.live()) != a {
-                return Behind::Restart;
-            }
-            if live_differs && self.retuning != Some(wanted.live()) {
-                return Behind::Retune;
-            }
-        } else if w != a {
+        let told = retunes && self.retuning == Some(wanted.live());
+        let compared = if told { w.with_live(a.live()) } else { w };
+        if compared != a {
             return Behind::Restart;
         }
         if wanted.mode == applied.mode {
@@ -990,11 +973,11 @@ impl State {
             HostOp::Activate(p) if !self.leads_active() => self.wanted = Some(p),
             HostOp::Reconfigure(p) => self.wanted = Some(p),
             HostOp::SetMode(mode) => self.wanted = self.wanted().map(|w| w.with_mode(mode)),
-            HostOp::Activate(_) | HostOp::Deactivate | HostOp::Relend | HostOp::Retune => {}
+            HostOp::Activate(_) | HostOp::Deactivate | HostOp::Relend => {}
         }
         // A relend asks for nothing an activation in flight does not do: it
         // lends at its end.
-        if matches!(op, HostOp::Relend | HostOp::Retune) && self.activating() {
+        if op == HostOp::Relend && self.activating() {
             return;
         }
         // An op raised while an activation is in flight cannot change the
@@ -1032,12 +1015,6 @@ impl State {
             HostOp::Relend => {
                 if matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
                     self.begin(&[Task::Lend], out);
-                }
-            }
-            HostOp::Retune => {
-                if matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
-                    self.retune_asked();
-                    self.begin(&[Task::Retune, Task::Lend], out);
                 }
             }
             HostOp::Deactivate => match (self.plan.wait, self.stage) {
@@ -1111,11 +1088,6 @@ impl State {
                 Task::RebuildMidiMapping => {
                     emit(out, Effect::RebuildMidiMapping);
                     emit(out, Effect::Notify(Notice::MidiMapChanged));
-                }
-                Task::Retune => {
-                    if let Some(wanted) = self.wanted() {
-                        emit(out, Effect::Retune(wanted));
-                    }
                 }
                 Task::Lend => emit(out, Effect::Lend),
                 Task::ReadParams(scope) => {

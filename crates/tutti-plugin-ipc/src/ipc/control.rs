@@ -10,10 +10,10 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, MidiAssignment, MidiMapApplied, OwnBypass, ParameterInfo, PipelineCounts,
-    PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult,
-    PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request,
-    StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
+    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParameterInfo,
+    PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset,
+    PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport,
+    Request, StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
     bypass_value,
 };
 use tutti_units::Normalized;
@@ -344,11 +344,6 @@ macro_rules! served_control {
                 out.append(&mut asked);
             }
 
-            /// The server answers the render mode it is told, later.
-            fn answers_later(&self) -> bool {
-                true
-            }
-
             /// What the server answered to the rate and render mode the host
             /// told it since the last call.
             fn take_answers(&mut self, _main: MainThreadMarker, out: &mut Vec<Told>) {
@@ -398,8 +393,13 @@ macro_rules! served_control {
                 }
             }
 
-            fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> bool {
-                AnyThread::set_render_mode(self, mode)
+            /// Queued for the server, which answers later.
+            fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> ModeTold {
+                if AnyThread::set_render_mode(self, mode) {
+                    ModeTold::Asked
+                } else {
+                    ModeTold::Refused
+                }
             }
 
             /// The edits the host lost: counted by the bridge, which forwards

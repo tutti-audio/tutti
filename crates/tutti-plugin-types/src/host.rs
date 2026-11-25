@@ -39,8 +39,8 @@ use crate::{
     bypass_parameter, bypass_value, is_bypassed,
 };
 use crate::{
-    MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    StateUse, TimerId, Told, TrackInfo, Wakeups, Widths,
+    MainThreadMarker, ModeTold, Prepare, RenderMode, RenderModeSupport, Request, RescanScope,
+    RestartRules, StateUse, TimerId, Told, TrackInfo, Wakeups, Widths,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_units::Normalized;
@@ -380,13 +380,6 @@ pub trait Control: EditorWindow {
     /// read at its next activation, or not at all.
     fn render_mode_support(&self, main: MainThreadMarker) -> RenderModeSupport;
 
-    /// Whether the plugin answers the render mode it is told
-    /// ([`set_render_mode`](Self::set_render_mode)) later, through
-    /// [`take_answers`](Self::take_answers), and not in the call.
-    fn answers_later(&self) -> bool {
-        false
-    }
-
     /// Appends what the plugin answered, since the last call, to a setting it
     /// was told without waiting (a rate its Processor retunes to, a render mode
     /// it answers later), oldest first, to `out`.
@@ -395,13 +388,14 @@ pub trait Control: EditorWindow {
     }
 
     /// Tells a [`Live`](RenderModeSupport::Live) plugin its render mode now,
-    /// and returns whether it took it. A host calls this only where
+    /// and returns what it did with it. A host calls this only where
     /// [`render_mode_support`](Self::render_mode_support) is `Live`; elsewhere
     /// the mode reaches the plugin as the [`Prepare::mode`](crate::Prepare::mode)
-    /// of its next activation, and this answers `false` and changes nothing.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
+    /// of its next activation, and this answers [`ModeTold::Unsupported`] and
+    /// changes nothing.
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeTold {
         let _ = (main, mode);
-        false
+        ModeTold::Unsupported
     }
 
     /// Appends the parameter edits the plugin reported of its own accord (its
@@ -962,10 +956,6 @@ impl<W: Wraps> Control for W {
         self.plugin_mut().take_requests(main, out);
     }
 
-    fn answers_later(&self) -> bool {
-        self.plugin().answers_later()
-    }
-
     fn take_answers(&mut self, main: MainThreadMarker, out: &mut Vec<Told>) {
         self.plugin_mut().take_answers(main, out);
     }
@@ -974,7 +964,7 @@ impl<W: Wraps> Control for W {
         self.plugin().render_mode_support(main)
     }
 
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeTold {
         self.plugin_mut().set_render_mode(main, mode)
     }
 

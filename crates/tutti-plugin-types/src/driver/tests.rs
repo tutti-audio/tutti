@@ -944,7 +944,10 @@ fn the_fake_control_answers_nothing_in_either_state() {
         let main = main();
         let control = rig.lifecycle.control().expect("a plugin is held");
 
-        assert!(!control.set_render_mode(main, RenderMode::Offline));
+        assert_ne!(
+            control.set_render_mode(main, RenderMode::Offline),
+            crate::ModeTold::Took
+        );
         assert!(!control.has_editor(main));
         assert!(matches!(
             control.open_floating_editor(main),

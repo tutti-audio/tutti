@@ -2195,8 +2195,14 @@ fn a_plugin_with_the_render_extension_takes_the_mode_live() {
             .features
             .contains(Features::RENDER_MODE)
     );
-    assert!(loaded.set_render_mode(main_thread(), RenderMode::Offline));
-    assert!(loaded.set_render_mode(main_thread(), RenderMode::Realtime));
+    assert_eq!(
+        loaded.set_render_mode(main_thread(), RenderMode::Offline),
+        tutti_plugin_types::ModeTold::Took
+    );
+    assert_eq!(
+        loaded.set_render_mode(main_thread(), RenderMode::Realtime),
+        tutti_plugin_types::ModeTold::Took
+    );
 }
 
 #[test]
