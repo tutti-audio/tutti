@@ -10,7 +10,9 @@ use std::sync::atomic::Ordering;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_graph::{Cx, Io, Node, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{
+    Cx, Io, Node, ParamInput, ParamNode, ParamPorts, ParamSet, Prepare, Shape, Status,
+};
 use tutti_units::Db;
 use tutti_units::{UnitAddr, UnitParam};
 
@@ -35,7 +37,7 @@ impl Bands {
 
 impl Node for Bands {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).param_addrs(&[BAND0, BAND1])
+        Shape::source_unassigned(ChannelLayout::STEREO).param_ports(ParamPorts::of(&[BAND0, BAND1]))
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -43,7 +45,9 @@ impl Node for Bands {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for (k, knob) in self.knobs.iter().enumerate() {
             match io.param(k) {
-                ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
+                ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+                    io.output(k).copy_from_slice(v);
+                }
                 ParamInput::Base => {
                     let base = knob.load(Ordering::Acquire);
                     io.output(k).fill(base as f32);

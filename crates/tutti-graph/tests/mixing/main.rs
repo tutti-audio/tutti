@@ -9,6 +9,7 @@
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod azimuth_arc;
+mod base_smoothing;
 mod declared_cells;
 mod declared_cells_config;
 mod declared_cells_entries;

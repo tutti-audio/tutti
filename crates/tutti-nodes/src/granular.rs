@@ -192,7 +192,7 @@ impl<F: Float> Node<F> for GranularNode<F> {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.layout)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, prepare: &Prepare) {

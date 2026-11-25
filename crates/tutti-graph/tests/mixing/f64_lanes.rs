@@ -34,13 +34,13 @@ declare_params!([] Lane, n { Cutoff => Hz = &n.0 });
 
 impl<F: Float> Node<F> for Lane {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let lane = self.declared_param::<{ UnitParam::Cutoff as u16 }, _>(&io);
         let base = F::from_f64(self.0.load().get());
-        match lane.frames() {
+        match lane.narrowed() {
             Some(values) => io.output(0).copy_from_slice(values),
             None => io.output(0).fill(base),
         }

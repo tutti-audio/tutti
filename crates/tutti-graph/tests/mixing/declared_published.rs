@@ -48,7 +48,7 @@ impl From<HolderConfig> for Holder {
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

@@ -91,12 +91,9 @@ impl Node for Knob {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         match self
             .declared_param::<{ UnitParam::Drive as u16 }, _>(&io)
-            .frames()
+            .narrowed()
         {
-            Some(v) => {
-                let v: Vec<f32> = v.to_vec();
-                io.output(0).copy_from_slice(&v);
-            }
+            Some(v) => io.output(0).copy_from_slice(v),
             None => io.output(0).fill(f32::from_unit(self.drive.load())),
         }
         Status::Modified
@@ -562,7 +559,9 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
         "the incoming knob sounds with what was written to its key while it waited"
     );
     s.set(knob.drive().to(Drive::new(9.0))).unwrap();
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    for _ in 0..512 {
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
     assert_eq!(out[0], 9.0, "its params are addressed under the key");
 }
 
@@ -657,7 +656,10 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
     s.set(knob.drive().to(Drive::new(4.0))).unwrap();
     assert!(s.update().is_empty());
     let mut out = [0.0f32];
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    // A write ramps over the declick, then holds.
+    for _ in 0..512 {
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
     assert_eq!(out[0], 4.0, "the refused swap left the running knob");
 
     let cut = Fade::new(Samples::ZERO);
@@ -1398,7 +1400,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
 
     s.set(knob.drive().to(Drive::new(7.0)))
         .expect("the key addresses the node that landed");
-    for _ in 0..8 {
+    for _ in 0..512 {
         let _ = s.update();
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }

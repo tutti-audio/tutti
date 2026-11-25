@@ -10,7 +10,7 @@
 //! - an event source's value is clamped to the port's range, frame by frame;
 //! - an event source replaces the base from its first event (a first ramp
 //!   from the base); connecting a second one replaces the first;
-//! - a base move under a source that has not spoken ramps across the block;
+//! - a base move under a source that has not spoken ramps over the declick;
 //! - connecting and disconnecting a source at runtime crossfades instead of
 //!   stepping;
 //! - a step or a `ParamRamp` lands on its frame; a shaped ramp hits its
@@ -161,14 +161,18 @@ impl Node for Probe {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         // Outputs 1 and 2 are the ports past the main bus.
         let readouts = self.shape().spare_out().expect("two readouts");
-        // Writes param `p` (its base, or its frames) to `out`; whether it
-        // read frames.
+        // Writes param `p` (its base, its smoothed base or its frames) to
+        // `out`; whether it was driven.
         let write = |out: &mut [f32], p: ParamInput<'_>, base: f32| match p {
             ParamInput::Base => {
                 out.fill(base);
                 false
             }
-            ParamInput::Frames { values: v, .. } => {
+            ParamInput::Smoothing { narrow: v, .. } => {
+                out.copy_from_slice(v);
+                false
+            }
+            ParamInput::Frames { narrow: v, .. } => {
                 out.copy_from_slice(v);
                 true
             }
@@ -513,11 +517,12 @@ fn an_event_sources_value_is_clamped_to_the_range() {
     );
 }
 
-/// A base moved under a source that has not spoken yet is read at once, as
-/// an unconnected port reads it: the port is not driven, so there is no
-/// trajectory to ramp.
+/// A base moved under a source that has not spoken yet ramps linearly over
+/// the declick, as an unconnected port's does: frame `j` of `n` is
+/// `from + (to - from) * (j + 1) / n`, across blocks, landing on the new
+/// base. The port is smoothed, not driven.
 #[test]
-fn a_base_move_under_a_silent_source_is_read_at_once() {
+fn a_base_move_under_a_silent_source_ramps_over_the_declick() {
     let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
     ed.insert(NodeKey(1), "quiet", Unforkable(Ramps::steps(&[])));
@@ -526,12 +531,17 @@ fn a_base_move_under_a_silent_source_is_read_at_once() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
     cutoff.set(200.0);
-    let out = render(&mut exec, &mut ed, 64, 64);
+    let n = declick();
+    let out = render(&mut exec, &mut ed, n + 64, 64);
+    for (j, &x) in out[0].iter().enumerate().take(n - 1) {
+        let want = 100.0 + 100.0 * ((j + 1) as f64 / n as f64);
+        assert_eq!(x, want as f32, "frame {j}");
+    }
     assert!(
-        out[0].iter().all(|&x| x == 200.0),
-        "the new base, every frame"
+        out[0][n - 1..].iter().all(|&x| x == 200.0),
+        "the new base from the ramp's last frame"
     );
-    assert!(out[2].iter().all(|&x| x == 0.0), "Base");
+    assert!(out[2].iter().all(|&x| x == 0.0), "never driven");
 }
 
 /// A port with an event source delivers `Frames` only through its connect's
@@ -681,8 +691,8 @@ fn connecting_and_disconnecting_at_runtime_does_not_click() {
 /// still a connection, not a first block: the first driven block fades from
 /// the base. The unit's one first block is the earliest block it ran, whatever
 /// the plan then drove, so a port that spent it undriven is not fresh when a
-/// lane arrives. The step asks the node the base of every port in that first
-/// block, and after it of the driven port alone: a port at rest is not asked.
+/// lane arrives. The step asks the node the base of every port the graph
+/// smooths in every block, to see it move.
 #[test]
 fn a_port_first_driven_blocks_after_the_units_first_fades_from_its_base() {
     const BLOCK: usize = 64;
@@ -698,7 +708,7 @@ fn a_port_first_driven_blocks_after_the_units_first_fades_from_its_base() {
     ed.commit().expect("commits");
     let undriven = render(&mut exec, &mut ed, 5 * BLOCK, BLOCK);
     assert!(undriven[0].iter().all(|&x| x == 0.25), "the base");
-    assert_eq!(asks(), [1, 1], "the first block asked both, no other did");
+    assert_eq!(asks(), [5, 5], "every block asked both smoothed ports");
 
     ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
         .unwrap();
@@ -717,7 +727,7 @@ fn a_port_first_driven_blocks_after_the_units_first_fades_from_its_base() {
     }
     assert!(out[0][0] < 0.26, "frame 0 is the base, not the source");
     assert!(out[1].iter().all(|&x| x == 0.5), "Q was never driven");
-    assert_eq!(asks(), [2, 1], "only the driven port was asked");
+    assert_eq!(asks(), [6, 6], "every block asked both smoothed ports");
 }
 
 /// A step lands on its frame: a zero-length `ParamRamp` at frame `k`
@@ -1797,7 +1807,7 @@ impl Node for SegmentThenRamp {
 /// `Cutoff` as the executor renders it, for a [`SegmentThenRamp`] driving
 /// the probe's port: block 1, frames 0..8, at a still base of 1; block 2,
 /// frames 8..24, at the base moved 1 → 3 between the blocks (a port whose
-/// source has not spoken reads the base itself, with no ramp across the block).
+/// source has not spoken reads the base's ramp, from 1 over the declick).
 fn segment_then_ramp(at: u64, step_at: Option<u64>) -> (Vec<f32>, Vec<f32>) {
     let (cutoff, q) = (Cell::new(1.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
@@ -1830,23 +1840,29 @@ fn assert_bits(got: &[f32], want: &[f32], from: usize) {
 
 /// The second block of [`segment_then_ramp`] with its ramp at frame `at`,
 /// 4 frames to 0 from `held`, and the base (3) before it.
-fn ramp_from(at: u64, held: impl Fn(usize) -> f32) -> Vec<f32> {
+fn ramp_from(at: u64, held: impl Fn(usize) -> f64) -> Vec<f32> {
     let k = (at - 8) as usize;
     let b = held(k);
     (0..16)
         .map(|j| {
-            if j < k {
+            (if j < k {
                 held(j)
             } else {
-                let done = (j - k + 1) as f32;
+                let done = (j - k + 1) as f64;
                 if done >= 4.0 {
                     0.0
                 } else {
                     b + (0.0 - b) * (done / 4.0)
                 }
-            }
+            }) as f32
         })
         .collect()
+}
+
+/// The base's ramp from 1 to 3 over the declick, at frame `j` of the block
+/// after the move.
+fn base_ramp(j: usize) -> f64 {
+    1.0 + 2.0 * ((j + 1) as f64 / declick() as f64)
 }
 
 /// A ramp that replaces a segment on the segment's own frame, as the
@@ -1857,8 +1873,12 @@ fn ramp_from(at: u64, held: impl Fn(usize) -> f32) -> Vec<f32> {
 /// start from the previous block's base or from a value nothing wrote.
 #[test]
 fn a_ramp_replacing_a_first_segment_on_its_frame_starts_from_the_base() {
-    let want = ramp_from(10, |_| 3.0);
-    assert_eq!(want[2], 2.25, "the ramp's first frame, from the base");
+    let want = ramp_from(10, base_ramp);
+    assert_eq!(
+        want[2],
+        (base_ramp(2) * 0.75) as f32,
+        "the ramp's first frame, from the base's ramp at that frame"
+    );
     let (first, second) = segment_then_ramp(10, None);
     assert_eq!(first, vec![1.0; 8], "the base, before any event");
     assert_bits(&second, &want, 8);

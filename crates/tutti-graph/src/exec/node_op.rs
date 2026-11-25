@@ -25,7 +25,7 @@ use crate::exec::lane::fade_gains;
 use crate::exec::loss::Dropped;
 use crate::exec::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
 use crate::node::io::Io;
-use crate::node::param::{CellValue, ParamInput};
+use crate::node::param::ParamInput;
 use crate::node::param_event::ParamEvent;
 use crate::node::time::Env;
 use crate::node::{ConstantMask, Cx, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
@@ -188,7 +188,7 @@ pub(super) fn fading_node_op<
     let frames = h.frames;
     // The key's params, once for both units: the outgoing one hears the
     // modulation the incoming one does.
-    let modulated = !h.ports.params.is_empty() || u.params.busy();
+    let modulated = steps_params(u, h);
     if modulated {
         run_params(u, h, st);
     }
@@ -253,7 +253,7 @@ pub(super) fn fading_node_op<
         }
     }
 
-    node_op_with(u, h, st, ports, !modulated, |call, node, st| {
+    node_op_with(u, h, st, ports, modulated, |call, node, st| {
         let (arena, events) = (&mut *st.arena, &mut *st.events);
         let dropped = &mut *st.dropped;
         call.run::<MAX_PORTS, MAX_PORTS, A, E>(node, arena, events, nodes, dropped)
@@ -418,9 +418,11 @@ pub(super) fn node_op<
 /// Run a unit's fused param step (see the `param` module docs,
 /// `src/node/param.rs`): each declared param, from its source this plan, into
 /// the unit's param buffers. Off the hot path: only a unit with a driven
-/// param, or one mid-declick, gets here. A port at rest (undriven, with
-/// nothing running) is not visited, so its node is not asked its base; the
-/// unit's first block visits every port.
+/// param, one mid-declick, or one whose base the graph smooths gets here. A
+/// port that lands whole and is at rest (undriven, with nothing running) is
+/// not visited, so its node is not asked its base; a smoothed port is asked
+/// every block, to see its base move. The unit's first block visits every
+/// port.
 #[inline(never)]
 pub(super) fn run_params<
     F: Float,
@@ -438,25 +440,43 @@ pub(super) fn run_params<
     let mut driven = plan.program.param_ports[h.ports.params.range()]
         .iter()
         .peekable();
-    let declared = h.pu.shape.params;
+    let declared = &h.pu.shape.params;
     let declick = h.declick;
     // The state was sized from the unit's shape; a fade's two units declare
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());
     for (k, &param) in declared.as_slice().iter().enumerate().take(n) {
         let source = driven.next_if(|p| p.port as usize == k);
-        if source.is_none() && params.at_rest(k) {
+        let whole = declared.lands_whole(k);
+        if source.is_none() && params.at_rest(k, whole) {
             continue;
         }
-        let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
+        let base = node.param_base(k);
         match source {
             Some(p) => {
                 let events = st.events.pev(p.slot);
-                params.port(k, param, frames, declick, Some((p.from, events)), base);
+                params.node_port(
+                    k,
+                    param,
+                    frames,
+                    declick,
+                    Some((p.from, events)),
+                    base,
+                    whole,
+                );
             }
-            None => params.port(k, param, frames, declick, None, base),
+            None => params.node_port(k, param, frames, declick, None, base, whole),
         }
     }
+}
+
+/// Whether the unit's fused param step runs this block: a unit with a
+/// modulated param, one still declicking off one, or one with a param whose
+/// base the graph smooths (it steps to see the base move). Every other unit
+/// pays this one branch.
+#[inline]
+pub(super) fn steps_params<F: Float>(u: &Unit<F>, h: &Head<'_, '_>) -> bool {
+    !h.ports.params.is_empty() || u.params.busy() || u.params.smooths()
 }
 
 /// [`node_op`], with the unit's params already run this block when
@@ -553,7 +573,7 @@ pub(super) fn node_op_with<
     // still declicking off one; every other unit pays this one branch. Run
     // whether or not the node is then skipped, so its ramps and declick
     // advance with the timeline.
-    if !params_done && (!np.params.is_empty() || u.params.busy()) {
+    if !params_done && steps_params(u, h) {
         run_params(u, h, st);
     }
     if skip {
