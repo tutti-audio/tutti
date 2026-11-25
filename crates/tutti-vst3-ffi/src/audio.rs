@@ -63,10 +63,13 @@ impl Arrangement {
 /// overlaps another. The audio thread only ever `try_claim`s, and refuses the
 /// block when it cannot have it, so it never waits on a control thread. The
 /// teardown takes the data out for good, so no entry reaches the processor
-/// afterwards. The audio half holds no owning reference to the plugin, so the
-/// plugin's destruction, and the unloading of its module, always happen on the
-/// thread that drops the [`Plugin`](crate::Plugin), never on the audio thread
-/// that drops an [`AudioSide`].
+/// afterwards. The claim holds a reference to the processor, which the audio
+/// half reaches through its `Arc`; the plugin's drop takes it out
+/// ([`deactivate`](Self::deactivate)) and releases it there, before releasing
+/// its own references. So the audio half never holds the last reference, or a
+/// live one, and the plugin's destruction and the unloading of its module
+/// happen on the thread that drops the [`Plugin`](crate::Plugin), never on the
+/// audio thread that drops an [`AudioSide`].
 pub(crate) struct Shared {
     /// An [`AudioSide`] exists. While it does, control-side state changes are
     /// refused.
@@ -83,10 +86,13 @@ pub(crate) struct Live {
     pub(crate) processor: ComPtr<IAudioProcessor>,
 }
 
-// SAFETY: the processor is used only through a claim guard, and released only
-// by the `take` in `Shared::deactivate`, which the plugin's owner runs (its drop,
-// or `set_active(false)` on a dead claim), so moving the `Live` moves no access
-// of its own.
+// SAFETY: a VST3 interface pointer has no thread affinity: `addRef` and
+// `release` are atomic in a conforming plugin, and `process` and
+// `setProcessing` are specified for the audio thread. Every call on it here is
+// under the claim, so moving the `Live` to another thread adds no concurrent
+// call. The plugin's drop takes the `Live` out (`Shared::deactivate`) and
+// releases it before the plugin's own references; a `Plugin` that is leaked
+// leaks its `Arc<Shared>` with it, so the audio half never drops the last one.
 unsafe impl Send for Live {}
 
 impl Shared {
@@ -113,8 +119,8 @@ impl Shared {
         self.active.load(Ordering::Acquire)
     }
 
-    /// Records an activation, under the claim (`live` proves it), and forgets
-    /// the bus layout of the one before.
+    /// Records an activation, under the claim (`live`, which must be this
+    /// `Shared`'s), and forgets the bus layout of the one before.
     pub(crate) fn record_activation(&self, live: &mut ClaimGuard<'_, Live>, active: bool) {
         live.state.buses = None;
         self.active.store(active, Ordering::Release);
