@@ -346,6 +346,7 @@ impl<F: Float> PendingFork<F> {
         fork.topology.inputs = spec.topology.inputs;
         fork.topology.outputs = spec.topology.outputs;
         fork.main_output = spec.main_output;
+        fork.main_output_id = spec.main_output_id;
         fork.topology.edges = spec.topology.edges;
         fork.events = spec.events;
         fork.required_resolution = spec.required_resolution;
@@ -1062,8 +1063,10 @@ impl<F: Float> Editor<F> {
             // The fork is of the lowered spec: a bus edge is already its
             // lanes.
             bus_edges: BTreeMap::new(),
+            // The live main output, declared under the first id past the empty
+            // one, as a fresh build declares it.
             main_output: live.main_output,
-            main_output_id: crate::MainOutputId::GENESIS,
+            main_output_id: crate::MainOutputId::GENESIS.next(),
             main_output_sources: Vec::new(),
         };
         // The edge gains whose edge the fork kept (an output channel the

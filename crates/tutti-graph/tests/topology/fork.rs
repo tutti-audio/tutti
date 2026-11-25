@@ -260,11 +260,7 @@ fn a_fork_places_the_units_generations_and_wiring_of_a_fresh_build() {
     assert_eq!(fork_ed.prepare(), &pre);
 
     let fresh = chain().renderer(pre).expect("builds");
-    // The fork's editor holds its own declaration id; the declared channels are
-    // the build's.
-    let mut fresh_spec = fresh.editor().spec().clone();
-    fresh_spec.main_output_id = fork_ed.spec().main_output_id;
-    assert_eq!(fork_ed.spec(), &fresh_spec);
+    assert_eq!(fork_ed.spec(), fresh.editor().spec());
     assert_eq!(fork_ed.spec().topology.nodes.len(), 3, "not vacuous");
 }
 
