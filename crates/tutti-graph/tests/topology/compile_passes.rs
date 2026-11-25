@@ -11,12 +11,12 @@ use std::collections::BTreeMap;
 use common::{Harness, Kind, SpecBehaviour, input_signal};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    AudioDelayKey, CompileError, CycleEdge, EventEdge, EventInputPort, EventOutputPort,
-    GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
+    AudioDelayKey, BusOutputPort, CompileError, CycleEdge, EventEdge, EventInputPort,
+    EventOutputPort, GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, Invalid, NodeSpec, OutputPort, PortSource};
-use tutti_graph::{NodeKey, Topology, delays, latency_plan};
-use tutti_units::{Latency, SampleRate, Samples, Tail};
+use tutti_graph::{NodeBus, NodeKey, ParamIn, Topology, delays, latency_plan};
+use tutti_units::{Latency, SampleRate, Samples, Tail, UnitParam};
 
 /// The `MaxBlock` every plan in this file is compiled for.
 const PREP: usize = 128;
@@ -582,6 +582,91 @@ fn a_cycle_through_an_event_edge_is_an_error_naming_its_edges() {
             ]
         }
     );
+}
+
+/// A lane's param edge that closes a cycle through an audio edge is found on
+/// the spec alone, with the edges `compile` reports, where
+/// `Topology::validate` (audio edges only) passes. A feedback edge cuts it,
+/// and an acyclic spec has none.
+#[test]
+fn a_spec_names_the_cycle_a_param_edge_closes() {
+    let param = ParamIn {
+        node: A,
+        param: UnitParam::Cutoff.into(),
+    };
+    let mut g = two_node_spec();
+    edge(&mut g.topology, at(B, 0), out(A, 0));
+    assert_eq!(g.cycle(), None, "a chain is acyclic");
+    g.connect_param(param, EventOutputPort::new(B, 0));
+    g.topology
+        .validate()
+        .expect("the audio edges alone are acyclic");
+    let want = vec![
+        CycleEdge::Audio(at(B, 0)),
+        CycleEdge::Param {
+            at: param,
+            from: EventOutputPort::new(B, 0),
+        },
+    ];
+    assert_eq!(g.cycle(), Some(want));
+
+    // The edges are the ones `compile` reports for an event edge closing the
+    // same loop (`a_cycle_through_an_event_edge_is_an_error_naming_its_edges`).
+    let mut e = two_node_spec();
+    edge(&mut e.topology, at(B, 0), out(A, 0));
+    e.connect_events(
+        EventInputPort::new(A, 0),
+        EventEdge::Direct(EventOutputPort::new(B, 0)),
+    );
+    let valid = e.validate().expect("the value alone cannot see it");
+    assert_eq!(
+        compile(&valid, &gain_kinds(&[A, B]), &common::prepare(PREP), None),
+        Err(CompileError::Cycle {
+            edges: e.cycle().expect("a cycle")
+        }),
+        "one search: compile reports the edges the spec does"
+    );
+
+    let mut f = two_node_spec();
+    edge(&mut f.topology, at(B, 0), out(A, 0));
+    f.topology.edges.insert(
+        at(A, 0),
+        vec![Edge::Feedback(FeedbackFrom::one_block(
+            out(B, 0),
+            Samples::new(PREP),
+        ))],
+    );
+    assert_eq!(f.cycle(), None, "a feedback edge reads the past");
+}
+
+/// A bus edge not yet lowered is a dependency at node level: A feeding B's bus
+/// and B driving A's param is a cycle the spec names, and without the param
+/// edge there is none. A feed from the main input is no dependency.
+#[test]
+fn a_spec_names_the_cycle_an_unlowered_bus_edge_closes() {
+    let param = ParamIn {
+        node: A,
+        param: UnitParam::Cutoff.into(),
+    };
+    let (source, sink) = (NodeBus::new(A, 0), NodeBus::new(B, 0));
+    let mut g = two_node_spec();
+    g.connect_bus(BusOutputPort::Node(source), sink);
+    assert_eq!(g.cycle(), None, "a bus chain is acyclic");
+    g.connect_bus(BusOutputPort::MainInput, NodeBus::new(A, 0));
+    assert_eq!(g.cycle(), None, "the main input is no node");
+    g.connect_param(param, EventOutputPort::new(B, 0));
+    let mut want = vec![
+        CycleEdge::Param {
+            at: param,
+            from: EventOutputPort::new(B, 0),
+        },
+        CycleEdge::Bus {
+            at: sink,
+            from: BusOutputPort::Node(source),
+        },
+    ];
+    want.sort();
+    assert_eq!(g.cycle(), Some(want));
 }
 
 /// An event edge from a node to itself is a cycle too.
