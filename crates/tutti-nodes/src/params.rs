@@ -272,7 +272,8 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// and its `Controls`, with the controls [`assemble`](ControlSet::assemble)
 /// starts from (the parts the ports do not carry). `live` is how many of the
 /// rows the set has (`all`, or an expression: a graphic EQ has a row for
-/// each of its bands). A row is `Kind => Unit = field`, a single control;
+/// each of its bands). A row is `Kind => Unit = field`, a single control, where `field` may be
+/// a path of fields (`inner.field`, as the FDN's `network.decay[0]` and `kind.pitch`);
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row `Kind => Unit = field via Ranged` is a
 /// range-checked field: it reads as `field.get()` and a cell becomes `Ranged::held(cell)`, the
@@ -288,7 +289,7 @@ macro_rules! control_set {
     (
         $set:ident($s:ident): $controls:ty = $base:expr;
         live: ($($live:tt)+);
-        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $([$pi:literal])? $(via $ranged:ty)?
+        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $(. $g:ident)* $([$pi:literal])? $(via $ranged:ty)?
             $({ $($flag:ident $(= $val:expr)?),* })?),+ ;
         $($items:tt)*
     ) => {
@@ -324,7 +325,7 @@ macro_rules! control_set {
             fn flatten(&self, c: &$controls, out: &mut [f64]) {
                 let all = [$(
                     <$unit as tutti_graph::ParamValue>::to_cell(
-                        control_set!(@read c.$f $([$pi])? $(via $ranged)?)
+                        control_set!(@read c . $f $(. $g)* $([$pi])? $(via $ranged)?)
                     )
                 ),+];
                 out.copy_from_slice(&all[..out.len()]);
@@ -337,7 +338,7 @@ macro_rules! control_set {
                 let mut cells = v.iter().copied();
                 $(
                     if let Some(x) = cells.next() {
-                        c.$f $([$pi])? = control_set!(@write $unit, x $(, via $ranged)?);
+                        c.$f $(. $g)* $([$pi])? = control_set!(@write $unit, x $(, via $ranged)?);
                     }
                 )+
                 c
@@ -347,8 +348,10 @@ macro_rules! control_set {
         }
         $( control_set!(@has $set; $kind $([$ix])? => $unit); )+
     };
-    (@read $c:ident . $f:ident $([$pi:literal])? via $ranged:ty) => { $c.$f $([$pi])?.get() };
-    (@read $c:ident . $f:ident $([$pi:literal])?) => { $c.$f $([$pi])? };
+    (@read $c:ident . $f:ident $(. $g:ident)* $([$pi:literal])? via $ranged:ty) => {
+        $c.$f $(. $g)* $([$pi])?.get()
+    };
+    (@read $c:ident . $f:ident $(. $g:ident)* $([$pi:literal])?) => { $c.$f $(. $g)* $([$pi])? };
     (@write $unit:ty, $x:ident, via $ranged:ty) => {
         <$ranged>::held(<$unit as tutti_graph::ParamValue>::from_cell($x))
     };

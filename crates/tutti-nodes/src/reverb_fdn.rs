@@ -6,7 +6,8 @@
 
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, Lerp, MaxDecay,
+    BlockMismatch, FdnBank, FdnControls, FdnKind, FdnLayout, FdnRamps, FftFloat, FreezeControls,
+    Lerp, MaxDecay,
 };
 use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
@@ -15,7 +16,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The feedback delay network as a graph node: mono in, stereo out, wet only.
 ///
-/// A [`KernelNode`] over [`FdnKernel`], the network being [`FdnBank`]'s. Its blend with its
+/// A [`KernelNode`] over [`FdnKernel`] of a plain [`FdnLayout`], the network being [`FdnBank`]'s. Its blend with its
 /// input, for use as an insert, is the graph's mix (`Editor::set_mix`); the node declares no
 /// latency (its pre-delay is part of the wet sound). Made from an [`FdnConfig`]
 /// (`FdnNode::from`).
@@ -42,24 +43,24 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the ramps;
 /// the lines are the layout's worst case (its most lines at the longest length the size and the
 /// modulation reach), so an `f32` graph halves the memory of an `f64` one.
-pub type FdnNode<F> = KernelNode<FdnKernel<F>>;
+pub type FdnNode<F> = KernelNode<FdnKernel<F, FdnLayout>>;
 
 /// What an [`FdnNode`] is made from: the network's layout and the controls its cells start at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnConfig {
     layout: FdnLayout,
-    controls: FdnControls,
+    controls: FdnNodeControls<FdnLayout>,
 }
 
 impl FdnConfig {
-    /// A network of [`FdnLayout::default`] with its cells at [`FdnControls::DEFAULT`]. It has
+    /// A network of [`FdnLayout::default`] with its cells at [`FdnNodeControls::DEFAULT`]. It has
     /// no rate until the graph's `prepare` gives it one: it declares no latency and an unknown
     /// tail before, and renders silence.
     #[must_use]
     pub fn new() -> Self {
         Self {
             layout: FdnLayout::default(),
-            controls: FdnControls::DEFAULT,
+            controls: FdnNodeControls::<FdnLayout>::DEFAULT,
         }
     }
 
@@ -72,7 +73,7 @@ impl FdnConfig {
 
     /// The controls the cells start at.
     #[must_use]
-    pub const fn controls(mut self, controls: FdnControls) -> Self {
+    pub const fn controls(mut self, controls: FdnNodeControls<FdnLayout>) -> Self {
         self.controls = controls;
         self
     }
@@ -91,6 +92,26 @@ impl<F: FftFloat + Lerp> From<FdnConfig> for FdnNode<F> {
     }
 }
 
+/// The controls of an FDN node of kind `L`: the network's, which every kind has, and the
+/// kind's own ([`FreezeControls`] for a plain network, [`ShimmerControls`](tutti_dsp::ShimmerControls)
+/// for a shimmer).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FdnNodeControls<L: FdnKind> {
+    /// The decays, the size, the diffusion, the pre-delay, the modulation's depth and rate,
+    /// the width and the wet gain.
+    pub network: FdnControls,
+    /// What the kind adds.
+    pub kind: L::Controls,
+}
+
+impl FdnNodeControls<FdnLayout> {
+    /// [`FdnControls::DEFAULT`], not frozen.
+    pub const DEFAULT: Self = Self {
+        network: FdnControls::DEFAULT,
+        kind: FreezeControls::DEFAULT,
+    };
+}
+
 /// The FDN's controls: the three decays, the size, the diffusion, the pre-delay, the
 /// modulation's depth and rate, the width, the wet gain and the freeze.
 #[derive(Clone, Copy, Debug)]
@@ -99,48 +120,50 @@ pub struct FdnSet;
 // In port order after the mix. Every row
 // lands whole: the bank's ramps are the ramp.
 control_set! {
-    FdnSet(_s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
+    FdnSet(_s): FdnNodeControls<FdnLayout> = FdnNodeControls::<FdnLayout>::DEFAULT;
     live: (all);
-    Decay[0] => Seconds = decay[0] { whole, longest = MaxDecay::CAP.get() },
-    Decay[1] => Seconds = decay[1] { whole, longest = MaxDecay::CAP.get() },
-    Decay[2] => Seconds = decay[2] { whole, longest = MaxDecay::CAP.get() },
-    RoomSize => Mix = size { whole },
-    Diffusion => Mix = diffusion { whole },
-    DelayTime => Seconds = pre_delay { whole },
-    Depth => Bipolar = modulation { whole },
-    Rate => Hz = rate { whole },
-    StereoSpread => StereoWidth = width { whole },
-    GainDb => Db = wet { whole, no_ring },
-    Freeze => bool = freeze { whole, longest = 1.0 };
+    Decay[0] => Seconds = network.decay[0] { whole, longest = MaxDecay::CAP.get() },
+    Decay[1] => Seconds = network.decay[1] { whole, longest = MaxDecay::CAP.get() },
+    Decay[2] => Seconds = network.decay[2] { whole, longest = MaxDecay::CAP.get() },
+    RoomSize => Mix = network.size { whole },
+    Diffusion => Mix = network.diffusion { whole },
+    DelayTime => Seconds = network.pre_delay { whole },
+    Depth => Bipolar = network.modulation { whole },
+    Rate => Hz = network.rate { whole },
+    StereoSpread => StereoWidth = network.width { whole },
+    GainDb => Db = network.wet { whole, no_ring },
+    Freeze => bool = kind.freeze { whole, longest = 1.0 };
 
-    fn defaults(&self) -> FdnControls {
-        FdnControls::DEFAULT
+    fn defaults(&self) -> FdnNodeControls<FdnLayout> {
+        FdnNodeControls::<FdnLayout>::DEFAULT
     }
 }
 
 /// A [`FdnBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running<F: FftFloat> {
+struct Running<F: FftFloat + Lerp, L: FdnKind> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
-    bank: FdnBank<F>,
-    ramps: FdnRamps<F>,
+    bank: FdnBank<F, L>,
+    ramps: FdnRamps<F, L>,
 }
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
-/// the ramps its design is set through.
+/// the ramps its design is set through, of the kind `L`: [`FdnLayout`] for the plain network
+/// ([`FdnSet`]) or [`ShimmerLayout`](tutti_dsp::ShimmerLayout) for the shimmer
+/// ([`ShimmerSet`](crate::ShimmerSet)).
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
-pub struct FdnKernel<F: FftFloat> {
-    layout: FdnLayout,
+pub struct FdnKernel<F: FftFloat + Lerp, L: FdnKind> {
+    layout: L,
     /// `None` until [`prepare`](Kernel::prepare).
-    running: Option<Running<F>>,
+    running: Option<Running<F, L>>,
 }
 
-impl<F: FftFloat + Lerp> FdnKernel<F> {
+impl<F: FftFloat + Lerp, L: FdnKind> FdnKernel<F, L> {
     /// A network of `layout`. It has no lines until `prepare` gives it a rate.
-    pub(crate) fn new(layout: FdnLayout) -> Self {
+    pub(crate) fn new(layout: L) -> Self {
         Self {
             layout,
             running: None,
@@ -148,12 +171,34 @@ impl<F: FftFloat + Lerp> FdnKernel<F> {
     }
 }
 
-impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
-    type Float = F;
-    type Set = FdnSet;
+mod sealed {
+    use tutti_dsp::{FdnKind, FdnLayout, ShimmerLayout};
 
-    /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
-    const GRID: usize = FdnBank::<F>::CHUNK;
+    use super::FdnNodeControls;
+    use crate::ControlSet;
+
+    /// A network kind the nodes run: its layout and the control set its node declares.
+    pub trait Sealed: FdnKind {
+        /// The rows of the kind's node.
+        type Set: ControlSet<Controls = FdnNodeControls<Self>>;
+    }
+
+    impl Sealed for FdnLayout {
+        type Set = super::FdnSet;
+    }
+
+    impl Sealed for ShimmerLayout {
+        type Set = crate::ShimmerSet;
+    }
+}
+
+impl<F: FftFloat + Lerp, L: sealed::Sealed> Kernel for FdnKernel<F, L> {
+    type Float = F;
+    type Set = L::Set;
+
+    /// A cell that moves reaches the render at a chunk's start, wherever the blocks
+    /// fall.
+    const GRID: usize = FdnBank::<F, L>::CHUNK;
 
     fn shape(&self) -> Shape {
         Shape::buses(
@@ -163,8 +208,8 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         .cost(Cost::Moderate)
     }
 
-    /// Sizes the lines, the pre-delay and the scratch of a design at `rate`: a re-prepare
-    /// empties them.
+    /// Sizes the lines, the pre-delay and the scratch of a design at `rate`: a
+    /// re-prepare empties them.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = FdnBank::new(&self.layout, rate);
         let ramps = bank.ramps();
@@ -177,9 +222,10 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         }
     }
 
-    fn retarget(&mut self, controls: &FdnControls) {
+    fn retarget(&mut self, controls: &FdnNodeControls<L>) {
         let Some(r) = &mut self.running else { return };
-        r.bank.retarget(&mut r.ramps, controls);
+        r.bank
+            .retarget(&mut r.ramps, &controls.network, &controls.kind);
     }
 
     fn jump_to_target(&mut self) {
@@ -199,10 +245,10 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         }
     }
 
-    /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a
-    /// finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out is declared
-    /// unbounded, not as a figure the graph would refuse or count as never decaying. The node
-    /// still narrows it each block to what rings.
+    /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes
+    /// as a finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out
+    /// is declared unbounded, not as a figure the graph would refuse or count as never
+    /// decaying. The node still narrows it each block to what rings.
     fn tail(&self) -> Tail {
         match self.running.as_ref().map(|r| (r.rate, r.bank.tail())) {
             None => Tail::Unknown,
@@ -213,10 +259,10 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         }
     }
 
-    fn tail_of(&mut self, controls: &FdnControls) -> Tail {
-        self.running
-            .as_mut()
-            .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.ramps, controls))
+    fn tail_of(&mut self, controls: &FdnNodeControls<L>) -> Tail {
+        self.running.as_mut().map_or(Tail::Unknown, |r| {
+            r.bank.tail_of(&r.ramps, &controls.network, &controls.kind)
+        })
     }
 }
 
@@ -238,7 +284,7 @@ mod tests {
     fn the_tail_is_longest_at_the_stated_decays_and_freeze() {
         use tutti_buffers::MaxBlock;
         use tutti_units::Samples;
-        let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
+        let mut kernel = FdnKernel::<f64, FdnLayout>::new(FdnLayout::default());
         kernel.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
         // The layout clamps a decay at its longest (the default 8 s), so the sweep spans the
         // decays that differ; the stated value past it reads as that longest.
@@ -273,24 +319,22 @@ mod tests {
         use tutti_units::{Mix, Samples, Seconds};
         let grid = [0.05, 0.3, 1.0, 2.0, 4.0, 6.0, 7.5, 7.9, 7.99, 8.0];
         for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
-            let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
+            let mut kernel = FdnKernel::<f64, FdnLayout>::new(FdnLayout::default());
             kernel.prepare(rate, MaxBlock::of(Samples::new(64)));
             for size in [0.0, 0.5, 1.0] {
                 for band in 0..3 {
                     for other in grid {
                         for third in grid {
-                            let mut c = FdnControls {
-                                size: Mix::new(size),
-                                ..FdnControls::DEFAULT
-                            };
-                            c.decay[(band + 1) % 3] = Seconds::new(other);
-                            c.decay[(band + 2) % 3] = Seconds::new(third);
-                            c.decay[band] = Seconds::new(MaxDecay::CAP.get());
+                            let mut c = FdnNodeControls::<FdnLayout>::DEFAULT;
+                            c.network.size = Mix::new(size);
+                            c.network.decay[(band + 1) % 3] = Seconds::new(other);
+                            c.network.decay[(band + 2) % 3] = Seconds::new(third);
+                            c.network.decay[band] = Seconds::new(MaxDecay::CAP.get());
                             let Tail::Finite(longest) = kernel.tail_of(&c) else {
                                 panic!("a finite tail with the freeze off")
                             };
                             for decay in grid {
-                                c.decay[band] = Seconds::new(decay);
+                                c.network.decay[band] = Seconds::new(decay);
                                 let Tail::Finite(n) = kernel.tail_of(&c) else {
                                     panic!("a finite tail with the freeze off")
                                 };
