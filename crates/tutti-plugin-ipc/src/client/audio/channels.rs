@@ -125,11 +125,11 @@ pub(super) struct Channels {
     /// did not apply the change within the fence deadline. The change may still
     /// land; the blocks after it were not held for it.
     unapplied: TallyWriter<u64>,
-    /// Host parameter writes the plugin did not get, ever: a point the frame
-    /// refused, or every point of a flush the server did not apply (refused it,
-    /// had no Processor) or did not answer within the window. The audio lane's
-    /// thread counts them, in the one place a flush ends
-    /// ([`Channels::note_unapplied_edits`]).
+    /// Host parameter writes the plugin did not get, ever: every parameter of a
+    /// flush the server answered as not applied (refused, or no Processor). An
+    /// answer past the lane's window is counted when it comes; a flush with no
+    /// answer counts nothing, as it may still land. The audio lane's thread
+    /// counts them ([`Channels::note_unapplied_edits`]).
     unapplied_edits: TallyWriter<u64>,
     /// Parameter buffers the audio thread leaked rather than free, ever: the
     /// free list had no room for one it returned (a broken sizing bound).

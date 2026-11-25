@@ -136,8 +136,17 @@ enum AudioKey {
 pub(super) enum AbandonedAudio {
     /// A block's `AudioProcessed`: its MIDI is forwarded.
     Block,
-    /// The one `ParametersApplied` of an `ApplyParameters`.
-    Params,
+    /// The one `ParametersApplied` of an `ApplyParameters` of `edits`
+    /// parameters: counted when it comes, if the plugin did not take them.
+    Params { edits: u64 },
+}
+
+/// How many of a flush's `edits` the plugin does not have, by its answer.
+fn undelivered(outcome: ApplyOutcome, edits: u64) -> u64 {
+    match outcome {
+        ApplyOutcome::Applied => 0,
+        ApplyOutcome::Refused | ApplyOutcome::Unseated => edits,
+    }
 }
 
 /// The key of the request an audio reply answers.
@@ -351,7 +360,12 @@ impl AudioState {
                 }
                 Ok(None)
             }
-            Heard::Abandoned(AbandonedAudio::Params) => Ok(None),
+            Heard::Abandoned(AbandonedAudio::Params { edits }) => {
+                if let AudioReply::ParametersApplied { outcome, .. } = reply {
+                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -804,15 +818,19 @@ pub(super) fn handle_audio(
                 done.send(true);
                 return Ok(());
             }
-            let changes_len = changes.queues.len() as u64;
+            let edits = changes.queues.len() as u64;
             // On the block connection, behind every block pushed before it, so
             // the server has those blocks' writes before these.
             let id = state.fresh();
             let key = AudioKey::Params(id);
             let window = lifecycle.timeouts().param_wait();
-            state
-                .conv
-                .open(key, AbandonedAudio::Params, Instant::now(), window, window);
+            state.conv.open(
+                key,
+                AbandonedAudio::Params { edits },
+                Instant::now(),
+                window,
+                window,
+            );
             ipc::send(
                 stream,
                 &AudioRequest::ApplyParameters {
@@ -820,21 +838,16 @@ pub(super) fn handle_audio(
                     param_changes: changes,
                 },
             )?;
-            let points = changes_len;
-            let applied = wait_audio(stream, state, channels, key)?;
-            // The one place a flush's failure is counted: an answer that is not
-            // `Applied`, or none within the window, leaves every point of the
-            // frame without the plugin.
-            let took = matches!(
-                applied,
-                Some(AudioReply::ParametersApplied {
-                    outcome: ApplyOutcome::Applied,
-                    ..
-                })
-            );
-            if !took {
-                channels.note_unapplied_edits(points);
-            }
+            // Counted where the answer is heard, in the window or late
+            // ([`AudioState::hear`]): none in the window counts nothing, as the
+            // flush may still land.
+            let took = match wait_audio(stream, state, channels, key)? {
+                Some(AudioReply::ParametersApplied { outcome, .. }) => {
+                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                    outcome == ApplyOutcome::Applied
+                }
+                _ => false,
+            };
             done.send(took);
         }
         AudioCommand::Settle { done } => {
@@ -905,13 +918,11 @@ fn fence(
 pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
     let taken = channels.take_host_edits();
     let mut changes = ParameterChanges::reserved(taken.len(), 1);
-    let mut refused = 0;
     for (id, value) in &taken {
-        if !changes.add_change(*id, Offset::ZERO, *value) {
-            refused += 1;
-        }
+        // A slot per parameter and one change per slot, in a set reserved a
+        // queue for each: none is past its room.
+        let _ = changes.add_change(*id, Offset::ZERO, *value);
     }
-    channels.note_unapplied_edits(refused);
     changes
 }
 
@@ -1310,7 +1321,11 @@ mod tests {
     fn a_late_apply_parameters_acknowledgement_is_dropped() {
         let (mut state, mut replies, channels) = audio_state();
         let id = state.fresh();
-        abandoned(&mut state, AudioKey::Params(id), AbandonedAudio::Params);
+        abandoned(
+            &mut state,
+            AudioKey::Params(id),
+            AbandonedAudio::Params { edits: 2 },
+        );
         let heard = state.hear(
             AudioReply::ParametersApplied {
                 id,

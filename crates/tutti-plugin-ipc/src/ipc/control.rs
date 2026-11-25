@@ -445,7 +445,8 @@ impl Health for IpcController {
         // Two counts of one kind, each in the place that sees it: the server
         // counts the edits its plugin refused when applied
         // (`ServerLosses::edits_refused`), the client counts the writes a flush
-        // did not deliver (`AudioBridge::unapplied_edits`).
+        // the server answered as not applied did not deliver
+        // (`AudioBridge::unapplied_edits`).
         self.link.counters.server_losses().edits_refused
             + self.link.bridge.audio().unapplied_edits()
     }
