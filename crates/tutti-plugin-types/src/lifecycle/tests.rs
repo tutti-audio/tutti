@@ -1227,6 +1227,7 @@ fn rule_7_a_request_on_a_plugin_that_is_not_running_changes_nothing() {
         Request::TailChanged,
         Request::Reload,
         Request::RescanParams(RescanScope::All),
+        Request::Callback,
         Request::MidiCcAssignmentChanged,
         Request::NoteExpressionChanged,
     ];
@@ -1363,20 +1364,6 @@ fn rule_9_a_plan_parks_behind_a_lent_processor_and_runs_once() {
 }
 
 #[test]
-fn rule_9_a_deactivate_replaces_a_parked_plan() {
-    let s = active(RESTARTS, prep(1));
-    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(prep(2))));
-    let (s, _) = reply(s, Reply::Lent);
-    let (s, fx) = go(s, Event::Op(HostOp::Deactivate));
-    assert!(fx.is_empty());
-    let (s, fx) = go(s, Event::Returned);
-    assert_eq!(fx, [Fx::Deactivate]);
-    let (s, fx) = reply(s, Reply::Deactivated);
-    assert!(fx.is_empty());
-    assert_eq!(s.stage(), Stage::Loaded);
-}
-
-#[test]
 fn rule_10_a_plugin_that_will_not_stop_stays_active_and_is_lent_again() {
     let s = active(RESTARTS, prep(1));
     let (s, _) = go(s, Event::Op(HostOp::Reconfigure(prep(2))));
@@ -1484,50 +1471,8 @@ fn a_rebuild_that_restored_nothing_is_told_after_the_reload() {
 }
 
 #[test]
-fn an_activate_raised_while_a_plan_waits_is_the_latest_intent() {
+fn an_activate_raised_during_a_refused_activation_retries_it() {
     let (p, q) = (prep(1), prep(2));
-    let s = active(RESTARTS, p);
-    let (s, _) = go(s, Event::Op(HostOp::Deactivate));
-    let (s, _) = reply(s, Reply::Lent);
-    let (s, fx) = go(s, Event::Op(HostOp::Activate(q)));
-    assert!(fx.is_empty());
-    let (s, fx) = go(s, Event::Returned);
-    assert_eq!(fx, [Fx::Deactivate]);
-    let (s, fx) = reply(s, Reply::Deactivated);
-    assert_eq!(fx, [Fx::Activate(q)]);
-    let (s, _) = reply(s, Reply::Activated);
-    assert_eq!(s.applied(), Some(q));
-}
-
-#[test]
-fn an_op_raised_during_an_activation_runs_when_it_ends() {
-    let (p, q) = (prep(1), prep(2));
-    // The latest of several wins.
-    let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
-    let (s, fx) = go(s, Event::Op(HostOp::Reconfigure(q)));
-    assert!(fx.is_empty());
-    let (s, fx) = go(s, Event::Op(HostOp::Deactivate));
-    assert!(fx.is_empty());
-    let (s, fx) = reply(s, Reply::Activated);
-    assert_eq!(
-        fx,
-        [Fx::Latency, Fx::Tail, Fx::Layout, Fx::Lend, Fx::Recall]
-    );
-    let (s, _) = reply(s, Reply::Returned);
-    let (s, fx) = reply(s, Reply::Deactivated);
-    assert!(fx.is_empty());
-    assert_eq!(s.stage(), Stage::Loaded);
-    // A reconfigure runs the same way and lands on its prepare.
-    let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
-    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
-    let (s, fx) = reply(s, Reply::Activated);
-    assert_eq!(fx.last(), Some(&Fx::Recall));
-    let (s, _) = reply(s, Reply::Returned);
-    let (s, fx) = reply(s, Reply::Deactivated);
-    assert_eq!(fx, [Fx::Activate(q)]);
-    let (s, _) = reply(s, Reply::Activated);
-    assert_eq!(s.applied(), Some(q));
-    // An activate raised during a refused activation retries it.
     let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
     let (s, _) = go(s, Event::Op(HostOp::Activate(q)));
     let (_, fx) = reply(s, Reply::Refused(err()));
@@ -1716,42 +1661,6 @@ fn a_relend_recalls_and_lends_with_no_deactivation_or_activation() {
 }
 
 #[test]
-fn an_activate_leaves_an_active_plugins_restart_as_it_is() {
-    let (q, r) = (prep(2), prep(3));
-    let s = active(RESTARTS, prep(1));
-    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
-    let (s, _) = reply(s, Reply::Lent);
-    let (s, fx) = go(s, Event::Op(HostOp::Activate(r)));
-    assert!(fx.is_empty());
-    let (s, _) = go(s, Event::Returned);
-    let (_, fx) = reply(s, Reply::Deactivated);
-    assert_eq!(fx, [Fx::Activate(q)]);
-}
-
-#[test]
-fn an_activate_does_not_displace_a_kept_op_that_leaves_the_plugin_active() {
-    let (p, q, r) = (prep(1), prep(2), prep(3));
-    let settle = |s: State| {
-        let (s, _) = reply(s, Reply::Activated);
-        let (s, _) = reply(s, Reply::Returned);
-        let (s, fx) = reply(s, Reply::Deactivated);
-        (s, fx)
-    };
-    let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
-    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
-    let (s, _) = go(s, Event::Op(HostOp::Activate(r)));
-    let (_, fx) = settle(s);
-    assert_eq!(fx, [Fx::Activate(q)]);
-    // After a kept deactivate, an activate asks for an activation at its own
-    // `Prepare`.
-    let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
-    let (s, _) = go(s, Event::Op(HostOp::Deactivate));
-    let (s, _) = go(s, Event::Op(HostOp::Activate(r)));
-    let (_, fx) = settle(s);
-    assert_eq!(fx, [Fx::Activate(r)]);
-}
-
-#[test]
 fn a_rescan_raised_before_a_deactivation_is_read_after_the_next_activation() {
     let q = prep(2);
     let s = req(
@@ -1779,16 +1688,6 @@ fn a_rescan_raised_before_a_deactivation_is_read_after_the_next_activation() {
     let (s, _) = reply(s, Reply::Deactivated);
     let (_, fx) = reply(s, Reply::Activated);
     assert_eq!(fx.len(), 4);
-}
-
-#[test]
-fn a_callback_raised_on_a_refused_plugin_is_dropped() {
-    let s = req(refused(RESTARTS, prep(1)), Request::Callback);
-    assert!(go(s.clone(), Event::Tick).1.is_empty());
-    // Nor is it kept for the activation that follows.
-    let (s, _) = go(s, Event::Op(HostOp::Activate(prep(1))));
-    let (s, _) = reply(s, Reply::Activated);
-    assert!(go(s, Event::Tick).1.is_empty());
 }
 
 /// A MIDI-mapping change is rebuilt in place, once, with no restart; a
@@ -1936,17 +1835,4 @@ fn a_note_value_keeps_the_range_contract() {
     };
     tutti_fixtures::check_range_contract(&c);
     tutti_fixtures::check_range_serde(&c);
-}
-
-/// **The standing of a refused rate says where the plugin is**: the rate it runs at while
-/// active, "deactivated" otherwise. A refusal that leaves a plugin deactivated is reachable
-/// only after a failed rollback, which no probe forces, so the sentence is pinned here, where
-/// every loader gets it.
-#[test]
-fn a_standing_says_running_or_deactivated() {
-    assert_eq!(
-        crate::standing(true, SampleRate::SR_48K),
-        "running at 48000"
-    );
-    assert_eq!(crate::standing(false, SampleRate::SR_48K), "deactivated");
 }

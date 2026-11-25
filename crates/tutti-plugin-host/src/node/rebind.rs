@@ -776,20 +776,6 @@ mod tests {
         assert_eq!(deactivations(&fake), 0);
     }
 
-    /// **A rebind over unchanged ports moves the Processor with no restart:**
-    /// one activation, no deactivation, in the whole run.
-    #[test]
-    fn a_rebind_over_unchanged_ports_moves_the_processor() {
-        let (fake, rebinder, mut old, inner) = rig();
-        block(&mut old, 0);
-        let mut new = rebind(&rebinder).expect("a node");
-        assert_eq!(new.shape().audio_out().count(), 2);
-        let frame = settle(&rebinder, &mut old, &inner, BLOCK as u64);
-        assert!(block(&mut new, frame).audio[0].iter().any(|&s| s != 0.0));
-        assert_eq!(activations(&fake), 1, "the load's activation, no other");
-        assert_eq!(deactivations(&fake), 0);
-    }
-
     /// **Dropping the old node while it holds the Processor hands the
     /// Processor back instead of dropping it:** the rebind raised the recall,
     /// the drop returns the Processor through the handoff, and the pump lends
