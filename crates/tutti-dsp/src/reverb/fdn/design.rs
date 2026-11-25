@@ -75,7 +75,7 @@ const SILENT_WET: Db = Db::new(-120.0);
 const MAX_WET: Db = Db::new(24.0);
 
 /// The controls every feedback delay network has, in tutti units. Each kind adds its own:
-/// an [`FdnLayout`] takes [`FreezeControls`](crate::FreezeControls) and a
+/// an [`FdnLayout`] takes [`FreezeControls`] and a
 /// [`ShimmerLayout`](crate::ShimmerLayout) takes [`ShimmerControls`](crate::ShimmerControls).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnControls {
