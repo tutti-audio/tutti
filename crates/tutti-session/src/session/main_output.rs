@@ -11,7 +11,7 @@ use crate::{AppKey, Clock, MainOutputDeclaration, Session};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MainOutputTopologyStatus {
-    /// In force: the main output is what was declared (or nothing was).
+    /// In force: the main output is what was declared.
     Applied,
     /// Declared and waiting for a running main output crossfade to end: the main output in
     /// force is the previous declaration, and
@@ -27,19 +27,20 @@ pub enum MainOutputTopologyStatus {
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Declares what the graph's main output's channels are: the session's output as the
     /// engine and an export place it on the device and in a file.
-    /// `Some(`[`ChannelTopology::unassigned`]`)` is independent buses, kept by
+    /// [`ChannelTopology::unassigned`] is independent buses, kept by
     /// index (a 4-wide one on a 6-wide device stays at 0..4, where a bare
     /// 4 is quad and its rears land at 4 and 5); a named topology is speaker
-    /// feeds, folded by position. `None` takes the declaration back, and the
-    /// main output is the engine's order for its width again. **Nothing changes
-    /// until one is declared.**
+    /// feeds, folded by position. The session is built with one declared
+    /// ([`SessionBuilder::main_output_topology`](crate::SessionBuilder::main_output_topology),
+    /// else the engine's order for [`main_output_width`](crate::main_output_width)),
+    /// and a device restart never changes it: a restart onto a wider device
+    /// leaves the main output as it is, and an app that wants a wider one
+    /// declares it.
     ///
     /// The declaration states the main output, so it **sets the main output's width**: the
     /// graph's outputs become exactly as many as `main_output` has, widened or
-    /// narrowed (channels past it are dropped), with no floor of the device's
-    /// ([`main_output_width`](crate::main_output_width)). Afterwards the width and the
-    /// declaration cannot disagree: [`crate::Graph::widen_outputs`] refuses to widen a
-    /// declared main output. Declare again to change both.
+    /// narrowed (channels past it are dropped), with no floor of the device's.
+    /// The width and the declaration are one fact.
     ///
     /// A declaration that changes the main output crossfades: the old main output's outputs
     /// fade out and the new main output's fade in over the declick length (5 ms),
@@ -67,8 +68,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`main_output_topology_status`](Self::main_output_topology_status) is `Refused` with
     /// the error and the main output in force stays. A
     /// [`unfaded`](MainOutputDeclaration::unfaded) declaration applies at once and drops
-    /// the waiting one. An export of the main output
-    /// places the file from the declaration (`tutti_export::Setup::main_output`, set by the export's fork).
+    /// the waiting one. An export of the main output places the file from
+    /// the declaration its fork carries.
     ///
     /// The device a declaration must place on is the one the session renders
     /// to (the offline `outputs`, or the open device's, and the new one on a
@@ -82,7 +83,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// no speaker names). Nothing is changed.
     pub fn declare_main_output_topology(
         &mut self,
-        main_output: Option<ChannelTopology>,
+        main_output: ChannelTopology,
     ) -> crate::Result<MainOutputDeclaration<'_, C::Float>> {
         self.output.declare(&mut self.graph, main_output)?;
         Ok(MainOutputDeclaration {
@@ -101,8 +102,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`SessionBuilder::main_output_topology`](crate::SessionBuilder::main_output_topology)),
     /// whether or not it is in force: see
     /// [`main_output_topology_status`](Self::main_output_topology_status).
-    pub fn requested_main_output_topology(&self) -> Option<&ChannelTopology> {
-        self.output.main_output_request.as_ref()
+    pub fn requested_main_output_topology(&self) -> &ChannelTopology {
+        &self.output.main_output_request
     }
 
     /// Whether the main output is as it was asked to be. A refusal is a value here,
@@ -117,13 +118,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///   places it.
     /// - The same when a declaration that waited for a main output crossfade
     ///   ([`declare_main_output_topology`](Self::declare_main_output_topology)) could not be
-    ///   placed once the fade ended; a later widening does not replace it.
-    /// - Otherwise `Refused` with [`crate::Graph::widen_outputs`]'s last refusal: a
-    ///   widening the declared main output could not take
-    ///   ([`MainOutputError::Width`]), or
-    ///   channels past `MAX_CHANNELS`
-    ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
-    ///   [`MainOutputError::Fold`]).
+    ///   placed once the fade ended.
     /// - Otherwise [`Pending`](MainOutputTopologyStatus::Pending) while a declaration
     ///   waits for a main output crossfade, and `Applied`.
     ///
@@ -134,7 +129,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .output
             .main_output_refusal
             .or(self.graph.apply_refusal())
-            .or(self.graph.widen_refusal())
         {
             Some(e) => MainOutputTopologyStatus::Refused(e),
             None if self.graph.main_output_pending() => MainOutputTopologyStatus::Pending,
@@ -143,8 +137,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// The topology the main output was declared with
-    /// ([`declare_main_output_topology`](Self::declare_main_output_topology)), if one was.
-    pub fn main_output_topology(&self) -> Option<&ChannelTopology> {
+    /// ([`declare_main_output_topology`](Self::declare_main_output_topology)), the one in force.
+    pub fn main_output_topology(&self) -> &ChannelTopology {
         self.graph.main_output_topology()
     }
 

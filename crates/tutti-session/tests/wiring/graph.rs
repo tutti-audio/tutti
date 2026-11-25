@@ -331,13 +331,6 @@ fn every_setter_stores_silence_as_the_empty_set() {
         graph.testing().planned_compensation().is_some(),
         "disconnected main bus"
     );
-
-    graph.widen_outputs(4).expect("widens");
-    assert!(
-        graph.testing().planned_compensation().is_some(),
-        "widened main output"
-    );
-    assert_eq!(graph.sources(MainOutput::channel(3)).unwrap(), []);
 }
 
 /// `remove` says whether the node was there, so removing a node twice is a

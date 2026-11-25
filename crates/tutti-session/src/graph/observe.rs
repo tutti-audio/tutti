@@ -185,11 +185,9 @@ impl<F: Float> Taps<'_, F> {
     /// the outputs when they are re-wired
     /// ([`set_sources`](Graph::set_sources),
     /// [`connect`](Graph::connect)); its width is the
-    /// output count when it was opened, and a later
-    /// [`widen_outputs`](Graph::widen_outputs) does not widen it.
+    /// output count when it was opened.
     ///
-    /// **A widen leaves the tap at its width, a declared main output reopens it when
-    /// the widths differ.** A declaration
+    /// **A declared main output reopens the tap when the widths differ.** A declaration
     /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology))
     /// that leaves the main output a width other than the tap's opens the tap again at
     /// the main output's, and the session reports it as
@@ -416,7 +414,7 @@ impl<'g, F: Float> Meters<'g, F> {
 impl<F: Float> Graph<F> {
     /// Opens again each reader of the main output whose width is not the main output's now.
     /// A tap is reopened when its own width differs from the main output's, whatever
-    /// moved the main output; the main output meter follows the main output's width as it widens,
+    /// moved the main output; the main output meter follows the main output's width,
     /// so it is reopened when `resized`, the declaration having changed the
     /// main output's width. No reader keeps a width the main output no longer has.
     ///
@@ -427,7 +425,7 @@ impl<F: Float> Graph<F> {
     /// replaced in place; one a host took is held under its id to be claimed.
     pub(super) fn reopen_main_output_readers(&mut self, resized: bool) {
         let width = self.outputs();
-        let topology = self.main_output_in_force();
+        let topology = *self.main_output_topology();
         let stale: Vec<(TapId, Samples)> = self
             .output_taps
             .iter()

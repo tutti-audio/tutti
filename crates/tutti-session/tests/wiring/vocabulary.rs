@@ -44,7 +44,7 @@ fn a_main_bus_feeds_the_main_outputs_channels_in_order() {
 #[test]
 fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_main_output() {
     let mut s = offline();
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Stereo.topology()))
+    s.declare_main_output_topology(tutti_buffers::Bed::Stereo.topology())
         .expect("a stereo main output");
     let mono = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph().connect(mono, MainOutput).unwrap().unfaded();
@@ -57,10 +57,8 @@ fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_main_output() {
 #[test]
 fn a_bus_with_no_place_on_the_main_output_is_refused() {
     let mut s = offline();
-    s.declare_main_output_topology(Some(
-        ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap(),
-    ))
-    .expect("an unassigned stereo main output");
+    s.declare_main_output_topology(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap())
+        .expect("an unassigned stereo main output");
     let mono = s.graph().add(ForkByClone(Const::mono(0.5)));
     let _ = s.update();
     assert!(matches!(

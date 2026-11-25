@@ -175,7 +175,6 @@ field-leak tutti_dsp::spatial::vbap::layout::SpeakerLayout::directions
 field-leak tutti_dsp::tremolo::AutoPan::controls
 field-leak tutti_dsp::wavetable::WavetableOscillator::table
 field-leak tutti_engine::engine::Fader::fade
-field-leak tutti_engine::output::MainOutputFolds::by_device
 field-leak tutti_engine::output::OutputControl::cell
 field-leak tutti_engine::output::OutputControl::in_use
 field-leak tutti_engine::output::OutputControl::installed

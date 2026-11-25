@@ -49,8 +49,10 @@ pub enum RenderError {
     #[error("Unsupported channel count: 0 (a render needs at least one channel)")]
     UnsupportedChannels,
 
+    /// A topology of another width than the rendered audio: the one
     /// [`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)
-    /// was given a topology of another width than the rendered audio.
+    /// was given, or the one [`Setup::main_output`](crate::Setup::main_output)
+    /// places the file from.
     #[error("the topology is {topology:?} wide and the rendered audio {rendered:?}")]
     TopologyWidth {
         /// The topology's width.
@@ -265,10 +267,6 @@ pub enum ConfigError {
     /// states cannot take them, or is not as wide as the file.
     #[error("the graph's channels cannot be placed into the file's: {0}")]
     Placement(tutti_buffers::FoldError),
-    /// The declared main output is not as wide as the graph
-    /// ([`MainOutputError::Width`](tutti_graph::MainOutputError::Width)).
-    #[error("the graph's main output cannot be placed into the file's: {0}")]
-    MainOutput(tutti_graph::MainOutputError),
 }
 
 impl From<tutti_codec::EncodeError> for RenderError {

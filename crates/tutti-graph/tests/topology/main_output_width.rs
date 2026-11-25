@@ -150,11 +150,6 @@ fn a_zero_width_at_either_end_is_refused() {
 
 #[test]
 fn a_main_output_error_says_what_was_refused() {
-    let wide = MainOutputError::Width {
-        declared: ChannelLayout::QUAD,
-        requested: width(5),
-    };
-    assert!(wide.to_string().contains("declared"));
     let folded = MainOutputError::from(FoldError::Unplaced {
         channel: 2,
         speaker: Speaker::Unassigned,
