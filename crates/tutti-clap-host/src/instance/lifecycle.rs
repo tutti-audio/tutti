@@ -61,9 +61,9 @@ pub(crate) fn plugin_error(error: ClapError) -> PluginError {
 
 impl ClapLoaded {
     /// Whether every one of the plugin's audio ports, inputs and outputs,
-    /// advertised 64-bit support at the last port read (and it has at least one). Activating as
-    /// `f64` requires this, because the host hands one sample width for every
-    /// buffer.
+    /// advertised 64-bit support at the last port read (and it has at least
+    /// one). Activating as `f64` requires this, because the host hands one
+    /// sample width for every buffer.
     #[must_use]
     pub fn supports_f64(&self) -> bool {
         self.audio.supports_f64
@@ -91,9 +91,8 @@ impl ClapLoaded {
     /// chooses the width from [`Loaded::widths`](tutti_plugin_types::Loaded::widths)
     /// before it activates, and a refused activation is retried, if at all,
     /// against the same mapped library and the same instance. Both failure
-    /// paths preserve it: the
-    /// `f64` check returns before any FFI runs, and a plugin-side refusal
-    /// leaves the instance untouched and not active.
+    /// paths preserve it: the `f64` check returns before any FFI runs, and a
+    /// plugin-side refusal leaves the instance untouched and not active.
     // The `Err` variant deliberately hands `self` (a large `ClapLoaded`) back so
     // the caller can retry or fall back; boxing it would defeat that ownership
     // return and add a heap alloc on the (rare) failure path.
