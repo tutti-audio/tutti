@@ -251,6 +251,22 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
                 1
             })
         }
+        Step::RequireDeslop => {
+            let ok = process::Command::new("deslop-please")
+                .arg("--help")
+                .stdout(process::Stdio::null())
+                .stderr(process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if ok {
+                Ok(())
+            } else {
+                eprintln!(
+                    "deslop-please is not installed; run: cargo install deslop-please --version 0.1.4 --locked"
+                );
+                Err(1)
+            }
+        }
         Step::RequireCargoDeny => {
             let ok = process::Command::new("cargo")
                 .args(["deny", "--version"])
