@@ -3,12 +3,15 @@
 //! the network's own with that delay in every line's loop.
 
 use tutti_buffers::Planes;
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, NetworkStage, System};
+use tutti_dsp::{
+    FdnBank, FdnControls, FdnLayout, MaxDecay, Network, NetworkStage, ShimmerControls,
+    ShimmerLayout, System,
+};
 use tutti_graph::contract::{assert_declared_tail, drive_input, prepared};
 use tutti_graph::{
     Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, TransportChanges, TransportPosition,
 };
-use tutti_nodes::{ShimmerConfig, ShimmerNode};
+use tutti_nodes::{FdnNodeControls, ShimmerConfig, ShimmerNode};
 use tutti_units::{
     Cents, Db, Feedback, Frame, Latency, SampleRate, SampleSpan, Samples, Seconds, Tail, UnitParam,
 };
@@ -50,11 +53,15 @@ fn the_ports_are_the_fdns_without_the_freeze_and_with_the_shift_and_the_send() {
 #[test]
 fn the_shift_and_the_wet_gain_do_not_change_the_reported_tail() {
     let figure = |pitch: f64, wet: f64| {
-        let c = FdnControls {
-            shimmer_pitch: Cents::new(pitch),
-            shimmer_send: Feedback::new_clamped(0.5),
-            wet: Db::new(wet),
-            ..FdnControls::DEFAULT
+        let c = FdnNodeControls::<ShimmerLayout> {
+            network: FdnControls {
+                wet: Db::new(wet),
+                ..FdnControls::DEFAULT
+            },
+            kind: ShimmerControls {
+                pitch: Cents::new(pitch),
+                send: Feedback::new_clamped(0.5),
+            },
         };
         let mut n = node(ShimmerConfig::new().controls(c));
         let env = Env {
@@ -88,8 +95,8 @@ fn the_shift_and_the_wet_gain_do_not_change_the_reported_tail() {
 /// harness's check, which also looks past the ceiling). A send of 0 reports the plain network's.
 #[test]
 fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
-    let layout = FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap();
-    let delay = FdnBank::<f32>::new(&layout, SR).shimmer_delay();
+    let layout = ShimmerLayout::default();
+    let delay = FdnBank::<f32, ShimmerLayout>::new(&layout, SR).shimmer_delay();
     let expected = |c: &FdnControls, loop_delay: Samples| {
         let mut network = Box::new(Network::new(SR));
         layout.design_into(c, SR, &mut network);
@@ -104,15 +111,19 @@ fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
         (s.get() * SR.get()).ceil() as usize
     };
     for (decay, send) in [(0.3, 0.5), (1.0, 0.99), (0.3, 0.0)] {
-        let c = FdnControls {
-            decay: [Seconds::new(decay); 3],
-            shimmer_pitch: Cents::new(1200.0),
-            shimmer_send: Feedback::new_clamped(send),
-            ..FdnControls::DEFAULT
+        let c = FdnNodeControls::<ShimmerLayout> {
+            network: FdnControls {
+                decay: [Seconds::new(decay); 3],
+                ..FdnControls::DEFAULT
+            },
+            kind: ShimmerControls {
+                pitch: Cents::new(1200.0),
+                send: Feedback::new_clamped(send),
+            },
         };
         let config = ShimmerConfig::new().controls(c);
         let mut n = node(config);
-        let want = expected(&c, if send > 0.0 { delay } else { Samples::ZERO });
+        let want = expected(&c.network, if send > 0.0 { delay } else { Samples::ZERO });
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SR,
@@ -149,7 +160,9 @@ fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
 fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
     let at = |max: MaxDecay, rate: SampleRate| {
         prepared(
-            ShimmerNode::<f32>::from(ShimmerConfig::new().max_decay(max)),
+            ShimmerNode::<f32>::from(
+                ShimmerConfig::new().layout(ShimmerLayout::new(FdnLayout::new(8, max).unwrap())),
+            ),
             rate,
             BLOCK,
         )

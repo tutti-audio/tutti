@@ -5,8 +5,8 @@
 //! three RT60s (`Absorption::designed`: the loop gain that loses 60 dB in
 //! that time), mixed by an orthogonal reflection `A = I - 2 v v^T`, with an
 //! input pre-delay, a slow modulation of the line lengths, a stereo output
-//! (even lines left, odd right) with a width and a wet gain, and, if the design
-//! is not a [shimmer](FdnLayout::shimmering), a freeze: every gain exactly one and
+//! (even lines left, odd right) with a width and a wet gain, and, for the plain
+//! [`FdnLayout`], a freeze ([`FreezeControls`]): every gain exactly one and
 //! the input gated off, so the network is lossless and its tail never ends.
 //!
 //! **Diffusion** is the vector `v`: from one axis (no line feeds another,
@@ -22,17 +22,18 @@
 //!
 //! The design is [`FdnLayout::design_into`]: the controls to a [`Network`], in place, since
 //! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
+//! The shimmer's own layout and controls are in [`ShimmerLayout`](crate::ShimmerLayout).
 
 use tutti_units::{
-    Bipolar, Cents, Db, Feedback, Gain, Hz, Mix, SampleRate, SampleSpan, Samples, Seconds,
-    StereoWidth,
+    Bipolar, Db, Gain, Hz, Mix, SampleRate, SampleSpan, Samples, Seconds, StereoWidth,
 };
 
+use super::kind::FreezeControls;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, NetworkOutputMap, NetworkStage, pre_delay_frames,
 };
-use crate::{DecayTime, MaxDecay, TAIL_FLOOR};
+use crate::{MaxDecay, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.
@@ -73,7 +74,9 @@ const SILENT_WET: Db = Db::new(-120.0);
 /// The loudest wet gain.
 const MAX_WET: Db = Db::new(24.0);
 
-/// The controls of a feedback delay network, in tutti units.
+/// The controls every feedback delay network has, in tutti units. Each kind adds its own:
+/// an [`FdnLayout`] takes [`FreezeControls`] and a
+/// [`ShimmerLayout`](crate::ShimmerLayout) takes [`ShimmerControls`](crate::ShimmerControls).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnControls {
     /// The RT60 of the mid band (index 0 of [`UnitParam::Decay`](tutti_units::UnitParam)),
@@ -98,16 +101,6 @@ pub struct FdnControls {
     pub width: StereoWidth,
     /// The wet gain.
     pub wet: Db,
-    /// Holds the tail; ignored by a [shimmering](FdnLayout::shimmering) layout, whose tail always
-    /// decays.
-    pub freeze: bool,
-    /// How far the shimmer shifts the feedback, read only by a
-    /// [shimmering](FdnLayout::shimmering) layout.
-    pub shimmer_pitch: Cents,
-    /// The share of the feedback the shimmer shifts, read only by a
-    /// [shimmering](FdnLayout::shimmering) layout: `0` is the plain network, and a send of
-    /// [`Feedback::MAX_STABLE`] or more is held at it, so the loop's gain stays below 1.
-    pub shimmer_send: Feedback,
 }
 
 impl FdnControls {
@@ -122,9 +115,6 @@ impl FdnControls {
         rate: Hz::new(0.5),
         width: StereoWidth::NATURAL,
         wet: Db::UNITY,
-        freeze: false,
-        shimmer_pitch: Cents::new(1200.0),
-        shimmer_send: Feedback::NONE,
     };
 }
 
@@ -134,9 +124,10 @@ impl Default for FdnControls {
     }
 }
 
-/// What a feedback delay network is built to: its lines and its longest decay.
-/// Mono in, stereo out. Every layout but a [shimmer](Self::shimmering) can freeze (see
-/// [`FdnControls::freeze`]), so its tail is unbounded over every control.
+/// What a plain feedback delay network is built to: its lines and its longest decay.
+/// Mono in, stereo out. It can freeze (see [`FreezeControls`]), so its tail is unbounded over
+/// every control. A network that shifts the pitch of its feedback is a
+/// [`ShimmerLayout`](crate::ShimmerLayout).
 ///
 /// A control outside its range is clamped and a non-finite one takes the
 /// [`FdnControls::DEFAULT`] value, so every control gives a stable network.
@@ -144,7 +135,6 @@ impl Default for FdnControls {
 pub struct FdnLayout {
     lines: usize,
     max_decay: Seconds,
-    shimmer: bool,
 }
 
 impl FdnLayout {
@@ -160,28 +150,7 @@ impl FdnLayout {
         ok.then_some(Self {
             lines,
             max_decay: max_decay.get(),
-            shimmer: false,
         })
-    }
-
-    /// A design of `lines` lines (2 to 16, even) with RT60s up to `max_decay` that shifts the
-    /// pitch of its feedback: a **shimmer**. Its tail always decays, so it has no freeze, and
-    /// the decay queries read the shifter's delay as part of every line's loop (see
-    /// [`FdnControls::shimmer_send`]). `None` when `lines` is out of range.
-    ///
-    /// The shifter is one mono [`PhaseVocoder`](crate::PhaseVocoder), run once a chunk on the
-    /// lines' summed feedback. Its latency and one chunk are the **loop delay** of the shifted
-    /// path ([`FdnBank::shimmer_delay`](crate::FdnBank::shimmer_delay)): the reverb's onset,
-    /// not a processing latency.
-    #[must_use]
-    pub fn shimmering(lines: usize, max_decay: MaxDecay) -> Option<Self> {
-        Self::new(lines, max_decay).map(|l| Self { shimmer: true, ..l })
-    }
-
-    /// Whether the feedback is shifted ([`shimmering`](Self::shimmering)).
-    #[must_use]
-    pub fn shimmers(&self) -> bool {
-        self.shimmer
     }
 
     /// The lines.
@@ -200,7 +169,7 @@ impl FdnLayout {
     /// is `3 / (RT60 fs)` decades a frame, so the bound reads a decay slower by
     /// `x = 2e / ln 10 * RT60 fs / 3` of itself, and the tail by `1 / (1 - x)`:
     /// 0.5% at 8 s and 44.1 kHz, 11% at 192 kHz.
-    fn rounding_margin(&self, rate: SampleRate) -> f64 {
+    pub(crate) fn rounding_margin(&self, rate: SampleRate) -> f64 {
         let e = 2.0 * f64::from(f32::EPSILON);
         let x = 2.0 * e / std::f64::consts::LN_10 * self.max_decay.get() * rate.get() / 3.0;
         1.0 / (1.0 - x.min(0.5))
@@ -213,7 +182,6 @@ impl Default for FdnLayout {
         Self {
             lines: Self::LINES,
             max_decay: MaxDecay::DEFAULT.get(),
-            shimmer: false,
         }
     }
 }
@@ -223,9 +191,26 @@ impl FdnLayout {
     /// entry for designing one (for its analytic queries as much as for running it). A
     /// network is about 115 KB, so it is built where it lives and never returned by value; no
     /// allocation.
-    pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
+    pub fn design_into(
+        &self,
+        c: &FdnControls,
+        freeze: &FreezeControls,
+        rate: SampleRate,
+        out: &mut Network,
+    ) {
+        self.design(c, freeze.freeze, rate, out);
+    }
+
+    /// [`design_into`](Self::design_into) with the freeze as a flag, for a kind that never
+    /// freezes.
+    pub(crate) fn design(
+        &self,
+        c: &FdnControls,
+        freeze: bool,
+        rate: SampleRate,
+        out: &mut Network,
+    ) {
         let d = FdnControls::DEFAULT;
-        let freeze = !self.shimmer && c.freeze;
         let rt60 = [
             c.decay[1], // low
             c.decay[0], // mid
@@ -362,8 +347,8 @@ pub(crate) fn set_loop_delay(network: &mut Network, delay: Samples) {
 
 impl FdnLayout {
     /// The worst case over every control: size 1, the longest decay in every band, the
-    /// longest pre-delay, the deepest modulation. The tail is unbounded unless the layout is a
-    /// shimmer, which cannot freeze: the network's own at the longest decay. Control side.
+    /// longest pre-delay, the deepest modulation, with `loop_delay` in every line's loop. The
+    /// tail is the network's own at the longest decay. Control side.
     pub(crate) fn capacity(&self, rate: SampleRate, loop_delay: Samples) -> NetworkCapacity {
         let worst = FdnControls {
             decay: [self.max_decay; 3],
@@ -371,23 +356,12 @@ impl FdnLayout {
             diffusion: Mix::new(1.0),
             pre_delay: MAX_PRE_DELAY,
             modulation: Bipolar::of(1.0),
-            freeze: false,
             ..FdnControls::DEFAULT
         };
         let mut network = Box::new(Network::new(rate));
-        self.design_into(&worst, rate, &mut network);
-        if self.shimmer {
-            set_loop_delay(&mut network, loop_delay);
-        }
-        let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
-        b.tail = match b.tail {
-            _ if !self.shimmer => DecayTime::Unbounded,
-            DecayTime::Finite(t) => {
-                DecayTime::Finite(Seconds::new(t.get() * self.rounding_margin(rate)))
-            }
-            other => other,
-        };
-        b
+        self.design(&worst, false, rate, &mut network);
+        set_loop_delay(&mut network, loop_delay);
+        NetworkCapacity::need(&network, TAIL_FLOOR)
     }
 }
 

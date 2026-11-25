@@ -10,7 +10,7 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, System};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_declared_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -20,7 +20,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
+use tutti_nodes::{FdnConfig, FdnNode, FdnNodeControls, FreeverbConfig, FreeverbNode};
 use tutti_units::{
     Bipolar, Db, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
@@ -32,12 +32,32 @@ fn plain() -> FdnLayout {
     FdnLayout::default()
 }
 
+/// Every control at the default but the freeze, which is on.
+const FROZEN: FdnNodeControls<FdnLayout> = FdnNodeControls {
+    network: FdnControls::DEFAULT,
+    kind: FreezeControls { freeze: true },
+};
+
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
+    live_with(
+        layout,
+        FdnNodeControls {
+            network: c,
+            kind: FreezeControls::DEFAULT,
+        },
+    )
+}
+
+fn live_with(layout: FdnLayout, c: FdnNodeControls<FdnLayout>) -> FdnNode<f32> {
     FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(c))
 }
 
 fn node(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
     prepared(live(layout, c), SR, BLOCK)
+}
+
+fn node_with(layout: FdnLayout, c: FdnNodeControls<FdnLayout>) -> FdnNode<f32> {
+    prepared(live_with(layout, c), SR, BLOCK)
 }
 
 struct Rig {
@@ -95,7 +115,7 @@ fn finite(d: &Driven) -> usize {
 /// The network's own tail at -60 dB in frames at 48 kHz.
 fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
     let mut network = Box::new(Network::new(SR));
-    layout.design_into(c, SR, &mut network);
+    layout.design_into(c, &FreezeControls::DEFAULT, SR, &mut network);
     let tutti_dsp::DecayTime::Finite(s) = network.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
@@ -161,11 +181,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
 /// `tail_of`), and `Unbounded` again once its freeze cell is on.
 #[test]
 fn a_frozen_node_reports_an_unbounded_tail_to_the_graph() {
-    let frozen = FdnControls {
-        freeze: true,
-        ..FdnControls::DEFAULT
-    };
-    let mut rig = Rig::new(node(plain(), frozen));
+    let mut rig = Rig::new(node_with(plain(), FROZEN));
     for block in [
         impulse(),
         vec![0.0; BLOCK],
@@ -200,15 +216,15 @@ fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tai
         ..FdnControls::DEFAULT
     };
     let (short, long) = (decays(0.3), decays(2.0));
-    let mut bank = FdnBank::<f32>::new(&layout, SR);
+    let mut bank = FdnBank::<f32, FdnLayout>::new(&layout, SR);
     let ramps = bank.ramps();
     let frames = |t: Tail| match t {
         Tail::Finite(n) => n.get(),
         other => panic!("a finite tail, not {other:?}"),
     };
     let (owed, new) = (
-        frames(bank.tail_of(&ramps, &short)),
-        frames(bank.tail_of(&ramps, &long)),
+        frames(bank.tail_of(&ramps, &short, &FreezeControls::DEFAULT)),
+        frames(bank.tail_of(&ramps, &long, &FreezeControls::DEFAULT)),
     );
     assert!(owed < new, "{owed} < {new}");
     let mut rig = Rig::new(node(layout, short));
@@ -678,11 +694,7 @@ fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
 /// grid, its modulation phases and its ramps where the thaw left them.
 #[test]
 fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
-    let frozen = FdnControls {
-        freeze: true,
-        ..FdnControls::DEFAULT
-    };
-    let mut rig = Rig::new(node(plain(), frozen));
+    let mut rig = Rig::new(node_with(plain(), FROZEN));
     let cells = rig.node.param_set();
     for _ in 0..500 {
         assert_eq!(

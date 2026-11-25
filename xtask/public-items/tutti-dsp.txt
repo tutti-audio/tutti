@@ -112,6 +112,8 @@ const reverb::fdn::bank::FdnBank::CHUNK
 const reverb::fdn::design::FdnControls::DEFAULT
 const reverb::fdn::design::MAX_PRE_DELAY
 const reverb::fdn::design::MIN_DECAY
+const reverb::fdn::kind::FreezeControls::DEFAULT
+const reverb::fdn::kind::ShimmerControls::DEFAULT
 const reverb::freeverb::bank::FreeverbBank::CHUNK
 const reverb::freeverb::bank::FreeverbBank::FIXED_GAIN
 const reverb::freeverb::design::FreeverbControls::GENERAL_MIDI
@@ -799,8 +801,9 @@ fn reverb::fdn::bank::FdnRamps::jump_to_target
 fn reverb::fdn::design::FdnLayout::design_into
 fn reverb::fdn::design::FdnLayout::lines
 fn reverb::fdn::design::FdnLayout::new
-fn reverb::fdn::design::FdnLayout::shimmering
-fn reverb::fdn::design::FdnLayout::shimmers
+fn reverb::fdn::kind::ShimmerLayout::design_into
+fn reverb::fdn::kind::ShimmerLayout::layout
+fn reverb::fdn::kind::ShimmerLayout::new
 fn reverb::freeverb::bank::FreeverbBank::new
 fn reverb::freeverb::bank::FreeverbBank::process
 fn reverb::freeverb::bank::FreeverbBank::ramps
@@ -1244,6 +1247,11 @@ struct reverb::fdn::bank::FdnBank
 struct reverb::fdn::bank::FdnRamps
 struct reverb::fdn::design::FdnControls
 struct reverb::fdn::design::FdnLayout
+struct reverb::fdn::kind::FreezeControls
+struct reverb::fdn::kind::ShimmerControls
+struct reverb::fdn::kind::ShimmerLayout
+struct reverb::fdn::kind::sealed::ShimmerRamps
+struct reverb::fdn::shimmer::Shimmer
 struct reverb::freeverb::bank::FreeverbBank
 struct reverb::freeverb::bank::FreeverbRamps
 struct reverb::freeverb::design::FreeverbControls
@@ -1332,6 +1340,10 @@ trait filter::simd_lanes::sealed::Sealed
 trait model::lti::Lti
 trait model::system::System
 trait ramp::Lerp
+trait reverb::fdn::kind::FdnKind
+trait reverb::fdn::kind::sealed::Sealed
+trait reverb::fdn::kind::sealed::ShiftRamps
+trait reverb::fdn::kind::sealed::Shifter
 trait stft::window::Window
 trait viterbi::Transition
 type reverb::network::Gains
