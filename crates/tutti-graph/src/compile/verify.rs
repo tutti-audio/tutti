@@ -25,7 +25,9 @@
 //!    the task successor lists; each task's activation count equals its number of
 //!    distinct predecessor tasks; the task graph is acyclic.
 //! 6. **Tables**: every delay index is used by exactly one op, every unit by
-//!    exactly one `Node` op, and no two units share a store index. Every
+//!    exactly one `Node` op (which `node_op` names), and no two units share a
+//!    store index. `Plan::ports` is what lowering gives for the plan's own
+//!    ops, lists and shapes. Every
 //!    event slot holds what is written into it: a node output what the
 //!    node's shape declares, an input's view what its source holds (under
 //!    the input bound; the room for the commands and flushed events a block
@@ -57,7 +59,8 @@ use crate::compile::ids::{
     TaskId,
 };
 use crate::compile::plan::{
-    Delta, EMPTY_SLOT, EventSlotCapacity, Op, ParamPortOp, Plan, Span, ZERO_SLOT, view_capacity,
+    Delta, EMPTY_SLOT, EventSlotCapacity, NodeTables, Op, ParamPortOp, Plan, Span, ZERO_SLOT,
+    view_capacity,
 };
 use crate::node::MAX_PORTS;
 use crate::node::io::PortKind;
@@ -470,6 +473,39 @@ pub(crate) fn verify(plan: &Plan) -> Result<(), VerifyError> {
     verify_in_place(plan)?;
     verify_tasks(plan)?;
     verify_tables(plan)?;
+    verify_ports(plan)?;
+    Ok(())
+}
+
+/// Rule 6, last: `Plan::ports` and its lists are what lowering derives from
+/// the plan's own ops, lists and shapes, so a row names the slots of its
+/// unit's op, its spans bound exactly them, and its main ports are the
+/// shape's. Each unit's `node_op` names a node op that runs it.
+fn verify_ports(plan: &Plan) -> Result<(), VerifyError> {
+    if plan.program.node_op.len() != plan.units.len() || plan.ports.len() != plan.units.len() {
+        return Err(VerifyError("a unit has no node op or no ports row".into()));
+    }
+    for (unit, &op) in plan.program.node_op.iter_enumerated() {
+        if !matches!(plan.program.ops[op], Op::Node { unit: u, .. } if u == unit) {
+            return Err(VerifyError(format!(
+                "unit {unit}'s node op {op} runs another unit"
+            )));
+        }
+    }
+    let (ports, nodes) = NodeTables::lower(&plan.program, &plan.units);
+    if let Some((unit, _)) = ports
+        .iter_enumerated()
+        .find(|&(unit, row)| *row != plan.ports[unit])
+    {
+        return Err(VerifyError(format!(
+            "unit {unit}'s ports row is not what its op, its lists and its shape give"
+        )));
+    }
+    if nodes != plan.nodes {
+        return Err(VerifyError(
+            "the port lists are not what the node ops give".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -738,7 +774,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
 /// running before it). See rule 8 in the module docs.
 ///
 /// Written against the two plans' units directly — not through
-/// `Editor::replace_or_swap`'s check — so a delta built by hand (through
+/// `Editor::replace`'s check — so a delta built by hand (through
 /// `Editor::package`) gets the same scrutiny as one the editor built.
 pub(crate) fn verify_fades(
     prev: Option<&Plan>,
@@ -944,8 +980,7 @@ mod tests {
                 *params = Span::default();
             }
         }
-        bad.nodes
-            .recs
+        bad.ports
             .iter_mut()
             .for_each(|r| r.params = Span::default());
         assert!(
@@ -977,6 +1012,32 @@ mod tests {
         let mut bad = good.clone();
         bad.program.param_ports[0].slot = other;
         assert!(verify(&bad).is_err(), "an unordered param read passed");
+    }
+
+    /// The `ports` column cannot drift from what lowering derives from the
+    /// ops, the lists and the shapes: a main span the shape does not give, a
+    /// slot list that left its op's, and a node op naming another unit are
+    /// each reported.
+    #[test]
+    fn the_verifier_rejects_a_ports_column_that_drifted() {
+        let (good, _) = modulated_plan();
+        verify(&good).expect("sound");
+        let err = |p: &Plan| verify(p).expect_err("drifted").0;
+
+        let [a, b] = [0, 1].map(crate::compile::ids::id_at::<PlanUnitId>);
+        let mut bad = good.clone();
+        bad.ports[a].main.inputs = crate::node::bus::PortSpan::new(0, 7);
+        assert!(err(&bad).contains("ports row"), "{}", err(&bad));
+
+        let mut bad = good.clone();
+        bad.nodes.audio_slots[0] = crate::compile::ids::id_at::<AudioSlotId>(99);
+        assert!(err(&bad).contains("port lists"), "{}", err(&bad));
+
+        let mut bad = good.clone();
+        let op = bad.program.node_op[a];
+        bad.program.node_op[a] = bad.program.node_op[b];
+        bad.program.node_op[b] = op;
+        assert!(err(&bad).contains("runs another unit"), "{}", err(&bad));
     }
 
     /// The verifier is not a rubber stamp: forcing two concurrent values into

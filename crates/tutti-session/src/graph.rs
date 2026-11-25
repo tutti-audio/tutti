@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written through the editor's `connect_edge` and `disconnect_edge` (a port holds a set of sources, which the graph sums) |
-//! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
+//! | `replace` | `Editor::replace` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
@@ -1698,7 +1698,7 @@ impl<F: Float> Graph<F> {
             OnShape::Refuse => {
                 let placed = self
                     .editor
-                    .replace_or_swap(node, incoming, fade)
+                    .replace(node, incoming, fade)
                     .map_err(|e| SwapRefused::Failed(e.into()))?;
                 (placed.controls, placed.unwired)
             }
@@ -1716,7 +1716,7 @@ impl<F: Float> Graph<F> {
                 let fade = if fits { fade } else { Fade::new(Samples::ZERO) };
                 let inserted = self
                     .editor
-                    .replace_or_swap(node, unit, fade)
+                    .replace(node, unit, fade)
                     .map_err(|e| SwapRefused::Failed(e.into()))?;
                 (placed.controls, inserted.unwired)
             }
@@ -3928,9 +3928,9 @@ impl<F: Float> Graph<F> {
             return false;
         }
         // Clamped to what PDC compensates, as the editor clamps a latency it
-        // probes at insert: `set_latency` refuses a figure past it, and a
-        // refused one would never be retried (the poll only fires again when
-        // the plugin's figure moves).
+        // probes at insert: `set_latency` refuses a figure past it. Every
+        // update hands the plugin's figure again until the editor holds it,
+        // so a refusal between a re-prepare's two commits is retried.
         let latency = clamp_latency(latency, self.editor.prepare().sample_rate());
         if self.node_latency(node) == Ok(latency.samples()) {
             return false;
@@ -3940,6 +3940,7 @@ impl<F: Float> Graph<F> {
                 self.edited = true;
                 true
             }
+            Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: latency of {node:?} refused: {e}");
                 false
@@ -3964,7 +3965,9 @@ impl<F: Float> Graph<F> {
         }
         // A finite figure past what a node may declare is `Unbounded`, never
         // clamped (a clamp would declare a ceiling shorter than the plugin
-        // rings), and so never refused: nothing retries it.
+        // rings), and so never refused for its length. Every update hands the
+        // plugin's figure again until the editor holds it, so a refusal
+        // between a re-prepare's two commits is retried.
         let rate = self.editor.prepare().sample_rate();
         let tail = tutti_plugin_types::Processing::new(tail).ceiling(rate);
         if self.node_tail(node) == Ok(tail) {
@@ -3975,6 +3978,7 @@ impl<F: Float> Graph<F> {
                 self.edited = true;
                 true
             }
+            Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: tail of {node:?} refused: {e}");
                 false

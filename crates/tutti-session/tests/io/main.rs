@@ -47,6 +47,10 @@ mod rt_log;
 mod tap_close;
 #[cfg(feature = "record")]
 mod tap_to_wav_roundtrip;
+// A take's recording flag, as a hosted plugin is told it.
+#[cfg(all(feature = "capture", feature = "clap"))]
+#[path = "../support/loading.rs"]
+mod loading;
 // Takes: a recording placed on the graph's clock, punched, and reported.
 #[cfg(feature = "capture")]
 mod takes;

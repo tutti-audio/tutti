@@ -43,7 +43,7 @@ impl Desc {
 // ---- crossfades -------------------------------------------------------------
 
 /// Whether a unit of `b` may crossfade from one of `a`: the same shape in
-/// everything but the tail (`Editor::replace_or_swap`'s rule, spelled out so the
+/// everything but the tail (`Editor::replace`'s rule, spelled out so the
 /// generator does not borrow the editor's).
 pub(crate) fn fits(a: &Kind, b: &Kind) -> bool {
     let (a, b) = (shape(a), shape(b));
