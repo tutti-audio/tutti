@@ -464,7 +464,6 @@ fn edit::editor::wiring::Editor::disconnect_events
 fn edit::editor::wiring::Editor::disconnect_param
 fn edit::editor::wiring::Editor::require_resolution
 fn edit::editor::wiring::Editor::resize_inputs
-fn edit::editor::wiring::Editor::resize_outputs
 fn edit::editor::wiring::Editor::wire_outputs
 fn event::sorted::SortedEvents::as_slice
 fn event::sorted::SortedEvents::is_empty
@@ -932,6 +931,7 @@ fn testing::block
 fn testing::block_in
 fn testing::cap_of
 fn testing::declare_outputs
+fn testing::declare_spec_outputs
 fn testing::declick
 fn testing::driver_value
 fn testing::feed_input

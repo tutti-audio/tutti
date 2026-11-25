@@ -310,6 +310,22 @@ pub enum WireError {
         /// The graph's output width.
         width: usize,
     },
+    /// More sources than the main output has channels: the width is the
+    /// declared main output's.
+    #[error("{sources} sources for a main output of {width} channels")]
+    OutputPastWidth {
+        /// The sources given.
+        sources: usize,
+        /// The declared main output's width.
+        width: usize,
+    },
+    /// The main output was declared again under the id it already holds, as
+    /// something else: a change is a declaration under a new id.
+    #[error("main output {id} is already declared as another set")]
+    MainOutputChanged {
+        /// The id both declarations carry.
+        id: crate::MainOutputId,
+    },
     /// A main output channel takes direct sources only: there is no feedback
     /// edge into one.
     #[error("main output {channel} takes no feedback edge")]

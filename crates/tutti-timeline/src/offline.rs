@@ -718,7 +718,7 @@ mod tests {
     /// rendered: 100 frames at 120 BPM and 48 kHz are 100 / 24 000 beats.
     #[test]
     fn a_block_rendered_at_f64_keeps_its_figure_and_advances_the_clock_by_its_frames() {
-        use tutti_buffers::{ChannelLayout, MaxBlock};
+        use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
         use tutti_buffers::{Planes, PlanesMut};
         use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 
@@ -738,7 +738,10 @@ mod tests {
             fn reset(&mut self) {}
         }
 
-        let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::MONO);
+        let mut g = GraphBuilder::<f64>::with_format(
+            ChannelLayout::EMPTY,
+            ChannelSet::default_for(ChannelLayout::MONO),
+        );
         let dc = g.add(ForkByClone(Dc));
         g.connect_output(dc, 0, 0);
         let (mut editor, mut exec) = g

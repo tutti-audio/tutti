@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use common::{Harness, Kind, TestNode, bits, input_signal, prepare, shapes_of};
 use tutti_buffers::{BufferError, Float, FoldError};
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
     AudioDelayKey, Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses,
@@ -142,6 +142,7 @@ impl Rig {
     fn output_all(&mut self, node: u64, width: usize) {
         let sources: Vec<PortSource> = (0..width as u16).map(|c| out_port(node, c)).collect();
         self.spec.topology.set_outputs(sources);
+        common::declare_spec_outputs(&mut self.spec);
     }
 
     fn lowering(&self) -> Result<Lowering, BusError> {
@@ -944,7 +945,7 @@ fn main_output_rig(src: usize, dst: usize) -> Rig {
     let mut rig = Rig::new(src);
     rig.add(1, source(src, smpte(src)));
     rig.feed_main_inputs(1, src);
-    rig.spec.main_output = Some(smpte(dst).topology);
+    rig.spec.main_output = ChannelSet::from(smpte(dst).topology);
     rig.spec.topology.outputs = vec![Vec::new(); dst];
     assert!(rig.spec.connect_bus_to_main_output(from(1, 0)));
     rig
@@ -1011,25 +1012,17 @@ fn a_same_topology_main_output_edge_is_the_hand_wired_plan() {
     assert_eq!(weighted_ops(&bus.plan()), 0);
 }
 
-/// A main output edge with no declared main output is refused at the call with
-/// [`BusError::MainOutputUndeclared`], storing nothing and moving no revision; and
-/// a bus edge that cannot fold to the declared main output is `MainOutputFold`.
+/// A bus edge that cannot fold to the declared main output is refused at the
+/// call with `MainOutputFold`, storing nothing and moving no revision.
 #[test]
-fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
-    let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
-    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
-        .unwrap();
-    let before = ed.revision();
-    assert_eq!(
-        ed.connect_bus_to_main_output(from(1, 0)),
-        Err(BusError::MainOutputUndeclared)
-    );
-    assert!(ed.spec().main_output_sources.is_empty());
-    assert_eq!(ed.revision(), before, "nothing marked edited");
-
-    // Declared, but three unassigned channels have no place in a named stereo.
+fn a_bus_edge_that_cannot_fold_to_the_main_output_is_refused_and_stores_nothing() {
+    // Three unassigned channels have no place in a named stereo.
     let (mut ed, _exec) = editor(&[(1, source(3, unassigned(3)))], 3);
-    ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(2).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     let before = ed.revision();
@@ -1044,13 +1037,42 @@ fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     assert_eq!(ed.revision(), before);
 }
 
+/// A main output wider than a topology holds has no speakers: a bus edge into
+/// it is read by index, channel `k` of the bus on output `k` at unity, and the
+/// outputs past the bus stay silent.
+#[test]
+fn a_bus_edge_into_a_main_output_past_the_topology_cap_goes_by_index() {
+    let (mut ed, _exec) = editor(&[(1, source(6, smpte(6)))], 0);
+    let wide = ChannelSet::default_for(ChannelLayout::from_count(20));
+    assert!(wide.topology().is_none());
+    ed.declare_main_output(wide, ed.spec().main_output_id.next())
+        .unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
+    let lowering = ed.lowered().unwrap();
+    let outputs = &lowering.spec.topology.outputs;
+    assert_eq!(outputs.len(), 20);
+    for (c, sources) in outputs.iter().enumerate() {
+        let want = if c < 6 {
+            vec![out_port(1, c as u16)]
+        } else {
+            vec![]
+        };
+        assert_eq!(*sources, want, "output {c}");
+    }
+    assert!(lowering.spec.gains.is_empty(), "every lane is at unity");
+}
+
 /// A main output lane on an output channel an ordinary source already feeds is
 /// refused, whichever came first: at the call when the ordinary source is
 /// there, at the commit when it came after.
 #[test]
 fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
-    ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(2).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([out_port(1, 0), PortSource::Zero])
         .unwrap();
     let lane = main_output_lane(0, out_port(1, 0));
@@ -1088,7 +1110,11 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
         ))
         .unwrap();
     }
-    ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(2).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
@@ -1097,7 +1123,11 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
     ed.collect();
 
     // Named stereo has no place in one unassigned channel.
-    ed.declare_main_output(Some(unassigned(1).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(unassigned(1).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     let refused = ed.commit().unwrap_err();
     assert!(
         matches!(
@@ -1106,18 +1136,26 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
         ),
         "{refused:?}"
     );
-    // Undeclared fails the same commit, by its own name.
-    ed.declare_main_output(None, ed.spec().main_output_id);
+    // A main output with no channels has nothing to fold to.
+    ed.declare_main_output(
+        ChannelSet::unassigned(ChannelLayout::EMPTY),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     let refused = ed.commit().unwrap_err();
     assert!(
         matches!(
             refused,
-            CommitError::Compile(CompileError::Bus(BusError::MainOutputUndeclared))
+            CommitError::Compile(CompileError::Bus(BusError::MainOutputFold { .. }))
         ),
         "{refused:?}"
     );
     // A re-declaration it folds to re-lowers: stereo to mono is 0.5 L + 0.5 R.
-    ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(1).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1138,7 +1176,11 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
 #[test]
 fn main_output_edges_connect_disconnect_and_go_with_their_node() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (3, source(2, smpte(2)))], 0);
-    ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(2).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.connect_bus_to_main_output(from(3, 0)).unwrap();
@@ -1188,7 +1230,11 @@ fn a_fork_of_a_main_output_edge_renders_the_fold() {
 
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
-    ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
+    ed.declare_main_output(
+        ChannelSet::from(smpte(1).topology),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_declared_outputs([PortSource::Zero]).unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");

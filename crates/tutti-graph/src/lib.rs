@@ -152,7 +152,7 @@
 //! # use tutti_buffers::{Float, Planes};
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_buffers::{ChannelLayout, MaxBlock};
+//! use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
 //!
 //! #[derive(Clone)]
 //! struct Half;
@@ -169,7 +169,7 @@
 //!     fn reset(&mut self) {}
 //! }
 //!
-//! let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::MONO, ChannelLayout::MONO);
+//! let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::MONO, ChannelSet::default_for(ChannelLayout::MONO));
 //! let half = g.add(ForkByClone(Half));
 //! g.pipe_input(half).pipe_output(half);
 //! let mut r = g

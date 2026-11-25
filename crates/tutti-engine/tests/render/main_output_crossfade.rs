@@ -10,7 +10,7 @@ use tutti_graph::EdgeId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::{Edge, Editor, Fade, ForkByClone, InputPort, NodeKey, OutputPort};
 use tutti_graph::{Pool, PortSource, Prepare, WorkerPool};
@@ -85,10 +85,11 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     for n in 0..9 {
         if n == 2 {
             let id = ed.spec().main_output_id.next();
+            let stereo = ChannelSet::default_for(ChannelLayout::STEREO);
             control
-                .publish_main_output(id, None, ChannelLayout::STEREO)
+                .publish_main_output(id, stereo, ChannelLayout::STEREO)
                 .expect("places");
-            ed.declare_main_output(ed.spec().main_output, id);
+            ed.declare_main_output(stereo, id).unwrap();
             wire(&mut ed, [15, 16]);
             ed.commit().expect("commits");
             assert!(

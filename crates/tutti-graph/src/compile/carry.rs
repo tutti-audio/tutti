@@ -400,6 +400,7 @@ mod tests {
             );
             spec.connect_events(into(13), EventEdge::feedback(from(15), Samples::new(BLOCK)));
         }
+        crate::testing::declare_spec_outputs(&mut spec);
         let shapes = shapes_of(&kinds);
         (spec, shapes)
     }

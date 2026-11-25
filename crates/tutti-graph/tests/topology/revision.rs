@@ -57,7 +57,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
     moves(&mut ed, "insert", |ed| {
         ed.insert(one, "out", Unforkable(Out));
     });
-    moves(&mut ed, "resize_outputs", |ed| {
+    moves(&mut ed, "declare_outputs", |ed| {
         declare_outputs(ed, ChannelLayout::from_count(1));
     });
     moves(&mut ed, "connect_edge", |ed| {
