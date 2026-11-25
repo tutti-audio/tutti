@@ -156,13 +156,20 @@ impl EditPost {
     /// ([`reset`](Self::reset)), and the writes made until the returned guard
     /// drops are held in their slots, so they apply after the load and not
     /// before the plugin's own `set_state`.
-    pub(super) fn restoring(&self) -> Restoring {
-        // Before the reset: a drain that starts after the flag yields nothing,
-        // and one that started before it collected only writes made before the
-        // reset, which the new epoch makes stale.
+    ///
+    /// Takes the reader's claim to do it, so no drain straddles the reset:
+    /// `Pending` while a node holds the claim for a drain, and the caller asks
+    /// again. A drain that finds the load flag set yields nothing.
+    pub(super) fn restoring(&self) -> Poll<Restoring> {
+        let Some(reader) = self.0.reader.try_borrow_mut() else {
+            return Poll::Pending;
+        };
+        // Under the claim: every later drain takes it after this flag, and
+        // reads the flag under it.
         self.0.restoring.store(true, Ordering::SeqCst);
         self.reset();
-        Restoring(Arc::clone(&self.0))
+        drop(reader);
+        Poll::Ready(Restoring(Arc::clone(&self.0)))
     }
 
     /// Whether a main-thread job should be queued to tell the controller: there
@@ -250,10 +257,9 @@ impl EditPort {
     /// control side settles) or a load in progress hands nothing: the slots keep
     /// what they hold for the next block.
     pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) {
-        if self.0.restoring.load(Ordering::Acquire) {
-            return;
-        }
-        if let Some(mut reader) = self.0.reader.try_borrow_mut() {
+        if let Some(mut reader) = self.0.reader.try_borrow_mut()
+            && !self.0.restoring.load(Ordering::SeqCst)
+        {
             reader.drain_in_epoch(apply);
         }
     }
@@ -400,7 +406,9 @@ mod tests {
     fn a_write_made_during_a_load_waits_for_its_end() {
         let (post, port) = host_edits([id(1), id(2)]);
         post.write(id(1), Normalized::of(0.25)).unwrap();
-        let restoring = post.restoring();
+        let Poll::Ready(restoring) = post.restoring() else {
+            panic!("no node holds the reader");
+        };
         post.write(id(2), Normalized::of(0.5)).unwrap();
         assert_eq!(drained(&port), [], "the load is running");
         drop(restoring);
@@ -409,6 +417,29 @@ mod tests {
             [(id(2), 0.5)],
             "the write made before the load is stale, the one made during it applies"
         );
+    }
+
+    /// **No drain straddles a load's reset.** A node that holds the reader
+    /// across the gate keeps the load `Pending`; once it lets go the load
+    /// begins, and a write made after that is not applied before the load ends.
+    #[test]
+    fn a_load_waits_for_a_drain_that_holds_the_reader() {
+        let (post, port) = host_edits([id(1)]);
+        post.write(id(1), Normalized::of(0.25)).unwrap();
+        let drain = post.0.reader.try_borrow_mut().expect("free");
+        assert!(post.restoring().is_pending(), "a drain is in progress");
+        assert!(
+            !post.0.restoring.load(Ordering::SeqCst),
+            "the load has not begun"
+        );
+        drop(drain);
+        let Poll::Ready(restoring) = post.restoring() else {
+            panic!("the drain ended");
+        };
+        post.write(id(1), Normalized::of(0.75)).unwrap();
+        assert_eq!(drained(&port), [], "held until the load ends");
+        drop(restoring);
+        assert_eq!(drained(&port), [(id(1), 0.75)]);
     }
 
     /// **A write the plugin refuses when it is applied is counted.**

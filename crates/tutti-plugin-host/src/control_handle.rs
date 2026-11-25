@@ -67,8 +67,12 @@ pub trait MainThreadControl: Send + Sync {
     /// held and applies after it. The default is for a control whose writes are
     /// not held apart from the plugin (an out-of-process plugin's `Control`
     /// resets its own).
-    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) {
+    ///
+    /// `Pending`, and `f` not run, while a node is draining the host's writes:
+    /// the load begins once no drain can straddle it, so ask again.
+    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) -> std::task::Poll<()> {
         self.lend(f);
+        std::task::Poll::Ready(())
     }
 
     /// The editor's tick, which an in-process plugin pairs with the pump of
@@ -108,11 +112,12 @@ fn lent<R>(control: &dyn MainThreadControl, f: impl FnOnce(&mut dyn Control) -> 
 fn lent_restoring<R>(
     control: &dyn MainThreadControl,
     f: impl FnOnce(&mut dyn Control) -> R,
-) -> Option<R> {
+) -> std::task::Poll<Option<R>> {
     let mut f = Some(f);
     let mut answer = None;
-    control.restoring(&mut |c| answer = f.take().map(|f| f(c)));
-    answer
+    control
+        .restoring(&mut |c| answer = f.take().map(|f| f(c)))
+        .map(|()| answer)
 }
 
 /// A plugin's error as the editor's.
@@ -683,6 +688,10 @@ impl PluginHandle {
 
     /// Restores a blob produced by [`AnyThread::save_state`].
     ///
+    /// `Pending` while a node is draining the host's parameter writes (it holds
+    /// them for the length of one drain): the load makes the writes before it
+    /// stale and holds the ones made during it, so none straddles it. Ask again.
+    ///
     /// # Errors
     ///
     /// A [`StateError`] if the state was not applied. A plugin declining a
@@ -692,17 +701,23 @@ impl PluginHandle {
     /// to the user rather than leaving the plugin silently at defaults.
     /// [`StateError::NoStateRoute`] when this handle carries no main-thread
     /// route.
-    pub fn load_state(&self, main: MainThreadMarker, data: &[u8]) -> Result<(), StateError> {
+    pub fn load_state(
+        &self,
+        main: MainThreadMarker,
+        data: &[u8],
+    ) -> std::task::Poll<Result<(), StateError>> {
+        use std::task::Poll;
         let Some(control) = self.control.as_deref() else {
-            return Err(StateError::NoStateRoute);
+            return Poll::Ready(Err(StateError::NoStateRoute));
         };
-        match lent_restoring(control, |c| {
+        lent_restoring(control, |c| {
             c.load_state(main, data, tutti_plugin_types::StateUse::Project)
-        }) {
+        })
+        .map(|loaded| match loaded {
             Some(Ok(())) => Ok(()),
             Some(Err(error)) => Err(error.into()),
             None => Err(StateError::PluginCrashed),
-        }
+        })
     }
 
     /// Every preset the plugin advertises, in its own order.
@@ -728,13 +743,20 @@ impl PluginHandle {
     /// [`PresetError::Unsupported`] when this handle carries no route to
     /// presets, [`PresetError::Refused`] when the plugin declined (leave the
     /// UI selection where it was), [`PresetError::Lost`] when it is gone.
-    pub fn load_preset(&self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
-        let control = self.control.as_deref().ok_or(PresetError::Unsupported)?;
-        match lent_restoring(control, |c| c.load_preset(main, id)) {
+    pub fn load_preset(
+        &self,
+        main: MainThreadMarker,
+        id: &PresetId,
+    ) -> std::task::Poll<Result<(), PresetError>> {
+        use std::task::Poll;
+        let Some(control) = self.control.as_deref() else {
+            return Poll::Ready(Err(PresetError::Unsupported));
+        };
+        lent_restoring(control, |c| c.load_preset(main, id)).map(|loaded| match loaded {
             Some(true) => Ok(()),
             Some(false) => Err(PresetError::Refused),
             None => Err(PresetError::Lost),
-        }
+        })
     }
 
     /// The preset the plugin considers current, when it will say. `None` means
@@ -1412,7 +1434,7 @@ mod tests {
 
         assert_eq!(
             handle_with(None).load_preset(tutti_fixtures::main_thread(), &id),
-            Err(PresetError::Unsupported),
+            std::task::Poll::Ready(Err(PresetError::Unsupported)),
             "no route must stay distinct from a refusal"
         );
 
@@ -1423,7 +1445,7 @@ mod tests {
         }));
         assert_eq!(
             refusing.load_preset(tutti_fixtures::main_thread(), &id),
-            Err(PresetError::Refused),
+            std::task::Poll::Ready(Err(PresetError::Refused)),
             "a refusal must report a present route that said no"
         );
 
@@ -1434,7 +1456,7 @@ mod tests {
         }));
         assert_eq!(
             accepting.load_preset(tutti_fixtures::main_thread(), &id),
-            Ok(()),
+            std::task::Poll::Ready(Ok(())),
             "an accepted load must be Ok"
         );
     }

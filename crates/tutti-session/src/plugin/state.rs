@@ -246,7 +246,7 @@ impl PluginOp for RestoreStateOp {
         main: MainThreadMarker,
         _mark: Generation,
     ) -> Poll<Result<(), StateError>> {
-        Poll::Ready(handle.load_state(main, self.state.bytes()))
+        handle.load_state(main, self.state.bytes())
     }
 
     fn send(&self, answers: &PluginAnswers) -> Answer<Result<(), StateError>> {

@@ -138,7 +138,7 @@ impl PluginOp for LoadPresetOp {
         main: MainThreadMarker,
         _mark: Generation,
     ) -> Poll<Result<(), PresetError>> {
-        Poll::Ready(handle.load_preset(main, &self.id))
+        handle.load_preset(main, &self.id)
     }
 
     fn send(&self, answers: &PluginAnswers) -> Answer<Result<(), PresetError>> {

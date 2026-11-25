@@ -576,9 +576,12 @@ where
         }
     }
 
-    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) {
-        let _held = self.edits.restoring();
+    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) -> Poll<()> {
+        let Poll::Ready(_held) = self.edits.restoring() else {
+            return Poll::Pending;
+        };
         self.lend(f);
+        Poll::Ready(())
     }
 
     fn editor_idle(&self, main: MainThreadMarker) {
