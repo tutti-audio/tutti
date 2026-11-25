@@ -377,19 +377,20 @@ fn cc_11_and_43_set_the_expression() {
 }
 
 // Arm 0x0A (pan coarse) and 0x2A (fine), by RP-036: values 0 and 1 both pan hard
-// left, 64 is center.
+// left, 64 is center. The violin's zone pan leaves the right at about -44 dB,
+// not exact zero, so "silent" is 40 dB down.
 #[test]
 fn cc_10_and_42_pan_the_channel() {
     let mut left = violin(|s| cc(s, CCNumber::PAN, 0));
     let (l, r) = energy_lr(&mut left, 2048);
     assert!(
-        l > 1.0 && r == 0.0,
+        l > 1.0 && r < l * 0.01,
         "hard left leaves the right silent: {l} {r}"
     );
 
     let mut one = violin(|s| cc(s, CCNumber::PAN, 1));
     let (l, r) = energy_lr(&mut one, 2048);
-    assert!(l > 1.0 && r == 0.0, "1 is hard left too: {l} {r}");
+    assert!(l > 1.0 && r < l * 0.01, "1 is hard left too: {l} {r}");
 
     let mut right = violin(|s| cc(s, CCNumber::PAN, 127));
     let (l, r) = energy_lr(&mut right, 2048);
@@ -544,8 +545,8 @@ fn cc_121_keeps_the_volume_and_the_pan() {
     cc(&mut left, CCNumber::PAN, 0);
     cc(&mut left, CCNumber::RESET_ALL, 0);
     left.note_on(0, 69, 100);
-    let (_, r) = energy_lr(&mut left, 2048);
-    assert_eq!(r, 0.0, "the pan stays hard left");
+    let (l, r) = energy_lr(&mut left, 2048);
+    assert!(l > 1.0 && r < l * 0.01, "the pan stays hard left: {l} {r}");
 }
 
 // M1 p.14, Legato Footswitch: the note struck while another sounds moves the
