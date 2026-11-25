@@ -152,6 +152,18 @@ impl EditPost {
         state.to_inform.clear();
     }
 
+    /// Applies every write made so far through the plugin's own `Control`,
+    /// waiting for a node's drain to let go of the reader. The claim's holder
+    /// is a bounded audio-thread drain, so the wait ends. For a synchronous
+    /// caller on the main thread with no later tick to ask again on (a save, a
+    /// fork); the rest [`settle`](Self::settle) and are asked again.
+    pub(super) fn settle_now(&self, main: MainThreadMarker, control: &mut dyn Control) {
+        let mark = self.mark();
+        while self.settle(main, control, mark).is_pending() {
+            std::thread::yield_now();
+        }
+    }
+
     /// A state or preset load begins: every write made so far is stale
     /// ([`reset`](Self::reset)), and the writes made until the returned guard
     /// drops are held in their slots, so they apply after the load and not

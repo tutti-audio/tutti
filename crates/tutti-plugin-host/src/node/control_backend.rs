@@ -447,14 +447,18 @@ where
     /// runs this on the session's executor: it is run by the main thread's
     /// next tick once the host's earlier writes are the plugin's, and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
-    /// On the main thread it is [`StateError::Unavailable`] at once: a caller
-    /// there saves through [`PluginHandle::save_state_on`](crate::PluginHandle::save_state_on),
-    /// which is polled.
+    /// On the main thread the writes are settled and the state saved at once.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-        // The main thread has no later tick to retry a save on: its callers
-        // save through the polled `PluginHandle::save_state_on`.
-        if MainThreadMarker::new().is_some() {
-            return Err(StateError::Unavailable);
+        if let Some(main) = MainThreadMarker::new() {
+            // No later tick to ask again on: settle now, then save.
+            let mut instance = self.inner.lock();
+            let Some(control) = instance.control() else {
+                return Err(StateError::PluginCrashed);
+            };
+            self.edits.settle_now(main, control);
+            return control
+                .save_state(main, state_use)
+                .map_err(StateError::from);
         }
         let (reply, wait) = sync_channel(1);
         self.after_writes(

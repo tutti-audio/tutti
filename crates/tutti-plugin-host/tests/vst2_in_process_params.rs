@@ -336,17 +336,28 @@ fn a_save_after_a_write_holds_the_write() {
     assert_eq!(at_once, after_read, "a save at once holds the write");
 }
 
-/// **The main thread has no blocking save**: the call there answers
-/// `Unavailable` at once and asks nothing, and the polled save answers.
-fn the_main_thread_saves_by_polling() {
+/// **A main-thread save right after a write holds the write.**
+fn a_main_thread_save_right_after_a_write_holds_it() {
     let _lock = PROBE_LOCK.lock();
-    let _env = ProbeEnv::new().params(4);
+    let _env = ProbeEnv::new().params(4).state_dc();
     let (_client, handle) = load();
-    assert!(matches!(
-        handle.save_state(tutti_plugin_types::StateUse::Project),
-        Err(tutti_plugin_types::StateError::Unavailable)
-    ));
-    assert!(!saved(&handle).is_empty());
+    let before = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saved");
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.5))
+        .expect("a declared parameter");
+    let after = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saved");
+    assert_ne!(after, before, "the write is in the state");
+    assert_eq!(read(&handle, 0), Some(0.5));
+    assert_eq!(
+        handle
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .expect("saved"),
+        after
+    );
 }
 
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
@@ -357,6 +368,6 @@ fn main() {
         a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it,
         an_export_renders_an_edit_made_in_the_plugin_as_live_does,
         a_save_after_a_write_holds_the_write,
-        the_main_thread_saves_by_polling,
+        a_main_thread_save_right_after_a_write_holds_it,
     ]);
 }
