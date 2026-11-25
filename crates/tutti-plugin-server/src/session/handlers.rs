@@ -405,10 +405,11 @@ impl Handle<SetRenderMode> for Session {
         cx: &mut Handling<'_>,
         SetRenderMode { mode }: SetRenderMode,
     ) -> Result<RenderModeSet, ServerError> {
-        // A server with no plugin has no mode to refuse.
+        // A server with no plugin has nothing to tell the mode to, as a
+        // plugin not yet prepared has not: it did not take it.
         let outcome = match self.plugin.as_mut() {
             Some(plugin) => plugin.plugin_mut().set_render_mode(cx.main, mode),
-            None => ModeOutcome::Unsupported,
+            None => ModeOutcome::Refused,
         };
         if outcome == ModeOutcome::Refused {
             tracing::debug!(?mode, "plugin did not accept the render mode");

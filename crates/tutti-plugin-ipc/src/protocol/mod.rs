@@ -393,6 +393,11 @@ mod tests {
             }),
             3
         );
+
+        let outcome = |m: ModeOutcome| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(outcome(ModeOutcome::Took), 0);
+        assert_eq!(outcome(ModeOutcome::Refused), 1);
+        assert_eq!(outcome(ModeOutcome::Unsupported), 2);
     }
 
     /// One request per row of the message table, named, in the table's order.

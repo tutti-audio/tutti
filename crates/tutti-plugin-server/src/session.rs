@@ -971,6 +971,28 @@ mod tests {
         ));
     }
 
+    /// **A render mode told to a server with no plugin is refused**, as a
+    /// plugin not yet prepared refuses it: there is nothing to run in the mode.
+    #[test]
+    fn a_render_mode_with_no_plugin_is_refused() {
+        let mut s = Rig::new();
+        let r = s
+            .handle(
+                main_thread(),
+                ControlRequest::SetRenderMode {
+                    mode: tutti_plugin_types::RenderMode::Offline,
+                },
+            )
+            .into_reply();
+        assert!(matches!(
+            r,
+            ControlReply::RenderModeSet {
+                mode: tutti_plugin_types::RenderMode::Offline,
+                outcome: tutti_plugin_ipc::ModeOutcome::Refused,
+            }
+        ));
+    }
+
     /// A `LoadState` with no plugin loaded answers, and answers with a refusal.
     ///
     /// Answering `Reaction::None` — silence — is the failure this pins. The host

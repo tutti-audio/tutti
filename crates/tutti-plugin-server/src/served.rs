@@ -826,19 +826,24 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// `AudioUnitInitialize`) is activated again in the mode, keeping its
     /// instance and state, and a refusal is rolled back to the mode it was
     /// running in; an `Unsupported` one is left running and answers
-    /// [`Unsupported`](ModeOutcome::Unsupported). The mode is kept for every
-    /// later activation (a restart, a rate change) either way.
+    /// [`Unsupported`](ModeOutcome::Unsupported) every time it is asked,
+    /// whatever mode it was last asked. The mode is kept for every later
+    /// activation (a restart, a rate change) either way. A plugin not prepared
+    /// has nothing to tell: [`Refused`](ModeOutcome::Refused).
     fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome {
         let Some(previous) = self.state.applied() else {
             return ModeOutcome::Refused;
         };
-        if previous.mode() == mode && self.is_active() {
-            return ModeOutcome::Took;
-        }
+        let unchanged = previous.mode() == mode && self.is_active();
         let Some(control) = self.lifecycle.control() else {
             return ModeOutcome::Refused;
         };
         match control.render_mode_support(main) {
+            RenderModeSupport::Unsupported => {
+                self.state.set_mode(mode);
+                ModeOutcome::Unsupported
+            }
+            _ if unchanged => ModeOutcome::Took,
             RenderModeSupport::Live => {
                 if control.set_render_mode(main, mode) {
                     self.state.set_mode(mode);
@@ -846,10 +851,6 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
                 } else {
                     ModeOutcome::Refused
                 }
-            }
-            RenderModeSupport::Unsupported => {
-                self.state.set_mode(mode);
-                ModeOutcome::Unsupported
             }
             RenderModeSupport::OnActivation => {
                 match self.reconfigure(main, previous.with_mode(mode)) {

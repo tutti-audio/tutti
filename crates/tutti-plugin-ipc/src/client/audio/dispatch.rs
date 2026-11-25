@@ -1159,8 +1159,9 @@ pub(super) fn apply_rate_reply(
 /// Tells the host a plugin that has a render mode did not take it. A plugin
 /// with none runs as it did, which the host already knows.
 fn apply_mode_reply(inbox: &mut Unsolicited, mode: RenderMode, outcome: ModeOutcome) {
-    if outcome == ModeOutcome::Refused {
-        inbox.render_mode_not_applied(mode);
+    match outcome {
+        ModeOutcome::Took | ModeOutcome::Unsupported => {}
+        ModeOutcome::Refused => inbox.render_mode_not_applied(mode),
     }
 }
 
