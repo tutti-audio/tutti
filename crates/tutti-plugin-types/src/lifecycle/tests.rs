@@ -1836,3 +1836,16 @@ fn a_note_value_keeps_the_range_contract() {
     tutti_fixtures::check_range_contract(&c);
     tutti_fixtures::check_range_serde(&c);
 }
+
+/// **The standing of a refused rate says where the plugin is**: the rate it runs at while
+/// active, "deactivated" otherwise. A refusal that leaves a plugin deactivated is reachable
+/// only after a failed rollback, which no probe forces, so the sentence is pinned here, where
+/// every loader gets it.
+#[test]
+fn a_standing_says_running_or_deactivated() {
+    assert_eq!(
+        crate::standing(true, SampleRate::SR_48K),
+        "running at 48000"
+    );
+    assert_eq!(crate::standing(false, SampleRate::SR_48K), "deactivated");
+}
