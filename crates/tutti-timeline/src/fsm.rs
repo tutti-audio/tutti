@@ -224,13 +224,14 @@ impl TransportFsm {
     /// Scrubbing while already scrubbing keeps the pre-scrub anchor, so
     /// fast-forward → rewind → end-scrub returns to what was playing rather
     /// than to fast-forward. A fade interrupted by a scrub is abandoned, and
-    /// the scrub returns to a stop.
+    /// the scrub returns to where the fade was heading.
     #[inline]
     fn scrub_anchor(&self) -> Settled {
         match *self {
             Self::Rolling => Settled::Rolling,
             Self::Scrub { anchor, .. } => anchor,
-            Self::Stopped | Self::Fading { .. } => Settled::Stopped,
+            Self::Stopped => Settled::Stopped,
+            Self::Fading { into } => into.landing(),
         }
     }
 
@@ -293,14 +294,15 @@ impl TransportFsm {
                 fade,
                 then,
             } => {
-                // `Keep` during a fade lands stopped; from a scrub it lands
-                // rolling.
+                // `Keep` during a fade lands where the fade was heading; from a
+                // scrub it lands rolling.
                 let landing = match then {
                     AfterLocate::Play => Settled::Rolling,
                     AfterLocate::Stop => Settled::Stopped,
                     AfterLocate::Keep => match self {
                         Self::Rolling | Self::Scrub { .. } => Settled::Rolling,
-                        Self::Stopped | Self::Fading { .. } => Settled::Stopped,
+                        Self::Stopped => Settled::Stopped,
+                        Self::Fading { into } => into.landing(),
                     },
                 };
                 // A stopped transport has nothing to fade out of: the jump is
@@ -491,18 +493,48 @@ mod tests {
         );
     }
 
-    /// A fade a scrub interrupts is abandoned: ending the scrub rests
-    /// stopped, and there is no fade left to complete.
+    /// A scrub abandons the fade it interrupts, and ending the scrub rests
+    /// where that fade was heading: stopped for a stop, rolling for a locate
+    /// that kept rolling. No fade is left to complete.
     #[test]
-    fn a_scrub_abandons_the_fade_it_interrupts() {
-        let mut fsm = TransportFsm::Rolling;
-        fsm.transition(MotionCommand::stop());
-        fsm.transition(MotionCommand::FastForward);
-        assert_eq!(
-            fsm.transition(MotionCommand::EndScrub),
-            moved(MotionState::Stopped)
-        );
-        assert_eq!(fsm.complete_declick(), None);
+    fn a_scrub_over_a_fade_returns_to_where_the_fade_was_heading() {
+        for (fade, rests) in [
+            (MotionCommand::stop(), MotionState::Stopped),
+            (MotionCommand::locate(Beat::new(8.0)), MotionState::Rolling),
+        ] {
+            let mut fsm = TransportFsm::Rolling;
+            fsm.transition(fade);
+            fsm.transition(MotionCommand::FastForward);
+            assert_eq!(
+                fsm.transition(MotionCommand::EndScrub),
+                moved(rests),
+                "{fade:?} then a scrub"
+            );
+            assert_eq!(fsm.complete_declick(), None);
+        }
+    }
+
+    /// A locate that keeps the motion, sent during a fade, lands where the
+    /// fade was heading: a second locate while rolling keeps rolling, one
+    /// during a stop's fade stays stopped.
+    #[test]
+    fn a_keep_locate_during_a_fade_lands_where_the_fade_was_heading() {
+        for (fade, landing) in [
+            (MotionCommand::locate(Beat::new(8.0)), Settled::Rolling),
+            (MotionCommand::stop(), Settled::Stopped),
+        ] {
+            let mut fsm = TransportFsm::Rolling;
+            fsm.transition(fade);
+            fsm.transition(MotionCommand::locate(Beat::new(12.0)));
+            assert_eq!(
+                fsm.complete_declick(),
+                Some(DeclickOutcome::Locate {
+                    pos: Beat::new(12.0),
+                    landing
+                }),
+                "{fade:?} then a locate"
+            );
+        }
     }
 
     /// `EndScrub` when not scrubbing changes nothing.
