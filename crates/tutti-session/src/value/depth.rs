@@ -7,7 +7,7 @@ use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders};
-use crate::{ModSourceId, ModTarget};
+use crate::{ModRouteId, ModSourceId, ModTarget};
 
 /// A route's depth: the [`Slot`] of its [`DepthTarget`], over the cell the
 /// route's lane reads.
@@ -38,9 +38,17 @@ keyed_slot_target!(
     /// `NoSuchTarget`.
     DepthTarget,
     Bipolar,
-    (ModSourceId, ModTarget),
+    DepthKey,
     RouteDepth
 );
+
+/// What names a route's depth: the route from a source into a target, or the
+/// one from a source into another route's depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum DepthKey {
+    Into(ModSourceId, ModTarget),
+    Scaling(ModSourceId, ModRouteId),
+}
 
 impl Modulatable for DepthTarget {}
 impl ScalarTarget for DepthTarget {
@@ -51,18 +59,31 @@ impl DepthTarget {
     /// The depth of the route from `source` into `target`.
     #[must_use]
     pub fn of(source: ModSourceId, target: impl Into<ModTarget>) -> Self {
-        Self::new((source, target.into()))
+        Self::new(DepthKey::Into(source, target.into()))
+    }
+
+    /// The depth of the route from `source` into the depth of `route`
+    /// ([`RouteSpec::scaling`](crate::RouteSpec::scaling)).
+    #[must_use]
+    pub fn scaling(source: ModSourceId, route: ModRouteId) -> Self {
+        Self::new(DepthKey::Scaling(source, route))
     }
 
     /// The source of the route.
     #[must_use]
     pub const fn source(self) -> ModSourceId {
-        self.0.0
+        match self.0 {
+            DepthKey::Into(source, _) | DepthKey::Scaling(source, _) => source,
+        }
     }
 
-    /// What the route modulates.
+    /// What the route modulates, for a route into a target; `None` for one
+    /// that scales another route's depth.
     #[must_use]
-    pub const fn target(self) -> ModTarget {
-        self.0.1
+    pub const fn target(self) -> Option<ModTarget> {
+        match self.0 {
+            DepthKey::Into(_, target) => Some(target),
+            DepthKey::Scaling(..) => None,
+        }
     }
 }

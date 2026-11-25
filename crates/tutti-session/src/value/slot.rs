@@ -96,7 +96,7 @@ pub enum SlotId {
     #[cfg(feature = "plugin")]
     PluginMidiMap(NodeKey),
     /// The depth of the route from a source into a target.
-    RouteDepth((ModSourceId, ModTarget)),
+    RouteDepth(super::depth::DepthKey),
 }
 
 impl SlotId {

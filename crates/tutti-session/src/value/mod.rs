@@ -61,6 +61,7 @@ pub(crate) use base::{BaseSlot, Bases};
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
+pub(crate) use depth::DepthKey;
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
 pub use edit_log::{EditLog, EditMark};
