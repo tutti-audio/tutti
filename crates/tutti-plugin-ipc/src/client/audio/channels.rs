@@ -379,13 +379,17 @@ impl Channels {
     /// Hands `apply` each parameter the host wrote since the last drain, with
     /// its latest value. The audio lane's thread, once per block: a refused
     /// claim (a control thread flushes) drains nothing, and the slots keep what
-    /// they hold.
-    pub(super) fn drain_host_edits(&self, apply: impl FnMut(ParamId, Normalized)) {
+    /// they hold. The generation of the writes the drain swept, which the
+    /// answer to the block that carries them acknowledges; generation zero when
+    /// nothing was drained.
+    pub(super) fn drain_host_edits(&self, apply: impl FnMut(ParamId, Normalized)) -> Generation {
         if let Some(mut cell) = self.host_edits.try_borrow_mut()
             && let Some(reader) = cell.as_mut()
         {
             reader.drain(apply);
+            return reader.swept();
         }
+        Generation::new(0)
     }
 
     /// What no block has taken, claiming the cell, and the generation of the
@@ -401,9 +405,12 @@ impl Channels {
         (taken, swept)
     }
 
-    /// Records that the server answered a flush whose drain had swept `swept`:
-    /// every write up to it is the plugin's, or counted lost. Audio lane's
-    /// thread only; never moves back.
+    /// Records that the server answered a request, a block or a flush, whose
+    /// drain had swept `swept`: every write up to it is the plugin's, or counted
+    /// lost ([`unapplied_edits`](Self::unapplied_edits_cell)) and not sent
+    /// again. The server answers in order, and every answered request either
+    /// applied its writes or was counted; one forgotten at its ceiling is acked
+    /// by a later answer. Audio lane's thread only; never moves back.
     pub(super) fn note_acked(&self, swept: Generation) {
         if swept.has_reached(self.acked()) {
             self.acked.store(swept.get(), Ordering::Release);

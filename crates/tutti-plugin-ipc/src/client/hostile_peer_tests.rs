@@ -2880,6 +2880,104 @@ fn a_timed_out_flush_leaves_the_wait_open_until_its_late_answer() {
     });
 }
 
+/// **A write a block took is not delivered while the block is unanswered**,
+/// even though no flush is owed: the block's drain swept the write, the block's
+/// answer missed its window, and an empty flush behind it must wait for the
+/// answer, not acknowledge what the late block still carries.
+#[test]
+fn a_write_a_held_block_took_is_delivered_when_the_block_is_answered() {
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(50);
+        t.rate = Duration::from_millis(10);
+        t
+    };
+    let mock = MockServer::start_lanes_under(
+        "held-block",
+        timeouts,
+        move |msg| match msg {
+            AudioRequest::ProcessAudio(data) => {
+                if first.swap(false, Ordering::SeqCst) {
+                    let _ = release.recv();
+                }
+                Action::Audio(Box::new(AudioReply::AudioProcessed {
+                    latency_us: 0,
+                    seq: data.seq,
+                    midi_out: Default::default(),
+                    status: Default::default(),
+                    refused: false,
+                }))
+            }
+            AudioRequest::ApplyParameters { id, .. } => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: crate::ApplyOutcome::Applied,
+                }))
+            }
+            _ => Action::Silent,
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    audio.set_reply_wait(Some(Duration::from_millis(50)));
+    audio.declare_host_edits([ParamId::new(1)]);
+    let upto = write_one(audio);
+    // The block's drain takes the write into its first frame; the server holds
+    // the block past its window.
+    submit_block(&mock.bridge, 1);
+    audio.settle();
+    for _ in 0..3 {
+        assert!(
+            !audio.edits_delivered(upto),
+            "the block that took it is unanswered"
+        );
+        audio.settle();
+    }
+    release_tx.send(()).expect("the server waits");
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+}
+
+/// **A block that carried a write and was answered refused loses it, counted**:
+/// the server drops a refused block's changes, so the write is counted
+/// unapplied, not sent again, and the settle ends.
+#[test]
+fn a_write_a_refused_block_carried_is_counted_and_the_wait_ends() {
+    let mock = MockServer::start_lanes(
+        "refused-block",
+        |msg| match msg {
+            AudioRequest::ProcessAudio(data) => {
+                Action::Audio(Box::new(AudioReply::AudioProcessed {
+                    latency_us: 0,
+                    seq: data.seq,
+                    midi_out: Default::default(),
+                    status: Default::default(),
+                    refused: true,
+                }))
+            }
+            AudioRequest::ApplyParameters { id, .. } => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: crate::ApplyOutcome::Applied,
+                }))
+            }
+            _ => Action::Silent,
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    audio.declare_host_edits([ParamId::new(1)]);
+    let upto = write_one(audio);
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+    assert_eq!(audio.unapplied_edits(), 1);
+}
+
 /// **A crashed plugin reads as delivered**: the read or save that follows fails
 /// on its own, by name, and no wait outlives the plugin.
 #[test]
