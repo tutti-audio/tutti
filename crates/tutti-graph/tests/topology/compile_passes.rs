@@ -11,11 +11,11 @@ use std::collections::BTreeMap;
 use common::{Harness, Kind, SpecBehaviour, input_signal};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    AudioDelayKey, CompileError, CycleEdge, EventEdge, EventInputPort, EventOutputPort,
-    GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
+    AudioDelayKey, BusOutputPort, CompileError, CycleEdge, EventEdge, EventInputPort,
+    EventOutputPort, GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, Invalid, NodeSpec, OutputPort, PortSource};
-use tutti_graph::{NodeKey, ParamIn, Topology, delays, latency_plan};
+use tutti_graph::{NodeBus, NodeKey, ParamIn, Topology, delays, latency_plan};
 use tutti_units::{Latency, SampleRate, Samples, Tail, UnitParam};
 
 /// The `MaxBlock` every plan in this file is compiled for.
@@ -637,6 +637,36 @@ fn a_spec_names_the_cycle_a_param_edge_closes() {
         ))],
     );
     assert_eq!(f.cycle(), None, "a feedback edge reads the past");
+}
+
+/// A bus edge not yet lowered is a dependency at node level: A feeding B's bus
+/// and B driving A's param is a cycle the spec names, and without the param
+/// edge there is none. A feed from the main input is no dependency.
+#[test]
+fn a_spec_names_the_cycle_an_unlowered_bus_edge_closes() {
+    let param = ParamIn {
+        node: A,
+        param: UnitParam::Cutoff.into(),
+    };
+    let (source, sink) = (NodeBus::new(A, 0), NodeBus::new(B, 0));
+    let mut g = two_node_spec();
+    g.connect_bus(BusOutputPort::Node(source), sink);
+    assert_eq!(g.cycle(), None, "a bus chain is acyclic");
+    g.connect_bus(BusOutputPort::MainInput, NodeBus::new(A, 0));
+    assert_eq!(g.cycle(), None, "the main input is no node");
+    g.connect_param(param, EventOutputPort::new(B, 0));
+    let mut want = vec![
+        CycleEdge::Param {
+            at: param,
+            from: EventOutputPort::new(B, 0),
+        },
+        CycleEdge::Bus {
+            at: sink,
+            from: BusOutputPort::Node(source),
+        },
+    ];
+    want.sort();
+    assert_eq!(g.cycle(), Some(want));
 }
 
 /// An event edge from a node to itself is a cycle too.
