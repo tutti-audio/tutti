@@ -2850,8 +2850,8 @@ mod tests {
 
     /// A main output with no fold into the device (five buses into three) is
     /// reported by `has_fold` before any block runs, so the session can
-    /// refuse the commit that would make it; a width a declared main output does not
-    /// have is not one it renders.
+    /// refuse the commit that would make it; a main output has a fold only at a
+    /// width it renders, and a declared one renders its one width.
     #[test]
     fn has_fold_names_the_pairs_a_commit_would_make() {
         let transport = Transport::new(SampleRate::SR_48K);
@@ -2882,7 +2882,22 @@ mod tests {
             !control.has_fold(id, 3, three),
             "the main output is declared 2 wide"
         );
-        assert!(control.has_width(id, 2) && !control.has_width(id, 3));
+        // A fold exists only at a width the main output renders: every width
+        // for the undeclared one, the declared width alone for the other.
+        for width in 0..=MAX_CHANNELS + 1 {
+            for main_output in [genesis, id] {
+                assert!(
+                    !control.has_fold(main_output, width, three)
+                        || control.has_width(main_output, width),
+                    "{main_output:?} folds at {width} channels it does not render"
+                );
+            }
+            assert_eq!(
+                control.has_width(genesis, width),
+                (1..=MAX_CHANNELS).contains(&width)
+            );
+            assert_eq!(control.has_width(id, width), width == 2, "{width}");
+        }
         assert!(!control.has_fold(id.next(), 2, three), "not published");
     }
 

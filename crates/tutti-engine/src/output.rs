@@ -78,62 +78,91 @@ pub(crate) const DEFAULT_DEVICE_WIDTHS: usize = 16;
 /// [`OutputControl::publish_main_output`] refuses with [`MainOutputError::TooManyPending`].
 pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 
+/// What a main output was published with: the widths it renders and the
+/// topology it has at each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// Undeclared: the engine's order for the plan's width, at every width
+    /// from one to [`MAX_CHANNELS`].
+    Open,
+    /// Declared: the one width of its topology, which it renders at.
+    Declared(ChannelTopology),
+}
+
+impl Layout {
+    /// The widths this main output renders, in column order.
+    fn widths(self) -> std::ops::RangeInclusive<usize> {
+        match self {
+            Self::Open => 1..=MAX_CHANNELS,
+            Self::Declared(topology) => {
+                let width = usize::from(topology.width().count());
+                width..=width
+            }
+        }
+    }
+
+    /// Where a main output of `width` channels sits in a device's column, or
+    /// `None` for a width this main output does not render.
+    fn slot(self, width: usize) -> Option<usize> {
+        let widths = self.widths();
+        widths.contains(&width).then(|| width - widths.start())
+    }
+
+    /// The width a plan of `plan` channels renders this main output at: a
+    /// declared main output keeps its own.
+    fn rendered(self, plan: usize) -> usize {
+        match self {
+            Self::Open => plan,
+            Self::Declared(topology) => usize::from(topology.width().count()),
+        }
+    }
+
+    /// The topology at `width`, one [`slot`](Self::slot) accepts.
+    fn topology(self, width: usize) -> Option<ChannelTopology> {
+        self.slot(width)?;
+        match self {
+            Self::Open => ChannelTopology::default_for(ChannelLayout::try_from(width).ok()?),
+            Self::Declared(topology) => Some(topology),
+        }
+    }
+}
+
 /// One main output generation's folds.
 #[derive(Debug, Clone)]
 struct MainOutputFolds<F: Float> {
     id: MainOutputId,
-    /// What the main output was declared with; `None` is the engine's order for the
-    /// plan's width, at every width.
-    topology: Option<ChannelTopology>,
+    layout: Layout,
     /// Index `d - 1` holds the folds into a device of `d` channels, `None` for
-    /// a width not supported; inside, index `w - 1` folds a main output of `w`.
+    /// a width not supported; inside, one fold per width the layout renders,
+    /// at its [`slot`](Layout::slot).
     by_device: Vec<Option<Box<[Option<Fold<F>>]>>>,
 }
 
 impl<F: Float> MainOutputFolds<F> {
-    /// The fold of this main output at `width` channels into `device`: `None` for a
-    /// width a declared main output does not have (it renders at the one it was
-    /// declared at), and the routing's refusal for a pair that cannot be placed.
+    /// The fold of this main output at `width` channels into `device`: `None` for
+    /// a width it does not render, and the routing's refusal for a pair that
+    /// cannot be placed.
     fn build(
         &self,
         width: usize,
         device: &OutputPlacement,
         routing: &Routing,
     ) -> Result<Option<Fold<F>>, RoutingError> {
-        let default;
-        let main_output = match &self.topology {
-            Some(main_output) if usize::from(main_output.width().count()) != width => {
-                return Ok(None);
-            }
-            Some(main_output) => main_output,
-            None => {
-                default = ChannelTopology::default_for(
-                    ChannelLayout::try_from(width)
-                        .expect("a main output width is within MAX_CHANNELS"),
-                )
-                .expect("a main output width is within MAX_CHANNELS");
-                &default
-            }
+        let Some(topology) = self.layout.topology(width) else {
+            return Ok(None);
         };
-        routing.fold(main_output, &device.channels).map(Some)
+        routing.fold(&topology, &device.channels).map(Some)
     }
 
-    /// The folds of every main output width this main output has into `device`. A width the
-    /// routing cannot place has no fold, and renders a silent, counted block
+    /// The folds of every width this main output renders into `device`. A width
+    /// the routing cannot place has no fold, and renders a silent, counted block
     /// into the device; [`OutputControl::set_routing`] refuses before that for
     /// the pair in use.
     fn column(&self, device: &OutputPlacement, routing: &Routing) -> Box<[Option<Fold<F>>]> {
-        (1..=MAX_CHANNELS)
+        self.layout
+            .widths()
             .map(|w| self.build(w, device, routing).unwrap_or_default())
             .collect()
-    }
-
-    /// Whether a main output of `width` channels is one this main output can render.
-    fn has_width(&self, width: usize) -> bool {
-        self.topology
-            .as_ref()
-            .is_none_or(|main_output| usize::from(main_output.width().count()) == width)
-            && (1..=MAX_CHANNELS).contains(&width)
     }
 }
 
@@ -164,7 +193,7 @@ impl<F: Float> OutputFolds<F> {
             devices: Vec::new(),
             main_outputs: vec![MainOutputFolds {
                 id: MainOutputId::GENESIS,
-                topology: None,
+                layout: Layout::Open,
                 by_device: Vec::new(),
             }],
             routing: Routing::default(),
@@ -254,11 +283,7 @@ impl<F: Float> OutputFolds<F> {
             return Ok(());
         };
         for main_output in &self.main_outputs {
-            let width = main_output
-                .topology
-                .as_ref()
-                .map_or(width, |t| usize::from(t.width().count()));
-            main_output.build(width, entry, routing)?;
+            main_output.build(main_output.layout.rendered(width), entry, routing)?;
         }
         Ok(())
     }
@@ -290,7 +315,7 @@ impl<F: Float> OutputFolds<F> {
             .by_device
             .get(device.checked_sub(1)?)?
             .as_ref()?
-            .get(width.checked_sub(1)?)?
+            .get(main_output.layout.slot(width)?)?
             .as_ref()
     }
 
@@ -570,7 +595,7 @@ impl<F: Float> OutputControl<F> {
             }
             let mut entry = MainOutputFolds {
                 id,
-                topology: main_output,
+                layout: main_output.map_or(Layout::Open, Layout::Declared),
                 by_device: Vec::new(),
             };
             entry.by_device = folds
@@ -603,7 +628,7 @@ impl<F: Float> OutputControl<F> {
             .main_outputs
             .iter()
             .find(|r| r.id == main_output)
-            .is_some_and(|r| r.has_width(width))
+            .is_some_and(|r| r.layout.slot(width).is_some())
     }
 
     /// Sets where the mix lands: the format the main output is heard in and the map
