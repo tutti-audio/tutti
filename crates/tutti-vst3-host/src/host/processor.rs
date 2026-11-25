@@ -1059,6 +1059,11 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 copy_process_output(output, out);
                 Ok(())
             }
+            Err(ProcessFailed {
+                error: tutti_vst3_ffi::Vst3Error::Poisoned,
+            }) => Err(PluginError::Block(
+                "host code panicked while holding the plugin; no block runs on it again",
+            )),
             Err(_) => Err(PluginError::Block("the plugin's process returned an error")),
         };
         self.seq = Some(seq);
