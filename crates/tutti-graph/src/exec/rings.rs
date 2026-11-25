@@ -423,8 +423,11 @@ impl EventFifo {
         len.div_ceil(max_block.max(1)) + 2
     }
 
-    pub(crate) fn retune(&mut self, len: Samples) {
+    /// Sets the delay to `len` and re-derives the limit for it at this rate
+    /// and maximum block ([`resize`](Self::resize)).
+    pub(crate) fn retune(&mut self, len: Samples, cap: usize, max_block: usize) {
         self.delay = len;
+        self.resize(cap, max_block);
     }
 
     /// Re-derive the limit for the current length at this rate and maximum
@@ -699,8 +702,7 @@ mod tests {
         let backlog: Vec<Event> = (0..limit as u32).map(|i| note(i, false, i)).collect();
         push_events(&mut f, &backlog);
         // Shorter: the whole backlog is overdue.
-        f.retune(Samples::new(1));
-        f.resize(2, 64);
+        f.retune(Samples::new(1), 2, 64);
         let input = [note(0, false, 100), note(1, false, 101)];
         // Room for the backlog and the input: the slot's own bound is the limit.
         let mut out = CappedVec::with_capacity(limit + input.len());
@@ -800,8 +802,7 @@ mod tests {
         let held = f.events.limit;
         let ons: Vec<Event> = (0..held as u32).map(|i| note(0, false, i)).collect();
         assert_eq!(push_events(&mut f, &ons), 0);
-        f.retune(Samples::new(1));
-        f.resize(4, 8);
+        f.retune(Samples::new(1), 4, 8);
         assert!(
             f.events.limit < held,
             "the bound was lowered under the queue"
@@ -821,8 +822,7 @@ mod tests {
     #[test]
     fn a_fifo_never_holds_more_than_its_bound() {
         let mut f = EventFifo::sized(Samples::new(64), 4, 8);
-        f.retune(Samples::new(1));
-        f.resize(4, 8);
+        f.retune(Samples::new(1), 4, 8);
         let offs: Vec<Event> = (0..200).map(|i| note(0, true, i)).collect();
         push_events(&mut f, &offs);
         assert_eq!(f.pending().count(), EventFifo::bound(1, 4, 8));

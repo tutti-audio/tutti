@@ -424,8 +424,11 @@ impl<F: Float> Executor<F> {
                 None => {
                     new.event_delays[i] = carried;
                     if let Some(f) = &mut new.event_delays[i] {
-                        f.retune(plan.program.event_delays[n].len);
-                        f.resize(st.delay_rates[n], max_block);
+                        f.retune(
+                            plan.program.event_delays[n].len,
+                            st.delay_rates[n],
+                            max_block,
+                        );
                     }
                 }
                 target => {
