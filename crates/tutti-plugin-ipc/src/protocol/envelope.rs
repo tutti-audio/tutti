@@ -619,7 +619,7 @@ messages! {
 /// ([`ControlReply::RenderModeSet`]).
 ///
 /// Variant order is wire-significant; see the module docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModeOutcome {
     /// The plugin runs in the mode.
     Took,

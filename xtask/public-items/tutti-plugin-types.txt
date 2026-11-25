@@ -81,6 +81,7 @@ enum invalidation::PluginRefresh
 enum invalidation::ResyncClass
 enum invalidation::ResyncKind
 enum layout_support::LayoutSupport
+enum lifecycle::Behind
 enum lifecycle::Effect
 enum lifecycle::Event
 enum lifecycle::HostOp
@@ -90,6 +91,7 @@ enum lifecycle::Reply
 enum lifecycle::Request
 enum lifecycle::RescanScope
 enum lifecycle::Stage
+enum lifecycle::Told
 enum load_stage::LoadStage
 enum locate::Helper
 enum locate::Locator
@@ -328,8 +330,6 @@ fn lifecycle::State::latency
 fn lifecycle::State::layout
 fn lifecycle::State::new
 fn lifecycle::State::renders
-fn lifecycle::State::retuned
-fn lifecycle::State::set_mode
 fn lifecycle::State::stage
 fn lifecycle::State::tail
 fn lifecycle::State::want

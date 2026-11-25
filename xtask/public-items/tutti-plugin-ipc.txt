@@ -13,6 +13,7 @@ enum protocol::envelope::AudioReply
 enum protocol::envelope::AudioRequest
 enum protocol::envelope::ControlFrame
 enum protocol::envelope::Lane
+enum protocol::envelope::ModeOutcome
 enum protocol::envelope::News
 enum protocol::envelope::Working
 enum protocol::message::Reaction
@@ -29,7 +30,6 @@ fn client::audio::AudioBridge::parameters
 fn client::audio::AudioBridge::parameters_answer
 fn client::audio::AudioBridge::presets
 fn client::audio::AudioBridge::rate_refusal
-fn client::audio::AudioBridge::render_mode
 fn client::audio::AudioBridge::save_state
 fn client::audio::AudioBridge::save_state_answer
 fn client::audio::AudioBridge::set_listener

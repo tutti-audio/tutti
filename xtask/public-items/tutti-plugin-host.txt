@@ -124,9 +124,11 @@ fn midi_map::MidiMapSlot::untranslatable
 fn node::client::InProcessClient::adopt_wait_switch
 fn node::client::InProcessClient::bind
 fn node::client::InProcessClient::go_offline
+fn node::client::InProcessClient::live_view
 fn node::client::InProcessClient::midi_map
 fn node::client::InProcessClient::seed_delivery
 fn node::client::InProcessClient::set_render_mode
+fn node::client::LiveView::render_mode
 fn node::fork::PluginNode::fork_instance
 fn node::graph::InProcessClient::controls
 fn node::graph::InProcessClient::origin
@@ -197,6 +199,7 @@ struct listeners::Subscription
 struct liveness::Liveness
 struct midi_map::MidiMapSlot
 struct node::client::InProcessClient
+struct node::client::LiveView
 struct node::client::PluginNode
 struct node::rebind::Pending
 struct node::rebind::Rebinder
