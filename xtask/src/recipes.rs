@@ -48,6 +48,8 @@ pub(crate) enum Step {
     RequireLlvmCov,
     /// `deny`'s probe: fails with the install hint when cargo-deny is missing.
     RequireCargoDeny,
+    /// `deslop`'s probe: fails with the install hint when deslop-please is missing.
+    RequireDeslop,
     /// `test-wasm`'s probe: fails when `wasm-bindgen-test-runner` is not at the
     /// version `Cargo.lock` pins for `wasm-bindgen`.
     RequireWasmRunner,
@@ -105,6 +107,10 @@ impl Step {
             }
             Step::RequireCargoDeny => {
                 "cargo deny --version || fail (cargo install cargo-deny --version 0.20.2 --locked)"
+                    .to_owned()
+            }
+            Step::RequireDeslop => {
+                "deslop-please --help || fail (cargo install deslop-please --version 0.1.4 --locked)"
                     .to_owned()
             }
             Step::RequireWasmRunner => {
@@ -444,6 +450,17 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "render the audio cases and verify them with the Python checks (needs uv)",
     ),
     ("deny", "", "RustSec advisories (needs cargo-deny)"),
+    (
+        "deslop",
+        "",
+        "the architectural lints of deslop-please, failing on a finding xtask/deslop.allow does \
+         not list (needs deslop-please 0.1.4; builds the workspace)",
+    ),
+    (
+        "write-deslop-allow",
+        "",
+        "rewrite xtask/deslop.allow from the tree's deslop-please findings",
+    ),
     (
         "public-api",
         "<crate> [<base>]",
@@ -896,6 +913,14 @@ impl Planner<'_> {
             "deny" => {
                 self.out.push(Step::RequireCargoDeny);
                 self.lines(&["cargo deny --locked check advisories"]);
+            }
+            "deslop" => {
+                self.out.push(Step::RequireDeslop);
+                self.lines(&["deslop-please --allow xtask/deslop.allow"]);
+            }
+            "write-deslop-allow" => {
+                self.out.push(Step::RequireDeslop);
+                self.lines(&["deslop-please --update-allow xtask/deslop.allow"]);
             }
             "gates" => {
                 self.dep("fmt")?;
