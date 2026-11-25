@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
-use tutti_buffers::{ChannelSet, ChannelTopology, MaxBlock};
+use tutti_buffers::{ChannelTopology, MaxBlock};
 use tutti_graph::GraphTail;
 use tutti_graph::{Editor, Executor, LogFilter, Pool, Prepare, RenderMode, RtLogReaders, RtRecord};
 use tutti_units::Samples;
@@ -260,11 +260,10 @@ impl<F: Float> RenderGraph<F> {
         self.rt_log.clone()
     }
 
-    /// What the file is placed from: [`Setup::main_output`], else the main
-    /// output the graph declares.
-    pub(crate) fn main_output(&self) -> ChannelSet {
+    /// The topology the file is placed from in place of the main output the
+    /// plan was committed with ([`Setup::main_output`]).
+    pub(crate) fn main_output_override(&self) -> Option<ChannelTopology> {
         self.main_output
-            .map_or(self.editor.spec().main_output, ChannelSet::from)
     }
 
     /// Both halves, for the render. Crate-private: outside the crate the

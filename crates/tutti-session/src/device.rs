@@ -1036,8 +1036,14 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         }
         // The main output keeps the width it declared, wider or narrower than
         // the device: the engine folds.
+        // Before the first commit the editor has sent no plan, so there is
+        // none to resume: the first update sends it.
         let running = stopped.apply_pending();
-        debug_assert!(running, "the re-prepare resumed inside the hook");
+        let planned = self.graph.sent_compensation().is_some();
+        debug_assert!(
+            running || !planned,
+            "the re-prepare resumed inside the hook"
+        );
         // The figures the first block runs at, published before it.
         self.graph.publish_sent();
         // The hardware inlets place an arrival a block after it came, a

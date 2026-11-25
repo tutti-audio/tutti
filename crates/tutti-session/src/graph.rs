@@ -3525,7 +3525,7 @@ impl<F: Float> Graph<F> {
     ///
     /// # Panics
     ///
-    /// Never: the graph declares topologies only, at most `MAX_CHANNELS` wide.
+    /// Never: the session declares only topologies (at most `MAX_CHANNELS`).
     pub fn main_output_topology(&self) -> &tutti_buffers::ChannelTopology {
         self.editor
             .spec()

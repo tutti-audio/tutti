@@ -1318,6 +1318,9 @@ pub struct Plan {
     pub(crate) compensation: Vec<Samples>,
     /// The main output generation the spec carried when this plan was compiled.
     pub(crate) main_output_id: crate::MainOutputId,
+    /// The channels the main output was declared with, as the spec carried them
+    /// when this plan was compiled.
+    pub(crate) main_output: tutti_buffers::ChannelSet,
     /// The old main output's outputs this plan renders after its own channels,
     /// while a main output change crossfades.
     pub(crate) main_output_bank: Option<crate::MainOutputBank>,
@@ -1374,6 +1377,7 @@ impl Plan {
             main_inputs: graph.topology().inputs.count(),
             compensation: timing.compensation,
             main_output_id: graph.main_output_id(),
+            main_output: graph.main_output(),
             main_output_bank: graph.main_output_bank(),
             rendered_outputs: timing.rendered_outputs,
             total_latency: timing.total,
@@ -1590,6 +1594,12 @@ impl Plan {
     /// looks its output folds up by.
     pub fn main_output_id(&self) -> crate::MainOutputId {
         self.main_output_id
+    }
+
+    /// The channels the main output was declared with: what a file placed from
+    /// this plan's render is placed from.
+    pub fn main_output(&self) -> tutti_buffers::ChannelSet {
+        self.main_output
     }
 
     /// Main output width: the main output's channels.

@@ -780,7 +780,6 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let _ = s.update();
     let across = s.open_heard_tap(Samples::new(1_024)).expect("opens");
     assert_eq!(across.width(), 2);
 
@@ -809,6 +808,33 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     new.render_block(Samples::new(64)).expect("open");
     assert_eq!(after.available(), Samples::new(64));
     assert_eq!(after.take_lost(), Samples::new(0));
+}
+
+/// **A restart before the first update has no plan to resume**: the hook
+/// completes, and the session then sends its plan and renders it on the new
+/// device.
+#[test]
+fn a_restart_before_the_first_update_then_renders() {
+    let (driver, _old) = ManualStreamDriver::new();
+    let mut s = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_at(48_000.0), driver)
+        .expect("builds with no device");
+    let dc = s
+        .graph()
+        .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [OutputPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
+    let (driver, new) = ManualStreamDriver::new();
+    s.restart_on(spec_at(48_000.0), driver, None, None)
+        .expect("restarts");
+    let _ = s.update();
+    new.render_block(Samples::new(64)).expect("open");
+    let block = new.render_block(Samples::new(64)).expect("open");
+    assert_eq!(block.len(), 64 * 2);
+    assert_eq!(block[0], 0.5, "the first channel carries the constant");
 }
 
 /// **The session lists the outputs once**: the first `list_outputs_once`
@@ -928,7 +954,6 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
-    let _ = session.update();
     assert_eq!(
         session.output_device().map(|d| d.placement),
         Some(Placement::Default)

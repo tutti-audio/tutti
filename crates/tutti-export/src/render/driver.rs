@@ -24,7 +24,7 @@ use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{ChannelLayout, ChannelSet};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{
     Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample, interleave,
 };
@@ -104,8 +104,8 @@ pub(crate) struct GraphSource<'a, F: Float> {
     planes: Vec<Vec<F>>,
     /// The main output's channels: the first of `planes`.
     outputs: usize,
-    /// What the file is placed from: the graph's declared main output, or the
-    /// setup's own topology.
+    /// What the file is placed from: the main output the committed plan was
+    /// compiled with, or the setup's own topology.
     main_output: ChannelSet,
     max_block: usize,
     produced: Samples,
@@ -141,7 +141,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
         executor: &'a mut tutti_graph::Executor<F>,
         sample_rate: tutti_units::SampleRate,
         clock: &'a dyn RenderClock,
-        main_output: ChannelSet,
+        placed_from: Option<ChannelTopology>,
         before: (u64, u64),
         rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
     ) -> crate::Result<Self> {
@@ -181,6 +181,11 @@ impl<'a, F: Float> GraphSource<'a, F> {
                 )
             },
         );
+        let main_output = placed_from.map(ChannelSet::from).unwrap_or_else(|| {
+            executor
+                .plan()
+                .map_or(editor.spec().main_output, |p| p.main_output())
+        });
         let planes = vec![vec![F::ZERO; max_block]; rendered];
         // The gate is open from the first block.
         drain_rt_log(rt_log.as_ref());
@@ -336,7 +341,7 @@ pub(crate) fn with_source<F: Float, T>(
     clock: &dyn RenderClock,
     f: impl FnOnce(&mut GraphSource<'_, F>) -> crate::Result<Outcome<T>>,
 ) -> crate::Result<(Outcome<T>, u64)> {
-    let main_output = graph.main_output();
+    let placed_from = graph.main_output_override();
     let settled = graph.settled();
     let rt_log = graph.rt_log();
     let (editor, executor) = graph.parts_mut();
@@ -345,7 +350,7 @@ pub(crate) fn with_source<F: Float, T>(
         executor,
         sample_rate,
         clock,
-        main_output,
+        placed_from,
         settled,
         rt_log,
     )?;

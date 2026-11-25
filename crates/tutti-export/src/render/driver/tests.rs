@@ -176,29 +176,22 @@ fn rendering_a_narrow_graph_to_a_wide_file_does_not_panic() {
     }
 }
 
-/// A main output declared and not committed is refused by name: the plan renders
-/// the width it was committed at, so the file is not placed from a declaration
-/// of another width.
+/// The planes follow the committed plan, not the editor's spec: outputs
+/// narrowed in the spec with no `commit()` leave the executor's plan as wide
+/// as it was, and the render must carry every channel of it (an undersized
+/// plane list made the executor render silence in release).
 #[test]
-fn a_declaration_without_a_commit_is_refused_by_name() {
+fn a_spec_narrowed_without_a_commit_still_renders_the_committed_width() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let k = g.add(tutti_nodes::testing::Const::mono(0.5));
     g.pipe_output(k);
     let (mut editor, executor) = g.build(RenderGraph::prepare(RATE)).expect("builds");
+    let committed = editor.spec().topology.outputs.len();
+    assert!(committed >= 2, "a stereo graph has two outputs");
     declare_outputs(&mut editor, ChannelLayout::from_count(1));
     let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
-    let refused = with_source(&mut graph, RATE, &FrozenClock, |src| {
-        let file = FileChannels {
-            channels: ChannelSet::default_for(ChannelLayout::STEREO),
-        };
-        file.fold_from::<f32>(src.outputs(), src.main_output())
-            .map(|_| Outcome::Finished(()))
-    });
-    assert!(matches!(
-        refused,
-        Err(crate::RenderError::TopologyWidth { topology, rendered })
-            if topology == ChannelLayout::MONO && rendered == ChannelLayout::STEREO
-    ));
+    let frames = render(&mut graph, &FrozenClock, 2, 16);
+    assert!(frames.iter().all(|f| f[0] == 0.5 && f[1] == 0.5));
 }
 
 /// `GraphSource` must NOT prime the clock: the render is
