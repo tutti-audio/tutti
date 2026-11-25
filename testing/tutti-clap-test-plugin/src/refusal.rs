@@ -50,6 +50,24 @@ static REFUSE_RATE: AtomicU64 = AtomicU64::new(ACTIVATE_REFUSE_NONE);
 /// call `process`. No real host asks for it.
 static REFUSE_FRAMES: AtomicU32 = AtomicU32::new(0);
 
+/// Whether `clap.render.set` refuses the offline mode: a plugin that has the
+/// extension and will not render offline.
+static REFUSE_OFFLINE: AtomicBool = AtomicBool::new(false);
+
+/// Whether `render.set` should refuse `offline`.
+pub(crate) fn refuse_offline() -> bool {
+    REFUSE_OFFLINE.load(Ordering::SeqCst)
+}
+
+/// Make `render.set` refuse the offline mode (`1`) or take it (`0`).
+///
+/// # Safety
+/// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tutti_test_plugin_set_refuse_offline(refuse: u32) {
+    REFUSE_OFFLINE.store(refuse != 0, Ordering::SeqCst);
+}
+
 /// Refused-`activate` count since the last [`tutti_test_plugin_reset_activation`].
 static REFUSALS: AtomicU32 = AtomicU32::new(0);
 

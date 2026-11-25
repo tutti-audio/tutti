@@ -97,11 +97,10 @@ fn the_served_control_and_any_thread_answer_alike() {
     );
 
     assert!(AnyThread::set_render_mode(&any, RenderMode::Offline));
-    assert!(Control::set_render_mode(
-        &mut control,
-        main,
-        RenderMode::Realtime
-    ));
+    assert_eq!(
+        Control::set_render_mode(&mut control, main, RenderMode::Realtime),
+        tutti_plugin_types::ModeTold::Asked
+    );
     assert!(
         AnyThread::set_automation_mode(&any, tutti_plugin_types::AutomationMode::Off).is_ok(),
         "the advisory is delivered"

@@ -853,7 +853,10 @@ fn the_render_mode_changes_live_without_a_restart() {
     assert_eq!(capture().process_level, 4, "offline");
     assert!(controller.loaded().is_offline_render());
 
-    assert!(controller.set_render_mode(main_thread(), RenderMode::Realtime));
+    assert_eq!(
+        controller.set_render_mode(main_thread(), RenderMode::Realtime),
+        tutti_plugin_types::ModeTold::Took
+    );
     render_f32(&mut processor, &ProcessContext::new());
     assert_eq!(capture().process_level, 2, "realtime");
     let cap = capture();

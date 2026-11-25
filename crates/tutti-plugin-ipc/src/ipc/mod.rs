@@ -57,7 +57,7 @@ use tutti_plugin_types::{
     ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
     PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
-    WaitSwitch, Widths,
+    Told, WaitSwitch, Widths,
 };
 use tutti_rt::AtomicCell;
 use tutti_units::ParamId;
@@ -170,6 +170,10 @@ struct Events {
     latency: AtomicUsize,
     tail: Mutex<PluginTail>,
     requests: Mutex<Vec<Request>>,
+    /// What the server answered to the rate and render mode the host told it,
+    /// oldest first, until the control side takes them
+    /// ([`Control::take_answers`](tutti_plugin_types::Control::take_answers)).
+    told: Mutex<Vec<Told>>,
     forward: Mutex<Option<IpcListener>>,
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
@@ -244,6 +248,7 @@ impl Events {
             IpcEvent::IoLayout(layout) => {
                 *self.layout.lock() = Some(layout.clone());
             }
+            IpcEvent::Told(told) => self.told.lock().push(told.clone()),
             // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
             // lays out the slab, the pipeline and the node for the buses the
             // layout above names; the pump that takes the request reports it.
@@ -530,6 +535,7 @@ impl Ipc {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
             tail: Mutex::new(loaded.tail),
             requests: Mutex::new(Vec::new()),
+            told: Mutex::new(Vec::new()),
             forward: Mutex::new(None),
             wake: OnceLock::new(),
             declared: DeclaredCache::default(),

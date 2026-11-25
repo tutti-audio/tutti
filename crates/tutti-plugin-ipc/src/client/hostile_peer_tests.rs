@@ -860,11 +860,12 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
 
 /// **A render mode the plugin did not take, and a restart it would not make,
 /// are heard by the host**: the server's refusal reaches the listener as
-/// `RenderModeNotApplied` with the mode, and its news as `WouldNotStop` with
-/// the reason.
+/// `Told::ModeRefused` with the mode, and its news as `WouldNotStop` with the
+/// reason.
 #[test]
 fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
     use crate::client::audio::IpcEvent;
+    use tutti_plugin_types::{RenderMode, Told};
 
     let mock = MockServer::start("mode-not-applied", |msg| match msg {
         ControlRequest::SetRenderMode { mode } => Action::EventsThenReply(
@@ -884,28 +885,30 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
     mock.bridge
         .audio()
         .set_listener(Some(Arc::new(move |ev| match ev {
-            IpcEvent::RenderModeNotApplied { mode } => sink.lock().push(format!("{mode:?}")),
+            IpcEvent::Told(told) => sink.lock().push(format!("{told:?}")),
             IpcEvent::WouldNotStop { reason } => sink.lock().push(reason),
             _ => {}
         })));
-    assert!(
-        mock.bridge
-            .audio()
-            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
-    );
+    assert!(mock.bridge.audio().set_render_mode(RenderMode::Offline));
     tutti_fixtures::wait_until("both to be heard", NOTICE_TIMEOUT, || {
         heard.lock().len() >= 2
     });
-    assert_eq!(*heard.lock(), ["Offline", "inside a block"]);
+    assert_eq!(
+        *heard.lock(),
+        [
+            "inside a block".to_string(),
+            format!("{:?}", Told::ModeRefused(RenderMode::Offline))
+        ]
+    );
 }
 
-/// **A render mode the server answers after the lane gave up on it is heard
-/// when it comes, and not before.** The lane's wait for the answer is a
-/// constructed deadline (`Timeouts::rate`): the server holds its answer past
-/// it, the blocks go on (a block is answered while the answer is held), and
-/// nothing is told of a refusal until the late `Refused` arrives.
+/// **A render mode the server leaves unanswered fails the bridge, and is no
+/// refusal**: the lane's wait for the answer is a constructed deadline
+/// (`Timeouts::rate`) the server holds its answer past, the bridge is lost, and
+/// the host is told of the loss and of no answer, so a late `Took` is never read
+/// to apply a mode the host was told was refused.
 #[test]
-fn a_render_mode_answered_after_the_lane_gave_up_is_heard_when_it_comes() {
+fn a_render_mode_the_server_leaves_unanswered_loses_the_bridge_and_is_no_refusal() {
     use crate::client::audio::IpcEvent;
 
     let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
@@ -915,26 +918,27 @@ fn a_render_mode_answered_after_the_lane_gave_up_is_heard_when_it_comes() {
         t.rate = Duration::from_millis(10);
         t
     };
-    let mut mock =
+    let mock =
         MockServer::start_lanes_under("late-mode", timeouts, answer_blocks, move |msg| match msg {
             ControlRequest::SetRenderMode { mode } => {
                 let _ = seen.try_send(());
                 let _ = release.recv();
                 Action::Reply(Box::new(ControlReply::RenderModeSet {
                     mode,
-                    outcome: crate::ModeOutcome::Refused,
+                    outcome: crate::ModeOutcome::Took,
                 }))
             }
             _ => Action::Silent,
         });
-    hold_replies(&mock);
-    let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
-    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let IpcEvent::RenderModeNotApplied { mode } = ev {
-            sink.lock().push(format!("{mode:?}"));
-        }
-    })));
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            IpcEvent::Told(_) => sink.lock().push("told"),
+            IpcEvent::Crashed { .. } => sink.lock().push("crashed"),
+            _ => {}
+        })));
 
     assert!(
         mock.bridge
@@ -944,23 +948,42 @@ fn a_render_mode_answered_after_the_lane_gave_up_is_heard_when_it_comes() {
     seen_rx
         .recv_timeout(NOTICE_TIMEOUT)
         .expect("the server holds the mode");
-    submit_block(&mock.bridge, 1);
-    tutti_fixtures::wait_until(
-        "the block to go on past the held mode",
-        NOTICE_TIMEOUT,
-        || answered(&mut mock, 1),
-    );
-    assert!(
-        heard.lock().is_empty(),
-        "giving up is not a refusal: {:?}",
-        heard.lock()
-    );
-
+    tutti_fixtures::wait_until("the bridge to be lost", NOTICE_TIMEOUT, || {
+        heard.lock().contains(&"crashed")
+    });
+    assert!(mock.bridge.audio().is_crashed());
+    assert_eq!(*heard.lock(), ["crashed"], "no refusal, and no answer");
     release_tx.send(()).expect("the server waits");
-    tutti_fixtures::wait_until("the late refusal to be heard", NOTICE_TIMEOUT, || {
+}
+
+/// **A plugin that has no render mode answers a mode as a refusal**, as a
+/// plugin that refused it does: the host did not get the mode it asked for.
+#[test]
+fn a_render_mode_the_plugin_has_none_of_is_heard_as_refused() {
+    use crate::client::audio::IpcEvent;
+    use tutti_plugin_types::{RenderMode, Told};
+
+    let mock = MockServer::start("mode-unsupported", |msg| match msg {
+        ControlRequest::SetRenderMode { mode } => {
+            Action::Reply(Box::new(ControlReply::RenderModeSet {
+                mode,
+                outcome: crate::ModeOutcome::Unsupported,
+            }))
+        }
+        _ => Action::Silent,
+    });
+    let heard: Arc<Mutex<Vec<Told>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
+        if let IpcEvent::Told(told) = ev {
+            sink.lock().push(told);
+        }
+    })));
+    assert!(mock.bridge.audio().set_render_mode(RenderMode::Offline));
+    tutti_fixtures::wait_until("the answer to be heard", NOTICE_TIMEOUT, || {
         !heard.lock().is_empty()
     });
-    assert_eq!(*heard.lock(), ["Offline"]);
+    assert_eq!(*heard.lock(), [Told::ModeRefused(RenderMode::Offline)]);
 }
 
 /// **The server's loss counts are heard by the host**, cumulative, the later

@@ -856,8 +856,9 @@ fn host_render_mode_reaches_the_plugin() {
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
     let mut loaded = session.load();
 
-    assert!(
+    assert_eq!(
         loaded.set_render_mode(main_thread(), RenderMode::Offline),
+        tutti_plugin_types::ModeTold::Took,
         "plugin accepts offline render"
     );
     assert_eq!(
@@ -867,8 +868,9 @@ fn host_render_mode_reaches_the_plugin() {
          host that inverted the flag records 0"
     );
 
-    assert!(
+    assert_eq!(
         loaded.set_render_mode(main_thread(), RenderMode::Realtime),
+        tutti_plugin_types::ModeTold::Took,
         "plugin accepts realtime"
     );
     assert_eq!(
