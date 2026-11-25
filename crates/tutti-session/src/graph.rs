@@ -4016,6 +4016,13 @@ impl<F: Float> Graph<F> {
         self.editor.take_unreported_event_losses()
     }
 
+    /// How many commits have sent a plan: an edit staged before a count is in
+    /// the plan of the commit that moved it past.
+    #[cfg(any(feature = "plugin", feature = "testing"))]
+    pub(crate) fn commits(&self) -> u64 {
+        self.commits
+    }
+
     /// `Editor::commit`. `Sent` clears the edit flag; `Refused` and `Retry` keep it.
     pub(crate) fn commit(&mut self) -> Committed {
         if let Some(refused) = self.unplaceable() {

@@ -179,6 +179,9 @@ where
         // (stopped) when the control side recalled it. Taken once, here, so
         // its chunk (`Processor::chunk`) is read from the one the block runs.
         let mut processor = this.rt.poll(Processor::stop);
+        // A plugin that asked to be processed again is not reported idle by
+        // this block, whatever it answers.
+        let asked = processor.is_some() && this.requested.take();
         let chunk = processor
             .as_deref()
             .and_then(Processor::chunk)
@@ -425,7 +428,7 @@ where
             // this one shipped (a wake's) comes a block later: it is not
             // parked again before then.
             let stale = std::mem::take(&mut this.idled);
-            this.idled = slept && this.out_events.is_empty() && !stale;
+            this.idled = slept && this.out_events.is_empty() && !stale && !asked;
             return slept_status(&io, this.idled);
         }
 
@@ -566,7 +569,7 @@ where
                 }
             }
         }
-        slept_status(&io, slept && !sends)
+        slept_status(&io, slept && !sends && !asked)
     }
 
     fn reset(&mut self) {
@@ -592,16 +595,12 @@ where
         }
     }
 
-    /// Hands the plugin's host a wake that raises the node's: a plugin that
-    /// slept and later asks to be processed again (CLAP's `request_process`)
-    /// runs on the next block even though the executor parked the node.
-    /// Control thread.
+    /// Binds the node's wake: the instance raises it for a recall that waits
+    /// and for the plugin's request to be processed again, which a plugin that
+    /// slept makes (CLAP's `request_process`) so that it runs on the next block
+    /// though the executor parked the node. Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
-        let mut instance = self.client.inner.lock();
-        *self.client.wake.lock() = Some(wake.clone());
-        if let Some(control) = instance.control() {
-            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
-        }
+        *self.client.wake.lock() = Some(wake);
     }
 }
 

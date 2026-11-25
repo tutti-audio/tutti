@@ -247,6 +247,60 @@ fn a_recall_reaches_the_node_that_holds_the_processor_while_its_successor_is_sta
     });
 }
 
+/// **The plugin's own request to be processed raises the wake of the node that
+/// holds the Processor**, whichever node that is: the node the executor runs
+/// while its successor is staged, and the successor once the Processor moved.
+/// The fake sleeps, so the executor parks the node that holds it; a request,
+/// answered at the instance's next pump, is what calls it again.
+#[test]
+fn the_plugins_process_request_wakes_the_node_that_holds_the_processor() {
+    let mut rig = Rig::new();
+    rig.rest();
+    let (successor, pending) = rig.rebinder.prepare().expect("a node");
+    let editor = rig.renderer.editor_mut();
+    for n in 0..QUEUE_CAPACITY {
+        let (inlet, _writer) = EventInletNode::pair(EventCapacity::of(1));
+        editor.insert(NodeKey(100 + n as u64), "filler", inlet);
+        editor.commit().expect("the queue has room");
+    }
+    editor
+        .replace(rig.key, Unforkable(successor), Fade::new(Samples::new(0)))
+        .expect("staged");
+    assert!(matches!(
+        editor.commit(),
+        Err(tutti_graph::CommitError::Backpressure)
+    ));
+
+    let before = rig.processed();
+    rig.fake.request_process();
+    let _ = rig.pump();
+    rig.block();
+    assert!(
+        rig.processed() > before,
+        "the request called the node that holds the Processor while its successor is staged"
+    );
+
+    let sent = (0..LIMIT).any(|_| {
+        rig.block();
+        rig.renderer.editor_mut().commit().is_ok()
+    });
+    assert!(sent, "the commit that carries the successor is sent");
+    pending.commit(main_thread());
+    let rebinder = rig.rebinder.clone();
+    rig.until("the Processor moved", |_, _| {
+        rebinder.settled() == Settlement::Moved
+    });
+    rig.rest();
+    let before = rig.processed();
+    rig.fake.request_process();
+    let _ = rig.pump();
+    rig.block();
+    assert!(
+        rig.processed() > before,
+        "the request called the successor, which holds the Processor now"
+    );
+}
+
 /// **No Processor activated at the rolled-back rate processes a block between
 /// the refusal and the first block at the next accepted rate**, with a block
 /// run after every control step: the mute is cleared only once the plugin is

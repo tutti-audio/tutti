@@ -57,7 +57,7 @@ impl<F: Float> Testing<'_, F> {
 
     /// How many commits have sent a plan.
     pub fn commits_sent(&self) -> u64 {
-        self.graph.commits
+        self.graph.commits()
     }
 
     /// The audio wiring as it stands: the nodes, the edges into every input
