@@ -366,7 +366,7 @@ fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
     let y = g.add(ForkByClone(Bused { aux: true }));
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Stereo.topology()))
+    s.declare_main_output_topology(tutti_buffers::Bed::Stereo.topology())
         .expect("stereo");
     let g = s.graph();
     g.connect(y.bus_output(0), MainOutput).unwrap().unfaded();

@@ -26,7 +26,7 @@ pub(crate) struct OutputPart<F: Float> {
     /// The main output topology last asked for
     /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
     /// applied or not.
-    pub(crate) main_output_request: Option<ChannelTopology>,
+    pub(crate) main_output_request: ChannelTopology,
     /// Why `main_output_request` is not in force, if it is not.
     pub(crate) main_output_refusal: Option<MainOutputError>,
     /// Where the mix lands, as set ([`Session::policy`](crate::Session::policy)).
@@ -44,7 +44,7 @@ pub(crate) struct OutputPart<F: Float> {
 
 impl<F: Float> OutputPart<F> {
     pub(crate) fn new(
-        main_output_request: Option<ChannelTopology>,
+        main_output_request: ChannelTopology,
         policy: Arc<Cell<OutputPolicy>>,
     ) -> Self {
         Self {
@@ -73,7 +73,7 @@ impl<F: Float> OutputPart<F> {
     pub(crate) fn declare(
         &mut self,
         graph: &mut Graph<F>,
-        main_output: Option<ChannelTopology>,
+        main_output: ChannelTopology,
     ) -> Result<(), MainOutputError> {
         self.sync_refusal(graph);
         // The same request again, in force, is nothing to do.

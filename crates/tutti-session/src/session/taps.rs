@@ -103,8 +103,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// it closes the meter at the next [`Reclaim`](crate::Phase::Reclaim)
     /// phase. `None` once taken.
     ///
-    /// It follows the outputs as they are re-wired or widened (up to
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared main output of
+    /// It follows the outputs as they are re-wired. **A declared main output of
     /// another width replaces it**
     /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)):
     /// the reader not yet taken is swapped for the new one, and one taken is

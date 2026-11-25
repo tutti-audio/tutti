@@ -24,7 +24,7 @@ use crate::process::dither_shape;
 use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
 use crate::{RenderError, Written};
 use std::path::Path;
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{
     Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
 };
@@ -500,7 +500,10 @@ pub(crate) fn write_planes<F: FftFloat>(
             crate::render::FileChannels {
                 channels: target.channel_set(),
             }
-            .fold_from(rendered.channels(), None)?,
+            .fold_from(
+                rendered.channels(),
+                &ChannelSet::default_for(rendered.layout()),
+            )?,
         )
     };
     let plan = RenderPlan::of_frames(frames);

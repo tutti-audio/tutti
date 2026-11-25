@@ -101,7 +101,7 @@ fn a_main_output_width_change_reopens_the_main_output_tap_and_closes_the_old_rea
         assert!(reopened(block(&mut s)).is_empty());
     }
 
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("a mono main output")
         .unfaded();
     let mut events = reopened(s.update());
@@ -166,7 +166,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
         .open_main_output(Samples::new(4096))
         .expect("the outputs exist");
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Stereo.topology()))
+    s.declare_main_output_topology(tutti_buffers::Bed::Stereo.topology())
         .expect("a stereo main output")
         .unfaded();
     for _ in 0..3 {
@@ -188,7 +188,7 @@ fn the_taken_main_output_meter_reopens_with_the_new_width() {
     let _ = block(&mut s);
     assert!(!old.is_closed());
 
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("a mono main output")
         .unfaded();
     let mut events = reopened(block(&mut s));
@@ -215,7 +215,7 @@ fn the_taken_main_output_meter_reopens_with_the_new_width() {
 #[test]
 fn a_meter_nobody_took_is_replaced_without_an_event() {
     let mut s = session();
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("a mono main output")
         .unfaded();
     assert!(reopened(block(&mut s)).is_empty());
@@ -236,12 +236,12 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
         .open_main_output(Samples::new(4096))
         .expect("opens");
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("mono")
         .unfaded();
-    s.declare_main_output_topology(Some(
+    s.declare_main_output_topology(
         ChannelTopology::default_for(ChannelLayout::from_count(4)).unwrap(),
-    ))
+    )
     .expect("quad")
     .unfaded();
     let mut events = reopened(s.update());
@@ -264,14 +264,14 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
         .taps()
         .open_main_output(Samples::new(4096))
         .expect("opens");
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("mono")
         .unfaded();
     let first = reopened(block(&mut s));
     assert_eq!(first.len(), 1);
-    s.declare_main_output_topology(Some(
+    s.declare_main_output_topology(
         ChannelTopology::default_for(ChannelLayout::from_count(4)).unwrap(),
-    ))
+    )
     .expect("quad")
     .unfaded();
     let second = reopened(block(&mut s));
@@ -295,7 +295,7 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
         .taps()
         .open_main_output(Samples::new(4096))
         .expect("opens");
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("mono")
         .unfaded();
     let events = reopened(block(&mut s));
@@ -318,19 +318,21 @@ fn a_claim_of_an_unknown_id_is_refused() {
     assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
 }
 
-/// **A widening is a declaration, so it reopens the readers at the new width**:
-/// a 2-wide tap, the main output widened to 4, reopens at 4 (the reader a claim
-/// takes is 4 wide), and declaring that width's order again moves nothing.
+/// **A tap that has the main output's width is left alone**: a 2-wide tap reopens at 4
+/// when the main output is declared 4 wide, and declaring that main output again moves
+/// nothing.
 #[test]
-fn a_widening_reopens_the_tap_at_the_new_width_and_a_declaration_of_it_leaves_it() {
+fn a_tap_that_has_the_main_outputs_width_is_not_reopened_by_a_declaration() {
     let mut s = session();
     let old = s
         .graph()
         .taps()
         .open_main_output(Samples::new(4096))
         .expect("opens");
-    s.graph().widen_outputs(4).expect("widens");
     let four = tutti_buffers::Bed::Quad.topology();
+    s.declare_main_output_topology(four)
+        .expect("quad")
+        .unfaded();
     let mut events = reopened(block(&mut s));
     events.retain(|(id, _)| matches!(id, MainOutputReader::Tap(_)));
     assert_eq!(events.len(), 1);
@@ -338,7 +340,7 @@ fn a_widening_reopens_the_tap_at_the_new_width_and_a_declaration_of_it_leaves_it
     assert_eq!(Some(events[0].0), old.id().map(MainOutputReader::Tap));
     assert_eq!(claim_tap(&mut s, events[0].0).width(), 4);
 
-    s.declare_main_output_topology(Some(four))
+    s.declare_main_output_topology(four)
         .expect("quad")
         .unfaded();
     assert!(
@@ -361,7 +363,7 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
         .expect("opens");
     let id = old.id().expect("named");
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("mono")
         .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);
@@ -383,7 +385,7 @@ fn closing_the_main_output_meter_drops_the_reader_held_for_it() {
     let old = s.take_main_output_meter().expect("held");
     let id = old.id();
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(mono()))
+    s.declare_main_output_topology(mono())
         .expect("mono")
         .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);

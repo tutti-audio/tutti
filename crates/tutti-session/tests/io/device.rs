@@ -810,6 +810,33 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     assert_eq!(after.take_lost(), Samples::new(0));
 }
 
+/// **A restart before the first update has no plan to resume**: the hook
+/// completes, and the session then sends its plan and renders it on the new
+/// device.
+#[test]
+fn a_restart_before_the_first_update_then_renders() {
+    let (driver, _old) = ManualStreamDriver::new();
+    let mut s = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_at(48_000.0), driver)
+        .expect("builds with no device");
+    let dc = s
+        .graph()
+        .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [OutputPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
+    let (driver, new) = ManualStreamDriver::new();
+    s.restart_on(spec_at(48_000.0), driver, None, None)
+        .expect("restarts");
+    let _ = s.update();
+    new.render_block(Samples::new(64)).expect("open");
+    let block = new.render_block(Samples::new(64)).expect("open");
+    assert_eq!(block.len(), 64 * 2);
+    assert_eq!(block[0], 0.5, "the first channel carries the constant");
+}
+
 /// **The session lists the outputs once**: the first `list_outputs_once`
 /// starts its listing and the second starts nothing, so the second fake never
 /// runs. The device is one the host supplied, so `device_name` is `Ok(None)`,
@@ -983,7 +1010,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
-    assert!(session.declare_main_output_topology(Some(buses)).is_err());
+    assert!(session.declare_main_output_topology(buses).is_err());
     assert!(matches!(
         session.main_output_topology_status(),
         MainOutputTopologyStatus::Refused(_)
@@ -1001,7 +1028,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
         session.main_output_topology_status(),
         MainOutputTopologyStatus::Applied
     );
-    assert_eq!(session.main_output_topology(), Some(&buses));
+    assert_eq!(session.main_output_topology(), &buses);
     assert_eq!(session.graph_ref().outputs(), 4);
 }
 
@@ -1034,16 +1061,16 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .unwrap()
         .unfaded();
     let _ = session.update();
-    session.declare_main_output_topology(Some(stereo)).unwrap();
+    session.declare_main_output_topology(stereo).unwrap();
     let _ = session.update();
     stream.render_block(Samples::new(64)).expect("open");
     // Four buses place on six channels, so the declaration is taken, and waits.
-    session.declare_main_output_topology(Some(buses)).unwrap();
+    session.declare_main_output_topology(buses).unwrap();
     assert_eq!(
         session.main_output_topology_status(),
         MainOutputTopologyStatus::Pending
     );
-    assert_eq!(session.requested_main_output_topology(), Some(&buses));
+    assert_eq!(session.requested_main_output_topology(), &buses);
 
     // The device changes under it to one that cannot place four buses.
     let (driver, narrow) = ManualStreamDriver::new();
@@ -1064,15 +1091,8 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     );
     assert_eq!(
         session.main_output_topology(),
-        Some(&stereo),
+        &stereo,
         "the main output in force stays"
-    );
-    let refusal = session.main_output_topology_status();
-    let _ = session.graph().widen_outputs(8);
-    assert_eq!(
-        session.main_output_topology_status(),
-        refusal,
-        "a widening does not replace the declaration's refusal"
     );
 
     let (driver, _wide) = ManualStreamDriver::new();
@@ -1083,7 +1103,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     );
     assert_eq!(
         session.main_output_topology(),
-        Some(&buses),
+        &buses,
         "the restart asked again"
     );
     assert_eq!(session.graph_ref().outputs(), 4);

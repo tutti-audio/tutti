@@ -256,7 +256,7 @@ fn a_reversed_source_is_reported_and_stopped() {
 /// that output's port.
 fn tapped() -> (crate::Graph, tutti_graph::NodeKey, FollowTap) {
     let mut graph = crate::Graph::new(
-        2,
+        tutti_buffers::ChannelTopology::STEREO,
         RATE,
         tutti_buffers::MaxBlock::of(Samples::new(64)),
         None,
