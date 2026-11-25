@@ -264,6 +264,22 @@ impl ClipEvents {
         self.events.len()
     }
 
+    /// The clip's side of a block's walk, sending through `sending` into a
+    /// port of `capacity` events.
+    fn playing<'a, 'w>(
+        &self,
+        sending: Sending<'a, 'w, NoteId>,
+        capacity: usize,
+    ) -> Playing<'a, 'w, '_> {
+        Playing {
+            sending,
+            chase: &self.chase,
+            header: &self.header,
+            rests: &self.rests,
+            capacity,
+        }
+    }
+
     /// Whether the clip holds no event.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -894,13 +910,10 @@ impl<F: Float> Node<F> for MidiClipNode {
         let seq = clip.seq();
         let replaced = std::mem::replace(&mut self.last_seq, seq) != seq;
         let Play { walk, held } = &mut self.play;
-        let mut playing = Playing {
-            sending: held.block(io.event_out(Self::OUT), first),
-            chase: &clip.chase,
-            header: &clip.header,
-            rests: &clip.rests,
-            capacity: self.capacity.get() as usize,
-        };
+        let mut playing = clip.playing(
+            held.block(io.event_out(Self::OUT), first),
+            self.capacity.get() as usize,
+        );
         if replaced {
             playing.sending.release_all(first);
         }
