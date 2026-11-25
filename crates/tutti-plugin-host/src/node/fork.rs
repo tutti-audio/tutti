@@ -249,7 +249,7 @@ where
         // finishes in this call, and the fork's first block has a Processor
         // (without it, that block's MIDI would be dropped unplayed).
         fork.inner.lock().set_render_mode(
-            main,
+            Some(main),
             if offline {
                 RenderMode::Offline
             } else {

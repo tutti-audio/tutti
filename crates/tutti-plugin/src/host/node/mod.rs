@@ -606,9 +606,9 @@ impl PluginClient<Bound> {
 }
 
 impl<S> PluginClient<S> {
-    /// The render mode the plugin runs in, as its lifecycle holds it; `None`
-    /// once the plugin is gone. What the plugin answers reaches it at the
-    /// lifecycle's next pump.
+    /// The render mode the plugin runs in, or is being changed to, as its
+    /// lifecycle holds it; `None` once the plugin is gone. What the plugin
+    /// answers reaches it at the lifecycle's next pump.
     #[must_use]
     pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
         self.live.render_mode()
@@ -670,7 +670,15 @@ impl<S> PluginClient<S> {
         .refresh_sink(self.refresh_sink().clone())
         .invalidate_sink(self.invalidate_sink().clone())
         .transport_sink(self.transport_sink().clone())
-        .midi_map(self.midi_map.clone());
+        .midi_map(self.midi_map.clone())
+        .render_mode_route({
+            let live = self.live.clone();
+            let has_mode = self
+                .loaded
+                .features
+                .contains(tutti_plugin_types::Features::RENDER_MODE);
+            move |mode| has_mode && live.announce_render_mode(mode)
+        });
         match pid {
             Some(pid) => handle.with_server_pid(pid),
             None => handle,

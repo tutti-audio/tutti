@@ -227,6 +227,9 @@ pub struct PluginHandle {
     /// The controller map the node translates by, when this handle's plugin has a
     /// node over it.
     midi_map: Option<MidiMapSlot>,
+    /// Where an announced render mode goes when it is not the backend's to
+    /// take: the plugin's lifecycle, for a plugin served from another process.
+    render_mode_route: Option<Arc<dyn Fn(RenderMode) -> bool + Send + Sync>>,
     server_pid: Option<u32>,
     /// Whether an editor this handle opened is open: shared by every clone, set
     /// by a successful open and cleared by `close_editor`.
@@ -279,6 +282,7 @@ impl PluginHandle {
             transport_sink: TransportSink::default(),
             // No subprocess to name unless `with_server_pid` says so.
             midi_map: None,
+            render_mode_route: None,
             server_pid: None,
             editor_open: Arc::new(AtomicBool::new(false)),
             instance: Arc::new(()),
@@ -321,6 +325,18 @@ impl PluginHandle {
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, whose node is built apart.
     pub fn midi_map(mut self, slot: MidiMapSlot) -> Self {
         self.midi_map = Some(slot);
+        self
+    }
+
+    /// This handle with an announced render mode going to `route`, which writes
+    /// the want in the plugin's lifecycle, in place of the backend's own tell.
+    ///
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle.
+    pub fn render_mode_route(
+        mut self,
+        route: impl Fn(RenderMode) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.render_mode_route = Some(Arc::new(route));
         self
     }
 
@@ -379,7 +395,10 @@ impl PluginHandle {
     /// Tells the plugin whether it renders offline and returns whether it
     /// accepted the mode ([`AnyThread::set_render_mode`]).
     pub fn announce_render_mode(&self, mode: RenderMode) -> bool {
-        self.any_thread.set_render_mode(mode)
+        match &self.render_mode_route {
+            Some(route) => route(mode),
+            None => self.any_thread.set_render_mode(mode),
+        }
     }
 
     /// Sends one parameter value to the plugin ([`AnyThread::set_parameter_value`]);

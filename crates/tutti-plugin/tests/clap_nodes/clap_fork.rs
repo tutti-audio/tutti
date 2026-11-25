@@ -1340,6 +1340,16 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
             client.render_mode() == Some(tutti_plugin_types::RenderMode::Offline)
         },
     );
+    // The want stands: pumps after the answer neither tell the plugin another
+    // mode nor change what the lifecycle holds.
+    for _ in 0..50 {
+        rebinder.tick(tutti_fixtures::main_thread());
+        assert_eq!(
+            client.render_mode(),
+            Some(tutti_plugin_types::RenderMode::Offline),
+            "the announced mode is not reverted"
+        );
+    }
     // Forked through the graph in `RenderMode::Realtime`, prepared in realtime: the
     // graph does not say offline, so only the live plugin's mode can.
     let rate = SampleRate::of(SAMPLE_RATE);

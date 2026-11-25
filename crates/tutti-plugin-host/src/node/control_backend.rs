@@ -396,7 +396,7 @@ where
     /// `false` if that does not come within the deadline.
     /// `InProcessClient::set_render_mode` is the same call on the node's side.
     fn set_render_mode(&self, mode: RenderMode) -> bool {
-        self.on_main(move |main, instance| instance.set_render_mode(main, mode, None))
+        self.on_main(move |main, instance| instance.set_render_mode(Some(main), mode, None))
             .unwrap_or(false)
     }
 

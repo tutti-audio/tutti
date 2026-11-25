@@ -619,7 +619,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// thread, not the audio thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         match MainThreadMarker::new() {
-            Some(main) => self.inner.lock().set_render_mode(main, mode, None),
+            Some(main) => self.inner.lock().set_render_mode(Some(main), mode, None),
             None => false,
         }
     }
@@ -673,11 +673,24 @@ impl<L: Loaded> std::fmt::Debug for LiveView<L> {
 }
 
 impl<L: Loaded> LiveView<L> {
-    /// The render mode the plugin runs in, as it has answered; `None` once the
-    /// plugin is gone.
+    /// The render mode the plugin runs in, or is being changed to; `None` once
+    /// the plugin is gone.
     #[must_use]
     pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
-        Some(self.0.upgrade()?.lock().running_mode())
+        Some(self.0.upgrade()?.lock().render_mode())
+    }
+
+    /// Asks for the plugin to run in `mode`, as the instance does
+    /// ([`InProcessClient::set_render_mode`]), from any thread: the want is
+    /// written here, and the main thread's next pump tells the plugin. `false`
+    /// once the plugin is gone, lost, or has no mode to take.
+    pub fn announce_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
+        let Some(instance) = self.0.upgrade() else {
+            return false;
+        };
+        instance
+            .lock()
+            .set_render_mode(MainThreadMarker::new(), mode, None)
     }
 }
 
