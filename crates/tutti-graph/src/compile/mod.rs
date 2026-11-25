@@ -59,7 +59,7 @@ pub(crate) mod order;
 mod place;
 pub(crate) mod plan;
 pub(crate) mod program;
-mod schedule;
+pub(crate) mod schedule;
 mod shapes;
 pub(crate) mod tail;
 mod timing;
@@ -68,7 +68,7 @@ pub(crate) mod verify;
 use std::collections::BTreeMap;
 
 use crate::NodeKey;
-use crate::{InputPort, PortSink};
+use crate::{BusOutputPort, InputPort, NodeBus, PortSink};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
@@ -114,6 +114,16 @@ pub enum CycleEdge {
         at: InputPort,
         /// The event output that drives the gain.
         from: EventOutputPort,
+    },
+    /// A bus edge from `from` into the bus `at`. Only a spec that is not yet
+    /// lowered has one (`GraphSpec::cycle` reads it at node level); `compile`
+    /// takes a lowered graph, whose bus edges are per-port audio edges, so it
+    /// never reports this arm.
+    Bus {
+        /// The sink bus.
+        at: NodeBus,
+        /// The bus that feeds it.
+        from: BusOutputPort,
     },
 }
 
