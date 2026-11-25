@@ -245,20 +245,25 @@ impl Loaded for ClapLoaded {
     /// CLAP restarts for latency and for the audio ports.
     const RESTARTS: RestartRules = RestartRules::CLAP;
 
-    /// 64-bit when every audio port advertises it, as of the last port read.
-    fn widths(&self) -> Widths {
+    /// 64-bit when every audio port advertises it. The ports are read again
+    /// (`clap_plugin_audio_ports.get` is `[main-thread]`, and a plugin
+    /// re-declares its ports while deactivated). A port the host cannot read
+    /// leaves 64-bit unsupported, so 32-bit is chosen, until a later read
+    /// succeeds and sets it from the ports again.
+    fn widths(&mut self, main: MainThreadMarker) -> Widths {
+        if self.rescan_audio_ports(main).is_err() {
+            self.audio.supports_f64 = false;
+        }
         Widths::new(self.audio.supports_f64)
     }
 
     /// Splits the plugin into its two halves. A refusal is the configuration's
     /// end, not the plugin's: CLAP plugins routinely decline 64-bit audio or a
     /// rate, so [`Refused`] carries the unconsumed [`ClapLoaded`] back beside
-    /// the reason, and a caller retries at `f32` against the same mapped
-    /// library and instance ([`negotiate_format`](ClapLoaded::negotiate_format)
-    /// answers which format to ask for). Both failure paths leave it intact:
-    /// the 64-bit check returns before any FFI runs, and a plugin-side
-    /// `activate` refusal leaves the instance inactive. The halves exist only
-    /// on success.
+    /// the reason, and a caller can retry against the same mapped library and
+    /// instance. Both failure paths leave it intact: the 64-bit check returns
+    /// before any FFI runs, and a plugin-side `activate` refusal leaves the
+    /// instance inactive. The halves exist only on success.
     fn activate(
         self,
         main: MainThreadMarker,

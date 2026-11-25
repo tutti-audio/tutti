@@ -117,7 +117,7 @@ impl Loaded for Vst2Loaded {
 
     /// 64-bit when the plugin declares double precision
     /// (`effFlagsCanDoubleReplacing`).
-    fn widths(&self) -> Widths {
+    fn widths(&mut self, _main: MainThreadMarker) -> Widths {
         Widths::new(self.metadata().supports_f64)
     }
 
@@ -155,7 +155,7 @@ impl Loaded for Vst2Loaded {
             });
         };
 
-        let format = self.widths().negotiate(prepare.format());
+        let format = self.widths(main).negotiate(prepare.format());
         let double_precision = format == FloatWidth::F64;
         // Before each dispatch, so a plugin asking `audioMasterGetSampleRate` or
         // `GetBlockSize` from inside it reads the figure being set.

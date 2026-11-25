@@ -329,9 +329,10 @@ impl<L: ServerSide> Server<L> {
     /// refusal of the state, if it refused: the plugin is then activated at its
     /// defaults (a plugin at its defaults beats none).
     ///
-    /// With a `requested` of 64-bit the plugin is activated at 64-bit; one that refuses it
-    /// is activated at 32-bit. What it runs at is its wiring's
-    /// [`Features::F64_AUDIO`], never the request.
+    /// With a `requested` of 64-bit the plugin is activated at 64-bit when
+    /// [`Loaded::widths`](tutti_plugin_types::Loaded::widths) says it takes it just before the activation, else at
+    /// 32-bit; a plugin that refuses the width it declared fails the activation.
+    /// What it runs at is its wiring's [`Features::F64_AUDIO`], never the request.
     ///
     /// `hand` is the Processor's way to the thread that renders: the server's
     /// is [`Hand::threaded`], whose other end is the render thread's seat
@@ -344,7 +345,7 @@ impl<L: ServerSide> Server<L> {
     /// took.
     pub(crate) fn activate(
         main: MainThreadMarker,
-        loaded: L,
+        mut loaded: L,
         sample_rate: SampleRate,
         block_size: usize,
         requested: FloatWidth,
@@ -367,6 +368,9 @@ impl<L: ServerSide> Server<L> {
                 ))
             })?;
 
+        // The width is chosen from the plugin's widths now, once: a plugin that
+        // refuses the width it declared fails the activation.
+        let format = loaded.widths(main).negotiate(requested);
         let mut this = Self {
             origin: loaded.origin().clone(),
             lifecycle: Lifecycle::new(loaded),
@@ -397,20 +401,10 @@ impl<L: ServerSide> Server<L> {
                 None => Some(lost()),
             }
         });
-        let mut refusal = this.drive(
+        let refusal = this.drive(
             main,
-            Event::Op(HostOp::Activate(prepare.with_format(requested))),
+            Event::Op(HostOp::Activate(prepare.with_format(format))),
         );
-        if requested == FloatWidth::F64 && refusal.is_some() && !this.lifecycle.is_poisoned() {
-            // A plugin that will not take 64-bit audio runs at 32-bit: the
-            // refusal was told to nobody.
-            this.refused = false;
-            this.events.clear();
-            refusal = this.drive(
-                main,
-                Event::Op(HostOp::Activate(prepare.with_format(FloatWidth::F32))),
-            );
-        }
         if this.state.stage() != Stage::Active {
             return Err(activation_failed(
                 refusal.map_or_else(|| "refused".to_string(), |r| r.reason.to_string()),

@@ -262,6 +262,9 @@ struct Shared {
     sleeps_over_sound: AtomicBool,
     /// The plugin processes 32-bit audio only ([`FakePlugin::only_32_bit`]).
     only_32_bit: AtomicBool,
+    /// `activate` refuses 64-bit audio although the fake declares it
+    /// ([`FakePlugin::refuse_64_bit`]).
+    refuse_64_bit: AtomicBool,
     /// The width of the last activation: 0 before one, else 1 (32-bit) or 2.
     activated: AtomicU8,
     /// The callback size of the last activation, in frames (0: none).
@@ -381,6 +384,7 @@ impl FakePlugin {
             ring: AtomicUsize::new(0),
             sleeps_over_sound: AtomicBool::new(false),
             only_32_bit: AtomicBool::new(false),
+            refuse_64_bit: AtomicBool::new(false),
             activated: AtomicU8::new(0),
             quantum: AtomicUsize::new(0),
             blocks_32: AtomicU64::new(0),
@@ -514,6 +518,12 @@ impl FakePlugin {
     /// 64-bit support ([`Loaded::widths`]).
     pub fn only_32_bit(&self) {
         self.0.only_32_bit.store(true, Ordering::Relaxed);
+    }
+
+    /// Makes `activate` refuse a 64-bit activation although the fake declares
+    /// 64-bit ([`Loaded::widths`]).
+    pub fn refuse_64_bit(&self) {
+        self.0.refuse_64_bit.store(true, Ordering::Relaxed);
     }
 
     /// The width the host activated the fake at, as it sent it: `None` before
@@ -993,7 +1003,7 @@ impl Loaded for FakeLoaded {
 
     const RESTARTS: RestartRules = RestartRules::CLAP;
 
-    fn widths(&self) -> Widths {
+    fn widths(&mut self, _main: MainThreadMarker) -> Widths {
         Widths::new(!self.shared.only_32_bit.load(Ordering::Relaxed))
     }
 
@@ -1026,6 +1036,13 @@ impl Loaded for FakeLoaded {
             let reason = PluginError::Other(format!("the fake refuses {refused} Hz"));
             let plugin = (!shared.lose_on_refuse.load(Ordering::Relaxed)).then_some(self);
             return Err(Refused { plugin, reason });
+        }
+        if prepare.format() == FloatWidth::F64 && shared.refuse_64_bit.load(Ordering::Relaxed) {
+            let reason = PluginError::Other("the fake refuses 64-bit audio".into());
+            return Err(Refused {
+                plugin: Some(self),
+                reason,
+            });
         }
         let shell = Arc::new(ActivationShell);
         let (sink, drain) = edit_slots(shared.declared().into_iter().map(|(id, _)| id));

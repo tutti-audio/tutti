@@ -237,9 +237,7 @@ fn a_64bit_request_negotiates_to_32bit_without_64bit_ports() {
     set_ports_64bit(0);
     let mut loaded = probe.load();
     assert!(!loaded.supports_f64());
-    let negotiated = loaded
-        .negotiate_format(main_thread(), FloatWidth::F64)
-        .expect("inactive");
+    let negotiated = loaded.widths(main_thread()).negotiate(FloatWidth::F64);
     assert_eq!(negotiated, FloatWidth::F32, "no 64-bit ports");
 
     let asked = prepare().with_format(FloatWidth::F64);
@@ -259,15 +257,11 @@ fn a_64bit_request_negotiates_to_32bit_without_64bit_ports() {
     set_ports_64bit(PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS);
     let mut capable = probe.load();
     assert_eq!(
-        capable
-            .negotiate_format(main_thread(), FloatWidth::F64)
-            .expect("inactive"),
+        capable.widths(main_thread()).negotiate(FloatWidth::F64),
         FloatWidth::F64
     );
     assert_eq!(
-        capable
-            .negotiate_format(main_thread(), FloatWidth::F32)
-            .expect("inactive"),
+        capable.widths(main_thread()).negotiate(FloatWidth::F32),
         FloatWidth::F32,
         "capability never raises a 32-bit request"
     );
@@ -282,14 +276,17 @@ fn a_64bit_request_negotiates_to_32bit_without_64bit_ports() {
 fn widths_follow_the_ports_precision() {
     let probe = Probe::acquire();
     set_ports_64bit(0);
-    let narrow = probe.load();
-    assert_eq!(narrow.widths(), Widths::F32);
-    assert!(!narrow.widths().accepts(FloatWidth::F64));
-    assert_eq!(narrow.widths().negotiate(FloatWidth::F64), FloatWidth::F32);
+    let mut narrow = probe.load();
+    assert_eq!(narrow.widths(main_thread()), Widths::F32);
+    assert!(!narrow.widths(main_thread()).accepts(FloatWidth::F64));
+    assert_eq!(
+        narrow.widths(main_thread()).negotiate(FloatWidth::F64),
+        FloatWidth::F32
+    );
 
     set_ports_64bit(PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS);
-    let wide = probe.load();
-    assert_eq!(wide.widths(), Widths::BOTH);
+    let mut wide = probe.load();
+    assert_eq!(wide.widths(main_thread()), Widths::BOTH);
     set_ports_64bit(0);
 }
 
@@ -304,17 +301,13 @@ fn partly_64bit_ports_negotiate_to_32bit_and_the_ports_are_read_again() {
     set_ports_64bit(PORTS_64BIT_INPUTS);
     let mut inputs_only = probe.load();
     assert_eq!(
-        inputs_only
-            .negotiate_format(main_thread(), FloatWidth::F64)
-            .expect("inactive"),
+        inputs_only.widths(main_thread()).negotiate(FloatWidth::F64),
         FloatWidth::F32,
         "inputs only"
     );
     set_ports_64bit(PORTS_64BIT_OUTPUTS);
     assert_eq!(
-        inputs_only
-            .negotiate_format(main_thread(), FloatWidth::F64)
-            .expect("inactive"),
+        inputs_only.widths(main_thread()).negotiate(FloatWidth::F64),
         FloatWidth::F32,
         "outputs only"
     );
@@ -324,9 +317,7 @@ fn partly_64bit_ports_negotiate_to_32bit_and_the_ports_are_read_again() {
     assert!(loaded.supports_f64());
     set_ports_64bit(0);
     assert_eq!(
-        loaded
-            .negotiate_format(main_thread(), FloatWidth::F64)
-            .expect("inactive"),
+        loaded.widths(main_thread()).negotiate(FloatWidth::F64),
         FloatWidth::F32,
         "the flags dropped after load"
     );

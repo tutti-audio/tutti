@@ -452,14 +452,20 @@ pub trait Loaded: Control + Sized + Send {
     /// What this format needs a restart for. A reload restarts on every format.
     const RESTARTS: RestartRules;
 
-    /// The float widths the plugin processes audio in, as of now. An
-    /// activation at a width outside it is refused, and
-    /// [`Widths::negotiate`] turns a request into the width one accepts.
+    /// The float widths the plugin processes audio in, read from the plugin
+    /// now. An activation at a width outside it is refused, and
+    /// [`Widths::negotiate`] turns a request into the width one accepts: an
+    /// activation negotiates against this read, taken just before it.
+    ///
+    /// A format whose spec lets the answer change after the plugin opened
+    /// reads it again here (CLAP's audio ports, VST3's `canProcessSampleSize`);
+    /// one whose answer is fixed (VST2's `effFlagsCanDoubleReplacing`, an AU's
+    /// stream format) answers what it holds.
     ///
     /// An out-of-process plugin answers the width its load settled on, not
     /// every width the plugin could process: its slab runs one width until a
     /// reload.
-    fn widths(&self) -> Widths;
+    fn widths(&mut self, main: MainThreadMarker) -> Widths;
 
     /// Splits the plugin. On failure the whole plugin comes back in the error.
     ///

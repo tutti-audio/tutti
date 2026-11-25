@@ -85,7 +85,6 @@ fn instance::editor_instance::ClapEditor::loaded
 fn instance::editor_instance::ClapEditor::loaded_mut
 fn instance::lifecycle::ClapLoaded::info
 fn instance::lifecycle::ClapLoaded::is_active
-fn instance::lifecycle::ClapLoaded::negotiate_format
 fn instance::lifecycle::ClapLoaded::supports_f64
 fn instance::load::ClapLoaded::load
 fn instance::load::ClapLoaded::probe
