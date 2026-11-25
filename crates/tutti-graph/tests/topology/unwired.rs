@@ -11,7 +11,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
-use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, EventEdge,
     EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node, NodeBus, NodeKey,
@@ -425,7 +425,8 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     let banded = Some(Bus::new(stereo(), BusRole::Aux));
     ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)));
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
-    ed.declare_main_output(Some(stereo()), ed.spec().main_output_id);
+    ed.declare_main_output(ChannelSet::from(stereo()), ed.spec().main_output_id.next())
+        .unwrap();
     let main_to_main_output = BusOutputPort::Node(NodeBus::new(y, 0));
     let band0 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(0));
     let band1 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(1));
@@ -513,7 +514,8 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
 fn a_narrower_reinsert_during_a_main_output_fade_prunes_the_spec_and_not_the_bank() {
     let (mut ed, _exec) = rig();
     ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(64))));
-    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next())
+        .unwrap();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let lost = EdgeId {
         sink: PortSink::Output(1),

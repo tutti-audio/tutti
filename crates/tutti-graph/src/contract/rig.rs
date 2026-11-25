@@ -4,9 +4,9 @@
 use crate::NodeKey;
 use crate::OutputPort;
 use crate::{InEvents, OutEvents};
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_rt::CappedVec;
 use tutti_units::{Frame, Latency, SampleRate, Samples};
 
@@ -108,6 +108,12 @@ impl<F: Float> BlockRig<F> {
             ins <= RIG_MAX_CHANNELS && outs <= RIG_MAX_CHANNELS,
             "a rig drives at most {RIG_MAX_CHANNELS} channels a side"
         );
+        editor
+            .declare_main_output(
+                ChannelSet::default_for(ChannelLayout::clamped(outs)),
+                editor.spec().main_output_id.next(),
+            )
+            .expect("a new id declares anything");
         let topology = &mut editor.spec_mut().topology;
         topology.inputs =
             ChannelLayout::try_from(ins).expect("asserted within RIG_MAX_CHANNELS above");

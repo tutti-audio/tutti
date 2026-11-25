@@ -24,8 +24,7 @@ use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
 pub struct MainOutputId(u64);
 
 impl MainOutputId {
-    /// The main output a graph starts with: undeclared, the engine's order for its
-    /// width.
+    /// The main output a graph starts with: the empty one, until a declaration.
     pub const GENESIS: Self = Self(0);
 
     /// The generation after this one.

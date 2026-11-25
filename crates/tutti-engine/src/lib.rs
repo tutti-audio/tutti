@@ -92,6 +92,12 @@
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
 //! editor
+//!     .declare_main_output(
+//!         tutti_buffers::ChannelSet::default_for(tutti_buffers::ChannelLayout::STEREO),
+//!         editor.spec().main_output_id.next(),
+//!     )
+//!     .expect("a new id declares anything");
+//! editor
 //!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(beats, port))))
 //!     .expect("the ports exist");
 //! editor.commit().expect("the graph compiles");

@@ -52,6 +52,10 @@
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
+//! editor.declare_main_output(
+//!     tutti_buffers::ChannelSet::default_for(tutti_buffers::ChannelLayout::STEREO),
+//!     editor.spec().main_output_id.next(),
+//! )?;
 //! editor
 //!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))?;
 //! editor.commit()?;
