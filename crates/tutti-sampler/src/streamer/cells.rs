@@ -61,7 +61,7 @@ struct PlaybackParams {
     /// Source samples consumed per output sample by a wrapping time-stretcher:
     /// `1 / stretch`. 1.0 when the voice does not stretch.
     ///
-    /// Held here rather than in `DiskSource` because the stretch vocoder and the
+    /// Held here rather than in `DiskVoice` because the stretch vocoder and the
     /// ring reader never meet: the vocoder lives in the `PlaybackSlot`, the reader
     /// behind the streamer's `SharedReader`. This is the cell both already
     /// share, and it is where the other two rate factors compose.

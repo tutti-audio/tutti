@@ -209,10 +209,8 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // `tutti_graph` nodes. The streamer's `LruCache` /
 // `StreamPin` are internal machinery a consumer never constructs, so they stay
 // `pub(crate)`.
-// `DiskVoiceConfig` and `DiskSource` are deliberately NOT re-exported: nothing
-// outside this crate constructs them. `DiskSource` in particular is the bare
-// ring reader a `DiskVoice` is built over — one capability, and only the outer
-// type is a doorway.
+// `DiskVoiceConfig` is deliberately NOT re-exported: nothing outside this
+// crate constructs it.
 //
 pub use voice::{
     DirectionKind, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, LoopingKind,
