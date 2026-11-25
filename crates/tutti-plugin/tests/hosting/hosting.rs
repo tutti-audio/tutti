@@ -50,38 +50,30 @@ mod clap {
         env
     }
 
-    /// **`Auto` serves a CLAP plugin**: the format's default is out of process,
-    /// so it runs in a `plugin-server` process, which the
-    /// handle names.
+    /// **`Auto` and `OutOfProcess` both serve a CLAP plugin**: the format's
+    /// default is out of process, so either runs in a `plugin-server` process,
+    /// which the handle names.
     #[test]
-    fn auto_serves_a_clap_plugin() {
+    fn auto_and_out_of_process_serve_a_clap_plugin() {
         let _env = with_server();
-        let plugin = Plugin::open_served(
-            &tutti_plugin_ipc::AudioConfig::default(),
-            tutti_fixtures::executor(),
-            &tutti_fixtures::detached_work(),
-            &clap(Hosting::Auto),
-            SampleRate::of(RATE),
-        )
-        .expect("the reference plugin loads through a server");
-        assert_eq!(plugin.hosting(), ResolvedHosting::OutOfProcess);
-        assert!(plugin.handle().server_pid().is_some());
-    }
-
-    /// **`OutOfProcess` serves it too**, from any thread (no main-thread proof).
-    #[test]
-    fn out_of_process_serves_a_clap_plugin() {
-        let _env = with_server();
-        let plugin = Plugin::open_served(
-            &tutti_plugin_ipc::AudioConfig::default(),
-            tutti_fixtures::executor(),
-            &tutti_fixtures::detached_work(),
-            &clap(Hosting::OutOfProcess),
-            SampleRate::of(RATE),
-        )
-        .expect("the reference plugin loads through a server");
-        assert_eq!(plugin.hosting(), ResolvedHosting::OutOfProcess);
-        assert!(plugin.handle().server_pid().is_some());
+        for hosting in [Hosting::Auto, Hosting::OutOfProcess] {
+            let plugin = Plugin::open_served(
+                &tutti_plugin_ipc::AudioConfig::default(),
+                tutti_fixtures::executor(),
+                &tutti_fixtures::detached_work(),
+                &clap(hosting),
+                SampleRate::of(RATE),
+            )
+            .unwrap_or_else(|e| {
+                panic!("{hosting:?}: the reference plugin loads through a server: {e:?}")
+            });
+            assert_eq!(
+                plugin.hosting(),
+                ResolvedHosting::OutOfProcess,
+                "{hosting:?}"
+            );
+            assert!(plugin.handle().server_pid().is_some(), "{hosting:?}");
+        }
     }
 
     /// **`InProcess` loads the same plugin in the host's process**: no server

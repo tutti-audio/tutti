@@ -4,7 +4,7 @@ use super::ClapProcessor;
 use super::config::AudioScratch;
 use crate::error::{ClapError, Result};
 use crate::events::{ClapEvent, EventList};
-use crate::types::{ClapNoteExpression, NoteSend, ParameterChanges, TransportInfo};
+use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
     CLAP_TRANSPORT_HAS_SECONDS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
@@ -284,12 +284,6 @@ impl ClapProcessor {
     /// intended use.
     pub fn last_process_status(&self) -> clap_process_status {
         self.scratch.last_process_status.load(Ordering::Relaxed)
-    }
-
-    /// What notes to the plugin's first input note port are sent, as read at
-    /// the last (re)activation: see [`crate::ClapLoaded::note_send`].
-    pub fn note_send(&self) -> NoteSend {
-        self.scratch.input_events.note_send()
     }
 
     /// Whether the plugin's most recent block reported `CLAP_PROCESS_TAIL` —

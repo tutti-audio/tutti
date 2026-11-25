@@ -155,7 +155,10 @@ pub trait Kernel: Clone + Send + 'static {
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
     /// the ceiling. It may design into the kernel's own scratch, and must not change the
-    /// audio state: lines, ramps and phase are as they were. Audio thread: no allocation.
+    /// audio state: lines, ramps and phase are as they were. It is asked at the controls a
+    /// control row states as its longest ([`Ring::LongestAt`](crate::Ring::LongestAt)), so the
+    /// figure must not fall as that control moves toward the stated value, whatever the other
+    /// controls are. Audio thread: no allocation.
     fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
         self.tail()
     }
@@ -178,10 +181,12 @@ pub trait Kernel: Clone + Send + 'static {
 ///
 /// A kernel that declares a finite or unbounded [`tail`](Kernel::tail) rings for at most
 /// that long, and the node holds it to it. Each block it narrows the declared ceiling to
-/// what the controls in force ring ([`Kernel::tail_of`] at the block's last frame; the
-/// ceiling itself while a control signal drives a control the tail reads, which may take any
-/// value later: [`Control::rings`](crate::Control::rings)), held at the longer figure until a
-/// shorter decay has been heard out, and reports it ([`Io::report_tail`]). Once the input has
+/// what the controls in force ring ([`Kernel::tail_of`] at the block's last frame). While a
+/// control signal drives a control the tail reads, which may take any value later, it is
+/// what rings with each driven control at its longest value and the others as their cells
+/// hold them ([`Ring::LongestAt`](crate::Ring::LongestAt)), or the ceiling itself when a driven
+/// control states none ([`Control::ring`](crate::Control::ring)). The figure is held at the
+/// longer one until a shorter decay has been heard out, and reported ([`Io::report_tail`]). Once the input has
 /// been silent for the reported tail plus the latency, the node cuts the output off, resets the kernel and parks
 /// ([`Status::Idle`]): what rings is below the kernel's floor, and a parked node is a fresh
 /// one when it wakes (its stream clock restarts with it).
@@ -400,16 +405,22 @@ impl<K: Kernel> KernelNode<K> {
         let Some(clock) = &mut t.clock else {
             return size;
         };
+        // A driven control the tail reads may take any value later, and its block's values
+        // do not cover that: the block reports the most the kernel rings with each driven
+        // control at its longest value ([`Ring::LongestAt`]), or the ceiling when one has none.
+        // The figure follows which ports are driven, never the values they carry. It is asked
+        // before the target's, so a kernel that keeps its last design holds the target's for
+        // the retarget that follows.
+        let driven = self.params.ring_driven(io).then(|| {
+            tail_frames(match self.params.longest(io) {
+                Some(longest) => self.kernel.tail_of(&longest),
+                None => self.kernel.tail(),
+            })
+        });
         if moved {
             t.current = tail_frames(self.kernel.tail_of(target));
         }
-        // A driven control the tail reads may take any value later, and its block's values
-        // do not cover that: the block reports the ceiling.
-        let current = if self.params.ring_driven(io) {
-            tail_frames(self.kernel.tail())
-        } else {
-            t.current
-        };
+        let current = driven.unwrap_or(t.current);
         let last_input = (0..inputs)
             .filter_map(|c| {
                 io.input(c)[..size]

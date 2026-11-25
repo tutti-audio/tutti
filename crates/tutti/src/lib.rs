@@ -361,13 +361,13 @@ pub mod nodes {
             LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet, ModHost,
             ModalBankKernel, ModalBankSet, MultibandControls, NoControls, PhaserControls,
             PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet, PlateControls,
-            PlateKernel, PlateSet, ReconcileError, RingModControls, RingModKernel, RingModSet,
-            ShimmerKernel, ShimmerSet, SpringControls, SpringReverbKernel, SpringReverbSet,
-            StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet, TiltFilterControls,
-            TiltFilterKernel, TiltFilterSet, TransientControls, TransientShaperKernel,
-            TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet, TubeStageControls,
-            TubeStageKernel, TubeStageSet, WaveguideStringKernel, WaveguideStringSet,
-            WidthControls,
+            PlateKernel, PlateSet, ReconcileError, Ring, RingModControls, RingModKernel,
+            RingModSet, ShimmerKernel, ShimmerSet, SpringControls, SpringReverbKernel,
+            SpringReverbSet, StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet,
+            TiltFilterControls, TiltFilterKernel, TiltFilterSet, TransientControls,
+            TransientShaperKernel, TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet,
+            TubeStageControls, TubeStageKernel, TubeStageSet, WaveguideStringKernel,
+            WaveguideStringSet, WidthControls,
         };
     }
 }
@@ -618,7 +618,7 @@ pub mod session {
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget,
         Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
-        RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
+        RouteInfo, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{

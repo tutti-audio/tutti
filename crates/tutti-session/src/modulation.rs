@@ -295,6 +295,54 @@ fn route_id(key: RouteKey) -> ModRouteId {
 #[error("no modulation source {0:?}")]
 pub struct NoSuchModSource(pub ModSourceId);
 
+/// Why [`Mods::set_source`] refused a source; nothing changes.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SourceError {
+    /// The id names a source this session does not declare.
+    #[error(transparent)]
+    NoSuchSource(NoSuchModSource),
+    /// The source is of another kind than the one declared, whose feed it
+    /// would keep or lack.
+    #[error("source {id:?} is a {from}; a {to} is another kind: remove it and declare a new one")]
+    ChangesKind {
+        /// The source.
+        id: ModSourceId,
+        /// What it is (an LFO, a macro, a follower, a note envelope). The
+        /// names are for the message: match on the variant, not the text.
+        from: &'static str,
+        /// What the call named.
+        to: &'static str,
+    },
+}
+
+/// Whether a source follows a node, so it is declared with one.
+const fn kind_name(source: &Source) -> &'static str {
+    match source {
+        Source::Lfo { .. } => "LFO",
+        Source::Macro { .. } => "macro",
+        Source::Follower { .. } => "follower",
+        Source::NoteEnvelope { .. } => "note envelope",
+    }
+}
+
+/// Whether two sources are of one kind.
+const fn same_kind(a: &Source, b: &Source) -> bool {
+    match (a, b) {
+        (Source::Lfo { .. }, Source::Lfo { .. })
+        | (Source::Macro { .. }, Source::Macro { .. })
+        | (Source::Follower { .. }, Source::Follower { .. })
+        | (Source::NoteEnvelope { .. }, Source::NoteEnvelope { .. }) => true,
+        (
+            Source::Lfo { .. }
+            | Source::Macro { .. }
+            | Source::Follower { .. }
+            | Source::NoteEnvelope { .. },
+            _,
+        ) => false,
+    }
+}
+
 /// What [`Mods::remove_route`] found missing: the route
 /// the id named.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -1495,19 +1543,14 @@ impl Mods<'_> {
         id
     }
 
-    /// A source of any kind with no node to feed (an LFO, a macro).
-    pub fn source(&mut self, source: impl Into<Source>) -> ModSourceId {
-        self.add_source(source.into(), None)
-    }
-
     /// An LFO.
     pub fn lfo(&mut self, lfo: Lfo) -> ModSourceId {
-        self.source(lfo)
+        self.add_source(lfo.into(), None)
     }
 
     /// A macro at `value`.
     pub fn macro_(&mut self, value: f64) -> ModSourceId {
-        self.source(Macro(value))
+        self.add_source(Macro(value).into(), None)
     }
 
     /// A follower of every audio output of `input`.
@@ -1528,8 +1571,8 @@ impl Mods<'_> {
         self.add_source(envelope.into(), Some(OwnFeed::Events(midi, port)))
     }
 
-    /// Replaces `id`'s source, keeping what feeds it, as a declaration: a
-    /// source of another kind, or an LFO of another shape. The value an LFO's
+    /// Replaces `id`'s source, keeping what feeds it, as a declaration: of the
+    /// same kind (an LFO of another shape, a macro at another value). The value an LFO's
     /// rate or a macro's position later takes is
     /// [`ModSourceId::rate`] or [`ModSourceId::value`]; one staged and not
     /// yet published is dropped with the source it was for. The lanes it
@@ -1537,18 +1580,28 @@ impl Mods<'_> {
     ///
     /// # Errors
     ///
-    /// [`NoSuchModSource`] when this session declared no source `id` (removed
-    /// already); nothing changes.
+    /// [`SourceError::NoSuchSource`] when this session declared no source `id`
+    /// (removed already); [`SourceError::ChangesKind`] when `source` is of
+    /// another kind than `id`'s. Nothing changes.
     pub fn set_source(
         &mut self,
         id: ModSourceId,
         source: impl Into<Source>,
-    ) -> Result<(), NoSuchModSource> {
+    ) -> Result<(), SourceError> {
         let Some(s) = self.own.sources.get(&SourceKey(id.get())) else {
-            return Err(NoSuchModSource(id));
+            return Err(SourceError::NoSuchSource(NoSuchModSource(id)));
         };
+        let source = source.into();
+        let from = s.source.get();
+        if !same_kind(&from, &source) {
+            return Err(SourceError::ChangesKind {
+                id,
+                from: kind_name(&from),
+                to: kind_name(&source),
+            });
+        }
         self.own.retire_source(id);
-        s.source.set(source.into());
+        s.source.set(source);
         self.own.provide_source(id, &s.source);
         Ok(())
     }

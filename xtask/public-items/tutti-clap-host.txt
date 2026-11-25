@@ -69,7 +69,6 @@ fn instance::audio::ClapProcessor::is_sleeping
 fn instance::audio::ClapProcessor::is_tailing
 fn instance::audio::ClapProcessor::last_process_status
 fn instance::audio::ClapProcessor::midi_dropped
-fn instance::audio::ClapProcessor::note_send
 fn instance::audio::ClapProcessor::output_events_refused
 fn instance::audio::ClapProcessor::output_param_points_dropped
 fn instance::audio::ClapProcessor::param_points_dropped
@@ -135,7 +134,6 @@ fn instance::ports::ClapLoaded::note_name
 fn instance::ports::ClapLoaded::note_name_count
 fn instance::ports::ClapLoaded::note_port_count
 fn instance::ports::ClapLoaded::note_port_info
-fn instance::ports::ClapLoaded::note_send
 fn instance::ports::ClapLoaded::note_sends
 fn instance::ports::ClapLoaded::num_input_channels
 fn instance::ports::ClapLoaded::num_output_channels

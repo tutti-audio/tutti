@@ -301,17 +301,32 @@ fn the_wet_gain_does_not_change_the_reported_tail() {
     assert_eq!(finite(&d), base);
 }
 
-/// A node cannot see what a driven port takes after the block, so a block with a driven decay
-/// (or size, or pre-delay) reports the ceiling the shape declares, unbounded, not the figure of
-/// the values the port takes in the block (every driven value here is low, and its figure is
-/// finite); the unbounded report never parks the node, and with the port gone the tail is the
-/// cells' again, finite.
+/// A node cannot see what a driven port takes after the block, so a block with a signal on a
+/// decay reports what the network rings with that decay at its longest and the other controls
+/// as their cells hold them (the freeze off): the bank's `tail_of` at the decay's cap, which
+/// the layout clamps to its own longest. The figure is finite, at least the block's own (every
+/// driven value here is low), and the reported ring never parks the node; with the port gone the
+/// cells' figure applies again, once the ring owed has been heard out.
 #[test]
-fn a_driven_control_reports_the_unbounded_ceiling_not_the_blocks_figure() {
+fn a_driven_decay_reports_the_finite_figure_at_its_longest_decay() {
     let low = vec![0.5f32; BLOCK];
+    let at = |decay: f64| FdnControls {
+        decay: [
+            Seconds::new(decay),
+            FdnControls::DEFAULT.decay[1],
+            FdnControls::DEFAULT.decay[2],
+        ],
+        ..FdnControls::DEFAULT
+    };
     let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
-    let d = rig.block(&impulse(), &[Some(&low), Some(&low), Some(&low)]);
-    assert_eq!(d.reported_tail, Some(Tail::Unbounded));
+    let d = rig.block(&impulse(), &[Some(&low)]);
+    let longest = tail_of(&plain(), &at(MaxDecay::CAP.get()));
+    assert_eq!(finite(&d), longest);
+    assert!(longest >= tail_of(&plain(), &at(0.5)), "the block's own");
+    assert!(
+        longest > tail_of(&plain(), &FdnControls::DEFAULT),
+        "past the cells' figure, which has the mid decay at 2 s"
+    );
     assert_ne!(rig.silent().status, Some(Status::Idle));
     let after = rig.block(&[0.0; BLOCK], &[]);
     assert!(
@@ -331,6 +346,34 @@ fn a_driven_control_reports_the_unbounded_ceiling_not_the_blocks_figure() {
         Some(Tail::Unbounded),
         "a driven size and pre-delay"
     );
+}
+
+/// A signal on the freeze, even at off, may switch it on after the block, and a frozen room
+/// never falls: the block reports `Unbounded`.
+#[test]
+fn a_driven_freeze_reports_an_unbounded_tail() {
+    let off = vec![0.0f32; BLOCK];
+    let none: Option<&[f32]> = None;
+    let mut params = vec![none; 10];
+    params.push(Some(&off));
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
+    let d = rig.block(&impulse(), &params);
+    assert_eq!(d.reported_tail, Some(Tail::Unbounded));
+}
+
+/// A control the tail reads and states no longest value for (the size and the pre-delay) driven
+/// reports the ceiling the shape declares, unbounded, not the figure of the values the port takes
+/// in the block (every driven value here is the lowest, and its figure is finite).
+#[test]
+fn a_driven_control_with_no_stated_longest_value_reports_the_ceiling() {
+    let none: Option<&[f32]> = None;
+    let small = vec![0.0f32; BLOCK];
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
+    let d = rig.block(
+        &impulse(),
+        &[none, none, none, Some(&small), none, Some(&small)],
+    );
+    assert_eq!(d.reported_tail, Some(Tail::Unbounded));
 }
 
 /// A real control lane in a real graph reaches the decay: with the cell at its default, a
