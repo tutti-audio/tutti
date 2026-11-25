@@ -71,6 +71,10 @@ impl SweepClock {
     /// `frames` rendered: the segment position moves on, and the next segment is due when
     /// the frames end on a corner.
     pub(crate) fn advance(&mut self, frames: usize) {
+        debug_assert!(
+            self.pos + frames <= COEFF_INTERVAL,
+            "a render chunk never crosses a corner"
+        );
         self.pos = (self.pos + frames) % COEFF_INTERVAL;
         self.due |= frames > 0 && self.pos == 0;
     }
