@@ -78,15 +78,10 @@ impl<F: Float> Editor<F> {
 
     /// Refuses a main output generation the attached host has no folds for.
     fn check_main_output_published(&self) -> Result<(), CommitError> {
-        let outputs = self.spec.topology.outputs.len();
-        if outputs > 0
-            && !self
-                .main_output
-                .publishes(self.spec.main_output_id, outputs)
-        {
+        if !self.main_output.publishes(self.spec.main_output_id) {
             return Err(CommitError::MainOutputNotPublished {
                 main_output: self.spec.main_output_id,
-                outputs,
+                outputs: self.spec.topology.outputs.len(),
             });
         }
         Ok(())
@@ -169,14 +164,13 @@ impl<F: Float> Editor<F> {
             return Ok(Vec::new());
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
-        let (mut plan, mut delta) = compile(
+        let (plan, mut delta) = compile(
             &valid,
             &self.shapes,
             &self.prepare,
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
-        plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         let fades = delta
@@ -252,9 +246,6 @@ impl<F: Float> Editor<F> {
     ///   `1 - g`, `g` the dropped main output's gain at the block: a caller that
     ///   wants no step declares the new main output after [`finish_fades`](Self::finish_fades)
     ///   reports the running fade over (the session does).
-    /// - A commit that changes the main output's width without declaring it again
-    ///   ends the crossfade running as a cut: the old main output's channels cannot
-    ///   stand beside a main output of another width.
     ///
     /// While a crossfade runs the editor holds a clone of the committed spec
     /// and shapes, the old main output's wiring, until it ends.
@@ -278,10 +269,12 @@ impl<F: Float> Editor<F> {
         let continuing = self.main_output.continuing(
             self.spec.main_output_id,
             committed.map(|c| c.spec.main_output_id),
-            self.spec.topology.outputs.len(),
         );
         let (fade, was, published) = match (continuing, self.main_output.fade, committed) {
-            (Some(f), _, _) => (f.bank.fade, &f.was, true),
+            (Some(f), _, _) => {
+                debug_assert_eq!(f.bank.base, self.spec.topology.outputs.len());
+                (f.bank.fade, &f.was, true)
+            }
             (None, Some(fade), Some(c)) if c.spec.main_output_id != self.spec.main_output_id => {
                 (fade, c, false)
             }
@@ -318,10 +311,7 @@ impl<F: Float> Editor<F> {
         let before = lower(&was.spec, &was.shapes)?;
         let base = now.spec.topology.outputs.len();
         let old_width = before.spec.topology.outputs.len();
-        let published = published
-            || self
-                .main_output
-                .publishes(was.spec.main_output_id, old_width);
+        let published = published || self.main_output.publishes(was.spec.main_output_id);
         if base == 0 || old_width == 0 || !published {
             let valid = now.spec.validate().map_err(CommitError::Invalid)?;
             return Ok((valid, now.weights(), None));
@@ -372,7 +362,11 @@ impl<F: Float> Editor<F> {
                 .gains
                 .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= base));
         }
-        let valid = now.spec.validate().map_err(CommitError::Invalid)?;
+        let bank_width = if kept { old_width } else { 0 };
+        let valid = now
+            .spec
+            .validate_banked(bank_width)
+            .map_err(CommitError::Invalid)?;
         if !kept {
             return Ok((valid, now.weights(), None));
         }

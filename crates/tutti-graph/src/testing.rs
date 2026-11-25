@@ -20,8 +20,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
+use tutti_buffers::{ChannelSet, Float};
 
 use crate::NodeKey;
 use crate::{
@@ -56,17 +56,30 @@ pub fn feed_input<F: Float>(
     }
 }
 
-/// Declares the main output `width` channels wide on a bare editor (test
-/// support; a session declares it through its builder). Returns whether the
-/// width changed.
+/// Declares the main output `width` channels wide ([`ChannelSet::default_for`])
+/// under the next [`MainOutputId`](crate::MainOutputId) on a bare editor, when
+/// its width differs (test support; a session declares it through its
+/// builder). Returns whether the width changed.
 pub fn declare_outputs<F: Float>(ed: &mut Editor<F>, width: ChannelLayout) -> bool {
-    ed.resize_outputs(width)
+    if ed.spec().main_output.width() == width {
+        return false;
+    }
+    let id = ed.spec().main_output_id.next();
+    ed.declare_main_output(ChannelSet::default_for(width), id)
+        .expect("a new id declares anything")
+}
+
+/// Declares `spec`'s main output as wide as its output list, for a test that
+/// builds the list on the spec itself.
+pub fn declare_spec_outputs(spec: &mut crate::GraphSpec) {
+    spec.main_output = ChannelSet::default_for(ChannelLayout::clamped(spec.topology.outputs.len()));
 }
 
 /// Wiring for tests that start from a bare editor.
 pub trait WireDeclared {
-    /// Makes the main output as wide as there are `sources` and wires
-    /// channel `c` to the `c`th of them, as [`Editor::wire_outputs`] does.
+    /// Declares the main output as wide as there are `sources`
+    /// ([`declare_outputs`]) and wires channel `c` to the `c`th of them, as
+    /// [`Editor::wire_outputs`] does.
     ///
     /// # Errors
     ///
@@ -82,6 +95,8 @@ impl<F: Float> WireDeclared for Editor<F> {
         &mut self,
         sources: impl IntoIterator<Item = crate::PortSource>,
     ) -> Result<(), crate::WireError> {
+        let sources: Vec<_> = sources.into_iter().collect();
+        declare_outputs(self, ChannelLayout::clamped(sources.len()));
         self.wire_outputs(sources)
     }
 }

@@ -33,7 +33,7 @@
 
 use std::collections::BTreeMap;
 
-use tutti_buffers::ChannelTopology;
+use tutti_buffers::{ChannelSet, ChannelTopology};
 use tutti_buffers::{Fold, FoldError};
 use tutti_units::Gain;
 
@@ -178,12 +178,8 @@ pub enum BusError {
         /// Why.
         error: FoldError,
     },
-    /// A bus edge into the main output, and the main output's topology is not declared
-    /// ([`GraphSpec::main_output`] is `None`).
-    #[error("the topology of the graph's main output is not declared")]
-    MainOutputUndeclared,
     /// A bus edge into the main output, and the source cannot be folded to the
-    /// main output's declared topology.
+    /// main output's declared set.
     #[error("bus edge {from:?} -> the graph's main output cannot be folded: {error}")]
     MainOutputFold {
         /// The source bus.
@@ -392,7 +388,7 @@ impl GraphSpec {
             side: BusSide::Input,
         };
         let (sink_topology, sink_first) = to.resolve(sink_shape.buses_in()).ok_or(no_sink)?;
-        self.fold_lanes(shapes, from, sink_topology, fold, |c| {
+        self.fold_lanes(shapes, from, ChannelSet::from(sink_topology), fold, |c| {
             PortSink::Port(InputPort::new(to.node, (sink_first + c) as u16))
         })
         .map_err(|error| match error {
@@ -409,10 +405,7 @@ impl GraphSpec {
         from: BusOutputPort,
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, Gain)>, BusError> {
-        // The engine's main outputs are at most `MAX_CHANNELS` wide, a bus's width, so
-        // a main output with no `ChannelTopology` is one never declared.
-        let main_output = self.main_output.ok_or(BusError::MainOutputUndeclared)?;
-        self.fold_lanes(shapes, from, main_output, fold, |c| {
+        self.fold_lanes(shapes, from, self.main_output, fold, |c| {
             PortSink::Output(c as u16)
         })
         .map_err(|error| match error {
@@ -421,13 +414,13 @@ impl GraphSpec {
         })
     }
 
-    /// The lanes of `from` folded to `sink`'s topology, each channel `c` at
-    /// `at(c)`.
+    /// The lanes of `from` folded to `sink`, each channel `c` at `at(c)`. A
+    /// `sink` with no topology (wider than a bus) takes the bus by index.
     fn fold_lanes(
         &self,
         shapes: &Shapes,
         from: BusOutputPort,
-        sink: ChannelTopology,
+        sink: ChannelSet,
         by: BusFold,
         at: impl Fn(usize) -> PortSink,
     ) -> Result<Vec<(EdgeId, Gain)>, LaneError> {
@@ -453,6 +446,7 @@ impl GraphSpec {
             }
         };
 
+        let sink = sink.topology().copied().unwrap_or(source_topology);
         let fold = match by {
             BusFold::Speakers => Fold::<f64>::between(&source_topology, &sink),
         }
@@ -548,13 +542,11 @@ impl GraphSpec {
                     spec.topology.connect(at, from);
                 }
                 (PortSink::Output(c), Edge::Direct(source)) => {
-                    // The main output is as wide as its declaration; a shorter
-                    // output list is widened in the lowered value only.
-                    let c = usize::from(c);
-                    if spec.topology.outputs.len() <= c {
-                        spec.topology.outputs.resize(c + 1, Vec::new());
+                    // A lane past the list is a spec whose output list is not
+                    // as wide as its main output: `validate` reports it.
+                    if usize::from(c) < spec.topology.outputs.len() {
+                        spec.topology.connect_output(usize::from(c), source);
                     }
-                    spec.topology.connect_output(c, source);
                 }
                 (PortSink::Output(_), Edge::Feedback(_)) => {
                     unreachable!("a bus lane is a direct edge");

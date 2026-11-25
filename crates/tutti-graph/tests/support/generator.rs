@@ -272,6 +272,7 @@ pub(crate) fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
             1 => PortSource::MainInput(rng.below(width) as u16),
             _ => rng.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
         }));
+    common::declare_spec_outputs(&mut desc.spec);
     // A channel now and then sums several sources, aligned to the output time
     // each on its own.
     for ch in 0..desc.spec.topology.outputs.len() {

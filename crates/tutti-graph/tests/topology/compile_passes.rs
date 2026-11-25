@@ -811,6 +811,7 @@ fn in_place_aliasing_happens_exactly_when_legal() {
     g.topology.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut g.topology, at(C, 0), out(A, 0));
     g.topology.outputs.push(vec![PortSource::Node(out(C, 0))]);
+    common::declare_spec_outputs(&mut g);
     shapes.insert(C, Shape::through_unassigned(ChannelLayout::MONO));
     let plan = compile(
         &g.validate().unwrap(),
@@ -1111,6 +1112,37 @@ fn a_resolution_mark_without_its_edge_is_invalid() {
     assert_eq!(
         g.validate().err(),
         Some(vec![GraphInvalid::RequirementWithoutEdge { at, from }])
+    );
+}
+
+/// The output list is as wide as the declared main output, and a spec whose
+/// list is not is invalid whichever of the two moved.
+#[test]
+fn an_output_list_as_wide_as_the_declared_main_output_is_valid_and_another_is_not() {
+    let mut g = two_node_spec();
+    assert_eq!(
+        g.topology.outputs.len(),
+        usize::from(g.main_output.width().count())
+    );
+    assert!(g.validate().is_ok());
+
+    g.topology.outputs.push(Vec::new());
+    assert_eq!(
+        g.validate().err(),
+        Some(vec![GraphInvalid::OutputWidth {
+            outputs: g.topology.outputs.len(),
+            declared: g.topology.outputs.len() - 1,
+        }])
+    );
+
+    g.topology.outputs.truncate(1);
+    g.main_output = tutti_buffers::ChannelSet::default_for(ChannelLayout::from_count(3));
+    assert_eq!(
+        g.validate().err(),
+        Some(vec![GraphInvalid::OutputWidth {
+            outputs: 1,
+            declared: 3,
+        }])
     );
 }
 

@@ -345,6 +345,7 @@ impl<F: Float> PendingFork<F> {
         let fork = editor.spec_mut();
         fork.topology.inputs = spec.topology.inputs;
         fork.topology.outputs = spec.topology.outputs;
+        fork.main_output = spec.main_output;
         fork.topology.edges = spec.topology.edges;
         fork.events = spec.events;
         fork.required_resolution = spec.required_resolution;
@@ -634,6 +635,12 @@ impl Error for ForkError {
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
 /// editor
+///     .declare_main_output(
+///         tutti_buffers::ChannelSet::default_for(ChannelLayout::MONO),
+///         editor.spec().main_output_id.next(),
+///     )
+///     .expect("a new id declares anything");
+/// editor
 ///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
 ///     .expect("the node exists");
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
@@ -709,6 +716,12 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
+/// editor
+///     .declare_main_output(
+///         tutti_buffers::ChannelSet::default_for(ChannelLayout::MONO),
+///         editor.spec().main_output_id.next(),
+///     )
+///     .expect("a new id declares anything");
 /// editor
 ///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
 ///     .expect("the node exists");
@@ -1049,7 +1062,7 @@ impl<F: Float> Editor<F> {
             // The fork is of the lowered spec: a bus edge is already its
             // lanes.
             bus_edges: BTreeMap::new(),
-            main_output: None,
+            main_output: live.main_output,
             main_output_id: crate::MainOutputId::GENESIS,
             main_output_sources: Vec::new(),
         };

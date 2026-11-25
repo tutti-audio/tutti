@@ -5,7 +5,7 @@
 
 use tutti_graph::testing::{WireDeclared, declare_outputs};
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
 use tutti_graph::{
     Cx, Edge, EdgeGainError, EdgeId, Editor, EventEdge, EventInputPort, EventOutputPort, Executor,
     FeedbackFrom, InputPort, Io, MissingSource, Node, NodeKey, OutputPort, ParamIn, Prepare,
@@ -190,26 +190,76 @@ fn connect_edge_refuses_what_does_not_exist() {
     assert_eq!(*ed.spec(), before, "a refused call writes nothing");
 }
 
-/// `resize_outputs` makes channels silent and cuts them with their sources and
-/// gain entries; it says whether the width moved.
+/// Declaring a narrower main output cuts the dropped channels with their
+/// sources and gain entries; a wider one adds silent channels; the call says
+/// whether the declaration moved.
 #[test]
-fn resize_outputs_cuts_a_channel_with_its_sources_and_gain() {
+fn declaring_a_narrower_main_output_cuts_the_dropped_channels_sources_and_gains() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     assert!(declare_outputs(&mut ed, ChannelLayout::from_count(2)));
     assert!(!declare_outputs(&mut ed, ChannelLayout::from_count(2)));
+    let first = into_output(0, out(1));
     let second = into_output(1, out(1));
+    ed.connect_edge(first).expect("wires");
     ed.connect_edge(second).expect("wires");
     ed.set_edge_gain(second, tutti_units::Gain::new(0.5))
         .expect("an edge of the spec");
     assert!(ed.spec().gains.contains_key(&second));
 
     assert!(declare_outputs(&mut ed, ChannelLayout::from_count(1)));
-    assert_eq!(ed.spec().topology.outputs.len(), 1);
+    assert_eq!(ed.spec().topology.outputs, vec![vec![out(1)]]);
     assert!(
         ed.spec().gains.is_empty(),
         "the cut channel's gain went with it"
     );
+
+    assert!(declare_outputs(&mut ed, ChannelLayout::from_count(3)));
+    assert_eq!(
+        ed.spec().topology.outputs,
+        vec![vec![out(1)], vec![], vec![]],
+        "a new channel is silent"
+    );
+}
+
+/// A main output changes under a new id: the same id with another set is
+/// refused and writes nothing, and the same set under it is no change.
+#[test]
+fn a_changed_declaration_under_the_same_id_is_refused() {
+    let (mut ed, _exec) = editor();
+    let id = ed.spec().main_output_id.next();
+    let stereo = ChannelSet::from(tutti_buffers::ChannelTopology::STEREO);
+    assert_eq!(ed.declare_main_output(stereo, id), Ok(true));
+    let before = ed.spec().clone();
+    assert_eq!(ed.declare_main_output(stereo, id), Ok(false));
+    assert_eq!(
+        ed.declare_main_output(ChannelSet::default_for(ChannelLayout::from_count(4)), id),
+        Err(WireError::MainOutputChanged { id }),
+    );
+    assert_eq!(*ed.spec(), before, "a refused call writes nothing");
+}
+
+/// The main output's width is the declaration's: a list of sources longer
+/// than it is refused, and a shorter one leaves the rest of the channels
+/// silent.
+#[test]
+fn wire_outputs_takes_no_more_sources_than_the_declared_width() {
+    let (mut ed, _exec) = editor();
+    ed.insert(key(1), "level", Unforkable(Level(0.25)));
+    declare_outputs(&mut ed, ChannelLayout::from_count(2));
+    let before = ed.spec().clone();
+    assert_eq!(
+        ed.wire_outputs([out(1), out(1), out(1)]),
+        Err(WireError::OutputPastWidth {
+            sources: 3,
+            width: 2,
+        }),
+    );
+    assert_eq!(*ed.spec(), before, "a refused call writes nothing");
+
+    ed.wire_outputs([out(1)])
+        .expect("fewer sources than channels");
+    assert_eq!(ed.spec().topology.outputs, vec![vec![out(1)], vec![]]);
 }
 
 /// `connect_events` and `disconnect_events` write and take out one edge:
@@ -348,8 +398,9 @@ fn declare_main_output_writes_the_declaration_and_its_generation() {
     let (mut ed, _exec) = editor();
     let topology = tutti_buffers::ChannelTopology::STEREO;
     let id = ed.spec().main_output_id.next();
-    ed.declare_main_output(Some(topology), id);
-    assert_eq!(ed.spec().main_output, Some(topology));
+    ed.declare_main_output(ChannelSet::from(topology), id)
+        .unwrap();
+    assert_eq!(ed.spec().main_output, ChannelSet::from(topology));
     assert_eq!(ed.spec().main_output_id, id);
 }
 
@@ -370,12 +421,13 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
     };
     let sink = EventInputPort::new(key(2), 0);
     let edge = EventEdge::Direct(driver);
-    let topology = Some(tutti_buffers::ChannelTopology::STEREO);
-    let id = ed.spec().main_output_id.next();
+    let topology = ChannelSet::from(tutti_buffers::ChannelTopology::STEREO);
+    // Past the id `declare_outputs` takes, which holds another set.
+    let id = ed.spec().main_output_id.next().next();
 
     let calls: Vec<(&str, Box<dyn Fn(&mut Editor)>)> = vec![
         (
-            "resize_outputs",
+            "declare_outputs",
             Box::new(|e| {
                 let _ = declare_outputs(e, ChannelLayout::from_count(1));
             }),
@@ -401,7 +453,7 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
         (
             "declare_main_output",
             Box::new(move |e| {
-                let _ = e.declare_main_output(topology, id);
+                let _ = e.declare_main_output(topology, id).unwrap();
             }),
         ),
         (

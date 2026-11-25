@@ -47,7 +47,7 @@
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSource};
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_units::{Frame, Mix, Samples};
 
 use crate::edit::editor::{CommitError, Editor};
@@ -196,19 +196,23 @@ impl GraphBuilder {
     /// sample format.
     #[must_use]
     pub fn new(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
-        Self::with_format(inputs, outputs)
+        Self::with_format(inputs, ChannelSet::default_for(outputs))
     }
 }
 
 impl<F: Float> GraphBuilder<F> {
     /// An empty graph in sample format `F` with `inputs` main input
-    /// channels and `outputs` main output channels, every output silent
-    /// until wired.
+    /// channels and the main output `outputs`, every output silent until
+    /// wired.
     #[must_use]
-    pub fn with_format(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
+    pub fn with_format(inputs: ChannelLayout, outputs: ChannelSet) -> Self {
         let mut spec = GraphSpec::default();
         spec.topology.inputs = inputs;
-        spec.topology.outputs = vec![Vec::new(); outputs.count() as usize];
+        spec.topology.outputs = vec![Vec::new(); usize::from(outputs.width().count())];
+        // Declared as an editor declares it: under the first id past the empty
+        // main output every graph starts with.
+        spec.main_output = outputs;
+        spec.main_output_id = crate::MainOutputId::GENESIS.next();
         Self {
             spec,
             values: GraphValues::default(),
@@ -883,7 +887,10 @@ impl<F: Float> Renderer<F> {
             settings,
         } = node.into_parts();
         let shape = node.shape();
-        let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
+        let mut g = GraphBuilder::<F>::with_format(
+            shape.audio_in(),
+            ChannelSet::default_for(shape.audio_out()),
+        );
         let unit = NodeParts {
             node,
             controls: (),

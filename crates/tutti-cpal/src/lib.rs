@@ -56,6 +56,10 @@
 //! let (mut editor, executor) = Editor::new(Prepare::new(sample_rate, MaxBlock::of(Samples::new(512))));
 //! let tone = NodeKey(1);
 //! editor.insert(tone, "tone", Osc::sine(Hz::new(440.0)));
+//! editor.declare_main_output(
+//!     tutti_buffers::ChannelSet::default_for(tutti_buffers::ChannelLayout::STEREO),
+//!     editor.spec().main_output_id.next(),
+//! )?;
 //! editor.wire_outputs(vec![PortSource::Node(OutputPort::new(tone, 0)); 2])?;
 //! editor.commit()?;
 //!

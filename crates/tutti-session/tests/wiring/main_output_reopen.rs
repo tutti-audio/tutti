@@ -318,39 +318,11 @@ fn a_claim_of_an_unknown_id_is_refused() {
     assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
 }
 
-/// **A reader keeps no width the main output lacks, and is left alone when it has it**:
-/// a 2-wide tap, the main output widened to 4 (the tap stays 2-wide), then declared 2
-/// wide: the tap has the main output's width and is not reopened.
+/// **A widening is a declaration, so it reopens the readers at the new width**:
+/// a 2-wide tap, the main output widened to 4, reopens at 4 (the reader a claim
+/// takes is 4 wide), and declaring that width's order again moves nothing.
 #[test]
-fn a_tap_that_has_the_main_outputs_width_after_a_widen_and_a_declaration_is_not_reopened() {
-    let mut s = session();
-    let mut tap = s
-        .graph()
-        .taps()
-        .open_main_output(Samples::new(4096))
-        .expect("opens");
-    s.graph().widen_outputs(4).expect("widens");
-    let _ = block(&mut s);
-    s.declare_main_output_topology(Some(tutti_buffers::Bed::Stereo.topology()))
-        .expect("stereo")
-        .unfaded();
-    let events = reopened(block(&mut s));
-    assert!(
-        events
-            .iter()
-            .all(|(id, _)| matches!(id, MainOutputReader::Meter(_))),
-        "no tap is reopened"
-    );
-    let (frames, ended) = drain(&mut tap);
-    assert!(!ended);
-    assert_eq!(frames.len(), 2 * BLOCK * 2);
-}
-
-/// **The converse**: the main output widened to 4 and declared 4 wide leaves a 2-wide
-/// tap with the wrong width, so it is reopened at 4 although the declaration
-/// did not move the main output's width.
-#[test]
-fn a_tap_narrower_than_the_declared_main_output_is_reopened_at_its_width() {
+fn a_widening_reopens_the_tap_at_the_new_width_and_a_declaration_of_it_leaves_it() {
     let mut s = session();
     let old = s
         .graph()
@@ -358,17 +330,23 @@ fn a_tap_narrower_than_the_declared_main_output_is_reopened_at_its_width() {
         .open_main_output(Samples::new(4096))
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
-    let _ = block(&mut s);
     let four = tutti_buffers::Bed::Quad.topology();
-    s.declare_main_output_topology(Some(four))
-        .expect("quad")
-        .unfaded();
     let mut events = reopened(block(&mut s));
     events.retain(|(id, _)| matches!(id, MainOutputReader::Tap(_)));
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1, four);
     assert_eq!(Some(events[0].0), old.id().map(MainOutputReader::Tap));
     assert_eq!(claim_tap(&mut s, events[0].0).width(), 4);
+
+    s.declare_main_output_topology(Some(four))
+        .expect("quad")
+        .unfaded();
+    assert!(
+        reopened(block(&mut s))
+            .iter()
+            .all(|(id, _)| matches!(id, MainOutputReader::Meter(_))),
+        "the width is the main output's: no tap is reopened"
+    );
 }
 
 /// **Closing a tap drops the reader held for it**: the claim is refused, and

@@ -249,7 +249,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Refused(err)
     );
-    s.graph().widen_outputs(max).unwrap();
+    s.graph().widen_outputs(4).unwrap();
     assert_eq!(
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Applied
@@ -374,11 +374,11 @@ fn a_statement_of_another_width_than_the_device_is_refused() {
     }
 }
 
-/// A main output a device has no fold for is refused at the commit that makes the
-/// pair, naming it, and the plan sent last keeps sounding: five undeclared
-/// channels on a three-channel device would drop two.
+/// A main output a device has no fold for is refused where it is made,
+/// naming the first channel with no place, and the plan sent last keeps
+/// sounding: five undeclared channels on a three-channel device would drop two.
 #[test]
-fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
+fn a_widening_the_device_has_no_fold_for_is_refused_by_name() {
     let mut s = offline(
         Session::builder().outputs_floor(ChannelLayout::from(3u16)),
         3,
@@ -386,14 +386,13 @@ fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
     .unwrap();
     feed(&mut s, &[0.1, 0.2, 0.3]);
     assert_eq!(heard(&mut s, 3), [0.1, 0.2, 0.3]);
-    // Widening is the edit; the commit is where the pair is refused.
-    s.graph().widen_outputs(5).unwrap();
-    match s.commit() {
-        Committed::Refused(tutti_graph::CommitError::Unplaceable { width, device, .. }) => {
-            assert_eq!((width, device.count()), (5, 3))
-        }
-        other => panic!("expected Unplaceable, got {other:?}"),
-    }
+    let err = s.graph().widen_outputs(5).unwrap_err();
+    assert!(matches!(
+        err,
+        MainOutputError::Fold(FoldError::Unplaced { channel: 3, .. })
+    ));
+    assert_eq!(s.graph_ref().outputs(), 3);
+    assert_eq!(s.commit(), Committed::Sent);
     // The plan sent last is still the one heard.
     assert_eq!(heard(&mut s, 3), [0.1, 0.2, 0.3]);
 }
@@ -462,7 +461,7 @@ fn a_declaration_past_the_pending_main_outputs_is_refused_by_name() {
 /// request the engine can render widens afterwards.
 #[test]
 fn widen_outputs_past_the_maximum_changes_nothing() {
-    let mut s = offline(Session::builder(), 2).unwrap();
+    let mut s = offline(Session::builder(), 16).unwrap();
     let before = s.graph_ref().outputs();
     let max = tutti_buffers::MAX_CHANNELS;
     for request in [max + 1, max + 8] {

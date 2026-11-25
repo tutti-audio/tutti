@@ -698,10 +698,11 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
         )))
         .expect("a stated device");
     let id = ed.spec().main_output_id.next();
+    let main_output = ChannelSet::from(Bed::Surround714.topology());
     control
-        .publish_main_output(id, Some(Bed::Surround714.topology()), twelve)
+        .publish_main_output(id, main_output, twelve)
         .expect("places");
-    ed.declare_main_output(ed.spec().main_output, id);
+    ed.declare_main_output(main_output, id).unwrap();
     ed.commit().expect("commits");
 
     let mut out = vec![0.0f32; 512 * 12];
@@ -936,9 +937,14 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     let control = engine.output_control();
     let id = ed.spec().main_output_id.next();
     control
-        .publish_main_output(id, Some(Bed::Surround51.topology()), ChannelLayout::STEREO)
+        .publish_main_output(
+            id,
+            ChannelSet::from(Bed::Surround51.topology()),
+            ChannelLayout::STEREO,
+        )
         .expect("places");
-    ed.declare_main_output(ed.spec().main_output, id);
+    ed.declare_main_output(ChannelSet::from(Bed::Surround51.topology()), id)
+        .unwrap();
     wire(&mut ed, 6);
     ed.commit().expect("commits");
     for _ in 0..8 {

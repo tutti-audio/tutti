@@ -92,7 +92,6 @@ fn manual::ManualStream::run_callback
 fn manual::ManualStreamDriver::new
 fn output::OutputControl::device
 fn output::OutputControl::has_fold
-fn output::OutputControl::has_width
 fn output::OutputControl::publish_main_output
 fn output::OutputControl::reclaim
 fn output::OutputControl::routing

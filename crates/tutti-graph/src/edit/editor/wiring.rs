@@ -1,7 +1,7 @@
 //! Wiring: the typed edits of audio, event, param and gain edges, and of the
 //! main output's width and declaration.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
+use tutti_buffers::{ChannelLayout, ChannelSet, Float};
 
 use super::{Editor, MissingSource, WireError};
 use crate::Shape;
@@ -220,40 +220,33 @@ impl<F: Float> Editor<F> {
         cleared
     }
 
-    /// Makes the graph's main output `width` channels wide. A new channel is
-    /// silent; a channel cut takes its sources and their gain entries with
-    /// it. Returns whether the width changed.
-    pub fn resize_outputs(&mut self, width: ChannelLayout) -> bool {
-        let width = usize::from(width.count());
-        let outputs = &mut self.spec.topology.outputs;
-        if outputs.len() == width {
-            return false;
-        }
-        outputs.resize(width, Vec::new());
-        self.spec
-            .gains
-            .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= width));
-        self.touch();
-        true
-    }
-
     /// Wires the main output: channel `c` is fed by exactly the `c`th of
-    /// `sources`, and the output is as wide as there are sources
-    /// (`PortSource::Zero` is a silent channel). Every channel's earlier
-    /// sources go, and their gain entries with them. The checked form of
-    /// [`Topology::set_outputs`](crate::Topology::set_outputs).
+    /// `sources` (`PortSource::Zero` is a silent channel), and a channel past
+    /// the last source is silent. The width is the declared main output's
+    /// ([`declare_main_output`](Self::declare_main_output)). Every channel's
+    /// earlier sources go, and their gain entries with them. The checked form
+    /// of [`Topology::set_outputs`](crate::Topology::set_outputs).
     ///
     /// # Errors
     ///
     /// Refused, changing nothing: [`WireError::Missing`] for a source that
     /// names a node that does not exist, a port past its node's outputs or a
-    /// main input past the graph's.
+    /// main input past the graph's, and [`WireError::OutputPastWidth`] for
+    /// more sources than the main output has channels.
     pub fn wire_outputs(
         &mut self,
         sources: impl IntoIterator<Item = PortSource>,
     ) -> Result<(), WireError> {
-        let sources: Vec<PortSource> = sources.into_iter().collect();
+        let mut sources: Vec<PortSource> = sources.into_iter().collect();
+        let width = self.spec.topology.outputs.len();
+        if sources.len() > width {
+            return Err(WireError::OutputPastWidth {
+                sources: sources.len(),
+                width,
+            });
+        }
         self.check_sources(&sources)?;
+        sources.resize(width, PortSource::Zero);
         let before = self.spec.topology.outputs.clone();
         self.spec.topology.set_outputs(sources);
         if self.spec.topology.outputs != before {
@@ -349,24 +342,40 @@ impl<F: Float> Editor<F> {
         had
     }
 
-    /// Declares the main output: its topology (`None` undeclared) and the
-    /// generation a commit carries to the host
+    /// Declares the main output: its channels and the generation a commit
+    /// carries to the host
     /// ([`GraphSpec::main_output`](crate::GraphSpec::main_output),
-    /// [`GraphSpec::main_output_id`](crate::GraphSpec::main_output_id)). A
-    /// bus edge into the main output folds to the declared topology at the
+    /// [`GraphSpec::main_output_id`](crate::GraphSpec::main_output_id)). This
+    /// is the one call that sets the output list's width: a new channel is
+    /// silent, and a channel cut takes its sources and their gain entries with
+    /// it. A bus edge into the main output folds to the declared set at the
     /// next commit. Returns whether either changed.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError::MainOutputChanged`], changing nothing, when `main_output`
+    /// differs from the one `id` already holds: a change is a declaration
+    /// under a new id.
     pub fn declare_main_output(
         &mut self,
-        main_output: Option<ChannelTopology>,
+        main_output: ChannelSet,
         id: MainOutputId,
-    ) -> bool {
-        if self.spec.main_output == main_output && self.spec.main_output_id == id {
-            return false;
+    ) -> Result<bool, WireError> {
+        if self.spec.main_output_id == id {
+            return match self.spec.main_output == main_output {
+                true => Ok(false),
+                false => Err(WireError::MainOutputChanged { id }),
+            };
         }
+        let width = usize::from(main_output.width().count());
+        self.spec.topology.outputs.resize(width, Vec::new());
+        self.spec
+            .gains
+            .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= width));
         self.spec.main_output = main_output;
         self.spec.main_output_id = id;
         self.touch();
-        true
+        Ok(true)
     }
 
     fn check_input(&self, at: InputPort) -> Result<(), WireError> {

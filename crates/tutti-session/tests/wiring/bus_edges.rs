@@ -388,22 +388,6 @@ fn a_bus_into_the_declared_main_output_renders_the_itu_rows() {
     assert!(all_are(&l, 0.0) && all_are(&r, 0.0));
 }
 
-/// An undeclared main output refuses a main output edge by name, storing nothing and
-/// marking nothing edited. (No main output is too wide for a bus: the engine's is 8
-/// channels, a bus 16.)
-#[test]
-fn an_undeclared_main_output_refuses_a_bus_edge() {
-    let mut r = rig();
-    let g = r.s.graph();
-    assert_eq!(
-        g.connect(BusOutputPort::Node(node_bus(r.stereo)), MainOutput)
-            .err(),
-        Some(ConnectError::Bus(BusError::MainOutputUndeclared))
-    );
-    assert!(!g.has_uncommitted_edits());
-    assert!(g.bus_sources(MainOutput).unwrap().is_empty());
-}
-
 /// A commit the editor refuses is an event of the update that first tried
 /// it, and of no later update that fails the same way; once a commit is sent,
 /// the next refusal is reported again.

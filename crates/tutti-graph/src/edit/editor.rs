@@ -99,11 +99,10 @@ use tutti_units::Gain;
 pub use unwired::{Inserted, Unwired};
 
 /// The host's side of a main output generation: whether it has published the folds
-/// for `main_output` at `outputs` channels ([`Editor::set_main_output_gate`]).
+/// for `main_output` ([`Editor::set_main_output_gate`]).
 pub trait MainOutputGate: Send + Sync {
-    /// Whether a plan of generation `main_output` with `outputs` main outputs has
-    /// its folds. A graph with no outputs has nothing to fold.
-    fn published(&self, main_output: crate::MainOutputId, outputs: usize) -> bool;
+    /// Whether a plan of generation `main_output` has its folds.
+    fn published(&self, main_output: crate::MainOutputId) -> bool;
 }
 
 /// What the host that runs an [`Executor`] can take, enforced by its
@@ -204,6 +203,12 @@ impl Limits {
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
 /// editor
+///     .declare_main_output(
+///         tutti_buffers::ChannelSet::default_for(tutti_buffers::ChannelLayout::MONO),
+///         editor.spec().main_output_id.next(),
+///     )
+///     .expect("a new id declares anything");
+/// editor
 ///     .wire_outputs([PortSource::Node(OutputPort::new(half, 0))])
 ///     .expect("the node exists");
 /// editor.commit().expect("compiles");
@@ -295,10 +300,10 @@ impl MainOutputState {
         }
     }
 
-    /// Whether the host has folds for main output `id` at `outputs` channels
-    /// (always, when no host is attached).
-    fn publishes(&self, id: crate::MainOutputId, outputs: usize) -> bool {
-        self.gate.as_ref().is_none_or(|g| g.published(id, outputs))
+    /// Whether the host has folds for main output `id` (always, when no host
+    /// is attached).
+    fn publishes(&self, id: crate::MainOutputId) -> bool {
+        self.gate.as_ref().is_none_or(|g| g.published(id))
     }
 
     /// Whether the plan sent last carries an old main output whose crossfade
@@ -327,19 +332,16 @@ impl MainOutputState {
 
     /// The crossfade running, when a commit leaves its main output alone
     /// (`now` is the spec's main output generation, `current` the committed
-    /// spec's) and its channels (`base` of them) stand.
+    /// spec's). The same generation is the same declaration, so the width its
+    /// bank sits past stands.
     fn continuing(
         &self,
         now: crate::MainOutputId,
         current: Option<crate::MainOutputId>,
-        base: usize,
     ) -> Option<&Fading> {
-        self.fading.as_ref().filter(|f| {
-            f.main_output == now
-                && current == Some(now)
-                && !self.fade_ended()
-                && f.bank.base == base
-        })
+        self.fading
+            .as_ref()
+            .filter(|f| f.main_output == now && current == Some(now) && !self.fade_ended())
     }
 
     /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
@@ -662,13 +664,15 @@ impl<F: Float> Editor<F> {
     }
 
     /// Declares the bus edge `from -> main_output`: the output bus `from` feeds the
-    /// graph's outputs, folded to the declared main output topology
-    /// ([`GraphSpec::main_output`]). Checked here, as [`connect_bus`](Self::connect_bus)
-    /// is, and nothing is stored on a failure. An undeclared main output refuses it.
+    /// graph's outputs, folded to the declared main output
+    /// ([`GraphSpec::main_output`]): by speaker where it has a topology, by index
+    /// past [`MAX_CHANNELS`]. Checked here, as
+    /// [`connect_bus`](Self::connect_bus) is, and nothing is stored on a failure. A main
+    /// output with no channels refuses it.
     ///
     /// # Errors
     ///
-    /// [`BusError::MainOutputUndeclared`], [`BusError::NoSuchNode`],
+    /// [`BusError::NoSuchNode`],
     /// [`BusError::NoSuchBus`], [`BusError::MainInputTooWide`],
     /// [`BusError::MainOutputFold`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane lands on an output source or a
