@@ -21,6 +21,10 @@
 //!   `0x2`, System and SysEx7 and every other type pass as they are. A
 //!   packet the MIDI 1.0 translator has no MIDI 1.0 form for (a per-note controller,
 //!   D.2.8) is dropped.
+//! - **A Group with the MPE Profile enabled**, in either Protocol, gets the
+//!   MIDI 2.0 its zones' notes and expression are as MPE ([`MpeSender`], M2-120)
+//!   before that: a note on a Member Channel, its expression as that Channel's
+//!   Pitch Bend, Channel Pressure and Control Change 74.
 //! - **JR Timestamps** are sent only when the device's configuration says it
 //!   receives them (§7.1.6.2, RXJR: the Sender sends none until a Stream
 //!   Configuration Notification message has been received): a JR Clock or JR Timestamp is dropped when `rx_jr` is off.
@@ -31,23 +35,36 @@
 //! when the device is opened, and what the UMP Stream negotiation settled
 //! (`MidiSession::poll`) after it.
 
-use tutti_midi_protocol::Midi1Translator;
+use tutti_midi_protocol::{Midi1Translator, ProfileZones};
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::{Join, Message, MessageType, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_ump::{
+    Join, Message, MessageType, MidiGroup, Protocol, StreamConfig, Ump, Utility, parse_exact,
+};
 use tutti_units::Losses;
+use tutti_voicing::MpeSender;
 
 /// One device output's wire form: its configuration, the [`Midi1Translator`] that
-/// serves it for as long as it is in MIDI 1.0, and the buffers one batch is
-/// converted in.
+/// serves it while it is in MIDI 1.0, the [`MpeSender`] of its MPE zones, and the
+/// buffers one batch is converted in.
 #[derive(Debug)]
 pub(crate) struct Wire {
     config: StreamConfig,
     midi1_translator: Midi1Translator,
+    mpe: MpeSender,
     /// The batch as it goes to the device.
     out: Vec<Outgoing>,
-    /// For each input event, how many of `out` it had produced once it was
-    /// done: what turns the device's count back into the caller's.
-    ends: Vec<usize>,
+    /// One for each input event.
+    converted: Vec<Converted>,
+}
+
+/// What became of one event.
+#[derive(Clone, Copy, Debug)]
+struct Converted {
+    /// How many packets the batch held once the event was done: what turns the
+    /// device's count back into the caller's.
+    end: usize,
+    /// The event has a form on the wire.
+    carried: bool,
 }
 
 impl Wire {
@@ -55,8 +72,9 @@ impl Wire {
         Self {
             config,
             midi1_translator: Midi1Translator::new(),
+            mpe: MpeSender::new(),
             out: Vec::new(),
-            ends: Vec::new(),
+            converted: Vec::new(),
         }
     }
 
@@ -64,12 +82,23 @@ impl Wire {
         self.config
     }
 
-    /// The device now has `config`. A change of Protocol resets the MIDI 1.0 translator.
+    /// The device now has `config`. After a change of Protocol it is sent the
+    /// values of its MPE Members again.
     pub(crate) fn set_config(&mut self, config: StreamConfig) {
         if config.protocol != self.config.protocol {
-            self.midi1_translator.reset();
+            self.mpe.unsent();
         }
         self.config = config;
+    }
+
+    /// The device now has `zones` of the MPE Profile enabled on `group`.
+    pub(crate) fn set_profile(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
+        self.mpe.set_profile(group, zones);
+    }
+
+    /// Some of the batch was not sent.
+    pub(crate) fn unsent(&mut self) {
+        self.mpe.unsent();
     }
 
     /// Whether the device is in a Protocol that has no MIDI 2.0 Channel Voice:
@@ -82,7 +111,7 @@ impl Wire {
     /// [`batch`](Self::batch) reads.
     pub(crate) fn convert(&mut self, events: &[Outgoing]) {
         self.out.clear();
-        self.ends.clear();
+        self.converted.clear();
         let speaks_midi1 = self.speaks_midi1();
         let jr = self.config.rx_jr;
         // Whether the event before made a packet: a packet joined to the one
@@ -103,29 +132,42 @@ impl Wire {
                     Join::ToPrevious => packet.joined_to_previous(),
                 }
             };
-            match ump.message_type() {
+            let carried = match ump.message_type() {
                 MessageType::Utility => {
-                    if let Some(kept) = utility(ump, jr) {
-                        self.out.push(packet(kept, first));
-                    }
+                    let kept = utility(ump, jr);
+                    self.out.extend(kept.map(|kept| packet(kept, first)));
+                    kept.is_some()
                 }
-                MessageType::Midi2ChannelVoice if speaks_midi1 => {
-                    if let Ok(message) = ump.decode() {
-                        let out = &mut self.out;
-                        let mut next = first;
-                        translate_voice(&mut self.midi1_translator, message, |translated| {
-                            out.push(packet(translated, next));
-                            // The packets of one event are one message: a cut
-                            // between a controller's select and its value
-                            // leaves the receiver selected with no value.
-                            next = Join::ToPrevious;
-                        });
-                    }
+                MessageType::Midi1ChannelVoice | MessageType::Midi2ChannelVoice => {
+                    let (out, midi1) = (&mut self.out, &self.midi1_translator);
+                    let mut next = first;
+                    let mut push = |ump| {
+                        out.push(packet(ump, next));
+                        // The packets of one event are one message: a cut
+                        // between a controller's select and its value
+                        // leaves the receiver selected with no value.
+                        next = Join::ToPrevious;
+                    };
+                    let mut representable = true;
+                    let carried = self.mpe.feed(ump, |ump| {
+                        if speaks_midi1 && let Ok(message @ Message::Midi2(..)) = ump.decode() {
+                            representable &= translate_voice(midi1, message, &mut push) > 0;
+                        } else {
+                            push(ump);
+                        }
+                    });
+                    carried && representable
                 }
-                _ => self.out.push(packet(ump, first)),
-            }
+                _ => {
+                    self.out.push(packet(ump, first));
+                    true
+                }
+            };
             follows_packet = self.out.len() > made;
-            self.ends.push(self.out.len());
+            self.converted.push(Converted {
+                end: self.out.len(),
+                carried,
+            });
         }
     }
 
@@ -141,21 +183,17 @@ impl Wire {
     /// through the conversion as it is, so the count still ends between
     /// messages.
     pub(crate) fn accepted(&self, taken: Taken, events: &[Outgoing]) -> Taken {
-        let events_taken = self.ends.partition_point(|&end| end <= taken.packets());
+        let events_taken = self
+            .converted
+            .partition_point(|event| event.end <= taken.packets());
         Taken::within(events, events_taken)
     }
 
-    /// How many of the first `taken` events of the batch became no packet at
-    /// all: they have no form on the wire this device is in. Counted once, at
-    /// the offer that takes them.
+    /// How many of the first `taken` events of the batch have no form on the
+    /// wire this device is in. Counted once, at the offer that takes them.
     pub(crate) fn unrepresentable_in(&self, taken: usize) -> Losses {
-        let mut before = 0;
-        let mut none = 0;
-        for &end in &self.ends[..taken] {
-            none += u64::from(end == before);
-            before = end;
-        }
-        Losses::refused(none)
+        let none = self.converted[..taken].iter().filter(|e| !e.carried);
+        Losses::refused(none.count() as u64)
     }
 }
 
@@ -164,7 +202,7 @@ impl Wire {
 /// many that was. Any other message, and one with no MIDI 1.0 form (a per-note
 /// controller, D.2.8), is none.
 pub(crate) fn translate_voice(
-    midi1_translator: &mut Midi1Translator,
+    midi1_translator: &Midi1Translator,
     message: Message,
     mut out: impl FnMut(Ump),
 ) -> usize {

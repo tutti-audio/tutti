@@ -193,7 +193,6 @@ mod clock_map;
 mod ledger;
 mod live;
 mod mpe_features;
-mod mpe_zones;
 mod outbound;
 mod output_plan;
 mod schedule;
@@ -212,7 +211,6 @@ pub use live::{
     MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
-pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, JrClock, JrStream, MIDI_OUT_EVENT_CAPACITY,
     MachineControlSender, MidiOutNode, NoTimeCode, SYNC_OUT_EVENT_CAPACITY, SyncMessages, SyncOut,

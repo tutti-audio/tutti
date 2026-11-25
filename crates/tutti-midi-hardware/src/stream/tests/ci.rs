@@ -1310,6 +1310,50 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     assert_eq!(zones(&wire), None, "disabled again");
 }
 
+/// **An output sends MPE to a device once its Enabled Report makes a zone, and
+/// stops at its Disabled Report** (M2-120 section 3.3), whether the output was
+/// connected before or after. A note on Channel 1, the Manager, goes out on
+/// Channel 2, the first Member.
+#[test]
+fn an_output_sends_mpe_while_its_device_has_the_profile_enabled() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
+    let format = || ProfileFormat::current(on_channel(0, ProfileChannels::of(3)));
+    let note_channel = |wire: &mut Wire| {
+        let _ = received(wire);
+        let note = tutti_fixtures::midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
+        let off = tutti_fixtures::midi::note_off(MidiChannel::FIRST, 60, 0);
+        wire.send(&[(Offset::ZERO, note), (Offset::ZERO, off)]);
+        received(wire)
+            .iter()
+            .find_map(|ump| match ump.decode() {
+                Ok(Message::Midi1(a, tutti_ump::Voice1::NoteOn { .. })) => Some(a.channel.get()),
+                _ => None,
+            })
+            .expect("a Note On")
+    };
+    wire.connect_output();
+    assert_eq!(note_channel(&mut wire), 0, "not enabled");
+    let enabled = CiMessage::ProfileEnabled {
+        source: peer(),
+        format: format(),
+        profile: ProfileId::MPE,
+    };
+    say(&wire, GROUP_0, &enabled, 120);
+    let _ = wire.poll(130);
+    assert_eq!(note_channel(&mut wire), 1, "enabled");
+    wire.connect_output();
+    assert_eq!(note_channel(&mut wire), 1, "connected while enabled");
+    let disabled = CiMessage::ProfileDisabled {
+        source: peer(),
+        format: format(),
+        profile: ProfileId::MPE,
+    };
+    say(&wire, GROUP_0, &disabled, 140);
+    let _ = wire.poll(150);
+    assert_eq!(note_channel(&mut wire), 0, "disabled");
+}
+
 /// M2-120 section 3.4: a zone that shares a Channel with a lower one is not a
 /// zone of the peer, and the session says so rather than leaving it out in
 /// silence: a change names the zone and why.

@@ -54,6 +54,7 @@ tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = f
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 

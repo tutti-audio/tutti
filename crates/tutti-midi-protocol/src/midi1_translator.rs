@@ -1,13 +1,8 @@
-//! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
+//! The MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
 //! [`Midi1Translator`] an output edge runs.
 
-use crate::{MpeLayout, PerNoteTranslation, TranslationMode, midi1};
-use members::Members;
-use tutti_ump::{
-    Address, CCNumber, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
-};
-
-mod members;
+use crate::midi1;
+use tutti_ump::{CCNumber, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2};
 
 /// MIDI 2.0 in, MIDI 1.0 out: the translation an output edge runs, per group
 /// and channel (M2-104 Appendix D.2). The inverse of [`Midi2Translator`](crate::Midi2Translator).
@@ -37,16 +32,10 @@ mod members;
 ///   with no MIDI 1.0 form (D.2.8: relative and per-note controllers) send
 ///   nothing.
 ///
-/// [`new`](Self::new) is the Default Translation. [`with_mode`](Self::with_mode)
-/// runs an Alternate Translation Mode (D.4): near-extreme values kept off the
-/// minimum and maximum (D.1.5, [`ExtremeValues`]) and the per-note messages sent
-/// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
-/// mode a Note On takes the member idle longest, or shares the member that plays
-/// the fewest notes and was given a note longest ago when all play (M2-120
-/// section 3.6.1); a per-note message for a note that does not sound sends
-/// nothing, and every message that is not per-note goes on the zone's Manager
-/// Channel. A MIDI 1.0 message passes unchanged, except in the MPE mode, where it
-/// takes the rules of its MIDI 2.0 equivalent.
+/// [`new`](Self::new) is the Default Translation. [`extremes`](Self::extremes)
+/// keeps near-extreme values off the minimum and maximum (D.1.5). The per-note
+/// messages of a device with the MPE Profile enabled are `tutti_voicing::MpeSender`'s,
+/// ahead of this (D.4.1).
 ///
 /// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
 /// same whatever went before. It allocates nothing after construction and holds
@@ -69,19 +58,9 @@ mod members;
 /// // CC 101, CC 100, CC 6 (12), CC 38 (0).
 /// assert_eq!(bytes, [[0xB0, 101, 0], [0xB0, 100, 0], [0xB0, 6, 12], [0xB0, 38, 0]]);
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Midi1Translator {
     extremes: ExtremeValues,
-    per_note: PerNote,
-}
-
-/// What the translator does with the per-note messages, and what that takes.
-#[derive(Clone, Debug)]
-enum PerNote {
-    /// The Default Translation: they have no MIDI 1.0 message and send nothing.
-    Dropped,
-    /// MPE: the zone's layout and the note allocation on its member channels.
-    Mpe { layout: MpeLayout, members: Members },
 }
 
 impl Default for Midi1Translator {
@@ -91,110 +70,46 @@ impl Default for Midi1Translator {
 }
 
 impl Midi1Translator {
-    /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
-    /// On sends one Note Off when it strikes its key again, then a centred Pitch
-    /// Bend, Channel Pressure 0 and Control Change 74 at 0x40 for each its
-    /// member's last note moved (only a member that plays no other note), then
-    /// the Note On. The Default Translation sends at most four, a
-    /// controller's sequence (D.2.3).
-    pub const MAX_MESSAGES: usize = 5;
+    /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends: a controller's
+    /// sequence (D.2.3).
+    pub const MAX_MESSAGES: usize = 4;
 
-    /// The most bytes one [`feed`](Self::feed) sends: the Note On sequence of
-    /// [`MAX_MESSAGES`](Self::MAX_MESSAGES), four 3-byte messages and the
-    /// 2-byte Channel Pressure. The Default Translation sends at most 12.
-    pub const MAX_BYTES: usize = 14;
+    /// The most bytes one [`feed`](Self::feed) sends: four 3-byte messages.
+    pub const MAX_BYTES: usize = 12;
 
     /// A translator that translates by the Default Translation.
     #[must_use]
     pub const fn new() -> Self {
         Self {
             extremes: ExtremeValues::Scaled,
-            per_note: PerNote::Dropped,
         }
     }
 
-    /// A translator that translates by `mode`: [`new`](Self::new) is the Default
-    /// Translation, and any other mode is an Alternate Translation Mode
-    /// (M2-104 D.4). [`reset`](Self::reset) in the MPE mode forgets the notes
-    /// held without sending their Note Offs.
+    /// The translator with `extremes` as how the smallest and largest values
+    /// are translated: [`ExtremeValues::Avoided`] is an Alternate Translation
+    /// Mode (M2-104 D.1.5, D.4), and a product tells its user it is active.
     #[must_use]
-    pub fn with_mode(mode: TranslationMode) -> Self {
-        Self {
-            extremes: mode.extremes,
-            per_note: match mode.per_note {
-                PerNoteTranslation::Dropped => PerNote::Dropped,
-                PerNoteTranslation::Mpe(layout) => PerNote::Mpe {
-                    layout,
-                    members: Members::new(),
-                },
-            },
-        }
-    }
-
-    /// The mode this translator translates by.
-    #[must_use]
-    pub fn mode(&self) -> TranslationMode {
-        TranslationMode {
-            extremes: self.extremes,
-            per_note: match self.per_note {
-                PerNote::Dropped => PerNoteTranslation::Dropped,
-                PerNote::Mpe { layout, .. } => PerNoteTranslation::Mpe(layout),
-            },
-        }
-    }
-
-    /// Forgets the notes the MPE mode holds, without a Note Off, as at
-    /// [`new`](Self::new). The Default Translation holds nothing to forget.
-    pub fn reset(&mut self) {
-        if let PerNote::Mpe { members, .. } = &mut self.per_note {
-            members.clear();
-        }
+    pub const fn extremes(mut self, extremes: ExtremeValues) -> Self {
+        self.extremes = extremes;
+        self
     }
 
     /// Calls `out` with each MIDI 1.0 message `message` stands for, in the
     /// order to send them: four for a controller, three for a Program Change
-    /// with a bank, up to five for an MPE Note On, one for most others, none
-    /// for one with no MIDI 1.0 form (D.2.8) or that is not a channel or system
-    /// message. [`MAX_MESSAGES`](Self::MAX_MESSAGES) and
+    /// with a bank, one for most others, none for one with no MIDI 1.0 form
+    /// (D.2.8) or that is not a channel or system message. A MIDI 1.0 message
+    /// is itself. [`MAX_MESSAGES`](Self::MAX_MESSAGES) and
     /// [`MAX_BYTES`](Self::MAX_BYTES) bound one call.
-    pub fn feed(&mut self, packet: impl Into<Ump>, mut out: impl FnMut(Midi1Bytes)) {
+    pub fn feed(&self, packet: impl Into<Ump>, mut out: impl FnMut(Midi1Bytes)) {
         // A packet that does not decode has no MIDI 1.0 form.
         let Ok(message) = packet.into().decode() else {
             return;
         };
-        let mpe = matches!(self.per_note, PerNote::Mpe { .. });
-        let (address, voice) = match message {
-            Message::Midi2(address, voice) => (address, voice),
-            // In the MPE mode a MIDI 1.0 voice message is the MIDI 2.0 one it
-            // means (M2-104 D.3) and takes the same rules; otherwise it passes
-            // unchanged.
-            Message::Midi1(address, voice) if mpe => (address, Voice2::from(voice)),
-            Message::Midi1(..) => {
-                midi1(message).for_each(&mut out);
-                return;
-            }
-            other => {
-                midi1(other).for_each(&mut out);
-                return;
-            }
+        let Message::Midi2(address, voice) = message else {
+            midi1(message).for_each(&mut out);
+            return;
         };
         let extremes = self.extremes;
-        let address = match &mut self.per_note {
-            PerNote::Mpe { layout, members } => {
-                if members.route(layout, extremes, address, voice, &mut out) {
-                    return;
-                }
-                // The zone is the destination of every other message (M2-120
-                // sections 4.1 to 4.6: zone-wide messages, Program Change and
-                // Bank Select are the Manager Channel's), so the source channel
-                // names no MIDI 1.0 channel.
-                Address {
-                    channel: layout.master_channel(),
-                    ..address
-                }
-            }
-            PerNote::Dropped => address,
-        };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
             if let Ok(voice) = Voice1::from_voice2(voice, extremes) {
                 out(voice.bytes(address.channel));
@@ -229,10 +144,6 @@ impl Midi1Translator {
                 cc(CCNumber::BANK_SELECT_LSB, bank.lsb);
                 out(Voice1::ProgramChange(program).bytes(address.channel));
             }
-            // Omni Off, Omni On, Mono Mode On and Poly Mode On are sent on no
-            // MPE Channel (M2-120 section 4.7).
-            Voice2::ControlChange { controller, .. }
-                if mpe && (124..=127).contains(&controller.get()) => {}
             _ => plain(&mut out),
         }
     }

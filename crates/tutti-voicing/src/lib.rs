@@ -36,6 +36,8 @@
 //! - [`PerNoteState`]: the per-note controllers of MIDI 2.0 (held values, a
 //!   note id for each started note, Per-Note Management), which [`VoiceAllocator`]
 //!   uses and a plugin host, which allocates no voices, can use as it is.
+//! - [`MpeSender`]: the Member Channel each note of an MPE output takes, and the
+//!   per-note state as what that channel is sent.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -46,6 +48,7 @@ mod channel;
 mod controller;
 mod holds;
 mod master;
+mod mpe_sender;
 mod per_note;
 mod phase;
 mod table;
@@ -56,6 +59,7 @@ pub use channel::{ChannelState, DEFAULT_MODULATION_RANGE};
 pub use controller::{Controller, Effect, Stop};
 pub use holds::{Holds, Release};
 pub use master::MasterGain;
+pub use mpe_sender::MpeSender;
 pub use per_note::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 pub use phase::Phase;
 pub use table::{NoteStart, NoteVoice, VoiceTable};

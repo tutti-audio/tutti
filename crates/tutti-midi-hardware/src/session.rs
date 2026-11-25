@@ -68,6 +68,7 @@ const _: () = {
     send::<MidiSession>();
 };
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
+use tutti_midi_protocol::ProfileZones;
 use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;
 use tutti_ump::{GroupSpan, MidiGroup};
@@ -477,9 +478,10 @@ impl MidiSession {
     /// connecting another is the caller's replacing it.
     ///
     /// It sends in what its device's input has settled when that input is open
-    /// and has settled; otherwise in the OS's description of the device. A
-    /// later settle is the caller's to apply, from what [`poll`](Self::poll)
-    /// reports, with [`OpenOutput::follow`].
+    /// and has settled; otherwise in the OS's description of the device. It
+    /// sends as MPE to the [`mpe_zones`](Self::mpe_zones) of the device. A
+    /// later change of either is the caller's to apply, from what
+    /// [`poll`](Self::poll) reports, with [`OpenOutput::follow`].
     ///
     /// `started` is what [`start`](Self::start) resolved to: the backend is ready.
     ///
@@ -497,6 +499,7 @@ impl MidiSession {
         {
             output.set_config(stream.config());
         }
+        output.follow_mpe_zones(self);
         Ok(output)
     }
 
@@ -813,6 +816,22 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.profiles())
+    }
+
+    /// The zones of the MPE Profile (M2-120) the peers found on the open input `id`
+    /// have enabled on `group`: the [`PeerProfiles::mpe_zones`] of them all, a zone
+    /// that shares a Channel with another peer's left out (section 3.4). `None`
+    /// when no peer has one.
+    #[must_use]
+    pub fn mpe_zones(&self, id: &MidiDeviceId, group: MidiGroup) -> Option<ProfileZones> {
+        self.profiles(id)
+            .iter()
+            .filter(|peer| peer.at().peer().group == group)
+            .filter_map(PeerProfiles::mpe_zones)
+            .reduce(|held, more| {
+                let zones = more.zones();
+                zones.fold(held, |all, zone| all.with(*zone).unwrap_or(all))
+            })
     }
 
     /// Asks a peer to enable or disable a Profile it lists, on the input the

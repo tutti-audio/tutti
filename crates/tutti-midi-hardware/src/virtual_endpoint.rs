@@ -270,9 +270,9 @@ fn published_numbers(spec: &VirtualSpec, os: Option<&[FunctionBlockId]>) -> Vec<
 
 /// How an endpoint brings a message to its protocol.
 enum Conversion {
-    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages translate through the one
-    /// [`Midi1Translator`] of the endpoint's life (M2-104 Appendix D.2).
-    ToMidi1(Box<Mutex<Midi1Translator>>),
+    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages translate through the
+    /// [`Midi1Translator`] (M2-104 Appendix D.2), one message at a time.
+    ToMidi1(Mutex<Midi1Translator>),
     /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages translate, holding the
     /// Registered and Assignable Controller runs a MIDI 1.0 stream spreads over
     /// several messages.
@@ -322,16 +322,16 @@ impl Outbound {
                 let Ok(message @ Message::Midi2(..)) = ump.decode() else {
                     return self.deliver(&ump);
                 };
-                // The packets go in order under the lock: the MIDI 1.0 translator assumes
-                // that what it emitted was sent before the next message.
-                let mut midi1_translator = midi1_translator.lock();
+                // The packets go in order under the lock: no other sender's message
+                // lands inside this one's sequence.
+                let midi1_translator = midi1_translator.lock();
                 let mut sent = Ok(());
                 // After a full queue the rest of the message's packets are not sent
                 // (a cut sequence is worse than a lost one). The counting follows
                 // the device output's: a message refused with none of it sent is
                 // `refused`, and the packets after a part that went are `lost`.
                 let (mut went, mut unsent, mut cut) = (0_u64, 0_u64, false);
-                let count = translate_voice(&mut midi1_translator, message, |packet| {
+                let count = translate_voice(&midi1_translator, message, |packet| {
                     if cut {
                         unsent += 1;
                     } else if sent.is_ok() {
@@ -586,9 +586,7 @@ impl OpeningVirtualEndpoint {
         main: MainThreadMarker,
     ) -> VirtualEndpoint {
         let conversion = match protocol {
-            VirtualProtocol::Midi1 => {
-                Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
-            }
+            VirtualProtocol::Midi1 => Conversion::ToMidi1(Mutex::new(Midi1Translator::new())),
             VirtualProtocol::Midi2 => {
                 Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
             }
@@ -684,7 +682,7 @@ mod tests {
                 fail_at,
                 full,
             }),
-            Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new()))),
+            Conversion::ToMidi1(Mutex::new(Midi1Translator::new())),
         );
         (outbound, sent)
     }
@@ -769,64 +767,6 @@ mod tests {
         outbound.send(bend_range(7)).unwrap();
         // CC 101 of the first; then the whole sequence of the second.
         assert_eq!(controllers(&sent), [101, 101, 100, 6, 38]);
-    }
-
-    /// **A failed send leaves an MPE note's member channel as it was**: the
-    /// The MIDI 1.0 translator's note allocation is not dropped by a refused packet, so the
-    /// note's per-note bend still goes to its channel (M2-104 D.2.8, MPE mode).
-    #[test]
-    fn a_failed_send_keeps_an_mpe_notes_channel() {
-        use tutti_midi_protocol::{
-            MemberCount, Mpe11Zone, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
-        };
-        use tutti_ump::{Address, Attribute, BendValue, ExtremeValues, NoteNumber, NoteVelocity};
-        let zone = Mpe11Zone::lower(
-            MemberCount::of(2),
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .layout();
-        let midi1_translator = Midi1Translator::with_mode(TranslationMode {
-            extremes: ExtremeValues::Scaled,
-            per_note: PerNoteTranslation::Mpe(zone),
-        });
-        // Send 0 (the Note On) succeeds and send 1 (the RPN's CC 101) is refused.
-        let (mut outbound, sent) = midi1_source(1);
-        outbound.conversion = Conversion::ToMidi1(Box::new(Mutex::new(midi1_translator)));
-        let address = Address {
-            group: MidiGroup::FIRST,
-            channel: MidiChannel::FIRST,
-        };
-        let note = NoteNumber::of(60);
-        outbound
-            .send(
-                Message::midi2(
-                    address,
-                    Voice2::NoteOn {
-                        note,
-                        velocity: NoteVelocity::new(0x8000),
-                        attribute: Attribute::None,
-                    },
-                )
-                .into(),
-            )
-            .unwrap();
-        assert!(outbound.send(bend_range(12)).is_err());
-        outbound
-            .send(
-                Message::midi2(
-                    address,
-                    Voice2::PerNotePitchBend {
-                        note,
-                        value: BendValue::new(0x8000_0000),
-                    },
-                )
-                .into(),
-            )
-            .unwrap();
-        let words: Vec<u32> = sent.lock().iter().map(|u| u.0[0]).collect();
-        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
-        assert_eq!(words, [0x2091_3C40, 0x20E1_0040]);
     }
 
     // M2-104 Appendix D.2.3: the same controller twice is the four messages twice.

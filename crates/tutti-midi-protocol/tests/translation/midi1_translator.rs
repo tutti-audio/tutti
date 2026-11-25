@@ -1,19 +1,16 @@
 //! The `Midi1Translator` against M2-104 Appendix D.2 and M2-115, with figures written
 //! here from the spec, never read from the code under test.
 
-use tutti_midi_protocol::{
-    MemberCount, Midi1Translator, Midi2Translator, Mpe11Zone, MpeLayout, PerNoteTranslation,
-    PitchBendSensitivity, ProfileZone, TranslationMode,
-};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_ump::{
     Address, Bank, CCNumber, ExtremeValues, Message, Midi1Bytes, MidiChannel, MidiGroup,
     NoteNumber, NoteVelocity, U7, Ump, Voice1, Voice2,
 };
-use tutti_ump::{BendValue, ControlValue, MpeChannels, MpeZoneSpan};
+use tutti_ump::{BendValue, ControlValue};
 
 const A: Address = Address::first(MidiChannel::FIRST);
 
-fn feed(n: &mut Midi1Translator, message: Message) -> Vec<Vec<u8>> {
+fn feed(n: &Midi1Translator, message: Message) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     n.feed(message, |b: Midi1Bytes| out.push(b.as_slice().to_vec()));
     out
@@ -47,10 +44,10 @@ fn nrpn(address: Address, bank: u8, index: u8, value: u32) -> Message {
 /// Spec: m2-104/6.2#4
 #[test]
 fn a_registered_controller_is_four_control_changes() {
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     // RPN 0/0 is zero-extended: 14-bit 0x1234 (MSB 0x24, LSB 0x34) in the top bits.
     assert_eq!(
-        feed(&mut n, rpn(A, 0, 0, 0x1234 << 18)),
+        feed(&n, rpn(A, 0, 0, 0x1234 << 18)),
         [
             vec![0xB0, 101, 0],
             vec![0xB0, 100, 0],
@@ -63,9 +60,9 @@ fn a_registered_controller_is_four_control_changes() {
 /// **D.2.3: an Assignable Controller selects with CC 99 and CC 98.**
 #[test]
 fn an_assignable_controller_selects_with_nrpn_controllers() {
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     let out = feed(
-        &mut n,
+        &n,
         nrpn(
             Address::new(MidiGroup::of(0), MidiChannel::of(3)),
             5,
@@ -91,29 +88,29 @@ fn an_assignable_controller_selects_with_nrpn_controllers() {
 /// another one, for the other kind and on any channel or group.
 #[test]
 fn every_controller_is_the_full_sequence_of_four() {
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     let again = [
         vec![0xB0, 101, 0],
         vec![0xB0, 100, 0],
         vec![0xB0, 6, 1],
         vec![0xB0, 38, 0],
     ];
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0))[..2], again[..2]);
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 1 << 25)), again, "same RPN again");
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 1 << 25)), again, "and again");
-    assert_eq!(feed(&mut n, rpn(A, 0, 1, 0)).len(), 4, "another index");
+    assert_eq!(feed(&n, rpn(A, 0, 0, 0))[..2], again[..2]);
+    assert_eq!(feed(&n, rpn(A, 0, 0, 1 << 25)), again, "same RPN again");
+    assert_eq!(feed(&n, rpn(A, 0, 0, 1 << 25)), again, "and again");
+    assert_eq!(feed(&n, rpn(A, 0, 1, 0)).len(), 4, "another index");
     let nrpn_seq = [
         vec![0xB0, 99, 0],
         vec![0xB0, 98, 1],
         vec![0xB0, 6, 0],
         vec![0xB0, 38, 0],
     ];
-    assert_eq!(feed(&mut n, nrpn(A, 0, 1, 0)), nrpn_seq, "other kind");
-    assert_eq!(feed(&mut n, nrpn(A, 0, 1, 0)), nrpn_seq, "NRPN again");
-    assert_eq!(feed(&mut n, rpn(A, 0, 1, 0)).len(), 4, "back to the RPN");
+    assert_eq!(feed(&n, nrpn(A, 0, 1, 0)), nrpn_seq, "other kind");
+    assert_eq!(feed(&n, nrpn(A, 0, 1, 0)), nrpn_seq, "NRPN again");
+    assert_eq!(feed(&n, rpn(A, 0, 1, 0)).len(), 4, "back to the RPN");
     assert_eq!(
         feed(
-            &mut n,
+            &n,
             rpn(Address::new(MidiGroup::of(0), MidiChannel::of(1)), 0, 1, 0)
         )
         .len(),
@@ -122,7 +119,7 @@ fn every_controller_is_the_full_sequence_of_four() {
     );
     assert_eq!(
         feed(
-            &mut n,
+            &n,
             rpn(Address::new(MidiGroup::of(1), MidiChannel::of(0)), 0, 1, 0)
         )
         .len(),
@@ -144,10 +141,10 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
         ]
     };
     for moved in [CCNumber::RPN_LSB, CCNumber::RESET_ALL] {
-        let mut n = Midi1Translator::new();
-        feed(&mut n, rpn(A, 0, 0, 0));
+        let n = Midi1Translator::new();
+        feed(&n, rpn(A, 0, 0, 0));
         feed(
-            &mut n,
+            &n,
             Message::Midi1(
                 A,
                 Voice1::ControlChange {
@@ -156,12 +153,8 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
                 },
             ),
         );
-        assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
+        assert_eq!(feed(&n, rpn(A, 0, 0, 0)), full());
     }
-    let mut n = Midi1Translator::new();
-    feed(&mut n, rpn(A, 0, 0, 0));
-    n.reset();
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
 }
 
 /// **M2-115 section 4.4.1 (`scaleDownRounding(v, 32, 14)`): RPN index 0 to 31
@@ -174,8 +167,8 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
 fn rpn_0_to_31_translates_with_rounding() {
     for (bank, index) in [(0, 7), (0, 31), (1, 0), (1, 31), (127, 7)] {
         let data = |value| {
-            let mut n = Midi1Translator::new();
-            let out = feed(&mut n, rpn(A, bank, index, value));
+            let n = Midi1Translator::new();
+            let out = feed(&n, rpn(A, bank, index, value));
             (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
         };
         assert_eq!(data(0x0001_FFFF), 0, "bank {bank} index {index}");
@@ -192,8 +185,8 @@ fn rpn_0_to_31_translates_with_rounding() {
 #[test]
 fn other_controllers_translate_by_shift() {
     let data = |message: Message| {
-        let mut n = Midi1Translator::new();
-        let out = feed(&mut n, message);
+        let n = Midi1Translator::new();
+        let out = feed(&n, message);
         (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
     };
     for message in [
@@ -226,19 +219,19 @@ fn a_program_change_with_a_bank_is_always_three_messages() {
             },
         )
     };
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     assert_eq!(
-        feed(&mut n, pc(5, Some((1, 2)))),
+        feed(&n, pc(5, Some((1, 2)))),
         [vec![0xB0, 0, 1], vec![0xB0, 32, 2], vec![0xC0, 5]]
     );
     assert_eq!(
-        feed(&mut n, pc(6, Some((1, 2)))),
+        feed(&n, pc(6, Some((1, 2)))),
         [vec![0xB0, 0, 1], vec![0xB0, 32, 2], vec![0xC0, 6]],
         "the same bank again"
     );
-    assert_eq!(feed(&mut n, pc(7, None)), [vec![0xC0, 7]]);
+    assert_eq!(feed(&n, pc(7, None)), [vec![0xC0, 7]]);
     assert_eq!(
-        feed(&mut n, pc(8, Some((1, 3)))),
+        feed(&n, pc(8, Some((1, 3)))),
         [vec![0xB0, 0, 1], vec![0xB0, 32, 3], vec![0xC0, 8]]
     );
 }
@@ -247,7 +240,7 @@ fn a_program_change_with_a_bank_is_always_three_messages() {
 /// stateless messages pass as `midi1()` sends them.
 #[test]
 fn a_quiet_note_on_is_velocity_1() {
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     let on = Message::Midi2(
         A,
         Voice2::NoteOn {
@@ -256,13 +249,13 @@ fn a_quiet_note_on_is_velocity_1() {
             attribute: tutti_ump::Attribute::None,
         },
     );
-    assert_eq!(feed(&mut n, on), [vec![0x90, 60, 1]]);
+    assert_eq!(feed(&n, on), [vec![0x90, 60, 1]]);
 }
 
 /// **D.2.8: the relative controllers have no MIDI 1.0 form.**
 #[test]
 fn relative_controllers_send_nothing() {
-    let mut n = Midi1Translator::new();
+    let n = Midi1Translator::new();
     let m = Message::Midi2(
         A,
         Voice2::RelativeRegistered {
@@ -271,7 +264,7 @@ fn relative_controllers_send_nothing() {
             delta: 5,
         },
     );
-    assert!(feed(&mut n, m).is_empty());
+    assert!(feed(&n, m).is_empty());
 }
 
 /// **Midi2Translator then Midi1Translator returns the CC sequence a MIDI 1.0 sender
@@ -305,7 +298,7 @@ fn the_round_trip_returns_the_controller_sequence() {
                 cc(0, CCNumber::DATA_ENTRY_LSB, lsb),
             ];
             let mut t = Midi2Translator::new();
-            let mut n = Midi1Translator::new();
+            let n = Midi1Translator::new();
             let mut back = Vec::new();
             for ump in sent {
                 if let Some(u) = t.translate(ump) {
@@ -327,10 +320,7 @@ fn the_round_trip_returns_the_controller_sequence() {
 }
 
 fn avoiding() -> Midi1Translator {
-    Midi1Translator::with_mode(TranslationMode {
-        extremes: ExtremeValues::Avoided,
-        per_note: PerNoteTranslation::Dropped,
-    })
+    Midi1Translator::new().extremes(ExtremeValues::Avoided)
 }
 
 fn cc_value(value: u32) -> Message {
@@ -373,8 +363,8 @@ fn note(on: bool, velocity: u16) -> Message {
 /// Spec: m2-104/d.1.5#1
 #[test]
 fn avoided_extremes_move_near_values_off_the_minimum_and_maximum() {
-    let mut default = Midi1Translator::new();
-    let mut avoided = avoiding();
+    let default = Midi1Translator::new();
+    let avoided = avoiding();
     for (value, scaled, kept) in [
         (0x0000_0000, 0, 0),
         (0x0000_0001, 0, 1),
@@ -386,12 +376,12 @@ fn avoided_extremes_move_near_values_off_the_minimum_and_maximum() {
         (0xFFFF_FFFF, 127, 127),
     ] {
         assert_eq!(
-            feed(&mut default, cc_value(value)),
+            feed(&default, cc_value(value)),
             [vec![0xB0, 7, scaled]],
             "{value:#x}"
         );
         assert_eq!(
-            feed(&mut avoided, cc_value(value)),
+            feed(&avoided, cc_value(value)),
             [vec![0xB0, 7, kept]],
             "{value:#x}"
         );
@@ -404,21 +394,21 @@ fn avoided_extremes_move_near_values_off_the_minimum_and_maximum() {
 /// Spec: m2-104/d.1.5#1
 #[test]
 fn avoided_extremes_cover_velocity_bend_pressure_and_controller_data() {
-    let mut n = avoiding();
-    assert_eq!(feed(&mut n, note(false, 0x0001)), [vec![0x80, 60, 1]]);
-    assert_eq!(feed(&mut n, note(false, 0x0000)), [vec![0x80, 60, 0]]);
-    assert_eq!(feed(&mut n, note(true, 0xFFFE)), [vec![0x90, 60, 126]]);
-    assert_eq!(feed(&mut n, note(true, 0xFFFF)), [vec![0x90, 60, 127]]);
+    let n = avoiding();
+    assert_eq!(feed(&n, note(false, 0x0001)), [vec![0x80, 60, 1]]);
+    assert_eq!(feed(&n, note(false, 0x0000)), [vec![0x80, 60, 0]]);
+    assert_eq!(feed(&n, note(true, 0xFFFE)), [vec![0x90, 60, 126]]);
+    assert_eq!(feed(&n, note(true, 0xFFFF)), [vec![0x90, 60, 127]]);
     let bend = |v: u32| Message::Midi2(A, Voice2::PitchBend(BendValue::new(v)));
-    assert_eq!(feed(&mut n, bend(0x0000_0001)), [vec![0xE0, 0x01, 0x00]]);
-    assert_eq!(feed(&mut n, bend(0xFFFF_FFFE)), [vec![0xE0, 0x7E, 0x7F]]);
-    assert_eq!(feed(&mut n, bend(0xFFFF_FFFF)), [vec![0xE0, 0x7F, 0x7F]]);
+    assert_eq!(feed(&n, bend(0x0000_0001)), [vec![0xE0, 0x01, 0x00]]);
+    assert_eq!(feed(&n, bend(0xFFFF_FFFE)), [vec![0xE0, 0x7E, 0x7F]]);
+    assert_eq!(feed(&n, bend(0xFFFF_FFFF)), [vec![0xE0, 0x7F, 0x7F]]);
     let pressure = Message::Midi2(A, Voice2::ChannelPressure(ControlValue::new(1)));
-    assert_eq!(feed(&mut n, pressure), [vec![0xD0, 1]]);
+    assert_eq!(feed(&n, pressure), [vec![0xD0, 1]]);
     // NRPN 0/0 at 0xFFFF_FFFE: 14 bits of 0x3FFF is the maximum, so 0x3FFE:
     // MSB 0x7F, LSB 0x7E.
     assert_eq!(
-        feed(&mut n, nrpn(A, 0, 0, 0xFFFF_FFFE)),
+        feed(&n, nrpn(A, 0, 0, 0xFFFF_FFFE)),
         [
             vec![0xB0, 99, 0],
             vec![0xB0, 98, 0],
@@ -441,519 +431,21 @@ fn avoided_extremes_leave_zero_extended_registered_controllers() {
             vec![0xB0, 6, msb],
             vec![0xB0, 38, lsb],
         ];
+        assert_eq!(feed(&avoiding(), rpn(A, 0, 0, value)), want, "{value:#x}");
         assert_eq!(
-            feed(&mut avoiding(), rpn(A, 0, 0, value)),
-            want,
-            "{value:#x}"
-        );
-        assert_eq!(
-            feed(&mut Midi1Translator::new(), rpn(A, 0, 0, value)),
+            feed(&Midi1Translator::new(), rpn(A, 0, 0, value)),
             want,
             "{value:#x}"
         );
     }
 }
 
-fn zone() -> MpeLayout {
-    Mpe11Zone::lower(
-        MemberCount::of(2),
-        PitchBendSensitivity::MPE_MASTER_DEFAULT,
-        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-    )
-    .layout()
-}
-
-fn mpe(zone: MpeLayout) -> Midi1Translator {
-    Midi1Translator::with_mode(TranslationMode {
-        extremes: ExtremeValues::Scaled,
-        per_note: PerNoteTranslation::Mpe(zone),
-    })
-}
-
-fn note_on(note: u8) -> Message {
-    Message::Midi2(
-        A,
-        Voice2::NoteOn {
-            note: NoteNumber::of(note),
-            velocity: NoteVelocity::new(0x8000),
-            attribute: tutti_ump::Attribute::None,
-        },
-    )
-}
-
-fn per_note_bend(note: u8, value: u32) -> Message {
-    Message::Midi2(
-        A,
-        Voice2::PerNotePitchBend {
-            note: NoteNumber::of(note),
-            value: BendValue::new(value),
-        },
-    )
-}
-
-/// **D.2.8: Per-Note Pitch Bend has no default translation, and an Alternate
-/// Translation Mode may translate it**: MPE gives each note a member channel
-/// (here Ch2 and Ch3 of the lower zone), and the note's bend is that
-/// channel's Pitch Bend (centre 0x2000 for 0x8000_0000). The default sends
-/// nothing.
-/// Spec: m2-104/d.2.8#1, m2-104/d.4.2#1
+/// The longest sequence one message makes, a controller's four Control
+/// Changes, is `MAX_MESSAGES` and `MAX_BYTES`.
 #[test]
-fn mpe_gives_each_note_a_member_channel_for_its_per_note_bend() {
-    let mut n = mpe(zone());
-    assert_eq!(feed(&mut n, note_on(60)), [vec![0x91, 60, 0x40]]);
-    assert_eq!(feed(&mut n, note_on(64)), [vec![0x92, 64, 0x40]]);
-    assert_eq!(
-        feed(&mut n, per_note_bend(60, 0x8000_0000)),
-        [vec![0xE1, 0x00, 0x40]]
-    );
-    assert_eq!(
-        feed(&mut n, per_note_bend(64, 0xFFFF_FFFF)),
-        [vec![0xE2, 0x7F, 0x7F]]
-    );
-    assert!(feed(&mut Midi1Translator::new(), per_note_bend(60, 0x8000_0000)).is_empty());
-}
-
-/// **D.4.1: a device that understands the MIDI-CI MPE Profile uses its
-/// translation**: a Profile zone with its Manager on Ch4 (index 3) and two
-/// Members puts the notes on Ch5 and Ch6.
-/// Spec: m2-104/d.4.1#1
-#[test]
-fn a_profile_zone_puts_notes_on_the_members_above_its_manager() {
-    let span = MpeZoneSpan::new(MidiChannel::of(3), MpeChannels::of(3)).unwrap();
-    let zone = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT).layout();
-    let mut n = mpe(zone);
-    assert_eq!(feed(&mut n, note_on(60)), [vec![0x94, 60, 0x40]]);
-    assert_eq!(feed(&mut n, note_on(61)), [vec![0x95, 61, 0x40]]);
-}
-
-/// **A note's pressure, slide and Note Off stay on its channel** (M1-100
-/// section 2.2: MPE gives a member channel its note's expression), and the
-/// channel is free again after the Note Off: the next note takes the
-/// other idle member first, the one idle longest.
-/// Spec: m2-104/d.2.8#1
-#[test]
-fn mpe_expression_and_release_follow_the_note_channel() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    let pressure = Message::Midi2(
-        A,
-        Voice2::PolyPressure {
-            note: NoteNumber::of(60),
-            value: ControlValue::new(0x8000_0000),
-        },
-    );
-    assert_eq!(feed(&mut n, pressure), [vec![0xD1, 0x40]]);
-    let slide = Message::Midi2(
-        A,
-        Voice2::AssignablePerNote {
-            note: NoteNumber::of(60),
-            controller: 74,
-            value: ControlValue::new(0xFFFF_FFFF),
-        },
-    );
-    assert_eq!(feed(&mut n, slide), [vec![0xB1, 74, 0x7F]]);
-    assert_eq!(feed(&mut n, note(false, 0)), [vec![0x81, 60, 0]]);
-    // Ch2 was just freed; Ch3 has been idle longer.
-    assert_eq!(feed(&mut n, note_on(62)), [vec![0x92, 62, 0x40]]);
-}
-
-fn note_off(note: u8) -> Message {
-    Message::Midi2(
-        A,
-        Voice2::NoteOff {
-            note: NoteNumber::of(note),
-            velocity: NoteVelocity::new(0),
-            attribute: tutti_ump::Attribute::None,
-        },
-    )
-}
-
-/// **With no unoccupied member a new note shares a channel with an existing
-/// note** and ends none: Ch2 and Ch3 each play one note, so the third note
-/// shares the one given a note longest ago, Ch2, and no Note Off is sent. The
-/// section leaves the choice of channel open; the fewest notes, then the
-/// oldest, is this sender's.
-/// Spec: m2-120/3.6.1#2
-#[test]
-fn mpe_shares_a_member_with_an_existing_note_when_none_is_free() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    let _ = feed(&mut n, note_on(64));
-    assert_eq!(feed(&mut n, note_on(67)), [vec![0x91, 67, 0x40]]);
-    // Ch3 now plays the fewest notes.
-    assert_eq!(feed(&mut n, note_on(70)), [vec![0x92, 70, 0x40]]);
-    // Both play two: the one given a note longest ago, Ch2, takes the next.
-    assert_eq!(feed(&mut n, note_on(72)), [vec![0x91, 72, 0x40]]);
-}
-
-/// **A shared channel plays on until its last note ends**: releasing one of two
-/// notes on Ch2 sends that Note Off on Ch2 and leaves Ch2 playing, so it is
-/// the least loaded only after Ch3 gains a second note.
-/// Spec: m2-120/3.6.1#2
-#[test]
-fn a_shared_member_is_idle_only_after_its_last_note_ends() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    let _ = feed(&mut n, note_on(64));
-    let _ = feed(&mut n, note_on(67));
-    let _ = feed(&mut n, note_on(70));
-    assert_eq!(feed(&mut n, note_off(60)), [vec![0x81, 60, 0]]);
-    // Ch2 plays one note, Ch3 two.
-    assert_eq!(feed(&mut n, note_on(72)), [vec![0x91, 72, 0x40]]);
-    // Ending both notes of Ch3 frees it: it is the idle channel taken first.
-    let _ = feed(&mut n, note_off(64));
-    let _ = feed(&mut n, note_off(70));
-    assert_eq!(feed(&mut n, note_on(74)), [vec![0x92, 74, 0x40]]);
-}
-
-/// **A note that joins a channel playing another leaves the channel's bend
-/// where it is**: a reset would move the note already there (M2-120
-/// section 3.6.1: a channel's controllers affect every note on it).
-/// Spec: m2-120/3.6.1#2
-#[test]
-fn a_note_sharing_a_member_does_not_reset_its_bend() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    let _ = feed(&mut n, note_on(64));
-    let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
-    assert_eq!(feed(&mut n, note_on(67)), [vec![0x91, 67, 0x40]]);
-    // Once Ch2 plays nothing, its next note starts from a centred bend.
-    let _ = feed(&mut n, note_off(60));
-    let _ = feed(&mut n, note_off(67));
-    let _ = feed(&mut n, note_off(64));
-    assert_eq!(
-        feed(&mut n, note_on(72)),
-        [vec![0xE1, 0x00, 0x40], vec![0x91, 72, 0x40]]
-    );
-}
-
-/// **The longest sequence one message makes is `MAX_MESSAGES` and
-/// `MAX_BYTES`**: a key struck again on a member whose note was bent, pressed
-/// and slid ends that note, centres the three, then sounds.
-#[test]
-fn a_restruck_mpe_note_is_the_longest_sequence() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
-    let pressure = Message::Midi2(
-        A,
-        Voice2::PolyPressure {
-            note: NoteNumber::of(60),
-            value: ControlValue::new(0x8000_0000),
-        },
-    );
-    let _ = feed(&mut n, pressure);
-    let slide = Message::Midi2(
-        A,
-        Voice2::AssignablePerNote {
-            note: NoteNumber::of(60),
-            controller: 74,
-            value: ControlValue::new(0xFFFF_FFFF),
-        },
-    );
-    let _ = feed(&mut n, slide);
-    let sent = feed(&mut n, note_on(60));
-    assert_eq!(
-        sent,
-        [
-            vec![0x81, 60, 0],
-            vec![0xE1, 0x00, 0x40],
-            vec![0xD1, 0],
-            vec![0xB1, 74, 0x40],
-            vec![0x91, 60, 0x40],
-        ]
-    );
+fn a_controllers_sequence_is_the_longest() {
+    let sent = feed(&Midi1Translator::new(), rpn(A, 0, 0, 12 << 25));
     assert_eq!(sent.len(), Midi1Translator::MAX_MESSAGES);
-    assert_eq!(
-        sent.iter().map(Vec::len).sum::<usize>(),
-        Midi1Translator::MAX_BYTES
-    );
-}
-
-/// The Default Translation's longest sequence, a controller's four Control
-/// Changes, stays under the bounds.
-#[test]
-fn the_default_translation_stays_under_the_bounds() {
-    let sent = feed(&mut Midi1Translator::new(), rpn(A, 0, 0, 12 << 25));
-    assert_eq!(sent.len(), 4);
-    assert_eq!(sent.iter().map(Vec::len).sum::<usize>(), 12);
-}
-
-/// A mode is alternate unless it is the Default Translation, so a product can
-/// tell its user (D.4).
-#[test]
-fn the_default_mode_is_the_default_translation() {
-    assert!(!TranslationMode::default().is_alternate());
-    assert_eq!(Midi1Translator::new().mode(), TranslationMode::default());
-    assert!(mpe(zone()).mode().is_alternate());
-    assert!(avoiding().mode().is_alternate());
-}
-
-/// **Omni Off, Omni On, Mono Mode On and Poly Mode On are not sent on an MPE
-/// channel**: Control Changes 124 to 127 send nothing, and a neighbouring
-/// Control Change (123, All Notes Off on the Manager, 7) still goes on the
-/// Manager Channel.
-/// Spec: m2-120/4.7#9, m2-120/4.7#11, m2-120/4.7#13, m2-120/4.7#15
-#[test]
-fn mpe_never_sends_channel_mode_selects() {
-    let mut n = mpe(zone());
-    let cc = |controller: u8| {
-        Message::Midi2(
-            A,
-            Voice2::ControlChange {
-                controller: CCNumber::of(controller),
-                value: ControlValue::new(0),
-            },
-        )
-    };
-    for controller in 124..=127 {
-        assert!(feed(&mut n, cc(controller)).is_empty(), "CC {controller}");
-    }
-    assert_eq!(feed(&mut n, cc(123)), [vec![0xB0, 123, 0]]);
-}
-
-/// **Reset All Controllers and All Notes Off are sent on the Manager Channel,
-/// never on a member**: from source Ch6 (index 5) both go on Ch1 (index 0),
-/// the lower zone's Manager.
-/// Spec: m2-120/4.7#3, m2-120/4.7#5, m2-120/4.7#6, m2-120/4.7#8
-#[test]
-fn mpe_sends_reset_all_controllers_and_all_notes_off_on_the_manager() {
-    let mut n = mpe(zone());
-    let from = Address::first(MidiChannel::of(5));
-    for controller in [CCNumber::RESET_ALL, CCNumber::ALL_NOTES_OFF] {
-        let message = Message::Midi2(
-            from,
-            Voice2::ControlChange {
-                controller,
-                value: ControlValue::new(0),
-            },
-        );
-        assert_eq!(feed(&mut n, message), [vec![0xB0, controller.get(), 0]]);
-    }
-}
-
-/// **The Pitch Bend range is not sent to Member Channels** (M2-120
-/// section 3.5): Pitch Bend Sensitivity (RPN 0/0) from source Ch6 (index 5)
-/// is Control Changes 101, 100, 6 and 38 on the Manager Channel, Ch1.
-/// Spec: m2-120/3.5#2, m2-120/3.5#5
-#[test]
-fn mpe_sends_the_pitch_bend_range_on_the_manager_only() {
-    let mut n = mpe(zone());
-    let from = Address::first(MidiChannel::of(5));
-    assert_eq!(
-        feed(&mut n, rpn(from, 0, 0, 12 << 25)),
-        [
-            vec![0xB0, 101, 0],
-            vec![0xB0, 100, 0],
-            vec![0xB0, 6, 12],
-            vec![0xB0, 38, 0],
-        ]
-    );
-}
-
-/// **A MIDI 1.0 message in the MPE mode follows the same rules as a MIDI 2.0
-/// one**: a Note On takes a member channel, a Pitch Bend from source Ch6 (index
-/// 5) and an RPN 0 Control Change go on the Manager, and Control Changes 124
-/// to 127 are dropped.
-/// Spec: m2-120/4.7#9, m2-120/4.7#11, m2-120/4.7#13, m2-120/4.7#15, m2-120/3.5#2
-#[test]
-fn mpe_translates_midi1_input_by_the_same_rules() {
-    let mut n = mpe(zone());
-    let from = Address::first(MidiChannel::of(5));
-    let midi1 = |voice: Voice1| Message::Midi1(from, voice);
-    assert_eq!(
-        feed(
-            &mut n,
-            midi1(Voice1::NoteOn {
-                note: NoteNumber::of(60),
-                velocity: U7::of(0x40),
-            })
-        ),
-        [vec![0x91, 60, 0x40]]
-    );
-    assert_eq!(
-        feed(&mut n, midi1(Voice1::PitchBend(tutti_ump::U14::of(0x2000)))),
-        [vec![0xE0, 0x00, 0x40]]
-    );
-    let cc = |controller: u8, value: u8| {
-        midi1(Voice1::ControlChange {
-            controller: CCNumber::of(controller),
-            value: U7::of(value),
-        })
-    };
-    assert_eq!(feed(&mut n, cc(101, 0)), [vec![0xB0, 101, 0]]);
-    for controller in 124..=127 {
-        assert!(
-            feed(&mut n, cc(controller, 0)).is_empty(),
-            "CC {controller}"
-        );
-    }
-    // Without the MPE mode a MIDI 1.0 message passes on its own channel.
-    assert_eq!(
-        feed(&mut Midi1Translator::new(), cc(124, 0)),
-        [vec![0xB5, 124, 0]]
-    );
-}
-
-/// **A MIDI 1.0 Note On at velocity 0 is a Note Off** (M2-104 D.3.1: a MIDI 2.0 Note Off)
-/// and in the MPE mode ends its note on its member: the Note Off goes out on
-/// Ch2, which is then idle, so the next note takes the longest idle member,
-/// Ch3, and the one after that Ch2 again.
-/// Spec: m2-104/d.3.1#1
-#[test]
-fn mpe_releases_a_member_on_a_midi1_note_on_at_velocity_zero() {
-    let mut n = mpe(zone());
-    let on = |note: u8, velocity: u8| {
-        Message::Midi1(
-            A,
-            Voice1::NoteOn {
-                note: NoteNumber::of(note),
-                velocity: U7::of(velocity),
-            },
-        )
-    };
-    assert_eq!(feed(&mut n, on(60, 0x40)), [vec![0x91, 60, 0x40]]);
-    let off = feed(&mut n, on(60, 0));
-    assert_eq!(off.len(), 1);
-    assert_eq!(off[0][0], 0x81, "a Note Off on Ch2");
-    assert_eq!(off[0][1], 60);
-    assert_eq!(feed(&mut n, on(62, 0x40)), [vec![0x92, 62, 0x40]]);
-    assert_eq!(feed(&mut n, on(64, 0x40)), [vec![0x91, 64, 0x40]]);
-}
-
-fn mpe_avoiding() -> Midi1Translator {
-    Midi1Translator::with_mode(TranslationMode {
-        extremes: ExtremeValues::Avoided,
-        per_note: PerNoteTranslation::Mpe(zone()),
-    })
-}
-
-/// **Every message that is not per-note goes on the Manager Channel** (M2-120
-/// sections 4.1 to 4.6): a Pitch Bend, a Program Change with its Bank Select
-/// and a Control Change from source Ch6 (index 5) go on Ch1 (index 0), the
-/// lower zone's Manager, not on Ch6 nor on a member.
-/// Spec: m2-104/d.2.8#1, m2-120/4.6#1
-#[test]
-fn mpe_sends_channel_messages_on_the_manager_channel() {
-    let mut n = mpe(zone());
-    let from = Address::first(MidiChannel::of(5));
-    let bend = Message::Midi2(from, Voice2::PitchBend(BendValue::new(0x8000_0000)));
-    assert_eq!(feed(&mut n, bend), [vec![0xE0, 0x00, 0x40]]);
-    let program = Message::Midi2(
-        from,
-        Voice2::ProgramChange {
-            program: U7::of(8),
-            bank: Some(Bank {
-                msb: U7::of(1),
-                lsb: U7::of(3),
-            }),
-        },
-    );
-    assert_eq!(
-        feed(&mut n, program),
-        [vec![0xB0, 0, 1], vec![0xB0, 32, 3], vec![0xC0, 8]]
-    );
-    let volume = Message::Midi2(
-        from,
-        Voice2::ControlChange {
-            controller: CCNumber::of(7),
-            value: ControlValue::new(0xFFFF_FFFF),
-        },
-    );
-    assert_eq!(feed(&mut n, volume), [vec![0xB0, 7, 0x7F]]);
-}
-
-/// **Both modes together**: a per-note bend of 0x0000_0001 is the 14-bit 1
-/// (LSB 1, MSB 0) where the shift gives 0, and a Poly Pressure of 0xFFFF_FFFE
-/// is Channel Pressure 126 where the shift gives 127.
-/// Spec: m2-104/d.1.5#1
-#[test]
-fn mpe_and_avoided_extremes_combine() {
-    let mut n = mpe_avoiding();
-    let _ = feed(&mut n, note_on(60));
-    assert_eq!(feed(&mut n, per_note_bend(60, 1)), [vec![0xE1, 0x01, 0x00]]);
-    let pressure = Message::Midi2(
-        A,
-        Voice2::PolyPressure {
-            note: NoteNumber::of(60),
-            value: ControlValue::new(0xFFFF_FFFE),
-        },
-    );
-    assert_eq!(feed(&mut n, pressure), [vec![0xD1, 126]]);
-    let slide = Message::Midi2(
-        A,
-        Voice2::AssignablePerNote {
-            note: NoteNumber::of(60),
-            controller: 74,
-            value: ControlValue::new(1),
-        },
-    );
-    assert_eq!(feed(&mut n, slide), [vec![0xB1, 74, 1]]);
-}
-
-/// **The same key struck twice ends its first note** on the same member, so a
-/// single Note Off later ends the only one sounding.
-/// Spec: m2-104/d.2.8#1
-#[test]
-fn mpe_retriggers_a_key_on_its_member_after_a_note_off() {
-    let mut n = mpe(zone());
-    let _ = feed(&mut n, note_on(60));
-    assert_eq!(
-        feed(&mut n, note_on(60)),
-        [vec![0x81, 60, 0], vec![0x91, 60, 0x40]]
-    );
-}
-
-/// **A reused member starts from reset expression**: a slide sent to the first
-/// note is centred to 0x40 (M1-100 A.4.3: CC 74 at Note On is 0x40, and the
-/// section 2.2 example's initial timbre is 0xB2 0x4A 0x40) before the next
-/// note on that channel.
-/// Spec: m2-104/d.2.8#1
-#[test]
-fn mpe_centres_a_reused_members_slide() {
-    let mut n = mpe(one_member_zone());
-    let _ = feed(&mut n, note_on(60));
-    let slide = Message::Midi2(
-        A,
-        Voice2::AssignablePerNote {
-            note: NoteNumber::of(60),
-            controller: 74,
-            value: ControlValue::new(0xFFFF_FFFF),
-        },
-    );
-    let _ = feed(&mut n, slide);
-    let _ = feed(&mut n, note(false, 0));
-    // One member only: the next note reuses Ch2.
-    assert_eq!(
-        feed(&mut n, note_on(62)),
-        [vec![0xB1, 74, 0x40], vec![0x91, 62, 0x40]]
-    );
-}
-
-fn one_member_zone() -> MpeLayout {
-    Mpe11Zone::lower(
-        MemberCount::of(1),
-        PitchBendSensitivity::MPE_MASTER_DEFAULT,
-        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-    )
-    .layout()
-}
-
-/// **The Manager Channel is the zone's, not index 0**: the upper zone's Manager
-/// is Ch16 (index 15, RP-053), and a Profile Manager on Ch4 (index 3) is its
-/// own; a bend from source Ch1 goes there.
-/// Spec: m2-104/d.2.8#1
-#[test]
-fn mpe_manager_channel_is_the_zones_own() {
-    let bend = Message::Midi2(A, Voice2::PitchBend(BendValue::new(0x8000_0000)));
-    let upper = Mpe11Zone::upper(
-        MemberCount::of(2),
-        PitchBendSensitivity::MPE_MASTER_DEFAULT,
-        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-    )
-    .layout();
-    assert_eq!(feed(&mut mpe(upper), bend), [vec![0xEF, 0x00, 0x40]]);
-    let span = MpeZoneSpan::new(MidiChannel::of(3), MpeChannels::of(3)).unwrap();
-    let profile = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT).layout();
-    assert_eq!(feed(&mut mpe(profile), bend), [vec![0xE3, 0x00, 0x40]]);
+    let bytes: usize = sent.iter().map(Vec::len).sum();
+    assert_eq!(bytes, Midi1Translator::MAX_BYTES);
 }

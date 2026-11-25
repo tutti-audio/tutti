@@ -3,10 +3,10 @@
 
 use tutti_midi_protocol::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MtcRate, MtcTimeCode, OctaveOffsets,
-    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, TimecodeHours,
-    TimecodeMinutes, TimecodeSeconds, Timing, TranslationMode, TuningFrequency, TuningName,
+    PerNotePolicy, SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+    Timing, TuningFrequency, TuningName,
 };
-use tutti_ump::{ExtremeValues, NoteNumber, PerNoteManagement, U7, U14};
+use tutti_ump::{NoteNumber, PerNoteManagement, U7, U14};
 
 fn round_trip<T>(value: &T) -> T
 where
@@ -57,16 +57,9 @@ fn a_timecode_reads_back_only_when_its_labels_are_in_range_for_its_rate() {
     }
 }
 
-/// The translation choices read back as written.
+/// The policies read back as written.
 #[test]
-fn a_translation_mode_and_a_policy_read_back_as_written() {
-    for extremes in [ExtremeValues::Scaled, ExtremeValues::Avoided] {
-        let mode = TranslationMode {
-            extremes,
-            per_note: PerNoteTranslation::Dropped,
-        };
-        assert_eq!(round_trip(&mode), mode);
-    }
+fn a_policy_reads_back_as_written() {
     for policy in [
         PerNotePolicy::WhenAttached(PerNoteManagement::Detach),
         PerNotePolicy::EveryNote(PerNoteManagement::DetachAndReset),

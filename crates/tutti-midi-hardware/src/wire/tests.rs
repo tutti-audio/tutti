@@ -284,60 +284,96 @@ fn the_accepted_count_is_in_the_callers_events() {
     assert_eq!(counts, [1, 1, 1, 1, 2, 3]);
 }
 
-/// **A change of Protocol drops a held MPE note's allocation**: the stream
-/// restarts, so a per-note message for the note sounding before it has no
-/// member channel and sends nothing, where without the change it is sent on
-/// the note's channel (M2-104 D.2.8, MPE mode).
-#[test]
-fn a_change_of_protocol_drops_an_mpe_notes_channel() {
-    use tutti_midi_protocol::{
-        MemberCount, Mpe11Zone, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
-    };
-    use tutti_ump::{Attribute, BendValue, ExtremeValues, NoteVelocity};
-    let mpe = || {
-        let zone = Mpe11Zone::lower(
-            MemberCount::of(2),
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .layout();
-        Midi1Translator::with_mode(TranslationMode {
-            extremes: ExtremeValues::Scaled,
-            per_note: PerNoteTranslation::Mpe(zone),
+/// The Manager Ch1 and two Members, on group 0 (M2-120 section 3.1).
+fn mpe(config: StreamConfig) -> Wire {
+    use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
+    let span = tutti_ump::MpeZoneSpan::new(MidiChannel::FIRST, tutti_ump::MpeChannels::of(3));
+    let zone = ProfileZone::new(span.unwrap(), PitchBendSensitivity::MPE_PROFILE_DEFAULT);
+    let mut wire = Wire::new(config);
+    wire.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone)));
+    wire
+}
+
+/// The channel and status nibble of each packet, each checked to be of `kind`.
+fn statuses(packets: &[Ump], kind: MessageType) -> Vec<(u8, u8)> {
+    packets
+        .iter()
+        .map(|ump| {
+            assert_eq!(ump.message_type(), kind, "{ump:?}");
+            let status = (ump.words()[0] >> 16) as u8;
+            (status & 0x0F, status >> 4)
         })
-    };
-    let note = NoteNumber::of(60);
-    let note_on = Ump::from(Message::Midi2(
-        address(0, 0),
-        Voice2::NoteOn {
-            note,
-            velocity: NoteVelocity::new(0x8000),
-            attribute: Attribute::None,
-        },
-    ));
-    let bend = Ump::from(Message::Midi2(
-        address(0, 0),
-        Voice2::PerNotePitchBend {
-            note,
-            value: BendValue::new(0x8000_0000),
-        },
-    ));
-    // A change of JR alone keeps the note: its bend is the member channel's.
-    let mut wire = Wire::new(MIDI1);
-    wire.midi1_translator = mpe();
-    convert(&mut wire, &[note_on]);
+        .collect()
+}
+
+/// **A device with the MPE Profile enabled gets MPE in either Protocol** (M2-120
+/// Appendix C): a note is the Manager's bend range, its Member's bend (`0xE`),
+/// third dimension (`0xB`) and pressure (`0xD`), and the Note On (`0x9`) on the
+/// Member. In MIDI 2.0 the range is one Registered Controller (`0x2`), in MIDI 1.0
+/// its four Control Changes. A Group with no zone is untouched.
+#[test]
+fn an_mpe_group_gets_mpe_in_either_protocol() {
+    let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
+    let member = [(1, 0xE), (1, 0xB), (1, 0xD), (1, 0x9)];
+    assert_eq!(
+        statuses(
+            &convert(&mut mpe(MIDI2), &[note]),
+            MessageType::Midi2ChannelVoice
+        ),
+        [&[(0, 0x2)][..], &member].concat()
+    );
+    assert_eq!(
+        statuses(
+            &convert(&mut mpe(MIDI1), &[note]),
+            MessageType::Midi1ChannelVoice
+        ),
+        [&[(0, 0xB); 4][..], &member].concat()
+    );
+    let bend = midi::per_note_pitch_bend(address(1, 0), 60, 0x9000_0000);
+    assert_eq!(convert(&mut mpe(MIDI2), &[bend]), [bend]);
+}
+
+/// **After a change of Protocol, and after a send the device did not take, a
+/// Member is told its values again**; after a change of JR alone it is not.
+#[test]
+fn an_mpe_member_is_told_its_values_again_when_the_device_may_not_hold_them() {
+    let note = |key| midi::note_on(MidiChannel::FIRST, key, 0xFFFF);
+    let off = |key| midi::note_off(MidiChannel::FIRST, key, 0);
+    let mut wire = mpe(MIDI2);
+    let first = convert(&mut wire, &[note(60)]).len();
+    // Every Member told once.
+    convert(&mut wire, &[off(60), note(60), off(60)]);
     wire.set_config(StreamConfig {
         rx_jr: true,
-        ..MIDI1
+        ..MIDI2
     });
-    assert_eq!(convert(&mut wire, &[bend]).len(), 1);
-    // A change of Protocol forgets it.
-    let mut wire = Wire::new(MIDI1);
-    wire.midi1_translator = mpe();
-    convert(&mut wire, &[note_on]);
-    wire.set_config(MIDI2);
+    assert_eq!(convert(&mut wire, &[note(60), off(60)]).len(), 2);
     wire.set_config(MIDI1);
-    assert!(convert(&mut wire, &[bend]).is_empty());
+    wire.set_config(MIDI2);
+    assert_eq!(convert(&mut wire, &[note(60), off(60)]).len(), first + 1);
+    wire.unsent();
+    assert_eq!(convert(&mut wire, &[note(60), off(60)]).len(), first + 1);
+}
+
+/// **A message MPE holds for a note that does not sound is taken, and one it has
+/// no message for has no wire form**: a per-note bend before its Note On sends no
+/// packet and is not counted, a Per-Note Pan is.
+#[test]
+fn an_mpe_value_for_a_silent_note_is_not_unrepresentable() {
+    let g = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
+    let pan = Ump::from(Message::Midi2(
+        g,
+        Voice2::RegisteredPerNote {
+            note: NoteNumber::of(60),
+            controller: tutti_ump::RegisteredPerNoteController::Pan,
+            value: ControlValue::new(1),
+        },
+    ));
+    let mut wire = mpe(MIDI2);
+    let bend = midi::per_note_pitch_bend(g, 60, 0x9000_0000);
+    assert!(convert(&mut wire, &[bend, pan]).is_empty());
+    assert_eq!(wire.unrepresentable_in(1), Losses::refused(0));
+    assert_eq!(wire.unrepresentable_in(2), Losses::refused(1));
 }
 
 /// **A send time stays with its event through the conversion:** an RPN that

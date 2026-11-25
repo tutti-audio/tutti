@@ -1368,32 +1368,13 @@ impl Ports {
     }
 
     /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
-    /// what its input node follows: the zones of every peer on a Group
-    /// together, or none where no peer has the Profile enabled.
+    /// what its input node follows.
     fn sync_mpe_profiles(&self, io: &MidiSession, device: &MidiDeviceId) {
-        let Some(port) = self.inputs.iter().find(|p| p.shared.is_open_on(device)) else {
-            return;
-        };
-        let mut zones = [None; tutti_ump::MidiGroup::COUNT as usize];
-        for peer in io.profiles(device).iter() {
-            let Some(enabled) = peer.mpe_zones() else {
-                continue;
-            };
-            let held: &mut Option<tutti_midi_protocol::ProfileZones> =
-                &mut zones[peer.at().peer().group.index()];
-            *held = match *held {
-                None => Some(enabled),
-                // A zone that shares a Channel with one held is left out (M2-120
-                // section 3.4).
-                Some(held) => Some(
-                    enabled
-                        .zones()
-                        .fold(held, |all, zone| all.with(*zone).unwrap_or(all)),
-                ),
-            };
-        }
-        for group in tutti_ump::MidiGroup::all() {
-            port.controls.set_mpe_profile(group, zones[group.index()]);
+        if let Some(port) = self.inputs.iter().find(|p| p.shared.is_open_on(device)) {
+            for group in tutti_ump::MidiGroup::all() {
+                let zones = io.mpe_zones(device, group);
+                port.controls.set_mpe_profile(group, zones);
+            }
         }
     }
 
@@ -1645,7 +1626,7 @@ impl Ports {
             // `MidiOut` phase that drains next stamps by it.
             for port in &mut self.outputs {
                 if let Some(out) = port.link.open_mut() {
-                    out.destination_mut().follow(&polled);
+                    out.destination_mut().follow(io, &polled);
                 }
             }
             let device = match &polled {

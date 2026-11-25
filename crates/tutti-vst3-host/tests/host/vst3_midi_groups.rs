@@ -2,7 +2,7 @@
 //! state (M2-104 sections 2.1.2 and 7.4, Appendices C.3 and D.2): a Group is an
 //! event bus, a note has a `noteId` of its own, per-note values told before a
 //! Note On are its initial values, and an RPN or NRPN is Control Changes
-//! through the stateful `Midi1Translator`. Every expectation is the spec's figure,
+//! through the `Midi1Translator`. Every expectation is the spec's figure,
 //! written out; the plugin's side of the calls is `unsafe` COM, so these live
 //! here and not in the host's `src/`.
 
