@@ -77,9 +77,7 @@ pub(super) fn solve(
     let total = Latency::new(solved.compensation().total());
     let rendered_outputs = graph.topology().outputs.len();
     let bank_total = match (graph.main_output_bank(), prev) {
-        (Some(bank), Some(p)) if p.main_output_bank.is_some_and(|b| b.old == bank.old) => {
-            p.bank_total
-        }
+        (Some(bank), Some(p)) if bank.continues => p.bank_total,
         (_, Some(p)) => p.total_latency,
         (_, None) => total,
     };

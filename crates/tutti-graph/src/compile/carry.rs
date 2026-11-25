@@ -8,7 +8,7 @@ use crate::compile::ids::{
     AudioDelayId, AudioFeedbackId, EventDelayId, EventFeedbackId, Id, PlanEventTapId, PlanMeterId,
     PlanTapId, Table, TableSlice,
 };
-use crate::compile::plan::{AudioDelay, AudioDelayKey, EventDelayKey, Plan};
+use crate::compile::plan::{AudioDelay, AudioDelayKey, EventDelayKey, Plan, PlanId};
 use crate::compile::program::{BySlot, Program};
 use crate::node::Prepare;
 use crate::{EdgeId, EventInputPort, MainOutputBank, PortSource};
@@ -30,6 +30,9 @@ pub(crate) struct Vanished<I> {
 /// are not time, and carry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Carry {
+    /// The plan it is against, `None` for no plan: a delta applies only
+    /// over the plan it was compiled against.
+    pub(crate) prev: Option<PlanId>,
     /// Each PDC ring's predecessor of the same key.
     pub(crate) audio_rings: Table<AudioDelayId, Option<AudioDelayId>>,
     /// Each event delay's predecessor of the same key.
@@ -146,6 +149,7 @@ impl Carry {
             .collect();
 
         Self {
+            prev: prev.map(|p| p.id.0),
             audio_rings: matched(&program.audio_delays, &old_audio, time, |d| d.key),
             event_rings: matched(&program.event_delays, &old_events, time, |d| d.key),
             audio_fb: matched(&program.audio_feedback, &old_audio_fb, time, |f| f.key),

@@ -125,6 +125,12 @@ pub enum CommitError {
         /// The incoming unit's shape.
         incoming: Box<crate::Shape>,
     },
+    /// A delta handed to [`Editor::package`](crate::Editor::package) was
+    /// compiled against another plan than the one sent last: what it says
+    /// carries over from the plan before it is not what the executor holds.
+    /// Nothing was sent.
+    #[error("the delta was compiled against another plan than the one sent last")]
+    StaleDelta,
     /// A delta handed to [`Editor::package`](crate::Editor::package) carries a crossfade the
     /// verifier refuses ([`Plan::verify_fades`](crate::Plan::verify_fades)). Nothing was
     /// sent.

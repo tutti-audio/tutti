@@ -304,15 +304,7 @@ pub fn compile(
     let tasks = coarsen::group(&program, &checked, prepare.max_block().samples());
     let program = colour::colour(program, &checked);
     let Placed { delta, units } = place::place(graph, &checked, &timing, &program, prepare, prev);
-    let plan = Plan::new(
-        prepare,
-        program,
-        tasks,
-        units,
-        delta.store_len(),
-        graph,
-        timing,
-    );
+    let plan = Plan::new(prepare, program, tasks, units, graph, timing);
 
     #[cfg(debug_assertions)]
     if let Err(e) = verify::verify(&plan) {

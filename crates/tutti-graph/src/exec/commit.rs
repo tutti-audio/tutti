@@ -2,6 +2,7 @@
 //! rings themselves.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use tutti_buffers::Float;
@@ -17,8 +18,8 @@ use super::stage::Staged;
 use super::state::{Gone, State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
-use crate::compile::ids::Generation;
-use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, UnitIdx};
+use crate::compile::ids::PlanUnitId;
+use crate::compile::plan::{Delta, Placement, Plan, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -128,9 +129,6 @@ impl<F: Float> Crossfade<F> {
 /// A unit a commit places, with everything built for it on the control
 /// side.
 pub(super) struct Incoming<F: Float = f32> {
-    pub(super) key: NodeKey,
-    pub(super) idx: UnitIdx,
-    pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// The crossfade it arrives with, over the unit at its key.
     pub(super) fade: Option<Box<Crossfade<F>>>,
@@ -141,6 +139,21 @@ pub(super) struct Incoming<F: Float = f32> {
     /// The tables it writes into while it waits behind a running fade
     /// (`Keys::wait`); empty for a unit with no event outputs or no fade.
     pub(super) staging: Tables,
+}
+
+/// One unit a commit installs, and what applying it needs to know of the
+/// unit it replaces: nothing is looked up by key.
+pub(super) struct Install<F: Float = f32> {
+    /// Where the unit goes.
+    pub(super) at: Placement,
+    /// The unit it replaces, at the same index.
+    pub(super) was: Option<Placement>,
+    /// The unit's row in the plan.
+    pub(super) unit: PlanUnitId,
+    /// The most the unit it replaces hands its successor (`Node::chase`),
+    /// set when the commit is staged.
+    pub(super) chase: Option<NonZeroU32>,
+    pub(super) incoming: Incoming<F>,
 }
 
 /// A kept unit's rebuilt bypass line.
@@ -170,7 +183,8 @@ pub(crate) struct Commit<F: Float = f32> {
     /// unit of the plan comes back, and the held-key tables of those the plan
     /// keeps go back to them.
     pub(super) resumed: bool,
-    pub(super) incoming: Vec<Incoming<F>>,
+    /// The units it installs: the delta's inserts, then its replaces.
+    pub(super) install: Vec<Install<F>>,
     /// Kept units whose declared latency changed, each with its rebuilt
     /// bypass line (`Editor::set_latency`).
     pub(super) relined: Vec<Relined<F>>,
@@ -195,7 +209,7 @@ pub(crate) struct Commit<F: Float = f32> {
     pub(super) gone: Gone,
     /// A re-prepare's first half: where the units' held-key tables wait for
     /// the resume (`Executor::parked`), with room for every unit.
-    pub(super) parked: CappedVec<(NodeKey, Keys)>,
+    pub(super) parked: CappedVec<(UnitIdx, Keys)>,
     /// Tap producers and meter cells the editor opened since the last commit.
     pub(super) opened: Opened<F>,
 }
@@ -245,20 +259,20 @@ impl<F: Float> Commit<F> {
         mut wakes: impl FnMut(NodeKey) -> Wake,
         opened: Opened<F>,
     ) -> Box<Commit<F>> {
-        let wanted: Vec<Placement> = if resumed {
-            plan.units().iter().map(PlanUnit::placement).collect()
+        let wanted: Vec<(Placement, Option<Placement>)> = if resumed {
+            plan.units().iter().map(|u| (u.placement(), None)).collect()
         } else {
             delta
                 .insert()
                 .iter()
-                .copied()
-                .chain(delta.replace().iter().map(|&(_, new)| new))
+                .map(|&p| (p, None))
+                .chain(delta.replace().iter().map(|&(old, new)| (new, Some(old))))
                 .collect()
         };
         let max_block = plan.prepare.max_block().get();
-        let incoming = wanted
+        let install = wanted
             .into_iter()
-            .map(|p| {
+            .map(|(p, was)| {
                 let unit = units
                     .remove(&p.key)
                     .unwrap_or_else(|| panic!("no unit supplied for node {}", p.key.0));
@@ -289,16 +303,19 @@ impl<F: Float> Commit<F> {
                     plan.unit(p.key).map_or(0, |u| u.shape.params.len()),
                     max_block,
                 );
-                Incoming {
-                    key: p.key,
-                    idx: p.idx,
-                    generation: Generation::new(p.generation),
-                    node: NodeBox::new(unit, wakes(p.key)),
-                    fade,
-                    params,
-                    mode: modes(p.key),
-                    keys: Keys::default(),
-                    staging: Tables::new(),
+                Install {
+                    at: p,
+                    was,
+                    unit: plan.unit_id(p.key).expect("a placed key is in the plan"),
+                    chase: None,
+                    incoming: Incoming {
+                        node: NodeBox::new(unit, wakes(p.key)),
+                        fade,
+                        params,
+                        mode: modes(p.key),
+                        keys: Keys::default(),
+                        staging: Tables::new(),
+                    },
                 }
             })
             .collect::<Vec<_>>();
@@ -326,8 +343,8 @@ impl<F: Float> Commit<F> {
         let retired = CappedVec::with_capacity(delta_units);
         // Every incoming unit's may come back unused, and every unit leaving
         // brings its own.
-        let spare_params = CappedVec::with_capacity(incoming.len() + delta_units);
-        let spare_modes = CappedVec::with_capacity(incoming.len() + delta_units);
+        let spare_params = CappedVec::with_capacity(install.len() + delta_units);
+        let spare_modes = CappedVec::with_capacity(install.len() + delta_units);
         let spare_lines = CappedVec::with_capacity(relined.len());
         Box::new(Self {
             _control: ControlDrop::new(),
@@ -336,7 +353,7 @@ impl<F: Float> Commit<F> {
             plan: Some(plan),
             delta,
             resumed,
-            incoming,
+            install,
             relined,
             retired,
             spare_params,
@@ -363,7 +380,7 @@ impl<F: Float> Commit<F> {
             plan: None,
             delta: Delta::default(),
             resumed: false,
-            incoming: Vec::new(),
+            install: Vec::new(),
             relined: Vec::new(),
             retired: CappedVec::with_capacity(units),
             spare_params: CappedVec::with_capacity(units),
@@ -376,13 +393,6 @@ impl<F: Float> Commit<F> {
             parked: CappedVec::with_capacity(units),
             opened: Opened::default(),
         })
-    }
-
-    /// Whether this commit crossfades `key` in.
-    pub(super) fn fades_in(&self, key: NodeKey) -> bool {
-        self.incoming
-            .iter()
-            .any(|i| i.fade.as_ref().is_some_and(|x| x.key == key))
     }
 
     /// Items the lists this box carries back refused when it was applied:
@@ -641,7 +651,7 @@ mod tests {
         c.spare_held.mark_overflowed();
         c.parked.mark_overflowed();
         c.gone.spare.mark_overflowed();
-        c.gone.replaced.mark_overflowed();
+        c.gone.chased.mark_overflowed();
         assert_eq!(c.refused(), 5);
     }
 }
