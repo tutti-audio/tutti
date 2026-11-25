@@ -45,8 +45,8 @@ fn holds::Holds::sustain_up
 fn holds::Holds::sustained
 fn mpe_sender::MpeSender::feed
 fn mpe_sender::MpeSender::new
+fn mpe_sender::MpeSender::resend
 fn mpe_sender::MpeSender::set_profile
-fn mpe_sender::MpeSender::unsent
 fn per_note::PerNoteState::clear
 fn per_note::PerNoteState::end
 fn per_note::PerNoteState::new

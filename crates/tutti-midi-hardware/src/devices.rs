@@ -679,11 +679,13 @@ impl OpenInput {
 /// never sent type `0x4`, and its MIDI 2.0 messages go through one `Midi1Translator`
 /// for this output (a Registered Controller as Control Changes 101, 100, 6 and
 /// 38); a Group whose device has the MPE Profile enabled is sent MPE (M2-120), a
-/// note on a Member Channel of its own; and JR Timestamps go only to a device whose configuration receives them.
+/// note on a Member Channel of its own; and JR Timestamps go only to a device whose
+/// configuration receives them.
 /// The configuration is the OS's description of the device until
 /// [`set_config`](Self::set_config) says what a negotiation settled
 /// ([`MidiSession::follow`](crate::MidiSession::follow) takes it from a
-/// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
+/// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages
+/// pass in every form.
 pub struct OpenOutput {
     /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
     /// started it. Declared first: it ends before the sink drops. A drop on a thread
@@ -831,9 +833,6 @@ impl OpenOutput {
         self.wire.convert(events);
         let taken = self.sink.queue_timed(self.wire.batch());
         let refused = taken.left_of(self.wire.batch()) as u64;
-        if refused > 0 {
-            self.wire.unsent();
-        }
         // Every send passes here: a packet the device took is traffic.
         if let Some(heartbeat) = &self.heartbeat
             && (self.wire.batch().len() as u64) > refused

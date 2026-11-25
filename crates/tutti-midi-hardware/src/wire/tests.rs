@@ -333,10 +333,10 @@ fn an_mpe_group_gets_mpe_in_either_protocol() {
     assert_eq!(convert(&mut mpe(MIDI2), &[bend]), [bend]);
 }
 
-/// **After a change of Protocol, and after a send the device did not take, a
-/// Member is told its values again**; after a change of JR alone it is not.
+/// **After a change of Protocol a Member is told its values again**; after a change
+/// of JR alone it is not.
 #[test]
-fn an_mpe_member_is_told_its_values_again_when_the_device_may_not_hold_them() {
+fn an_mpe_member_is_told_its_values_again_after_a_protocol_change() {
     let note = |key| midi::note_on(MidiChannel::FIRST, key, 0xFFFF);
     let off = |key| midi::note_off(MidiChannel::FIRST, key, 0);
     let mut wire = mpe(MIDI2);
@@ -351,8 +351,33 @@ fn an_mpe_member_is_told_its_values_again_when_the_device_may_not_hold_them() {
     wire.set_config(MIDI1);
     wire.set_config(MIDI2);
     assert_eq!(convert(&mut wire, &[note(60), off(60)]).len(), first + 1);
-    wire.unsent();
-    assert_eq!(convert(&mut wire, &[note(60), off(60)]).len(), first + 1);
+}
+
+/// **An event the device did not take is the same when it is offered again**: the
+/// range and values of a refused Note On, and a refused Note Off, which still ends
+/// its note. A note after a taken one keeps what that was told.
+#[test]
+fn a_refused_mpe_event_converts_the_same_again() {
+    let events = [
+        midi::note_on(MidiChannel::FIRST, 60, 0xFFFF),
+        midi::note_off(MidiChannel::FIRST, 60, 0),
+    ]
+    .map(at);
+    let events = Outgoing::now_batch(&events);
+    let mut wire = mpe(MIDI2);
+    let offer = |wire: &mut Wire, events: &[Outgoing], room: usize| {
+        wire.convert(events);
+        let batch: Vec<Ump> = wire.batch().iter().map(|o| o.ump).collect();
+        let taken = Taken::within(wire.batch(), room);
+        (batch, wire.accepted(taken, events).packets())
+    };
+    let (all, none) = offer(&mut wire, &events, 0);
+    assert_eq!((all.len(), none), (6, 0));
+    // Room for the Note On and what goes ahead of it.
+    assert_eq!(offer(&mut wire, &events, 5), (all.clone(), 1));
+    assert_eq!(offer(&mut wire, &events[1..], 0), (all[5..].to_vec(), 0));
+    assert_eq!(offer(&mut wire, &events[1..], 1), (all[5..].to_vec(), 1));
+    assert_eq!(offer(&mut wire, &events[1..], 1).0, []);
 }
 
 /// **A message MPE holds for a note that does not sound is taken, and one it has

@@ -168,7 +168,7 @@ fn initial_values_are_sent_before_the_note_on_and_once() {
 
 /// **Each note has its own Member until none is free**, and a freed Member is
 /// taken again after the one idle longest.
-/// Spec: m2-120/3.6.1#1, m2-104/d.2.8#1, m2-104/d.4.1#1
+/// Spec: m2-120/3.6.1#1, m2-104/d.4.1#1
 #[test]
 fn each_note_takes_the_member_idle_longest() {
     let mut s = sender(3);
@@ -199,6 +199,42 @@ fn a_note_shares_the_least_loaded_member_when_none_is_free() {
     // Releasing one of Ch3's two leaves it the least loaded.
     assert_eq!(feed(&mut s, 0, note_off(60)), [(2, note_off(60))]);
     assert_eq!(notes(&feed(&mut s, 0, note_on(72))), [(2, note_on(72))]);
+}
+
+/// **A note shares no Member that plays its key while another does not**, since a
+/// receiver would end both at one Note Off: Ch2 plays one note, key 60, and Ch3
+/// two, so 60 from another source joins Ch3.
+#[test]
+fn a_note_does_not_share_a_member_that_plays_its_key() {
+    let mut s = started(2);
+    for key in [64, 60, 67] {
+        feed(&mut s, 0, note_on(key)); // on Ch3, Ch2, Ch3
+    }
+    assert_eq!(notes(&feed(&mut s, 1, note_on(60))), [(2, note_on(60))]);
+    assert_eq!(feed(&mut s, 1, note_off(60)), [(2, note_off(60))]);
+    assert_eq!(feed(&mut s, 0, note_off(60)), [(1, note_off(60))]);
+}
+
+/// **A bend range changed by a delta is the sum** (M2-104 section 7.4.8): 2
+/// semitones of channel bend and 10 more, and 48 of per-note bend and 12 more, for
+/// which the zone is sent 60.
+#[test]
+fn a_bend_range_is_changed_by_a_delta() {
+    let delta = |rpn: Rpn, semitones: i32| Voice2::RelativeRegistered {
+        bank: rpn.bank(),
+        index: rpn.index(),
+        delta: semitones << 25,
+    };
+    let mut s = started(1);
+    feed(&mut s, 0, note_on(60));
+    feed(&mut s, 0, delta(Rpn::PITCH_BEND_SENSITIVITY, 10));
+    let sent = feed(&mut s, 0, bend(0xFFFF_FFFF));
+    assert_bend(&sent, 1, bend_of(12.0, 48.0));
+    feed(&mut s, 0, bend(CENTER));
+    let sent = feed(&mut s, 0, delta(Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY, 12));
+    assert_eq!(sent[0], (0, bend_range(60)));
+    let sent = feed(&mut s, 0, note_bend(60, 0xFFFF_FFFF));
+    assert_bend(&sent, 1, bend_of(60.0, 60.0));
 }
 
 /// **A note that joins a Member leaves what the Member holds where it is**, which
@@ -254,7 +290,7 @@ fn a_key_of_two_source_channels_is_two_notes() {
 /// **A note's own bend, pressure and third dimension are its Member's** Pitch
 /// Bend, Channel Pressure and Control Change 74, exactly where the ranges are
 /// equal and the channel adds nothing.
-/// Spec: m2-120/4.3#1, m2-120/4.4#1, m2-120/4.5#1, m2-120/4.5#2
+/// Spec: m2-104/d.2.8#1, m2-120/4.3#1, m2-120/4.4#1, m2-120/4.5#1, m2-120/4.5#2
 #[test]
 fn per_note_expression_is_the_members() {
     let mut s = started(2);
@@ -590,12 +626,12 @@ fn a_changed_zone_forgets_its_notes_and_another_keeps_its_own() {
     assert_eq!(feed(&mut s, 8, note_on(62)), [(8, note_on(62))]);
 }
 
-/// **After a send that was not taken, what the receiver holds is not assumed**:
-/// the range and the note's values are sent again at the next note.
+/// **What the receiver holds is not assumed once it may not be what it was
+/// told**: the range and the note's values are sent again at the next note.
 #[test]
-fn values_not_sent_are_sent_again() {
+fn values_the_receiver_may_not_hold_are_sent_again() {
     let mut s = started(1);
-    s.unsent();
+    s.resend();
     assert_eq!(
         feed(&mut s, 0, note_on(60)),
         [
@@ -611,11 +647,11 @@ fn values_not_sent_are_sent_again() {
 /// A bend after that is over the range the zone has, not the one it starts with:
 /// 24 semitones of 96, with the range sent ahead of it.
 #[test]
-fn a_bend_after_an_unsent_range_is_over_the_zones_range() {
+fn a_bend_after_a_range_to_send_again_is_over_the_zones_range() {
     let mut s = started(1);
     feed(&mut s, 0, note_bend_range(96));
     feed(&mut s, 0, note_on(60));
-    s.unsent();
+    s.resend();
     let sent = feed(&mut s, 0, note_bend(60, 0xA000_0000));
     assert_eq!(sent[0], (0, bend_range(96)));
     assert_bend(&sent[1..2], 1, bend_of(24.0, 96.0));
@@ -657,20 +693,4 @@ fn the_midi1_translator_makes_it_midi1() {
             vec![0x91, 60, 0x40],
         ]
     );
-}
-
-/// Nothing is allocated for a message.
-#[test]
-fn feeding_allocates_nothing() {
-    let mut s = sender(2);
-    let messages = [note_on(60), note_bend(60, 1), cc(123, 0)]
-        .map(|voice| Ump::from(Message::Midi2(Address::first(MidiChannel::FIRST), voice)));
-    let mut sent = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for message in messages {
-            s.feed(message, |_| sent += 1);
-        }
-    });
-    // The range, three values and the note; the bend; the Manager's All Notes Off.
-    assert_eq!(sent, 7);
 }

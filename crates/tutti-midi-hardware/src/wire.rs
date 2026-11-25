@@ -51,6 +51,8 @@ pub(crate) struct Wire {
     config: StreamConfig,
     midi1_translator: Midi1Translator,
     mpe: MpeSender,
+    /// `mpe` as it was before the batch.
+    before: MpeSender,
     /// The batch as it goes to the device.
     out: Vec<Outgoing>,
     /// One for each input event.
@@ -73,6 +75,7 @@ impl Wire {
             config,
             midi1_translator: Midi1Translator::new(),
             mpe: MpeSender::new(),
+            before: MpeSender::new(),
             out: Vec::new(),
             converted: Vec::new(),
         }
@@ -86,7 +89,7 @@ impl Wire {
     /// values of its MPE Members again.
     pub(crate) fn set_config(&mut self, config: StreamConfig) {
         if config.protocol != self.config.protocol {
-            self.mpe.unsent();
+            self.mpe.resend();
         }
         self.config = config;
     }
@@ -94,11 +97,6 @@ impl Wire {
     /// The device now has `zones` of the MPE Profile enabled on `group`.
     pub(crate) fn set_profile(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
         self.mpe.set_profile(group, zones);
-    }
-
-    /// Some of the batch was not sent.
-    pub(crate) fn unsent(&mut self) {
-        self.mpe.unsent();
     }
 
     /// Whether the device is in a Protocol that has no MIDI 2.0 Channel Voice:
@@ -110,6 +108,7 @@ impl Wire {
     /// Converts `events` into the batch for the device, which
     /// [`batch`](Self::batch) reads.
     pub(crate) fn convert(&mut self, events: &[Outgoing]) {
+        self.before.clone_from(&self.mpe);
         self.out.clear();
         self.converted.clear();
         let speaks_midi1 = self.speaks_midi1();
@@ -181,12 +180,20 @@ impl Wire {
     /// events whose packets all went, so an event that became nothing counts as
     /// taken. A message of several packets is one event per packet and goes
     /// through the conversion as it is, so the count still ends between
-    /// messages.
-    pub(crate) fn accepted(&self, taken: Taken, events: &[Outgoing]) -> Taken {
+    /// messages. The rest may be converted again: what it did to the zones is
+    /// undone.
+    pub(crate) fn accepted(&mut self, taken: Taken, events: &[Outgoing]) -> Taken {
         let events_taken = self
             .converted
             .partition_point(|event| event.end <= taken.packets());
-        Taken::within(events, events_taken)
+        let accepted = Taken::within(events, events_taken);
+        if accepted.packets() < events.len() {
+            self.mpe.clone_from(&self.before);
+            for event in &events[..accepted.packets()] {
+                self.mpe.feed(event.ump, |_| {});
+            }
+        }
+        accepted
     }
 
     /// How many of the first `taken` events of the batch have no form on the

@@ -1349,7 +1349,17 @@ fn an_output_sends_mpe_while_its_device_has_the_profile_enabled() {
         format: format(),
         profile: ProfileId::MPE,
     };
+    // A device that left MPE and is in it again stopped the note it played.
+    let off = tutti_fixtures::midi::note_off(MidiChannel::FIRST, 60, 0);
+    let on = tutti_fixtures::midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
+    wire.send(&[(Offset::ZERO, on)]);
     say(&wire, GROUP_0, &disabled, 140);
+    say(&wire, GROUP_0, &enabled, 141);
+    let _ = wire.poll(145);
+    let _ = received(&wire);
+    wire.send(&[(Offset::ZERO, off)]);
+    assert_eq!(received(&wire), [], "its note is forgotten");
+    say(&wire, GROUP_0, &disabled, 146);
     let _ = wire.poll(150);
     assert_eq!(note_channel(&mut wire), 0, "disabled");
 }

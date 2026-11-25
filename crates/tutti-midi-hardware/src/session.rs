@@ -68,10 +68,10 @@ const _: () = {
     send::<MidiSession>();
 };
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
-use tutti_midi_protocol::ProfileZones;
+use tutti_midi_protocol::{PitchBendSensitivity, ProfileZones};
 use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;
-use tutti_ump::{GroupSpan, MidiGroup};
+use tutti_ump::{GroupSpan, MidiGroup, MpeZoneSet, MpeZoneSpan};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -510,7 +510,21 @@ impl MidiSession {
     pub fn follow(&self, output: &mut OpenOutput, polled: &Polled) {
         match polled {
             Polled::Stream(id, stream) if id == output.id() => output.set_config(stream.config()),
-            Polled::Profile(id, ..) if id == output.id() => self.send_mpe(output),
+            Polled::Profile(id, peer, change) if id == output.id() => {
+                // The device stopped the notes of the zone, and is at the default
+                // range when it has it again (M2-120 sections 3.3 and 3.5): one that
+                // went and came back within a poll is a new zone.
+                if let ProfilesChange::Changed {
+                    address: CiDeviceId::Channel(manager),
+                    profile: ProfileId::MPE,
+                    ..
+                } = change
+                {
+                    let others = self.mpe_zones_where(id, peer.group, |z| z.manager() != *manager);
+                    output.set_mpe_zones(peer.group, others);
+                }
+                self.send_mpe(output);
+            }
             _ => {}
         }
     }
@@ -844,14 +858,31 @@ impl MidiSession {
     /// when no peer has one.
     #[must_use]
     pub fn mpe_zones(&self, id: &MidiDeviceId, group: MidiGroup) -> Option<ProfileZones> {
-        self.profiles(id)
+        self.mpe_zones_where(id, group, |_| true)
+    }
+
+    /// The [`mpe_zones`](Self::mpe_zones) that are to be `kept`.
+    fn mpe_zones_where(
+        &self,
+        id: &MidiDeviceId,
+        group: MidiGroup,
+        kept: impl Fn(MpeZoneSpan) -> bool,
+    ) -> Option<ProfileZones> {
+        let peers = self.profiles(id);
+        let sets = peers
             .iter()
             .filter(|peer| peer.at().peer().group == group)
-            .filter_map(PeerProfiles::mpe_zones)
-            .reduce(|held, more| {
-                let zones = more.zones();
-                zones.fold(held, |all, zone| all.with(*zone).unwrap_or(all))
-            })
+            .filter_map(|peer| peer.table().mpe_zones().zones);
+        let mut all: Option<MpeZoneSet> = None;
+        for set in sets {
+            for zone in set.zones().filter(|zone| kept(*zone)) {
+                all = match all {
+                    Some(held) => Some(held.with(zone).unwrap_or(held)),
+                    None => Some(MpeZoneSet::single(zone)),
+                };
+            }
+        }
+        all.map(|set| ProfileZones::new(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
     }
 
     /// Asks a peer to enable or disable a Profile it lists, on the input the

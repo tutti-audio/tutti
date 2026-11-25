@@ -19,9 +19,6 @@ use crate::{NoteControl, NoteEvent, PerNoteState};
 const CHANNELS: usize = MidiChannel::COUNT as usize;
 const GROUPS: usize = MidiGroup::COUNT as usize;
 
-/// The most notes that sound in a Group's zones: one per channel and Note Number.
-const MAX_NOTES: usize = CHANNELS * 128;
-
 /// The per-note controller of MPE's third dimension of control (M2-120 section
 /// 4.5), the one a receiver makes of Control Change 74 on a Member.
 const THIRD_DIMENSION: u8 = CCNumber::BRIGHTNESS.get();
@@ -39,10 +36,10 @@ const OMNI_OFF: u8 = 124;
 /// ([`set_profile`](Self::set_profile)):
 ///
 /// - **A note takes a Member Channel of its own** while one plays none: the one
-///   idle longest. With none idle it shares the Member that plays the fewest
-///   notes and of those was given a note longest ago (section 3.6.1, which
-///   leaves the choice to the sender). Any channel of the zone is a source of
-///   notes, the Manager too.
+///   idle longest. With none idle it shares one that does not play its key, if
+///   there is one: the one that plays the fewest notes, and of those was given a
+///   note longest ago (section 3.6.1 leaves the choice to the sender). Any
+///   channel of the zone is a source of notes, the Manager too.
 /// - **A Member's Pitch Bend is the whole bend of its note**: the source
 ///   channel's Pitch Bend over its Pitch Bend Sensitivity (RPN 0/0), the Per-Note
 ///   Pitch Bend over its (RPN 0/7), and the pitch a Note On attribute or
@@ -67,8 +64,8 @@ const OMNI_OFF: u8 = 124;
 /// On a Member that plays several notes the last change of any of them is what
 /// the channel holds; a note that joins one changes nothing on it.
 ///
-/// For a control thread: [`set_profile`](Self::set_profile) allocates.
-/// [`feed`](Self::feed) does not.
+/// For a control thread: it allocates. What was fed and then not sent is undone
+/// by a clone made before.
 #[derive(Clone, Debug)]
 pub struct MpeSender {
     /// Reads a source's MIDI 1.0 messages, whose controllers are runs of several.
@@ -109,12 +106,11 @@ impl MpeSender {
             .set(zones, &self.sources[group.index()]);
     }
 
-    /// Some of what [`feed`](Self::feed) made was not sent: the receiver may
-    /// hold other values than it was told, so each Member is told its own again
-    /// at its next change or note, and each zone its bend range.
-    pub fn unsent(&mut self) {
+    /// The receiver may hold other values than it was told: each Member is told
+    /// its own again at its next change or note, and each zone its bend range.
+    pub fn resend(&mut self) {
         for zoned in self.zoned.iter_mut().flatten() {
-            zoned.unsent();
+            zoned.resend();
         }
     }
 
@@ -139,8 +135,10 @@ impl MpeSender {
             _ => None,
         };
         let sources = &mut self.sources[address.group.index()];
+        let source = &mut sources[address.channel.index()];
+        let meant = meant.map(|voice| source.absolute(voice));
         if let Some(voice) = meant {
-            sources[address.channel.index()].observe(voice);
+            source.observe(voice);
         }
         let zoned = self.zoned[address.group.index()].as_mut();
         let Some((zone, zoned)) = zoned.and_then(|z| Some((z.zone_of(address.channel)?, z))) else {
@@ -177,6 +175,21 @@ impl Source {
         pressure: ControlValue::MIN,
         brightness: None,
     };
+
+    /// `voice`, a change of a bend range by a delta as the range it makes
+    /// (M2-104 section 7.4.8), which stops at either end.
+    fn absolute(&self, voice: Voice2) -> Voice2 {
+        let Voice2::RelativeRegistered { bank, index, delta } = voice else {
+            return voice;
+        };
+        let rpn = Rpn::new(bank, index);
+        let held = match rpn {
+            Rpn::PITCH_BEND_SENSITIVITY => self.bend_range.to_channel_data().to_word(),
+            Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY => self.note_range.to_rpn_bits(),
+            _ => return voice,
+        };
+        Voice2::registered(rpn, ControlValue::new(held.saturating_add_signed(delta)))
+    }
 
     fn observe(&mut self, voice: Voice2) {
         match voice {
@@ -371,7 +384,7 @@ impl Zoned {
             zones,
             ranges: [None; CHANNELS],
             members: [Member::IDLE; CHANNELS],
-            notes: Vec::with_capacity(MAX_NOTES),
+            notes: Vec::new(),
             per_note: PerNoteState::new(
                 GroupSpan::of(1),
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones(),
@@ -398,7 +411,7 @@ impl Zoned {
     }
 
     /// Takes the receiver to hold nothing it was told.
-    fn unsent(&mut self) {
+    fn resend(&mut self) {
         self.ranges = [None; CHANNELS];
         for member in &mut self.members {
             member.bend = None;
@@ -470,15 +483,18 @@ impl Zoned {
         Some(note)
     }
 
-    /// The Member of `layout` a new note takes.
-    fn pick(&self, layout: &MpeLayout) -> MidiChannel {
-        let member = |c: &MidiChannel| &self.members[c.index()];
+    /// The Member of `layout` a new note of `key` takes.
+    fn pick(&self, layout: &MpeLayout, key: NoteNumber) -> MidiChannel {
         let age = |tick: u32| Reverse(self.tick.wrapping_sub(tick));
+        let plays = |member| {
+            let mut notes = self.notes.iter();
+            notes.any(|n| n.member == member && n.key == key)
+        };
         layout
             .member_channels()
-            .min_by_key(|c| match member(c) {
-                idle if idle.notes == 0 => (0, age(idle.released)),
-                playing => (playing.notes, age(playing.started)),
+            .min_by_key(|c| match &self.members[c.index()] {
+                idle if idle.notes == 0 => (false, 0, age(idle.released)),
+                playing => (plays(*c), playing.notes, age(playing.started)),
             })
             .unwrap_or_else(|| layout.first_member())
     }
@@ -550,12 +566,6 @@ impl Zoned {
                 // Its range may have changed, for every note.
                 self.tell(zone, sources, |_| true, send);
             }
-            // It changes a range this sends by value.
-            Voice2::RelativeRegistered { bank, index, .. }
-                if Rpn::new(bank, index) == Rpn::PITCH_BEND_SENSITIVITY =>
-            {
-                return false;
-            }
             Voice2::ControlChange { controller, .. } => match controller {
                 CCNumber::BRIGHTNESS => self.tell(zone, sources, |n| n.source == source, send),
                 CCNumber::RESET_ALL => self.reset_controllers(zone, sources, source, voice, send),
@@ -602,7 +612,7 @@ impl Zoned {
         if let Some(note) = again {
             send(note.member, off(key));
         }
-        let member = again.map_or_else(|| self.pick(&zone.layout()), |note| note.member);
+        let member = again.map_or_else(|| self.pick(&zone.layout(), key), |note| note.member);
         for event in self.per_note.step(Address::first(source), voice) {
             match *event {
                 NoteEvent::Started { id, .. } => self.notes.push(Note {
