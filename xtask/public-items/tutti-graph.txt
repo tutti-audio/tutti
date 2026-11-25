@@ -838,7 +838,6 @@ fn node::shape::Shape::no_note_events
 fn node::shape::Shape::output_bus
 fn node::shape::Shape::output_handles
 fn node::shape::Shape::own_bypass
-fn node::shape::Shape::param_addrs
 fn node::shape::Shape::param_events
 fn node::shape::Shape::param_ports
 fn node::shape::Shape::params
