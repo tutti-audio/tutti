@@ -934,6 +934,7 @@ mod tests {
         let reporting = Reporting {
             invalidate: crate::InvalidateSink::new(),
             transport: crate::TransportSink::new(),
+            rates_only: false,
         };
         let sink = Arc::clone(&heard);
         let _hearing = reporting.invalidate.subscribe(move |e| sink.lock().push(e));

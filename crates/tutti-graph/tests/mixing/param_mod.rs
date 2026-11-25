@@ -38,6 +38,8 @@
 //! `tests/executor/contract.rs`'s `param_echo`, and the allocation gate
 //! `tests/rt_no_alloc.rs`'s `modulated_params_are_allocation_free`.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
@@ -441,7 +443,7 @@ const PROBE: u64 = 10;
 fn probe_graph(max: usize, cutoff: &Cell, q: &Cell) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepare(max));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe::new(cutoff, q)));
-    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+    ed.wire_declared_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
         .unwrap();
     (ed, exec)
 }
@@ -690,7 +692,7 @@ fn a_port_first_driven_blocks_after_the_units_first_fades_from_its_base() {
     let asked = probe.asked.clone();
     let asks = || asked.each_ref().map(|a| a.load(Ordering::Relaxed));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
-    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+    ed.wire_declared_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
         .unwrap();
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
     ed.commit().expect("commits");
@@ -775,7 +777,7 @@ fn a_node_without_a_base_is_never_modulated() {
     let mut probe = Probe::new(&cutoff, &q);
     probe.answers = false;
     ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
-    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+    ed.wire_declared_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
         .unwrap();
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
     ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
@@ -1283,7 +1285,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
         "probe",
         ForkByClone(Probe::new(&cutoff, &q)),
     );
-    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+    ed.wire_declared_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
         .unwrap();
     ed.insert(
         NodeKey(2),
@@ -2437,7 +2439,7 @@ fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
         ))
         .unwrap();
     }
-    ed.wire_outputs(outputs.clone()).unwrap();
+    ed.wire_declared_outputs(outputs.clone()).unwrap();
 
     let width = outputs.len();
     let mut rendered = Vec::new();
@@ -2629,7 +2631,7 @@ fn corners_skip_a_resend_at_any_block_size() {
         let probe = Probe::new(&cutoff, &q).with_corners();
         ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
         ed.insert(NodeKey(1), "src", Unforkable(source()));
-        ed.wire_outputs((0..4).map(|c| PortSource::Node(port(PROBE, c))))
+        ed.wire_declared_outputs((0..4).map(|c| PortSource::Node(port(PROBE, c))))
             .unwrap();
         ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
             .unwrap();

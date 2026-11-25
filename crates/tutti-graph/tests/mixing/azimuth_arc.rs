@@ -8,6 +8,8 @@
 //!   and a value past the bound is clamped;
 //! - a bounded range of a circular param written crossed is refused.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
@@ -101,7 +103,7 @@ fn graph(
     let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
-    ed.wire_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))))
+    ed.wire_declared_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))))
         .unwrap();
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
         ed.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0))
@@ -307,7 +309,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.wire_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))))
+    ed.wire_declared_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))))
         .unwrap();
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {

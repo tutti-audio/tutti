@@ -7,6 +7,8 @@
 //! analytic. A commit applies at a block's first frame, so a commit "at a block
 //! boundary" is any commit.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
@@ -80,7 +82,7 @@ fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
     for (k, kind) in nodes {
         ed.insert(key(*k), "node", Unforkable(TestNode::new(kind.clone())));
     }
-    ed.wire_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>())
+    ed.wire_declared_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>())
         .unwrap();
     ed.commit().expect("commits");
     let mut r = Renderer::new(ed, exec);
@@ -94,7 +96,7 @@ fn declare(r: &mut Renderer, node: u64, fade: Fade) {
     let ed = r.editor_mut();
     ed.set_main_output_fade(Some(fade));
     ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
-    ed.wire_outputs(vec![source(node)]).unwrap();
+    ed.wire_declared_outputs(vec![source(node)]).unwrap();
     ed.commit()
         .expect("commits with the old main output's channels");
 }
@@ -334,6 +336,32 @@ fn main_output_in_force(r: &Renderer) -> tutti_graph::MainOutputId {
     r.executor().plan().expect("plan").main_output_id()
 }
 
+/// A re-prepare recompiles the plan from the spec, so the plan it resumes with names the
+/// main output id the spec declared, not the genesis one.
+#[test]
+fn a_re_prepare_keeps_the_declared_main_output_id() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    let ed = r.editor_mut();
+    ed.set_main_output_fade(None);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(2)]).unwrap();
+    ed.commit().expect("commits");
+    let declared = r.editor().spec().main_output_id;
+    assert_ne!(declared, tutti_graph::MainOutputId::GENESIS);
+    step(&mut r, BLOCK);
+    assert_eq!(main_output_in_force(&r), declared);
+
+    r.editor_mut()
+        .reprepare(prepare(BLOCK * 2))
+        .expect("reprepares");
+    r.executor_mut().apply_pending(); // checks the units out
+    r.editor_mut().collect(); // re-prepares them, sends them back
+    r.executor_mut().apply_pending(); // installs them
+    assert_eq!(r.executor().prepare().max_block().get(), BLOCK * 2);
+    assert_eq!(main_output_in_force(&r), declared);
+}
+
 /// A declaration made while a fade runs ends it at that block and begins
 /// another, from the main output that was fading in (at full level) to the newest;
 /// the main output that was fading out is dropped, a step of `1 - g`.
@@ -373,7 +401,7 @@ fn a_hard_redeclare_mid_fade_cuts_at_its_block() {
     r.editor_mut().set_main_output_fade(None);
     let ed = r.editor_mut();
     ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
-    ed.wire_outputs(vec![source(3)]).unwrap();
+    ed.wire_declared_outputs(vec![source(3)]).unwrap();
     ed.commit().expect("commits");
     let newest = r.editor().spec().main_output_id;
     let block = step(&mut r, BLOCK);
@@ -395,7 +423,7 @@ fn a_width_change_without_a_new_main_output_cuts_the_fade() {
     declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
     step(&mut r, BLOCK);
     r.editor_mut()
-        .wire_outputs(vec![source(2), source(2)])
+        .wire_declared_outputs(vec![source(2), source(2)])
         .unwrap();
     r.editor_mut().commit().expect("commits");
     let block = step(&mut r, BLOCK);
@@ -438,7 +466,8 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
         let ed = r.editor_mut();
         ed.set_main_output_fade(Some(fade(law)));
         ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
-        ed.wire_outputs(vec![source(3), source(4)]).unwrap();
+        ed.wire_declared_outputs(vec![source(3), source(4)])
+            .unwrap();
         ed.commit().expect("commits");
         record(&mut r);
         r.editor_mut().remove(key(7));
@@ -462,7 +491,8 @@ fn declare_pair(r: &mut Renderer, a: u64, b: u64, fade: Fade) {
     let ed = r.editor_mut();
     ed.set_main_output_fade(Some(fade));
     ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
-    ed.wire_outputs(vec![source(a), source(b)]).unwrap();
+    ed.wire_declared_outputs(vec![source(a), source(b)])
+        .unwrap();
     ed.commit().expect("commits");
 }
 
@@ -571,7 +601,7 @@ fn a_carried_commit_that_removes_every_old_source_cuts() {
             width: 1,
         })),
     );
-    ed.wire_outputs(vec![source(9)]).unwrap();
+    ed.wire_declared_outputs(vec![source(9)]).unwrap();
     ed.commit().expect("commits");
     let block = step(&mut r, BLOCK);
     assert_eq!(block.fade, None);
@@ -739,7 +769,7 @@ fn main_output_fade_running_is_true_while_the_bank_runs_and_false_after_settling
     r.editor_mut().set_main_output_fade(None);
     let ed = r.editor_mut();
     ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
-    ed.wire_outputs(vec![source(3)]).unwrap();
+    ed.wire_declared_outputs(vec![source(3)]).unwrap();
     ed.commit().expect("commits");
     assert!(
         !r.editor().main_output_fade_running(),

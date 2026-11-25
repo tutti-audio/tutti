@@ -6,6 +6,8 @@
 //! mid-render would. The render finishes (a dead unit renders silence), and
 //! the only place the failure shows is the probe.
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,7 +92,7 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     let probe = Arc::new(Crashed(AtomicBool::new(false)));
     let (mut live, _exec) = Editor::new(RenderGraph::prepare(RATE));
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     let graph = support::fork_offline(&live, RATE);
     (graph, probe, live)

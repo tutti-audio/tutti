@@ -8,6 +8,8 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::MaxBlock;
@@ -93,7 +95,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         EventEdge::Direct(EventOutputPort::new(auto_key, 0)),
     )
     .unwrap();
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
@@ -164,7 +166,7 @@ fn render_gain(
         )
         .unwrap();
     }
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))])
         .unwrap();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),

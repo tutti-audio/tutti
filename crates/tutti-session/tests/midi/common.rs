@@ -19,6 +19,16 @@ use tutti_units::{Beat, BeatDuration};
 /// The mezzo-forte default: MIDI 2.0's center velocity.
 pub(crate) const MF: u16 = 0x8000;
 
+/// An arrival time a device input takes for the next block: ten seconds before
+/// now, before the session's first frame. A test that renders a fixed number of
+/// blocks after a device sends stamps the event with this, not with the wall
+/// clock, because blocks render faster than real time and a thread that waits
+/// before rendering would put a wall-clock stamp past those blocks.
+#[cfg(feature = "midi-hardware")]
+pub(crate) fn next_block() -> tutti_platform::Instant {
+    tutti_platform::Instant::now() - std::time::Duration::from_secs(10)
+}
+
 /// `(absolute frame, event)` of every MIDI event a [`Tap`] received.
 pub(crate) type Seen = tutti_fixtures::Record<(u64, Ump)>;
 

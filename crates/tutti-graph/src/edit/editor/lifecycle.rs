@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::{BusLanes, CommitError, Editor, panic_text};
+use super::{BusLanes, CommitError, Editor, panic_text, write};
 use crate::NodeKey;
 use crate::compile::plan::{Delta, Plan};
 use crate::compile::{CompileError, Shapes, compile};
@@ -18,11 +18,15 @@ use crate::node::{Node, Prepare};
 /// bus lanes the plan has.
 pub(super) type Resumed<F> = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node<F>>>, BusLanes);
 
-/// The spec and shapes a commit compiled the running plan from.
+/// The spec and shapes a commit compiled the running plan from, shared with
+/// the editor until it writes them, and the editor's
+/// [`structure`](Editor::structure) at that commit. An editor whose structure
+/// is this one has the spec and shapes this holds.
 #[derive(Clone)]
 pub(super) struct Committed {
-    pub(super) spec: GraphSpec,
-    pub(super) shapes: Shapes,
+    pub(super) structure: u64,
+    pub(super) spec: Arc<GraphSpec>,
+    pub(super) shapes: Arc<Shapes>,
 }
 
 /// The editor's compile lifecycle. A plan is sent by a commit, and a
@@ -53,7 +57,7 @@ pub(super) enum Lifecycle<F: Float> {
 /// nothing: it would compile the same plan with an empty delta.
 pub(super) struct Sent {
     plan: Arc<Plan>,
-    committed: Option<Box<Committed>>,
+    committed: Option<Committed>,
 }
 
 impl<F: Float> Lifecycle<F> {
@@ -78,15 +82,15 @@ impl<F: Float> Lifecycle<F> {
             }
             | Self::Poisoned {
                 sent: Some(sent), ..
-            } => sent.committed.as_deref(),
+            } => sent.committed.as_ref(),
             _ => None,
         }
     }
 
     /// Records the spec and shapes the running plan was compiled from.
-    pub(super) fn set_committed(&mut self, spec: GraphSpec, shapes: Shapes) {
+    pub(super) fn set_committed(&mut self, committed: Committed) {
         if let Self::Running(sent) = self {
-            sent.committed = Some(Box::new(Committed { spec, shapes }));
+            sent.committed = Some(committed);
         }
     }
 
@@ -129,8 +133,8 @@ impl<F: Float> Lifecycle<F> {
 /// as it was checked, and the uncommitted units it places, already
 /// re-prepared.
 pub(super) struct Reprepare<F: Float> {
-    spec: GraphSpec,
-    shapes: Shapes,
+    spec: Arc<GraphSpec>,
+    shapes: Arc<Shapes>,
     pending: BTreeMap<NodeKey, Box<dyn Node<F>>>,
 }
 
@@ -236,7 +240,7 @@ impl<F: Float> Editor<F> {
             .map(|p| p.key)
             .chain(delta.replace().iter().map(|(_, new)| new.key));
         for node in needed {
-            if !self.placements.has_unit(node) {
+            if !self.entries.has_unit(node) {
                 return Err(CommitError::MissingUnit { node });
             }
         }
@@ -245,17 +249,23 @@ impl<F: Float> Editor<F> {
         // `prepare`, which poisons the editor (the uncommitted units are lost
         // with it; nothing has been sent, so the executor keeps running).
         self.touch();
-        let mut pending = self.placements.take_units();
+        let mut pending = self.entries.take_units();
         // The re-prepare restarts every unit from silence, so there is
         // nothing to fade from: a pending replace lands as a plain swap.
-        self.placements.clear_fades_and_cuts();
+        self.entries.clear_fades_and_cuts();
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for (&key, unit) in &mut pending {
-                if let Some(wake) = self.placements.wake(key) {
+                if let Some(wake) = self.entries.wake(key) {
                     unit.bind_wake(wake.clone());
                 }
                 unit.prepare(&prepare);
-                refresh(key, unit.shape(), &mut self.spec, &mut self.shapes);
+                let spec = write(&mut self.spec, &mut self.structure);
+                refresh(
+                    key,
+                    unit.shape(),
+                    spec,
+                    write(&mut self.shapes, &mut self.structure),
+                );
             }
         }));
         if let Err(p) = prepared {
@@ -273,8 +283,8 @@ impl<F: Float> Editor<F> {
         self.life = Lifecycle::Repreparing {
             sent: self.life.take().into_sent(),
             reprepare: Box::new(Reprepare {
-                spec: self.spec.clone(),
-                shapes: self.shapes.clone(),
+                spec: Arc::clone(&self.spec),
+                shapes: Arc::clone(&self.shapes),
                 pending,
             }),
         };
@@ -333,10 +343,11 @@ impl<F: Float> Editor<F> {
         rep: Reprepare<F>,
     ) -> Result<Resumed<F>, CompileError> {
         let Reprepare {
-            mut spec,
-            mut shapes,
+            spec,
+            shapes,
             pending,
         } = rep;
+        let (mut spec, mut shapes) = (Arc::unwrap_or_clone(spec), Arc::unwrap_or_clone(shapes));
         let base = self.life.plan().cloned();
         let prepare = self.prepare;
         let mut units: BTreeMap<NodeKey, Box<dyn Node<F>>> = BTreeMap::new();
@@ -351,7 +362,7 @@ impl<F: Float> Editor<F> {
             if !survives {
                 continue;
             }
-            if let Some(wake) = self.placements.wake(key) {
+            if let Some(wake) = self.entries.wake(key) {
                 unit.bind_wake(wake.clone());
             }
             unit.prepare(&prepare);
@@ -361,7 +372,13 @@ impl<F: Float> Editor<F> {
             if self.spec.topology.nodes.contains_key(&key)
                 && self.spec.generation(key) == spec.generation(key)
             {
-                refresh(key, shape, &mut self.spec, &mut self.shapes);
+                let live = write(&mut self.spec, &mut self.structure);
+                refresh(
+                    key,
+                    shape,
+                    live,
+                    write(&mut self.shapes, &mut self.structure),
+                );
             }
             units.insert(key, unit);
         }

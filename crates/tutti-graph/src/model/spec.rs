@@ -650,6 +650,7 @@ impl GraphSpec {
                 required_resolution: self.required_resolution.clone(),
                 params: self.params.clone(),
                 gains: self.gains.clone(),
+                main_output_id: self.main_output_id,
                 main_output_bank: None,
             }),
             _ => Err(errs),
@@ -731,6 +732,7 @@ pub struct ValidGraph {
     required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
     params: BTreeMap<ParamIn, EventOutputPort>,
     gains: BTreeMap<EdgeId, EdgeGain>,
+    main_output_id: crate::MainOutputId,
     main_output_bank: Option<crate::MainOutputBank>,
 }
 
@@ -750,6 +752,11 @@ impl ValidGraph {
     /// change is crossfading.
     pub fn main_output_bank(&self) -> Option<crate::MainOutputBank> {
         self.main_output_bank
+    }
+
+    /// The id of the main output the spec declared.
+    pub(crate) fn main_output_id(&self) -> crate::MainOutputId {
+        self.main_output_id
     }
 
     /// The checked topology.

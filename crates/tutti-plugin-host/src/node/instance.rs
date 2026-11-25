@@ -1082,7 +1082,8 @@ impl<L: Loaded> Instance<L> {
     }
 
     /// A plugin that refused a rate has taken one when it renders again with
-    /// no plan under way, at a rate other than the one it was rolled back to:
+    /// no plan under way, at the wanted rate, other than the one it was rolled
+    /// back to (a want the refusal kept is still to be told, not taken):
     /// a parked change that was waiting for the audio thread's Processor has
     /// finished. Its own restart, or an activation for a render mode, runs
     /// at the rolled-back rate and takes none.
@@ -1092,6 +1093,7 @@ impl<L: Loaded> Instance<L> {
         };
         if self.state.renders()
             && !self.state.is_busy()
+            && self.state.applied().map(|a| a.rate()) == Some(self.wanted().rate())
             && silence.running() != Some(self.wanted().rate())
         {
             self.restored();

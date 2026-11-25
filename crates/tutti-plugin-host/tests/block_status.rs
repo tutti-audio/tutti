@@ -7,6 +7,8 @@
 //! frame) and says what CLAP's process status would, hosted through
 //! `client_over` as a served plugin is. No format and no server is involved.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth, Planes};
 
@@ -157,7 +159,7 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
         EventEdge::Direct(EventOutputPort::new(inlet_key, 0)),
     )
     .unwrap();
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(plugin, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(plugin, port))))
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();

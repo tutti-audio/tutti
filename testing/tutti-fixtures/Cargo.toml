@@ -68,7 +68,7 @@ coreaudio-sys = { version = "0.2", optional = true }
 
 [features]
 # `EventRig` and `Sink`: a graph that logs the MIDI its event inputs receive.
-graph = ["dep:tutti-graph"]
+graph = ["dep:tutti-graph", "tutti-graph/testing"]
 # `au_bundle`, the bundle that declares the shared plugin's Audio Unit, and
 # `element_name_retain_count` (macOS).
 au = ["plugin", "dep:tutti-shared-plugin", "dep:coreaudio-sys"]

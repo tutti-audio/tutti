@@ -520,6 +520,7 @@ mod logged {
     use super::{BLOCK, POISONED, SR};
     use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
     use tutti_graph::EdgeId;
+    use tutti_graph::testing::WireDeclared;
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InputPort, IntoNode, Io, LogFilter, Node, NodeKey, OutputPort,
         PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
@@ -590,7 +591,7 @@ mod logged {
             ))
             .unwrap();
         }
-        ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
+        ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
             .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();

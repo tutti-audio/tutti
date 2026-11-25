@@ -7,6 +7,8 @@
 //! Each tempo probe writes the map's tempo at beat 9 in BPM, or -1 when the
 //! block has none.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::{WORKERS, test_pool};
@@ -65,8 +67,10 @@ fn render(
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe(read)));
     }
-    ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

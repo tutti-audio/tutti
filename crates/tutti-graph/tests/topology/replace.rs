@@ -1,6 +1,8 @@
 //! `Editor::replace`: swapping a running node's unit with a crossfade. The
 //! rules are in `src/fade.rs`; each test here pins one.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -39,7 +41,7 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -185,7 +187,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     dc(&mut exec, 16);
@@ -307,7 +309,7 @@ fn a_shape_mismatch_is_refused() {
     );
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+        declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(
             channel,
             PortSource::Node(OutputPort::new(lagged, 0)),
@@ -362,7 +364,7 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -502,7 +504,7 @@ fn events_go_to_the_incoming_unit_only() {
         tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(emitter, 0)),
     )
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));

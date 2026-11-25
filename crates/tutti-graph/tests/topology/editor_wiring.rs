@@ -3,6 +3,8 @@
 //! node, port or channel that does not exist fails at the call, the graph
 //! as it was.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
     Cx, Edge, EdgeGainError, EdgeId, Editor, EventEdge, EventInputPort, EventOutputPort, Executor,
@@ -103,7 +105,7 @@ fn connect_and_disconnect_edge_are_heard_at_the_outputs() {
     let (mut ed, mut exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "times", Unforkable(Times(4.0)));
-    assert!(ed.resize_outputs(ChannelLayout::from_count(2)));
+    assert!(declare_outputs(&mut ed, ChannelLayout::from_count(2)));
     assert_eq!(ed.connect_edge(into_output(0, out(1))), Ok(true));
     assert_eq!(ed.connect_edge(into_output(0, out(1))), Ok(false));
     assert_eq!(ed.connect_edge(into_port(2, out(1))), Ok(true));
@@ -132,7 +134,7 @@ fn connect_edge_refuses_what_does_not_exist() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "times", Unforkable(Times(4.0)));
-    ed.resize_outputs(ChannelLayout::from_count(1));
+    declare_outputs(&mut ed, ChannelLayout::from_count(1));
     let before = ed.spec().clone();
 
     assert_eq!(
@@ -194,15 +196,15 @@ fn connect_edge_refuses_what_does_not_exist() {
 fn resize_outputs_cuts_a_channel_with_its_sources_and_gain() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
-    assert!(ed.resize_outputs(ChannelLayout::from_count(2)));
-    assert!(!ed.resize_outputs(ChannelLayout::from_count(2)));
+    assert!(declare_outputs(&mut ed, ChannelLayout::from_count(2)));
+    assert!(!declare_outputs(&mut ed, ChannelLayout::from_count(2)));
     let second = into_output(1, out(1));
     ed.connect_edge(second).expect("wires");
     ed.set_edge_gain(second, tutti_units::Gain::new(0.5))
         .expect("an edge of the spec");
     assert!(ed.spec().gains.contains_key(&second));
 
-    assert!(ed.resize_outputs(ChannelLayout::from_count(1)));
+    assert!(declare_outputs(&mut ed, ChannelLayout::from_count(1)));
     assert_eq!(ed.spec().topology.outputs.len(), 1);
     assert!(
         ed.spec().gains.is_empty(),
@@ -284,7 +286,7 @@ fn param_and_edge_gain_sources_are_written_and_taken_out() {
     let (mut ed, _exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "events", Unforkable(Events));
-    ed.resize_outputs(ChannelLayout::from_count(1));
+    declare_outputs(&mut ed, ChannelLayout::from_count(1));
     let wire = into_output(0, out(1));
     ed.connect_edge(wire).expect("wires");
     let driver = EventOutputPort::new(key(2), 0);
@@ -375,7 +377,7 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
         (
             "resize_outputs",
             Box::new(|e| {
-                let _ = e.resize_outputs(ChannelLayout::from_count(1));
+                let _ = declare_outputs(e, ChannelLayout::from_count(1));
             }),
         ),
         (
@@ -452,15 +454,17 @@ fn wire_outputs_wires_one_source_per_channel() {
     let (mut ed, mut exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "level", Unforkable(Level(0.5)));
-    ed.wire_outputs([out(1), PortSource::Zero]).expect("wires");
-    ed.wire_outputs([out(2), out(1)]).expect("replaces");
+    ed.wire_declared_outputs([out(1), PortSource::Zero])
+        .expect("wires");
+    ed.wire_declared_outputs([out(2), out(1)])
+        .expect("replaces");
     let [left, right] = render(&mut ed, &mut exec);
     assert!(left.iter().all(|&s| s == 0.5));
     assert!(right.iter().all(|&s| s == 0.25));
 
     let before = ed.spec().clone();
     assert_eq!(
-        ed.wire_outputs([out(1), out(7)]),
+        ed.wire_declared_outputs([out(1), out(7)]),
         Err(WireError::Missing(MissingSource::Node { node: key(7) })),
     );
     assert_eq!(*ed.spec(), before);

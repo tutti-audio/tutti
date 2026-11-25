@@ -1,6 +1,8 @@
 //! [`Sink`] and [`EventRig`]: a graph whose one node logs the MIDI its event
 //! inputs receive, for the tests of what feeds a graph's event inputs.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_platform::Instant;
 
@@ -147,7 +149,7 @@ impl EventRig {
         );
         if output == Output::Mono {
             editor
-                .wire_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
+                .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
                 .unwrap();
         }
         Self {

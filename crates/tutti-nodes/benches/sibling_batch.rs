@@ -34,6 +34,8 @@
 //! bit, before it is timed: the lanes run each member's own arithmetic in
 //! its own order (no fused multiply-add), so the three render the same.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::EdgeId;
@@ -413,7 +415,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
             }
         }
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -142,6 +142,10 @@ pub(super) enum Deadline {
     ///
     /// [`Timeouts::editor`]: tutti_plugin_types::Timeouts::editor
     Editor,
+    /// A rate change: the plugin's re-activation ([`Timeouts::rate`]).
+    ///
+    /// [`Timeouts::rate`]: tutti_plugin_types::Timeouts::rate
+    Rate,
 }
 
 impl Deadline {
@@ -152,6 +156,7 @@ impl Deadline {
             Self::Query => (timeouts.param, timeouts.param),
             Self::State => (timeouts.state, timeouts.state_ceiling()),
             Self::Editor => (timeouts.editor, timeouts.editor),
+            Self::Rate => (timeouts.rate, timeouts.rate),
         }
     }
 
@@ -162,6 +167,7 @@ impl Deadline {
             Self::Query => timeouts.param_wait(),
             Self::State => timeouts.state_wait(),
             Self::Editor => timeouts.editor_wait(),
+            Self::Rate => timeouts.rate.saturating_add(timeouts.param_wait()),
         }
     }
 }

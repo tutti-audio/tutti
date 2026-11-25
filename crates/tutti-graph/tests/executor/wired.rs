@@ -4,6 +4,8 @@
 //! commit that applies them, is the same on the parallel executor, and the
 //! commit reports exactly the nodes whose answer moved.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -175,14 +177,14 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.wire_outputs(vec![PortSource::Node(out(PROBE, 2))])
+    ed.wire_declared_outputs(vec![PortSource::Node(out(PROBE, 2))])
         .unwrap();
     steps.push(step(&mut ed, &mut exec, &seen, 1));
     // Back to nothing: the last source of each input goes, the output
     // leaves, the tap closes.
     ed.disconnect_edge(EdgeId::into_port(at(0), from(0)));
     ed.disconnect_edge(EdgeId::into_port(at(2), from(1)));
-    ed.wire_outputs(vec![]).unwrap();
+    ed.wire_declared_outputs(vec![]).unwrap();
     ed.close_tap(TapId::of(1)).expect("open");
     drop(tap);
     steps.push(step(&mut ed, &mut exec, &seen, 0));

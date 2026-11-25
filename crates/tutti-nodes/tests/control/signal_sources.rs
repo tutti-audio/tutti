@@ -7,6 +7,8 @@
 //! parallel and no-allocation gates are in `rt_no_alloc_modulation.rs`,
 //! beside the gated pool they share.
 
+use tutti_graph::testing::declare_outputs;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_graph::EdgeId;
@@ -354,7 +356,7 @@ fn lane_to_probe(
     ed.insert(NodeKey(probe), "probe", ForkByClone(Probe));
     {
         let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+        declare_outputs(ed, ChannelLayout::from_count(channel + 1));
         ed.connect_edge(EdgeId::into_output(channel, out(probe, 0)))
             .unwrap()
     };

@@ -22,6 +22,7 @@ use tutti_buffers::Float;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
+use tutti_graph::testing::WireDeclared;
 use tutti_graph::{
     Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkSource,
     ForkTarget, Forked, InEvents, IntoNode, Io, Node, NodeParts, Offset, OutEvents, Prepare,
@@ -747,7 +748,7 @@ fn forkable_rig() -> (
         },
     );
     connect(&mut ed, 1, 2);
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .unwrap();
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)

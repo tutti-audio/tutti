@@ -40,7 +40,7 @@ serde = "1"
 tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
 tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
 # The graph's by-hand node driver, `tutti_graph::contract::Direct`.
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 assert_no_alloc = { version = "1", default-features = false }
 criterion.workspace = true
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }

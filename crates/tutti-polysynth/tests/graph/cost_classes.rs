@@ -3,6 +3,8 @@
 //! sibling synths pack into fewer tasks than undeclared ones, and the render on a pool is bit
 //! for bit the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -99,7 +101,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     let sources = LIGHT + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.wire_outputs([PortSource::Zero; 2]).unwrap();
+    ed.wire_declared_outputs([PortSource::Zero; 2]).unwrap();
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));
         ed.insert(clip, "clip", MidiClipNode::new(notes(k)));

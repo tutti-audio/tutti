@@ -7,7 +7,7 @@
 use crate::common::OpenPorts as _;
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 #[cfg(feature = "midi-hardware")]
-use crate::common::{every_input_port, input_ports, with_input};
+use crate::common::{every_input_port, input_ports, next_block, with_input};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
@@ -784,7 +784,7 @@ fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
     let (mut s, fake, seen) = keyboards();
     let _ports = connect(&mut s, &["keys"]);
     roll(&mut s, 1_024);
-    assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
+    assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), next_block()));
     roll(&mut s, 8_192);
     let heard = note_ons(&seen);
     assert_eq!(heard.len(), 1, "once: {heard:?}");
@@ -847,7 +847,7 @@ fn a_dropped_port_ends_its_held_key_once() {
     let (mut s, fake, seen) = keyboards();
     let ports = connect(&mut s, &["keys"]);
     roll(&mut s, 1_024);
-    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), next_block()));
     roll(&mut s, 8_192);
     assert_eq!(note_ons(&seen).len(), 1);
     drop(ports);
@@ -1834,7 +1834,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let raw = EndpointId::from_raw(MpePeer::RAW);
 
     // Not enabled: Omni Off on channel 3 passes.
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
 
@@ -1875,7 +1875,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             "member {channel}"
         );
     }
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 1, "the Profile prohibits it on a Member");
 
@@ -1899,7 +1899,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .mpe_zones(),
         None
     );
-    assert!(fake.send_input(raw, omni_off(2), Instant::now()));
+    assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");
 }

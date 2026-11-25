@@ -8,6 +8,8 @@
 //! The counts are checked frame for frame; epochs are checked against the
 //! restarts they must mark.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -100,7 +102,7 @@ fn rig(lat: usize, forkable: bool) -> Rig {
         Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
     ))
     .unwrap();
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
         .unwrap();
     ed.commit().expect("commits");
     Rig { ed, exec }

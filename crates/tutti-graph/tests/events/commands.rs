@@ -3,6 +3,8 @@
 //! across a block boundary; late is
 //! counted and never dropped; the queue back-pressures instead of growing.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -128,7 +130,7 @@ fn rig() -> Rig {
             level: 0.0,
         }),
     );
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -343,7 +345,7 @@ fn a_command_needs_a_port_and_an_orphan_is_counted() {
         .schedule(At::Frame(Frame::new(2000)), to(), tag(9))
         .expect_err("and the editor knows it");
     rig.ed.remove(PROBE);
-    rig.ed.resize_outputs(ChannelLayout::from_count(0));
+    declare_outputs(&mut rig.ed, ChannelLayout::from_count(0));
     rig.ed.commit().expect("commits");
     for _ in 0..40 {
         rig.exec.process(64, &t, &[], &mut []);
@@ -434,7 +436,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         tutti_graph::Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(A, 0)),
         PortSource::Node(OutputPort::new(B, 0)),
     ])
@@ -1330,7 +1332,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
         .schedule(At::Frame(Frame::new(100)), to(), ramp(4.0))
         .expect("the probe declares param events");
     rig.ed.insert(PROBE, "plain", Unforkable(Plain));
-    rig.ed.resize_outputs(ChannelLayout::from_count(0));
+    declare_outputs(&mut rig.ed, ChannelLayout::from_count(0));
     rig.ed.commit().expect("commits");
     let t = TransportPosition::default();
     for _ in 0..4 {

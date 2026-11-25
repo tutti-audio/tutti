@@ -6,6 +6,8 @@
 //! one-participant == parallel and no-allocation gates are in
 //! `rt_no_alloc_modulation.rs`, beside the gated pool they share.
 
+use tutti_graph::testing::declare_outputs;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
@@ -173,7 +175,7 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
         ed.insert(NodeKey(p), "probe", ForkByClone(Probe));
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+            declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
             ed.connect_edge(EdgeId::into_output(channel, out(p, 0)))
                 .unwrap()
         };

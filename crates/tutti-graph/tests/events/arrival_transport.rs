@@ -14,6 +14,8 @@
 //! behind a block start), at most `JUMPS` are kept, the newest, and a rate
 //! change clears them. The roll is the public `Env::transport_at`'s.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -94,7 +96,7 @@ fn topology(ed: &mut Editor) {
         Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
     ))
     .unwrap();
-    ed.wire_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+    ed.wire_declared_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
         .unwrap();
 }
 
@@ -440,7 +442,7 @@ fn wide(workers: usize) -> (Editor, Executor) {
         .unwrap();
         outputs.extend((0..3).map(|port| PortSource::Node(OutputPort::new(probe, port))));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, workers);
     (ed, exec)

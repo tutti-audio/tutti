@@ -3,6 +3,8 @@
 //! the wiring to the ports it keeps stays as it was, and the next commit
 //! goes through.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::collections::BTreeSet;
 use tutti_buffers::InterleavedMut;
 
@@ -98,7 +100,7 @@ fn rig() -> (Editor, Executor) {
     ] {
         ed.connect_edge(EdgeId::into_port(at, from)).unwrap();
     }
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(X, 0)),
         PortSource::Node(out(X, 1)),
     ])
@@ -470,7 +472,8 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
     ed.insert(X, "const", konst(2));
-    ed.wire_outputs(vec![PortSource::Node(out(X, 0))]).unwrap();
+    ed.wire_declared_outputs(vec![PortSource::Node(out(X, 0))])
+        .unwrap();
     let mut tap = ed
         .open_tap(
             TapId::of(1),

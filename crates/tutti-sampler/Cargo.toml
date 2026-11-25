@@ -87,7 +87,7 @@ tutti-codec = { path = "../tutti-codec", features = ["decode-wav", "decode-flac"
 # Stimulus nodes (`tutti_nodes::testing`).
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # `contract` for the node harnesses (`drive_input`, `Direct`, `BlockRig`).
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 # The engine the clock tests render through.
 tutti-engine = { path = "../tutti-engine" }
 # `ControlProgram`, for a control lane on a voice's gain port

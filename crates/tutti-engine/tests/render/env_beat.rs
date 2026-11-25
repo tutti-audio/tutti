@@ -20,6 +20,8 @@
 //! [`BeatPorts`] below emits the walk on two beat ports, so every assertion
 //! reads it through the same `f32` split.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
@@ -135,7 +137,7 @@ fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
         ))
         .unwrap();
     }
-    ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(SINK, port))))
+    ed.wire_declared_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(SINK, port))))
         .unwrap();
     ed.commit().expect("commits");
 }
@@ -344,7 +346,7 @@ fn click_clicks_on_the_model_beats() {
     ));
     const CLICK: NodeKey = NodeKey(1);
     ed.insert(CLICK, "click", click);
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
         .unwrap();
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -423,7 +425,7 @@ pub(crate) fn env_graph(max_block: usize, log: &Record<Env>) -> (Editor, Executo
         MaxBlock::of(Samples::new(max_block)),
     ));
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(log.clone())));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     (ed, exec)

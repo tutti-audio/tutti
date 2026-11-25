@@ -27,6 +27,8 @@
 //! nor of a 64-frame piece of one, which voices rendered before their
 //! scratch was sized from `Prepare::max_block`.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_sampler::VoiceWindow;
@@ -134,8 +136,10 @@ fn graph_with(
     ));
     ed.insert(NodeKey(1), "voice", pool);
     ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

@@ -4,6 +4,8 @@
 //!
 //! Against the committed `TimGM6mb.sf2`; a missing fixture fails.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::{Record, midi};
@@ -73,8 +75,10 @@ impl Rig {
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         )
         .unwrap();
-        ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
-            .unwrap();
+        ed.wire_declared_outputs(
+            (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))),
+        )
+        .unwrap();
         ed.commit().expect("commits");
         Self { ed, exec, tx }
     }

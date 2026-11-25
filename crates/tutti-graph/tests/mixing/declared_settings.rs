@@ -6,6 +6,8 @@
 //! every frame of its output, so the rendered samples show which value each
 //! block read.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 
 use tutti_graph::testing as common;
@@ -79,7 +81,7 @@ impl Rig {
                 cells: Arc::clone(cells),
             }),
         );
-        ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
+        ed.wire_declared_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
             .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();

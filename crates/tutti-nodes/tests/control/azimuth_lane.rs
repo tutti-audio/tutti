@@ -5,6 +5,8 @@
 //!
 //! Against closed forms written here, never another render.
 
+use tutti_graph::testing::declare_outputs;
+
 use std::sync::Arc;
 use tutti_graph::EdgeId;
 
@@ -73,7 +75,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
     for c in 0..2 {
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+            declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
             ed.connect_edge(EdgeId::into_output(
                 channel,
                 PortSource::Node(OutputPort::new(NodeKey(PROBE), c)),
