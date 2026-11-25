@@ -8,9 +8,8 @@
 
 use crate::common::OpenPorts as _;
 use crate::common::Wire;
-use crate::common::{Keyed, blocks};
+use crate::common::{Keyed, blocks, next_block};
 use std::sync::Arc;
-use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
@@ -56,7 +55,7 @@ fn command(fake: &FakeCounters, device: u8, commands: &[u8]) {
     let mut payload = vec![0x7F, device, 0x06];
     payload.extend_from_slice(commands);
     for ump in Sysex7Packets::from_payload(G, &payload).expect("a 7-bit payload") {
-        assert!(fake.send_input(EndpointId::from_raw(KEYS), ump, Instant::now()));
+        assert!(fake.send_input(EndpointId::from_raw(KEYS), ump, next_block()));
     }
 }
 

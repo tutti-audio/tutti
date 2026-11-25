@@ -4,10 +4,9 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
-use crate::common::{MF, play};
+use crate::common::{MF, next_block, play};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
@@ -88,7 +87,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
     // own); the blocks that read the events are the gate's.
     for n in 0..200u8 {
         let note = midi::note_on(MidiChannel::of(n % 4), 40 + n % 40, MF);
-        assert!(fake.send_input(EndpointId::from_raw(1), note, Instant::now()));
+        assert!(fake.send_input(EndpointId::from_raw(1), note, next_block()));
     }
     for _ in 0..200 {
         block(&mut s);

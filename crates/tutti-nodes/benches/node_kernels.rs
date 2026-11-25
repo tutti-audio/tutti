@@ -1,7 +1,8 @@
 //! **What does one block of each per-sample kernel cost, at 64 and 1024
 //! frames?**
 //!
-//! The nodes here are the waveshaper, the Moog ladder, the brickwall clip,
+//! The nodes here are the state-variable filter (held and gliding, at widths 1, 2 and 6, in
+//! blocks of 64 and 512), the waveshaper, the Moog ladder, the brickwall clip,
 //! the width adapter, the dynamics (the lookahead limiter, the gate and the
 //! compressor) and the ring-buffer family (the feedback delay, the lookahead
 //! limiter's ring and the convolver's dry
@@ -16,7 +17,7 @@
 //!
 //! ```text
 //! cargo bench -p tutti-nodes --bench node_kernels
-//! //! ```
+//! ```
 
 use tutti_graph::testing::WireDeclared;
 
@@ -33,15 +34,16 @@ use tutti_nodes::{
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
     GateControls, GateNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
-    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
-    TubeStageNode, Waveshape,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, SvfFilterConfig,
+    SvfFilterNode, SvfType, TubeStageConfig, TubeStageNode, Waveshape,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
-    CompressionRatio, Db, Drive, Feedback, Hz, Resonance, SampleRate, Samples, Seconds,
+    CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
 };
 
 const BLOCKS: [usize; 2] = [64, 1024];
+const SVF_BLOCKS: [usize; 2] = [64, 512];
 const SR: SampleRate = SampleRate::SR_48K;
 
 /// Broadband input from a seeded `SplitMix64`.
@@ -64,8 +66,20 @@ fn run<N: Node>(
     make: impl Fn() -> N,
     fed: Option<fn(usize) -> Vec<f32>>,
 ) {
+    run_blocks(c, group, case, &BLOCKS, make, fed);
+}
+
+/// [`run`] over `blocks`.
+fn run_blocks<N: Node>(
+    c: &mut Criterion,
+    group: &str,
+    case: &str,
+    blocks: &[usize],
+    make: impl Fn() -> N,
+    fed: Option<fn(usize) -> Vec<f32>>,
+) {
     let mut g = c.benchmark_group(group);
-    for block in BLOCKS {
+    for &block in blocks {
         let mut d = Direct::new(make(), SR, block);
         let shape = d.node.shape();
         let width = shape.audio_in().count().max(shape.audio_out().count()) as usize;
@@ -343,6 +357,35 @@ fn delay(c: &mut Criterion) {
     );
 }
 
+/// A cutoff that moves every frame, between 200 Hz and 4 kHz.
+fn cutoff_sweep(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| 200.0 + 3_800.0 * i as f32 / n as f32)
+        .collect()
+}
+
+/// The low-pass SVF at 1 kHz, held and with the cutoff gliding per frame, at widths 1, 2 and 6.
+fn svf(c: &mut Criterion) {
+    for width in [1u16, 2, 6] {
+        let make = move || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(width, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
+            )
+        };
+        run_blocks(c, "svf", &format!("held_{width}"), &SVF_BLOCKS, make, None);
+        run_blocks(
+            c,
+            "svf",
+            &format!("gliding_{width}"),
+            &SVF_BLOCKS,
+            make,
+            Some(cutoff_sweep),
+        );
+    }
+}
+
 fn limiter(c: &mut Criterion) {
     run(
         c,
@@ -584,6 +627,7 @@ criterion_group!(
     ladder,
     brickwall,
     delay,
+    svf,
     limiter,
     dynamics,
     reverb,

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
+use super::lifecycle::Committed;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
 use crate::compile::plan::{Delta, Plan, Rewired};
 use crate::compile::{CompileError, Shapes, compile};
@@ -12,7 +13,7 @@ use crate::exec::{Opened, StageIn};
 use crate::model::gain::{EdgeFade, EdgeGain};
 use crate::model::spec::{GraphSpec, ValidGraph};
 use crate::node::Node;
-use crate::node::param::ParamState;
+use crate::node::param::{ParamPorts, ParamState};
 use crate::{Edge, EdgeId, PortSink, PortSource};
 use crate::{Fade, MainOutputBank, NodeKey};
 use tutti_units::Gain;
@@ -103,16 +104,17 @@ impl<F: Float> Editor<F> {
     /// fade holds neither: its commit comes back when applied, and its slot
     /// on the fade-return ring is its own.
     ///
-    /// A commit that changes nothing — the spec and shapes those of the last
-    /// commit, no unit pending, no crossfade or latency cut waiting — sends
-    /// nothing and returns `Ok`: it would compile the plan the executor
-    /// already has, with an empty delta. So it costs a comparison, not a
-    /// compile, and a host may commit every frame. Nor does one whose spec
-    /// differs only in param **ranges**: those are controls, not plan, so it
-    /// validates the spec, writes the ranges to the running units (see
-    /// [`set_param_range`](Self::set_param_range)) and sends nothing. That
-    /// still costs the validate and a clone of the spec, on this thread;
-    /// [`set_param_range`](Self::set_param_range) costs a store.
+    /// A commit that changes nothing structural sends nothing and returns
+    /// `Ok`: the spec and shapes those of the last commit, no unit pending,
+    /// no crossfade, latency cut, tap, event tap or meter waiting. It would
+    /// compile the plan the executor already has, with an empty delta. So it
+    /// costs a comparison of two counters (the editor's structure against
+    /// the one that commit recorded) when no spec or shape was written since,
+    /// and a comparison of the contents when one was, not a compile, and a
+    /// host may commit every frame. A param range, a base, a mode or a mix is
+    /// a control, not structure: it is stored into the running unit's cells
+    /// when set (see [`set_param_range`](Self::set_param_range)) and never
+    /// moves the counter.
     ///
     /// **A range and a rewire in one commit** do not land together: the
     /// commit writes every range cell at once, and the plan lands when the
@@ -147,21 +149,30 @@ impl<F: Float> Editor<F> {
         }
         self.link.check_room()?;
         self.check_spec()?;
-        if !self.placements.is_staged()
+        if let Some(c) = self.life.committed()
+            && !self.entries.is_staged()
             && !self.taps.has_pending()
             && !self.event_taps.has_pending()
             && !self.meters.has_pending()
             // A plan whose main output crossfade has ended is compiled again without
             // the old main output's channels.
             && !self.main_output.fade_ended()
-            && self
-                .life
-                .committed()
-                .is_some_and(|c| c.shapes == self.shapes && c.spec.same_plan(&self.spec))
         {
-            // The plan the executor has is this spec's: at most a value
-            // moved, which is a control.
-            return Ok(Vec::new());
+            // An equal structure is the spec and shapes committed. A moved
+            // one may have come back to them (a route dropped and added
+            // again), which the contents say.
+            if c.structure == self.structure {
+                // A write that skipped the guards would leave the structure
+                // equal and the spec changed.
+                debug_assert!(
+                    c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes,
+                    "a write bypassed the structural guards"
+                );
+                return Ok(Vec::new());
+            }
+            if c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes {
+                return Ok(Vec::new());
+            }
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
         let (plan, mut delta) = compile(
@@ -176,13 +187,13 @@ impl<F: Float> Editor<F> {
         let fades = delta
             .replace()
             .iter()
-            .filter_map(|&(_, new)| self.placements.fade(new.key).map(|f| (new.key, f)))
+            .filter_map(|&(_, new)| self.entries.fade(new.key).map(|f| (new.key, f)))
             .collect();
         // The keys `set_latency` changed that this delta keeps: their
         // crossfades are cut (see `Delta::cuts`).
         let base = self.life.plan().map(|p| &**p);
         let cuts = self
-            .placements
+            .entries
             .latency_cuts()
             .filter_map(|key| {
                 let now = plan.unit(key)?;
@@ -204,21 +215,25 @@ impl<F: Float> Editor<F> {
             .collect();
         // Check before taking anything, so a failed commit leaves every
         // pending unit where it was.
-        if let Some(&node) = needed.iter().find(|&&k| !self.placements.has_unit(k)) {
+        if let Some(&node) = needed.iter().find(|&&k| !self.entries.has_unit(k)) {
             return Err(CommitError::MissingUnit { node });
         }
         self.fade_room(&delta)?;
         let units: BTreeMap<NodeKey, Box<dyn Node<F>>> = needed
             .into_iter()
-            .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
+            .map(|k| (k, self.entries.take_unit(k).expect("checked above")))
             .collect();
-        self.placements.clear_fades_and_cuts();
+        self.entries.clear_fades_and_cuts();
         let rewired = delta.take_rewired();
         self.send(plan, delta, units, &weights, false);
         self.main_output.fading = fading;
-        self.sync_ranges();
-        self.life
-            .set_committed(self.spec.clone(), self.shapes.clone());
+        self.entries.sync(&self.values);
+        self.gains.sync(&self.spec, &self.values);
+        self.life.set_committed(Committed {
+            structure: self.structure,
+            spec: Arc::clone(&self.spec),
+            shapes: Arc::clone(&self.shapes),
+        });
         // A lane the spec no longer has takes its base and range with it.
         let spec = &self.spec;
         self.values.retain_edges(|id| spec.gains.contains_key(&id));
@@ -247,8 +262,8 @@ impl<F: Float> Editor<F> {
     ///   wants no step declares the new main output after [`finish_fades`](Self::finish_fades)
     ///   reports the running fade over (the session does).
     ///
-    /// While a crossfade runs the editor holds a clone of the committed spec
-    /// and shapes, the old main output's wiring, until it ends.
+    /// While a crossfade runs the editor shares the committed spec and
+    /// shapes, the old main output's wiring, until it ends.
     pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
         self.main_output.fade = fade.filter(|f| !f.is_cut());
     }
@@ -447,19 +462,19 @@ impl<F: Float> Editor<F> {
         self.main_output
             .sent(plan.main_output_bank(), self.link.next_seq());
         let plan = Arc::new(plan);
-        let spec = &self.spec;
-        let values = &self.values;
-        let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
-        let params = |key: NodeKey, ports: usize, max: usize| {
-            let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declared, values)
-        };
-        let gains = self.cells.gains.for_plan(&plan, spec, values, bus_weights);
-        let modes = |key: NodeKey| modes_cells.state(key, &plan, values);
-        let placements = &self.placements;
+        for &key in units.keys() {
+            let declared = plan.unit(key).map_or(ParamPorts::NONE, |u| u.shape.params);
+            self.entries.stage_cells(key, declared, &self.values);
+        }
+        let gains = self
+            .gains
+            .for_plan(&plan, &self.spec, &self.values, bus_weights);
+        let entries = &self.entries;
+        let params = |key: NodeKey, ports: usize, max: usize| entries.param_state(key, ports, max);
+        let modes = |key: NodeKey| entries.mode_state(key, &plan);
         // A unit handed in whole (`send`'s callers) was never bound: its flag
         // is a fresh one nothing holds.
-        let wakes = |key: NodeKey| placements.wake(key).cloned().unwrap_or_default();
+        let wakes = |key: NodeKey| entries.wake(key).cloned().unwrap_or_default();
         let taps = self.taps.take_pending();
         let event_taps = self.event_taps.take_pending();
         let meters = self.meters.take_pending();
@@ -482,20 +497,19 @@ impl<F: Float> Editor<F> {
         // Everything applying needs that is a function of the plan is built
         // here, so the audio thread only swaps and moves.
         let max = plan.prepare.max_block().get();
-        let mode_cells = &self.cells.modes;
         let old = self.life.plan().map(Arc::clone);
         self.stager.stage(
             &mut commit,
             StageIn {
                 old: old.as_deref(),
                 mix_lane: &|key| {
-                    mode_cells
-                        .get(key)
+                    entries
+                        .mode(key)
                         .map(|cell| ParamState::lane(max, cell.ranges()))
                 },
             },
         );
-        self.cells.keep_placed(&plan, &self.values);
+        self.entries.keep_placed(&plan, &self.values);
         self.link.send(commit, fades);
         // `commit` syncs the cells against the spec it last sent, then
         // records this one.

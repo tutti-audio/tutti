@@ -1,7 +1,7 @@
 //! What placing a unit at a key leaves unwired: the wiring recorded for the
 //! key that names a port the new unit's shape does not have.
 
-use super::Editor;
+use super::{Editor, write};
 use crate::model::bus_edge::{BusFeed, BusOutputPort, NodeBus};
 use crate::model::gain::EdgeFade;
 use crate::model::mode::NodeMix;
@@ -73,7 +73,7 @@ impl<F: Float> Editor<F> {
         let mut out = Unwired::default();
         let (ain, aout) = (shape.audio_in().count(), shape.audio_out().count());
         let (ein, eout) = (shape.event_in, shape.event_out);
-        let spec = &mut self.spec;
+        let spec = write(&mut self.spec, &mut self.structure);
         let values = &mut self.values;
         let faded_out = |spec: &crate::GraphSpec, values: &GraphValues, id: EdgeId| {
             spec.gains.contains_key(&id) && values.fade(id) == EdgeFade::Out

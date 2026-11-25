@@ -8,7 +8,7 @@ use crate::Shape;
 use crate::model::mode::NodeMix;
 use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
 use crate::node::param::ParamIn;
-use crate::{Edge, EdgeId, InputPort, MainOutputId, PortSink, PortSource, Resolution};
+use crate::{Edge, EdgeId, InputPort, MainOutputId, PortSink, PortSource, Resolution, Topology};
 
 impl<F: Float> Editor<F> {
     /// Adds the audio edge `id` — a source into an input port, or into a main
@@ -42,21 +42,18 @@ impl<F: Float> Editor<F> {
                 return Err(WireError::FeedbackIntoOutput { channel });
             }
         }
-        let was = self.spec.has_edge(id);
+        if self.spec.has_edge(id) || id.from == Edge::Direct(PortSource::Zero) {
+            return Ok(false);
+        }
+        let spec = self.spec_mut();
         match (id.sink, id.from) {
-            (PortSink::Port(at), edge) => self.spec.connect(at, edge),
+            (PortSink::Port(at), edge) => spec.connect(at, edge),
             (PortSink::Output(channel), Edge::Direct(source)) => {
-                self.spec
-                    .topology
-                    .connect_output(usize::from(channel), source);
+                spec.topology.connect_output(usize::from(channel), source);
             }
             (PortSink::Output(_), Edge::Feedback(_)) => {}
         }
-        let added = !was && self.spec.has_edge(id);
-        if added {
-            self.touch();
-        }
-        Ok(added)
+        Ok(true)
     }
 
     /// Removes the audio edge `id` and its gain entry with it (a stale entry
@@ -64,19 +61,17 @@ impl<F: Float> Editor<F> {
     /// one that is not (a node or channel that does not exist included) is
     /// not an error, as removing an edge twice is not.
     pub fn disconnect_edge(&mut self, id: EdgeId) -> bool {
-        let removed = match (id.sink, id.from) {
-            (PortSink::Port(at), edge) => self.spec.disconnect(at, edge),
-            (PortSink::Output(channel), Edge::Direct(source))
-                if usize::from(channel) < self.spec.topology.outputs.len() =>
-            {
-                self.spec.disconnect_output(usize::from(channel), source)
-            }
-            (PortSink::Output(_), _) => false,
-        };
-        if removed {
-            self.touch();
+        if !self.spec.has_edge(id) {
+            return false;
         }
-        removed
+        let spec = self.spec_mut();
+        match (id.sink, id.from) {
+            (PortSink::Port(at), edge) => spec.disconnect(at, edge),
+            (PortSink::Output(channel), Edge::Direct(source)) => {
+                spec.disconnect_output(usize::from(channel), source)
+            }
+            (PortSink::Output(_), Edge::Feedback(_)) => false,
+        }
     }
 
     /// Adds the event edge `edge` into event input `at`; a port holds the set
@@ -100,8 +95,7 @@ impl<F: Float> Editor<F> {
     ) -> Result<bool, WireError> {
         self.check_event_in(at)?;
         self.check_event_out(edge.from())?;
-        self.touch();
-        self.spec.connect_events(at, edge);
+        self.spec_mut().connect_events(at, edge);
         Ok(true)
     }
 
@@ -109,22 +103,27 @@ impl<F: Float> Editor<F> {
     /// feedback edge from one source are two edges), and the source's
     /// resolution mark with the last of them. Returns whether it was there.
     pub fn disconnect_events(&mut self, at: EventInputPort, edge: EventEdge) -> bool {
-        let Some(sources) = self.spec.events.get_mut(&at) else {
+        if !self
+            .spec
+            .events
+            .get(&at)
+            .is_some_and(|sources| sources.contains(&edge))
+        {
             return false;
-        };
-        let Some(i) = sources.iter().position(|e| *e == edge) else {
-            return false;
-        };
-        sources.remove(i);
+        }
+        let spec = self.spec_mut();
+        let sources = spec.events.entry(at).or_default();
+        if let Some(i) = sources.iter().position(|e| *e == edge) {
+            sources.remove(i);
+        }
         let from = edge.from();
         let source_left = sources.iter().any(|e| e.from() == from);
         if sources.is_empty() {
-            self.spec.events.remove(&at);
+            spec.events.remove(&at);
         }
         if !source_left {
-            self.spec.clear_resolution(at, from);
+            spec.clear_resolution(at, from);
         }
-        self.touch();
         true
     }
 
@@ -153,21 +152,17 @@ impl<F: Float> Editor<F> {
             .into());
         }
         self.check_event_out(from)?;
-        let changed = self.spec.connect_param(at, from) != Some(from);
-        if changed {
-            self.touch();
+        if self.spec.params.get(&at) == Some(&from) {
+            return Ok(false);
         }
-        Ok(changed)
+        self.spec_mut().connect_param(at, from);
+        Ok(true)
     }
 
     /// Stops driving param port `at` from `from`: the port reads its base
     /// again. Returns whether `from` was its source.
     pub fn disconnect_param(&mut self, at: ParamIn, from: EventOutputPort) -> bool {
-        let removed = self.spec.disconnect_param(at, from);
-        if removed {
-            self.touch();
-        }
-        removed
+        self.spec.params.get(&at) == Some(&from) && self.spec_mut().disconnect_param(at, from)
     }
 
     /// Drives edge `id`'s gain from event output `from`
@@ -191,33 +186,33 @@ impl<F: Float> Editor<F> {
     ) -> Result<bool, WireError> {
         self.check_gain_edge(id)?;
         self.check_event_out(from)?;
-        let had = self.spec.gains.contains_key(&id);
-        self.declare_lane(id);
-        let changed = self.spec.connect_edge_gain(id, from) != Some(from) || !had;
-        if changed {
-            self.touch();
+        if self
+            .spec
+            .gains
+            .get(&id)
+            .is_some_and(|g| g.source == Some(from))
+        {
+            return Ok(false);
         }
-        Ok(changed)
+        self.declare_lane(id);
+        self.spec_mut().connect_edge_gain(id, from);
+        Ok(true)
     }
 
     /// Stops driving edge `id`'s gain from `from`; the edge keeps its entry,
     /// and reads its base. Returns whether `from` was its source.
     pub fn disconnect_edge_gain(&mut self, id: EdgeId, from: EventOutputPort) -> bool {
-        let removed = self.spec.disconnect_edge_gain(id, from);
-        if removed {
-            self.touch();
-        }
-        removed
+        self.spec
+            .gains
+            .get(&id)
+            .is_some_and(|g| g.source == Some(from))
+            && self.spec_mut().disconnect_edge_gain(id, from)
     }
 
     /// Removes edge `id`'s gain entry: the edge is plain again. Returns
     /// whether it had one.
     pub fn clear_edge_gain(&mut self, id: EdgeId) -> bool {
-        let cleared = self.spec.clear_edge_gain(id).is_some();
-        if cleared {
-            self.touch();
-        }
-        cleared
+        self.spec.gains.contains_key(&id) && self.spec_mut().clear_edge_gain(id).is_some()
     }
 
     /// Wires the main output: channel `c` is fed by exactly the `c`th of
@@ -247,20 +242,14 @@ impl<F: Float> Editor<F> {
         }
         self.check_sources(&sources)?;
         sources.resize(width, PortSource::Zero);
-        let before = self.spec.topology.outputs.clone();
-        self.spec.topology.set_outputs(sources);
-        if self.spec.topology.outputs != before {
-            let spec = &self.spec;
-            let stale: Vec<EdgeId> = spec
-                .gains
-                .keys()
-                .filter(|id| matches!(id.sink, PortSink::Output(_)) && !spec.has_edge(**id))
-                .copied()
-                .collect();
-            for id in stale {
-                self.spec.gains.remove(&id);
-            }
-            self.touch();
+        let mut wired = Topology::default();
+        wired.set_outputs(sources);
+        if wired.outputs != self.spec.topology.outputs {
+            let spec = self.spec_mut();
+            spec.topology.outputs = wired.outputs;
+            let mut gains = std::mem::take(&mut spec.gains);
+            gains.retain(|id, _| !matches!(id.sink, PortSink::Output(_)) || spec.has_edge(*id));
+            spec.gains = gains;
         }
         Ok(())
     }
@@ -272,29 +261,19 @@ impl<F: Float> Editor<F> {
         if self.spec.topology.inputs == width {
             return false;
         }
-        self.spec.topology.inputs = width;
+        let spec = self.spec_mut();
+        spec.topology.inputs = width;
         let cut = |s: &PortSource| matches!(s, PortSource::MainInput(c) if *c >= width.count());
-        for sources in self.spec.topology.edges.values_mut() {
+        for sources in spec.topology.edges.values_mut() {
             sources.retain(|e| !matches!(e, Edge::Direct(s) if cut(s)));
         }
-        self.spec
-            .topology
-            .edges
-            .retain(|_, sources| !sources.is_empty());
-        for sources in &mut self.spec.topology.outputs {
+        spec.topology.edges.retain(|_, sources| !sources.is_empty());
+        for sources in &mut spec.topology.outputs {
             sources.retain(|s| !cut(s));
         }
-        let spec = &self.spec;
-        let stale: Vec<EdgeId> = spec
-            .gains
-            .keys()
-            .filter(|id| !spec.has_edge(**id))
-            .copied()
-            .collect();
-        for id in stale {
-            self.spec.gains.remove(&id);
-        }
-        self.touch();
+        let mut gains = std::mem::take(&mut spec.gains);
+        gains.retain(|id, _| spec.has_edge(*id));
+        spec.gains = gains;
         true
     }
 
@@ -326,8 +305,7 @@ impl<F: Float> Editor<F> {
             return Err(WireError::NoSuchEventEdge { at, from });
         }
         if self.spec.required_resolution.get(&(at, from)) != Some(&resolution) {
-            self.spec.require_resolution(at, from, resolution);
-            self.touch();
+            self.spec_mut().require_resolution(at, from, resolution);
         }
         Ok(())
     }
@@ -336,8 +314,7 @@ impl<F: Float> Editor<F> {
     pub fn clear_resolution(&mut self, at: EventInputPort, from: EventOutputPort) -> bool {
         let had = self.spec.required_resolution.contains_key(&(at, from));
         if had {
-            self.spec.clear_resolution(at, from);
-            self.touch();
+            self.spec_mut().clear_resolution(at, from);
         }
         had
     }
@@ -368,13 +345,12 @@ impl<F: Float> Editor<F> {
             return Ok(false);
         }
         let width = usize::from(main_output.width().count());
-        self.spec.topology.outputs.resize(width, Vec::new());
-        self.spec
-            .gains
+        let spec = self.spec_mut();
+        spec.topology.outputs.resize(width, Vec::new());
+        spec.gains
             .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= width));
-        self.spec.main_output = main_output;
-        self.spec.main_output_id = id;
-        self.touch();
+        spec.main_output = main_output;
+        spec.main_output_id = id;
         Ok(true)
     }
 
