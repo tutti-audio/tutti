@@ -2443,6 +2443,21 @@ fn answer_blocks(msg: AudioRequest) -> Action {
     }
 }
 
+/// [`answer_blocks`] whose blocks say their changes were handed to the plugin.
+fn answer_blocks_handing(msg: AudioRequest) -> Action {
+    match msg {
+        AudioRequest::ProcessAudio(data) => Action::Audio(Box::new(AudioReply::AudioProcessed {
+            latency_us: 0,
+            seq: data.seq,
+            midi_out: Default::default(),
+            status: Default::default(),
+            refused: false,
+            writes: crate::BlockWrites::Handed,
+        })),
+        _ => Action::Silent,
+    }
+}
+
 /// Gives each block's reply up to `NOTICE_TIMEOUT`, so no block is abandoned at
 /// the live deadline: a block the bridge gave up on is answered by the bridge
 /// itself, before the server has logged it.
@@ -3012,6 +3027,50 @@ fn a_write_a_handed_block_carried_is_not_counted_when_its_audio_is_refused() {
         audio.edits_delivered(upto)
     });
     assert_eq!(audio.unapplied_edits(), 0);
+}
+
+/// **A flush answered `Deferred` leaves the wait open until a block's answer**:
+/// the server kept the write for the next block, so nothing is acknowledged by
+/// the flush, nor by an empty one asked for meanwhile; the block that took it
+/// acknowledges its own drain, which reaches the write.
+#[test]
+fn a_deferred_flush_leaves_the_wait_open_until_the_next_blocks_answer() {
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(50);
+        t.rate = Duration::from_millis(10);
+        t
+    };
+    let mock = MockServer::start_lanes_under(
+        "deferred-flush",
+        timeouts,
+        |msg| match msg {
+            AudioRequest::ApplyParameters { id, .. } => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: crate::ApplyOutcome::Deferred,
+                }))
+            }
+            other => answer_blocks_handing(other),
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    audio.declare_host_edits([ParamId::new(1)]);
+    let upto = write_one(audio);
+    assert!(!audio.edits_delivered(upto), "asks for the flush");
+    for _ in 0..3 {
+        audio.settle();
+        assert!(!audio.edits_delivered(upto), "kept for the block");
+    }
+    assert_eq!(audio.unapplied_edits(), 0, "a deferred write is not lost");
+    // The next block drains after the flush: its answer acknowledges its own
+    // swept, which reaches the write.
+    let _ = write_one(audio);
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
 }
 
 /// **A crashed plugin reads as delivered**: the read or save that follows fails

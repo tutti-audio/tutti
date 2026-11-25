@@ -1,5 +1,5 @@
 use super::*;
-use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
+use crate::served::format::clap::{THREAD_POOL, pool_participants};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::News;
@@ -1647,16 +1647,6 @@ fn test_clap_param_write_is_settled_for_a_state_save() {
         (readback - new_value).abs() < 0.01,
         "expected {new_value}, got {readback}"
     );
-}
-
-/// A parameter that requires `process` is never flushed out of band while
-/// the plugin is processing; any other is.
-#[test]
-fn a_requires_process_parameter_is_not_flushed_while_processing() {
-    assert!(!flush_out_of_band(true, true));
-    assert!(flush_out_of_band(true, false), "before the first block");
-    assert!(flush_out_of_band(false, true));
-    assert!(flush_out_of_band(false, false));
 }
 
 /// **A load with no block is refused** at the activation stage, and the

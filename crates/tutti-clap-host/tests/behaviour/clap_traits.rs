@@ -787,6 +787,30 @@ fn queued_edits_survive_a_rejoin() {
     assert!((got - wanted).abs() < 1e-9, "{got} vs {wanted}");
 }
 
+/// **A flushed value of a `REQUIRES_PROCESS` parameter waits for the next
+/// block**: the plugin is active, so the format wants it in `process`, never in
+/// `params.flush`; any other parameter's flushed value is applied at once.
+#[test]
+fn a_flushed_requires_process_value_waits_for_the_next_block() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, _controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let (cutoff, manual) = (probe_params()[0].id, MANUAL_PARAM_ID);
+    let mut changes = tutti_plugin_types::ParameterChanges::reserved(2, 1);
+    assert!(changes.add_change(ParamId::new(cutoff), at_frame(0), unit_value(0.25)));
+    assert!(changes.add_change(ParamId::new(manual), at_frame(0), unit_value(1.0)));
+    assert!(processor.flush_parameters(&changes), "the plugin flushes");
+    assert_eq!(peek_param(cutoff), Some(350.0), "applied at once");
+    assert_eq!(peek_param(manual), Some(0.0), "kept for the block");
+    assert!(Processor::holds_parameters(&processor));
+    render(&mut processor, FloatWidth::F32).expect("a block");
+    assert_eq!(peek_param(manual), Some(1.0), "taken by the block");
+    assert!(!Processor::holds_parameters(&processor));
+}
+
 /// **An errored block allocates nothing**, whatever the reason: a block longer
 /// than the activation, and a block after the Controller went.
 #[test]

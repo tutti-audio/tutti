@@ -54,6 +54,11 @@ pub struct ClapProcessor {
     pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
     pub(crate) drain: EditReader,
+    /// The host's flushed values for parameters flagged `REQUIRES_PROCESS`, the
+    /// latest of each, kept for the next block's `process`: the format takes
+    /// them there while the plugin is active, never out of band. Room for every
+    /// declared parameter, so keeping one never allocates.
+    pub(crate) held: Vec<(ParamId, Normalized)>,
     /// Tells the Controller what `drain` took, once the plugin has processed it.
     pub(crate) published: tutti_rt::GenerationPublisher,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
@@ -88,16 +93,18 @@ impl ClapProcessor {
             output_ports,
             max_frames,
             scratch,
-            ranges,
+            mut ranges,
             drain,
             published,
             reports,
             reports_dropped,
         } = parts;
+        let held = Vec::with_capacity(ranges.lend().ranges.len());
         Self {
             scratch,
             ranges,
             drain,
+            held,
             published,
             reports,
             reports_dropped,
@@ -385,6 +392,11 @@ impl Processor for ClapProcessor {
         } else {
             Err(PluginError::Block("the plugin has no params.flush to call"))
         }
+    }
+
+    /// Values of `REQUIRES_PROCESS` parameters wait for the next block.
+    fn holds_parameters(&self) -> bool {
+        !self.held.is_empty()
     }
 
     fn reset(&mut self) {

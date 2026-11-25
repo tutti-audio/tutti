@@ -2,6 +2,7 @@
 
 use super::ClapProcessor;
 use super::config::AudioScratch;
+use crate::ParamBounds;
 use crate::error::{ClapError, Result};
 use crate::events::{ClapEvent, EventList};
 use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
@@ -20,6 +21,7 @@ use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
+use tutti_units::{Normalized, ParamId};
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -335,8 +337,13 @@ impl ClapProcessor {
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let drain = &mut self.drain;
+            let (drain, held) = (&mut self.drain, &mut self.held);
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
+                // What a flush kept for this block first, then the
+                // Controller's, then the block's own: the latest is last.
+                for (id, value) in held.drain(..) {
+                    each(id, value);
+                }
                 drain.drain(each);
             });
             if !param_changes.is_empty() {
@@ -373,8 +380,11 @@ impl ClapProcessor {
     }
 
     /// Delivers `changes` between blocks with `clap.params.flush`, the
-    /// Controller's writes first, as at the head of a block. `false` when the
-    /// plugin has no flush entry or is busy.
+    /// Controller's writes first, as at the head of a block. A parameter
+    /// flagged `REQUIRES_PROCESS` is not flushed: the plugin is active, so its
+    /// latest value waits for the next block
+    /// ([`holds_parameters`](tutti_plugin_types::Processor::holds_parameters)).
+    /// `false` when the plugin has no flush entry or is busy.
     pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
@@ -385,8 +395,18 @@ impl ClapProcessor {
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(each);
             });
+            for queue in &changes.queues {
+                let bounds = ParamBounds::find(&table.ranges, queue.param_id);
+                if bounds.is_some_and(|b| b.requires_process && !b.read_only)
+                    && let Some(point) = queue.points.last()
+                {
+                    keep_latest(&mut self.held, queue.param_id, point.value);
+                }
+            }
             if !changes.is_empty() {
-                input_events.add_param_changes(changes, &table.ranges, table.claims);
+                input_events.add_param_changes_where(changes, &table.ranges, table.claims, |b| {
+                    !b.is_some_and(|b| b.requires_process)
+                });
             }
         }
         self.scratch.input_events.sort_by_time();
@@ -595,6 +615,17 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
         // construction, so the conversion is total and lossless.
         tsig_num: transport.timing.signature.beats_per_bar().into(),
         tsig_denom: transport.timing.signature.note_value().into(),
+    }
+}
+
+/// Keeps `value` as the latest of `id` in `held`, which has room for every
+/// declared parameter: a value past it is lost with the rest of an activation
+/// the table outgrew (a rescan that added parameters).
+fn keep_latest(held: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normalized) {
+    if let Some((_, kept)) = held.iter_mut().find(|(kept, _)| *kept == id) {
+        *kept = value;
+    } else if held.len() < held.capacity() {
+        held.push((id, value));
     }
 }
 

@@ -23,6 +23,7 @@ fn events::FlushEvents::sort_by_time
 fn events::InputEventList::add_midi
 fn events::InputEventList::add_midi_events
 fn events::InputEventList::add_param_changes
+fn events::InputEventList::add_param_changes_where
 fn events::InputEventList::clamp_times
 fn events::InputEventList::event_input
 fn events::InputEventList::events

@@ -145,12 +145,6 @@ pub(in crate::served) mod clap {
         Option<std::sync::Arc<tutti_graph::WorkerPool>>,
     > = std::sync::OnceLock::new();
 
-    /// Whether a pending write may be flushed out of band: not when the parameter
-    /// requires `process` and the plugin is processing.
-    pub(in crate::served) fn flush_out_of_band(requires_process: bool, processing: bool) -> bool {
-        !(requires_process && processing)
-    }
-
     impl ServerSide for ClapLoaded {
         fn adopt(&mut self) {
             if self.supports_thread_pool() {
@@ -176,7 +170,7 @@ pub(in crate::served) mod clap {
 
         /// Each is applied through an out-of-band `params.flush`, except that a
         /// parameter flagged `REQUIRES_PROCESS` is never flushed while the plugin
-        /// is processing (CLAP wants it in event order, in a block): it goes back
+        /// is active (CLAP wants it in event order, in a block): it goes back
         /// to the queue. Only what was pending is flushed, at the moment it is
         /// asked for, so a value the plugin or its editor has since moved is not
         /// re-asserted by every write.
@@ -185,16 +179,13 @@ pub(in crate::served) mod clap {
                 control.flush_edits(main);
             }
             let mut pending = Vec::new();
-            let processing = match lifecycle {
+            match lifecycle {
                 Lifecycle::Active {
                     seat: Seat::Held(processor),
                     ..
-                } => {
-                    processor.take_edits(&mut pending);
-                    processor.is_processing()
-                }
+                } => processor.take_edits(&mut pending),
                 _ => return 0,
-            };
+            }
             // A write the plugin refuses is not written and is counted: the
             // wire has no reply to carry the error.
             refusals(pending.into_iter().filter_map(|(id, value)| {
@@ -204,7 +195,7 @@ pub(in crate::served) mod clap {
                     }
                     _ => false,
                 };
-                if flush_out_of_band(requires, processing) {
+                if !requires {
                     match lifecycle {
                         Lifecycle::Active { controller, .. } => Some(Control::set_parameter(
                             controller.loaded_mut(),

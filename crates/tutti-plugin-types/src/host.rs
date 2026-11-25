@@ -588,6 +588,16 @@ pub trait Processor: Send {
         ))
     }
 
+    /// Whether changes [`flush_parameters`](Self::flush_parameters) was given
+    /// are kept for the next block's `process` (a CLAP parameter flagged
+    /// `REQUIRES_PROCESS`, which the format does not take out of band while the
+    /// plugin is active): the plugin does not have them yet, and a flush made
+    /// now is not their delivery. The default is a format that applies a flush
+    /// at once.
+    fn holds_parameters(&self) -> bool {
+        false
+    }
+
     /// The frames this Processor renders in, if it renders in fixed chunks
     /// that may begin in the middle of a graph block and span several
     /// [`process`](Self::process) calls (the served pipeline's: it ships a

@@ -203,6 +203,7 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome {
         match self.rt.held() {
             Some(processor) => match processor.flush_parameters(changes) {
+                Ok(()) if processor.holds_parameters() => ApplyOutcome::Deferred,
                 Ok(()) => ApplyOutcome::Applied,
                 Err(_) => ApplyOutcome::Refused,
             },

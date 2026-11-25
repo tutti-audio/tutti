@@ -201,6 +201,11 @@ pub enum ApplyOutcome {
     /// No Processor was here to take them (recalled for a rate change, or
     /// refused at the seat): none was applied.
     Unseated,
+    /// The Processor kept changes for the next block (a CLAP parameter flagged
+    /// `REQUIRES_PROCESS`, which the format takes through `process` while the
+    /// plugin is active): the plugin does not have them yet. Answered to every
+    /// flush while any is kept, even an empty one.
+    Deferred,
 }
 
 /// A lane the broker connection opens to the server.

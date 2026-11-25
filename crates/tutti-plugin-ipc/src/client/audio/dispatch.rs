@@ -158,6 +158,20 @@ fn answered(channels: &Channels, got: bool, edits: u64, swept: Generation) {
     channels.note_acked(swept);
 }
 
+/// The server answered a flush ([`answered`] for what it counts). `Deferred`
+/// counts and acknowledges nothing: the server kept changes for the next
+/// block, and answers `Deferred` to every flush while it holds any, so an empty
+/// flush does not acknowledge them either. The next block's answer acknowledges
+/// its own `swept`, which is at least this flush's, because that block drained
+/// after it.
+fn flush_answered(channels: &Channels, outcome: ApplyOutcome, edits: u64, swept: Generation) {
+    match outcome {
+        ApplyOutcome::Applied => answered(channels, true, edits, swept),
+        ApplyOutcome::Refused | ApplyOutcome::Unseated => answered(channels, false, edits, swept),
+        ApplyOutcome::Deferred => {}
+    }
+}
+
 /// The key of the request an audio reply answers.
 fn audio_key(reply: &AudioReply) -> AudioKey {
     match reply {
@@ -390,7 +404,7 @@ impl AudioState {
             }
             Heard::Abandoned(AbandonedAudio::Params { edits, swept }) => {
                 if let AudioReply::ParametersApplied { outcome, .. } = reply {
-                    answered(channels, outcome == ApplyOutcome::Applied, edits, swept);
+                    flush_answered(channels, outcome, edits, swept);
                 }
                 Ok(None)
             }
@@ -879,9 +893,8 @@ pub(super) fn handle_audio(
             // as the flush may not have landed.
             let took = match wait_audio(stream, state, channels, key)? {
                 Some(AudioReply::ParametersApplied { outcome, .. }) => {
-                    let got = outcome == ApplyOutcome::Applied;
-                    answered(channels, got, edits, swept);
-                    got
+                    flush_answered(channels, outcome, edits, swept);
+                    outcome == ApplyOutcome::Applied
                 }
                 _ => false,
             };
