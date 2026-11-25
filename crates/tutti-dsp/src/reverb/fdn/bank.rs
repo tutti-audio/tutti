@@ -51,13 +51,13 @@
 //! scaled by the design (`rescale_bands`) so no frequency decays slower than the longest band
 //! set, and the loop cannot grow.
 //!
-//! **The shimmer.** A [shimmering](FdnLayout::shimmering) layout runs one mono fixed-rate
+//! **The shimmer.** A [`ShimmerLayout`](crate::ShimmerLayout) runs one mono fixed-rate
 //! vocoder in the feedback ([`shimmer`](super::shimmer) has the loop and its gain): at each
 //! frame the lines' feedback `f` is summed to its mean component `s`, the share `k` of it is
 //! replaced by the shifted `s` of the chunk before (delayed by the chunk and the vocoder's
 //! latency, [`shimmer_delay`](FdnBank::shimmer_delay)), and the chunk's `s` goes to the vocoder
 //! at the chunk's end. The model's `Fdn` stage carries that delay as its `loop_delay` while the send
-//! is above zero or its ramp has not reached zero, so the decay queries and the tail read it. A layout that does not shimmer
+//! is above zero or its ramp has not reached zero, so the decay queries and the tail read it. A plain layout
 //! runs the loop above unchanged.
 //!
 //! **Format.** The state and the views are the bank's float `F`. The loop gains and the
@@ -80,8 +80,10 @@ use tutti_units::{
     Tail,
 };
 
-use super::design::{CROSSOVER, FdnControls, FdnLayout, set_loop_delay};
-use super::shimmer::{GAIN_BOUND, Shimmer};
+use super::design::{CROSSOVER, FdnControls, set_loop_delay};
+use super::kind::FdnKind;
+use super::kind::sealed::Shifter;
+use super::shimmer::GAIN_BOUND;
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
@@ -331,8 +333,8 @@ struct State<F> {
 /// [`reset`](Self::reset) zeroes them without allocating. Mono in (the input channels are
 /// averaged), stereo out: the **wet** signal alone, even lines left and odd right.
 #[derive(Clone, Debug)]
-pub struct FdnBank<F: FftFloat> {
-    layout: FdnLayout,
+pub struct FdnBank<F: FftFloat, L: FdnKind> {
+    layout: L,
     rate: SampleRate,
     max_lines: usize,
     cap: usize,
@@ -342,27 +344,29 @@ pub struct FdnBank<F: FftFloat> {
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: usize,
     state: State<F>,
-    /// The shifter of a [shimmering](FdnLayout::shimmering) layout.
-    shimmer: Option<Shimmer<F>>,
+    /// What the kind keeps in the feedback path: the shifter of a shimmer layout, nothing
+    /// for a plain layout.
+    shimmer: L::State<F>,
     /// The controls the design in `network` is of: a design is made once however many of
     /// [`retarget`](Self::retarget) and [`tail_of`](Self::tail_of) ask for it.
-    designed: Option<FdnControls>,
+    designed: Option<(FdnControls, L::Controls)>,
     /// Where a design is made and the coefficient point it asks for, so the audio thread
     /// builds neither.
     network: Box<Network>,
     target: Target<F>,
 }
 
-impl<F: FftFloat + Lerp> FdnBank<F> {
+impl<F: FftFloat + Lerp, L: FdnKind> FdnBank<F, L> {
     /// The frames between a ramp's steps: the chunk. A caller that designs on a grid of
     /// its own can align it here, so a new target lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
     /// A silent bank of `layout` at `rate`. Allocates: build it on the control side.
     #[must_use]
-    pub fn new(layout: &FdnLayout, rate: SampleRate) -> Self {
-        let shimmer = layout.shimmers().then(|| Shimmer::new(rate));
-        let bounds = layout.capacity(rate, shimmer.as_ref().map_or(Samples::ZERO, Shimmer::delay));
+    pub fn new(layout: &L, rate: SampleRate) -> Self {
+        let shimmer = layout.state::<F>(rate);
+        let mut bounds = layout.layout().capacity(rate, shimmer.delay());
+        bounds.tail = layout.ceiling(bounds.tail, rate);
         let max_lines = bounds.lines;
         let cap = bounds.line.to_samples_ceil().get() + 4;
         let pre_cap = bounds.pre_delay.get() + 4;
@@ -411,20 +415,19 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
         FdnRamps::new(self.max_lines, ramp(self.rate), &self.target)
     }
 
-    /// How long it rings at its worst: unbounded, since a freeze holds the tail; a
-    /// [shimmering](FdnLayout::shimmering) layout cannot freeze, and its ceiling is its longest
-    /// decay.
+    /// How long it rings at its worst: unbounded for a plain layout, since a freeze holds the
+    /// tail; a [`ShimmerLayout`](crate::ShimmerLayout) cannot freeze, and its ceiling is its longest decay.
     #[must_use]
     pub fn tail(&self) -> Tail {
         self.ceiling
     }
 
     /// Designs `controls` into the scratch network, unless it already holds that design.
-    fn design(&mut self, controls: &FdnControls) {
-        if self.designed != Some(*controls) {
+    fn design(&mut self, network: &FdnControls, kind: &L::Controls) {
+        if self.designed != Some((*network, *kind)) {
             self.layout
-                .design_into(controls, self.rate, &mut self.network);
-            self.designed = Some(*controls);
+                .design_into(network, kind, self.rate, &mut self.network);
+            self.designed = Some((*network, *kind));
         }
     }
 
@@ -438,17 +441,19 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
     /// what it still has to fall: a pre-delay at `P'` frames with the target `P` delays the
     /// input into the loop by up to `P' - P` more, and `P' <= ` the longest pre-delay, which
     /// the ceiling's worst design already has.
-    pub fn tail_of(&mut self, ramps: &FdnRamps<F>, controls: &FdnControls) -> Tail {
-        self.design(controls);
+    pub fn tail_of(
+        &mut self,
+        ramps: &FdnRamps<F>,
+        network: &FdnControls,
+        kind: &L::Controls,
+    ) -> Tail {
+        self.design(network, kind);
         // The shifted path's delay is in the loop while the send is above zero, and until its
         // ramp has reached zero: the shifted share still circulating is read at the ramp's value.
-        let delay = match &self.shimmer {
-            Some(shimmer)
-                if controls.shimmer_send > Feedback::NONE || ramps.shimmer.now() > F::ZERO =>
-            {
-                shimmer.delay()
-            }
-            _ => Samples::ZERO,
+        let delay = if L::shift(kind).1 > Feedback::NONE || ramps.shimmer.now() > F::ZERO {
+            self.shimmer.delay()
+        } else {
+            Samples::ZERO
         };
         set_loop_delay(&mut self.network, delay);
         let DecayTime::Finite(t) = self.network.tail(TAIL_FLOOR) else {
@@ -471,36 +476,34 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
         }
         s.fresh = true;
         self.into = 0;
-        if let Some(shimmer) = &mut self.shimmer {
-            shimmer.reset();
-        }
+        self.shimmer.reset();
     }
 
-    /// The frames the shifted feedback of a [shimmering](FdnLayout::shimmering) layout takes
-    /// to come back into the lines, the chunk it is collected in and the vocoder's latency:
-    /// zero for a layout that does not shimmer. It is the delay of the reverb's onset and is
-    /// added to every line's loop in the network the decay queries read, from a design with
-    /// a [`shimmer_send`](FdnControls::shimmer_send) above zero.
+    /// The frames the shifted feedback of a [`ShimmerLayout`](crate::ShimmerLayout) takes to come back into the
+    /// lines, the chunk it is collected in and the vocoder's latency: zero for a plain layout.
+    /// It is the delay of the reverb's onset and is added to every line's loop in the network
+    /// the decay queries read, from a design with a [`ShimmerControls::send`](crate::ShimmerControls::send) above zero.
     #[must_use]
     pub fn shimmer_delay(&self) -> Samples {
-        self.shimmer.as_ref().map_or(Samples::ZERO, Shimmer::delay)
+        self.shimmer.delay()
     }
 
     /// Aims `ramps` at the design of `controls`: the first recirculating stage's lines,
     /// matrix, outputs, pre-delay, wet gain and width, each as the value its ramp moves to.
     /// No allocation.
-    pub fn retarget(&mut self, ramps: &mut FdnRamps<F>, controls: &FdnControls) {
-        self.design(controls);
+    pub fn retarget(&mut self, ramps: &mut FdnRamps<F>, network: &FdnControls, kind: &L::Controls) {
+        self.design(network, kind);
         if self.coefficients() {
-            // A send of 0.99 at most (`Feedback::MAX_STABLE`), whatever the control wrote, and
-            // none for a layout that does not shimmer.
-            let send = controls.shimmer_send.get();
-            self.target.shimmer = if self.shimmer.is_some() && send > 0.0 {
+            // A send of 0.99 at most (`Feedback::MAX_STABLE`), whatever the control wrote;
+            // a plain layout sends none.
+            let (pitch, send) = L::shift(kind);
+            let send = send.get();
+            self.target.shimmer = if send > 0.0 {
                 F::from_design(send.min(Feedback::MAX_STABLE.get()))
             } else {
                 F::ZERO
             };
-            self.target.shimmer_pitch = controls.shimmer_pitch;
+            self.target.shimmer_pitch = pitch;
             ramps.retarget(&self.target);
         }
     }
@@ -650,9 +653,7 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
             F::ZERO
         };
         s.c_shimmer = c.shimmer.now();
-        if let Some(shimmer) = &mut self.shimmer {
-            shimmer.retarget(c.shimmer_pitch);
-        }
+        self.shimmer.retarget(c.shimmer_pitch);
         s.c_wet = c.wet.now();
         s.c_width = c.width.now();
         s.c_pre = c.pre_len.now();
@@ -740,30 +741,15 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
             }
             // `m` scales the projection, so `m = 1` is the reflection to the bit.
             let sum = s.c_mix * sum;
-            if let Some(shimmer) = &mut self.shimmer {
-                // The feedback `f`, its mean component `s` and the shifted share of it.
-                let mut mean = F::ZERO;
-                for j in 0..n {
-                    d[j] -= two * s.c_v[j] * sum;
-                    mean += d[j];
-                }
-                let mean = mean * root;
-                shimmer.push(self.into, mean);
-                let k = s.c_shimmer;
-                // A send of exactly 0 leaves the lines untouched, a non-finite shifted sample
-                // included.
-                let share = if k > F::ZERO {
-                    k * (shimmer.back(self.into) * bound - mean) * root
-                } else {
-                    F::ZERO
-                };
-                for j in 0..n {
-                    s.lines[j].put(s.c_in[j] * xd + d[j] + share);
-                }
-            } else {
-                for j in 0..n {
-                    s.lines[j].put(s.c_in[j] * xd + d[j] - two * s.c_v[j] * sum);
-                }
+            // The feedback `f` and the shifted share of its mean component.
+            for j in 0..n {
+                d[j] -= two * s.c_v[j] * sum;
+            }
+            let share = self
+                .shimmer
+                .share(self.into, &d[..n], s.c_shimmer, root, bound);
+            for j in 0..n {
+                s.lines[j].put(s.c_in[j] * xd + d[j] + share);
             }
             // Every row moves on, the idle ones too: a line past `n` keeps the frames it held
             // and a later regrowth reads them at the right age.
@@ -778,10 +764,8 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
                 y[i] = (mid - s.c_width * side) * wet;
             }
             self.into = (self.into + 1) % Self::CHUNK;
-            if self.into == 0
-                && let Some(shimmer) = &mut self.shimmer
-            {
-                shimmer.end_chunk();
+            if self.into == 0 {
+                self.shimmer.end_chunk();
             }
         }
         Ok(())

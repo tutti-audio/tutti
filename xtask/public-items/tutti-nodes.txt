@@ -9,6 +9,7 @@ const kernel::MAX_SIGNALS
 const lfo::LFO_SYNC_RAMP
 const params::Control::RAMP
 const pitch_shifter::PitchShifterConfig::DEFAULT_HOP
+const reverb_fdn::FdnNodeControls::DEFAULT
 const signal::sender::SOURCE_EVENT_CAPACITY
 enum automation::recording::RecordMode
 enum click::MetronomeMode
@@ -249,7 +250,7 @@ fn reverb_plate::PlateReverbConfig::modulation
 fn reverb_plate::PlateReverbConfig::new
 fn reverb_plate::PlateReverbConfig::predelay
 fn reverb_shimmer::ShimmerConfig::controls
-fn reverb_shimmer::ShimmerConfig::max_decay
+fn reverb_shimmer::ShimmerConfig::layout
 fn reverb_shimmer::ShimmerConfig::new
 fn reverb_shimmer::ShimmerConfig::pitch
 fn reverb_shimmer::ShimmerConfig::send
@@ -459,6 +460,7 @@ struct reconcile::Applied
 struct reconcile::Modulation
 struct reverb_fdn::FdnConfig
 struct reverb_fdn::FdnKernel
+struct reverb_fdn::FdnNodeControls
 struct reverb_fdn::FdnSet
 struct reverb_freeverb::FreeverbConfig
 struct reverb_freeverb::FreeverbKernel
@@ -467,7 +469,6 @@ struct reverb_plate::PlateKernel
 struct reverb_plate::PlateReverbConfig
 struct reverb_plate::PlateSet
 struct reverb_shimmer::ShimmerConfig
-struct reverb_shimmer::ShimmerKernel
 struct reverb_shimmer::ShimmerSet
 struct reverb_spring::SpringReverbConfig
 struct reverb_spring::SpringReverbKernel

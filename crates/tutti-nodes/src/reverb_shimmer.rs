@@ -2,22 +2,18 @@
 //! pitch.
 //!
 //! The network is [`FdnBank`](tutti_dsp::FdnBank)'s, run by an [`FdnKernel`] on a
-//! [shimmering](FdnLayout::shimmering) layout; this file holds the controls it adds to the
+//! [`ShimmerLayout`]; this file holds the controls it adds to the
 //! [`FdnSet`](crate::FdnSet)'s and how the graph reaches them.
 
-use tutti_buffers::{InputOutput, MaxBlock};
-use tutti_dsp::{BlockMismatch, FdnControls, FdnLayout, FftFloat, Lerp, MaxDecay};
-use tutti_graph::Shape;
-use tutti_units::{
-    Bipolar, Cents, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds, StereoWidth, Tail,
-};
+use tutti_dsp::{FdnControls, FftFloat, Lerp, MaxDecay, ShimmerControls, ShimmerLayout};
+use tutti_units::{Bipolar, Cents, Db, Feedback, Hz, Mix, Seconds, StereoWidth};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
-use crate::reverb_fdn::FdnKernel;
+use crate::kernel::KernelNode;
+use crate::reverb_fdn::{FdnKernel, FdnNodeControls};
 
 /// A feedback delay network with a pitch shifter in its feedback: mono in, stereo out, wet only.
 ///
-/// A [`KernelNode`] over [`ShimmerKernel`]. Each trip round the loop, the share of the feedback
+/// A [`KernelNode`] over an [`FdnKernel`] of a [`ShimmerLayout`]. Each trip round the loop, the share of the feedback
 /// the **send** sets goes through one phase vocoder ([`PhaseVocoder`](tutti_dsp::PhaseVocoder),
 /// fixed-rate) and comes back shifted by the **pitch**, so the tail climbs: at +1200 cents each
 /// trip puts what it carried an octave higher. Its blend with its input, for use as an insert,
@@ -47,40 +43,43 @@ use crate::reverb_fdn::FdnKernel;
 /// trips lengthened by it, and the node narrows it each block as the controls in force ring.
 ///
 /// `F` is the float of the graph it runs in, as the [`FdnNode`](crate::FdnNode)'s.
-pub type ShimmerNode<F> = KernelNode<ShimmerKernel<F>>;
+pub type ShimmerNode<F> = KernelNode<FdnKernel<F, ShimmerLayout>>;
 
-/// What a [`ShimmerNode`] is made from: the network's longest decay and the controls its cells
-/// start at.
+/// What a [`ShimmerNode`] is made from: the network's layout and the controls its cells start
+/// at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShimmerConfig {
-    max_decay: MaxDecay,
-    controls: FdnControls,
+    layout: ShimmerLayout,
+    controls: FdnNodeControls<ShimmerLayout>,
 }
 
 impl ShimmerConfig {
-    /// Eight lines, RT60s up to [`MaxDecay::DEFAULT`], the cells at [`FdnControls::DEFAULT`]:
-    /// an octave up (`1200` cents), at a send of `0.5`.
+    /// A [`ShimmerLayout`] of eight lines, RT60s up to [`MaxDecay::DEFAULT`], the cells at
+    /// [`FdnControls::DEFAULT`]: an octave up (`1200` cents), at a send of `0.5`.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            max_decay: MaxDecay::DEFAULT,
-            controls: FdnControls {
-                shimmer_send: Feedback::new_clamped(0.5),
-                ..FdnControls::DEFAULT
+            layout: ShimmerLayout::default(),
+            controls: FdnNodeControls {
+                network: FdnControls::DEFAULT,
+                kind: ShimmerControls {
+                    send: Feedback::new_clamped(0.5),
+                    ..ShimmerControls::DEFAULT
+                },
             },
         }
     }
 
-    /// The longest RT60 a control may ask for.
+    /// The network's lines and their longest decay.
     #[must_use]
-    pub const fn max_decay(mut self, max_decay: MaxDecay) -> Self {
-        self.max_decay = max_decay;
+    pub const fn layout(mut self, layout: ShimmerLayout) -> Self {
+        self.layout = layout;
         self
     }
 
-    /// The controls the cells start at; their `freeze` is ignored.
+    /// The controls the cells start at.
     #[must_use]
-    pub const fn controls(mut self, controls: FdnControls) -> Self {
+    pub const fn controls(mut self, controls: FdnNodeControls<ShimmerLayout>) -> Self {
         self.controls = controls;
         self
     }
@@ -88,14 +87,14 @@ impl ShimmerConfig {
     /// The shift the cell starts at.
     #[must_use]
     pub const fn pitch(mut self, pitch: Cents) -> Self {
-        self.controls.shimmer_pitch = pitch;
+        self.controls.kind.pitch = pitch;
         self
     }
 
     /// The share of the feedback the cell starts at sending through the shifter.
     #[must_use]
     pub const fn send(mut self, send: Feedback) -> Self {
-        self.controls.shimmer_send = send;
+        self.controls.kind.send = send;
         self
     }
 }
@@ -109,14 +108,7 @@ impl Default for ShimmerConfig {
 impl<F: FftFloat + Lerp> From<ShimmerConfig> for ShimmerNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: ShimmerConfig) -> Self {
-        let layout = FdnLayout::shimmering(8, config.max_decay).expect("eight lines is a layout");
-        Self::with_kernel(
-            ShimmerKernel {
-                fdn: FdnKernel::new(layout),
-            },
-            ShimmerSet,
-            config.controls,
-        )
+        Self::with_kernel(FdnKernel::new(config.layout), ShimmerSet, config.controls)
     }
 }
 
@@ -127,84 +119,39 @@ impl<F: FftFloat + Lerp> From<ShimmerConfig> for ShimmerNode<F> {
 pub struct ShimmerSet;
 
 control_set! {
-    ShimmerSet(_s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
+    ShimmerSet(_s): FdnNodeControls<ShimmerLayout> = FdnNodeControls {
+        network: FdnControls::DEFAULT,
+        kind: ShimmerControls::DEFAULT,
+    };
     live: (all);
-    Decay[0] => Seconds = decay[0] { whole, longest = MaxDecay::CAP.get() },
-    Decay[1] => Seconds = decay[1] { whole, longest = MaxDecay::CAP.get() },
-    Decay[2] => Seconds = decay[2] { whole, longest = MaxDecay::CAP.get() },
-    RoomSize => Mix = size { whole },
-    Diffusion => Mix = diffusion { whole },
-    DelayTime => Seconds = pre_delay { whole },
-    Depth => Bipolar = modulation { whole },
-    Rate => Hz = rate { whole },
-    StereoSpread => StereoWidth = width { whole },
-    GainDb => Db = wet { whole, no_ring },
-    Pitch => Cents = shimmer_pitch { whole, no_ring },
-    Feedback => Feedback = shimmer_send { whole, longest = Feedback::MAX_STABLE.get() };
+    Decay[0] => Seconds = network.decay[0] { whole, longest = MaxDecay::CAP.get() },
+    Decay[1] => Seconds = network.decay[1] { whole, longest = MaxDecay::CAP.get() },
+    Decay[2] => Seconds = network.decay[2] { whole, longest = MaxDecay::CAP.get() },
+    RoomSize => Mix = network.size { whole },
+    Diffusion => Mix = network.diffusion { whole },
+    DelayTime => Seconds = network.pre_delay { whole },
+    Depth => Bipolar = network.modulation { whole },
+    Rate => Hz = network.rate { whole },
+    StereoSpread => StereoWidth = network.width { whole },
+    GainDb => Db = network.wet { whole, no_ring },
+    Pitch => Cents = kind.pitch { whole, no_ring },
+    Feedback => Feedback = kind.send { whole, longest = Feedback::MAX_STABLE.get() };
 
-    fn defaults(&self) -> FdnControls {
-        FdnControls::DEFAULT
-    }
-}
-
-/// The shimmer as a [`Kernel`]: an [`FdnKernel`] on a shimmering layout, with the shimmer's
-/// controls.
-#[derive(Clone, Debug)]
-pub struct ShimmerKernel<F: FftFloat> {
-    fdn: FdnKernel<F>,
-}
-
-impl<F: FftFloat + Lerp> Kernel for ShimmerKernel<F> {
-    type Float = F;
-    type Set = ShimmerSet;
-
-    const GRID: usize = <FdnKernel<F> as Kernel>::GRID;
-
-    fn shape(&self) -> Shape {
-        self.fdn.shape()
-    }
-
-    fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        self.fdn.prepare(rate, max_block);
-    }
-
-    fn reset(&mut self) {
-        self.fdn.reset();
-    }
-
-    fn retarget(&mut self, controls: &FdnControls) {
-        self.fdn.retarget(controls);
-    }
-
-    fn jump_to_target(&mut self) {}
-
-    fn render(
-        &mut self,
-        block: &mut InputOutput<'_, F>,
-        signals: ControlSignals<'_, F>,
-    ) -> Result<(), BlockMismatch> {
-        self.fdn.render(block, signals)
-    }
-
-    /// None: the shifter's delay is the reverb's onset (see [`ShimmerNode`]).
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    fn tail(&self) -> Tail {
-        self.fdn.tail()
-    }
-
-    fn tail_of(&mut self, controls: &FdnControls) -> Tail {
-        self.fdn.tail_of(controls)
+    fn defaults(&self) -> FdnNodeControls<ShimmerLayout> {
+        FdnNodeControls {
+            network: FdnControls::DEFAULT,
+            kind: ShimmerControls::DEFAULT,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kernel::Kernel;
     use crate::test_support::non_ringing;
-    use tutti_units::{UnitAddr, UnitParam};
+    use tutti_graph::ParamNode as _;
+    use tutti_units::{SampleRate, UnitAddr, UnitParam};
 
     /// The shift and the wet gain are the controls the tail does not read.
     #[test]
@@ -223,9 +170,7 @@ mod tests {
     #[test]
     fn the_tail_is_longest_at_the_stated_decays_and_send() {
         use tutti_buffers::MaxBlock;
-        let mut kernel = ShimmerKernel::<f64> {
-            fdn: FdnKernel::new(FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap()),
-        };
+        let mut kernel = FdnKernel::<f64, ShimmerLayout>::new(ShimmerLayout::default());
         kernel.prepare(
             SampleRate::SR_48K,
             MaxBlock::of(tutti_units::Samples::new(64)),
@@ -251,5 +196,95 @@ mod tests {
                 (0.0, 0.99),
             ],
         );
+    }
+
+    /// The controls the last `retarget` of the wrapped kernel took.
+    type Seen = std::sync::Arc<std::sync::Mutex<Option<FdnNodeControls<ShimmerLayout>>>>;
+
+    /// A shimmer kernel that records what its `retarget` is given.
+    #[derive(Clone, Debug)]
+    struct Spy {
+        fdn: FdnKernel<f32, ShimmerLayout>,
+        seen: Seen,
+    }
+
+    impl Kernel for Spy {
+        type Float = f32;
+        type Set = ShimmerSet;
+
+        const GRID: usize = <FdnKernel<f32, ShimmerLayout> as Kernel>::GRID;
+
+        fn shape(&self) -> tutti_graph::Shape {
+            self.fdn.shape()
+        }
+
+        fn prepare(&mut self, rate: SampleRate, max_block: tutti_buffers::MaxBlock) {
+            self.fdn.prepare(rate, max_block);
+        }
+
+        fn reset(&mut self) {
+            self.fdn.reset();
+        }
+
+        fn retarget(&mut self, controls: &FdnNodeControls<ShimmerLayout>) {
+            *self.seen.lock().unwrap() = Some(*controls);
+            self.fdn.retarget(controls);
+        }
+
+        fn jump_to_target(&mut self) {
+            self.fdn.jump_to_target();
+        }
+
+        fn render(
+            &mut self,
+            block: &mut tutti_buffers::InputOutput<'_, f32>,
+            signals: crate::ControlSignals<'_, f32>,
+        ) -> Result<(), tutti_dsp::BlockMismatch> {
+            self.fdn.render(block, signals)
+        }
+
+        fn tail(&self) -> tutti_units::Tail {
+            self.fdn.tail()
+        }
+    }
+
+    /// A control a row names through a field path (`kind.pitch`, `kind.send`,
+    /// `network.decay[1]`) is written where it names: the cells a port holds reach `retarget`
+    /// as the shift, the send and the low band's decay, and no other field moves.
+    #[test]
+    fn a_driven_nested_control_reaches_retarget_in_its_field() {
+        let seen = Seen::default();
+        let spy = Spy {
+            fdn: FdnKernel::new(ShimmerLayout::default()),
+            seen: seen.clone(),
+        };
+        let controls = FdnNodeControls::<ShimmerLayout> {
+            network: FdnControls::DEFAULT,
+            kind: ShimmerControls::DEFAULT,
+        };
+        let mut node = tutti_graph::contract::prepared(
+            KernelNode::with_kernel(spy, ShimmerSet, controls),
+            SampleRate::SR_48K,
+            64,
+        );
+        let cells = node.param_set();
+        assert!(cells.set(UnitParam::Pitch, 700.0));
+        assert!(cells.set(UnitParam::Feedback, 0.25));
+        assert!(cells.set(UnitAddr::new(UnitParam::Decay, 1), 3.0));
+        let input = vec![0.25f32; 64];
+        for _ in 0..2 {
+            tutti_graph::contract::drive(
+                &mut node,
+                SampleRate::SR_48K,
+                tutti_buffers::Planes::new(&[&input[..]]).unwrap(),
+                &[],
+            );
+        }
+        let got = seen.lock().unwrap().expect("the kernel was retargeted");
+        let mut want = controls;
+        want.kind.pitch = Cents::new(700.0);
+        want.kind.send = Feedback::new(0.25);
+        want.network.decay[1] = Seconds::new(3.0);
+        assert_eq!(got, want);
     }
 }

@@ -59,7 +59,7 @@ pub(crate) const GAIN_BOUND: f64 = 1.05;
 /// The shifter of one shimmering [`FdnBank`](crate::FdnBank): a mono fixed-rate vocoder and the
 /// chunk of the lines' summed feedback it is handed, with the shifted chunk it gave back.
 #[derive(Debug)]
-pub(crate) struct Shimmer<F: FftFloat> {
+pub struct Shimmer<F: FftFloat> {
     rate: SampleRate,
     pitch: Cents,
     vocoder: PhaseVocoder<F>,
