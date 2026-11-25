@@ -606,6 +606,7 @@ fn model::spec::GraphSpec::connect
 fn model::spec::GraphSpec::connect_edge_gain
 fn model::spec::GraphSpec::connect_events
 fn model::spec::GraphSpec::connect_param
+fn model::spec::GraphSpec::cycle
 fn model::spec::GraphSpec::disconnect
 fn model::spec::GraphSpec::disconnect_edge_gain
 fn model::spec::GraphSpec::disconnect_events

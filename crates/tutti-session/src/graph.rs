@@ -2460,8 +2460,8 @@ impl<F: Float> Graph<F> {
 }
 
 impl<F: Float> Graph<F> {
-    /// Applies `decl` to the editor through `m`, resolving the host's keys
-    /// through `keys`. A native target's knob is its node's own `Param`
+    /// Applies `decl` to the editor through `m`, resolving the keys of the
+    /// session's own declarations `own`. A native target's knob is its node's own `Param`
     /// cell, from the node's `ParamSet`; a plugin target's lane starts at the
     /// plugin's mirrored value (the session's record of it,
     /// `Plugin::param_values`). Marks the graph edited when the apply asks
@@ -2469,13 +2469,14 @@ impl<F: Float> Graph<F> {
     ///
     /// # Errors
     ///
-    /// The apply's refusal: the graph keeps what the last apply built.
+    /// The apply's refusal: nothing is written, the graph keeps what the last
+    /// apply built.
     pub(crate) fn modulate(
         &mut self,
-        m: &mut tutti_nodes::Modulation,
+        m: &mut crate::modulation::derived::Derived,
         decl: &tutti_modulation::Declarations<'_>,
-        keys: &dyn tutti_nodes::ModHost,
-    ) -> Result<tutti_nodes::Applied, tutti_nodes::ReconcileError> {
+        own: &crate::modulation::OwnMods,
+    ) -> Result<crate::modulation::derived::Applied, crate::modulation::lower::Refusal> {
         let values = &self.values;
         // A node the session hosts no plugin at has no mirror: its lane has
         // no knob to start from. A plugin target waits for its mirror.
@@ -2494,8 +2495,8 @@ impl<F: Float> Graph<F> {
         let mirror = |_: NodeKey, _: tutti_units::ParamId| Some(None);
         let applied = m.apply(
             decl,
+            own,
             &mut self.editor,
-            keys,
             &|at| values.cell(at.node, at.param),
             &mirror,
         )?;
@@ -2519,10 +2520,10 @@ impl<F: Float> Graph<F> {
 
 impl<F: Float> Graph<F> {
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
-    /// sent their nodes (`Modulation::send_resyncs`).
-    pub(crate) fn send_mod_resyncs(&mut self, m: &mut tutti_nodes::Modulation) {
+    /// sent their nodes (`Derived::send_resyncs`).
+    pub(crate) fn send_mod_resyncs(&mut self, m: &mut crate::modulation::derived::Derived) {
         // A resync refused for now stays owed (the next update retries); one
-        // refused for good is counted (`Modulation::resyncs_dropped`).
+        // refused for good is counted (`Derived::resyncs_dropped`).
         if let Err(e) = m.send_resyncs(&mut self.editor) {
             tracing::debug!("modulation: a resync waits: {e}");
         }
@@ -3760,6 +3761,13 @@ impl<F: Float> Graph<F> {
     /// commits on.
     pub fn has_uncommitted_edits(&self) -> bool {
         self.edited
+    }
+
+    /// What a pass that is a function of the editor compares: its revision,
+    /// which moves with anything an apply reads of the spec and the shapes, and
+    /// the play clock's epoch, which the audio thread moves.
+    pub(crate) fn modulation_clock(&self) -> (u64, u32) {
+        (self.editor.revision(), self.editor.play_reading().epoch)
     }
 
     /// The compensation of the plan sent last: what the session publishes,

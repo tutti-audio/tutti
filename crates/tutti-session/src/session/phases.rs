@@ -190,7 +190,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Phase::Commit => {
                 self.apply_output_policy(out);
+                self.mods.before_commit(&self.graph);
                 let sent = self.graph.has_uncommitted_edits() && self.commit_reporting(out);
+                self.mods.after_commit(&self.graph);
                 self.graph.report_commit(out);
                 self.graph.report_rewired(out);
                 if self.graph.take_resumed() && !sent {

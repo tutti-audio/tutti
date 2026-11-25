@@ -1,15 +1,17 @@
-//! Modulation in the session: the reconcile loop of `tutti-nodes`'
-//! [`Modulation`](tutti_nodes::Modulation), run by [`Phase::Modulation`] over
-//! the session's own declarations
-//! ([`Session::mods_mut`](crate::Session::mods_mut)).
+//! Modulation in the session: the declarations ([`Mods`]) lowered to lanes,
+//! signal-source nodes and event edges, and kept in the graph, by
+//! [`Phase::Modulation`] over
+//! [`Session::mods_mut`](crate::Session::mods_mut)'s declarations.
 //!
 //! Per update:
 //!
-//! 1. **Apply** (`Modulation`): the declarations onto the editor. A program
-//!    edit republishes its lanes and stages nothing; a new lane, a signal
-//!    node or a moved edge is staged for the commit. A target is bound to the
-//!    cells its node declared when it was staged, so a lane resolves in the
-//!    update its node is added in.
+//! 1. **Apply** (`derived`): when the declarations were rebuilt, the editor's
+//!    revision or the play epoch moved, or a target waits for its node, they
+//!    are lowered (`lower`) and the difference from what is built is written
+//!    to the editor. A program edit republishes its lane and stages nothing;
+//!    a new lane, a signal node or a moved edge is staged for the commit. A
+//!    target is bound to the cells its node declared when it was staged, so a
+//!    lane resolves in the update its node is added in.
 //! 2. **Commit** (`Commit`): one plan carries the lane and its target. A note
 //!    envelope's resync follows the plan it was owed for: a scheduled
 //!    command waits for the plan sent before it.
@@ -33,13 +35,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_graph::{EdgeId, EventOutputPort, NodeKey};
+use tutti_graph::{EdgeId, EventOutputPort, NodeKey, PassError};
 use tutti_modulation::{
-    Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
-    RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
+    Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, ProgramCompileError,
+    RouteDecl, RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
 use tutti_nodes::automation::{AutomationRecorder, LaneControls, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ReconcileError};
 use tutti_rt::Param;
 use tutti_units::{Bipolar, ParamAddr, ParamId, UnitAddr, UnitParam};
 
@@ -53,6 +54,11 @@ use crate::value::{
     Automation, AutomationCell, AutomationField, Bounds, Declared, DepthSlot, Edited, Field,
     MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
 };
+use derived::{Applied, Derived};
+use lower::{Feed, Refusal};
+
+pub(crate) mod derived;
+pub(crate) mod lower;
 
 /// How long a modulation target may stay unresolved before it is logged:
 /// 240 frames at 60 Hz. A target waits for its node to be added, and a
@@ -384,76 +390,6 @@ pub enum RouteError {
     },
 }
 
-/// Why the session refused modulation. What it names is in the reconciler's
-/// keys, which a [`Problem`] puts in terms of nodes and params.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ModRefusal {
-    /// The declarations do not apply. The graph keeps what the last apply
-    /// that succeeded built.
-    #[error("{0}")]
-    Apply(ReconcileError),
-}
-
-impl ModRefusal {
-    /// The route it names: a route whose follower is downstream of its own
-    /// target, or one the compile refused.
-    pub fn route(&self) -> Option<RouteKey> {
-        use tutti_modulation::ProgramCompileError as C;
-        match self {
-            Self::Apply(ReconcileError::Cycle { route })
-            | Self::Apply(ReconcileError::Compile(
-                C::DuplicateRoute(route)
-                | C::UnknownSource { route }
-                | C::UnknownRoute { route }
-                | C::UndeclaredTarget { route }
-                | C::DepthByChain { route }
-                | C::DepthBySignal { route }
-                | C::TwoDepthBy { route },
-            )) => Some(*route),
-            _ => None,
-        }
-    }
-
-    /// The target it names.
-    pub fn target(&self) -> Option<TargetKey> {
-        use tutti_modulation::ProgramCompileError as C;
-        match self {
-            Self::Apply(
-                ReconcileError::Unplaced { target: t, .. }
-                | ReconcileError::NoSuchParam(t)
-                | ReconcileError::NoSuchEventInput(t)
-                | ReconcileError::PortTaken(t)
-                | ReconcileError::SharedPort { first: t, .. }
-                | ReconcileError::Compile(
-                    C::DuplicateTarget(t)
-                    | C::NanRange(t)
-                    | C::CrossedArc(t)
-                    | C::LiveCurve(t)
-                    | C::LayerIdCollision(t)
-                    | C::TooManyLayers { target: t, .. }
-                    | C::TooManyInputs { target: t, .. },
-                ),
-            ) => Some(*t),
-            _ => None,
-        }
-    }
-
-    /// The source it names.
-    pub fn source(&self) -> Option<SourceKey> {
-        use tutti_modulation::ProgramCompileError as C;
-        match self {
-            Self::Apply(
-                ReconcileError::WrongFeed(s)
-                | ReconcileError::Compile(
-                    C::DuplicateSource(s) | C::BadSource(s) | C::AnchorDeclared(s),
-                ),
-            ) => Some(*s),
-            _ => None,
-        }
-    }
-}
-
 /// The targets of a set of declarations, as `tutti_modulation` takes them, from
 /// ranges and automations: a range and an automation on one target
 /// make one [`TargetDecl`]; an automation with no range is unclamped
@@ -646,17 +582,58 @@ impl std::fmt::Display for SourceName {
 /// One reason a modulation is not doing what was declared, as
 /// [`ModState::problems`] lists it and
 /// [`SessionEvent::Modulation`](crate::SessionEvent::Modulation) reports it.
-/// Its `Display` names the node and the param (or the source).
+/// Its `Display` names the node and the param (or the source). The first five
+/// are refusals: nothing new applied, and the graph keeps what the last apply
+/// that succeeded built.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Problem {
-    /// The declarations are refused and nothing new applied; the graph keeps
-    /// what the last apply that succeeded built.
-    Refused {
+    /// The declarations do not compile.
+    Uncompilable {
         /// Why.
-        cause: ModRefusal,
+        cause: ProgramCompileError,
         /// The target the cause names, or the one of the route it names.
         at: Option<TargetName>,
+    },
+    /// A route from a source whose input is downstream of the route's own
+    /// target: its edge would close a cycle.
+    Cycle {
+        /// The route.
+        route: ModRouteId,
+        /// The route's target.
+        at: Option<TargetName>,
+    },
+    /// A native target whose node does not declare the param.
+    NoSuchParam {
+        /// The target.
+        target: TargetName,
+    },
+    /// A plugin target whose node has no event input at the port its lane
+    /// feeds.
+    NoSuchEventInput {
+        /// The target.
+        target: TargetName,
+    },
+    /// A mix target on a node with no pass: the dry side of the mix would be
+    /// a guess.
+    Unplaced {
+        /// The target.
+        target: TargetName,
+        /// What the node would need to declare.
+        error: PassError,
+    },
+    /// Two targets resolved to one param port (or one edge's gain): one lane
+    /// each would be two event sources on it.
+    SharedPort {
+        /// The first, in key order.
+        first: TargetName,
+        /// The second.
+        second: TargetName,
+    },
+    /// A note envelope fed from an event output its node does not have.
+    WrongFeed {
+        /// The source.
+        source: SourceName,
     },
     /// A target the last apply could not resolve: no node, a node not
     /// committed yet, or a plugin's values not read yet.
@@ -673,14 +650,85 @@ pub enum Problem {
     },
 }
 
+impl Problem {
+    /// The route a refusal names: a route whose follower is downstream of its
+    /// own target, or one the compile refused.
+    #[must_use]
+    pub fn route(&self) -> Option<ModRouteId> {
+        match self {
+            Self::Cycle { route, .. } => Some(*route),
+            Self::Uncompilable { cause, .. } => compile_route(cause).map(route_id),
+            _ => None,
+        }
+    }
+}
+
+/// The route a compile refusal names.
+fn compile_route(cause: &ProgramCompileError) -> Option<RouteKey> {
+    use ProgramCompileError as C;
+    match cause {
+        C::DuplicateRoute(route)
+        | C::UnknownSource { route }
+        | C::UnknownRoute { route }
+        | C::UndeclaredTarget { route }
+        | C::DepthByChain { route }
+        | C::DepthBySignal { route }
+        | C::TwoDepthBy { route } => Some(*route),
+        _ => None,
+    }
+}
+
+/// The target a compile refusal names.
+fn compile_target(cause: &ProgramCompileError) -> Option<TargetKey> {
+    use ProgramCompileError as C;
+    match cause {
+        C::DuplicateTarget(t)
+        | C::NanRange(t)
+        | C::CrossedArc(t)
+        | C::LiveCurve(t)
+        | C::LayerIdCollision(t)
+        | C::TooManyLayers { target: t, .. }
+        | C::TooManyInputs { target: t, .. } => Some(*t),
+        _ => None,
+    }
+}
+
 impl std::fmt::Display for Problem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let refused = |f: &mut std::fmt::Formatter<'_>, at: &Option<TargetName>| match at {
+            Some(at) => write!(f, "modulation refused at {at}: "),
+            None => write!(f, "modulation refused: "),
+        };
         match self {
-            Self::Refused { cause, at: None } => write!(f, "modulation refused: {cause}"),
-            Self::Refused {
-                cause,
-                at: Some(at),
-            } => write!(f, "modulation refused at {at}: {cause}"),
+            Self::Uncompilable { cause, at } => {
+                refused(f, at)?;
+                write!(f, "it does not compile: {cause}")
+            }
+            Self::Cycle { at, .. } => {
+                refused(f, at)?;
+                write!(f, "its source's input is downstream of its target")
+            }
+            Self::NoSuchParam { target } => {
+                refused(f, &Some(*target))?;
+                write!(f, "its node does not declare it")
+            }
+            Self::NoSuchEventInput { target } => {
+                refused(f, &Some(*target))?;
+                write!(f, "no such event input")
+            }
+            Self::Unplaced { target, error } => {
+                refused(f, &Some(*target))?;
+                write!(f, "no mix without a pass: {error}")
+            }
+            Self::SharedPort { first, second } => {
+                write!(
+                    f,
+                    "modulation refused: {first} and {second} resolve to one port"
+                )
+            }
+            Self::WrongFeed { source } => {
+                write!(f, "modulation refused: {source} has a feed it cannot take")
+            }
             Self::Unresolved { target, waited } => write!(
                 f,
                 "{target} is unresolved after {waited:?}: no node is bound to it, or the \
@@ -709,18 +757,58 @@ impl OwnMods {
         }
     }
 
-    fn refused(&self, cause: ModRefusal) -> Problem {
-        let at = cause
-            .target()
-            .and_then(|t| self.target_name(t))
-            .or_else(|| {
-                let route = cause.route()?;
-                match self.routes.get(&route)?.decl.to {
-                    RouteTarget::Param(t) => self.target_name(t),
-                    RouteTarget::Depth(_) => None,
-                }
-            });
-        Problem::Refused { cause, at }
+    /// The target of `route`, as a [`Problem`] reports it.
+    fn route_target_name(&self, route: RouteKey) -> Option<TargetName> {
+        match self.routes.get(&route)?.decl.to {
+            RouteTarget::Param(t) => self.target_name(t),
+            RouteTarget::Depth(_) => None,
+        }
+    }
+
+    /// `refusal` as the [`Problem`] that names it in the session's terms.
+    fn problem(&self, refusal: Refusal) -> Problem {
+        let name = |t: TargetKey| {
+            self.target_name(t)
+                .expect("a refusal names a declared target")
+        };
+        match refusal {
+            Refusal::Uncompilable(cause) => {
+                let at = compile_target(&cause)
+                    .and_then(|t| self.target_name(t))
+                    .or_else(|| self.route_target_name(compile_route(&cause)?));
+                Problem::Uncompilable { cause, at }
+            }
+            Refusal::Cycle { route } => Problem::Cycle {
+                route: route_id(route),
+                at: self.route_target_name(route),
+            },
+            Refusal::NoSuchParam(t) => Problem::NoSuchParam { target: name(t) },
+            Refusal::NoSuchEventInput(t) => Problem::NoSuchEventInput { target: name(t) },
+            Refusal::Unplaced { target, error } => Problem::Unplaced {
+                target: name(target),
+                error,
+            },
+            Refusal::SharedPort { first, second } => Problem::SharedPort {
+                first: name(first),
+                second: name(second),
+            },
+            Refusal::WrongFeed(s) => Problem::WrongFeed {
+                source: self.source_name(s),
+            },
+        }
+    }
+
+    /// The edge a target key of an edge names.
+    fn edge_of(&self, key: u64) -> Option<EdgeId> {
+        crate::Graph::<f32>::edge_id(self.edge_refs.get(&key).copied()?)
+    }
+
+    /// What feeds source `source`.
+    fn feed_of(&self, source: SourceKey) -> Option<Feed> {
+        Some(match self.sources.get(&source)?.feed? {
+            OwnFeed::Audio(node) => Feed::Audio(node),
+            OwnFeed::Events(node, port) => Feed::Events(EventOutputPort::new(node, port)),
+        })
     }
 }
 
@@ -730,8 +818,8 @@ impl OwnMods {
 /// is where to ask why nothing modulates.
 #[derive(Debug)]
 pub struct ModState {
-    modulation: tutti_nodes::Modulation,
-    /// Why the declarations are refused now: a [`Problem::Refused`].
+    derived: Derived,
+    /// Why the declarations are refused now: the refusal's [`Problem`].
     refusal: Option<Problem>,
     /// What the last apply left unresolved: [`Problem::Unresolved`] and
     /// [`Problem::Unfed`].
@@ -740,6 +828,10 @@ pub struct ModState {
     /// was reported: the warning's clock.
     unresolved_since: BTreeMap<TargetKey, (Instant, bool)>,
     warn_after: Duration,
+    /// The last apply staged edits and the commit that sends them has not run.
+    awaiting_commit: bool,
+    /// The commit about to run is the last apply's own.
+    commit_is_ours: bool,
     /// An apply has run: from then on every modulation phase applies, so
     /// taking every declaration away tears down what they built.
     applied: bool,
@@ -748,18 +840,77 @@ pub struct ModState {
 impl ModState {
     pub(crate) fn new(warn_after: Duration) -> Self {
         Self {
-            modulation: tutti_nodes::Modulation::new(),
+            derived: Derived::default(),
             refusal: None,
             unresolved: Vec::new(),
             unresolved_since: BTreeMap::new(),
             warn_after,
+            awaiting_commit: false,
+            commit_is_ours: false,
             applied: false,
+        }
+    }
+
+    /// Applies `own`'s declarations when there is something to apply: they
+    /// were rebuilt (`declared`), a target or a source waits for a node, or the
+    /// editor is not where the last apply left it. What the apply stages is the
+    /// update's commit's.
+    fn run<F: Float>(
+        &mut self,
+        graph: &mut Graph<F>,
+        own: &OwnMods,
+        declared: bool,
+        now: Instant,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
+        let unresolved = !self.unresolved.is_empty();
+        if !self
+            .derived
+            .stale(declared, unresolved, graph.modulation_clock())
+        {
+            return;
+        }
+        let built = own.built.as_ref().expect("built");
+        let applied = graph.modulate(&mut self.derived, &built.borrow(), own);
+        let committed = applied.as_ref().is_ok_and(|a| a.commit);
+        self.applied(applied, own, now, out);
+        // What the editor is at after the apply's own writes: the next update
+        // finds nothing to apply unless something else moves it. The commit
+        // that follows adds its own (`before_commit`, `after_commit`).
+        self.derived.settle(graph.modulation_clock());
+        self.awaiting_commit = committed;
+        // Every lane this apply built or dropped is in `derived` now: the
+        // plugins' driven parameters follow it in the same update.
+        #[cfg(feature = "plugin")]
+        graph.refresh_driven(self);
+    }
+
+    /// Before `Phase::Commit` sends: whether the editor is as the last apply
+    /// left it, so that the revision the commit moves it to is the apply's own.
+    fn before_commit(&mut self, revision: u64) {
+        self.commit_is_ours =
+            self.awaiting_commit && self.derived.seen_revision() == Some(revision);
+        self.awaiting_commit = false;
+    }
+
+    /// After `Phase::Commit`: the commit of the apply's own edits moved the
+    /// revision, which the next update does not take for a change.
+    fn after_commit(&mut self, revision: u64) {
+        if std::mem::take(&mut self.commit_is_ours) {
+            self.derived.adopt_revision(revision);
+        }
+    }
+
+    /// Sends the owed resyncs, once nothing is left to commit.
+    fn resync<F: Float>(&mut self, graph: &mut Graph<F>) {
+        if self.derived.resyncs_owed() > 0 && !graph.has_uncommitted_edits() {
+            graph.send_mod_resyncs(&mut self.derived);
         }
     }
 
     /// The lanes' retired programs, freed (`Phase::Reclaim`).
     pub(crate) fn reclaim(&self) -> usize {
-        self.modulation.reclaim()
+        self.derived.reclaim()
     }
 
     /// Everything the last apply found wrong: the refusal if the declarations
@@ -772,13 +923,13 @@ impl ModState {
     /// `target`'s lane: its node and its controls (the knob, the range, the
     /// counters). `None` while it has none.
     pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
-        self.modulation.lane(target)
+        self.derived.lane(target)
     }
 
     /// The lanes with a knob that drive `node`'s plugin parameters, by id.
     #[cfg(feature = "plugin")]
     pub(crate) fn plugin_lanes(&self, node: NodeKey) -> crate::plugin_params::Knobs {
-        self.modulation
+        self.derived
             .plugin_lanes(node)
             .map(|(id, lane)| (id, lane.clone()))
             .collect()
@@ -786,23 +937,23 @@ impl ModState {
 
     /// Signal source `source`'s node (a follower's, a note envelope's).
     pub fn source_node(&self, source: ModSourceId) -> Option<NodeKey> {
-        self.modulation.source(SourceKey(source.get()))
+        self.derived.source(SourceKey(source.get()))
     }
 
     /// Note-envelope resyncs owed to the next commit.
     pub fn pending_resyncs(&self) -> usize {
-        self.modulation.resyncs_owed()
+        self.derived.resyncs_owed()
     }
 
     /// Resyncs refused for good (a full queue), counted.
     pub fn resyncs_dropped(&self) -> u64 {
-        self.modulation.resyncs_dropped()
+        self.derived.resyncs_dropped()
     }
 
     /// Records an apply's outcome.
     fn applied(
         &mut self,
-        applied: Result<tutti_nodes::Applied, ReconcileError>,
+        applied: Result<Applied, Refusal>,
         names: &OwnMods,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
@@ -843,12 +994,12 @@ impl ModState {
                 self.unresolved = unresolved;
             }
             Err(error) => {
-                self.refuse(names.refused(ModRefusal::Apply(error)), out);
+                self.refuse(names.problem(error), out);
             }
         }
     }
 
-    /// Holds `refusal` (a [`Problem::Refused`]), reporting it when it starts
+    /// Holds `refusal`, reporting it when it starts
     /// or changes.
     fn refuse(&mut self, refusal: Problem, out: &mut Vec<crate::SessionEvent>) {
         if self.refusal.as_ref() != Some(&refusal) {
@@ -933,7 +1084,7 @@ pub(crate) struct OwnMods {
     /// edge has no node bits to be its key): minted on first use, kept for
     /// the edge's life as a target.
     edge_keys: BTreeMap<ChannelEdge, u64>,
-    /// The inverse, for [`OwnKeys`].
+    /// The inverse of `edge_keys`.
     edge_refs: BTreeMap<u64, ChannelEdge>,
     /// The declarations as the reconciler takes them, built from the maps
     /// above on the first apply after they may have changed: cleared when
@@ -1117,15 +1268,17 @@ impl OwnMods {
     }
 
     /// Builds the declarations if they may have changed since the last
-    /// build ([`built`](Self::built) then holds them).
-    fn build(&mut self) {
+    /// build ([`built`](Self::built) then holds them); whether it did.
+    fn build(&mut self) -> bool {
         // A target landed since the last build: its field is read again.
         if self.edited.swap(false, Ordering::AcqRel) {
             self.built = None;
         }
-        if self.built.is_none() {
+        let rebuild = self.built.is_none();
+        if rebuild {
             self.built = Some(self.declarations());
         }
+        rebuild
     }
 
     fn declarations(&self) -> OwnDeclarations {
@@ -1214,29 +1367,6 @@ impl OwnMods {
     }
 }
 
-/// The session's own resolver: a target's key is its node's key bits, and a
-/// follower's feed is the node it was declared with.
-struct OwnKeys<'a>(&'a OwnMods);
-
-impl tutti_nodes::ModHost for OwnKeys<'_> {
-    fn node(&self, target: u64) -> Option<NodeKey> {
-        // A key no node has any more names one the editor does not hold:
-        // the reconciler leaves its target unresolved.
-        Some(NodeKey(target))
-    }
-
-    fn edge(&self, target: u64) -> Option<EdgeId> {
-        crate::Graph::<f32>::edge_id(self.0.edge_refs.get(&target).copied()?)
-    }
-
-    fn feed(&self, source: SourceKey) -> Option<Feed> {
-        Some(match self.0.sources.get(&source)?.feed? {
-            OwnFeed::Audio(node) => Feed::Audio(node),
-            OwnFeed::Events(node, port) => Feed::Events(EventOutputPort::new(node, port)),
-        })
-    }
-}
-
 /// The session's modulation: what it applied, and its own declarations.
 #[derive(Debug)]
 pub(crate) struct ModSession {
@@ -1252,28 +1382,6 @@ impl ModSession {
         }
     }
 
-    /// Applies the declarations. What the apply stages is the update's
-    /// commit's.
-    fn apply<F: Float>(
-        &mut self,
-        graph: &mut Graph<F>,
-        now: Instant,
-        out: &mut Vec<crate::SessionEvent>,
-    ) {
-        self.own.build();
-        let own = self.own.built.as_ref().expect("built");
-        let applied = graph.modulate(
-            &mut self.state.modulation,
-            &own.borrow(),
-            &OwnKeys(&self.own),
-        );
-        self.state.applied(applied, &self.own, now, out);
-        // Every lane this apply built or dropped is in `state` now: the
-        // plugins' driven parameters follow it in the same update.
-        #[cfg(feature = "plugin")]
-        graph.refresh_driven(&self.state);
-    }
-
     /// `Phase::Modulation`: closes the session's own takes that are finished,
     /// then applies, when something is declared or was ever applied (taking
     /// every declaration away tears down what they built).
@@ -1284,17 +1392,27 @@ impl ModSession {
         out: &mut Vec<crate::SessionEvent>,
     ) {
         self.own.close_takes();
-        if !self.own.is_empty() || self.state.applied {
-            self.apply(graph, now, out);
+        if self.own.is_empty() && !self.state.applied {
+            return;
         }
+        let declared = self.own.build();
+        self.state.run(graph, &self.own, declared, now, out);
+    }
+
+    /// Before `Phase::Commit` sends (see `ModState::before_commit`).
+    pub(crate) fn before_commit<F: Float>(&mut self, graph: &Graph<F>) {
+        self.state.before_commit(graph.modulation_clock().0);
+    }
+
+    /// After `Phase::Commit` (see `ModState::after_commit`).
+    pub(crate) fn after_commit<F: Float>(&mut self, graph: &Graph<F>) {
+        self.state.after_commit(graph.modulation_clock().0);
     }
 
     /// `Phase::Commit`'s resyncs: sent on an update that owes them and has
     /// nothing left to commit.
     pub(crate) fn resync<F: Float>(&mut self, graph: &mut Graph<F>) {
-        if self.state.modulation.resyncs_owed() > 0 && !graph.has_uncommitted_edits() {
-            graph.send_mod_resyncs(&mut self.state.modulation);
-        }
+        self.state.resync(graph);
     }
 }
 
@@ -1852,7 +1970,7 @@ impl Mods<'_> {
     }
 
     /// The key the reconciler holds `target` under: what
-    /// [`ModState::lane`] and [`ModRefusal::target`] speak. A param's is
+    /// [`ModState::lane`] speaks. A param's is
     /// [`ParamRef::key`], a mix's [`MixRef::key`]; an edge's is minted on first
     /// use and kept.
     pub fn key(&mut self, target: impl Into<ModTarget>) -> TargetKey {

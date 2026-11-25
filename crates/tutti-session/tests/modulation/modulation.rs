@@ -17,11 +17,10 @@ use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_modulation::ControlProgram;
 use tutti_modulation::{Follower, Lfo, Polarity, TargetKey};
-use tutti_nodes::ReconcileError;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_session::{
-    MainOutput, ModRefusal, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
-    RouteSpec, Session, SessionEvent, TargetName,
+    MainOutput, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError, RouteSpec,
+    Session, SessionEvent, TargetName,
 };
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, UnitParam};
@@ -234,13 +233,9 @@ fn a_refusal_names_the_node_and_the_param() {
         })
         .collect();
     assert_eq!(refused.len(), 1, "reported once: {refused:?}");
-    let Problem::Refused { cause, at } = &refused[0] else {
+    let Problem::Uncompilable { at, .. } = &refused[0] else {
         panic!("a refusal: {:?}", refused[0]);
     };
-    assert!(matches!(
-        cause,
-        ModRefusal::Apply(ReconcileError::Compile(_))
-    ));
     assert_eq!(*at, Some(TargetName::Own(cutoff.into())));
     let text = refused[0].to_string();
     assert!(
@@ -533,4 +528,111 @@ fn an_own_edit_after_a_steady_state_applies() {
     let _ = s.update();
     let range = s.mods().range_of(probe.cutoff()).expect("a declared range");
     assert_eq!(*range.end(), 2_000.0, "the range edit is stored");
+}
+
+/// **A steady update applies nothing.** A lane on a probe's cutoff, settled:
+/// every further update leaves the editor's revision, the plans sent and the
+/// lane's published program exactly as they were, and reports nothing. After an
+/// update whose apply committed (a route added), the next one is as steady as
+/// any: the commit's own move of the revision is not taken for a change.
+#[test]
+fn a_steady_update_leaves_the_editor_and_the_lane_as_they_were() {
+    let mut s = offline_48k();
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let other = s.graph().add(ProbeUnit::new(0.1));
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    let read = |s: &Session| {
+        (
+            s.graph_ref().testing().editor_revision(),
+            s.graph_ref().testing().commits_sent(),
+            s.mod_state()
+                .lane(cutoff.key())
+                .expect("a lane")
+                .1
+                .program(),
+        )
+    };
+    let before = read(&s);
+    for _ in 0..8 {
+        let events = s.update();
+        assert!(events.is_empty(), "nothing to report: {events:?}");
+        let now = read(&s);
+        assert_eq!(now.0, before.0, "the editor was not written");
+        assert_eq!(now.1, before.1, "no plan was sent");
+        assert!(
+            std::sync::Arc::ptr_eq(&now.2, &before.2),
+            "no program was published"
+        );
+    }
+
+    let mut m = s.mods_mut();
+    let follower = m.follower(Follower::default(), other);
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.25)))
+        .unwrap();
+    let _ = s.update();
+    let applied = read(&s);
+    assert_eq!(
+        applied.1,
+        before.1 + 1,
+        "the follower's node and edge were committed"
+    );
+    assert!(
+        !std::sync::Arc::ptr_eq(&applied.2, &before.2),
+        "and the lane's program published"
+    );
+    for _ in 0..8 {
+        let events = s.update();
+        assert!(events.is_empty(), "nothing to report: {events:?}");
+        let now = read(&s);
+        assert_eq!(now.0, applied.0, "the editor was not written");
+        assert_eq!(now.1, applied.1, "no plan was sent");
+        assert!(
+            std::sync::Arc::ptr_eq(&now.2, &applied.2),
+            "no program was published"
+        );
+    }
+}
+
+/// **A play start applies again.** An LFO's rate edit while stopped is dated
+/// from an anchor that is only valid within the play epoch: after the edit
+/// applies and settles, starting the transport moves the epoch, and the next
+/// update republishes the lane's program without the anchor.
+#[test]
+fn a_play_start_republishes_an_anchored_program() {
+    let mut s = offline_48k();
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    s.set(lfo.rate().to(Hz::new(3.0))).unwrap();
+    let _ = s.update();
+    let program = |s: &Session| {
+        s.mod_state()
+            .lane(cutoff.key())
+            .expect("a lane")
+            .1
+            .program()
+    };
+    let anchored = program(&s);
+    let _ = s.update();
+    assert!(std::sync::Arc::ptr_eq(&anchored, &program(&s)), "steady");
+
+    s.play().expect("room");
+    let mut buf = vec![0.0f32; 256];
+    s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+    let _ = s.update();
+    assert!(
+        !std::sync::Arc::ptr_eq(&anchored, &program(&s)),
+        "the play start dropped the anchor from the program"
+    );
 }

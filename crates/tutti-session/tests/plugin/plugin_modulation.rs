@@ -142,9 +142,11 @@ fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> Node
         tutti_fixtures::HANG_GUARD,
         || {
             assert!(
-                !s.mod_state()
-                    .problems()
-                    .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
+                !s.mod_state().problems().any(|p| !matches!(
+                    p,
+                    tutti_session::Problem::Unresolved { .. }
+                        | tutti_session::Problem::Unfed { .. }
+                )),
                 "the declarations apply"
             );
             lane = s.mod_state().lane(target.key()).map(|(key, _)| key);

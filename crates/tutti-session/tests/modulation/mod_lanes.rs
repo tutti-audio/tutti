@@ -25,11 +25,11 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{ModDelayConfig, PhaserConfig, ReconcileError};
+use tutti_nodes::{ModDelayConfig, PhaserConfig};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRefusal,
-    ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef,
-    ParamTarget, Problem, Replacement, RouteError, RouteSpec, Session, SessionEvent, TargetName,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRouteId,
+    ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget,
+    Problem, Replacement, RouteError, RouteSpec, Session, SessionEvent, TargetName,
 };
 use tutti_units::{
     Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -537,11 +537,11 @@ fn a_latch_take_becomes_the_automation_when_stopped() {
 // ---------------------------------------------------------- refusal --
 
 /// The refusals of one `update`, in order.
-fn refusals(events: Vec<SessionEvent>) -> Vec<ModRefusal> {
+fn refusals(events: Vec<SessionEvent>) -> Vec<Problem> {
     events
         .into_iter()
         .filter_map(|e| match e {
-            SessionEvent::Modulation(Problem::Refused { cause, .. }) => Some(cause),
+            SessionEvent::Modulation(p @ Problem::Cycle { .. }) => Some(p),
             _ => None,
         })
         .collect()
@@ -574,29 +574,20 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     let mut refused = refusals(s.update());
     refused.extend(refusals(s.update()));
     assert_eq!(refused.len(), 1, "one message for one refusal: {refused:?}");
-    assert!(refused[0].route().is_some(), "refused by route");
+    assert_eq!(refused[0].route(), Some(route), "refused by route");
     assert_eq!(
-        s.mod_state().problems().next().map(ToString::to_string),
-        Some(
-            Problem::Refused {
-                cause: refused[0].clone(),
-                at: Some(TargetName::Own(cutoff.into())),
-            }
-            .to_string()
-        ),
+        refused[0],
+        Problem::Cycle {
+            route,
+            at: Some(TargetName::Own(cutoff.into())),
+        },
         "the problem names the route's target"
     );
-    assert!(matches!(
-        refused[0],
-        ModRefusal::Apply(ReconcileError::Cycle { .. })
-    ));
-    assert!(matches!(
+    assert_eq!(
         s.mod_state().problems().next(),
-        Some(Problem::Refused {
-            cause: ModRefusal::Apply(ReconcileError::Cycle { .. }),
-            ..
-        })
-    ));
+        Some(&refused[0]),
+        "held while it lasts"
+    );
     assert_eq!(s.mod_state().source_node(follower), None, "nothing built");
     let (_, lane) = s
         .mod_state()

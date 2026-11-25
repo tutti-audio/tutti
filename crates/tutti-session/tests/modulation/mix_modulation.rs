@@ -14,11 +14,10 @@ use crate::common::render;
 use crate::offline::offline;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_nodes::ReconcileError;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    InputPort, Key, MainOutput, MixRef, ModRefusal, ModTarget, OutputPort, ParamRef, PassError,
-    Problem, RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
+    InputPort, Key, MainOutput, MixRef, ModTarget, OutputPort, ParamRef, PassError, Problem,
+    RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
 };
 use tutti_units::{Bipolar, Mix, UnitParam};
 
@@ -266,21 +265,17 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
-    let target = m.key(mix);
     for _ in 0..6 {
         let _ = s.update();
     }
     assert_eq!(
         s.mod_state().problems().next(),
-        Some(&Problem::Refused {
-            cause: ModRefusal::Apply(ReconcileError::Unplaced {
-                target,
-                error: PassError::Unplaced {
-                    inputs: 1,
-                    outputs: 2
-                },
-            }),
-            at: Some(TargetName::Own(mix.into())),
+        Some(&Problem::Unplaced {
+            target: TargetName::Own(mix.into()),
+            error: PassError::Unplaced {
+                inputs: 1,
+                outputs: 2
+            },
         })
     );
 }

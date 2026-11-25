@@ -50,6 +50,7 @@ fn automation::control_lane::LaneControls::blocks_unranged
 fn automation::control_lane::LaneControls::probe_reader
 fn automation::control_lane::LaneControls::program
 fn automation::control_lane::LaneControls::publish
+fn automation::control_lane::LaneControls::reclaim
 fn automation::control_lane::LaneControls::resync
 fn automation::control_lane::LaneControls::retired_programs
 fn automation::control_lane::LaneControls::value
