@@ -13,6 +13,13 @@ tests and the source gates, seconds and no build) is what CI fails fastest on: r
 before a push, or once per clone `git config core.hooksPath .githooks` to have
 `.githooks/pre-push` run it.
 
+`cargo xtask deslop` runs deslop-please's architectural lints (module cycles, tangles,
+field leaks, shallow modules, wide directories, long files) against `xtask/deslop.allow`,
+the findings on main. A PR adds no finding. Fix one by asking what its readers need and giving
+them that, never with a getter or a mechanical move. A PR that removes a finding, or changes
+a cycle's members, rewrites the list with `cargo xtask write-deslop-allow`, and its diff of
+the list adds no line it does not explain. It builds the workspace, so it is not in `gates`.
+
 ```bash
 cargo build
 cargo clippy --workspace --all-targets -- -D warnings
@@ -28,6 +35,7 @@ cargo xtask check-windows                  # Windows lints from Linux
 cargo xtask test-wasm                      # the web suite under node (needs `wasm-bindgen-cli` at Cargo.lock's version)
 cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
 cargo xtask deny                           # needs cargo-deny 0.20.2 (`cargo install --locked`)
+cargo xtask deslop                         # needs deslop-please 0.1.4; a finding not in xtask/deslop.allow fails
 ```
 
 The static gates (`cargo xtask check-*`) are Rust in `xtask/src/gates/`: a pure function
