@@ -181,7 +181,7 @@ impl Wire {
     /// taken. A message of several packets is one event per packet and goes
     /// through the conversion as it is, so the count still ends between
     /// messages. The rest may be converted again: what it did to the zones is
-    /// undone.
+    /// undone. Called once for each [`convert`](Self::convert).
     pub(crate) fn accepted(&mut self, taken: Taken, events: &[Outgoing]) -> Taken {
         let events_taken = self
             .converted
