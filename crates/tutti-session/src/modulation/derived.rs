@@ -284,7 +284,7 @@ impl Derived {
                 None => applied.unresolved_sources.push(source),
             }
         }
-        let lowered = lower(decl, &compiled, targets, sources)?;
+        let lowered = lower(decl, &compiled, targets, sources);
         let keys = self.keys(&lowered, editor);
         check_cycle(&self.lanes, &self.sources, &lowered, &keys, decl, editor)?;
         self.diff(&lowered, &compiled, keys, editor, &mut applied);
@@ -583,6 +583,7 @@ fn resolve_target<F: Float>(
             editor
                 .check_pass(node)
                 .map_err(|error| Refusal::Unplaced { target, error })?;
+            resolved.generation = editor.spec().generation(node);
             resolved.knob = Some(
                 editor
                     .mix_cell(node)

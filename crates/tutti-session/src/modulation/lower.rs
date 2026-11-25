@@ -129,7 +129,6 @@ pub(crate) enum Refusal {
     NoSuchParam(TargetKey),
     NoSuchEventInput(TargetKey),
     Unplaced { target: TargetKey, error: PassError },
-    SharedPort { first: TargetKey, second: TargetKey },
     WrongFeed(SourceKey),
 }
 
@@ -138,30 +137,21 @@ pub(crate) enum Refusal {
 /// entry: no lane, no node, and the edges that name one are dropped). A
 /// target's range is its declaration's in `decl`.
 ///
-/// # Errors
-///
-/// [`Refusal::SharedPort`] when two targets resolved to one port (or to one
-/// edge's gain): one lane each would be two event sources on it.
+/// Two targets never resolve to one param port or one edge's gain: a target's
+/// key is its node and its one address ([`ParamAddr`](tutti_units::ParamAddr)
+/// keeps index 0 in one form), the mix of a node is its own drive and no node
+/// declares the mix's address, and an edge's key is the edge.
 pub(crate) fn lower(
     decl: &Declarations<'_>,
     compiled: &Compiled,
     mut targets: BTreeMap<TargetKey, Resolved>,
     sources: BTreeMap<SourceKey, SourcePlan>,
-) -> Result<Lowered, Refusal> {
+) -> Lowered {
     let mut lanes = BTreeMap::new();
-    let mut claimed: BTreeMap<ClaimedPort, TargetKey> = BTreeMap::new();
     for (&target, program) in &compiled.programs {
         let Some(resolved) = targets.remove(&target) else {
             continue;
         };
-        if let Some(port) = ClaimedPort::of(&resolved.drive)
-            && let Some(first) = claimed.insert(port, target)
-        {
-            return Err(Refusal::SharedPort {
-                first,
-                second: target,
-            });
-        }
         let (min, max) = decl
             .targets
             .iter()
@@ -184,26 +174,9 @@ pub(crate) fn lower(
         .copied()
         .filter(|(s, t)| sources.contains_key(s) && lanes.contains_key(t))
         .collect();
-    Ok(Lowered {
+    Lowered {
         lanes,
         sources,
         edges,
-    })
-}
-
-/// What one lane takes over: an event source per param port or edge gain.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ClaimedPort {
-    Param(ParamIn),
-    Gain(EdgeId),
-}
-
-impl ClaimedPort {
-    fn of(drive: &Drive) -> Option<Self> {
-        match drive {
-            Drive::Gain(id) => Some(Self::Gain(*id)),
-            Drive::Plugin { .. } => None,
-            Drive::Port(_) | Drive::Mix(_) => drive.port().map(Self::Param),
-        }
     }
 }

@@ -29,7 +29,7 @@ use tutti_nodes::{ModDelayConfig, PhaserConfig};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRouteId,
     ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget,
-    Problem, Replacement, RouteError, RouteSpec, Session, SessionEvent, TargetName,
+    Problem, Replacement, RouteError, RouteSpec, Session, SessionEvent, SourceName, TargetName,
 };
 use tutti_units::{
     Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -382,14 +382,12 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
 
 // ------------------------------------------------------- envelope --
 
-/// **A held note envelope newly routed reads its level at once.** A note held
-/// from frame 10 into a note envelope (sustain 0.4) routed to probe 1
-/// (`0..=1`, knob 0.2, depth 0.5); probe 2 (knob 0.1) has a lane reading a
-/// macro of 0. A route from the envelope to probe 2 is added in the sustain:
-/// from the first grid piece after the frame it lands in, probe 2 reads
-/// `0.1 + 0.5 · 0.4`, not its knob until the next note.
-#[test]
-fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
+/// A note held from frame 10 into a note envelope (sustain 0.4) routed to
+/// probe 1 (`0..=1`, knob 0.2, depth 0.5); probe 2 (knob 0.1) has a lane
+/// reading a macro of 0. Rendered into the sustain: probe 1 reads 0.4, probe 2
+/// its knob. Returns the session, its audio side, the two cutoffs and the
+/// envelope.
+fn held_envelope_scene() -> (DetachedSession, AudioSide, ParamRef, ParamRef, ModSourceId) {
     let (mut s, mut side) = rig(2);
     let one = s.graph().add(ProbeUnit::new(0.2));
     let two = s.graph().add(ProbeUnit::new(0.1));
@@ -420,7 +418,16 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
         got[0][4_095]
     );
     assert!((got[1][4_095] - 0.1).abs() < 1e-7, "probe 2 at its knob");
+    (s, side, c1, c2, env)
+}
 
+/// **A held note envelope newly routed reads its level at once.** A route
+/// from the envelope to probe 2 is added in the sustain: from the first grid
+/// piece after the frame it lands in, probe 2 reads `0.1 + 0.5 · 0.4`, not its
+/// knob until the next note.
+#[test]
+fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
+    let (mut s, mut side, _, c2, env) = held_envelope_scene();
     s.mods_mut()
         .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
         .unwrap();
@@ -434,6 +441,155 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
     for (f, &v) in got[1].iter().enumerate().skip(STEP) {
         assert!((v - 0.3).abs() < 1e-6, "frame {f}: {v}");
     }
+}
+
+/// **A route dropped and added back reads the held envelope at once too.** The
+/// route from the envelope to probe 2 is added, dropped (the lane frees the
+/// envelope's input slot: probe 2 is at its knob again) and added back: the
+/// lane's program newly reads the envelope, so it is owed a resync, and probe 2
+/// reads `0.1 + 0.5 · 0.4` from the first grid piece, not its knob until the
+/// next note.
+#[test]
+fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
+    let (mut s, mut side, _, c2, env) = held_envelope_scene();
+    let route = s
+        .mods_mut()
+        .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    let got = render_n(&mut side, 2, 1_024, 128);
+    assert!(
+        (got[1][1_023] - 0.3).abs() < 1e-6,
+        "routed: {}",
+        got[1][1_023]
+    );
+
+    s.mods_mut().remove_route(route).unwrap();
+    settle(&mut s);
+    let got = render_n(&mut side, 2, 1_024, 128);
+    assert!(
+        (got[1][1_023] - 0.1).abs() < 1e-7,
+        "the lane dropped the input: {}",
+        got[1][1_023]
+    );
+
+    s.mods_mut()
+        .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(s.mod_state().pending_resyncs(), 0, "sent with the commit");
+    let got = render_n(&mut side, 2, 512, 128);
+    for (f, &v) in got[1].iter().enumerate().skip(STEP) {
+        assert!((v - 0.3).abs() < 1e-6, "frame {f}: {v}");
+    }
+}
+
+/// **A follower is owed no resync**: it sends on every grid point while it is
+/// not silent, so a route from one leaves nothing pending.
+#[test]
+fn a_follower_route_owes_no_resync() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let other = s.graph().add(ProbeUnit::new(0.1));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let follower = m.follower(Follower::default(), other);
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    let _ = s.update();
+    assert!(s.mod_state().source_node(follower).is_some(), "built");
+    assert_eq!(s.mod_state().pending_resyncs(), 0);
+}
+
+// -------------------------------------------------------- refusals --
+
+/// What one update reports of modulation.
+fn reported(events: Vec<SessionEvent>) -> Vec<Problem> {
+    events
+        .into_iter()
+        .filter_map(|e| match e {
+            SessionEvent::Modulation(p) => Some(p),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **A route onto a param the node does not declare is refused by target.**
+/// The probe declares a cutoff; a route onto its Q names a param no port has.
+/// One report, held while it lasts, nothing built.
+#[test]
+fn a_param_the_node_does_not_declare_is_refused_by_target() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let q = ParamRef::unit(probe, UnitParam::Q);
+    let mut m = s.mods_mut();
+    m.range_raw(q, 0.0, 1.0).unwrap();
+    let source = m.macro_(1.0);
+    m.route(RouteSpec::new(source, q, Bipolar::of(0.5)))
+        .unwrap();
+    let refusal = Problem::NoSuchParam {
+        target: TargetName::Own(q.into()),
+    };
+    assert_eq!(reported(s.update()), vec![refusal.clone()]);
+    assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&refusal]);
+    assert!(s.mod_state().lane(q.key()).is_none(), "nothing built");
+    assert_eq!(reported(s.update()), [], "reported once");
+}
+
+/// **A plugin parameter on a node with no event input is refused by target**:
+/// the lane would feed an input the node does not have.
+#[test]
+fn a_plugin_parameter_on_a_node_with_no_event_input_is_refused() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let param = ParamRef::plugin(probe, tutti_units::ParamId::new(7));
+    let mut m = s.mods_mut();
+    m.range_raw(param, 0.0, 1.0).unwrap();
+    let source = m.macro_(1.0);
+    m.route(RouteSpec::new(source, param, Bipolar::of(0.5)))
+        .unwrap();
+    assert_eq!(
+        reported(s.update()),
+        [Problem::NoSuchEventInput {
+            target: TargetName::Own(param.into()),
+        }]
+    );
+    assert!(s.mod_state().lane(param.key()).is_none(), "nothing built");
+}
+
+/// **A note envelope fed from an event output its node does not have is
+/// refused by source**, naming the node it was declared on.
+#[test]
+fn a_note_envelope_fed_from_a_missing_event_output_is_refused() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let adsr = Adsr {
+        attack: Seconds::new(0.002),
+        decay: Seconds::new(0.003),
+        sustain: Amplitude::new(0.4),
+        release: Seconds::new(0.2),
+    };
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1.0).unwrap();
+    let env = m.note_envelope(NoteEnvelope::new(adsr), probe, 3);
+    m.route(RouteSpec::new(env, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    assert_eq!(
+        reported(s.update()),
+        [Problem::WrongFeed {
+            source: SourceName::Own {
+                id: env,
+                fed_by: Some(probe.erase()),
+            },
+        }]
+    );
+    assert_eq!(s.mod_state().source_node(env), None, "nothing built");
 }
 
 // ----------------------------------------------------------- takes --
