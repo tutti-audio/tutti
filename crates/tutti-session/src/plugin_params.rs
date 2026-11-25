@@ -69,7 +69,7 @@
 use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{ParamEdit, ParameterInfo, UnknownParam};
+use tutti_plugin_types::{ParamEdit, ParamWriteError, ParameterInfo};
 use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -257,7 +257,7 @@ impl<'a> PluginParam<'a> {
     }
 
     /// The write policy every format answers
-    /// ([`ParamWriteError`](tutti_plugin_types::ParamWriteError)), on what the
+    /// ([`ParamWriteError`]), on what the
     /// mirror holds of this parameter's declaration.
     fn writable(&self) -> Result<(), PluginParamRefusal> {
         use tutti_plugin_types::{ParamAccess, ParamWriteError};
@@ -370,7 +370,7 @@ impl ParamGesture {
     ///
     /// [`PluginParamRefusal::UnknownParam`] once the plugin was removed or replaced, or no
     /// longer declares the parameter, including when the write finds it
-    /// undeclared.
+    /// undeclared; [`PluginParamRefusal::Lost`] when the plugin is lost.
     pub fn set(&self, value: Normalized) -> Result<(), PluginParamRefusal> {
         if !self.gate.holds(self.id) {
             return Err(PluginParamRefusal::UnknownParam(self.id));
@@ -378,7 +378,13 @@ impl ParamGesture {
         if !self.driven.write(self.id, value) {
             self.handle
                 .send_parameter(self.id, value)
-                .map_err(|UnknownParam(id)| PluginParamRefusal::UnknownParam(id))?;
+                .map_err(|refused| match refused {
+                    ParamWriteError::Undeclared(id) => PluginParamRefusal::UnknownParam(id),
+                    ParamWriteError::ReadOnly(id) => PluginParamRefusal::ReadOnly(id),
+                    ParamWriteError::Lost(id) | ParamWriteError::Unanswered(id) => {
+                        PluginParamRefusal::Lost(id)
+                    }
+                })?;
         }
         self.reporter.report(self.id, value);
         queue(

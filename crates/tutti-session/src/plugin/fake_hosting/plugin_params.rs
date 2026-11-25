@@ -76,6 +76,8 @@ pub(super) struct Fake {
     /// Writes the host made while `held`, which the plugin has not taken yet.
     held: std::sync::atomic::AtomicBool,
     pending: Mutex<Vec<(ParamId, Normalized)>>,
+    /// The plugin is lost: a write is refused at the call.
+    lost: std::sync::atomic::AtomicBool,
 }
 
 impl Fake {
@@ -137,9 +139,12 @@ impl AnyThread for Fake {
         &self,
         id: ParamId,
         value: Normalized,
-    ) -> Result<(), tutti_plugin_types::UnknownParam> {
+    ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+        if self.lost.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(tutti_plugin_types::ParamWriteError::Lost(id));
+        }
         if !self.infos.lock().iter().any(|i| i.id() == id) {
-            return Err(tutti_plugin_types::UnknownParam(id));
+            return Err(tutti_plugin_types::ParamWriteError::Undeclared(id));
         }
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
             self.pending.lock().push((id, value));
@@ -745,6 +750,20 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
         gesture.set(Normalized::of(0.5)),
         Err(PluginParamRefusal::UnknownParam(CUTOFF))
     );
+}
+
+/// **A gesture's write to a lost plugin is refused as `Lost`**, naming the
+/// parameter, and is not reported as a change.
+#[test]
+fn a_gesture_on_a_lost_plugin_is_refused_as_lost() {
+    let (mut s, node, fake, _refresh) = ready();
+    let gesture = cutoff(&s, node).edit().unwrap();
+    fake.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        gesture.set(Normalized::of(0.5)),
+        Err(PluginParamRefusal::Lost(CUTOFF))
+    );
+    let _ = update(&mut s);
 }
 
 /// Whether `result` failed as `NoSuchTarget`, naming the target.

@@ -3406,7 +3406,7 @@ mod tests {
             &self,
             _id: ParamId,
             _value: Normalized,
-        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             Ok(())
         }
         fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {

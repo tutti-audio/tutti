@@ -1697,6 +1697,45 @@ fn a_lost_plugin_refuses_the_write() {
     );
 }
 
+/// **A served write to a plugin whose parameter list did not come fails at the
+/// call**, and stores nothing: `Ok` would be a write that goes nowhere.
+#[test]
+fn a_served_write_with_no_parameter_list_fails_at_the_call() {
+    use tutti_plugin_types::AnyThread;
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let half = Normalized::of(0.5);
+    let (ipc, server) = mock();
+    server
+        .lists
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(3), half),
+        Err(tutti_plugin_types::ParamWriteError::Unanswered(
+            ParamId::new(3)
+        )),
+        "no list came: the write has no table"
+    );
+}
+
+/// **A served write to a crashed plugin fails at the call.**
+#[test]
+fn a_served_write_to_a_crashed_plugin_fails_at_the_call() {
+    use tutti_plugin_types::{AnyThread, PluginFailure};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, _server) = mock();
+    ipc.link
+        .bridge
+        .audio()
+        .mark_crashed(PluginFailure::StreamClosed);
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(3), Normalized::of(0.5)),
+        Err(tutti_plugin_types::ParamWriteError::Lost(ParamId::new(3))),
+        "a crashed plugin takes no write"
+    );
+}
+
 /// **A refill that began before a forgetting does not store its older answer**
 /// (the generation moved): the write that asked is answered from what it read,
 /// and the next one asks again.
@@ -1808,7 +1847,7 @@ fn many_served_writes_before_a_block_leave_each_parameter_at_its_latest() {
 /// once, not once per write.
 #[test]
 fn a_served_write_to_an_unknown_parameter_is_unknown_at_the_call_without_asking_again() {
-    use tutti_plugin_types::{AnyThread, UnknownParam};
+    use tutti_plugin_types::{AnyThread, ParamWriteError};
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
@@ -1822,7 +1861,7 @@ fn a_served_write_to_an_unknown_parameter_is_unknown_at_the_call_without_asking_
     for _ in 0..5 {
         assert_eq!(
             AnyThread::set_parameter_value(&ipc, ParamId::new(9), half),
-            Err(UnknownParam(ParamId::new(9)))
+            Err(ParamWriteError::Undeclared(ParamId::new(9)))
         );
     }
     assert_eq!(
