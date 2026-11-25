@@ -137,6 +137,10 @@ pub(crate) trait RenderEnd: Render + Send {
     /// plugin whose Processor is not here has nothing to deliver them to
     /// ([`Unseated`](ApplyOutcome::Unseated)).
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome;
+    /// Drops what the Processor kept for the next block
+    /// ([`Processor::drop_held`]) and says how many: the block that would have
+    /// delivered it was refused.
+    fn drop_held(&mut self) -> u64;
 }
 
 /// [`RenderEnd`] over the format's Processor, in a handoff.
@@ -209,6 +213,10 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
             },
             None => ApplyOutcome::Unseated,
         }
+    }
+
+    fn drop_held(&mut self) -> u64 {
+        self.rt.held().map_or(0, |processor| processor.drop_held())
     }
 }
 
@@ -325,6 +333,9 @@ struct LossReaders {
 
 /// The writing ends of the loss tallies, held by the render side.
 struct LossWriters {
+    /// The writes a refused block dropped with the values the Processor kept
+    /// ([`Losses::edits_refused`]).
+    edits_refused: TallyWriter<u64>,
     refused_blocks: TallyWriter<u64>,
     midi_dropped: TallyWriter<u64>,
     back_refused: TallyWriter<u64>,
@@ -659,6 +670,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
     let (refused_blocks, failed_blocks, midi_dropped, back_refused) =
         (tally(), tally(), tally(), tally());
     let writers = LossWriters {
+        edits_refused: ties.edits_refused.writer(),
         refused_blocks: refused_blocks.writer(),
         midi_dropped: midi_dropped.writer(),
         back_refused: back_refused.writer(),
@@ -935,9 +947,11 @@ impl RenderSide {
         // or the slab cannot hold, is refused the same way (`block_fits`).
         if self.config.rate_refused {
             self.losses.refused_blocks.add(1);
+            self.drop_held();
             return Ok(silent());
         }
         if !self.block_fits(Samples::new(block.num_samples)) {
+            self.drop_held();
             return Ok(silent());
         }
         // Neither the no-slab return just below nor a block the plugin's host
@@ -961,11 +975,17 @@ impl RenderSide {
             // Both were checked above: a refusal all the same, counted, so the
             // host's queue stays in step and it hears silence.
             losses.refused_blocks.add(1);
+            losses
+                .edits_refused
+                .add(seat.as_mut().map_or(0, |seat| seat.drop_held()));
             return Ok(silent());
         };
 
         let reaches = seat.has_processor();
         let mut output = pipeline.process(seat.as_mut(), slab, block);
+        if output.writes == BlockWrites::Dropped {
+            losses.edits_refused.add(seat.drop_held());
+        }
         if let Some(fault) = output.failure.take() {
             *failures += 1;
             // A plugin failing every block is logged on a doubling schedule,
@@ -994,6 +1014,14 @@ impl RenderSide {
             refused: output.refused,
             writes: output.writes,
         })
+    }
+
+    /// A block is answered without reaching the plugin: what its Processor kept
+    /// for the block is dropped and counted ([`Losses::edits_refused`]).
+    fn drop_held(&mut self) {
+        if let Some(seat) = self.seat.as_mut() {
+            self.losses.edits_refused.add(seat.drop_held());
+        }
     }
 
     /// The pipeline, for the tests that read what it holds.
@@ -1808,6 +1836,9 @@ mod tests {
                 Mode::Fail => ApplyOutcome::Refused,
                 _ => ApplyOutcome::Applied,
             }
+        }
+        fn drop_held(&mut self) -> u64 {
+            0
         }
     }
 

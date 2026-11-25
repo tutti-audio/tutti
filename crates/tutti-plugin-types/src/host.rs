@@ -598,6 +598,13 @@ pub trait Processor: Send {
         false
     }
 
+    /// Drops what [`holds_parameters`](Self::holds_parameters) reports, and says
+    /// how many parameters were dropped: a block the server answered without
+    /// reaching the plugin never delivers them, and they are not sent again.
+    fn drop_held(&mut self) -> u64 {
+        0
+    }
+
     /// The frames this Processor renders in, if it renders in fixed chunks
     /// that may begin in the middle of a graph block and span several
     /// [`process`](Self::process) calls (the served pipeline's: it ships a

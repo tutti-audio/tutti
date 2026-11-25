@@ -399,6 +399,12 @@ impl Processor for ClapProcessor {
         !self.held.is_empty()
     }
 
+    fn drop_held(&mut self) -> u64 {
+        let dropped = self.held.len() as u64;
+        self.held.clear();
+        dropped
+    }
+
     fn reset(&mut self) {
         ClapProcessor::reset(self);
     }

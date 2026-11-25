@@ -384,10 +384,12 @@ impl ClapProcessor {
     /// flagged `REQUIRES_PROCESS` is not flushed: the plugin is active, so its
     /// latest value waits for the next block
     /// ([`holds_parameters`](tutti_plugin_types::Processor::holds_parameters)).
-    /// `false` when the plugin has no flush entry or is busy.
+    /// `false` when the plugin has no flush entry or is busy, or a value had no
+    /// room to wait.
     pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
+        let mut kept = true;
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
@@ -400,7 +402,7 @@ impl ClapProcessor {
                 if bounds.is_some_and(|b| b.requires_process && !b.read_only)
                     && let Some(point) = queue.points.last()
                 {
-                    keep_latest(&mut self.held, queue.param_id, point.value);
+                    kept &= keep_latest(&mut self.held, queue.param_id, point.value);
                 }
             }
             if !changes.is_empty() {
@@ -422,7 +424,8 @@ impl ClapProcessor {
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
         }
-        flushed
+        // A value with no room to wait is a refusal: counted by the caller.
+        flushed && kept
     }
 
     /// Hands the block to the plugin through the FFI crate, which binds the
@@ -619,13 +622,18 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 }
 
 /// Keeps `value` as the latest of `id` in `held`, which has room for every
-/// declared parameter: a value past it is lost with the rest of an activation
-/// the table outgrew (a rescan that added parameters).
-fn keep_latest(held: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normalized) {
+/// parameter declared at activation: `false` when there is none, for a table a
+/// rescan grew past it. A fixed room, because this runs on the audio thread and
+/// must not allocate.
+fn keep_latest(held: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normalized) -> bool {
     if let Some((_, kept)) = held.iter_mut().find(|(kept, _)| *kept == id) {
         *kept = value;
+        true
     } else if held.len() < held.capacity() {
         held.push((id, value));
+        true
+    } else {
+        false
     }
 }
 

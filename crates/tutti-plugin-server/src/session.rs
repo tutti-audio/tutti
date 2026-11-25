@@ -901,6 +901,65 @@ mod tests {
         assert_eq!(outcome(&mut s, empty()), ApplyOutcome::Applied, "taken");
     }
 
+    /// **A block answered without reaching the plugin drops the values the
+    /// Processor kept, and counts them**: the block that would have delivered
+    /// them was refused, so nothing later does, and a flush made after it does
+    /// not read as deferred.
+    #[test]
+    #[cfg(feature = "clap")]
+    fn a_dropped_block_drops_and_counts_the_values_a_flush_kept() {
+        use tutti_plugin_ipc::ApplyOutcome;
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
+        let manual = tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+        let flush = |s: &mut Rig, request: AudioRequest| match s
+            .handle_audio(request)
+            .unwrap()
+            .expect("answered")
+        {
+            AudioReply::ParametersApplied { outcome, .. } => outcome,
+            other => panic!("not a flush's answer: {other:?}"),
+        };
+        assert_eq!(
+            flush(&mut s, apply_parameter(manual, 1.0)),
+            ApplyOutcome::Deferred
+        );
+        // A block longer than the plugin was activated for is refused.
+        let refused = s
+            .handle_audio(AudioRequest::ProcessAudio(
+                tutti_plugin_ipc::ProcessAudioData {
+                    seq: 1,
+                    num_samples: 1 << 20,
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
+                },
+            ))
+            .unwrap()
+            .expect("answered");
+        assert!(
+            matches!(
+                refused,
+                AudioReply::AudioProcessed {
+                    refused: true,
+                    writes: tutti_plugin_ipc::BlockWrites::Dropped,
+                    ..
+                }
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(s.render.losses().edits_refused, 1, "the value is counted");
+        let empty = AudioRequest::ApplyParameters {
+            id: tutti_plugin_ipc::ReqId::new(2),
+            param_changes: ParameterChanges::reserved(0, 1),
+        };
+        assert_eq!(
+            flush(&mut s, empty),
+            ApplyOutcome::Applied,
+            "nothing is kept"
+        );
+    }
+
     /// Every request a host can send before a plugin is loaded must be
     /// *answered* — with an absent value, an empty list, or a refusal, but
     /// never with silence. The host blocks on a reply frame for each of the
