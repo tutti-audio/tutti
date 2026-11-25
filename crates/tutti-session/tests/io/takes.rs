@@ -15,11 +15,13 @@ use tutti_buffers::{Interleaved, Sink, SinkFailed};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
+use tutti_nodes::MetronomeMode;
 use tutti_session::{
-    Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Record, Recorded,
-    Session, SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeFile, TakeTarget, Trim,
+    Armed, Input, InputConfig, InputOpener, LiveSession, MainOutput, OpenedInput, OutputPort,
+    Punch, Record, Recorded, Session, SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent,
+    TakeFile, TakeTarget, Trim,
 };
-use tutti_units::{At, Beat, Frame, SampleRate, Samples};
+use tutti_units::{Amplitude, At, Beat, Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -116,8 +118,8 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
 impl Rig {
     /// Pushes `frames` frames of the ramp (the sample at index `i` is `i`,
     /// the right channel its negative), renders them as one block and
-    /// updates, collecting the events.
-    fn step(&mut self, frames: usize) {
+    /// updates, collecting the events. Returns the block the session rendered.
+    fn step(&mut self, frames: usize) -> Vec<f32> {
         let ramp: Vec<f32> = (self.pushed..self.pushed + frames)
             .flat_map(|i| match self.signal {
                 Some(signal) => [signal(i); 2],
@@ -133,7 +135,7 @@ impl Rig {
         self.pushed += frames;
         self.events.extend(self.session.update());
         // A callback's timestamp reports the playback delay each block.
-        match self.delay {
+        let rendered = match self.delay {
             Some(delay) => self
                 .stream
                 .render_block_delayed(Samples::new(frames), delay),
@@ -141,6 +143,7 @@ impl Rig {
         }
         .expect("the stream is open");
         self.events.extend(self.session.update());
+        rendered
     }
 
     /// Steps blocks until `done` holds of the events so far, giving the pump
@@ -274,6 +277,149 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
         (end.get() - 1) as f32,
         "up to F(b), not past"
     );
+    drop(take);
+}
+
+/// **A recording-only click sounds from the take's punch-in to its punch-out
+/// and is silent outside.** At 120 bpm and 48 kHz a beat is 24 000 frames: a
+/// punch over beats 1 to 3 is the frames [24 000, 72 000). The click, routed to
+/// the main output, clicks on the beats the transport recording flag covers:
+/// beats 1 and 2, each heard from the frame after its beat (its first sample is
+/// `sin(0)`). Beat 0 is before the punch-in and beat 3 is the punch-out's own
+/// frame, so the output is exactly zero outside [24 001, 72 000).
+#[test]
+fn a_recording_only_click_sounds_from_punch_in_to_punch_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.session
+        .set((
+            rig.session.click().mode().to(MetronomeMode::RecordingOnly),
+            rig.session.click().volume().to(Amplitude::new(1.0)),
+        ))
+        .unwrap();
+    let click = rig
+        .session
+        .click_node()
+        .expect("the builder inserts the click");
+    for port in 0..2 {
+        rig.session
+            .graph()
+            .set_sources(MainOutput::channel(port), [OutputPort::new(click, port)])
+            .unwrap()
+            .unfaded();
+    }
+    rig.session.play().expect("queued");
+    let mut left: Vec<f32> = Vec::new();
+    let collect = |rig: &mut Rig, left: &mut Vec<f32>, frames: usize| {
+        left.extend(rig.step(frames).chunks(2).map(|frame| frame[0]));
+    };
+    collect(&mut rig, &mut left, 64);
+    collect(&mut rig, &mut left, 64);
+    let punch = Punch::new(Beat::new(1.0)).until(Beat::new(3.0)).unwrap();
+    let take = rig
+        .session
+        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "click.wav"))).punch(punch))
+        .expect("armed");
+    let window = take.window();
+    assert_eq!(window.start, Frame::new(24_000));
+    assert_eq!(window.end, Some(Frame::new(72_000)));
+    while left.len() < 5 * 24_000 {
+        collect(&mut rig, &mut left, BLOCK);
+    }
+
+    let sounding: Vec<usize> = (0..left.len()).filter(|&f| left[f] != 0.0).collect();
+    assert!(
+        sounding.iter().all(|f| (24_001..72_000).contains(f)),
+        "silent outside the punch: first {:?}, last {:?}",
+        sounding.first(),
+        sounding.last()
+    );
+    for beat in [1usize, 2] {
+        let from = beat * 24_000;
+        assert!(
+            left[from..from + 1_440].iter().any(|&x| x != 0.0),
+            "beat {beat} clicks inside the punch"
+        );
+    }
+    for beat in [0usize, 3, 4] {
+        let from = beat * 24_000;
+        assert!(
+            left[from..from + 1_440].iter().all(|&x| x == 0.0),
+            "beat {beat} is outside the punch"
+        );
+    }
+    drop(take);
+}
+
+/// **A plugin is told the host records from a take's punch-in to its
+/// punch-out, and not outside.** The shared plugin logs each transport the host
+/// sends it, before it reads anything from it, with the beat it holds at its
+/// frame: the host sends one with every block and another at a frame where the
+/// recording flag changes. A take punched over beats 0.25 to 0.5 (frames 6 000
+/// to 12 000 at 120 bpm and 48 kHz) is recording exactly at the transports whose
+/// beat is in [0.25, 0.5), and the log (its first 16 transports) holds the
+/// punch-in and the punch-out.
+#[cfg(feature = "clap")]
+#[test]
+fn a_plugin_is_told_the_host_records_during_a_take() {
+    use crate::loading::{LoadPlugin, Perform, Spec};
+    use tutti_shared_plugin::transcript::{Transcript, find_blob};
+
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    let plugin = tutti_plugin_types::PluginRef::file(tutti_fixtures::publish_with_extension(
+        &tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin"),
+        "clap",
+    ));
+    let notes = {
+        let core = tutti_shared_plugin::core::Core::new();
+        core.set_param(tutti_shared_plugin::core::MODE, 3.0 / 4.0);
+        core.save()
+    };
+    let node = rig
+        .session
+        .load_plugin_blocking(
+            tutti_fixtures::main_thread(),
+            Spec::new(plugin.clone()).restoring(tutti_session::PeerState::of_plugin(plugin, notes)),
+        )
+        .expect("the plugin loads");
+    let handle = rig
+        .session
+        .instrument(node)
+        .expect("the plugin declares itself an instrument");
+    rig.session
+        .graph()
+        .connect(handle.output(), MainOutput)
+        .unwrap();
+
+    rig.session.play().expect("queued");
+    rig.step(64);
+    rig.step(64);
+    let punch = Punch::new(Beat::new(0.25)).until(Beat::new(0.5)).unwrap();
+    let take = rig
+        .session
+        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "told.wav"))).punch(punch))
+        .expect("armed");
+    while rig.pushed < 24_000 {
+        rig.step(BLOCK);
+    }
+    let state = rig
+        .session
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
+        .expect("the plugin is hosted")
+        .perform(tutti_fixtures::main_thread())
+        .expect("the plugin saves its state");
+    let told = Transcript::parse(&find_blob(state.bytes())).transports;
+    assert!(
+        told.iter()
+            .all(|t| t.recording == (0.25..0.5).contains(&t.beat)),
+        "recording exactly while the beat is in [0.25, 0.5): {told:?}"
+    );
+    let mut flags: Vec<bool> = told.iter().map(|t| t.recording).collect();
+    flags.dedup();
+    assert_eq!(flags, [false, true, false], "{told:?}");
+    assert!(told.iter().all(|t| t.playing), "{told:?}");
     drop(take);
 }
 
