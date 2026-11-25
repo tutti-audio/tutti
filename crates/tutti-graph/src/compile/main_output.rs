@@ -74,6 +74,10 @@ pub struct MainOutputBank {
     pub base: usize,
     /// How the two main outputs trade places.
     pub fade: crate::Fade,
+    /// This bank carries on the crossfade the plan before it began: the
+    /// editor's one decision, which the compiler and the executor read
+    /// instead of deciding again. It can only be set by this crate.
+    pub(crate) continues: bool,
 }
 
 /// Why the graph's main output cannot be widened or placed.

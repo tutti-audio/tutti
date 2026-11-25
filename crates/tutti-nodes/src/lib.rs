@@ -516,11 +516,11 @@ pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, Freeverb
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnSet};
+pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnNodeControls, FdnSet};
 
 // The feedback delay network with a pitch shifter in its feedback, as a `KernelNode`.
 mod reverb_shimmer;
-pub use reverb_shimmer::{ShimmerConfig, ShimmerKernel, ShimmerNode, ShimmerSet};
+pub use reverb_shimmer::{ShimmerConfig, ShimmerNode, ShimmerSet};
 
 // Dattorro's plate as a `KernelNode`.
 mod reverb_plate;
@@ -534,8 +534,9 @@ pub use reverb_spring::{
 
 // The banks' controls that sit in a node's signature.
 pub use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls, SpringControls,
-    SpringLayout, SpringLength, SpringLengthError, SpringStages, SpringStagesError,
+    FdnControls, FdnKind, FdnLayout, FreeverbControls, FreezeControls, MaxDecay, PlateControls,
+    ShimmerControls, ShimmerLayout, SpringControls, SpringLayout, SpringLength, SpringLengthError,
+    SpringStages, SpringStagesError,
 };
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.

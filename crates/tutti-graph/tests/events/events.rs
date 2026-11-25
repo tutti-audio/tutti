@@ -277,10 +277,10 @@ fn run_scheduled(
         let (plan, delta) =
             compile(&valid, &shapes, &prep, ed.base().map(|p| &**p)).expect("compiles");
         let placed: BTreeSet<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, n)| n.key))
+            .chain(delta.replace().iter().map(|(_, n)| n.key))
             .collect();
         let mut units = units_of(ph, emitters, &ledger, &inbox, &stop);
         units.retain(|k, _| placed.contains(k));

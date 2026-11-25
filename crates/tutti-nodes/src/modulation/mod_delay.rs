@@ -192,8 +192,8 @@ control_set! {
 /// step of `h` radians misses it by at most `h^2 / 8` of the depth, 0.03 frames against the
 /// deepest chorus at 5 Hz and 48 kHz. The LFO steps before the frame it sounds in: frame `i`
 /// of a segment sounds the sweep `i + 1` steps on from the segment's start. **A re-prepare
-/// restarts the sweep**; a rate, a depth and a feedback that move are taken at the next grid
-/// point, the rate with the phase continuous across it.
+/// restarts the sweep**; a depth and a feedback that move start their ramps when they move,
+/// and the rate is taken at the next grid point, with the phase continuous across it.
 ///
 /// **A moving depth is a pitch bend**, so its speed is bounded, not its duration: a depth that
 /// moves ramps at most [`DELAY_SLEW`] frames of delay per frame, and is solved into a
@@ -293,32 +293,20 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
             delay.jump_to_target();
         }
         self.clock.reset();
-        self.clock.unland();
     }
 
-    /// At a grid point it retargets the depth and the feedback to `controls`, takes the rate and
-    /// solves the segment: a retarget inside a segment is a control that moved, and waits for
-    /// the next grid point (which retargets with the controls in force there). The first
-    /// retarget after a prepare or a reset lands the depth and the feedback at once.
+    /// Aims the depth and the feedback at `controls` and takes the rate's step, whenever a
+    /// control moves: the ramps start at once and the segment is solved at its corner, from
+    /// the depth the ramp has there. The first design after a prepare or a reset lands in
+    /// [`jump_to_target`](Kernel::jump_to_target) before the first segment is solved.
     fn retarget(&mut self, controls: &ModDelayControls) {
         let Some(bank) = &self.bank else { return };
-        let first = self.clock.lands();
-        if !first && !self.clock.at_corner() {
-            return;
-        }
         let design = bank.design(controls);
         self.clock.set_inc(design.inc);
         self.depth
             .retarget_by(F::from_unit(design.depth), Steps::Rate(DELAY_SLEW));
         self.feedback
             .retarget_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
-        if first {
-            self.depth.jump_to_target();
-            self.feedback.jump_to_target();
-        }
-        if self.clock.at_corner() {
-            self.solve();
-        }
     }
 
     /// The depth and the feedback on their targets. The delays stay on their segment: the
@@ -333,6 +321,9 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
+        if self.clock.due() {
+            self.solve();
+        }
         let frames = block.frames().get();
         let rendered = match &mut self.bank {
             Some(bank) => bank.process(&mut self.delays, &mut self.feedback, block),
@@ -368,7 +359,7 @@ mod tests {
     use tutti_dsp::{MaxDelay, Stagger};
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::{Latency, Samples, UnitParam};
+    use tutti_units::{Latency, Real, Samples, UnitParam};
     use tutti_units::{Phase, PhaseIncrement, RunningPhase};
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -842,7 +833,7 @@ mod tests {
             "the sweep was running"
         );
         k.prepare(RATE, MaxBlock::of(Samples::new(64)));
-        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
+        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false, true));
         let len = 6_000;
         let trace = trace(&mut k, &[(0, c)], len);
         let exact = exact_delays(len, depth, hz, &[]);
@@ -1028,25 +1019,63 @@ mod tests {
         }
     }
 
-    /// A feedback moved at a control signal corner **off the grid** waits for the next grid point, as the
-    /// rate and the depth do: a retarget at frame 5 of a segment (frame 613) renders the same
-    /// as at the grid point 624, and differently from the one at 640, with the loop already
-    /// ringing (the delay is 480 frames).
+    /// A feedback moved at a control signal corner **off the grid** aims its ramp at once,
+    /// and the delays wait for the next corner: after 613 frames (frame 5 of a segment) the
+    /// retarget puts the feedback's target on the new value, and every channel's segment ramp
+    /// is the one in flight.
     #[test]
-    fn a_feedback_moved_off_the_grid_starts_at_the_next_grid_point() {
+    fn a_feedback_moved_off_the_grid_aims_at_once_and_the_delays_wait_for_the_corner() {
         let x: Vec<Vec<f32>> = vec![
-            (0..1_500)
+            (0..613)
                 .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
                 .collect(),
         ];
         let (first, second) = (controls(2.0, 0.003, 0.1), controls(2.0, 0.003, 0.9));
-        let render = |at: usize| {
-            let mut k = prepared_kernel(ModDelayLayout::chorus(bus(1)), RATE);
-            drive_kernel(&mut k, &[(0, first), (at, second)], &x)
-        };
-        let on_grid = render(624);
-        assert_eq!(render(613), on_grid);
-        assert_ne!(render(640), on_grid);
+        let mut k = prepared_kernel(ModDelayLayout::chorus(bus(1)), RATE);
+        drive_kernel(&mut k, &[(0, first)], &x);
+        assert_eq!(k.clock.state().1, 613 % COEFF_INTERVAL);
+        let segment = (k.clock.state().0, k.delays[0].target());
+        k.retarget(&second);
+        assert_eq!(k.feedback.target(), f32::from_unit(Feedback::new(0.9)));
+        assert_eq!((k.clock.state().0, k.delays[0].target()), segment);
+    }
+
+    /// A fork taken **mid-segment** lands its first design: a clone of a node that has rendered
+    /// 613 frames (frame 5 of a segment), its depth cell moved from 2 ms to 10 ms, renders the
+    /// exact sweep at 10 ms from its first solved segment. A depth that slewed in from the old
+    /// 2 ms at [`DELAY_SLEW`] frames a frame (3,072 frames for the 384 between them) would be
+    /// short of it at frame 1,700.
+    #[test]
+    fn a_fork_taken_mid_segment_lands_its_first_design() {
+        let (hz, depth) = (20.0f64, 0.01f64);
+        let layout = trajectory_layout(1, Stagger::NONE);
+        let node = ModDelayNode::<f32>::from(
+            ModDelayConfig::new(layout).controls(controls(hz, 0.002, 0.0)),
+        );
+        let set = node.param_set();
+        let mut node = prepared(node, RATE, 64);
+        let ramp: Vec<f32> = (0..613).map(|n| n as f32).collect();
+        for chunk in ramp.chunks(64) {
+            drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &[]);
+        }
+        let mut fork = node.clone();
+        assert!(set.set(UnitParam::Depth, depth));
+        let len = 1_800;
+        let ramp: Vec<f32> = (0..len).map(|n| n as f32).collect();
+        let out: Vec<f32> = ramp
+            .chunks(64)
+            .flat_map(|c| drive(&mut fork, RATE, Planes::new(&[c]).unwrap(), &[]).remove(0))
+            .collect();
+        let exact = exact_delays(len, depth, hz, &[]);
+        let bound = chord_bound(depth, hz) + 0.05;
+        for n in (FROM..len).filter(|n| (n + 1).is_multiple_of(COEFF_INTERVAL)) {
+            let got = n as f64 - f64::from(out[n]);
+            assert!(
+                (got - exact[n]).abs() < bound,
+                "frame {n}: {got} vs {}",
+                exact[n]
+            );
+        }
     }
 
     /// A reset node equals a fresh one that has the cell: render, move a cell, reset, and the

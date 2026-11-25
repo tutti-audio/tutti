@@ -27,8 +27,8 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{
-    AdoptError, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, PlayDirection,
-    StreamHandle, StreamReader, StreamStart,
+    AdoptError, DiskStreamer, DiskStreamerConfig, DiskVoice, GUARD_FRAMES, Loop, Manual, OpenError,
+    PlaceError, PlayDirection, StreamHandle, StreamReader, StreamStart,
 };
 use tutti_units::{Beat, Bpm, SampleRate};
 
@@ -416,10 +416,25 @@ fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
 
 /// Every sample of `block` is within rounding of `want` (a fold sums in `f32`).
 fn assert_near(block: &[Vec<f32>], want: &[f32; 8], what: &str) {
+    assert_near_at(block, want, None, what);
+}
+
+/// [`assert_near`] for a block of a render of [`loop_1000_3000`] starting at
+/// `frame0`: a constant channel crossfaded with itself reads `want` times the
+/// sum of the equal-power gains in the fade, and `want` elsewhere.
+fn assert_near_at(
+    block: &[Vec<f32>],
+    want: &[f32; 8],
+    frame0: Option<(usize, fn(usize) -> f32)>,
+    what: &str,
+) {
     assert_eq!(block.len(), 8, "{what}: width");
     for (c, (lane, &w)) in block.iter().zip(want).enumerate() {
         assert!(
-            lane.iter().all(|s| (s - w).abs() < 1e-6),
+            lane.iter().enumerate().all(|(j, s)| {
+                let gain = frame0.map_or(1.0, |(f, level)| level(f + j));
+                (s - w * gain).abs() < 1e-6
+            }),
             "{what}: channel {c} is not {w}: {:?}",
             &lane[..4]
         );
@@ -499,8 +514,33 @@ fn lanes<N: tutti_graph::Node>(direct: &contract::Direct<N>) -> Vec<Vec<f32>> {
         .collect()
 }
 
+/// The crossfade length of [`loop_1000_3000`].
+const SEAM: usize = 64;
+
 fn loop_1000_3000() -> Option<Loop> {
-    Some(loop_frames(1_000, 3_000, 64))
+    Some(loop_frames(1_000, 3_000, SEAM))
+}
+
+/// The level a constant reads at straight frame `frame` of [`loop_1000_3000`]:
+/// 1 outside its fade; inside it, frame `k` of the fade is the constant
+/// against itself, `cos(πs/2) + sin(πs/2)` with `s = x³(6x² − 15x + 10)` at
+/// `x = (k + 1) / (SEAM + 1)`.
+fn seam_level(frame: usize) -> f32 {
+    let at = if frame < 3_000 {
+        frame
+    } else {
+        1_000 + (frame - 1_000) % 2_000
+    };
+    at.checked_sub(3_000 - SEAM).map_or(1.0, equal_power_sum)
+}
+
+/// `cos(πs/2) + sin(πs/2)` for frame `k` of a `SEAM`-frame fade, `s` the
+/// smootherstep `x³(6x² − 15x + 10)` of `x = (k + 1) / (SEAM + 1)`.
+fn equal_power_sum(k: usize) -> f32 {
+    let x = (k + 1) as f64 / (SEAM + 1) as f64;
+    let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+    let a = s * std::f64::consts::FRAC_PI_2;
+    (a.cos() + a.sin()) as f32
 }
 
 /// A fork reads a placed file through every one of its paths: forward, looped
@@ -532,36 +572,85 @@ fn a_fork_places_every_read_path() {
                     .iter()
                     .map(|l| l[chunk * BLOCK..(chunk + 1) * BLOCK].to_vec())
                     .collect();
-                assert_near(&block, &f.want, &format!("{what}, block {chunk}"));
+                let frame0 =
+                    (path == "looped").then_some((chunk * BLOCK, seam_level as fn(usize) -> f32));
+                assert_near_at(&block, &f.want, frame0, &format!("{what}, block {chunk}"));
             }
         }
     }
 }
 
+/// The second loop of the edit test: `[1500, 3000)`, the same crossfade.
+fn loop_1500_3000() -> Option<Loop> {
+    Some(loop_frames(1_500, 3_000, SEAM))
+}
+
+/// The block the edit test issues its second loop at (frame 3 200, past the
+/// first wrap at 3 000).
+const EDIT_BLOCK: usize = 50;
+
+/// The level a constant reads at straight frame `frame` in the edit test: the
+/// first loop's seam before frame 3 000, nothing until the second loop's seam
+/// at `3 000 + (3 000 - SEAM - 1 500)` (the second loop wraps to 1 500), then
+/// that seam, where `k` counts from its first frame.
+fn edit_seam_level(frame: usize) -> f32 {
+    let second_seam = 3_000 + (3_000 - SEAM - 1_500);
+    let k = if frame < 3_000 {
+        frame.checked_sub(3_000 - SEAM)
+    } else {
+        frame.checked_sub(second_seam).filter(|&k| k < SEAM)
+    };
+    k.map_or(1.0, equal_power_sum)
+}
+
 /// A live placed voice allocates nothing in a block that crosses a loop edit
 /// (the reader's crossfade from the old mapping, `cross_switch`) or a loop's
 /// wrap, and plays its figures throughout.
+///
+/// The first loop is published early, ahead of its crossfade, so the ring
+/// switches without a fade. The second is published at [`EDIT_BLOCK`], after
+/// the first wrap, where its mapping differs from the first at once: the
+/// streamer switches at `at <= (EDIT_BLOCK + 2) * BLOCK + GUARD_FRAMES` (the
+/// in-flight block ends at most one block past the one played), the reader
+/// crosses the switch (`cross_switch`) and blends the old mapping into the
+/// new over `seek_crossfade_frames`, so the blend ends by
+/// `(EDIT_BLOCK + 2) * BLOCK + GUARD_FRAMES + seek_crossfade_frames` = 4 096,
+/// before the second loop's seam at 4 436. Both mappings read the same
+/// constant until then, so the blend leaves every frame at its figure
+/// whatever its weight, and each seam frame is the new mapping alone: the
+/// figure times [`edit_seam_level`].
 #[test]
 fn a_loop_edit_and_wrap_on_a_placed_stream_allocate_nothing() {
+    let seek = DiskStreamerConfig::default()
+        .buffer_config
+        .seek_crossfade_frames
+        .get();
+    let blend_ends = (EDIT_BLOCK + 2) * BLOCK + GUARD_FRAMES.get() + seek;
+    let second_seam = 3_000 + (3_000 - SEAM - 1_500);
+    assert!(
+        blend_ends < second_seam,
+        "{blend_ends} reaches {second_seam}"
+    );
     for f in fixtures() {
         let (_dir, mut rig, reader) = stream_fixture(&f);
         let voice = voice_of(reader);
         let mut direct = contract::Direct::new(voice, SampleRate::of(SR), BLOCK);
         let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
         for b in 0..90 {
-            // Frame 2 816: the loop's end (3 000) is within the 256 frames a
-            // change near the playhead is crossfaded over, so the reader
-            // crosses a switch (`cross_switch`).
-            if b == 44 {
+            if b == 2 {
                 rig.stream.looping_cell().publish(loop_1000_3000());
+            }
+            if b == EDIT_BLOCK {
+                rig.stream.looping_cell().publish(loop_1500_3000());
             }
             direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
             clock.advance(BLOCK as i64, SampleRate::of(SR));
             let _ = rig.streamer.step();
             if b >= 4 {
-                assert_near(
+                assert_near_at(
                     &lanes(&direct),
                     &f.want,
+                    Some((b * BLOCK, edit_seam_level as fn(usize) -> f32)),
                     &format!("{} channels, block {b}", f.channels),
                 );
             }

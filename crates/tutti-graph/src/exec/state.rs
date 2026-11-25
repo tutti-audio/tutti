@@ -9,9 +9,8 @@ use tutti_units::{Samples, Tail};
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::Flags;
 use super::tail_elapsed;
-use crate::NodeKey;
 use crate::compile::ids::{Generation, PlanUnitId, Table};
-use crate::compile::plan::NodePorts;
+use crate::compile::plan::{NodePorts, UnitIdx};
 use crate::compile::tail::Owed;
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
@@ -147,21 +146,21 @@ impl<F: Float> Unit<F> {
 }
 
 /// What a commit takes away from the keys held at a node: the tables of the
-/// keys retired or replaced, and the keys replaced.
+/// units retired or replaced, by the store index they held.
 #[derive(Default)]
 pub(super) struct Gone {
-    pub(super) held: CappedVec<(NodeKey, Tables)>,
+    pub(super) held: CappedVec<(UnitIdx, Tables)>,
     /// Emptied tables to free on the control side.
     pub(super) spare: CappedVec<Tables>,
-    pub(super) replaced: CappedVec<NodeKey>,
     /// What each replaced node wrote for its successor (`Node::chase`):
-    /// the key, its span of `chase_events` and what its buffer refused.
-    pub(super) chased: CappedVec<(NodeKey, std::ops::Range<usize>, u32)>,
+    /// the successor's row, its span of `chase_events` and what its buffer
+    /// refused.
+    pub(super) chased: CappedVec<(PlanUnitId, std::ops::Range<usize>, u32)>,
     /// The executor's chase buffer, lent for the commit.
     pub(super) chase_events: CappedVec<Event>,
-    /// What a chase held for a successor behind a running fade refused, by
-    /// key, counted once the new plan says where the node is.
-    pub(super) held_refused: CappedVec<(NodeKey, u32)>,
+    /// What a chase held for a successor behind a running fade refused,
+    /// counted once the new plan is in place.
+    pub(super) held_refused: CappedVec<(PlanUnitId, u32)>,
 }
 
 impl Gone {
@@ -170,7 +169,6 @@ impl Gone {
         [
             self.held.refused(),
             self.spare.refused(),
-            self.replaced.refused(),
             self.chased.refused(),
             self.held_refused.refused(),
         ]

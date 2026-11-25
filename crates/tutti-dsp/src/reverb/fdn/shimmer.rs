@@ -59,7 +59,7 @@ pub(crate) const GAIN_BOUND: f64 = 1.05;
 /// The shifter of one shimmering [`FdnBank`](crate::FdnBank): a mono fixed-rate vocoder and the
 /// chunk of the lines' summed feedback it is handed, with the shifted chunk it gave back.
 #[derive(Debug)]
-pub(crate) struct Shimmer<F: FftFloat> {
+pub struct Shimmer<F: FftFloat> {
     rate: SampleRate,
     pitch: Cents,
     vocoder: PhaseVocoder<F>,
@@ -67,6 +67,10 @@ pub(crate) struct Shimmer<F: FftFloat> {
     send: Vec<F>,
     /// The shifted chunk of the one before, which the chunk being run reads.
     back: Vec<F>,
+    /// The chunk's share of the feedback shifted, `k`.
+    k: F,
+    /// The weight of a line in the feedback's mean component, `1 / sqrt(n)`.
+    root: F,
 }
 
 /// A fork is a shifter of its own: a new vocoder, silent, at the shift last set.
@@ -74,6 +78,7 @@ impl<F: FftFloat> Clone for Shimmer<F> {
     fn clone(&self) -> Self {
         let mut shimmer = Self::new(self.rate);
         shimmer.retarget(self.pitch);
+        shimmer.set_chunk(self.k, self.root);
         shimmer
     }
 }
@@ -91,6 +96,8 @@ impl<F: FftFloat> Shimmer<F> {
             vocoder: PhaseVocoder::fixed_rate(ChannelLayout::MONO, geometry),
             send: vec![F::ZERO; CHUNK],
             back: vec![F::ZERO; CHUNK],
+            k: F::ZERO,
+            root: F::ZERO,
         }
     }
 
@@ -98,6 +105,17 @@ impl<F: FftFloat> Shimmer<F> {
     /// chunk it is collected in and the vocoder's latency.
     pub(crate) fn delay(&self) -> Samples {
         Samples::new(CHUNK) + self.vocoder.latency()
+    }
+
+    /// Sets the chunk's share `k` and line weight `root`.
+    pub(crate) fn set_chunk(&mut self, k: F, root: F) {
+        self.k = k;
+        self.root = root;
+    }
+
+    /// The chunk's share `k` and line weight `root`.
+    pub(crate) fn chunk(&self) -> (F, F) {
+        (self.k, self.root)
     }
 
     /// Shifts by `pitch` from the next hop on.

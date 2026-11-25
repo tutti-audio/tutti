@@ -6,15 +6,16 @@ use tutti_buffers::Float;
 
 use super::{BusLanes, CommitError, Editor, panic_text};
 use crate::NodeKey;
-use crate::compile::plan::{Delta, Placement, Plan};
+use crate::compile::plan::{Delta, Plan};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::model::spec::GraphSpec;
 use crate::node::shape::Shape;
 use crate::node::{Node, Prepare};
 
-/// What a re-prepare's second half builds: the plan, the resume delta, every
-/// unit, and the weights of the bus lanes the plan has.
+/// What a re-prepare's second half builds: the plan, the delta `compile` found
+/// against the plan before the re-prepare, every unit, and the weights of the
+/// bus lanes the plan has.
 pub(super) type Resumed<F> = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node<F>>>, BusLanes);
 
 /// The spec and shapes a commit compiled the running plan from.
@@ -131,16 +132,6 @@ pub(super) struct Reprepare<F: Float> {
     spec: GraphSpec,
     shapes: Shapes,
     pending: BTreeMap<NodeKey, Box<dyn Node<F>>>,
-    /// Whether the sample rate changes: the resume carries no time-based
-    /// state.
-    rate_changed: bool,
-}
-
-/// What a re-prepare's resume commit tells the stager.
-#[derive(Clone, Copy)]
-pub(super) struct Resume {
-    /// Whether time-based state carries (the rate stands).
-    pub(super) carry: bool,
 }
 
 /// Write `shape`'s latency and tail into `key`'s spec and shape entry — the
@@ -240,10 +231,10 @@ impl<F: Float> Editor<F> {
         let (_, delta) = compile(&valid, &self.shapes, &prepare, self.base().map(|p| &**p))
             .map_err(CommitError::Compile)?;
         let needed = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, new)| new.key));
+            .chain(delta.replace().iter().map(|(_, new)| new.key));
         for node in needed {
             if !self.placements.has_unit(node) {
                 return Err(CommitError::MissingUnit { node });
@@ -275,7 +266,6 @@ impl<F: Float> Editor<F> {
             };
             return Err(CommitError::Poisoned { cause });
         }
-        let rate_changed = self.prepare.sample_rate() != prepare.sample_rate();
         let units = self.life.plan().map_or(0, |p| p.units().len());
         let suspend = Commit::suspend(self.link.next_seq(), prepare, units);
         self.link.send_suspend(suspend);
@@ -286,7 +276,6 @@ impl<F: Float> Editor<F> {
                 spec: self.spec.clone(),
                 shapes: self.shapes.clone(),
                 pending,
-                rate_changed,
             }),
         };
         Ok(())
@@ -311,15 +300,12 @@ impl<F: Float> Editor<F> {
         self.life = Lifecycle::idle(sent);
         self.life.clear_committed();
         let rep = *reprepare;
-        let resume = Resume {
-            carry: !rep.rate_changed,
-        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.finish_reprepare(returned, rep)
         }));
         match outcome {
             Ok(Ok((plan, delta, units, weights))) => {
-                self.send(plan, delta, units, &weights, Some(resume));
+                self.send(plan, delta, units, &weights, true);
             }
             Ok(Err(e)) => {
                 self.life = Lifecycle::Poisoned {
@@ -350,7 +336,6 @@ impl<F: Float> Editor<F> {
             mut spec,
             mut shapes,
             pending,
-            rate_changed: _,
         } = rep;
         let base = self.life.plan().cloned();
         let prepare = self.prepare;
@@ -387,24 +372,6 @@ impl<F: Float> Editor<F> {
             other => unreachable!("reprepare validated this spec: {other}"),
         })?;
         let (plan, delta) = compile(&valid, &shapes, &prepare, base.as_deref())?;
-        // The executor's store is empty: every unit goes back in, at the
-        // index the plan gives it.
-        let resume = Delta {
-            insert: plan
-                .units()
-                .iter()
-                .map(|u| Placement {
-                    key: u.key,
-                    generation: u.generation,
-                    idx: u.idx,
-                })
-                .collect(),
-            retire: Vec::new(),
-            replace: Vec::new(),
-            fades: Vec::new(),
-            cuts: Vec::new(),
-            store_len: delta.store_len,
-        };
-        Ok((plan, resume, units, weights))
+        Ok((plan, delta, units, weights))
     }
 }
