@@ -285,6 +285,8 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
+    /// What the host bound for the plugin's request to be processed again.
+    process_wake: std::sync::OnceLock<crate::ProcessWake>,
     /// The edits the fake reports the host did not hear
     /// (`FakePlugin::drop_reported_edits`).
     dropped_edits: AtomicU64,
@@ -389,6 +391,7 @@ impl FakePlugin {
             event_input: AtomicU32::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
+            process_wake: std::sync::OnceLock::new(),
             dropped_edits: AtomicU64::new(0),
             refused_off_thread: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
@@ -582,6 +585,14 @@ impl FakePlugin {
     /// ([`Control::dropped_reported_edits`]).
     pub fn drop_reported_edits(&self, n: u64) {
         self.0.dropped_edits.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// The plugin asks to be processed again, as CLAP's `request_process`: raises
+    /// the wake the host bound ([`Control::bind_wake`]), and nothing before one is.
+    pub fn request_process(&self) {
+        if let Some(wake) = self.0.process_wake.get() {
+            wake.raise();
+        }
     }
 
     /// The plugin reports `n` more callbacks the host refused for their thread
@@ -878,6 +889,11 @@ macro_rules! fake_control {
             /// As [`FakePlugin::refuse_off_thread_calls`] counted them.
             fn refused_off_thread_calls(&self) -> tutti_units::Calls {
                 tutti_units::Calls::new(self.shared.refused_off_thread.load(Ordering::Relaxed))
+            }
+
+            /// The first binding stands, as in a format host.
+            fn bind_wake(&self, wake: crate::ProcessWake) {
+                let _ = self.shared.process_wake.set(wake);
             }
         }
 

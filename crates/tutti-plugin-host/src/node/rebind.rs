@@ -12,9 +12,9 @@
 //! restart). The node it replaces hands the Processor back at its next block,
 //! and the instance's next pump lends it to the successor.
 //!
-//! A node dropped while it holds the Processor and a recall is raised returns
-//! the Processor to the control side, so the replaced node need not stay in the
-//! graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
+//! A node dropped while it holds the Processor returns it to the control side as
+//! it was, and the instance's pump stops it there, so the replaced node need not
+//! stay in the graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
 //! the plugin dies meanwhile ([`Lost`](Settlement::Lost)) no Processor moves,
 //! and neither node renders.
 
@@ -265,8 +265,8 @@ impl<L: Loaded> Pending<L> {
     /// Processor from the node it replaces: the plugin keeps running, and the
     /// Processor is lent to this node at the instance's next pump, with no
     /// deactivation. The node it replaces hands the Processor back at its
-    /// next block, or when it is dropped (the recall is raised, so a node
-    /// dropped while it holds the Processor returns it to the control side).
+    /// next block, or when it is dropped (a node dropped while it holds the
+    /// Processor returns it to the control side, which stops it).
     ///
     /// Call it once the node is in the graph. It does not fail, whatever the
     /// plugin's state is by then (it may have changed since
@@ -773,20 +773,6 @@ mod tests {
             );
         }
         assert_eq!(activations(&fake), 1);
-        assert_eq!(deactivations(&fake), 0);
-    }
-
-    /// **A rebind over unchanged ports moves the Processor with no restart:**
-    /// one activation, no deactivation, in the whole run.
-    #[test]
-    fn a_rebind_over_unchanged_ports_moves_the_processor() {
-        let (fake, rebinder, mut old, inner) = rig();
-        block(&mut old, 0);
-        let mut new = rebind(&rebinder).expect("a node");
-        assert_eq!(new.shape().audio_out().count(), 2);
-        let frame = settle(&rebinder, &mut old, &inner, BLOCK as u64);
-        assert!(block(&mut new, frame).audio[0].iter().any(|&s| s != 0.0));
-        assert_eq!(activations(&fake), 1, "the load's activation, no other");
         assert_eq!(deactivations(&fake), 0);
     }
 

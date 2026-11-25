@@ -515,8 +515,14 @@ pub trait Processor: Send {
     fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()>;
 
     /// Ends processing (CLAP `stop_processing`, VST3 `setProcessing(false)`) so
-    /// the realtime thread can hand the Processor back. Realtime. Processing
-    /// starts again lazily in the first [`process`](Self::process).
+    /// the Processor can be handed back. Processing starts again lazily in the
+    /// first [`process`](Self::process).
+    ///
+    /// Two callers: the realtime thread, between blocks, before it hands the
+    /// Processor back; and the main thread, for a Processor whose realtime end
+    /// was dropped holding it. A format whose stop needs the audio role takes
+    /// its own claim, as CLAP's audio side does; VST3 allows `setProcessing`
+    /// from the UI thread as well as the processing thread.
     fn stop(&mut self);
 
     /// Asks the plugin to forget its signal history, as a seek or a transport

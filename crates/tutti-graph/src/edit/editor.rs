@@ -63,8 +63,8 @@ use crate::compile::{CompileError, Shapes};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
-use crate::exec::command::{CommandId, ScheduleError, Scheduled, command_channel};
-use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
+use crate::exec::command::{CommandId, ScheduleError, Scheduled};
+use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager};
 use crate::model::bus_edge::{BusError, BusFold, BusOutputPort, Lowering, NodeBus};
 use crate::model::gain::EdgeFade;
 use crate::model::spec::{EventInputPort, GraphSpec, ValidGraph};
@@ -81,7 +81,7 @@ mod controls;
 mod corrupted;
 mod errors;
 mod lifecycle;
-mod link;
+pub(crate) mod link;
 mod nodes;
 mod outlets;
 mod placements;
@@ -91,7 +91,7 @@ mod wiring;
 use cells::LiveCells;
 pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
-use link::Link;
+use link::{EditLink, link};
 use outlets::Outlets;
 use placements::Placements;
 use tutti_buffers::MAX_CHANNELS;
@@ -216,7 +216,7 @@ impl Limits {
 /// ```
 pub struct Editor<F: Float = f32> {
     /// The rings to the paired executor.
-    link: Link<F>,
+    link: EditLink<F>,
     prepare: Prepare,
     spec: GraphSpec,
     shapes: Shapes,
@@ -445,15 +445,10 @@ impl<F: Float> Editor<F> {
     /// way to build an [`Executor`].
     #[must_use]
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
-        let (channels, ends) = channels();
-        let (commands, command_rx) = command_channel();
-        let stager = Stager::new(
-            cap,
-            channels.readings.pool.clone(),
-            channels.readings.rendered.clone(),
-        );
+        let (link, exec_link) = link();
+        let stager = link.stager(cap);
         let editor = Self {
-            link: Link::new(channels, commands),
+            link,
             prepare,
             spec: GraphSpec::default(),
             shapes: Shapes::new(),
@@ -472,7 +467,7 @@ impl<F: Float> Editor<F> {
             main_output: MainOutputState::new(),
             bells: None,
         };
-        (editor, Executor::new(prepare, cap, ends, command_rx))
+        (editor, Executor::new(prepare, cap, exec_link))
     }
 
     /// What units are prepared for now — after a

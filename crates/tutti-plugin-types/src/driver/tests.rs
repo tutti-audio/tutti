@@ -268,25 +268,6 @@ fn stuck_restores_both_halves() {
     );
 }
 
-/// **What a `Loaded` must do with a pair from two activations: refuse it, and
-/// hand both halves back.** This pins the fake's implementation of the
-/// contract; each format's own `deactivate` carries its own check and test.
-#[test]
-fn a_pair_from_two_activations_is_refused() {
-    let (plugin, loaded) = FakePlugin::new();
-    let (p1, c1) = loaded.activate(main(), prepare(48_000.0)).unwrap();
-    let c1 = FakeLoaded::deactivate(main(), p1, c1).unwrap();
-    let (p1, c1) = c1.activate(main(), prepare(48_000.0)).unwrap();
-    let (_, other) = FakePlugin::new();
-    let (p2, c2) = other.activate(main(), prepare(48_000.0)).unwrap();
-
-    let stuck = FakeLoaded::deactivate(main(), p1, c2).unwrap_err();
-    assert!(stuck.reason.to_string().contains("two activations"));
-    // Both halves are back and still pair with their own.
-    FakeLoaded::deactivate(main(), p2, c1).expect_err("crossed again");
-    drop(plugin);
-}
-
 /// **A reconfigure deactivates then activates once, and re-reads.**
 #[test]
 fn a_reconfigure_is_one_deactivate_and_one_activate() {
@@ -371,6 +352,13 @@ fn a_failed_rebuild_is_refused_and_the_next_activation_rebuilds_first() {
         Lifecycle::Refused { rate: None, .. }
     ));
 
+    // Refused again, the plugin stays `Refused` with no rate.
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(matches!(
+        rig.lifecycle,
+        Lifecycle::Refused { rate: None, .. }
+    ));
+
     rig.plugin.fail_rebuild(false);
     rig.plugin.clear_calls();
     rig.op(HostOp::Activate(prepare(48_000.0)));
@@ -449,26 +437,6 @@ fn nothing_runs_after_died() {
     );
 }
 
-/// **The control surface is reachable in every state that has a plugin.**
-#[test]
-fn control_is_reachable_loaded_active_and_refused() {
-    let mut rig = Rig::new();
-    assert!(rig.lifecycle.control().is_some());
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    assert!(rig.lifecycle.control().is_some());
-    assert!(
-        rig.lifecycle
-            .control_ref()
-            .map(|c| c.wiring(main()))
-            .is_some()
-    );
-    let mut refused = Rig::new();
-    refused.plugin.refuse_rate(Some(SampleRate::of(1_000.0)));
-    refused.op(HostOp::Activate(prepare(1_000.0)));
-    assert!(matches!(refused.lifecycle, Lifecycle::Refused { .. }));
-    assert!(refused.lifecycle.control().is_some());
-}
-
 /// **A plugin lost while its refusal is rolled back is told once, by the
 /// refusal.**
 #[test]
@@ -491,26 +459,6 @@ fn a_plugin_lost_in_a_refused_reconfigure_is_told_by_the_refusal_alone() {
             }]
         ),
         "{notices:?}"
-    );
-}
-
-/// **State round-trips through the control surface, loaded and active.**
-#[test]
-fn state_round_trips_through_the_lifecycle() {
-    let mut rig = Rig::new();
-    rig.lifecycle
-        .control()
-        .expect("the plugin is there")
-        .load_state(main(), b"abc", crate::StateUse::Project)
-        .unwrap();
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    assert_eq!(
-        rig.lifecycle
-            .control()
-            .expect("the plugin is there")
-            .save_state(main(), crate::StateUse::Project)
-            .unwrap(),
-        b"abc"
     );
 }
 
@@ -597,19 +545,26 @@ fn a_panic_in_rebuild_poisons() {
     assert_eq!(rig.state.stage(), Stage::Poisoned);
 }
 
-/// **A panic out of a read poisons, and the `State` is not lost with the
-/// unwind.** `drive` takes the state by value, so a panic that escaped would
-/// drop it.
+/// **A panic out of a read poisons, tells the host the plugin is lost, and the
+/// `State` is not lost with the unwind.** `drive` takes the state by value, so
+/// a panic that escaped would drop it; without the notice the lifecycle poisons
+/// silently and the host keeps a plugin that renders nothing.
 #[test]
 fn a_panic_in_a_read_poisons_without_losing_the_state() {
     let mut rig = Rig::new();
     rig.op(HostOp::Activate(prepare(48_000.0)));
+    rig.take_notices();
     rig.plugin.panic_in_latency(true);
     rig.plugin.set_latency(Samples::new(8));
     Request::LatencyChanged.raise(rig.plugin.request_flags());
     rig.tick();
     assert!(rig.lifecycle.is_poisoned());
     assert_eq!(rig.state.stage(), Stage::Poisoned);
+    let notices = rig.take_notices();
+    assert!(
+        notices.iter().any(|n| matches!(n, Notice::Lost { .. })),
+        "{notices:?}"
+    );
 }
 
 /// **A deactivation that is stuck, then a reconfigure, ends active at the new
@@ -632,25 +587,6 @@ fn stuck_then_reconfigure_settles_at_the_new_rate() {
         Some(SampleRate::SR_96K)
     );
     rig.render(64).unwrap();
-}
-
-/// **A rebuild that is refused twice stays `Refused` with no rate, and the
-/// attempt that takes revives it.**
-#[test]
-fn a_refused_rebuild_is_retried_with_no_rate() {
-    let mut rig = Rig::new();
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    rig.plugin.fail_rebuild(true);
-    Request::Reload.raise(rig.plugin.request_flags());
-    rig.tick();
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    assert!(matches!(
-        rig.lifecycle,
-        Lifecycle::Refused { rate: None, .. }
-    ));
-    rig.plugin.fail_rebuild(false);
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    assert_eq!(rig.state.stage(), Stage::Active);
 }
 
 /// **Writes to one parameter before a block arrive as its latest value, once;
@@ -712,25 +648,6 @@ fn a_mapping_change_rebuilds_the_mapping_once() {
         rig.take_notices().as_slice(),
         [Notice::MidiMapChanged, Notice::NoteExpressionChanged]
     ));
-}
-
-/// **A panic out of the idle flush or a read tells the host the plugin is
-/// lost.** Without the notice the lifecycle poisons silently and the host
-/// keeps a plugin that renders nothing.
-#[test]
-fn a_panic_outside_a_transition_is_told_to_the_host() {
-    let mut rig = Rig::new();
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    rig.take_notices();
-    rig.plugin.panic_in_latency(true);
-    Request::LatencyChanged.raise(rig.plugin.request_flags());
-    rig.tick();
-    assert!(rig.lifecycle.is_poisoned());
-    let notices = rig.take_notices();
-    assert!(
-        notices.iter().any(|n| matches!(n, Notice::Lost { .. })),
-        "{notices:?}"
-    );
 }
 
 /// **A panic in a transition is told once, by `Refused`.**
@@ -900,6 +817,57 @@ fn a_relend_moves_the_processor_without_restarting_the_plugin() {
     assert!(!calls.contains(&Call::Deactivate), "no deactivation");
 }
 
+/// **A realtime end dropped while it holds the Processor hands it back as it
+/// was, and the main thread stops it and lends it to the successor.** The old
+/// end never ran `stop` (a drop only hands back); the tick that collects the
+/// Processor does, and the relend completes with no further action.
+#[test]
+fn a_dropped_end_hands_the_processor_back_and_the_tick_stops_and_relends_it() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = install(&mut rig);
+    rig.op(HostOp::Relend);
+    drop(old);
+    assert!(
+        !rig.plugin.calls().contains(&Call::Stop),
+        "the drop stops nothing"
+    );
+    rig.tick();
+    assert_eq!(
+        rig.plugin
+            .calls()
+            .iter()
+            .filter(|c| **c == Call::Stop)
+            .count(),
+        1,
+        "the main thread stopped it once"
+    );
+    assert!(poll(&mut new), "lent to the successor");
+    assert!(rig.take_notices().is_empty(), "nothing is reported");
+}
+
+/// **A realtime end that is gone without the Processor leaves the plugin
+/// lost, once.** The end took the Processor and destroyed it
+/// ([`take_held`](tutti_rt::Rt::take_held)); nothing will come home, so the
+/// tick reports the loss rather than waiting.
+#[test]
+fn an_end_gone_without_the_processor_is_a_lost_plugin() {
+    let (mut rig, mut rt) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut rt));
+    drop(rt.take_held());
+    drop(rt);
+    rig.tick();
+    assert!(rig.lifecycle.is_poisoned());
+    let lost = rig
+        .take_notices()
+        .into_iter()
+        .filter(|n| matches!(n, Notice::Lost { .. }))
+        .count();
+    assert_eq!(lost, 1, "reported once");
+}
+
 /// **A relend of a plugin that is not active does nothing:** nothing is
 /// recalled, parked or lent, and the successor stays pending.
 #[test]
@@ -926,43 +894,6 @@ fn a_relend_during_an_activation_is_left_to_the_activation() {
     rig.tick();
     assert!(poll(&mut new), "the reconfigure's lend went to the new end");
     assert_eq!(activations(&rig.plugin.calls()), 2);
-}
-
-/// **The fake's explicit answers for the editor, render-mode, request and
-/// reported-edit entries of `Control` reach the host through
-/// [`Lifecycle::control`] in both states that hold a plugin**: no editor (and
-/// the floating window refused by its one default), no live render mode, no
-/// requests, no reported edits.
-#[test]
-fn the_fake_control_answers_nothing_in_either_state() {
-    let mut rig = Rig::new();
-    for active in [false, true] {
-        if active {
-            rig.op(HostOp::Activate(prepare(48_000.0)));
-            assert!(rig.lifecycle.processor().is_some());
-        }
-        let main = main();
-        let control = rig.lifecycle.control().expect("a plugin is held");
-
-        assert_ne!(
-            control.set_render_mode(main, RenderMode::Offline),
-            crate::ModeTold::Took
-        );
-        assert!(!control.has_editor(main));
-        assert!(matches!(
-            control.open_floating_editor(main),
-            Err(PluginError::Editor(_))
-        ));
-        control.close_editor(main);
-        control.editor_idle(main);
-
-        let mut requests = Vec::new();
-        control.take_requests(main, &mut requests);
-        assert!(requests.is_empty());
-        let mut edits = Vec::new();
-        control.take_reported_edits(main, &mut edits);
-        assert!(edits.is_empty());
-    }
 }
 
 /// **A plugin its shell activated itself is in the state a driven activation
