@@ -45,8 +45,10 @@ keyed_slot_target!(
 /// What names a route's depth: the route from a source into a target, or the
 /// one from a source into another route's depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum DepthKey {
+pub enum DepthKey {
+    /// The route from a source into a target.
     Into(ModSourceId, ModTarget),
+    /// The route from a source into the depth of a route.
     Scaling(ModSourceId, ModRouteId),
 }
 

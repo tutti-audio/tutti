@@ -375,8 +375,8 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, LoopTarget,
-    MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, ParamTarget,
+    DepthKey, DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead,
+    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, ParamTarget,
     PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
