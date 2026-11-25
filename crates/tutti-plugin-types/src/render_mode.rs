@@ -34,3 +34,20 @@ pub enum RenderModeSupport {
     /// never reactivates the plugin.
     Unsupported,
 }
+
+/// What a plugin did with the render mode it was told
+/// ([`Control::set_render_mode`](crate::Control::set_render_mode)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModeTold {
+    /// The plugin runs in the mode.
+    Took,
+    /// The plugin has a render mode and did not take this one: it runs in the
+    /// mode it had.
+    Refused,
+    /// The plugin has no render mode to tell. Asked one anyway, the lifecycle
+    /// reads it as a refusal: the plugin did not take it.
+    Unsupported,
+    /// The plugin was told and answers later, through
+    /// [`Control::take_answers`](crate::Control::take_answers).
+    Asked,
+}

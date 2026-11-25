@@ -329,9 +329,9 @@ pub use harmony::{
     NoteExpressionTextChanges, NoteExpressionTextValue, ScaleChanges, ScaleValue,
 };
 pub use lifecycle::{
-    EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice, Prepare,
-    Recovery, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId,
-    standing, step,
+    Behind, EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice,
+    Prepare, Recovery, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK,
+    TimerId, Told, standing, step,
 };
 pub use load_stage::LoadStage;
 pub use main_thread::{MainThreadMarker, MainWork, MainWorkHandle};
@@ -383,7 +383,7 @@ pub use probe_failure::{MeasureFailure, ProbeError, ProbeRefusal, Unmeasured};
 #[cfg(feature = "probe-wire")]
 pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};
-pub use render_mode::RenderModeSupport;
+pub use render_mode::{ModeTold, RenderModeSupport};
 pub use sysex::{SYSEX_MESSAGE_CAPACITY, push_sysex, sysex_assembler, sysex_packets};
 pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,

@@ -569,6 +569,8 @@ impl<L: ServerSide> Server<L> {
                     reason: reason.to_string(),
                 });
             }
+            // The mode's reply says it.
+            Notice::ModeRefused { .. } => {}
             Notice::StateNotRestored { reason } => {
                 tracing::warn!("plugin did not restore its state after a reload: {reason}");
                 self.events.push(News::PluginStateNotRestored {
@@ -840,15 +842,22 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         };
         match control.render_mode_support(main) {
             RenderModeSupport::Unsupported => {
-                self.state.set_mode(mode);
+                self.state.want(previous.with_mode(mode));
                 ModeOutcome::Unsupported
             }
             _ if unchanged => ModeOutcome::Took,
             RenderModeSupport::Live => {
-                if control.set_render_mode(main, mode) {
-                    self.state.set_mode(mode);
+                let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
+                let running = self.state.applied().map(|applied| applied.mode());
+                if running == Some(mode) {
                     ModeOutcome::Took
                 } else {
+                    // Refused, or not told (the plugin is not active): the
+                    // plugin runs as it did, and what the server wants goes
+                    // back with the answer.
+                    if let (Some(wanted), Some(running)) = (self.state.wanted(), running) {
+                        self.state.want(wanted.with_mode(running));
+                    }
                     ModeOutcome::Refused
                 }
             }

@@ -27,7 +27,9 @@ use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
-use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses};
+use tutti_plugin_types::{
+    MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told,
+};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -414,8 +416,6 @@ pub(super) enum Abandoned {
     Discard,
     /// A rate change's answer, which settles the plugin's rate refusal.
     Rate,
-    /// A render-mode change's answer, which says whether the plugin took it.
-    Mode,
 }
 
 /// The control lane's conversation with the server, and the cursor of any frame
@@ -520,12 +520,6 @@ impl ControlState {
                 Heard::Abandoned(Abandoned::Rate) => {
                     if let ControlReply::SampleRateSet { rate, refusal } = reply {
                         inbox.late_rate_answer(rate, refusal);
-                    }
-                    Ok(None)
-                }
-                Heard::Abandoned(Abandoned::Mode) => {
-                    if let ControlReply::RenderModeSet { mode, outcome } = reply {
-                        apply_mode_reply(inbox, mode, outcome);
                     }
                     Ok(None)
                 }
@@ -1036,14 +1030,17 @@ pub(super) fn handle_setting(
         }
         Setting::RenderMode(mode) => {
             // As a rate: the plugin may activate again to take the mode, and
-            // the requests behind it on this lane wait for it.
+            // the requests behind it on this lane wait for it. Unlike a rate,
+            // no answer within the window (restarting at each sign of life) is
+            // the server failing, not a refusal: the lane ends, and the bridge
+            // is lost, so a late answer is never read and applies nothing.
             let budget = lifecycle.timeouts().rate;
             let Lane { stream, state } = lane;
             let id = ask(
                 stream,
                 state,
                 ControlRequest::SetRenderMode { mode },
-                Abandoned::Mode,
+                Abandoned::Discard,
                 budget,
                 budget,
             )?;
@@ -1054,10 +1051,15 @@ pub(super) fn handle_setting(
                             return Ok(());
                         }
                     }
-                    // No answer: the late one is told when it comes.
-                    Waited::GaveUp => break,
+                    Waited::GaveUp => {
+                        return Err(IpcError::Timeout {
+                            operation: "a render mode",
+                            after: budget,
+                            partial: false,
+                        });
+                    }
                     Waited::Reply(ControlReply::RenderModeSet { mode, outcome }) => {
-                        apply_mode_reply(inbox, mode, outcome);
+                        inbox.told(mode_told(mode, outcome));
                         break;
                     }
                     Waited::Reply(other) => {
@@ -1134,34 +1136,34 @@ fn read_state(state: &mut ControlState, reply: ControlReply) -> Outcome {
 }
 
 /// Record the plugin's answer to a rate change: the refusal while it refuses,
-/// cleared (and heard, if there was one) when it takes the rate.
+/// cleared when it takes the rate, and told to the host either way.
 pub(super) fn apply_rate_reply(
     lifecycle: &Lifecycle,
     inbox: &mut Unsolicited,
     rate: SampleRate,
     refusal: Option<RateRefusalCause>,
 ) {
-    match refusal {
+    let told = match refusal {
         Some(cause) => {
             let refusal = RateRefusal::new(rate, cause);
             lifecycle.set_rate_refusal(Some(refusal.clone()));
-            inbox.rate_refusal(Some(refusal));
+            Told::RateRefused(refusal)
         }
         None => {
-            if lifecycle.is_rate_refused() {
-                lifecycle.set_rate_refusal(None);
-                inbox.rate_refusal(None);
-            }
+            lifecycle.set_rate_refusal(None);
+            Told::RateTook(rate)
         }
-    }
+    };
+    inbox.told(told);
 }
 
-/// Tells the host a plugin that has a render mode did not take it. A plugin
-/// with none runs as it did, which the host already knows.
-fn apply_mode_reply(inbox: &mut Unsolicited, mode: RenderMode, outcome: ModeOutcome) {
+/// What the server's reply to a render mode says the plugin did. A plugin with
+/// no mode runs as it did, which the host that asked it had no reason to
+/// expect: it did not take it.
+fn mode_told(mode: RenderMode, outcome: ModeOutcome) -> Told {
     match outcome {
-        ModeOutcome::Took | ModeOutcome::Unsupported => {}
-        ModeOutcome::Refused => inbox.render_mode_not_applied(mode),
+        ModeOutcome::Took => Told::ModeTook(mode),
+        ModeOutcome::Refused | ModeOutcome::Unsupported => Told::ModeRefused(mode),
     }
 }
 
