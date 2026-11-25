@@ -55,12 +55,6 @@ impl<F: Float> Testing<'_, F> {
         self.graph.editor.base().cloned()
     }
 
-    /// The editor's revision: it moves with anything a reader of the spec,
-    /// the shapes or the ranges may have seen change.
-    pub fn editor_revision(&self) -> u64 {
-        self.graph.editor.revision()
-    }
-
     /// How many commits have sent a plan.
     pub fn commits_sent(&self) -> u64 {
         self.graph.commits()

@@ -835,6 +835,9 @@ pub struct ModState {
     /// was reported: the warning's clock.
     unresolved_since: BTreeMap<TargetKey, (Instant, bool)>,
     warn_after: Duration,
+    /// A plugin target waits for its parameter's value to be read, which no
+    /// edit of the editor announces: the next update applies again to find out.
+    awaiting_values: bool,
     /// The last apply staged edits and the commit that sends them has not run.
     awaiting_commit: bool,
     /// The commit about to run is the last apply's own.
@@ -852,6 +855,7 @@ impl ModState {
             unresolved: Vec::new(),
             unresolved_since: BTreeMap::new(),
             warn_after,
+            awaiting_values: false,
             awaiting_commit: false,
             commit_is_ours: false,
             applied: false,
@@ -859,9 +863,10 @@ impl ModState {
     }
 
     /// Applies `own`'s declarations when there is something to apply: they
-    /// were rebuilt (`declared`), a target or a source waits for a node, or the
-    /// editor is not where the last apply left it. What the apply stages is the
-    /// update's commit's.
+    /// were rebuilt (`declared`), a plugin target waits for a value, or the
+    /// editor is not where the last apply left it (a node or an edge that a
+    /// target waited for is an edit, which moves it). Whether it did. What the
+    /// apply stages is the update's commit's.
     fn run<F: Float>(
         &mut self,
         graph: &mut Graph<F>,
@@ -869,13 +874,12 @@ impl ModState {
         declared: bool,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
-    ) {
-        let unresolved = !self.unresolved.is_empty();
+    ) -> bool {
         if !self
             .derived
-            .stale(declared, unresolved, graph.modulation_clock())
+            .stale(declared, self.awaiting_values, graph.modulation_clock())
         {
-            return;
+            return false;
         }
         let built = own.built.as_ref().expect("built");
         let applied = graph.modulate(&mut self.derived, &built.borrow(), own);
@@ -890,6 +894,7 @@ impl ModState {
         // plugins' driven parameters follow it in the same update.
         #[cfg(feature = "plugin")]
         graph.refresh_driven(self);
+        true
     }
 
     /// Before `Phase::Commit` sends: whether the editor is as the last apply
@@ -969,7 +974,7 @@ impl ModState {
         match applied {
             Ok(applied) => {
                 self.refusal = None;
-                let warn_after = self.warn_after;
+                self.awaiting_values = applied.awaiting_values;
                 let mut since = std::mem::take(&mut self.unresolved_since);
                 let mut unresolved = Vec::new();
                 self.unresolved_since = applied
@@ -978,18 +983,11 @@ impl ModState {
                     .filter_map(|&target| {
                         // A target whose declaration is gone has nothing to name.
                         let name = names.target_name(target)?;
-                        let (from, mut warned) = since.remove(&target).unwrap_or((now, false));
-                        let waited = now.saturating_duration_since(from);
-                        let problem = Problem::Unresolved {
+                        let (from, warned) = since.remove(&target).unwrap_or((now, false));
+                        unresolved.push(Problem::Unresolved {
                             target: name,
-                            waited,
-                        };
-                        if !warned && waited >= warn_after {
-                            warned = true;
-                            tracing::warn!("{problem}");
-                            out.push(crate::SessionEvent::Modulation(problem.clone()));
-                        }
-                        unresolved.push(problem);
+                            waited: now.saturating_duration_since(from),
+                        });
                         Some((target, (from, warned)))
                     })
                     .collect();
@@ -999,10 +997,43 @@ impl ModState {
                     }
                 }));
                 self.unresolved = unresolved;
+                self.warn(names, now, out);
             }
             Err(error) => {
+                self.awaiting_values = false;
                 self.refuse(names.problem(error), out);
             }
+        }
+    }
+
+    /// Reports, once, each target that has been unresolved for
+    /// the builder's unresolved warning time. Every update runs it: the time
+    /// passes while nothing else changes.
+    fn warn(&mut self, names: &OwnMods, now: Instant, out: &mut Vec<crate::SessionEvent>) {
+        let warn_after = self.warn_after;
+        for (&target, (from, warned)) in &mut self.unresolved_since {
+            let waited = now.saturating_duration_since(*from);
+            if *warned || waited < warn_after {
+                continue;
+            }
+            let Some(name) = names.target_name(target) else {
+                continue;
+            };
+            *warned = true;
+            let problem = Problem::Unresolved {
+                target: name,
+                waited,
+            };
+            tracing::warn!("{problem}");
+            // The list holds the reading as of now.
+            if let Some(held) = self
+                .unresolved
+                .iter_mut()
+                .find(|p| matches!(p, Problem::Unresolved { target, .. } if *target == name))
+            {
+                *held = problem.clone();
+            }
+            out.push(crate::SessionEvent::Modulation(problem));
         }
     }
 
@@ -1408,7 +1439,9 @@ impl ModSession {
             return;
         }
         let declared = self.own.build();
-        self.state.run(graph, &self.own, declared, now, out);
+        if !self.state.run(graph, &self.own, declared, now, out) {
+            self.state.warn(&self.own, now, out);
+        }
     }
 
     /// Before `Phase::Commit` sends (see `ModState::before_commit`).

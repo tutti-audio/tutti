@@ -68,6 +68,9 @@ pub(crate) struct Applied {
     /// Followers with no feed, or whose feed node is not in the graph: no node
     /// until a later apply.
     pub(crate) unresolved_sources: Vec<SourceKey>,
+    /// A plugin target waits for its parameter's value to be read: nothing
+    /// the editor holds says when, so the next update applies again.
+    pub(crate) awaiting_values: bool,
 }
 
 /// The controls of the lane built for a target: a port or edge lane's, or a
@@ -192,14 +195,14 @@ impl Derived {
     }
 
     /// Whether an apply would find something to do: the declarations were
-    /// rebuilt (`declared`), or a target or source is unresolved
-    /// (`unresolved`: a node or an edge to wait for), or the editor's
-    /// revision or the play epoch is not what the last apply left (a node
-    /// replaced, removed or rebound, a range cell, a sample rate, a play
+    /// rebuilt (`declared`), a plugin target waits for its value
+    /// (`awaiting_values`), or the editor's revision or the play epoch is not
+    /// what the last apply left (a node or an edge a target waited for, added;
+    /// a node replaced, removed or rebound, a range cell, a sample rate, a play
     /// start).
-    pub(crate) fn stale(&self, declared: bool, unresolved: bool, now: (u64, u32)) -> bool {
+    pub(crate) fn stale(&self, declared: bool, awaiting_values: bool, now: (u64, u32)) -> bool {
         declared
-            || unresolved
+            || awaiting_values
             || self.seen
                 != Some(Seen {
                     revision: now.0,
@@ -260,7 +263,12 @@ impl Derived {
         let mut applied = Applied::default();
         let mut targets = BTreeMap::new();
         for &target in compiled.programs.keys() {
-            match resolve_target(target, ask(target, own, cell, mirror), editor)? {
+            let Some(asked) = ask(target, own, cell, mirror) else {
+                applied.awaiting_values = true;
+                applied.unresolved_targets.push(target);
+                continue;
+            };
+            match resolve_target(target, asked, editor)? {
                 Some(resolved) => {
                     targets.insert(target, resolved);
                 }
@@ -506,14 +514,15 @@ struct Keys {
 /// What the keys of `target` name, and the cells its lane starts from: a
 /// native param's own cell (`cell`), a plugin parameter's first value
 /// (`mirror`, `None` while it is not read, `Some(None)` for one the node does
-/// not list). `None` while the key names nothing, or the plugin's value is not
-/// read: a lane built without a knob could not take one later.
+/// not list). The outer `None`: the plugin's value is not read yet, and a lane
+/// built without a knob could not take one later; the inner, the key names
+/// nothing.
 fn ask(
     target: TargetKey,
     own: &OwnMods,
     cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
     mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
-) -> Option<Resolved> {
+) -> Option<Option<Resolved>> {
     let (drive, knob, seed) = match target {
         TargetKey::Param { node, param } => {
             let node = NodeKey(node);
@@ -524,7 +533,7 @@ fn ask(
                 }
                 None => {
                     let ParamAddr::Id(id) = param else {
-                        return None;
+                        return Some(None);
                     };
                     let input = EventInputPort::new(node, 0);
                     (Drive::Plugin { input, id }, None, mirror(node, id)?)
@@ -532,14 +541,19 @@ fn ask(
             }
         }
         TargetKey::Mix(node) => (Drive::Mix(NodeKey(node)), None, None),
-        TargetKey::Edge(edge) => (Drive::Gain(own.edge_of(edge)?), None, None),
+        TargetKey::Edge(edge) => {
+            let Some(id) = own.edge_of(edge) else {
+                return Some(None);
+            };
+            (Drive::Gain(id), None, None)
+        }
     };
-    Some(Resolved {
+    Some(Some(Resolved {
         drive,
         generation: 0,
         knob,
         seed,
-    })
+    }))
 }
 
 /// `target`, as asked of the declarations (`asked`), checked against `editor`.

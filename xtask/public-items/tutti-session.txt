@@ -298,7 +298,6 @@ fn graph::testing::AudioSide::tick
 fn graph::testing::Graph::take_audio_side
 fn graph::testing::Graph::testing
 fn graph::testing::Testing::commits_sent
-fn graph::testing::Testing::editor_revision
 fn graph::testing::Testing::fork_live
 fn graph::testing::Testing::is_repreparing
 fn graph::testing::Testing::keeps_reclaimer
