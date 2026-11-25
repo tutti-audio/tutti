@@ -100,6 +100,14 @@ fn no_editor(
 
 /// The answer to the request the bridge sends after a render mode: the server
 /// answers its control lane in order, so this says the mode is applied.
+/// The server's answer to a render mode request: it took the mode.
+fn mode_took() -> ControlReply {
+    ControlReply::RenderModeSet {
+        mode: tutti_plugin_types::RenderMode::Realtime,
+        outcome: crate::ModeOutcome::Took,
+    }
+}
+
 fn applied_fence() -> ControlReply {
     ControlReply::CurrentPreset { id: None }
 }
@@ -203,10 +211,8 @@ pub(crate) enum Action {
     /// an `AudioReply` inlines a ~5 KB MIDI vec, and an unboxed variant would
     /// make every `Action` that large.
     Audio(Box<AudioReply>),
-    /// Say something unprompted on the control connection.
-    Event(News),
-    /// Say several things unprompted, in order.
-    Events(Vec<News>),
+    /// Say several things unprompted, in order, then answer.
+    EventsThenReply(Vec<News>, Box<ControlReply>),
     /// Answer nothing and keep the connection open (a hung server).
     Silent,
     /// Close the connection immediately (a crashed server).
@@ -259,16 +265,14 @@ fn serve_lane<Req: Wire>(
                     return;
                 }
             }
-            Action::Event(event) => {
-                if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
-                    return;
-                }
-            }
-            Action::Events(events) => {
+            Action::EventsThenReply(events, reply) => {
                 for event in events {
                     if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
                         return;
                     }
+                }
+                if send_reply(&stream, id, &reply).is_err() {
+                    return;
                 }
             }
             Action::ReplyAfter { reply, gap } => {
@@ -725,9 +729,12 @@ fn a_listener_hears_the_crash_with_its_cause() {
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let mock = MockServer::start("unprompted", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Event(News::LatencyChanged {
-            samples: tutti_plugin_types::Samples::new(77),
-        }),
+        ControlRequest::SetRenderMode { .. } => Action::EventsThenReply(
+            vec![News::LatencyChanged {
+                samples: tutti_plugin_types::Samples::new(77),
+            }],
+            Box::new(mode_took()),
+        ),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
@@ -773,14 +780,17 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     };
     let sent = real.clone();
     let mock = MockServer::start("silly-layout", move |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
-            News::PluginIoChanged {
-                layout: Some(silly.clone()),
-            },
-            News::PluginIoChanged {
-                layout: Some(sent.clone()),
-            },
-        ]),
+        ControlRequest::SetRenderMode { .. } => Action::EventsThenReply(
+            vec![
+                News::PluginIoChanged {
+                    layout: Some(silly.clone()),
+                },
+                News::PluginIoChanged {
+                    layout: Some(sent.clone()),
+                },
+            ],
+            Box::new(mode_took()),
+        ),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
@@ -816,12 +826,15 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("state-not-restored", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
-            News::PluginReloaded,
-            News::PluginStateNotRestored {
-                reason: "setState refused".into(),
-            },
-        ]),
+        ControlRequest::SetRenderMode { .. } => Action::EventsThenReply(
+            vec![
+                News::PluginReloaded,
+                News::PluginStateNotRestored {
+                    reason: "setState refused".into(),
+                },
+            ],
+            Box::new(mode_took()),
+        ),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
@@ -846,21 +859,23 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
 }
 
 /// **A render mode the plugin did not take, and a restart it would not make,
-/// are heard by the host**: the server's news reaches the listener as
-/// `RenderModeNotApplied` with the mode and `WouldNotStop` with the reason.
+/// are heard by the host**: the server's refusal reaches the listener as
+/// `RenderModeNotApplied` with the mode, and its news as `WouldNotStop` with
+/// the reason.
 #[test]
 fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("mode-not-applied", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
-            News::RenderModeNotApplied {
-                mode: tutti_plugin_types::RenderMode::Offline,
-            },
-            News::PluginWouldNotStop {
+        ControlRequest::SetRenderMode { mode } => Action::EventsThenReply(
+            vec![News::PluginWouldNotStop {
                 reason: "inside a block".into(),
-            },
-        ]),
+            }],
+            Box::new(ControlReply::RenderModeSet {
+                mode,
+                outcome: crate::ModeOutcome::Refused,
+            }),
+        ),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
@@ -891,11 +906,14 @@ fn the_servers_loss_counts_are_heard() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("server-losses", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
-            commands_refused: 3,
-            edits_refused: 2,
-            refused_off_thread_calls: tutti_units::Calls::new(5),
-        }]),
+        ControlRequest::SetRenderMode { .. } => Action::EventsThenReply(
+            vec![News::ServerLosses {
+                commands_refused: 3,
+                edits_refused: 2,
+                refused_off_thread_calls: tutti_units::Calls::new(5),
+            }],
+            Box::new(mode_took()),
+        ),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
@@ -2454,17 +2472,17 @@ fn a_crash_the_control_lane_sees_is_answered_by_the_audio_lane() {
 }
 
 /// **A request that finds the control queue full is `Busy`, and counted.** The
-/// control lane is held in a render mode's fence, which owes no request slot, and
-/// its queue is filled behind it.
+/// control lane is held in a render mode's request, which owes no request slot,
+/// and its queue is filled behind it.
 #[test]
 fn a_control_call_on_a_full_queue_is_busy() {
     let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
     let mock = MockServer::start_lanes("full", answer_blocks, move |msg| match msg {
-        ControlRequest::GetCurrentPreset => {
+        ControlRequest::SetRenderMode { .. } => {
             let _ = seen.try_send(());
             let _ = release.recv();
-            Action::Reply(Box::new(applied_fence()))
+            Action::Reply(Box::new(mode_took()))
         }
         _ => Action::Silent,
     });
@@ -2475,7 +2493,7 @@ fn a_control_call_on_a_full_queue_is_busy() {
     );
     seen_rx
         .recv_timeout(NOTICE_TIMEOUT)
-        .expect("the control lane is held in the fence");
+        .expect("the control lane is held in the render mode");
     while mock
         .bridge
         .audio()
@@ -2641,8 +2659,8 @@ fn log_blocks(
 
 /// **A render mode is applied before the next block is sent.** The control lane
 /// gives the mode a window to be overtaken by a block; a block held for the
-/// mode's fence is not, and the server's two lanes see the mode, its fence and
-/// then the block. A bridge that stops holding the blocks logs the block first.
+/// mode's answer is not, and the server's two lanes see the mode and then the
+/// block. A bridge that stops holding the blocks logs the block first.
 #[test]
 fn a_render_mode_is_applied_before_the_next_block() {
     let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
@@ -2652,11 +2670,7 @@ fn a_render_mode_is_applied_before_the_next_block() {
         move |msg: ControlRequest| match msg {
             ControlRequest::SetRenderMode { .. } => {
                 log_after_window(&log, &block_rx, "mode");
-                Action::Silent
-            }
-            ControlRequest::GetCurrentPreset => {
-                log.lock().push("fence");
-                Action::Reply(Box::new(applied_fence()))
+                Action::Reply(Box::new(mode_took()))
             }
             _ => Action::Silent,
         }
@@ -2677,7 +2691,7 @@ fn a_render_mode_is_applied_before_the_next_block() {
     tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
         answered(&mut mock, 1)
     });
-    assert_eq!(*log.lock(), ["mode", "fence", "block"]);
+    assert_eq!(*log.lock(), ["mode", "block"]);
 }
 
 /// **A rate change is applied before the next block is sent**, as a render mode
@@ -2716,10 +2730,10 @@ fn a_rate_change_is_applied_before_the_next_block() {
 
 /// **A control command pushed after a block reaches the server after it.** With
 /// a thread per lane nothing else orders them: the audio lane is held for a
-/// render mode's fence (the control mock holds it), a block and then an
-/// automation mode are pushed, and once the fence is answered the control lane
+/// render mode's answer (the control mock holds it), a block and then an
+/// automation mode are pushed, and once the mode is answered the control lane
 /// has the command to send while the audio lane is still waking to send the
-/// block. The server's log must read mode, fence, block, command; a bridge
+/// block. The server's log must read mode, block, command; a bridge
 /// that does not make the command wait for the block logs it before the block.
 #[test]
 fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
@@ -2740,13 +2754,9 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
         move |msg: ControlRequest| match msg {
             ControlRequest::SetRenderMode { .. } => {
                 log.lock().push("mode");
-                Action::Silent
-            }
-            ControlRequest::GetCurrentPreset => {
-                log.lock().push("fence");
                 fence_seen.send(()).expect("the test listens");
-                release.recv().expect("the test releases the fence");
-                Action::Reply(Box::new(applied_fence()))
+                release.recv().expect("the test releases the mode");
+                Action::Reply(Box::new(mode_took()))
             }
             ControlRequest::SetAutomationState { .. } => {
                 log.lock().push("command");
@@ -2780,5 +2790,5 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
     tutti_fixtures::wait_until("the command to reach the server", NOTICE_TIMEOUT, || {
         log.lock().contains(&"command")
     });
-    assert_eq!(*log.lock(), ["mode", "fence", "block", "command"]);
+    assert_eq!(*log.lock(), ["mode", "block", "command"]);
 }

@@ -20,7 +20,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::News;
+use tutti_plugin_ipc::{ModeOutcome, News};
 use tutti_plugin_types::{
     AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
     LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, MidiAssignment, MidiMapApplied, Notice,
@@ -119,8 +119,8 @@ pub(crate) trait ServerPlugin {
         main: MainThreadMarker,
         rate: SampleRate,
     ) -> Result<(), RateRefusal>;
-    /// Tells the plugin its render mode; whether it now runs in it.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool;
+    /// Tells the plugin its render mode, and what it made of it.
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome;
     /// How many parameters the plugin has.
     fn parameter_count(&self, main: MainThreadMarker) -> usize;
     /// Every parameter.
@@ -825,39 +825,37 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// `OnActivation` one (VST3's `setupProcessing`, AU's
     /// `AudioUnitInitialize`) is activated again in the mode, keeping its
     /// instance and state, and a refusal is rolled back to the mode it was
-    /// running in; an `Unsupported` one is left running and answers `false`.
-    /// The mode is kept for every later activation (a restart, a rate change)
-    /// either way.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
+    /// running in; an `Unsupported` one is left running and answers
+    /// [`Unsupported`](ModeOutcome::Unsupported). The mode is kept for every
+    /// later activation (a restart, a rate change) either way.
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome {
         let Some(previous) = self.state.applied() else {
-            return false;
+            return ModeOutcome::Refused;
         };
         if previous.mode() == mode && self.is_active() {
-            return true;
+            return ModeOutcome::Took;
         }
         let Some(control) = self.lifecycle.control() else {
-            return false;
+            return ModeOutcome::Refused;
         };
         match control.render_mode_support(main) {
             RenderModeSupport::Live => {
-                let took = control.set_render_mode(main, mode);
-                if took {
+                if control.set_render_mode(main, mode) {
                     self.state.set_mode(mode);
+                    ModeOutcome::Took
                 } else {
-                    self.events.push(News::RenderModeNotApplied { mode });
+                    ModeOutcome::Refused
                 }
-                took
             }
             RenderModeSupport::Unsupported => {
                 self.state.set_mode(mode);
-                false
+                ModeOutcome::Unsupported
             }
             RenderModeSupport::OnActivation => {
-                let took = self.reconfigure(main, previous.with_mode(mode)).is_ok();
-                if !took {
-                    self.events.push(News::RenderModeNotApplied { mode });
+                match self.reconfigure(main, previous.with_mode(mode)) {
+                    Ok(()) => ModeOutcome::Took,
+                    Err(_) => ModeOutcome::Refused,
                 }
-                took
             }
         }
     }

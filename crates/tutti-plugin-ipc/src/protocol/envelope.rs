@@ -349,17 +349,6 @@ messages! {
     SharedMemoryReady;
     /// Ask the subprocess to exit cleanly.
     Shutdown => Stop;
-    /// Tell the plugin whether it is rendering under realtime pressure.
-    ///
-    /// A sibling of [`SetSampleRate`](ControlRequest::SetSampleRate) rather than a field
-    /// on [`ProcessAudio`](AudioRequest::ProcessAudio): three of the four formats can
-    /// only accept this while the plugin is deactivated, and two of those
-    /// rebuild buffers around it. Sending it per block would be both wasteful
-    /// and unrepresentable.
-    SetRenderMode {
-        /// Realtime or offline.
-        mode: tutti_plugin_types::RenderMode,
-    };
     /// Ask for the plugin's preset list.
     GetPresetList
     ->
@@ -602,6 +591,43 @@ messages! {
         /// The plugin's wiring as it reads now.
         wiring: tutti_plugin_types::PluginWiring,
     };
+    /// Tell the plugin whether it is rendering under realtime pressure.
+    ///
+    /// A sibling of [`SetSampleRate`](ControlRequest::SetSampleRate) rather than a field
+    /// on [`ProcessAudio`](AudioRequest::ProcessAudio): three of the four formats can
+    /// only accept this while the plugin is deactivated, and two of those
+    /// rebuild buffers around it. Sending it per block would be both wasteful
+    /// and unrepresentable. Answered by [`ControlReply::RenderModeSet`]: the
+    /// host must learn whether the plugin runs in the mode, as it learns its
+    /// rate.
+    SetRenderMode {
+        /// Realtime or offline.
+        mode: tutti_plugin_types::RenderMode,
+    }
+    ->
+    /// Answers a [`ControlRequest::SetRenderMode`].
+    RenderModeSet {
+        /// The mode that was asked for, echoed so a reply read late is never
+        /// attributed to a later request.
+        mode: tutti_plugin_types::RenderMode,
+        /// What the plugin did with the mode.
+        outcome: ModeOutcome,
+    };
+}
+
+/// What a plugin did with the render mode it was told
+/// ([`ControlReply::RenderModeSet`]).
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModeOutcome {
+    /// The plugin runs in the mode.
+    Took,
+    /// The plugin has a render mode and did not take this one: it runs in the
+    /// mode it had.
+    Refused,
+    /// The plugin has no render mode: it renders the same either way.
+    Unsupported,
 }
 
 /// What the plugin says unprompted, on the control connection.
@@ -685,14 +711,6 @@ pub enum News {
     PluginStateNotRestored {
         /// Why the state was not restored.
         reason: String,
-    },
-    /// The plugin did not take the render mode the host asked for
-    /// ([`ControlRequest::SetRenderMode`]): it runs in the mode it had. Not
-    /// sent for a plugin that has no render-mode capability, which the host
-    /// already knows.
-    RenderModeNotApplied {
-        /// The mode that was asked for.
-        mode: tutti_plugin_types::RenderMode,
     },
     /// A restart the host asked for (a rate or a render mode) did not happen:
     /// the plugin would not stop and runs as it was.

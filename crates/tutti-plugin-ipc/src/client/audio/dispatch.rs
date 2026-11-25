@@ -17,8 +17,8 @@ use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
-    StateReady,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
+    Request, StateReady,
 };
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -27,7 +27,7 @@ use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
-use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, ServerLosses};
+use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -414,6 +414,8 @@ pub(super) enum Abandoned {
     Discard,
     /// A rate change's answer, which settles the plugin's rate refusal.
     Rate,
+    /// A render-mode change's answer, which says whether the plugin took it.
+    Mode,
 }
 
 /// The control lane's conversation with the server, and the cursor of any frame
@@ -518,6 +520,12 @@ impl ControlState {
                 Heard::Abandoned(Abandoned::Rate) => {
                     if let ControlReply::SampleRateSet { rate, refusal } = reply {
                         inbox.late_rate_answer(rate, refusal);
+                    }
+                    Ok(None)
+                }
+                Heard::Abandoned(Abandoned::Mode) => {
+                    if let ControlReply::RenderModeSet { mode, outcome } = reply {
+                        apply_mode_reply(inbox, mode, outcome);
                     }
                     Ok(None)
                 }
@@ -1027,12 +1035,39 @@ pub(super) fn handle_setting(
             applied.send(());
         }
         Setting::RenderMode(mode) => {
-            tell(
-                &mut lane.stream,
-                &mut lane.state,
+            // As a rate: the plugin may activate again to take the mode, and
+            // the requests behind it on this lane wait for it.
+            let budget = lifecycle.timeouts().rate;
+            let Lane { stream, state } = lane;
+            let id = ask(
+                stream,
+                state,
                 ControlRequest::SetRenderMode { mode },
+                Abandoned::Mode,
+                budget,
+                budget,
             )?;
-            fence(lane, inbox, lifecycle)?;
+            loop {
+                match wait_for(stream, inbox, state, id, Some(RATE_SLICE))? {
+                    Waited::Pending => {
+                        if !lifecycle.is_running() {
+                            return Ok(());
+                        }
+                    }
+                    // No answer: the late one is told when it comes.
+                    Waited::GaveUp => break,
+                    Waited::Reply(ControlReply::RenderModeSet { mode, outcome }) => {
+                        apply_mode_reply(inbox, mode, outcome);
+                        break;
+                    }
+                    Waited::Reply(other) => {
+                        return Err(IpcError::UnexpectedMessage {
+                            expected: "RenderModeSet",
+                            got: format!("{other:?}").into(),
+                        });
+                    }
+                }
+            }
             applied.send(());
         }
         Setting::Fence => {
@@ -1121,6 +1156,14 @@ pub(super) fn apply_rate_reply(
     }
 }
 
+/// Tells the host a plugin that has a render mode did not take it. A plugin
+/// with none runs as it did, which the host already knows.
+fn apply_mode_reply(inbox: &mut Unsolicited, mode: RenderMode, outcome: ModeOutcome) {
+    if outcome == ModeOutcome::Refused {
+        inbox.render_mode_not_applied(mode);
+    }
+}
+
 /// Puts an unsolicited event into `inbox`.
 fn file_news(inbox: &mut Unsolicited, news: News) {
     match news {
@@ -1138,7 +1181,6 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
         News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
-        News::RenderModeNotApplied { mode } => inbox.render_mode_not_applied(mode),
         News::PluginWouldNotStop { reason } => inbox.would_not_stop(reason),
         News::ServerLosses {
             commands_refused,
