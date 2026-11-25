@@ -378,13 +378,13 @@ fn crossfades_are_allocation_free_on(workers: usize) {
 
     // A long fade, one queued behind it, and one on the event node.
     let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
-    ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
+    ed.replace_or_swap(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
         .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec, 64);
-    ed.replace(NodeKey(1), Unforkable(gain(4.0)), fade(2_000))
+    ed.replace_or_swap(NodeKey(1), Unforkable(gain(4.0)), fade(2_000))
         .expect("fits");
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(3),
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
         fade(500),
@@ -483,7 +483,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
     block(&mut exec);
     let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
     for k in 0..KEYS {
-        ed.replace(
+        ed.replace_or_swap(
             NodeKey(k + 1),
             Unforkable(HeldChaser(Arc::clone(&b[k as usize]))),
             fade(256),
@@ -493,7 +493,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
     ed.commit().expect("commits");
     block(&mut exec);
     for k in 0..KEYS {
-        ed.replace(
+        ed.replace_or_swap(
             NodeKey(k + 1),
             Unforkable(HeldChaser(Arc::clone(&c[k as usize]))),
             fade(256),
@@ -555,7 +555,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
     };
     block(&mut exec);
     let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(HeldChaser(Arc::clone(&b))),
         fade(256),
@@ -564,7 +564,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
     ed.commit().expect("commits");
     block(&mut exec);
     assert_eq!(b.load(Ordering::Relaxed), 3, "A's chase reached B");
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(HeldChaser(Arc::clone(&c))),
         fade(256),
@@ -2201,7 +2201,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
     };
     block(&mut exec, 256);
     for (k, (_, second)) in (1..).zip(&seen) {
-        ed.replace(
+        ed.replace_or_swap(
             NodeKey(k),
             Unforkable(Chaser {
                 seen: Arc::clone(second),
@@ -2687,7 +2687,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // Held keys close: the edge from one holder is cut, and the other holder
     // is replaced hard while its edge stays behind its delay.
     ed.disconnect_events(sink(23, 2), tutti_graph::EventEdge::Direct(ev(24, 0)));
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(25),
         Unforkable(Holder::new(0)),
         Fade::new(Samples::new(0)).law(FadeLaw::EqualPower),
@@ -2765,7 +2765,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     blocks(&mut exec, 20, 64);
     ed.collect();
     assert_eq!(offs.load(Ordering::Relaxed), 0, "nothing closed yet");
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(700),
         Unforkable(Holder::paced(0, 64)),
         Fade::new(Samples::new(0)).law(FadeLaw::EqualPower),
@@ -2826,12 +2826,12 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     blocks(&mut exec, 4, 64);
     ed.collect();
     let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
-    ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
+    ed.replace_or_swap(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 2, 64);
-    ed.replace(NodeKey(500), Unforkable(chaser(2)), fade(1_000))
+    ed.replace_or_swap(NodeKey(500), Unforkable(chaser(2)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -2999,12 +2999,12 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     blocks(&mut exec, 4);
     ed.collect();
     let fade = Fade::new(Samples::new(128)).law(FadeLaw::EqualPower);
-    ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
+    ed.replace_or_swap(NodeKey(1), Unforkable(Latch { sent: false }), fade)
         .expect("fits");
     ed.commit().expect("commits");
     exec.apply_pending();
     blocks(&mut exec, 1);
-    ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
+    ed.replace_or_swap(NodeKey(1), Unforkable(Latch { sent: false }), fade)
         .expect("fits");
     ed.commit().expect("commits");
     exec.apply_pending();

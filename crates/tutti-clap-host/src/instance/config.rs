@@ -86,7 +86,11 @@ pub(crate) struct AudioScratch {
 }
 
 impl AudioScratch {
-    pub fn new(format: FloatWidth, input_rooms: InputRooms, output_rooms: OutputRooms) -> Self {
+    pub(crate) fn new(
+        format: FloatWidth,
+        input_rooms: InputRooms,
+        output_rooms: OutputRooms,
+    ) -> Self {
         Self {
             process: PortScratch::new(format),
             input_events: InputEventList::new(input_rooms),
@@ -149,13 +153,13 @@ impl PortLayout {
     ///
     /// Stays `usize`, not a [`ChannelLayout`](tutti_plugin_types::ChannelLayout): a sum across buses is a size for
     /// the flat channel pool, not the layout of any one bus.
-    pub fn input_channel_total(&self) -> usize {
+    pub(crate) fn input_channel_total(&self) -> usize {
         self.inputs.iter().map(|c| c.count() as usize).sum()
     }
 
     /// Channel count summed across every output port. `usize` for the same
     /// reason as [`input_channel_total`](Self::input_channel_total).
-    pub fn output_channel_total(&self) -> usize {
+    pub(crate) fn output_channel_total(&self) -> usize {
         self.outputs.iter().map(|c| c.count() as usize).sum()
     }
 }

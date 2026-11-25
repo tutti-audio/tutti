@@ -13,6 +13,6 @@
 //! The control handle, the node's controls and the host policy written once
 //! over a handle live in `tutti-plugin-host`.
 
-pub mod node;
-pub mod placement;
-pub mod plugin;
+pub(crate) mod node;
+pub(crate) mod placement;
+pub(crate) mod plugin;

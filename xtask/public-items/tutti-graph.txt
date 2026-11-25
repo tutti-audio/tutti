@@ -380,7 +380,6 @@ fn edit::editor::Editor::first_unsupported_rate
 fn edit::editor::Editor::in_flight
 fn edit::editor::Editor::is_paired_with
 fn edit::editor::Editor::is_repreparing
-fn edit::editor::Editor::leaked_items
 fn edit::editor::Editor::limits
 fn edit::editor::Editor::lowered
 fn edit::editor::Editor::new
@@ -433,7 +432,6 @@ fn edit::editor::nodes::Editor::insert
 fn edit::editor::nodes::Editor::is_leaving
 fn edit::editor::nodes::Editor::remove
 fn edit::editor::nodes::Editor::remove_declicked
-fn edit::editor::nodes::Editor::replace
 fn edit::editor::nodes::Editor::replace_or_swap
 fn edit::editor::nodes::Editor::set_latency
 fn edit::editor::nodes::Editor::set_tail
@@ -531,13 +529,11 @@ fn exec::pool::WorkerPoolBuilder::start_handler
 fn exec::pool::WorkerPoolBuilder::thread_name
 fn exec::published::ErasedPublished::cell
 fn exec::published::ErasedPublished::kind_name
+fn exec::published::ErasedPublished::reclaim
 fn exec::published::PublishedCell::detached
 fn exec::published::PublishedCell::lend
 fn exec::published::PublishedCell::new
 fn exec::published::PublishedCell::publisher
-fn exec::published::Sweep::is_empty
-fn exec::published::Sweep::new
-fn exec::published::Sweep::with
 fn exec::render::Executor::process
 fn exec::render::Executor::process_with_changes
 fn exec::render::Executor::render_applied
@@ -1035,7 +1031,6 @@ struct exec::pool::WorkerPool
 struct exec::pool::WorkerPoolBuilder
 struct exec::published::ErasedPublished
 struct exec::published::PublishedCell
-struct exec::published::Sweep
 struct model::bus_edge::BusFeed
 struct model::bus_edge::Lowering
 struct model::bus_edge::NodeBus

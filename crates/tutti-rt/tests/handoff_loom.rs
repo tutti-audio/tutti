@@ -19,13 +19,19 @@
 //!   lend's write, and a second lend writes only after the first was taken.
 //! - **a lend never erases a recall** for a value the audio end still holds
 //!   (Core's review of #494): the lend is refused and the value comes back.
+//! - **the audio end going away destroys nothing**: dropped at any point of a
+//!   lend, a recall and a second lend, every value lent ends in the control
+//!   end's hands (taken, withdrawn or refused), and none drops before the
+//!   control end drops it;
+//! - **the ends dropped against each other**, the audio end holding a value,
+//!   free it exactly once.
 
 #![cfg(loom)]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use loom::thread;
-use tutti_rt::{Rt, handoff};
+use tutti_rt::{Handback, Rt, handoff};
 
 /// Executions loom ran, to report.
 static RUNS: AtomicUsize = AtomicUsize::new(0);
@@ -76,7 +82,7 @@ fn a_lent_value_is_in_one_place_and_a_recall_is_never_lost() {
         let withdrawn = hand.recall();
         let mut rt: Rt<Tracked> = audio.join().unwrap();
 
-        let returned = hand.take();
+        let returned = hand.take().map(Handback::into_inner);
         let held = rt.held().is_some();
         let places =
             usize::from(withdrawn.is_some()) + usize::from(returned.is_some()) + usize::from(held);
@@ -91,7 +97,9 @@ fn a_lent_value_is_in_one_place_and_a_recall_is_never_lost() {
             // Recalled while the audio end held it and after its last poll:
             // the bit is still raised, so the next poll returns it.
             assert!(rt.poll(stop).is_none(), "a recall is never lost");
-            let back = hand.take().expect("returned");
+            let Some(Handback::Recalled(back)) = hand.take() else {
+                panic!("returned by the poll");
+            };
             assert!(back.stopped);
         }
         drop((withdrawn, returned, hand, rt));
@@ -126,7 +134,7 @@ fn a_lend_racing_a_return_loses_and_duplicates_nothing() {
             ids.push(v.id);
         }
         // The slot: either the returned first value, or the second on offer.
-        let returned = hand.take();
+        let returned = hand.take().map(Handback::into_inner);
         if let Some(v) = &returned {
             ids.push(v.id);
         }
@@ -209,11 +217,101 @@ fn a_lend_never_erases_a_recall_for_a_held_value() {
         // A was returned by the poll, or is returned by the next one: the
         // recall is still raised.
         let _ = rt.poll(stop);
-        let back = hand.take().expect("A comes back");
+        let Some(Handback::Recalled(back)) = hand.take() else {
+            panic!("A comes back, by the recall");
+        };
         assert_eq!(back.id, 1);
         assert!(back.stopped);
         assert!(rt.held().is_none());
         drop((refused, back, hand, rt));
         assert_eq!(drops.load(Ordering::SeqCst), 2, "each dropped once");
+    });
+}
+
+/// The audio end polls up to `polls` times and is then dropped, while the
+/// control end recalls and lends a second value. Whatever the interleaving,
+/// the control end ends with both values and the primitive destroyed neither.
+fn the_audio_end_goes_after(polls: usize) {
+    loom::model(move || {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+        let (mut hand, mut rt) = handoff::<Tracked>();
+        assert!(hand.lend(Tracked::new(1, &drops)).is_ok());
+        let audio = thread::spawn(move || {
+            for _ in 0..polls {
+                let _ = rt.poll(stop);
+            }
+            drop(rt);
+        });
+        let mut mine = Vec::new();
+        mine.extend(hand.recall());
+        mine.extend(hand.lend(Tracked::new(2, &drops)).err());
+        audio.join().unwrap();
+        assert!(hand.borrower_gone());
+        // What the audio end returned at a poll or left as it went, and what
+        // is still on offer to nobody.
+        for home in [hand.take(), hand.take()].into_iter().flatten() {
+            // How it came home is what was done to it: `last` ran on a
+            // recalled value and on no other.
+            match home {
+                Handback::Recalled(v) => {
+                    assert!(v.stopped, "recalled: `last` ran");
+                    mine.push(v);
+                }
+                Handback::Dropped(v) => {
+                    assert!(!v.stopped, "dropped: as it was");
+                    mine.push(v);
+                }
+            }
+        }
+        mine.extend(hand.recall());
+        assert_eq!(
+            drops.load(Ordering::SeqCst),
+            0,
+            "the audio end's drop destroys nothing"
+        );
+        let mut ids: Vec<u32> = mine.iter().map(|v| v.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2], "the control end has every value it lent");
+        let last = mine.pop().expect("two values");
+        let refused = hand.lend(last).expect_err("a lend to nobody is refused");
+        drop((mine, refused, hand));
+        assert_eq!(drops.load(Ordering::SeqCst), 2, "each dropped once");
+    });
+}
+
+/// Dropped before it ever polled: the offer is withdrawn or still on offer,
+/// never taken by a drop.
+#[test]
+fn an_audio_end_dropped_before_a_poll_destroys_nothing() {
+    the_audio_end_goes_after(0);
+}
+
+/// Dropped after a poll that may have taken the value, answered the recall,
+/// or cleared a stale one: the held value comes back as the audio end goes.
+#[test]
+fn an_audio_end_dropped_after_a_poll_returns_what_it_holds() {
+    the_audio_end_goes_after(1);
+}
+
+/// Dropped after two polls, so a value returned at the second and one held
+/// through both are covered as well.
+#[test]
+fn an_audio_end_dropped_after_two_polls_destroys_nothing() {
+    the_audio_end_goes_after(2);
+}
+
+/// The two ends dropped at once, the audio end holding a value: whichever
+/// goes last frees it, once.
+#[test]
+fn the_ends_dropped_against_each_other_free_a_held_value_once() {
+    loom::model(|| {
+        let drops = std::sync::Arc::new(AtomicUsize::new(0));
+        let (mut hand, mut rt) = handoff::<Tracked>();
+        assert!(hand.lend(Tracked::new(1, &drops)).is_ok());
+        assert!(rt.poll(stop).is_some(), "held");
+        let audio = thread::spawn(move || drop(rt));
+        drop(hand);
+        audio.join().unwrap();
+        assert_eq!(drops.load(Ordering::SeqCst), 1, "freed once");
     });
 }

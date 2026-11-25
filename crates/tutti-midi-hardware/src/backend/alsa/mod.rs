@@ -66,7 +66,7 @@ pub(super) fn address_of(handle: EndpointId) -> Option<Address> {
 /// opened per call would announce its own start, port and exit each time, and
 /// every watch on the machine would wake for it. Each connection owns the client
 /// it pumps or sends through, and the watch enumerates on its own.
-pub struct AlsaEndpoints {
+pub(super) struct AlsaEndpoints {
     executor: Executor,
     enumerator: Mutex<Option<Client>>,
 }
@@ -80,7 +80,7 @@ impl core::fmt::Debug for AlsaEndpoints {
 impl AlsaEndpoints {
     /// The ALSA backend, whose pump and watch threads are `executor`'s. No client
     /// is open until one is needed.
-    pub fn new(executor: &Executor) -> Self {
+    pub(super) fn new(executor: &Executor) -> Self {
         Self {
             executor: executor.clone(),
             enumerator: Mutex::new(None),

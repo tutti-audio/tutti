@@ -35,7 +35,7 @@ use tutti_units::{Amplitude, PlaybackRate, ReadRate, SrcRatio};
 /// not false-share with the audio thread's per-block write of the underrun
 /// count.
 #[derive(Debug)]
-pub struct Cells {
+pub(crate) struct Cells {
     /// Varispeed, conversion ratio, stretch and gain.
     playback: PlaybackParams,
     /// Underruns the voice counted since the handle last drained them.
@@ -88,7 +88,7 @@ impl Default for Cells {
 impl Cells {
     /// Cells at rest: unity speed, conversion ratio and gain, no stretch, no
     /// underruns.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             playback: PlaybackParams {
                 speed: Param64::new(PlaybackRate::UNITY),
@@ -106,7 +106,7 @@ impl Cells {
     /// conversion ratio, stretch rate) at their current values, and nothing
     /// else: no counters.
     ///
-    /// What a disk voice severed for an offline render keeps
+    /// What a disk voice forked for an offline render keeps
     /// (`DiskVoice::fork_copy`): its controls as a snapshot, like every other
     /// forked unit's, in cells no streamer and no live voice shares.
     pub(crate) fn detached(&self) -> Self {
@@ -120,7 +120,7 @@ impl Cells {
 
     /// The current varispeed. [`PlaybackRate::UNITY`] is normal speed.
     #[inline]
-    pub fn speed(&self) -> PlaybackRate {
+    pub(crate) fn speed(&self) -> PlaybackRate {
         self.playback.speed.load()
     }
 
@@ -131,13 +131,13 @@ impl Cells {
     /// instead would bind only this tier — the in-memory sampler never calls
     /// this setter, so the same command would produce different audio depending
     /// on which tier happened to be playing.
-    pub fn set_speed(&self, speed: PlaybackRate) {
+    pub(crate) fn set_speed(&self, speed: PlaybackRate) {
         self.playback.speed.store(speed);
     }
 
     /// The voice's linear output gain.
     #[inline]
-    pub fn gain(&self) -> Amplitude {
+    pub(crate) fn gain(&self) -> Amplitude {
         Amplitude::new(self.playback.gain.load(Ordering::Acquire))
     }
 
@@ -146,7 +146,7 @@ impl Cells {
     /// `&self`, like every other publisher here: the whole point of this cell
     /// is that the control thread and the audio thread hold the *same* one, so
     /// no `&mut` is available or needed.
-    pub fn set_gain(&self, gain: Amplitude) {
+    pub(crate) fn set_gain(&self, gain: Amplitude) {
         self.playback.gain.store(gain.get(), Ordering::Release);
     }
 
@@ -154,7 +154,7 @@ impl Cells {
     /// to [`speed`](Self::speed); the separate name marks the hot call site
     /// rather than the raw atomic load.
     #[inline]
-    pub fn effective_speed(&self) -> PlaybackRate {
+    pub(crate) fn effective_speed(&self) -> PlaybackRate {
         self.speed()
     }
 
@@ -171,7 +171,7 @@ impl Cells {
     /// the term a stretched disk voice consumes as many source frames as an
     /// unstretched one, and the vocoder has nothing to spread.
     #[inline]
-    pub fn read_rate(&self) -> ReadRate {
+    pub(crate) fn read_rate(&self) -> ReadRate {
         self.speed()
             .read_rate(self.src_ratio())
             .then(self.stretch_rate())
@@ -180,21 +180,21 @@ impl Cells {
     /// The wrapping stretcher's read rate — `1 / stretch`, or unity when the
     /// voice does not stretch.
     #[inline]
-    pub fn stretch_rate(&self) -> ReadRate {
+    pub(crate) fn stretch_rate(&self) -> ReadRate {
         self.playback.stretch_rate.load()
     }
 
     /// Publish the wrapping stretcher's read rate. Control thread, or the audio
     /// thread's own parameter application — a single relaxed store either way.
     #[inline]
-    pub fn set_stretch_rate(&self, rate: ReadRate) {
+    pub(crate) fn set_stretch_rate(&self, rate: ReadRate) {
         self.playback.stretch_rate.store(rate);
     }
 
     /// Sample-rate conversion ratio: file rate over session rate.
     /// [`SrcRatio::UNITY`] means the file already plays at the session rate.
     #[inline]
-    pub fn src_ratio(&self) -> SrcRatio {
+    pub(crate) fn src_ratio(&self) -> SrcRatio {
         self.playback.src_ratio.load()
     }
 
@@ -202,21 +202,21 @@ impl Cells {
     /// and when the session rate moves, from [`SrcRatio::for_rates`]
     /// — the same derivation the in-memory tier uses, so neither tier can pick
     /// the ratio up backwards.
-    pub fn set_src_ratio(&self, ratio: SrcRatio) {
+    pub(crate) fn set_src_ratio(&self, ratio: SrcRatio) {
         self.playback.src_ratio.store(ratio);
     }
 
     /// Count one frame the ring could not supply. Audio side: a single relaxed
     /// increment, allocation-free and safe on the hot path.
     #[inline]
-    pub fn report_underrun(&self) {
+    pub(crate) fn report_underrun(&self) {
         self.health.underrun_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Read and zero the underrun count, returning the frames missed since the
     /// previous call. Draining rather than peeking is what makes the figure a
     /// per-interval rate instead of an ever-growing total.
-    pub fn take_underruns(&self) -> u64 {
+    pub(crate) fn take_underruns(&self) -> u64 {
         self.health.underrun_count.swap(0, Ordering::Relaxed)
     }
 }

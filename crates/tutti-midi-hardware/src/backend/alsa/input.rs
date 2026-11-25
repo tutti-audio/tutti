@@ -27,7 +27,7 @@ const PAIRING_AGE: Duration = Duration::from_secs(1);
 
 /// An open ALSA input. Dropping it wakes the pump, which then ends on its thread,
 /// closes the client and unsubscribes the port: the drop does not wait for that.
-pub struct AlsaInput {
+pub(super) struct AlsaInput {
     /// One end of a socket pair whose other end is in the pump's `poll` set:
     /// closing this one is the shutdown signal, and wakes the pump at once.
     stop: Option<UnixStream>,
@@ -95,7 +95,7 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 /// [`MidiHardwareError::Spawn`] if the pump thread cannot be
 /// spawned. A source client that exits while the open reads its Endpoint record
 /// fails the open (`ENOENT`) rather than opening as a legacy port.
-pub fn open(
+pub(super) fn open(
     executor: &Executor,
     id: EndpointId,
     producer: InputProducerHandle,

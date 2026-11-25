@@ -394,7 +394,7 @@ fn a_handoff_trades_without_allocating() {
             assert_eq!(rt.poll(|_| {}).map(|v| v[0]), Some(round));
             assert!(hand.recall().is_none());
             assert!(rt.poll(|v| v[1] = 0).is_none());
-            let back = hand.take().expect("returned");
+            let back = hand.take().expect("returned").into_inner();
             core::hint::black_box(back);
         }
     });

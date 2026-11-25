@@ -29,7 +29,7 @@ fn read_string(ptr: *mut c_void) -> String {
 }
 
 /// Deprecated process function.
-pub extern "C" fn process_deprecated(
+pub(crate) extern "C" fn process_deprecated(
     _effect: *mut AEffect,
     _raw_inputs: *const *const f32,
     _raw_outputs: *mut *mut f32,
@@ -38,7 +38,7 @@ pub extern "C" fn process_deprecated(
 }
 
 /// VST2.4 replacing function.
-pub extern "C" fn process_replacing(
+pub(crate) extern "C" fn process_replacing(
     effect: *mut AEffect,
     raw_inputs: *const *const f32,
     raw_outputs: *mut *mut f32,
@@ -66,7 +66,7 @@ pub extern "C" fn process_replacing(
 }
 
 /// VST2.4 replacing function with `f64` values.
-pub extern "C" fn process_replacing_f64(
+pub(crate) extern "C" fn process_replacing_f64(
     effect: *mut AEffect,
     raw_inputs: *const *const f64,
     raw_outputs: *mut *mut f64,
@@ -93,13 +93,13 @@ pub extern "C" fn process_replacing_f64(
 }
 
 /// VST2.4 set parameter function.
-pub extern "C" fn set_parameter(effect: *mut AEffect, index: i32, value: f32) {
+pub(crate) extern "C" fn set_parameter(effect: *mut AEffect, index: i32, value: f32) {
     // SAFETY: VST2 ABI: `effect` is the `AEffect` this library created (it is the one passed back to its own entry points) and the host serialises calls per instance.
     unsafe { (*effect).get_params() }.set_parameter(index, value);
 }
 
 /// VST2.4 get parameter function.
-pub extern "C" fn get_parameter(effect: *mut AEffect, index: i32) -> f32 {
+pub(crate) extern "C" fn get_parameter(effect: *mut AEffect, index: i32) -> f32 {
     // The C ABI has no way to say "absent", and a plugin implementing this
     // trait always has a value — `None` here means the plugin did not override
     // `get_parameter` at all, for which 0.0 is the SDK's historical answer.
@@ -114,7 +114,7 @@ pub extern "C" fn get_parameter(effect: *mut AEffect, index: i32) -> f32 {
 /// `extern "C"`, so a panic escaping into the host's C++ frame is undefined
 /// behaviour. The body is wrapped in `catch_unwind` and a panic degrades to
 /// `0` — the VST2 "unhandled" answer for every effect opcode.
-pub extern "C" fn dispatch(
+pub(crate) extern "C" fn dispatch(
     effect: *mut AEffect,
     opcode: i32,
     index: i32,

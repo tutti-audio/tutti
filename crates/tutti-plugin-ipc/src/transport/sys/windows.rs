@@ -150,6 +150,13 @@ impl PendingLane {
 ///
 /// The pipe cannot be created or connected.
 #[cfg(any(test, feature = "testing"))]
+#[cfg_attr(
+    not(feature = "testing"),
+    expect(
+        unreachable_pub,
+        reason = "exported with feature `testing`; the crate's tests use it too"
+    )
+)]
 pub fn broker_pair() -> (ControlStream, ControlStream) {
     use interprocess::local_socket::ListenerOptions;
     use interprocess::local_socket::traits::Listener as _;
@@ -212,7 +219,7 @@ fn has_pending(stream: &ControlStream) -> bool {
 /// The duplicated handle is peeked with the [`back_off`] naps, because a named
 /// pipe has no `poll`. Holding it keeps the pipe open: drop it promptly when the
 /// stream's owner is done.
-pub struct Watch {
+pub(crate) struct Watch {
     handle: OwnedHandle,
 }
 
@@ -222,7 +229,7 @@ impl Watch {
     /// # Errors
     ///
     /// The OS refuses to duplicate the handle.
-    pub fn of(stream: &ControlStream) -> std::io::Result<Self> {
+    pub(crate) fn of(stream: &ControlStream) -> std::io::Result<Self> {
         let Stream::NamedPipe(pipe) = stream;
         Ok(Self {
             handle: pipe.as_handle().try_clone_to_owned()?,
@@ -232,7 +239,7 @@ impl Watch {
     /// Waits up to `timeout` for the stream to have something to read.
     /// `true` when it has, or when asking fails (a read is the authority on a
     /// closed or broken stream); `false` on a timeout.
-    pub fn wait_readable(&self, timeout: Duration) -> bool {
+    pub(crate) fn wait_readable(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut empty = 0u32;
         loop {
@@ -253,13 +260,13 @@ impl Watch {
 /// wait looks at between its looks at the pipe. Any thread rings it, the audio
 /// thread included: one store.
 #[derive(Clone)]
-pub struct ControlUnparker {
+pub(crate) struct ControlUnparker {
     rung: Arc<AtomicBool>,
 }
 
 impl ControlUnparker {
     /// Ends the control thread's wait now, or its next one.
-    pub fn unpark(&self) {
+    pub(crate) fn unpark(&self) {
         self.rung.store(true, Ordering::Release);
     }
 }
@@ -267,13 +274,13 @@ impl ControlUnparker {
 /// The waiting side of a control thread's wait ([`control_unparker`]): a named pipe
 /// has no `poll`, so it asks the pipe and the flag in turn and naps between
 /// asks ([`back_off`]).
-pub struct ControlWait {
+pub(crate) struct ControlWait {
     rung: Arc<AtomicBool>,
 }
 
 /// What ended a [`ControlWait::wait`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Woken {
+pub(crate) struct Woken {
     /// The control stream has something to read (or broke: the read says).
     pub stream: bool,
     /// The bell rang.
@@ -285,7 +292,7 @@ pub struct Woken {
 /// # Errors
 ///
 /// Never on this platform.
-pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
+pub(crate) fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
     let rung = Arc::new(AtomicBool::new(false));
     Ok((
         ControlUnparker {
@@ -302,7 +309,7 @@ impl ControlWait {
     /// # Errors
     ///
     /// Never on this platform.
-    pub fn wait(
+    pub(crate) fn wait(
         &self,
         stream: &ControlStream,
         timeout: Option<Duration>,

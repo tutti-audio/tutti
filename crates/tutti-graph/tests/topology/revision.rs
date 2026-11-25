@@ -95,7 +95,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
             .expect("a node");
     });
     moves(&mut ed, "replace", |ed| {
-        ed.replace(
+        ed.replace_or_swap(
             one,
             Unforkable(Out),
             Fade::new(Samples::new(64)).law(FadeLaw::EqualPower),

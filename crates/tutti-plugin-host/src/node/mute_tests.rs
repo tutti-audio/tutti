@@ -122,9 +122,11 @@ impl Rig {
 
     /// The plugin is asked for `rate` the way the pump path asks.
     fn ask(&self, rate: SampleRate) {
-        self.inner
-            .lock()
-            .set_sample_rate(main_thread(), rate, None)
+        let mut instance = self.inner.lock();
+        instance.want(|w| w.with_rate(rate));
+        instance.rate_asked();
+        instance
+            .reconcile(Some(main_thread()), None)
             .expect("the change starts");
     }
 
@@ -232,7 +234,7 @@ fn a_recall_reaches_the_node_that_holds_the_processor_while_its_successor_is_sta
     }
     let fade = Fade::new(Samples::new(0));
     editor
-        .replace(rig.key, Unforkable(successor), fade)
+        .replace_or_swap(rig.key, Unforkable(successor), fade)
         .expect("staged");
     assert!(matches!(
         editor.commit(),

@@ -18,11 +18,6 @@ enum render_notify::ParamEvent
 enum render_notify::RenderPhase
 enum status::Status
 fn bundle::declared_components
-fn cf::CfArray::len
-fn cf::CfPlist::from_binary
-fn cf::CfPlist::to_binary
-fn cf::CfString::new
-fn cf::CfUrl::to_path_string
 fn cf::cfstring_to_string_checked
 fn cf::preset_facts
 fn cf::preset_with_identity
@@ -87,14 +82,6 @@ fn render::PushScratch::new
 fn render::PushScratch::output_bus_count
 fn render::PushScratch::reset_position
 fn render::PushScratch::stage_input
-fn render::RenderBufferList::bind
-fn render::RenderBufferList::new
-fn render::RenderScratch::advance
-fn render::RenderScratch::bind_output
-fn render::RenderScratch::emit_output
-fn render::RenderScratch::new
-fn render::RenderScratch::reset_position
-fn render::RenderScratch::stage_input
 fn render::Renderer::emit_output
 fn render::Renderer::input_callback_installs
 fn render::Renderer::install_input_callback
@@ -165,10 +152,6 @@ fn unit::Unit::sysex
 fn unit::Unit::uninitialize
 mod property
 struct bundle::DeclaredComponent
-struct cf::CfArray
-struct cf::CfPlist
-struct cf::CfString
-struct cf::CfUrl
 struct cf::PresetFacts
 struct component::ComponentKey
 struct component::ComponentRef
@@ -239,8 +222,3 @@ trait property::Property
 trait property::sealed::Sealed
 type error::Result
 type midi_out::MidiOutSink
-type transport::BeatAndTempoProc
-type transport::Boolean
-type transport::MusicalTimeLocationProc
-type transport::TransportStateProc
-type transport::TransportStateProc2

@@ -148,7 +148,6 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProces
 
 # tutti-plugin-ipc
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_render_mode
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale
@@ -178,10 +177,6 @@ tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::w
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::channels
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::gain
 tutti-sampler  chain-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_speed
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_src_ratio
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_stretch_rate
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
@@ -206,8 +201,6 @@ tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::new
 tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::streaming
 tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
 tutti-sampler  ctor-result  crates/tutti-sampler/src/clip.rs::Clip::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/interp.rs::Place::for_channels
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/interp.rs::Place::for_wave
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::placed
@@ -302,7 +295,6 @@ tutti-plugin-ipc  pub-field-config  crates/tutti-plugin-ipc/src/config/audio.rs:
 tutti-plugin-types  pub-field-config  crates/tutti-plugin-types/src/measured.rs::ProbeConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/config.rs::BufferConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamerConfig
-tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoiceConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/memory_source.rs::MemorySourceConfig
 tutti-session  pub-field-config  crates/tutti-session/src/input.rs::InputConfig
 tutti-timeline  pub-field-config  crates/tutti-timeline/src/offline.rs::OfflineTimelineConfig

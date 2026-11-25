@@ -276,14 +276,14 @@ fn tapped() -> (crate::Graph, tutti_graph::NodeKey, FollowTap) {
     (graph, node, FollowTap::new(reader, "test"))
 }
 
-/// **`reopen` answers for what the graph did to the tap.** At the graph's own
-/// rate the tap is `Unchanged` and the graph is not edited; after a re-rate it
-/// is `Opened` on the new rate, then `Unchanged` again; once its node is gone
-/// it is `Gone`, and asking again edits nothing.
+/// **`reopen` answers whether it opened a reader.** At the graph's own rate
+/// it does not and the graph is not edited; after a re-rate it does, on the new
+/// rate, then does not again; once its node is gone it opens nothing and edits
+/// nothing on the second ask.
 #[test]
-fn reopen_answers_unchanged_opened_and_gone() {
+fn reopen_answers_whether_it_opened_a_reader() {
     let (mut graph, node, mut tap) = tapped();
-    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+    assert!(!tap.reopen(&mut graph));
     assert!(
         !graph.has_uncommitted_edits(),
         "nothing was asked of the graph"
@@ -293,17 +293,17 @@ fn reopen_answers_unchanged_opened_and_gone() {
         .set_sample_rate(SampleRate::SR_44K1)
         .expect("re-rates");
     let _ = graph.commit();
-    assert_eq!(tap.reopen(&mut graph), Reopened::Opened);
+    assert!(tap.reopen(&mut graph));
     assert_eq!(tap.rate(), SampleRate::SR_44K1);
     let _ = graph.commit();
-    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+    assert!(!tap.reopen(&mut graph));
 
     let _ = graph.remove(node).expect("the node is in the graph");
     graph.set_sample_rate(SampleRate::SR_48K).expect("re-rates");
     let _ = graph.commit();
-    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    assert!(!tap.reopen(&mut graph));
     let _ = graph.commit();
-    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    assert!(!tap.reopen(&mut graph));
     assert!(
         !graph.has_uncommitted_edits(),
         "a gone tap edits nothing on the second ask"

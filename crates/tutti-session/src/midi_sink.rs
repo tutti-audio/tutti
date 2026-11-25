@@ -25,6 +25,8 @@ use crate::midi::{
     Claim, Departure, Held, HostSink, LossReaders, LossWriters, OutputTiming, Retiring, Stamping,
     Sweepable, UmpOut, drain_events, loss_cells, settle, sweep_dropped,
 };
+use crate::midi_network::Joined;
+use crate::midi_record::Record;
 
 // --- The shared record ---
 
@@ -126,6 +128,9 @@ struct SinkPort {
     tap: EventTapReader,
     departure: Departure,
     out: UmpOut<HostSink>,
+    /// What the sink has been sent, which a network peer that joins is caught up
+    /// from.
+    record: Record,
     losses: LossWriters,
 }
 
@@ -153,6 +158,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             tap,
             departure,
             out,
+            record: Record::default(),
             losses,
         });
         MidiSink { claim }
@@ -160,6 +166,25 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
 }
 
 impl Sinks {
+    /// Sends the peer that `joined` what the sink it listens to has been sent
+    /// ([`Record::catch_up`]), and counts in the sink's `refused` the events the
+    /// link did not take.
+    pub(crate) fn catch_up(&mut self, joined: &Joined) {
+        let retiring = self.retiring.iter_mut().map(|going| &mut going.going);
+        let Some(port) = self
+            .ports
+            .iter_mut()
+            .chain(retiring)
+            .find(|port| port.node == joined.sink())
+        else {
+            return;
+        };
+        let setup = port.record.catch_up();
+        if !joined.send(&setup) {
+            port.losses.refused(setup.len() as u64);
+        }
+    }
+
     /// Each sink's tap on one scale of frames, the rate it was opened at: where
     /// the graph has been re-prepared at another, drains the old reader and
     /// reopens that one tap. Whether any reopened; the graph is then edited and
@@ -232,6 +257,12 @@ impl Sweepable for SinkPort {
 impl SinkPort {
     /// Reads the tap dry to the sink, and counts what did not go.
     fn drain(&mut self, timing: Option<&OutputTiming>) {
-        drain_events(&mut self.tap, Some(&mut self.out), &mut self.losses, timing);
+        drain_events(
+            &mut self.tap,
+            Some(&mut self.out),
+            &mut self.record,
+            &mut self.losses,
+            timing,
+        );
     }
 }

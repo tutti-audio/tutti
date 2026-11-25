@@ -566,7 +566,7 @@
 //!
 //! # Editing a running graph
 //!
-//! - [`Editor::replace`] swaps a node's unit with a crossfade ([`Fade`],
+//! - [`Editor::replace_or_swap`] swaps a node's unit with a crossfade ([`Fade`],
 //!   along a [`FadeLaw`]); the outgoing unit retires on the control
 //!   thread.
 //! - [`Editor::set_latency`] changes a node's declared latency (a hosted
@@ -773,7 +773,6 @@ pub use tutti_units::PlayReading;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::exec::published::Sweep;
     pub use crate::node::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };

@@ -12,7 +12,11 @@ const PATIENCE: Duration = Duration::from_secs(30);
 /// the watch's first wake rather than at open (ALSA's, while clients come and
 /// go), and a virtual endpoint is listed when the watch sees it. `what` names
 /// the device in the panic when it never is.
-pub fn listed(session: &MidiSession, what: &str, keep: impl Fn(&DeviceInfo) -> bool) -> DeviceInfo {
+pub(crate) fn listed(
+    session: &MidiSession,
+    what: &str,
+    keep: impl Fn(&DeviceInfo) -> bool,
+) -> DeviceInfo {
     let mut events = session.devices().subscribe();
     if let Some(device) = events.initial().iter().find(|d| keep(d)) {
         return device.clone();

@@ -99,7 +99,7 @@ fn a_param_set_through_the_controls_reaches_the_running_node() {
 
 /// **A by-value change is made by replacing the node.** The filter type is
 /// fixed when the band is built, so a running bell cannot become a high-pass
-/// by a setter; a high-pass faded in over it (`Editor::replace`) is how the
+/// by a setter; a high-pass faded in over it (`Editor::replace_or_swap`) is how the
 /// change reaches the audio.
 #[test]
 fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
@@ -114,7 +114,7 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     );
     let editor = s.editor_mut();
     editor
-        .replace(key, high_pass, Fade::new(Samples::new(1)))
+        .replace_or_swap(key, high_pass, Fade::new(Samples::new(1)))
         .expect("same shape");
     editor.commit().expect("commits");
     let replaced = energy(&mut s);

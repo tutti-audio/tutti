@@ -62,6 +62,10 @@ pub trait LaneKind: sealed::Sealed + Send + Sync + 'static {
     /// The range now, in a cell of its own. Control side: it locks.
     fn frozen(source: &Self::Source) -> Self::Source;
 
+    /// Frees the ranges `source` has retired and no block holds; returns how
+    /// many are still held. Control thread, from the lane's reclaimer.
+    fn reclaim(source: &Self::Source) -> usize;
+
     /// The range this block.
     fn load(range: &mut Self::Range) -> ParamRange;
 
@@ -116,6 +120,12 @@ impl LaneKind for PortLane {
         source.as_ref().map(ParamRangeCell::detached)
     }
 
+    /// The port's range cell is the port's: the graph sweeps it with the
+    /// port's other cells.
+    fn reclaim(_: &Self::Source) -> usize {
+        0
+    }
+
     #[inline]
     fn load(range: &mut Self::Range) -> ParamRange {
         range
@@ -156,6 +166,10 @@ impl LaneKind for ForeignLane {
 
     fn frozen(source: &Self::Source) -> Self::Source {
         Arc::new(Publisher::new(*source.current()))
+    }
+
+    fn reclaim(source: &Self::Source) -> usize {
+        source.reclaim()
     }
 
     #[inline]
@@ -497,7 +511,7 @@ impl ForeignLaneControls {
     /// without publishing; returns how many are still held. Control thread,
     /// every tick of its owner.
     pub fn reclaim(&self) -> usize {
-        self.lane.reclaim() + self.range.reclaim()
+        self.lane.reclaim() + ForeignLane::reclaim(&self.range)
     }
 }
 
@@ -1371,7 +1385,32 @@ impl<F: Float, K: LaneKind> IntoNode<F> for ControlLaneNode<K> {
             addr: self.addr,
             source: self.source.clone(),
         };
-        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
+        // The lane's cells, so a lane added to a session graph is swept like
+        // any node's; the reconciler inserts through an `Editor`, which
+        // discards the reclaimer, and sweeps its lanes itself.
+        let cells = LaneCells::<K> {
+            program: self.shared.program.clone(),
+            source: self.source.clone(),
+        };
+        NodeParts::new(
+            Box::new(self),
+            controls,
+            Some(Box::new(fork)),
+            Some(Box::new(cells)),
+        )
+    }
+}
+
+/// What a lane's reclaimer sweeps: its program cell and its range cell when
+/// the lane owns one ([`LaneKind::reclaim`]).
+struct LaneCells<K: LaneKind> {
+    program: Publisher<ControlProgram>,
+    source: K::Source,
+}
+
+impl<K: LaneKind> tutti_rt::Reclaim for LaneCells<K> {
+    fn reclaim(&self) -> usize {
+        self.program.reclaim() + K::reclaim(&self.source)
     }
 }
 
@@ -1432,10 +1471,11 @@ mod tests {
     }
 
     /// **A foreign lane's range a block still held when it was set anew is
-    /// freed by its controls' next `reclaim`**, with no further set; the
-    /// program-only `LaneControls::reclaim` leaves it.
+    /// freed by its controls' next `reclaim`, and by the node's reclaimer**
+    /// (what a session runs for a lane added by hand), with no further set;
+    /// the program-only `LaneControls::reclaim` leaves it.
     #[test]
-    fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
+    fn reclaim_and_the_reclaimer_free_a_range_a_block_held_across_its_replacement() {
         let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
         {
             // A block in progress across the range change.
@@ -1453,6 +1493,24 @@ mod tests {
             controls.range.retired_len(),
             0,
             "freed by the foreign controls' reclaim"
+        );
+
+        // The same through the node's reclaimer, the node now in its parts.
+        let reclaimer = IntoNode::<f32>::into_parts(node)
+            .reclaimer
+            .expect("a lane hands a reclaimer");
+        // A reader on the cell, as the node's own is, stands in for a block.
+        let mut block = controls.range.reader();
+        {
+            let _held = block.lend();
+            controls.publish_range(ParamRange::of(0.5, 0.75));
+        }
+        assert_eq!(controls.range.retired_len(), 1, "retired, pinned");
+        assert_eq!(reclaimer.reclaim(), 0);
+        assert_eq!(
+            controls.range.retired_len(),
+            0,
+            "freed by the node's reclaimer"
         );
     }
 

@@ -162,7 +162,7 @@ impl Default for UnisonConfig {
 /// One unison sub-voice's derived parameters, recomputed by every unison
 /// setter.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct UnisonVoiceParams {
+pub(crate) struct UnisonVoiceParams {
     /// Pitch ratio against the note's pitch; 1.0 is the center pitch. A bare
     /// ratio: it is the output of `Semitones::to_pitch_ratio`, and a
     /// multiplier is not one of the units.
@@ -181,7 +181,7 @@ pub struct UnisonVoiceParams {
 const PHASE_SEED: u64 = 12345;
 
 #[derive(Debug, Clone)]
-pub struct UnisonEngine {
+pub(crate) struct UnisonEngine {
     config: UnisonConfig,
     voices: [UnisonVoiceParams; MAX_UNISON_VOICES],
     rng: SplitMix64,
@@ -196,7 +196,7 @@ pub struct UnisonEngine {
 }
 
 impl UnisonEngine {
-    pub fn new(config: UnisonConfig) -> Self {
+    pub(crate) fn new(config: UnisonConfig) -> Self {
         let detune = Param::new(config.detune_cents);
         let spread = Param::new(config.stereo_spread);
         let mut engine = Self {
@@ -214,7 +214,7 @@ impl UnisonEngine {
     /// mod targets, keeping their current values (see `Param::detach`): the
     /// half of `PolySynth`'s `fork_fresh` that makes a fork render the unison
     /// it was taken with.
-    pub fn detach(&mut self) {
+    pub(crate) fn detach(&mut self) {
         self.detune.detach();
         self.spread.detach();
     }
@@ -235,7 +235,7 @@ impl UnisonEngine {
     ///
     /// `driven` is the block's detune and spread from the synth's param
     /// ports where a lane drives them; `None` reads the atomic.
-    pub fn sync_from_atomics<F: Float>(&mut self, [detune, spread]: [Option<F>; 2]) {
+    pub(crate) fn sync_from_atomics<F: Float>(&mut self, [detune, spread]: [Option<F>; 2]) {
         // A lane's value is any float; the span saturates it (a negative
         // detune is no detune), so the comparison against the stored config
         // never recomputes a block for an out-of-range lane.
@@ -254,7 +254,7 @@ impl UnisonEngine {
         }
     }
 
-    pub fn recompute_params(&mut self) {
+    pub(crate) fn recompute_params(&mut self) {
         let count = usize::from(self.config.voice_count.get());
 
         let amplitude = Amplitude::new(1.0 / (count as f64).sqrt());
@@ -297,7 +297,7 @@ impl UnisonEngine {
     /// Every call is a new draw, so each voice that starts calls this for its
     /// own stack: two notes of a chord struck together get different phases.
     /// Without `phase_randomize` every phase is [`Phase::START`].
-    pub fn randomize_phases(&mut self) -> &[UnisonVoiceParams] {
+    pub(crate) fn randomize_phases(&mut self) -> &[UnisonVoiceParams] {
         if !self.config.phase_randomize {
             for v in &mut self.voices {
                 v.phase_offset = Phase::START;
@@ -314,21 +314,21 @@ impl UnisonEngine {
     }
 
     #[inline]
-    pub fn voice_count(&self) -> UnisonVoices {
+    pub(crate) fn voice_count(&self) -> UnisonVoices {
         self.config.voice_count
     }
 
     #[inline]
-    pub fn voice_params(&self, index: usize) -> &UnisonVoiceParams {
+    pub(crate) fn voice_params(&self, index: usize) -> &UnisonVoiceParams {
         &self.voices[index.min(MAX_UNISON_VOICES - 1)]
     }
 
     #[inline]
-    pub fn all_params(&self) -> &[UnisonVoiceParams] {
+    pub(crate) fn all_params(&self) -> &[UnisonVoiceParams] {
         &self.voices[..usize::from(self.config.voice_count.get())]
     }
 
-    pub fn config(&self) -> &UnisonConfig {
+    pub(crate) fn config(&self) -> &UnisonConfig {
         &self.config
     }
 }

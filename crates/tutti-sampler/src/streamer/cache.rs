@@ -32,7 +32,7 @@ use tutti_rt::Mutex;
 /// [`identity`](tutti_platform::Asset::identity): a file's carries its stamp, so a
 /// file rewritten since is another key and misses. An asset whose identity is
 /// `None` has no key: it is never cached, and is decoded each time it is opened.
-pub struct LruCache<F: Float> {
+pub(crate) struct LruCache<F: Float> {
     inner: Mutex<Inner<F>>,
     max_entries: usize,
     max_bytes: u64,
@@ -77,7 +77,7 @@ struct CacheEntry<F: Float> {
 /// RAII guard that keeps a cache entry pinned (unevictable) for the lifetime of
 /// a stream. Acquired by [`LruCache::pin`], released on `Drop`. Held inside the
 /// streamer's stream link so it lives exactly as long as the stream.
-pub struct StreamPin {
+pub(super) struct StreamPin {
     /// The counter of the entry this pin incremented, not the entry that
     /// happens to sit under the key when it drops. `None` when there was no
     /// entry to pin.
@@ -105,7 +105,7 @@ impl<F: Float> LruCache<F> {
     /// Both bounds are targets, not guarantees: an insert that can find no
     /// unpinned victim is admitted over-budget rather than evicting a wave a
     /// live stream is still reading.
-    pub fn new(max_entries: usize, max_bytes: u64) -> Self {
+    pub(super) fn new(max_entries: usize, max_bytes: u64) -> Self {
         Self {
             inner: Mutex::new(Inner {
                 entries: HashMap::new(),
@@ -127,7 +127,7 @@ impl<F: Float> LruCache<F> {
     ///
     /// `None` is a plain miss — every caller treats it as "skip this region",
     /// never as an error.
-    pub fn get(&self, key: &Identity) -> Option<Arc<Wave<F>>> {
+    pub(super) fn get(&self, key: &Identity) -> Option<Arc<Wave<F>>> {
         let mut inner = self.lock();
         let tick = inner.next_tick();
         inner.entries.get_mut(key).map(|entry| {
@@ -149,7 +149,7 @@ impl<F: Float> LruCache<F> {
     /// nothing: admitting it would empty the cache for one file and still
     /// leave it over budget. Its holder keeps it (a stream that cannot seek
     /// holds its file on its writer, as its `Source::Whole`).
-    pub fn insert(&self, key: Identity, wave: Arc<Wave<F>>) {
+    pub(super) fn insert(&self, key: Identity, wave: Arc<Wave<F>>) {
         let size = wave_bytes(&wave);
         if size > self.max_bytes {
             return;
@@ -194,7 +194,7 @@ impl<F: Float> LruCache<F> {
     /// If the entry is absent (never admitted: an incremental stream) the
     /// guard is inert. The guard holds the entry's own counter, so its drop
     /// releases exactly what it took, whatever is under the key by then. No key (an asset that is never cached) pins nothing.
-    pub fn pin(&self, key: Option<&Identity>) -> StreamPin {
+    pub(super) fn pin(&self, key: Option<&Identity>) -> StreamPin {
         let pins = key.and_then(|key| {
             let inner = self.lock();
             let entry = inner.entries.get(key)?;
@@ -231,13 +231,13 @@ impl<F: Float> LruCache<F> {
 
     /// Number of cached entries. Test observability for eviction behavior.
     #[cfg(test)]
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.lock().entries.len()
     }
 
     /// Total cached bytes. Test observability for byte-budget eviction.
     #[cfg(test)]
-    pub fn byte_len(&self) -> u64 {
+    pub(super) fn byte_len(&self) -> u64 {
         self.lock().current_bytes
     }
 }

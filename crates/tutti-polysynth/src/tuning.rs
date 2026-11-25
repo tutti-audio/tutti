@@ -21,13 +21,13 @@ pub(crate) struct ScaleDegree {
 }
 
 impl ScaleDegree {
-    pub fn from_cents(cents: impl Into<Cents>) -> Self {
+    pub(crate) fn from_cents(cents: impl Into<Cents>) -> Self {
         Self {
             cents: cents.into(),
         }
     }
 
-    pub fn from_ratio(ratio: FrequencyRatio) -> Self {
+    pub(crate) fn from_ratio(ratio: FrequencyRatio) -> Self {
         Self {
             cents: Cents::from_pitch_ratio(ratio),
         }

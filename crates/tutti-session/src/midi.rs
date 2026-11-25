@@ -36,8 +36,9 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow, Placed, Reopened,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
+use crate::midi_record::Record;
 use crate::{
     ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
     UnfollowCause,
@@ -440,7 +441,7 @@ pub(crate) fn loss_cells() -> (LossWriters, LossReaders) {
 }
 
 impl LossWriters {
-    /// Counts `n` events its node's tap had no room for.
+    /// Counts `n` events its node's tap, or the output's record, had no room for.
     pub(crate) fn lost(&mut self, n: u64) {
         self.losses.add(tutti_units::Losses::lost(n));
     }
@@ -464,29 +465,42 @@ impl LossReaders {
 /// ([`UmpOut::send_frames`]), so the spacing of the whole drain, not of a
 /// chunk of it, is what the stamps and the send times keep. With no output the
 /// events are counted as refused in `losses`. Returns how many events did not go.
+///
+/// This is the one place an output's events are folded into its `record`: every
+/// event of the drain is observed before the destination is asked, so what an
+/// away device or a full destination refused is part of the state it is caught
+/// up to. What the record had no room for is counted lost in `losses`.
 fn route_drain<D: Destination>(
     out: Option<&mut UmpOut<D>>,
+    record: &mut Record,
     losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
     fill: impl FnOnce(&mut dyn FnMut(Frame, Ump)),
 ) -> u64 {
-    match out {
+    let refused = match out {
         Some(out) => {
             let mut batch = core::mem::take(&mut out.drained);
             batch.clear();
-            fill(&mut |frame, ump| batch.push((frame, ump)));
+            fill(&mut |frame, ump| {
+                record.observe(ump);
+                batch.push((frame, ump));
+            });
             let refused = out.send_frames(&batch, timing) as u64;
             out.drained = batch;
-            losses.refused(refused);
             refused
         }
         None => {
             let mut n = 0;
-            fill(&mut |_, _| n += 1);
-            losses.refused(n);
+            fill(&mut |_, ump| {
+                record.observe(ump);
+                n += 1;
+            });
             n
         }
-    }
+    };
+    losses.refused(refused);
+    losses.lost(record.take_lost());
+    refused
 }
 
 /// What the handles of an output port, an input port or a sink share: its
@@ -950,7 +964,13 @@ impl MidiState {
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
         let layout = nodes.map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
-        self.networks.poll(graph, &self.mpe, layout, out)
+        let edited = self.networks.poll(graph, &self.mpe, layout, out);
+        // A peer that joined hears what the output has said, and it alone: the
+        // peers already listening heard it as it was sent.
+        for joined in self.networks.take_joined() {
+            self.sinks.catch_up(&joined);
+        }
+        edited
     }
 
     /// The timing of a drain at `now`, from the engine's block clock: `None`
@@ -980,17 +1000,17 @@ impl MidiState {
             return (Vec::new(), false);
         };
         let actions = clock.heard(cx, out);
-        let reopened = clock.tap.reopen(graph);
-        if reopened == Reopened::Gone
-            && let Some(ended) = self.clock.take()
-        {
-            cx.end(
-                FollowKind::Clock(ended.kind()),
-                UnfollowCause::InputGone,
-                out,
-            );
+        if clock.tap.source_gone() {
+            if let Some(ended) = self.clock.take() {
+                cx.end(
+                    FollowKind::Clock(ended.kind()),
+                    UnfollowCause::InputGone,
+                    out,
+                );
+            }
+            return (actions, false);
         }
-        (actions, reopened == Reopened::Opened)
+        (actions, clock.tap.reopen(graph))
     }
 
     /// `Phase::Poll`, for the Machine Control the session follows: reads its
@@ -1011,12 +1031,12 @@ impl MidiState {
             .into_iter()
             .map(ClockAction::at_next_block)
             .collect();
-        let reopened = machine.tap.reopen(graph);
-        if reopened == Reopened::Gone {
+        if machine.tap.source_gone() {
             self.machine = None;
             cx.end(FollowKind::MachineControl, UnfollowCause::InputGone, out);
+            return (actions, false);
         }
-        (actions, reopened == Reopened::Opened)
+        (actions, machine.tap.reopen(graph))
     }
 
     /// `Phase::Poll`, for the tempo the session follows: reports what
@@ -1037,13 +1057,13 @@ impl MidiState {
         // What the tap holds is read at the scale it was opened at, then the
         // tap is reopened if the graph has been re-prepared at another rate.
         let heard = follow.heard();
-        let reopened = follow.tap.reopen(graph);
         cx.apply(&heard, out);
-        if reopened == Reopened::Gone {
+        if follow.tap.source_gone() {
             self.follow = None;
             cx.end(FollowKind::Tempo, UnfollowCause::InputGone, out);
+            return false;
         }
-        reopened == Reopened::Opened
+        follow.tap.reopen(graph)
     }
 
     /// The outputs' taps are on one scale of frames, the rate they were opened
@@ -1082,10 +1102,12 @@ impl MidiState {
 /// Reads `tap` dry and routes what it held to `out` (with none, the events are
 /// counted as refused), each event on its frame. The events the tap had no room
 /// for ([`EventTapReader::take_lost`]) are counted lost, and those that did not
-/// go refused, in `losses`.
+/// go refused, in `losses`. Every event is folded into `record` first
+/// ([`route_drain`]).
 pub(crate) fn drain_events<D: Destination>(
     tap: &mut EventTapReader,
     out: Option<&mut UmpOut<D>>,
+    record: &mut Record,
     losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
 ) {
@@ -1093,7 +1115,7 @@ pub(crate) fn drain_events<D: Destination>(
         frame: Frame::ZERO,
         ump: Ump([0; 4]),
     }; DRAIN_CHUNK];
-    route_drain(out, losses, timing, |push| {
+    route_drain(out, record, losses, timing, |push| {
         loop {
             let n = tap.pop_into(&mut events);
             for e in &events[..n] {
@@ -1845,11 +1867,11 @@ impl<F: Float> Midi<'_, F> {
     /// steps laid so far stay over the base, and the tempo in force stays until
     /// the new source sends one.
     ///
-    /// **A follower whose input node is removed ends** at the next
-    /// [`Poll`](crate::Phase::Poll) that finds its tap gone (when the graph's rate
-    /// changes): it is dropped, the base maps are published again as
-    /// [`unfollow_tempo`](Self::unfollow_tempo) does, and the update reports
-    /// [`MidiEvent::Unfollowed`].
+    /// **A follower whose input node is removed ends** at the
+    /// [`Poll`](crate::Phase::Poll) after the removal is applied, once it has
+    /// applied what its tap still held: it is dropped, the base maps are
+    /// published again as [`unfollow_tempo`](Self::unfollow_tempo) does, and
+    /// the update reports [`MidiEvent::Unfollowed`].
     ///
     /// # Errors
     ///

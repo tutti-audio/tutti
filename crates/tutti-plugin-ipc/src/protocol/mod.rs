@@ -305,7 +305,8 @@ mod tests {
 
     /// **The audio, news and frame enums' tags are their declaration order, pinned
     /// here as literals.** The control messages' are pinned in
-    /// `every_control_message_is_pinned_to_its_row`.
+    /// `every_control_request_is_pinned_to_its_row` and
+    /// `every_control_reply_is_pinned_to_its_row`.
     ///
     /// postcard encodes an enum as a leading varint discriminant over
     /// declaration order, so inserting a variant mid-enum silently renumbers

@@ -48,10 +48,6 @@ fn host::plugin::PluginRebinder::settled
 fn host::plugin::PluginRebinder::tick
 fn host::plugin::Rebuilt::into_parts
 mod catalog
-mod format::gui
-mod host::node
-mod host::placement
-mod host::plugin
 struct host::node::Bound
 struct host::node::PluginAnswers
 struct host::node::PluginClient

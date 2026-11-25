@@ -43,7 +43,7 @@ fn run_budget(timeout: Duration) -> Duration {
 
 /// The state a measuring probe puts one plugin in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeState {
+pub(crate) struct ProbeState {
     /// A file of the bytes the plugin's own `save_state` wrote.
     pub file: PathBuf,
     /// The plugin the state is for; `None` is the file's first plugin.

@@ -77,7 +77,7 @@
 //!    plugin that ran offline) and drop its host clock then, so the plugin is
 //!    told no `systemTime`: no clock relates to a render that runs at its own
 //!    speed. A fork, offline or live, is **watched** (`Ipc::watch`, before the
-//!    plugin is activated): its `prepare` (`IpcProcessor::retune`) settles the
+//!    plugin is activated): its `prepare` (`IpcProcessor::retune_live`) settles the
 //!    server's queued rate and mode changes and records the latency its graph
 //!    is compiled against. **The wait for each chunk is the node's, not the
 //!    plugin's:** the fork's node is handed the switch of its pipeline's wait

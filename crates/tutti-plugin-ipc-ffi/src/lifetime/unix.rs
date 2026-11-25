@@ -6,7 +6,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 /// Makes `command` start its process as the leader of a new process group.
-pub fn own_group(command: &mut Command) {
+pub(crate) fn own_group(command: &mut Command) {
     command.process_group(0);
 }
 
@@ -23,7 +23,7 @@ pub fn kill_group(leader: u32) {
 /// it: a zombie keeps its id, so its group can still be ended by it
 /// ([`kill_group`]) before the reaping lets the id go.
 #[must_use]
-pub fn has_ended(leader: u32) -> bool {
+pub(crate) fn has_ended(leader: u32) -> bool {
     use rustix::process::{WaitId, WaitIdOptions};
     let Some(pid) = i32::try_from(leader).ok().and_then(Pid::from_raw) else {
         return false;

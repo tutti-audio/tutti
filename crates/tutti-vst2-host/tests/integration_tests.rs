@@ -183,17 +183,17 @@ fn preset_trace(path: &Path) -> Vec<i32> {
 
 /// Preset-opcode trace values, mirrored from the probe's `switches.rs`.
 mod preset_event {
-    pub const BEGIN: i32 = 1;
-    pub const CHANGE: i32 = 2;
-    pub const END: i32 = 3;
+    pub(crate) const BEGIN: i32 = 1;
+    pub(crate) const CHANGE: i32 = 2;
+    pub(crate) const END: i32 = 3;
 }
 
 /// `CanDoAnswer` discriminants, mirrored from the probe's `switches.rs`.
 mod can_do {
-    pub const YES: i32 = 0;
-    pub const MAYBE: i32 = 1;
-    pub const NO: i32 = 2;
-    pub const CUSTOM: i32 = 3;
+    pub(crate) const YES: i32 = 0;
+    pub(crate) const MAYBE: i32 = 1;
+    pub(crate) const NO: i32 = 2;
+    pub(crate) const CUSTOM: i32 = 3;
 }
 
 fn render_block(instance: &mut Active, midi: &[UmpAt]) -> Vec<Vec<f32>> {

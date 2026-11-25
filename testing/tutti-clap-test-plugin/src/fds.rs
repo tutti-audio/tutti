@@ -117,7 +117,7 @@ pub(crate) fn reset() {
 /// # Safety
 /// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tutti_test_plugin_fd_poke() -> bool {
+pub(super) extern "C" fn tutti_test_plugin_fd_poke() -> bool {
     PIPE.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_mut()

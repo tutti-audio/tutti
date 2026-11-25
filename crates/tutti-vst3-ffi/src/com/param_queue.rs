@@ -50,7 +50,7 @@ pub(crate) struct QueueState {
     points: PointBuf,
 }
 
-pub struct ParamValueQueueImpl {
+pub(super) struct ParamValueQueueImpl {
     state: AudioThreadCell<QueueState>,
     /// Points the plugin's `addPoint` could not add as new points (the
     /// queue full; it kept the latest value). Atomic, not in `state`, so a COM
@@ -160,7 +160,7 @@ impl ParamValueQueueImpl {
     /// An empty queue with room for exactly `points` points (a pooled list's
     /// queue draws on the list's shared pool past them). Allocates; call it
     /// off the audio thread.
-    pub fn with_room(param_id: ParamId, points: usize) -> ComWrapper<Self> {
+    pub(super) fn with_room(param_id: ParamId, points: usize) -> ComWrapper<Self> {
         ComWrapper::new(Self {
             state: AudioThreadCell::new(QueueState {
                 param_id,
