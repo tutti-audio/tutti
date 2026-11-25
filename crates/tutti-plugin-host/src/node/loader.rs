@@ -187,6 +187,7 @@ where
     let reporting = Reporting {
         invalidate: invalidate_sink.clone(),
         transport: transport_sink.clone(),
+        rates_only: false,
     };
     // A pump the node's rebinder runs reports through the handle's listeners too.
     client.reporting = Some(reporting.clone());

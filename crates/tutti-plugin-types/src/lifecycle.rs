@@ -1564,16 +1564,25 @@ impl State {
                 }
             }
             Told::RateRefused(refusal) => {
-                if self.retuning.is_none_or(|told| told.rate != refusal.rate) {
+                let Some(told) = self.retuning.filter(|told| told.rate == refusal.rate) else {
                     return;
-                }
+                };
                 let recovery = match (&refusal.cause, self.applied) {
                     (RateRefusalCause::RolledBack { .. }, Some(running)) => {
                         Recovery::RolledBack { running }
                     }
                     _ => Recovery::Inactive,
                 };
-                self.wanted = self.applied;
+                // The refused ask, still the current one, gives up its live
+                // fields and keeps the rest (the mode); a different ask made
+                // since is the host's later one: it stays, and the plugin is
+                // behind in it again. `applied` is set here: a retune is told
+                // only to a Processor an activation made, and nothing unsets it.
+                if let (Some(wanted), Some(applied)) = (self.wanted, self.applied)
+                    && wanted.live() == told
+                {
+                    self.wanted = Some(wanted.with_live(applied.live()));
+                }
                 self.retuning = None;
                 let rate = refusal.rate;
                 let reason = Arc::new(PluginError::Bridge(Box::new(IpcError::RateRefused(

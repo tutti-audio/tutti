@@ -109,6 +109,8 @@ struct Mock {
     states: Arc<Mutex<Vec<Vec<u8>>>>,
     /// Whether the server refuses the slabs it is asked to open.
     refuse_slabs: Arc<std::sync::atomic::AtomicBool>,
+    /// The rate the server refuses, rolled back to the rate it ran at.
+    refuse_rate: Arc<Mutex<Option<SampleRate>>>,
     /// Buses the plugin announces while the server is asked to open a slab,
     /// before it answers: a change that lands inside an activation.
     announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
@@ -280,6 +282,8 @@ fn mock_featuring(
     let answers = Arc::clone(&parameters);
     let refuse_slabs = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let refusing = Arc::clone(&refuse_slabs);
+    let refuse_rate: Arc<Mutex<Option<SampleRate>>> = Arc::default();
+    let refusing_rate = Arc::clone(&refuse_rate);
     let announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>> = Arc::default();
     let announcing = Arc::clone(&announce_during_setup);
     let saved_state: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(Some(vec![1, 2, 3])));
@@ -331,7 +335,12 @@ fn mock_featuring(
                     id,
                     &ControlReply::SampleRateSet {
                         rate: *rate,
-                        refusal: None,
+                        refusal: (*refusing_rate.lock() == Some(*rate)).then(|| {
+                            tutti_plugin_types::RateRefusalCause::RolledBack {
+                                running: RATE,
+                                reason: "no".into(),
+                            }
+                        }),
                     },
                 ),
                 // The server's editor: a parent of 0 is a window it cannot embed
@@ -465,6 +474,7 @@ fn mock_featuring(
             stream,
             states,
             refuse_slabs,
+            refuse_rate,
             lists,
             announce_during_setup,
             saved_state,
@@ -559,6 +569,42 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
         )),
         "the rate is sent"
     );
+}
+
+/// **An activation at a rate the server refused is refused, and the server is
+/// asked again.** A retune sets the link's rate when it asks; the restart that
+/// follows its refusal must still tell the server the rate and answer for it,
+/// not mark a rate applied the server never took.
+#[test]
+fn an_activation_at_a_refused_rate_is_refused() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (ipc, server) = mock();
+    *server.refuse_rate.lock() = Some(SampleRate::SR_96K);
+    let (mut processor, controller) = activate(ipc, 48);
+    let retune = IpcProcessor::RETUNE.expect("a served Processor retunes live");
+    retune(&mut processor, SampleRate::SR_96K, Samples::new(48), None);
+    let ipc = Ipc::deactivate(main, processor, controller).expect("one activation rejoins");
+    ipc.bridge().audio().settle();
+    let asked = |server: &Mock| {
+        let log = server.received.lock();
+        log.iter()
+            .filter(|m| matches!(m, Sent::Control(ControlRequest::SetSampleRate { rate }) if *rate == SampleRate::SR_96K))
+            .count()
+    };
+    assert_eq!(asked(&server), 1, "the retune asked");
+    let prepared = Prepare::new(SampleRate::SR_96K, MaxBlock::of(Samples::new(48)));
+    let Err(refused) = ipc.activate(main, prepared) else {
+        panic!("the server refuses 96 kHz");
+    };
+    assert!(
+        matches!(&refused.reason, tutti_plugin_types::PluginError::Bridge(e) if matches!(**e, tutti_plugin_types::IpcError::RateRefused(_))),
+        "{}",
+        refused.reason
+    );
+    assert_eq!(asked(&server), 2, "the activation asked again");
+    let ipc = refused.plugin.expect("the plugin comes back");
+    let (_p, _c) = activate(ipc, 48);
 }
 
 /// **Only the two halves of one activation rejoin.** A pair from two

@@ -100,8 +100,8 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) figures: Arc<Figures>,
     /// Where a pump of the instance delivers what it finds, for a node whose
     /// plugin has a handle to hear it; the successor a [`Rebinder`](super::Rebinder) builds
-    /// delivers through the same. `None` for an out-of-process plugin, whose own
-    /// listener reports it.
+    /// delivers through the same. An out-of-process plugin's delivers the rates
+    /// only ([`report_rates_to`](Self::report_rates_to)): its own listener reports the rest.
     pub(super) reporting: Option<Reporting>,
     /// The host's parameter writes (`host_edits`), drained at the head of each
     /// block a Processor renders. `None` for a plugin whose writes do not come
@@ -623,6 +623,17 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         }
     }
 
+    /// Where the node's pump delivers what it finds of a rate, for an
+    /// out-of-process plugin: the refusal its activation or a tell met and its
+    /// restoring, which no listener of the bridge reports.
+    pub fn report_rates_to(&mut self, invalidate: crate::InvalidateSink) {
+        self.reporting = Some(Reporting {
+            invalidate,
+            transport: crate::TransportSink::new(),
+            rates_only: true,
+        });
+    }
+
     /// What a fork reads of this plugin's lifecycle, keeping nothing alive.
     #[must_use]
     pub fn live_view(&self) -> LiveView<L> {
@@ -744,7 +755,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// `true` when it took them live: the plugin is told no restart, needs no
     /// main thread, and the instance is not reconciled. `false` when
     /// it has none in hand or does not follow the graph (an in-process one).
-    pub(super) fn retune(&mut self, p: &tutti_graph::Prepare) -> bool {
+    pub(super) fn retune(&mut self, instance: &mut Instance<L>, p: &tutti_graph::Prepare) -> bool {
         let rate = p.sample_rate();
         let max_block = Samples::new(p.max_block().get());
         let Some(retune) = <L::Processor as Processor>::RETUNE else {
@@ -760,7 +771,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             p.quantum().map(tutti_buffers::MaxBlock::samples),
         );
         self.pipeline = processor.latency();
-        self.inner.lock().retune_asked();
+        instance.retune_asked();
         if let Some(controls) = &self.controls {
             // What a host holding the controls reads as the declared latency
             // and stamps a source with.
@@ -818,11 +829,13 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     pub(super) fn follow(&mut self, p: &tutti_graph::Prepare) {
         self.sample_rate = p.sample_rate();
         let main = MainThreadMarker::new();
+        // One lock throughout: a pump on another thread between the want and
+        // the tell would reconcile the new ask as well, and the plugin would
+        // hear it twice (and `rate_asked` after that pump would reopen the
+        // refusal it had just told).
+        let inner = Arc::clone(&self.inner);
         {
-            // One lock for both: a pump on another thread between them would
-            // reconcile the new ask, and `rate_asked` after it would reopen
-            // the refusal that pump had just told.
-            let mut instance = self.inner.lock();
+            let mut instance = inner.lock();
             instance.want(|w| {
                 let wanted = tutti_plugin_types::Prepare::new(p.sample_rate(), p.max_block())
                     .with_format(w.format())
@@ -830,17 +843,16 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
                 p.quantum().map_or(wanted, |q| wanted.with_quantum(q))
             });
             instance.rate_asked();
-        }
-        if self.retune(p) {
-            // The Processor started its pipeline over: the chunk in flight is
-            // dropped by the caller, and the rest of a SysEx open in it is cut,
-            // as at a reset. Its far end keeps its reassembler's open message
-            // across the retune (a served server does nothing for a rate it
-            // already has), so a tail taken now would complete the message with
-            // a gap.
-            self.intake.lost();
-        } else if let Err(reason) = self.inner.lock().reconcile(main, Some(&mut self.rt)) {
-            tracing::error!("a plugin refused its rate: {reason}");
+            if self.retune(&mut instance, p) {
+                // The Processor started its pipeline over: the chunk in flight is
+                // dropped by the caller, and the rest of a SysEx open in it is cut,
+                // as at a reset. Its far end keeps its reassembler's open message
+                // across the retune, so a tail taken now would complete the
+                // message with a gap.
+                self.intake.lost();
+            } else if let Err(reason) = instance.reconcile(main, Some(&mut self.rt)) {
+                tracing::error!("a plugin refused its rate: {reason}");
+            }
         }
         self.inner
             .lock()

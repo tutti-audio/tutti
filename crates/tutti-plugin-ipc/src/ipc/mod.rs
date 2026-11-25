@@ -762,7 +762,8 @@ impl Ipc {
         self.link.format
     }
 
-    /// The rate the server runs at.
+    /// The rate the pipeline's blocks are at: the last one asked of the
+    /// server, which a standing refusal says it does not run at.
     pub fn rate(&self) -> SampleRate {
         self.link.rate()
     }
@@ -887,8 +888,8 @@ impl Ipc {
     ///
     /// # Errors
     ///
-    /// Never, today: the pipeline is built, and a rate is told to the server
-    /// by a queued command that cannot be refused here.
+    /// The server refused the rate: the plugin comes back loaded, still at the
+    /// rate it ran at.
     pub fn activate_anywhere(
         self,
         prepare: Prepare,
@@ -937,9 +938,26 @@ impl Ipc {
             }
         };
         let rate = prepare.rate();
-        if rate != link.rate() {
-            let _ = link.bridge.audio().set_sample_rate(rate);
-            link.set_rate(rate);
+        // The server hears the rate whenever it may not run at it: a rate the
+        // link was not at, or one a refusal stands against (a retune moves
+        // the link's rate when it asks). Its answer is the activation's: a
+        // refusal is `Refused`, and nothing else reports it.
+        if rate != link.rate() || link.bridge.audio().rate_refusal().is_some() {
+            match link.bridge.audio().set_sample_rate_now(rate) {
+                Ok(()) => link.set_rate(rate),
+                Err(refusal) => {
+                    return Err(Refused {
+                        plugin: Some(Self {
+                            link,
+                            slab,
+                            replies: Box::new(Exclusive::new(replies)),
+                            next_seq,
+                            slab_unsure,
+                        }),
+                        reason: PluginError::Bridge(Box::new(IpcError::RateRefused(refusal))),
+                    });
+                }
+            }
         }
         // The widths are the slab's own, which is the snapshot's: one source.
         let mut batcher = Batcher::new(

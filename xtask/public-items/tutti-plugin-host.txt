@@ -126,6 +126,7 @@ fn node::client::InProcessClient::bind
 fn node::client::InProcessClient::go_offline
 fn node::client::InProcessClient::live_view
 fn node::client::InProcessClient::midi_map
+fn node::client::InProcessClient::report_rates_to
 fn node::client::InProcessClient::seed_delivery
 fn node::client::InProcessClient::set_render_mode
 fn node::client::LiveView::announce_render_mode
