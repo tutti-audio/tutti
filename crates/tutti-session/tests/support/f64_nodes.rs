@@ -32,14 +32,14 @@ pub(super) struct Gain(pub Param<Amplitude>);
 
 impl<F: Float> Node<F> for Gain {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::through_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let size = io.frames();
         let driven = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         // The param cell is an `f32` word, widened once per block.
         let cell = F::from_f64(self.0.load().get());
         let (ins, mut outs) = io.split();

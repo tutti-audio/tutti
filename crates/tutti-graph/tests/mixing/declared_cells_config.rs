@@ -34,7 +34,7 @@ impl<F: Float> From<TableConfig<F>> for Table<F> {
 
 impl<F: Float> Node<F> for Table<F> {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
@@ -89,7 +89,7 @@ impl From<SeededConfig> for Seeded {
 
 impl Node for Seeded {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

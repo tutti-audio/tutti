@@ -19,6 +19,16 @@
 //! event on. A source that has not spoken leaves the port on its base, as an
 //! unconnected port reads.
 //!
+//! **The base is smoothed by the graph**, on every port that does not land
+//! whole ([`ParamPorts::whole`]): a move of the node's cell ramps
+//! linearly from the last frame delivered to the new value over
+//! [`Prepare::declick`](crate::Prepare) frames, counted across blocks, and
+//! reaches the node as [`ParamInput::Smoothing`], which is not a drive. A
+//! retarget mid-ramp continues from the last frame. There is no ramp on a
+//! unit's first block, after a prepare or a replace, or in a fork, and a port
+//! leaving its source is carried by the source's declick alone. Before a
+//! source's first event, a driven port's base is the same ramp.
+//!
 //! A circular param ([`UnitParam::is_circular`], `Azimuth`) is wrapped onto
 //! `-180..180`, never clamped, and its moves take the short arc. **The port's
 //! frames jump by 360 where a move crosses the seam**: a ramp from 170 to
@@ -74,10 +84,13 @@ pub const MAX_PARAM_PORTS: usize = 32;
 /// take. A fixed-capacity list, so [`Shape`](crate::Shape) stays `Copy`.
 ///
 /// Each is a [`UnitAddr`], so a node with several params of one kind (a
-/// threshold per band) declares each at its own index. Two bytes per entry.
+/// threshold per band) declares each at its own index. Two bytes per entry,
+/// and one bit per port for the ports that land whole.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ParamPorts {
     len: u8,
+    /// Bit `k`: port `k` lands whole (see [`whole`](Self::whole)).
+    whole: u32,
     ids: [UnitAddr; MAX_PARAM_PORTS],
 }
 
@@ -85,6 +98,7 @@ impl ParamPorts {
     /// No modulatable params.
     pub const NONE: Self = Self {
         len: 0,
+        whole: 0,
         ids: [UnitAddr::first(UnitParam::Cutoff); MAX_PARAM_PORTS],
     };
 
@@ -92,6 +106,7 @@ impl ParamPorts {
     /// graph may list (a node's own list refuses it).
     pub(crate) const MIX: Self = Self {
         len: 1,
+        whole: 0,
         ids: [NodeMix::ADDR; MAX_PARAM_PORTS],
     };
 
@@ -184,6 +199,30 @@ impl ParamPorts {
         }
         out.len = addrs.len() as u8;
         Ok(out)
+    }
+
+    /// These ports, with the ports whose bits are set in `mask` (bit `k`: port
+    /// `k`) landing **whole**: the graph never smooths their base, so a move
+    /// of the node's own cell reaches it on the block it happens in, as a
+    /// step. A node marks a param whole when it smooths it itself or when its
+    /// value cannot be interpolated (a choice, an encoded `None`). Bits past
+    /// the last port are ignored.
+    #[must_use]
+    pub const fn whole(mut self, mask: u32) -> Self {
+        let ports = if self.len as usize == MAX_PARAM_PORTS {
+            u32::MAX
+        } else {
+            (1u32 << self.len) - 1
+        };
+        self.whole = mask & ports;
+        self
+    }
+
+    /// Whether port `k` lands whole ([`whole`](Self::whole)).
+    #[inline]
+    #[must_use]
+    pub(crate) const fn lands_whole(&self, k: usize) -> bool {
+        self.whole >> k & 1 == 1
     }
 
     /// The params, in port order.
@@ -516,17 +555,35 @@ impl Default for ParamRange {
 
 /// What a node reads for one of its params this block
 /// ([`Io::param`](crate::Io::param)).
+///
+/// Values are `f64`, the unit's own width, at any graph float; a reader that
+/// runs per sample in the graph's float reads [`narrowed`](Self::narrowed),
+/// which the graph fills once per block.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ParamInput<'a, F: Float = f32> {
-    /// Nothing modulates it: use the param's own control (the base), as the
-    /// node would with no graph around it. The fast path.
+    /// Nothing modulates it and its base is at rest: use the param's own
+    /// control (the base), as the node would with no graph around it. The
+    /// fast path.
     Base,
+    /// Nothing drives it, and the graph is moving its base: the base's value
+    /// at each frame of the block, a linear ramp from where the last block
+    /// left it to the cell's value over the declick. Not a drive: it has no
+    /// corners, [`is_driven`](Self::is_driven) is false, and a param that
+    /// lands whole is never smoothed.
+    Smoothing {
+        /// The value at each frame.
+        values: &'a [f64],
+        /// `values` in the graph's float.
+        narrow: &'a [F],
+    },
     /// The param's value at each frame of the block, and its corners. A
     /// circular param's values are wrapped, so they step by about 360 across
     /// the seam (see the module docs).
     Frames {
         /// The value at each frame.
-        values: &'a [F],
+        values: &'a [f64],
+        /// `values` in the graph's float.
+        narrow: &'a [F],
         /// The block offsets where the delivered trajectory changes piece,
         /// ascending, at most one per frame (see [`corners`](Self::corners)).
         corners: &'a [u32],
@@ -534,23 +591,44 @@ pub enum ParamInput<'a, F: Float = f32> {
 }
 
 impl<'a, F: Float> ParamInput<'a, F> {
-    /// The value on the block's **last** frame, when modulated: what a
+    /// The value on the block's **last** frame, when it has frames: what a
     /// block-rate control reads, and where a block-rate cell's own ramp ends.
-    /// `None`: nothing modulates it, read the cell.
+    /// `None`: nothing modulates or smooths it, read the cell.
     #[inline]
     #[must_use]
-    pub fn last_frame(self) -> Option<F> {
+    pub fn last_frame(self) -> Option<f64> {
         self.frames().and_then(|v| v.last().copied())
     }
 
-    /// The per-frame values, when modulated.
+    /// The per-frame values, when the param is driven or its base is being
+    /// smoothed.
     #[inline]
     #[must_use]
-    pub fn frames(self) -> Option<&'a [F]> {
+    pub fn frames(self) -> Option<&'a [f64]> {
         match self {
             Self::Base => None,
-            Self::Frames { values, .. } => Some(values),
+            Self::Smoothing { values, .. } | Self::Frames { values, .. } => Some(values),
         }
+    }
+
+    /// [`frames`](Self::frames) in the graph's float, narrowed once per block
+    /// by the graph: what a per-sample reader that runs in `F` reads.
+    #[inline]
+    #[must_use]
+    pub fn narrowed(self) -> Option<&'a [F]> {
+        match self {
+            Self::Base => None,
+            Self::Smoothing { narrow, .. } | Self::Frames { narrow, .. } => Some(narrow),
+        }
+    }
+
+    /// Whether a source drives it this block: [`Frames`](Self::Frames), not a
+    /// base the graph is smoothing. A node that steps or reports a tail for a
+    /// driven param asks this, not [`frames`](Self::frames).
+    #[inline]
+    #[must_use]
+    pub fn is_driven(self) -> bool {
+        matches!(self, Self::Frames { .. })
     }
 
     /// The block offsets, ascending, where the trajectory its event source
@@ -566,13 +644,13 @@ impl<'a, F: Float> ParamInput<'a, F> {
     ///
     /// Read after the port's delay, as the values are. A base's ramp, a
     /// connection's declick and the range clamp make none. Empty when nothing
-    /// modulates it. At most one per frame, so never more than the block's
+    /// drives it. At most one per frame, so never more than the block's
     /// length.
     #[inline]
     #[must_use]
     pub fn corners(self) -> &'a [u32] {
         match self {
-            Self::Base => &[],
+            Self::Base | Self::Smoothing { .. } => &[],
             Self::Frames { corners, .. } => corners,
         }
     }
@@ -760,12 +838,12 @@ fn speaks_for(event: &ParamEvent, param: UnitAddr) -> bool {
 /// `base(i)` on each frame before its first event ever. A first ramp starts
 /// from `base` at its own frame, whether or not a segment came before it
 /// on that frame.
-pub(crate) fn render_ramps<F: Float>(
+pub(crate) fn render_ramps(
     ramp: &mut Ramp,
     events: &[ParamEvent],
     param: UnitAddr,
-    out: &mut [F],
-    base: impl Fn(usize) -> F,
+    out: &mut [f64],
+    base: impl Fn(usize) -> f64,
     corners: &mut Corners<'_>,
 ) {
     let want = ParamAddr::unit(param);
@@ -779,7 +857,7 @@ pub(crate) fn render_ramps<F: Float>(
             match e.kind {
                 ParamKind::Ramp(r) if r.addr() == want => {
                     if !ramp.started {
-                        ramp.value = base(i).into();
+                        ramp.value = base(i);
                     }
                     ramp.start(r.raw_target(), r.duration().get(), r.shape());
                     corners.mark(i);
@@ -789,7 +867,7 @@ pub(crate) fn render_ramps<F: Float>(
                     // ramp that replaces it on this frame does: a first one
                     // starts from the base, as it would alone.
                     if !ramp.started {
-                        ramp.value = base(i).into();
+                        ramp.value = base(i);
                     }
                     let curve = Curve { timing: s.timing() };
                     // A re-send of the piece in flight is no corner; the
@@ -812,7 +890,7 @@ pub(crate) fn render_ramps<F: Float>(
                 // It arrived on this frame and holds its end from here.
                 corners.mark(i);
             }
-            control_in(v)
+            v
         } else {
             base(i)
         };
@@ -1054,26 +1132,26 @@ impl ParamRangeReader {
 /// One declared param port's running state, kept with its unit across
 /// blocks and plans.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PortState<F: Float> {
+pub(crate) struct PortState {
     /// The event source it last ran with (`None`: none).
     source: Option<EventOutputPort>,
-    /// Whether the last block delivered frames.
+    /// Whether the last block delivered frames from a source or a declick.
     modulated: bool,
     /// What the port's [`EffectiveCell`] reads, as far as this state knows.
     /// A state starts `Unknown`: the cell is the key's, and a unit placed
     /// without a crossfade replaced a state that may have left it `Driven`.
     shown: Shown,
     /// The last frame delivered.
-    last: F,
-    /// The base at the end of the last block.
-    last_base: F,
+    last: f64,
     /// Where the declick fades from; meaningful while `progress` runs.
-    hold: F,
+    hold: f64,
     /// The declick's progress; idle when none runs.
     progress: Progress,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
     ramp: Ramp,
+    /// Its base, as the graph smooths it.
+    smooth: Smooth,
 }
 
 /// What a port state knows of its [`EffectiveCell`].
@@ -1085,19 +1163,147 @@ enum Shown {
     Driven,
 }
 
-impl<F: Float> PortState<F> {
+impl PortState {
+    /// Whether the port is undriven with nothing running: no source, no frames
+    /// last block, no declick.
+    fn at_rest(&self) -> bool {
+        self.source.is_none() && !self.modulated && !self.progress.running()
+    }
+
     /// A port that has not run.
     fn new() -> Self {
         Self {
             source: None,
             modulated: false,
             shown: Shown::Unknown,
-            last: F::ZERO,
-            last_base: F::ZERO,
-            hold: F::ZERO,
+            last: 0.0,
+            hold: 0.0,
             progress: Progress::default(),
             ramp: Ramp::default(),
+            smooth: Smooth::new(),
         }
+    }
+}
+
+/// A port's base as the graph smooths it: the value on the last frame
+/// delivered, and the linear ramp from there to the base's value now, run over
+/// [`Prepare::declick`](crate::Prepare) frames across blocks, so its length
+/// does not depend on the block size. A base that moves mid-ramp starts a new
+/// ramp from the last frame delivered.
+#[derive(Clone, Copy, Debug)]
+struct Smooth {
+    /// Where the ramp started, and what it ends on.
+    from: f64,
+    to: f64,
+    /// The value on the last frame delivered; `to` once the ramp is done.
+    last: f64,
+    /// The ramp's progress; idle when none runs.
+    progress: Progress,
+    /// Whether `last` is a value delivered, not yet seeded: the first base
+    /// lands whole.
+    seeded: bool,
+}
+
+impl Smooth {
+    fn new() -> Self {
+        Self {
+            from: 0.0,
+            to: 0.0,
+            last: 0.0,
+            progress: Progress::default(),
+            seeded: false,
+        }
+    }
+
+    /// A block begins with the base at `base`: it lands whole when `whole`
+    /// (a port that lands whole, a unit's first block, a port leaving its
+    /// source), when nothing was seeded, and when it is not finite; it
+    /// starts a ramp from the last frame when it moved.
+    fn begin(&mut self, base: f64, whole: bool, declick: Samples) -> BaseLine {
+        if whole || !self.seeded || !base.is_finite() {
+            *self = Self {
+                from: base,
+                to: base,
+                last: base,
+                progress: Progress::default(),
+                seeded: true,
+            };
+        } else if base.to_bits() != self.to.to_bits() {
+            self.from = self.last;
+            self.to = base;
+            self.progress.restart(declick);
+        }
+        BaseLine {
+            from: self.from,
+            to: self.to,
+            done: self.progress.done(declick),
+            len: declick,
+            idle: self.last,
+        }
+    }
+
+    /// A lane's block of `frames` frames at `base`: it moves over the block
+    /// from where the last block left it (when that block delivered), and
+    /// the next block starts from `base`.
+    fn lane(&mut self, delivered: bool, base: f64, frames: usize) -> BaseLine {
+        let line = BaseLine {
+            from: if delivered { self.last } else { base },
+            to: base,
+            done: Samples::ZERO,
+            len: Samples::new(frames),
+            idle: base,
+        };
+        self.last = base;
+        line
+    }
+
+    /// Whether the base is seeded, at rest on `base`: this block changes
+    /// nothing.
+    fn holds(&self, base: f64) -> bool {
+        self.seeded && !self.progress.running() && base.to_bits() == self.to.to_bits()
+    }
+
+    /// Whether a ramp has frames left to run.
+    fn running(&self) -> bool {
+        self.progress.running()
+    }
+
+    /// The block has run its `frames` frames of `line`.
+    fn end(&mut self, line: BaseLine, param: UnitParam, frames: usize, declick: Samples) {
+        if self.progress.running() {
+            self.last = line.at(param, frames - 1);
+            self.progress.advance(Samples::new(frames), declick);
+        } else {
+            self.last = self.to;
+        }
+    }
+}
+
+/// A base's frames over one block: frame `i` of a linear ramp from `from` to
+/// `to` of `len` frames, of which `done` have run before the block, landing
+/// exactly on `to` on its last frame and holding it. A circular param takes
+/// the short arc.
+#[derive(Clone, Copy, Debug)]
+struct BaseLine {
+    from: f64,
+    to: f64,
+    done: Samples,
+    len: Samples,
+    /// The value the port reads undriven now: where it fades from when a
+    /// source connects.
+    idle: f64,
+}
+
+impl BaseLine {
+    #[inline]
+    fn at(self, param: UnitParam, i: usize) -> f64 {
+        ramp_in(
+            Some(param),
+            self.from,
+            self.to,
+            self.done + Samples::new(i),
+            self.len,
+        )
     }
 }
 
@@ -1106,16 +1312,19 @@ impl<F: Float> PortState<F> {
 /// with the unit's commit, so the audio thread never allocates one.
 #[derive(Debug)]
 pub(crate) struct ParamState<F: Float> {
-    ports: Vec<PortState<F>>,
+    ports: Vec<PortState>,
     /// What the ports delivered this block.
     delivered: PortFrames<F>,
     /// Whether any port delivered frames this block, is mid-declick, or has
     /// yet to run: a unit for which this is false and whose op lists no
-    /// driven port skips the whole step.
+    /// driven port skips the whole step, if every port lands whole.
     busy: bool,
     /// Where the unit is in its blocks: its first takes every port's source
     /// without a declick (see the module docs), and steps every port.
     run: Run,
+    /// Whether a port the graph smooths has stepped: the unit steps its
+    /// params every block, to see their bases move.
+    smooths: bool,
     /// Each port's live range reader, in port order (see [`ParamRanges`]);
     /// empty for a unit with no declared params and for one whose ports are
     /// unbounded.
@@ -1137,55 +1346,94 @@ enum Run {
     Later,
 }
 
+/// What a port delivered this block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Delivery {
+    /// Nothing: the node reads the base.
+    Base,
+    /// Its base's ramp ([`ParamInput::Smoothing`]).
+    Smoothing,
+    /// A source or a declick's frames ([`ParamInput::Frames`]).
+    Driven,
+}
+
 /// The per-frame values the declared ports delivered this block, and the
 /// corners of their ramps: `max` slots a port. A port's frames are read only
 /// when its step delivered them.
 #[derive(Debug)]
 struct PortFrames<F: Float> {
-    scratch: Vec<F>,
+    /// The values, in the unit's own width.
+    scratch: Vec<f64>,
+    /// `scratch` in the graph's float, narrowed once per block for each port
+    /// that delivered.
+    narrow: Vec<F>,
     /// Each port's corners this block, `max` slots a port: at most one a
     /// frame, so a port's slots never run out.
     corners: Vec<u32>,
     /// How many of each port's corner slots this block wrote.
     corner_count: [usize; MAX_PARAM_PORTS],
     max: usize,
-    /// Per port: whether this block's step delivered frames.
-    framed: [bool; MAX_PARAM_PORTS],
+    /// Per port: what this block's step delivered.
+    framed: [Delivery; MAX_PARAM_PORTS],
 }
 
 impl<F: Float> PortFrames<F> {
     /// Room for `ports` ports at blocks of up to `max` frames. Allocates.
     fn new(ports: usize, max: usize) -> Self {
         Self {
-            scratch: vec![F::ZERO; ports * max],
+            scratch: vec![0.0; ports * max],
+            narrow: vec![F::ZERO; ports * max],
             corners: vec![0; ports * max],
             corner_count: [0; MAX_PARAM_PORTS],
             max,
-            framed: [false; MAX_PARAM_PORTS],
+            framed: [Delivery::Base; MAX_PARAM_PORTS],
         }
     }
 
     /// Start a block: no port delivered frames.
     fn begin(&mut self) {
-        self.framed = [false; MAX_PARAM_PORTS];
+        self.framed = [Delivery::Base; MAX_PARAM_PORTS];
         self.corner_count = [0; MAX_PARAM_PORTS];
     }
 
-    /// Port `k`'s values this block: `None` when it reads its base.
-    fn frames(&self, k: usize, frames: usize) -> Option<&[F]> {
-        self.framed[k].then(|| &self.scratch[k * self.max..k * self.max + frames])
+    /// Port `k`'s values in the graph's float, once its block is final.
+    fn narrowed(&self, k: usize, frames: usize) -> Option<&[F]> {
+        (self.framed[k] != Delivery::Base)
+            .then(|| &self.narrow[k * self.max..k * self.max + frames])
+    }
+
+    /// Narrows port `k`'s `frames` values (of `param`), once, after they are
+    /// final. A circular param is wrapped again after the narrowing, which can
+    /// round a value just under the seam onto it.
+    fn narrow_port(&mut self, k: usize, frames: usize, param: UnitParam) {
+        let at = k * self.max;
+        let values = self.narrow[at..at + frames]
+            .iter_mut()
+            .zip(&self.scratch[at..at + frames]);
+        for (n, &v) in values {
+            *n = wrap_in(param, control_in(v));
+        }
     }
 
     /// What each of `ports` ports reads this block.
     fn inputs(&self, ports: usize, frames: usize) -> [ParamInput<'_, F>; MAX_PARAM_PORTS] {
         let mut out = [ParamInput::Base; MAX_PARAM_PORTS];
         for (k, o) in out.iter_mut().enumerate().take(ports) {
-            if self.framed[k] {
-                let at = k * self.max;
-                *o = ParamInput::Frames {
-                    values: &self.scratch[at..at + frames],
-                    corners: &self.corners[at..at + self.corner_count[k]],
-                };
+            let at = k * self.max;
+            let (values, narrow) = (
+                &self.scratch[at..at + frames],
+                &self.narrow[at..at + frames],
+            );
+            match self.framed[k] {
+                Delivery::Base => {}
+                Delivery::Smoothing => *o = ParamInput::Smoothing { values, narrow },
+                Delivery::Driven => {
+                    *o = ParamInput::Frames {
+                        values,
+                        narrow,
+                        corners: &self.corners[at..at + self.corner_count[k]],
+                    };
+                }
             }
         }
         out
@@ -1199,6 +1447,7 @@ impl<F: Float> Default for ParamState<F> {
             delivered: PortFrames::new(0, 0),
             busy: false,
             run: Run::New,
+            smooths: false,
             ranges: Vec::new(),
             lanes: Vec::new(),
         }
@@ -1226,6 +1475,7 @@ impl<F: Float> ParamState<F> {
             // seed each port (see `Run::First`).
             busy: true,
             run: Run::New,
+            smooths: false,
             ranges,
             lanes,
         }
@@ -1237,6 +1487,13 @@ impl<F: Float> ParamState<F> {
     #[inline]
     pub(crate) fn busy(&self) -> bool {
         self.busy
+    }
+
+    /// Whether a port of the unit has its base smoothed by the graph, which
+    /// is read every block ([`node_port`](Self::node_port)).
+    #[inline]
+    pub(crate) fn smooths(&self) -> bool {
+        self.smooths
     }
 
     /// State for **one** port at blocks of up to `max` frames, clamping to
@@ -1263,16 +1520,25 @@ impl<F: Float> ParamState<F> {
         self.run = Run::Later;
     }
 
+    /// A new node takes the key's state over (a replace): every base lands
+    /// whole on its next block, as a unit's first does, since the state's
+    /// last frame belongs to the node it replaces.
+    pub(crate) fn reseat(&mut self) {
+        for st in &mut self.ports {
+            st.smooth = Smooth::new();
+        }
+    }
+
     /// Whether the state can serve blocks of up to `max` frames.
     pub(crate) fn fits(&self, max: usize) -> bool {
         self.delivered.max >= max
     }
 
-    /// Port `k`'s values this block, after [`port`](Self::port): `None` when
-    /// it reads its base.
+    /// Port `k`'s values this block in the graph's float, after
+    /// [`port`](Self::port): `None` when it reads its base.
     #[inline]
-    pub(crate) fn frames(&self, k: usize, frames: usize) -> Option<&[F]> {
-        self.delivered.frames(k, frames)
+    pub(crate) fn narrowed(&self, k: usize, frames: usize) -> Option<&[F]> {
+        self.delivered.narrowed(k, frames)
     }
 
     /// What each port reads this block, after [`port`](Self::port).
@@ -1289,35 +1555,46 @@ impl<F: Float> ParamState<F> {
     /// says so.
     #[inline]
     pub(crate) fn begin(&mut self) {
-        self.delivered.begin();
-        self.busy = false;
+        // Only a port that delivered last block left anything to clear.
+        if self.busy {
+            self.delivered.begin();
+            self.busy = false;
+        }
         self.run = match self.run {
             Run::New => Run::First,
             Run::First | Run::Later => Run::Later,
         };
     }
 
-    /// Whether port `k`, undriven this block, has nothing to do: its step
-    /// would change no state and deliver nothing. Never in the unit's first
-    /// block. A port is not at rest while its last source still stands (it
-    /// changes this block), while a declick runs, or while its last block
-    /// delivered (the lane is released on the block after).
+    /// Whether port `k`, which lands whole and is undriven this block, has
+    /// nothing to do: its step would change no state and deliver nothing.
+    /// Never in the unit's first block. A port is not at rest while its last
+    /// source still stands (it changes this block), while a declick runs, or
+    /// while its last block delivered (the lane is released on the block
+    /// after). A port the graph smooths is never at rest: its base is read
+    /// every block to see it move.
     #[inline]
-    pub(crate) fn at_rest(&self, k: usize) -> bool {
-        let st = &self.ports[k];
-        self.run != Run::First && st.source.is_none() && !st.modulated && !st.progress.running()
+    pub(crate) fn at_rest(&self, k: usize, whole: bool) -> bool {
+        whole && self.run != Run::First && self.ports[k].at_rest()
     }
 
-    /// Run the fused step for declared port `k` (param `param`) over one
-    /// block: its event source this plan and the source's sorted events
-    /// (`None` when nothing drives it), and its base (`None` for a node that
-    /// cannot say, which then reads its own control, undriven). The value
-    /// is held to the port's live range as it stands at this block's start
-    /// ([`ParamRanges`]): clamped, or for a circular param wrapped (and held
-    /// to its arc). A circular param's frames jump by 360 across the seam
-    /// (see the module docs): a consumer smooths on the arc, not on the
-    /// frames. A change of source fades over `declick` frames
-    /// ([`Prepare::declick`](crate::Prepare)).
+    /// A node that cannot say its base is never driven or smoothed: it reads
+    /// its own control. No state to carry.
+    fn unsaid(&mut self, k: usize) {
+        let st = &mut self.ports[k];
+        if st.shown != Shown::Idle
+            && let Some(lane) = self.lanes.get(k)
+        {
+            lane.release();
+        }
+        *st = PortState::new();
+        st.shown = Shown::Idle;
+    }
+
+    /// Run the fused step for a lane's one port over one block: its event
+    /// source this plan and the source's sorted events (`None` when nothing
+    /// drives it), and its base `base`, which moves over the block from where
+    /// the last block left it ([`deliver`](Self::deliver)).
     pub(crate) fn port(
         &mut self,
         k: usize,
@@ -1325,21 +1602,115 @@ impl<F: Float> ParamState<F> {
         frames: usize,
         declick: Samples,
         m: Option<(EventOutputPort, &[ParamEvent])>,
-        base: Option<F>,
+        base: Option<f64>,
     ) {
-        let st = &mut self.ports[k];
         let Some(b1) = base else {
-            // A node that cannot say its base is never driven: it reads
-            // its own control. No state to carry.
-            if st.shown != Shown::Idle
-                && let Some(lane) = self.lanes.get(k)
-            {
-                lane.release();
-            }
-            *st = PortState::new();
-            st.shown = Shown::Idle;
+            self.unsaid(k);
             return;
         };
+        let st = &mut self.ports[k];
+        let line = st.smooth.lane(st.modulated, b1, frames);
+        self.deliver(k, param, frames, declick, m, line);
+    }
+
+    /// Run the fused step for a node's declared port `k` (param `param`) over
+    /// one block: its event source this plan and the source's sorted events
+    /// (`None` when nothing drives it), and its base (`None` for a node that
+    /// cannot say, which then reads its own control, undriven).
+    ///
+    /// The base is smoothed here, on the port, and nowhere else: a base that
+    /// moved ramps linearly from the last frame delivered to its value over
+    /// `declick` frames ([`Smooth`]), delivered as [`ParamInput::Smoothing`]
+    /// while it runs. The port lands whole, with no ramp, when `whole` (the
+    /// node's [`ParamPorts::whole`]), on the unit's first block, and
+    /// while it leaves a source: the source's declick alone carries that.
+    /// With a source, the ramp is what the port reads before the source's
+    /// first event.
+    #[inline]
+    pub(crate) fn node_port(
+        &mut self,
+        k: usize,
+        param: UnitAddr,
+        frames: usize,
+        declick: Samples,
+        m: Option<(EventOutputPort, &[ParamEvent])>,
+        base: Option<f64>,
+        whole: bool,
+    ) {
+        let Some(b1) = base else {
+            self.unsaid(k);
+            return;
+        };
+        let st = &self.ports[k];
+        // The common block: nothing drives it, nothing runs, the base held.
+        if m.is_none()
+            && self.run != Run::First
+            && st.shown == Shown::Idle
+            && st.at_rest()
+            && st.smooth.holds(b1)
+        {
+            return;
+        }
+        self.step_port(k, param, frames, declick, m, b1, whole);
+    }
+
+    /// [`node_port`](Self::node_port) for a port with something to do.
+    #[inline(never)]
+    fn step_port(
+        &mut self,
+        k: usize,
+        param: UnitAddr,
+        frames: usize,
+        declick: Samples,
+        m: Option<(EventOutputPort, &[ParamEvent])>,
+        b1: f64,
+        whole: bool,
+    ) {
+        self.smooths |= !whole;
+        let first = self.run == Run::First;
+        let st = &mut self.ports[k];
+        let leaving = m.is_none() && (st.source.is_some() || st.progress.running());
+        let line = st.smooth.begin(b1, whole || first || leaving, declick);
+        let driven = self.deliver(k, param, frames, declick, m, line);
+        if !driven && self.ports[k].smooth.running() {
+            let PortFrames {
+                scratch,
+                max,
+                framed,
+                ..
+            } = &mut self.delivered;
+            for (i, o) in scratch[k * *max..k * *max + frames].iter_mut().enumerate() {
+                *o = line.at(param.param, i);
+            }
+            framed[k] = Delivery::Smoothing;
+            self.delivered.narrow_port(k, frames, param.param);
+            self.busy = true;
+        }
+        self.ports[k].smooth.end(line, param.param, frames, declick);
+    }
+
+    /// The step both kinds of port share: the port's source (or the declick
+    /// off it), its range and its [`EffectiveCell`], with `line` the base
+    /// the port reads before its source's first event and while it fades to
+    /// no source (`line.idle`: the value it reads undriven now). A circular
+    /// param's frames jump by 360 across the seam (see the module docs): a
+    /// consumer smooths on the arc, not on the frames. A change of source
+    /// fades over `declick` frames ([`Prepare::declick`](crate::Prepare)).
+    /// The value is held to the port's live range as it stands at this
+    /// block's start ([`ParamRanges`]): clamped, or for a circular param
+    /// wrapped (and held to its arc).
+    ///
+    /// Whether the port delivered [`Delivery::Driven`] frames.
+    fn deliver(
+        &mut self,
+        k: usize,
+        param: UnitAddr,
+        frames: usize,
+        declick: Samples,
+        m: Option<(EventOutputPort, &[ParamEvent])>,
+        line: BaseLine,
+    ) -> bool {
+        let st = &mut self.ports[k];
         let source = m.map(|(from, _)| from);
         if self.run == Run::First {
             // The unit's first block: nothing to fade from (module docs).
@@ -1347,7 +1718,7 @@ impl<F: Float> ParamState<F> {
         } else if source != st.source {
             // The source changed: fade from where the port was, and start
             // the new source's ramp at rest.
-            st.hold = if st.modulated { st.last } else { b1 };
+            st.hold = if st.modulated { st.last } else { line.idle };
             st.progress.restart(declick);
             st.source = source;
             st.ramp = Ramp::default();
@@ -1365,15 +1736,15 @@ impl<F: Float> ParamState<F> {
                 st.shown = Shown::Idle;
             }
             st.modulated = false;
-            return;
+            return false;
         }
-        let from = if st.modulated { st.last_base } else { b1 };
         let PortFrames {
             scratch,
             corners: corner_slots,
             corner_count,
             max: slot,
             framed,
+            ..
         } = &mut self.delivered;
         let out = &mut scratch[k * *slot..k * *slot + frames];
         match m {
@@ -1384,15 +1755,7 @@ impl<F: Float> ParamState<F> {
                     events,
                     param,
                     out,
-                    |i| {
-                        ramp_in(
-                            Some(param.param),
-                            from,
-                            b1,
-                            Samples::new(i),
-                            Samples::new(frames),
-                        )
-                    },
+                    |i| line.at(param.param, i),
                     &mut corners,
                 );
                 corner_count[k] = corners.len();
@@ -1409,13 +1772,7 @@ impl<F: Float> ParamState<F> {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = ramp_in(
-                        Some(param.param),
-                        from,
-                        b1,
-                        Samples::new(i),
-                        Samples::new(frames),
-                    );
+                    *o = line.at(param.param, i);
                 }
             }
         }
@@ -1426,7 +1783,7 @@ impl<F: Float> ParamState<F> {
                 if j >= declick {
                     break;
                 }
-                let (out, inn) = declick_gains::<F>(j, declick);
+                let (out, inn) = declick_gains::<f64>(j, declick);
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
@@ -1441,13 +1798,12 @@ impl<F: Float> ParamState<F> {
             st.progress.advance(Samples::new(frames), declick);
         }
         st.last = out[frames - 1];
-        st.last_base = b1;
         st.modulated = true;
         // One store a block, only while the port is driven or fading: the
         // lane's last frame, unless it is not finite, which is never latched
         // (the read then answers the base).
         if let Some(lane) = self.lanes.get(k) {
-            let last: f64 = st.last.into();
+            let last = st.last;
             if last.is_finite() {
                 lane.deliver(last, st.shown != Shown::Driven);
                 st.shown = Shown::Driven;
@@ -1456,8 +1812,10 @@ impl<F: Float> ParamState<F> {
                 st.shown = Shown::Idle;
             }
         }
-        framed[k] = true;
+        framed[k] = Delivery::Driven;
+        self.delivered.narrow_port(k, frames, param.param);
         self.busy = true;
+        true
     }
 }
 
@@ -1473,322 +1831,4 @@ impl<F: Float> Drop for ParamState<F> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::node::param_event::{ParamEvent, ParamRamp};
-    use crate::node::time::Offset;
-    use tutti_units::{Hz, ParamKey, Real, Samples};
-
-    /// A NaN at either end is no range; an infinite end is a range; `of` is
-    /// `new` for bounds that are not NaN.
-    #[test]
-    fn a_range_holds_no_nan_bound() {
-        assert_eq!(ParamRange::new(f64::NAN, 1.0), None);
-        assert_eq!(ParamRange::new(0.0, f64::NAN), None);
-        assert_eq!(ParamRange::new(f64::NAN, f64::NAN), None);
-        let open = ParamRange::new(f64::NEG_INFINITY, f64::INFINITY).expect("infinite bounds");
-        assert_eq!(open, ParamRange::UNBOUNDED);
-        let r = ParamRange::new(-1.0, 2.0).expect("finite bounds");
-        assert_eq!(r, ParamRange::of(-1.0, 2.0));
-        assert_eq!((r.min(), r.max()), (-1.0, 2.0));
-    }
-
-    /// `of` refuses a NaN bound by panicking, as a literal's error.
-    #[test]
-    #[should_panic(expected = "not NaN")]
-    fn of_panics_on_a_nan_bound() {
-        let _ = ParamRange::of(f64::NAN, 0.0);
-    }
-
-    const AZ: Option<UnitParam> = Some(UnitParam::Azimuth);
-    const EL: Option<UnitParam> = Some(UnitParam::Elevation);
-
-    /// An arc across ±180 contains 180 (and its neighbours either side) and
-    /// not 0, where `new(170, -170)` ordered would read the opposite arc.
-    #[test]
-    fn an_arc_across_180_contains_180_and_not_0() {
-        let behind = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0)).view(AZ);
-        for v in [180.0, -180.0, 165.0, -165.0, 160.0, -160.0] {
-            assert!(behind.contains(v), "{v}");
-        }
-        for v in [0.0, 90.0, -90.0, 159.0, -159.0] {
-            assert!(!behind.contains(v), "{v}");
-        }
-        // The same bounds as a line are the opposite, wide range: the trap.
-        let line = ParamRange::of(160.0, 200.0).view(EL);
-        assert!(line.contains(180.0) && !line.contains(-180.0));
-        assert_eq!(behind.span(), 40.0);
-    }
-
-    /// A circular range's span is its arc's length, the whole circle for an
-    /// unbounded or wide one; a line's is `max - min`.
-    #[test]
-    fn a_circular_ranges_span_is_its_arcs_length() {
-        assert_eq!(ParamRange::UNBOUNDED.view(AZ).span(), 360.0);
-        assert_eq!(ParamRange::of(-180.0, 180.0).view(AZ).span(), 360.0);
-        let arc = |half| ParamRange::arc(Azimuth::new(0.0), ArcDegrees::new(half)).view(AZ);
-        assert_eq!(arc(90.0).span(), 180.0);
-        assert_eq!(arc(400.0).span(), 360.0);
-        assert_eq!(ParamRange::of(-90.0, 90.0).view(EL).span(), 180.0);
-        assert!(ParamRange::UNBOUNDED.view(EL).span().is_infinite());
-        assert!(ParamRange::UNBOUNDED.view(None).span().is_infinite());
-    }
-
-    /// `constrain` wraps for a circle (190 is -170, not 180) and clamps for a
-    /// line; an arc holds to its nearer end.
-    #[test]
-    fn constrain_wraps_a_circle_and_clamps_a_line() {
-        let r = ParamRange::of(-180.0, 180.0);
-        assert_eq!(r.view(AZ).constrain(190.0), -170.0);
-        assert_eq!(r.view(EL).constrain(190.0), 180.0);
-        let arc = ParamRange::arc(Azimuth::new(90.0), ArcDegrees::new(30.0)).view(AZ);
-        assert_eq!(arc.constrain(100.0), 100.0);
-        assert_eq!(arc.constrain(170.0), 120.0);
-        assert_eq!(arc.constrain(10.0), 60.0);
-        assert_eq!(
-            arc.constrain(-170.0),
-            120.0,
-            "the near end is the short way round"
-        );
-    }
-
-    /// A ramp event starts on its frame and lands on its target on its last
-    /// frame; a zero-length one is a step on its frame.
-    #[test]
-    fn a_ramp_lands_on_its_last_frame() {
-        let ev = |at: usize, t: f64, len: usize| {
-            ParamEvent::ramp(
-                Offset::of(Samples::new(at), Samples::new(16)),
-                ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(t), Samples::new(len)),
-            )
-        };
-        let events = [ev(4, 100.0, 4), ev(12, -5.0, 0)];
-        let mut r = Ramp::default();
-        let mut out = [0.0f32; 16];
-        render_ramps(
-            &mut r,
-            &events,
-            UnitParam::Cutoff.into(),
-            &mut out,
-            |_| 0.0,
-            &mut Corners::new(&mut [0; 4096]),
-        );
-        assert_eq!(&out[..4], &[0.0; 4], "nothing before the event");
-        assert_eq!(out[4], 25.0);
-        assert_eq!(out[7], 100.0, "on target at the ramp's last frame");
-        assert_eq!(out[11], 100.0, "held");
-        assert_eq!(out[12], -5.0, "a step lands on its frame");
-        // Another param's ramp is not this port's.
-        let mut r = Ramp::default();
-        render_ramps(
-            &mut r,
-            &events,
-            UnitParam::Q.into(),
-            &mut out,
-            |_| 0.0,
-            &mut Corners::new(&mut [0; 4096]),
-        );
-        assert!(out.iter().all(|&x| x == 0.0));
-    }
-
-    /// A segment and then a ramp on one frame, as a source's first events:
-    /// the ramp replaces the segment from the base at that frame, as it
-    /// would alone, under a base that moves every frame.
-    #[test]
-    fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
-        use crate::node::param_event::ParamSegment;
-        let at = Offset::of(Samples::new(4), Samples::new(8));
-        let seg = ParamSegment::new(
-            ParamKey::<Hz>::CUTOFF,
-            Hz::new(5.0),
-            Hz::new(9.0),
-            Samples::new(20),
-        );
-        let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(2));
-        let base = |i: usize| 1.0 + i as f32;
-        let mut after_segment = [0.0f32; 8];
-        let events = [ParamEvent::segment(at, seg), ParamEvent::ramp(at, ramp)];
-        render_ramps(
-            &mut Ramp::default(),
-            &events,
-            UnitParam::Cutoff.into(),
-            &mut after_segment,
-            base,
-            &mut Corners::new(&mut [0; 4096]),
-        );
-        let mut alone = [0.0f32; 8];
-        let events = [ParamEvent::ramp(at, ramp)];
-        render_ramps(
-            &mut Ramp::default(),
-            &events,
-            UnitParam::Cutoff.into(),
-            &mut alone,
-            base,
-            &mut Corners::new(&mut [0; 4096]),
-        );
-        assert_eq!(after_segment, [1.0, 2.0, 3.0, 4.0, 2.5, 0.0, 0.0, 0.0]);
-        assert_eq!(after_segment, alone, "as the ramp alone");
-    }
-
-    /// A linear ramp renders what the port rendered before ramps had a
-    /// shape, bit for bit: `from + (target - from) · (done / len)`, written
-    /// out here, at every frame of ramps of many lengths and spans.
-    #[test]
-    fn a_linear_ramp_renders_the_unshaped_bits() {
-        for len in [1usize, 2, 3, 7, 10, 64, 97, 1000] {
-            for (from, target) in [(0.0f64, 1.0f64), (0.3, -7.9), (440.0, 1234.5)] {
-                // The port renders in `f64` and crosses to `f32` once a frame:
-                // the oracle is the same line, from the base the lane gives it.
-                let from32 = f32::from_unit(Hz::new(from));
-                let start = f64::from(from32);
-                let frames = len + 4;
-                let events = [ParamEvent::ramp(
-                    Offset::of(Samples::new(1), Samples::new(frames)),
-                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
-                )];
-                let mut r = Ramp::default();
-                let mut out = vec![0.0f32; frames];
-                render_ramps(
-                    &mut r,
-                    &events,
-                    UnitParam::Cutoff.into(),
-                    &mut out,
-                    |_| from32,
-                    &mut Corners::new(&mut vec![0; frames]),
-                );
-                for (j, &v) in out[1..].iter().enumerate() {
-                    let done = j + 1;
-                    let want = f32::from_unit(Hz::new(if done >= len {
-                        target
-                    } else {
-                        start + (target - start) * (done as f64 / len as f64)
-                    }));
-                    assert_eq!(v.to_bits(), want.to_bits(), "len {len}, frame {j}");
-                }
-            }
-        }
-    }
-
-    /// A list a node cannot declare is a named error, not a panic.
-    #[test]
-    fn an_undeclarable_list_is_a_named_error() {
-        use UnitParam::*;
-        let kinds = [
-            Cutoff, Q, Drive, Wet, Threshold, Ratio, Attack, Release, Volume,
-        ];
-        assert_eq!(
-            ParamPorts::try_new(&kinds).map(|p| p.len()),
-            Ok(kinds.len())
-        );
-        let over = [Cutoff; MAX_PARAM_PORTS + 1];
-        assert_eq!(
-            ParamPorts::try_new(&over),
-            Err(ParamPortsError::TooMany {
-                count: MAX_PARAM_PORTS + 1
-            })
-        );
-        assert_eq!(
-            ParamPorts::try_new(&[Q, Cutoff, Q]),
-            Err(ParamPortsError::Duplicate(Q.into()))
-        );
-    }
-
-    /// The port's corners follow `ParamInput::corners`' rule: a new
-    /// segment's frame and its arrival are corners; the piece in flight sent
-    /// again, resumed (a source's re-send, a resync), is none; a step is one
-    /// corner; a ramp's frame and the frame it lands on are corners.
-    #[test]
-    fn corners_are_where_the_trajectory_changes_piece() {
-        use crate::node::param_event::ParamSegment;
-        let key = ParamKey::<Hz>::CUTOFF;
-        let at = |i: usize| Offset::of(Samples::new(i), Samples::new(64));
-        let seg = |from: f64, to: f64, len: usize| {
-            ParamSegment::new(key, Hz::new(from), Hz::new(to), Samples::new(len))
-        };
-        let corners = |events: &[ParamEvent]| {
-            let mut buf = [0u32; 64];
-            let mut c = Corners::new(&mut buf);
-            render_ramps(
-                &mut Ramp::default(),
-                events,
-                UnitParam::Cutoff.into(),
-                &mut [0.0; 64],
-                |_| 0.0,
-                &mut c,
-            );
-            let n = c.len();
-            buf[..n].to_vec()
-        };
-        // A segment at 4 over 10 frames, in the ramp convention (its frame
-        // one step in): its frame and the frame it lands on, 13.
-        let a = seg(1.0, 2.0, 10);
-        assert_eq!(corners(&[ParamEvent::segment(at(4), a)]), [4, 13]);
-        // The same piece re-sent resumed at 9, five frames on: still 4, 13.
-        let resent = a.resumed(a.position() + Samples::new(5), a.length());
-        assert_eq!(
-            corners(&[
-                ParamEvent::segment(at(4), a),
-                ParamEvent::segment(at(9), resent)
-            ]),
-            [4, 13]
-        );
-        // Re-sent after it arrived, at rest on its end: no corner either.
-        let rested = a.resumed(a.length(), a.length());
-        assert_eq!(
-            corners(&[
-                ParamEvent::segment(at(4), a),
-                ParamEvent::segment(at(30), rested)
-            ]),
-            [4, 13]
-        );
-        // A different piece at 9 is a corner, and so is its own arrival.
-        let b = seg(1.5, 3.0, 4);
-        assert_eq!(
-            corners(&[ParamEvent::segment(at(4), a), ParamEvent::segment(at(9), b)]),
-            [4, 9, 12]
-        );
-        // A step is one corner on its frame.
-        assert_eq!(
-            corners(&[ParamEvent::segment(at(7), seg(0.0, 5.0, 0))]),
-            [7]
-        );
-        // A ramp of 3 frames at 20: its frame and the frame it lands on, 22.
-        let ramp = ParamRamp::new(key, Hz::new(8.0), Samples::new(3));
-        assert_eq!(corners(&[ParamEvent::ramp(at(20), ramp)]), [20, 22]);
-    }
-
-    /// **A range's two bounds are one publish's.** While another thread
-    /// publishes `-k..k` as fast as it can, a reader that lends once per
-    /// block never reads a `min` that is not the negation of its `max` (a
-    /// torn pair would), and it ends on the last publish; the cell has
-    /// nothing retired once the reader is idle.
-    #[test]
-    fn a_range_is_read_whole_while_another_thread_publishes() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        const LAST: u32 = 20_000;
-        let addr: UnitAddr = UnitParam::Cutoff.into();
-        let ranges = ParamRanges::new(ParamPorts::of(&[addr]));
-        let mut reader = ranges.readers().remove(0);
-        let done = AtomicBool::new(false);
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                for k in 1..=LAST {
-                    let k = f64::from(k);
-                    assert!(ranges.store(addr, ParamRange::of(-k, k)));
-                }
-                done.store(true, Ordering::Release);
-            });
-            loop {
-                let finished = done.load(Ordering::Acquire);
-                let r = reader.load();
-                assert_eq!(r.min(), -r.max(), "one publish's bounds: {r:?}");
-                if finished {
-                    break;
-                }
-            }
-        });
-        let last = f64::from(LAST);
-        assert_eq!(reader.load(), ParamRange::of(-last, last));
-        assert_eq!(ranges.reclaim(), 0, "nothing is held once the reader idles");
-    }
-}
+mod tests;

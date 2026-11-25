@@ -614,10 +614,12 @@ pub trait Node<F: Float = f32>: Send + 'static {
 
     /// The **base** of declared param `port` ([`Shape::params`]): the current
     /// value of the node's own control for it — the `Param<U>` its
-    /// `Controls` hand out. The executor reads it once per block for a
-    /// modulated param and ramps it across the block under the modulation;
-    /// an unmodulated param is not asked (the node reads its control
-    /// itself, [`ParamInput::Base`](crate::ParamInput::Base)).
+    /// `Controls` hand out. The executor reads it once per block for every
+    /// port that does not [land whole](crate::ParamPorts::whole), to
+    /// smooth a move of it ([`ParamInput::Smoothing`](crate::ParamInput::Smoothing))
+    /// and to read before a source's first event; a port that lands whole
+    /// and is not driven is not asked (the node reads its control itself,
+    /// [`ParamInput::Base`](crate::ParamInput::Base)).
     ///
     /// `None`, the default, is a node that cannot say: its param is then
     /// never modulated — it keeps reading [`ParamInput::Base`](crate::ParamInput::Base)

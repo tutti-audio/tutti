@@ -190,6 +190,8 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     transport: TransportPosition,
     inputs: Vec<Vec<F>>,
     params: Vec<Option<Vec<F>>>,
+    /// `params` widened.
+    wide: Vec<Vec<f64>>,
     outputs: Vec<Vec<F>>,
     events_in: Vec<Vec<Event>>,
     events_out: Vec<CappedVec<Event>>,
@@ -321,6 +323,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         };
         Self {
             params: vec![None; shape.params.as_slice().len()],
+            wide: vec![Vec::new(); shape.params.as_slice().len()],
             events_in: events(shape.event_in),
             events_out: (0..usize::from(shape.event_out))
                 .map(|_| CappedVec::with_capacity(HAND_EVENT_CAPACITY))
@@ -398,6 +401,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             );
         }
         self.params[k] = values.map(<[F]>::to_vec);
+        self.wide[k] = values.map_or_else(Vec::new, |v| v.iter().map(|x| x.to_f64()).collect());
     }
 
     /// Play `events` on event input `port` in the **next** block only (each
@@ -518,10 +522,11 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         let mut out_refs: [&mut [F]; RIG_MAX_CHANNELS] =
             core::array::from_fn(|_| outs.next().map_or(&mut [][..], |c| &mut c[..len]));
         let mut params = [ParamInput::Base; crate::node::param::MAX_PARAM_PORTS];
-        for (slot, p) in params.iter_mut().zip(&self.params) {
+        for ((slot, p), wide) in params.iter_mut().zip(&self.params).zip(&self.wide) {
             if let Some(v) = p {
                 *slot = ParamInput::Frames {
-                    values: &v[..len],
+                    values: &wide[..len],
+                    narrow: &v[..len],
                     corners: &[],
                 };
             }

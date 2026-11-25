@@ -8,7 +8,7 @@ use tutti_units::{Frame, Latency, Samples, UnitAddr};
 
 use crate::event::types::{Event, EventKind};
 use crate::node::io::Io;
-use crate::node::param::ParamInput;
+use crate::node::param::{ParamInput, ParamPorts};
 use crate::node::param_event::{ParamEvent, ParamSegment};
 use crate::node::shape::Shape;
 use crate::node::{Cx, Node, Prepare, Resolution, Status};
@@ -34,7 +34,7 @@ impl ParamEcho {
 
 impl Node for ParamEcho {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).param_addrs(&[self.param])
+        Shape::through_unassigned(ChannelLayout::MONO).param_ports(ParamPorts::of(&[self.param]))
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -42,7 +42,9 @@ impl Node for ParamEcho {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         match io.param(0) {
             ParamInput::Base => io.output(0).fill(0.0),
-            ParamInput::Frames { values: v, .. } => io.output(0).copy_from_slice(v),
+            ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+                io.output(0).copy_from_slice(v);
+            }
         }
         Status::Modified
     }

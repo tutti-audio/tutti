@@ -105,7 +105,7 @@ impl<F: Float> Node<F> for OscillatorNode {
         Shape::source_unassigned(ChannelLayout::MONO)
             .cost(tutti_graph::Cost::Light)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, prepare: &Prepare) {
@@ -119,10 +119,10 @@ impl<F: Float> Node<F> for OscillatorNode {
         let size = io.frames();
         let frequency = self
             .declared_param::<{ UnitParam::Frequency as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let level = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let frequency_cell = self.cells.frequency.load().get();
         let level_cell = self.cells.level.load().get();
         let out = io.output(0);

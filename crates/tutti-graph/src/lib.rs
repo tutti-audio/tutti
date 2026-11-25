@@ -284,13 +284,14 @@
 //! impl Node for Volume {
 //!     fn shape(&self) -> Shape {
 //!         Shape::through_unassigned(ChannelLayout::MONO)
-//!             .param_addrs(self.declared_ports().as_slice())
+//!             .param_ports(self.declared_ports())
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 //!         let level = self
 //!             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-//!             .last_frame()
+//!             .narrowed()
+//!             .and_then(|v| v.last().copied())
 //!             .unwrap_or_else(|| f32::from_unit(self.level.load()));
 //!         io.channel(0).map(|x| x * level);
 //!         Status::Modified
@@ -319,8 +320,12 @@
 //!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render_input(Planes::new(&[&[1.0; 4]]).unwrap())[0], [1.0; 4]);
-//! // A host sets it by address; the next block reads the cell.
+//! // A host sets it by address; the graph ramps the base to it over the
+//! // declick (5 ms), and the node then reads the cell again.
 //! assert!(controls.set(UnitParam::Volume, 0.25));
+//! for _ in 0..5 {
+//!     r.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! }
 //! assert_eq!(r.render_input(Planes::new(&[&[1.0; 4]]).unwrap())[0], [0.25; 4]);
 //! ```
 //!

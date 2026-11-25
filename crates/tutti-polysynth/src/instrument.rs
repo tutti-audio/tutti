@@ -77,7 +77,7 @@ impl Patch for OneVoice {
 tutti_graph::declare_params!([V: InstrumentVoice] NoteInstrument<V>,
     InstrumentConfig<C: Clone>, InstrumentCells<C: Clone> {
     required { voice: C, rules: VoiceConfig }
-    params { Volume => gain: Amplitude = Amplitude::UNITY }
+    params { Volume => gain: Amplitude { whole } = Amplitude::UNITY }
     options { group: MidiGroup = MidiGroup::FIRST, device: SysexDeviceId = SysexDeviceId::DEFAULT }
 });
 
@@ -203,7 +203,7 @@ impl<V: InstrumentVoice> Node<V::Float> for NoteInstrument<V> {
     fn shape(&self) -> Shape {
         Self::PORTS
             .tail(Tail::Unbounded)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
             .chase(VoiceAllocator::CHASE_MESSAGES as u32)
     }
 
@@ -226,7 +226,7 @@ impl<V: InstrumentVoice> Node<V::Float> for NoteInstrument<V> {
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
         {
-            Some(lane) => Amplitude::new(lane.into()),
+            Some(lane) => Amplitude::new(lane),
             None => {
                 let cell = self.cells.gain.load();
                 if cell.get().is_finite() {

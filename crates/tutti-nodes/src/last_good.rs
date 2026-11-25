@@ -73,8 +73,8 @@ impl LastGood<f64> {
     /// A block's value of a control the graph may drive: the signal's `driven` value (its last
     /// frame), else the `cell`'s, held at the last finite one.
     #[inline]
-    pub(crate) fn block<F: Float>(&mut self, driven: Option<F>, cell: f64) -> f64 {
-        self.read(driven.map_or(cell, Into::into))
+    pub(crate) fn block(&mut self, driven: Option<f64>, cell: f64) -> f64 {
+        self.read(driven.unwrap_or(cell))
     }
 
     /// A level the cell holds, as the output's float: held at the last finite one.
