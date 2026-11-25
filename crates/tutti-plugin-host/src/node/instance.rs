@@ -663,6 +663,15 @@ impl<L: Loaded> Instance<L> {
         self.wanted().mode()
     }
 
+    /// The render mode the plugin runs in, as it has answered: a mode told to
+    /// it by the host's bridge directly counts once the plugin has taken it,
+    /// where [`render_mode`](Self::render_mode) is what the host wants.
+    pub(super) fn running_mode(&self) -> RenderMode {
+        self.state
+            .applied()
+            .map_or_else(|| self.render_mode(), |applied| applied.mode())
+    }
+
     /// Asks for the plugin to run in `mode`. Main thread.
     ///
     /// What happens is the plugin's

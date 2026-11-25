@@ -431,6 +431,7 @@ fn mock_with(
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             latency_samples: Samples::new(5),
+            features: tutti_plugin_types::Features::RENDER_MODE,
             ..PluginWiring::default()
         },
         format: FloatWidth::F32,

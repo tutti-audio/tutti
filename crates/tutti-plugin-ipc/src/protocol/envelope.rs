@@ -623,8 +623,9 @@ messages! {
 pub enum ModeOutcome {
     /// The plugin runs in the mode.
     Took,
-    /// The plugin has a render mode and did not take this one: it runs in the
-    /// mode it had.
+    /// The plugin did not take the mode: it has a render mode and runs in the
+    /// one it had, or there was no prepared plugin to tell it to (as a rate
+    /// with nothing to apply it to is refused).
     Refused,
     /// The plugin has no render mode: it renders the same either way.
     Unsupported,

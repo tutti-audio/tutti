@@ -349,6 +349,13 @@ impl ProbeEnv {
         self
     }
 
+    /// Withhold the `clap.render` extension: a plugin whose rendering does not
+    /// depend on the mode.
+    pub(crate) fn without_render(mut self) -> Self {
+        self.set("TUTTI_CLAP_PROBE_RENDER_EXTENSION", "0".to_string());
+        self
+    }
+
     /// Make `clap.render.set` refuse the offline mode.
     pub(crate) fn refuse_offline(mut self) -> Self {
         self.set("TUTTI_CLAP_PROBE_REFUSE_OFFLINE", "1".to_string());

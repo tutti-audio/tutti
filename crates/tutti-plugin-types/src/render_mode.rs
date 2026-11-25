@@ -44,7 +44,8 @@ pub enum ModeTold {
     /// The plugin has a render mode and did not take this one: it runs in the
     /// mode it had.
     Refused,
-    /// The plugin has no render mode to tell.
+    /// The plugin has no render mode to tell. Asked one anyway, the lifecycle
+    /// reads it as a refusal: the plugin did not take it.
     Unsupported,
     /// The plugin was told and answers later, through
     /// [`Control::take_answers`](crate::Control::take_answers).

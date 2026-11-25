@@ -184,18 +184,19 @@ struct Live {
 }
 
 impl Prepare {
-    /// What an activation takes and nothing else: the callback size, which only
-    /// a retune takes, and the render mode, which a plugin may take live, are
-    /// set aside, and a block ceiling at or below the one `told` is the one it
-    /// was told (its blocks are split to it).
-    fn restart_key(self, told: Self) -> Self {
+    /// What an activation takes and nothing else: the render mode, which a
+    /// plugin may take live, is set aside, and so is the callback size unless
+    /// `retunes` (only a Processor that retunes takes it, and one out of hand
+    /// is activated for it); a block ceiling at or below the one `told` is the
+    /// one it was told (its blocks are split to it).
+    fn restart_key(self, told: Self, retunes: bool) -> Self {
         let max_block = if self.max_block.get() > told.max_block.get() {
             self.max_block
         } else {
             told.max_block
         };
         Self {
-            quantum: None,
+            quantum: if retunes { self.quantum } else { None },
             mode: RenderMode::default(),
             max_block,
             ..self
@@ -293,6 +294,12 @@ pub enum Event {
 
 /// What a plugin answered to a setting the host told it live: the rate its
 /// Processor retunes to, or the render mode it was told.
+///
+/// An answer names the setting it answers, and [`step`] applies it only while
+/// the state is still waiting for exactly that: a rate that is not the one the
+/// Processor was last told, a mode that is not the one last asked, and any
+/// answer after an activation began change nothing. What a taken rate applies
+/// is what the Processor was told with it, not what the host wants since.
 ///
 /// Exhaustive: [`step`] and every shell match every variant.
 #[derive(Debug, Clone, PartialEq)]
@@ -820,9 +827,10 @@ impl State {
     /// callback size live ([`RETUNE`](crate::Processor::RETUNE)): the node
     /// tells it, and a difference in them is [`Behind::Restart`] only while the
     /// Processor has not been told ([`retune_asked`](Self::retune_asked)); an
-    /// answer makes it what the plugin has. A difference in any other field but
-    /// the callback size and the render mode needs an activation, which no
-    /// field added to a [`Prepare`] escapes. `support` is how the plugin
+    /// answer makes it what the plugin has. A Processor that does not retune
+    /// takes no callback size, so a difference in it is not a restart there.
+    /// A difference in any other field but the render mode needs an
+    /// activation, which no field added to a [`Prepare`] escapes. `support` is how the plugin
     /// takes a render mode: a plugin that takes it live is told
     /// ([`Behind::Mode`]) until it answers, one that reads it at activation
     /// restarts, and one with no mode is never behind in it.
@@ -831,7 +839,10 @@ impl State {
         let (Some(wanted), Some(applied)) = (self.wanted(), self.applied) else {
             return Behind::No;
         };
-        let (w, a) = (wanted.restart_key(applied), applied.restart_key(applied));
+        let (w, a) = (
+            wanted.restart_key(applied, retunes),
+            applied.restart_key(applied, retunes),
+        );
         let told = retunes && self.retuning == Some(wanted.live());
         let compared = if told { w.with_live(a.live()) } else { w };
         if compared != a {
@@ -1006,7 +1017,11 @@ impl State {
                 _ => self.plan.set_activate(p),
             },
             HostOp::SetMode(mode) => {
-                let behind = self.applied.is_some_and(|applied| applied.mode != mode);
+                // Against what the plugin will run in once the ask out is
+                // answered, so a newer want while one is out is told.
+                let behind = self
+                    .applied
+                    .is_some_and(|applied| self.asking.unwrap_or(applied.mode) != mode);
                 if behind && matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
                     self.asking = Some(mode);
                     emit(out, Effect::SetMode(mode));
@@ -1109,6 +1124,10 @@ impl State {
             self.revived = true;
             self.stage = Stage::Loaded;
         }
+        // An answer to a setting told before this activation names a setting
+        // the activation takes at `p`.
+        self.asking = None;
+        self.retuning = None;
         self.trying = Some(p);
         emit(out, Effect::CallActivate(p));
         self.plan.wait = wait;
@@ -1368,6 +1387,8 @@ impl State {
             Reply::Activated if matches!(wait, Wait::Activate | Wait::Rollback) => {
                 self.stage = Stage::Active;
                 self.applied = self.trying.take();
+                self.asking = None;
+                self.retuning = None;
                 emit(out, Effect::ReadLatency);
                 emit(out, Effect::ReadTail);
                 emit(out, Effect::ReadLayout);
@@ -1452,23 +1473,27 @@ impl State {
 }
 
 impl State {
-    /// What the plugin answered to a setting it was told live. A taken
-    /// setting is what the plugin has ([`applied`](Self::applied)); a refused
-    /// one is given up, as a refused activation's is, and the plugin runs as
-    /// it did.
+    /// What the plugin answered to a setting it was told live. A taken setting
+    /// is what the plugin has ([`applied`](Self::applied)); a refused one is
+    /// given up, as a refused activation's is, and the plugin runs as it did.
+    /// An answer to a setting that is not the one last told applies nothing:
+    /// the plugin is still behind in what the host wants, and
+    /// [`behind`](Self::behind) says how.
     fn on_answer(&mut self, answer: Told, out: &mut Effects) {
         match answer {
             Told::RateTook(rate) => {
+                let Some(told) = self.retuning.filter(|told| told.rate == rate) else {
+                    return;
+                };
                 self.retuning = None;
-                if let (Some(applied), Some(wanted)) = (self.applied, self.wanted()) {
-                    let live = Live {
-                        rate,
-                        ..wanted.live()
-                    };
-                    self.applied = Some(applied.with_live(live));
+                if let Some(applied) = self.applied {
+                    self.applied = Some(applied.with_live(told));
                 }
             }
             Told::RateRefused(refusal) => {
+                if self.retuning.is_none_or(|told| told.rate != refusal.rate) {
+                    return;
+                }
                 let recovery = match (&refusal.cause, self.applied) {
                     (RateRefusalCause::RolledBack { .. }, Some(running)) => {
                         Recovery::RolledBack { running }
@@ -1491,30 +1516,28 @@ impl State {
                 );
             }
             // The server runs the last mode it was told, whoever told it (the
-            // lifecycle, or the host's bridge directly), so that is what the
-            // host wants now.
+            // lifecycle, or the host's bridge directly): that is what the
+            // plugin has, and what the host wants stays its own.
             Told::ModeTook(mode) => {
                 if let Some(applied) = &mut self.applied {
                     applied.mode = mode;
-                }
-                if let Some(wanted) = &mut self.wanted {
-                    wanted.mode = mode;
                 }
                 if self.asking == Some(mode) {
                     self.asking = None;
                 }
             }
             Told::ModeRefused(mode) => {
+                if self.asking != Some(mode) {
+                    return;
+                }
+                self.asking = None;
                 let running = self.applied.map(|applied| applied.mode);
                 if let (Some(wanted), Some(running)) = (&mut self.wanted, running)
                     && wanted.mode == mode
                 {
                     wanted.mode = running;
+                    emit(out, Effect::Notify(Notice::ModeRefused { mode }));
                 }
-                if self.asking == Some(mode) {
-                    self.asking = None;
-                }
-                emit(out, Effect::Notify(Notice::ModeRefused { mode }));
             }
         }
     }

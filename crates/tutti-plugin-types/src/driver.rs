@@ -369,9 +369,9 @@ impl<L: Loaded> Lifecycle<L> {
                 Some(control) => match control.set_render_mode(main, mode) {
                     ModeTold::Took => Reply::Answered(Told::ModeTook(mode)),
                     ModeTold::Refused => Reply::Answered(Told::ModeRefused(mode)),
-                    // No mode to refuse: what the plugin runs in, and whether
-                    // it renders, is as it was.
-                    ModeTold::Unsupported => Reply::Done,
+                    // The host asked a mode of a plugin that has none: it did
+                    // not take it, as a served plugin's server says.
+                    ModeTold::Unsupported => Reply::Answered(Told::ModeRefused(mode)),
                     ModeTold::Asked => Reply::Asked,
                 },
                 None => Reply::NotActive,

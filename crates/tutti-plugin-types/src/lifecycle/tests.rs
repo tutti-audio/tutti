@@ -1041,6 +1041,7 @@ fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field
     });
     let mut s = s;
     s.want(other_width.with_rate(SampleRate::SR_48K));
+    s.retune_asked();
     let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_48K)));
     assert_eq!(s.applied().map(|a| a.rate()), Some(SampleRate::SR_48K));
     assert_eq!(
@@ -1110,6 +1111,7 @@ fn rule_3_a_refused_retune_rolls_the_wanted_rate_back_and_tells_the_refusal() {
     let p = prep(1);
     let mut s = active(REST, p);
     s.want(p.with_rate(SampleRate::SR_96K));
+    s.retune_asked();
     let cause = RateRefusalCause::RolledBack {
         running: p.rate(),
         reason: "no".into(),
@@ -1977,6 +1979,169 @@ fn a_refused_live_mode_rolls_the_wanted_mode_back_and_is_told() {
     assert_eq!(fx, [Fx::ModeRefusedNotice]);
     assert_eq!(s.wanted(), Some(p));
     assert_eq!(s.behind(false, RenderModeSupport::Live), Behind::No);
+}
+
+/// **A newer want while a mode is out is told, and the plugin ends running the
+/// last**: two asks before one answer are both told (the second against what
+/// the first will leave the plugin running, not against what it runs now), and
+/// the answers, in order, end at the second.
+#[test]
+fn two_mode_asks_before_one_answer_end_running_the_second() {
+    let p = prep(1);
+    let s = active(RESTARTS, p);
+    let (s, fx) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    assert_eq!(fx, [Fx::SetMode(RenderMode::Offline)]);
+    let (s, fx) = go(s, Event::Op(HostOp::SetMode(RenderMode::Realtime)));
+    assert_eq!(
+        fx,
+        [Fx::SetMode(RenderMode::Realtime)],
+        "the mode it will run in is not the one asked for"
+    );
+    let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
+    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
+    let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Realtime)));
+    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Realtime));
+    assert_eq!(s.wanted().map(|p| p.mode()), Some(RenderMode::Realtime));
+    assert_eq!(s.behind(false, RenderModeSupport::Live), Behind::No);
+}
+
+/// **A taken mode leaves what the host wants as it is**: the app asked for
+/// another mode while the answer was out, so the plugin runs the first, the
+/// want stands, and the plugin is behind in it until it is told.
+#[test]
+fn a_taken_mode_after_the_app_asked_for_another_is_not_the_want() {
+    let p = prep(1);
+    let mut s = active(RESTARTS, p);
+    s.want(p.with_mode(RenderMode::Offline));
+    let (mut s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    s.want(p);
+    let (s, fx) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
+    assert!(fx.is_empty());
+    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
+    assert_eq!(s.wanted().map(|p| p.mode()), Some(RenderMode::Realtime));
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Live),
+        Behind::Mode(RenderMode::Realtime),
+        "told again"
+    );
+}
+
+/// **A refused mode that is not the one last asked is dropped**: the refusal
+/// answers an earlier ask, so it tells nothing and rolls nothing back, even when
+/// the app wants that mode again.
+#[test]
+fn a_refused_mode_that_is_not_the_last_asked_changes_nothing() {
+    let p = prep(1);
+    let s = active(RESTARTS, p);
+    let (s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    let (mut s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Realtime)));
+    s.want(p.with_mode(RenderMode::Offline));
+    let (s, fx) = go(s, Event::Answered(Told::ModeRefused(RenderMode::Offline)));
+    assert!(fx.is_empty(), "no notice for an ask that was replaced");
+    assert_eq!(s.wanted().map(|p| p.mode()), Some(RenderMode::Offline));
+}
+
+/// **A taken rate records the rate the Processor was told with**, not what the
+/// host wants since: a ceiling raised after the tell is not applied, and the
+/// plugin is still behind in it.
+#[test]
+fn a_taken_rate_after_the_ceiling_rose_records_the_told_ceiling() {
+    let p = prep(1);
+    let told = p.with_rate(SampleRate::SR_96K);
+    let raised = told.with_max_block(MaxBlock::of(Samples::new(2048)));
+    let mut s = active(REST, p);
+    s.want(told);
+    s.retune_asked();
+    s.want(raised);
+    let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_96K)));
+    assert_eq!(s.applied(), Some(told), "the ceiling it was told");
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Restart,
+        "the raised ceiling still needs an activation"
+    );
+}
+
+/// **A late refusal of a rate the host has since replaced rolls nothing back**:
+/// the Processor was told a newer rate, and the answer to it is the one that
+/// settles.
+#[test]
+fn a_late_rate_refusal_after_a_newer_rate_does_not_roll_the_newer_back() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    s.retune_asked();
+    s.want(p.with_rate(SampleRate::SR_192K));
+    s.retune_asked();
+    let cause = RateRefusalCause::RolledBack {
+        running: p.rate(),
+        reason: "no".into(),
+    };
+    let late = RateRefusal::new(SampleRate::SR_96K, cause);
+    let (s, fx) = go(s, Event::Answered(Told::RateRefused(late)));
+    assert!(fx.is_empty(), "no notice for a rate that was replaced");
+    assert_eq!(s.wanted().map(|w| w.rate()), Some(SampleRate::SR_192K));
+    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
+    let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_192K)));
+    assert_eq!(s.applied().map(|a| a.rate()), Some(SampleRate::SR_192K));
+}
+
+/// **An answer never outlives its activation**: a rate and a mode told before
+/// an activation began, and one told while it was in flight, answered after it
+/// started or ended, change nothing.
+#[test]
+fn an_answer_arriving_after_a_restart_began_changes_nothing() {
+    let p = prep(1);
+    let q = prep(2);
+    // Told before the activation began.
+    let mut s = active(RESTARTS, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    s.retune_asked();
+    let (s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
+    let (s, _) = reply(s, Reply::Returned);
+    let (s, fx) = reply(s, Reply::Deactivated);
+    assert_eq!(fx, [Fx::Activate(q)]);
+    let cause = RateRefusalCause::RolledBack {
+        running: p.rate(),
+        reason: "no".into(),
+    };
+    let refusal = RateRefusal::new(SampleRate::SR_96K, cause.clone());
+    let (s, fx) = go(s, Event::Answered(Told::RateRefused(refusal)));
+    assert!(fx.is_empty());
+    let (s, fx) = go(s, Event::Answered(Told::ModeRefused(RenderMode::Offline)));
+    assert!(fx.is_empty());
+    assert_eq!(s.wanted(), Some(q), "the activation's want stands");
+
+    // Told while the activation was in flight, answered after it ended.
+    let mut s = s;
+    s.retune_asked();
+    let (s, _) = reply(s, Reply::Activated);
+    let (s, _) = reply(s, Reply::Latency(Samples::new(0)));
+    let (s, _) = reply(s, Reply::Tail(PluginTail::Unknown));
+    let (s, _) = reply(s, Reply::Layout(stereo()));
+    let (s, _) = reply(s, Reply::Done);
+    assert_eq!(s.applied(), Some(q));
+    let refusal = RateRefusal::new(q.rate(), cause);
+    let (s, fx) = go(s, Event::Answered(Told::RateRefused(refusal)));
+    assert!(fx.is_empty(), "the activation settled the retune");
+    assert_eq!(s.applied(), Some(q));
+}
+
+/// **A callback size alone restarts a Processor that retunes, until it is
+/// told**: one out of hand takes it with an activation, and one that was told
+/// is not behind while the answer is out.
+#[test]
+fn a_callback_size_alone_restarts_a_retuning_processor_that_was_not_told() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_quantum(MaxBlock::of(Samples::new(32))));
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Restart
+    );
+    s.retune_asked();
+    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
 }
 
 /// **A mode read at activation restarts the plugin, and a plugin with no mode

@@ -53,6 +53,17 @@ pub(crate) enum Hosting {
     OutOfProcess,
 }
 
+/// What the plugin does with a render mode it is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Render {
+    /// It takes realtime and offline.
+    Takes,
+    /// It has `clap.render` and refuses offline.
+    RefusesOffline,
+    /// It has no `clap.render`: its rendering does not depend on the mode.
+    Absent,
+}
+
 /// What each hosting holds to render and to tear down.
 enum Stage {
     /// The node alone in a graph; the probe lifts the refusal it armed.
@@ -100,21 +111,18 @@ impl Drop for HostedProbe {
     fn drop(&mut self) {
         if let Stage::Local { probe, .. } = &self.stage {
             probe.set_activate_refusal(u64::MAX);
+            probe.set(ClapSwitch::RefuseOffline, 0);
+            probe.set(ClapSwitch::RenderExtension, 1);
         }
     }
 }
 
 impl HostedProbe {
     /// Loads the plugin at `rate`, hosted as `hosting`, refusing an activation
-    /// at `refused_hz` and, with `refusing_offline`, the offline render mode,
-    /// and writing its tag to every output. The caller holds `machine_lock`: the
+    /// at `refused_hz`, taking the render mode as `render` says, and writing its
+    /// tag to every output. The caller holds `machine_lock`: the
     /// refusal is process-wide, and the served one rides in the environment.
-    pub(crate) fn load(
-        hosting: Hosting,
-        rate: f64,
-        refused_hz: f64,
-        refusing_offline: bool,
-    ) -> Self {
+    pub(crate) fn load(hosting: Hosting, rate: f64, refused_hz: f64, render: Render) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let record = {
             let seen = Arc::clone(&seen);
@@ -132,7 +140,15 @@ impl HostedProbe {
                 );
                 probe.set(ClapSwitch::RenderMode, render::TAG_ONLY);
                 probe.set_activate_refusal(refused_hz.to_bits());
-                probe.set(ClapSwitch::RefuseOffline, u32::from(refusing_offline));
+                probe.set(
+                    ClapSwitch::RefuseOffline,
+                    u32::from(render == Render::RefusesOffline),
+                );
+                // Read once, when the plugin loads.
+                probe.set(
+                    ClapSwitch::RenderExtension,
+                    u32::from(render != Render::Absent),
+                );
                 let (client, handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
                     main_thread(),
                     &tutti_fixtures::pumped_work(),
@@ -155,8 +171,10 @@ impl HostedProbe {
                 let mut env = ProbeEnv::new()
                     .render_mode(render::TAG_ONLY)
                     .refuse_rate(refused_hz);
-                if refusing_offline {
-                    env = env.refuse_offline();
+                match render {
+                    Render::Takes => {}
+                    Render::RefusesOffline => env = env.refuse_offline(),
+                    Render::Absent => env = env.without_render(),
                 }
                 let loaded = load_probe(rate);
                 let handle = loaded.handle.clone();
@@ -346,14 +364,14 @@ fn tempo() -> tutti_timeline::TempoReader {
 /// Runs a case body against the plugin loaded in this process and through a
 /// `plugin-server`: a test for each, named `<case>::in_process` and
 /// `<case>::out_of_process`, with the body's `$probe` a [`HostedProbe`] loaded
-/// at `$rate` that refuses an activation at `$refused` and, when
-/// `$offline`, the offline render mode.
+/// at `$rate` that refuses an activation at `$refused`, taking the render mode
+/// as `$render` says.
 macro_rules! in_both_hostings {
     (
         $case:ident,
         rate = $rate:expr,
         refusing = $refused:expr,
-        refusing_offline = $offline:expr,
+        render = $render:expr,
         |$probe:ident| $body:block
     ) => {
         mod $case {
@@ -364,7 +382,7 @@ macro_rules! in_both_hostings {
             #[test]
             fn in_process() {
                 let _lock = tutti_fixtures::machine_lock();
-                let mut probe = HostedProbe::load(Hosting::InProcess, $rate, $refused, $offline);
+                let mut probe = HostedProbe::load(Hosting::InProcess, $rate, $refused, $render);
                 run(&mut probe);
                 probe.dropped();
             }
@@ -372,7 +390,7 @@ macro_rules! in_both_hostings {
             #[test]
             fn out_of_process() {
                 let _lock = tutti_fixtures::machine_lock();
-                let mut probe = HostedProbe::load(Hosting::OutOfProcess, $rate, $refused, $offline);
+                let mut probe = HostedProbe::load(Hosting::OutOfProcess, $rate, $refused, $render);
                 run(&mut probe);
                 probe.dropped();
             }
@@ -401,7 +419,7 @@ in_both_hostings! {
     a_refused_rate_is_rolled_back_silent_reported_retried_and_cleared_by_a_rate_it_takes,
     rate = LOAD_RATE,
     refusing = REFUSED_RATE,
-    refusing_offline = false,
+    render = Render::Takes,
     |probe| {
         assert!(probe.renders_live(), "the plugin renders at {LOAD_RATE}");
         assert!(probe.rebindable(), "a plugin that runs has a Processor to move");
@@ -462,7 +480,7 @@ in_both_hostings! {
     a_refused_mode_is_reported_and_a_muted_node_stays_muted,
     rate = LOAD_RATE,
     refusing = REFUSED_RATE,
-    refusing_offline = true,
+    render = Render::RefusesOffline,
     |probe| {
         assert!(probe.renders_live(), "the plugin renders at {LOAD_RATE}");
 
@@ -499,7 +517,7 @@ in_both_hostings! {
     a_live_mode_the_plugin_takes_is_applied_without_a_restart,
     rate = LOAD_RATE,
     refusing = REFUSED_RATE,
-    refusing_offline = false,
+    render = Render::Takes,
     |probe| {
         assert!(probe.renders_live(), "the plugin renders at {LOAD_RATE}");
         let activations = probe.activations();
@@ -510,6 +528,32 @@ in_both_hostings! {
         // plugin keeps rendering as it did.
         for _ in 0..8 {
             assert!(probe.renders_live(), "the plugin renders through the mode");
+            assert!(probe.rebindable(), "the plugin runs");
+        }
+        let reports = probe.invalidations();
+        assert!(
+            reports.iter().all(|e| !is_refusal(e) && !is_mode_refused(e)),
+            "{reports:?}"
+        );
+        assert_eq!(probe.activations(), activations, "the plugin was not restarted");
+    }
+}
+
+in_both_hostings! {
+    a_plugin_with_no_render_mode_is_never_told_one_and_reports_no_refusal,
+    rate = LOAD_RATE,
+    refusing = REFUSED_RATE,
+    render = Render::Absent,
+    |probe| {
+        assert!(probe.renders_live(), "the plugin renders at {LOAD_RATE}");
+        let activations = probe.activations();
+
+        // It has no mode to take: the app is told it did not, and the plugin
+        // is neither told nor restarted, nor reported refusing a mode it never
+        // had, in either hosting.
+        assert!(!probe.announce(RenderMode::Offline), "there is no mode to take");
+        for _ in 0..8 {
+            assert!(probe.renders_live(), "the plugin renders as it did");
             assert!(probe.rebindable(), "the plugin runs");
         }
         let reports = probe.invalidations();

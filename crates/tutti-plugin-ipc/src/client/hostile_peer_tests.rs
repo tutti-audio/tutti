@@ -98,8 +98,6 @@ fn no_editor(
     })
 }
 
-/// The answer to the request the bridge sends after a render mode: the server
-/// answers its control lane in order, so this says the mode is applied.
 /// The server's answer to a render mode request: it took the mode.
 fn mode_took() -> ControlReply {
     ControlReply::RenderModeSet {
@@ -108,6 +106,8 @@ fn mode_took() -> ControlReply {
     }
 }
 
+/// The answer to a fence: the server answers its control lane in order, so
+/// this says what was sent before it is applied.
 fn applied_fence() -> ControlReply {
     ControlReply::CurrentPreset { id: None }
 }
@@ -900,6 +900,90 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
             format!("{:?}", Told::ModeRefused(RenderMode::Offline))
         ]
     );
+}
+
+/// **A render mode the server leaves unanswered fails the bridge, and is no
+/// refusal**: the lane's wait for the answer is a constructed deadline
+/// (`Timeouts::rate`) the server holds its answer past, the bridge is lost, and
+/// the host is told of the loss and of no answer, so a late `Took` is never read
+/// to apply a mode the host was told was refused.
+#[test]
+fn a_render_mode_the_server_leaves_unanswered_loses_the_bridge_and_is_no_refusal() {
+    use crate::client::audio::IpcEvent;
+
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.rate = Duration::from_millis(10);
+        t
+    };
+    let mock =
+        MockServer::start_lanes_under("late-mode", timeouts, answer_blocks, move |msg| match msg {
+            ControlRequest::SetRenderMode { mode } => {
+                let _ = seen.try_send(());
+                let _ = release.recv();
+                Action::Reply(Box::new(ControlReply::RenderModeSet {
+                    mode,
+                    outcome: crate::ModeOutcome::Took,
+                }))
+            }
+            _ => Action::Silent,
+        });
+    let heard: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            IpcEvent::Told(_) => sink.lock().push("told"),
+            IpcEvent::Crashed { .. } => sink.lock().push("crashed"),
+            _ => {}
+        })));
+
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the server holds the mode");
+    tutti_fixtures::wait_until("the bridge to be lost", NOTICE_TIMEOUT, || {
+        heard.lock().contains(&"crashed")
+    });
+    assert!(mock.bridge.audio().is_crashed());
+    assert_eq!(*heard.lock(), ["crashed"], "no refusal, and no answer");
+    release_tx.send(()).expect("the server waits");
+}
+
+/// **A plugin that has no render mode answers a mode as a refusal**, as a
+/// plugin that refused it does: the host did not get the mode it asked for.
+#[test]
+fn a_render_mode_the_plugin_has_none_of_is_heard_as_refused() {
+    use crate::client::audio::IpcEvent;
+    use tutti_plugin_types::{RenderMode, Told};
+
+    let mock = MockServer::start("mode-unsupported", |msg| match msg {
+        ControlRequest::SetRenderMode { mode } => {
+            Action::Reply(Box::new(ControlReply::RenderModeSet {
+                mode,
+                outcome: crate::ModeOutcome::Unsupported,
+            }))
+        }
+        _ => Action::Silent,
+    });
+    let heard: Arc<Mutex<Vec<Told>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
+        if let IpcEvent::Told(told) = ev {
+            sink.lock().push(told);
+        }
+    })));
+    assert!(mock.bridge.audio().set_render_mode(RenderMode::Offline));
+    tutti_fixtures::wait_until("the answer to be heard", NOTICE_TIMEOUT, || {
+        !heard.lock().is_empty()
+    });
+    assert_eq!(*heard.lock(), [Told::ModeRefused(RenderMode::Offline)]);
 }
 
 /// **The server's loss counts are heard by the host**, cumulative, the later

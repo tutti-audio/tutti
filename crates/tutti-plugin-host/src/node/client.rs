@@ -673,11 +673,11 @@ impl<L: Loaded> std::fmt::Debug for LiveView<L> {
 }
 
 impl<L: Loaded> LiveView<L> {
-    /// The render mode the plugin runs in, or is being changed to; `None` once
-    /// the plugin is gone.
+    /// The render mode the plugin runs in, as it has answered; `None` once the
+    /// plugin is gone.
     #[must_use]
     pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
-        Some(self.0.upgrade()?.lock().render_mode())
+        Some(self.0.upgrade()?.lock().running_mode())
     }
 }
 

@@ -578,13 +578,15 @@ impl Unsolicited {
         self.transport.push_back(request);
     }
 
-    /// What the plugin answered to a setting it was told, replacing an answer
-    /// of the same setting not yet drained.
+    /// What the plugin answered to a setting it was told. One of the same
+    /// setting not yet drained is replaced and counted with the dropped
+    /// events: the state applies the answer that is still the one it waits for.
     pub(super) fn told(&mut self, told: Told) {
-        match told {
-            Told::RateTook(_) | Told::RateRefused(_) => self.rate = Some(told),
-            Told::ModeTook(_) | Told::ModeRefused(_) => self.mode = Some(told),
-        }
+        let slot = match told {
+            Told::RateTook(_) | Told::RateRefused(_) => &mut self.rate,
+            Told::ModeTook(_) | Told::ModeRefused(_) => &mut self.mode,
+        };
+        self.dropped += u64::from(slot.replace(told).is_some());
     }
 
     /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
@@ -713,6 +715,31 @@ mod tests {
         let heard: Vec<_> = inbox.drain().collect();
         assert!(
             matches!(heard.as_slice(), [IpcEvent::StateNotRestored { reason }] if reason == "second"),
+            "{heard:?}"
+        );
+    }
+
+    /// **An answer replaced before it was drained is counted**, per setting: a
+    /// rate's answer and a mode's do not replace each other, and the latest of
+    /// a setting is the one delivered.
+    #[test]
+    fn a_replaced_answer_is_counted_and_the_latest_is_delivered() {
+        use tutti_plugin_types::RenderMode;
+        let mut inbox = Unsolicited::new();
+        inbox.told(Told::ModeTook(RenderMode::Offline));
+        inbox.told(Told::RateTook(tutti_units::SampleRate::SR_96K));
+        assert_eq!(inbox.take_dropped(), 0, "two settings, nothing replaced");
+        inbox.told(Told::ModeRefused(RenderMode::Realtime));
+        assert_eq!(inbox.take_dropped(), 1);
+        let heard: Vec<_> = inbox.drain().collect();
+        assert!(
+            matches!(
+                heard.as_slice(),
+                [
+                    IpcEvent::Told(Told::RateTook(_)),
+                    IpcEvent::Told(Told::ModeRefused(RenderMode::Realtime))
+                ]
+            ),
             "{heard:?}"
         );
     }

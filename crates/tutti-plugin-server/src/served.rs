@@ -828,34 +828,38 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// `AudioUnitInitialize`) is activated again in the mode, keeping its
     /// instance and state, and a refusal is rolled back to the mode it was
     /// running in; an `Unsupported` one is left running and answers
-    /// [`Unsupported`](ModeOutcome::Unsupported). The mode is kept for every
-    /// later activation (a restart, a rate change) either way.
+    /// [`Unsupported`](ModeOutcome::Unsupported) every time it is asked,
+    /// whatever mode it was last asked. The mode is kept for every later
+    /// activation (a restart, a rate change) either way. A plugin not prepared
+    /// has nothing to tell: [`Refused`](ModeOutcome::Refused).
     fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeOutcome {
         let Some(previous) = self.state.applied() else {
             return ModeOutcome::Refused;
         };
-        if previous.mode() == mode && self.is_active() {
-            return ModeOutcome::Took;
-        }
+        let unchanged = previous.mode() == mode && self.is_active();
         let Some(control) = self.lifecycle.control() else {
             return ModeOutcome::Refused;
         };
         match control.render_mode_support(main) {
-            RenderModeSupport::Live => {
-                let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
-                if self
-                    .state
-                    .applied()
-                    .is_some_and(|applied| applied.mode() == mode)
-                {
-                    ModeOutcome::Took
-                } else {
-                    ModeOutcome::Refused
-                }
-            }
             RenderModeSupport::Unsupported => {
                 self.state.want(previous.with_mode(mode));
                 ModeOutcome::Unsupported
+            }
+            _ if unchanged => ModeOutcome::Took,
+            RenderModeSupport::Live => {
+                let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
+                let running = self.state.applied().map(|applied| applied.mode());
+                if running == Some(mode) {
+                    ModeOutcome::Took
+                } else {
+                    // Refused, or not told (the plugin is not active): the
+                    // plugin runs as it did, and what the server wants goes
+                    // back with the answer.
+                    if let (Some(wanted), Some(running)) = (self.state.wanted(), running) {
+                        self.state.want(wanted.with_mode(running));
+                    }
+                    ModeOutcome::Refused
+                }
             }
             RenderModeSupport::OnActivation => {
                 match self.reconfigure(main, previous.with_mode(mode)) {

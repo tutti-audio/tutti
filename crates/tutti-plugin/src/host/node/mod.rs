@@ -606,9 +606,9 @@ impl PluginClient<Bound> {
 }
 
 impl<S> PluginClient<S> {
-    /// The render mode the plugin runs in, or is being changed to, as its
-    /// lifecycle holds it; `None` once the plugin is gone. What the plugin
-    /// answers reaches it at the lifecycle's next pump.
+    /// The render mode the plugin runs in, as its lifecycle holds it; `None`
+    /// once the plugin is gone. What the plugin answers reaches it at the
+    /// lifecycle's next pump.
     #[must_use]
     pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
         self.live.render_mode()

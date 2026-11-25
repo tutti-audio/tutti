@@ -416,8 +416,6 @@ pub(super) enum Abandoned {
     Discard,
     /// A rate change's answer, which settles the plugin's rate refusal.
     Rate,
-    /// A render-mode change's answer, which settles whether the plugin took it.
-    Mode,
 }
 
 /// The control lane's conversation with the server, and the cursor of any frame
@@ -522,12 +520,6 @@ impl ControlState {
                 Heard::Abandoned(Abandoned::Rate) => {
                     if let ControlReply::SampleRateSet { rate, refusal } = reply {
                         inbox.late_rate_answer(rate, refusal);
-                    }
-                    Ok(None)
-                }
-                Heard::Abandoned(Abandoned::Mode) => {
-                    if let ControlReply::RenderModeSet { mode, outcome } = reply {
-                        inbox.told(mode_told(mode, outcome));
                     }
                     Ok(None)
                 }
@@ -1038,14 +1030,17 @@ pub(super) fn handle_setting(
         }
         Setting::RenderMode(mode) => {
             // As a rate: the plugin may activate again to take the mode, and
-            // the requests behind it on this lane wait for it.
+            // the requests behind it on this lane wait for it. Unlike a rate,
+            // no answer within the window (restarting at each sign of life) is
+            // the server failing, not a refusal: the lane ends, and the bridge
+            // is lost, so a late answer is never read and applies nothing.
             let budget = lifecycle.timeouts().rate;
             let Lane { stream, state } = lane;
             let id = ask(
                 stream,
                 state,
                 ControlRequest::SetRenderMode { mode },
-                Abandoned::Mode,
+                Abandoned::Discard,
                 budget,
                 budget,
             )?;
@@ -1056,10 +1051,12 @@ pub(super) fn handle_setting(
                             return Ok(());
                         }
                     }
-                    // No answer is a refusal; the late one settles the state.
                     Waited::GaveUp => {
-                        inbox.told(Told::ModeRefused(mode));
-                        break;
+                        return Err(IpcError::Timeout {
+                            operation: "a render mode",
+                            after: budget,
+                            partial: false,
+                        });
                     }
                     Waited::Reply(ControlReply::RenderModeSet { mode, outcome }) => {
                         inbox.told(mode_told(mode, outcome));

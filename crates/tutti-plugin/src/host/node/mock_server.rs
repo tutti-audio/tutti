@@ -281,6 +281,7 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
             latency_samples: Samples::ZERO,
             tail: PluginTail::Unknown,
             features: Features::TRANSPORT
+                | Features::RENDER_MODE
                 | Features::MIDI_OUT
                 | Features::PARAM_AUTOMATION
                 | Features::SEQUENCER_CONTEXT,
