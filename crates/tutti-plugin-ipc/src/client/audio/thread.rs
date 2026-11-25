@@ -1257,6 +1257,10 @@ mod tests {
 
         let (channels, waits) =
             Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        // The block's reply budget outlasts the test: a block that missed a
+        // short budget would be given up and the lane would park, where nothing
+        // rings it for the peer's close. The close ends the lane by the read.
+        channels.set_reply_wait(Some(HANG_GUARD));
         let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
         let listener = silent_listener();
         let (stream, audio_peer) = broker_pair();
@@ -1281,6 +1285,7 @@ mod tests {
         );
         let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let (polling_tx, polling_rx) = mpsc::channel();
+        let (ended_tx, ended_rx) = mpsc::channel();
         let poller = {
             let recorder = Arc::clone(&recorder);
             std::thread::spawn(move || {
@@ -1289,6 +1294,7 @@ mod tests {
                 let mut cx = Context::from_waker(&waker);
                 let mut lane = std::pin::pin!(lane);
                 while lane.as_mut().poll(&mut cx) == Poll::Pending {}
+                ended_tx.send(()).expect("the test is waiting");
             })
         };
         let polling = polling_rx.recv().expect("the poller's id");
@@ -1299,6 +1305,10 @@ mod tests {
         channels.wake();
         let _sent: AudioRequest = crate::read_frame(&mut &audio_peer).expect("the block");
         drop(audio_peer);
+        assert!(
+            ended_rx.recv_timeout(HANG_GUARD).is_ok(),
+            "the lane did not end after the peer closed"
+        );
         poller.join().expect("the lane ended");
 
         let woken_by = recorder.0.lock().clone();
