@@ -380,6 +380,7 @@ fn midi::Midi::clock_error
 fn midi::Midi::follow_clock
 fn midi::Midi::follow_machine_control
 fn midi::Midi::follow_tempo
+fn midi::Midi::held
 fn midi::Midi::input
 fn midi::Midi::output_latency
 fn midi::Midi::output_terms
@@ -444,6 +445,8 @@ fn midi_follow::FollowMachineControl::new
 fn midi_follow::FollowTempo::meter
 fn midi_follow::FollowTempo::new
 fn midi_hardware::Midi::devices
+fn midi_held::HeldReader::id
+fn midi_held::HeldReader::update
 fn midi_load::LoadReport::is_clean
 fn midi_load::LoadedMidi::file
 fn midi_load::LoadedMidi::meter
@@ -933,6 +936,7 @@ struct midi_follow::FollowClock
 struct midi_follow::FollowMachineControl
 struct midi_follow::FollowTempo
 struct midi_hardware::MidiPolicy
+struct midi_held::HeldReader
 struct midi_load::LoadMidi
 struct midi_load::LoadReport
 struct midi_load::LoadedMidi

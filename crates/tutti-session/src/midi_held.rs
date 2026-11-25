@@ -1,6 +1,6 @@
 //! What an instrument is holding: a fold of the MIDI its event input hears.
 
-use tutti_graph::{EventTapReader, TapEvent};
+use tutti_graph::{EventTapId, EventTapReader, TapEvent};
 use tutti_ump::{Held, Ump};
 use tutti_units::{Frame, Losses};
 
@@ -60,10 +60,10 @@ impl HeldReader {
         (&self.held, Losses::lost(self.tap.take_lost()))
     }
 
-    /// The tap's reader, to close it
-    /// (`Graph::taps().close_event(reader.tap().id())`) or reopen it.
+    /// The id of the tap the reader folds, to close it before the reader is
+    /// dropped (`Graph::taps().close_event(reader.id())`).
     #[must_use]
-    pub fn tap(&self) -> &EventTapReader {
-        &self.tap
+    pub fn id(&self) -> EventTapId {
+        self.tap.id()
     }
 }
