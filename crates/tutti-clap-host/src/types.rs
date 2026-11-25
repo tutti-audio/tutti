@@ -214,10 +214,8 @@ bitflags! {
         const MODULATABLE_PER_CHANNEL = 1 << 13;
         /// Modulatable with per-port addressing.
         const MODULATABLE_PER_PORT    = 1 << 14;
-        /// Changes must be delivered in event order through `process()`
-        /// rather than out-of-band via `flush()`. Gates
-        /// [`set_parameter`](crate::ClapLoaded::set_parameter) on an actively
-        /// processing instance.
+        /// While the plugin is active, changes must be delivered in event
+        /// order through `process()` rather than out-of-band via `flush()`.
         const REQUIRES_PROCESS        = 1 << 15;
         /// The value is an enumerated choice (`CLAP_PARAM_IS_ENUM`): an index
         /// into names the plugin gives through `value_to_text`. Implies

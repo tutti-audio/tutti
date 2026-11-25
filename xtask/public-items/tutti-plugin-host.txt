@@ -187,6 +187,7 @@ fn time_signature::PluginTimeSignature::retired_len
 fn time_signature::PluginTimeSignature::set_meter
 fn wakeups::service_now
 struct control_handle::InstanceId
+struct control_handle::PendingWrites
 struct control_handle::PluginHandle
 struct controls::ForkedSources
 struct controls::NodeControls

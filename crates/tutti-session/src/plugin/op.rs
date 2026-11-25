@@ -15,7 +15,7 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use tutti_platform::Instant;
-use tutti_rt::Generation;
+use tutti_plugin_host::PendingWrites;
 
 use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
@@ -68,13 +68,13 @@ pub trait PluginOp: sealed::Sealed + Sized {
     fn stalled(after: Duration) -> Self::Error;
 
     /// Asks a plugin in this process, on the main thread. `Pending` while the
-    /// host's parameter writes made before `mark` are not yet the plugin's.
+    /// host's parameter writes `pending` names are not yet the plugin's.
     #[doc(hidden)]
     fn run(
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        mark: Generation,
+        pending: &mut PendingWrites,
     ) -> Poll<Result<Self::Reply, Self::Error>>;
 
     /// Queues the call with the bridge of a plugin in a `plugin-server` process.
@@ -106,7 +106,7 @@ impl<O: PluginOp> Op<O> {
         match &hosted.answers {
             None => Self::InProcess(InProcessOp {
                 op: Some(op),
-                mark: hosted.handle.writes(),
+                pending: hosted.handle.writes(),
                 handle: Box::new(hosted.handle.clone()),
                 support,
                 started: None,
@@ -133,7 +133,7 @@ impl<O: PluginOp> Op<O> {
 pub struct InProcessOp<O: PluginOp> {
     op: Option<O>,
     /// The host's parameter writes made when the value was made.
-    mark: Generation,
+    pending: PendingWrites,
     handle: Box<PluginHandle>,
     support: PresetSupport,
     /// When the first poll was made.
@@ -183,7 +183,7 @@ impl<O: PluginOp> InProcessOp<O> {
             return Poll::Ready(Err(error));
         }
         let started = *self.started.get_or_insert(now);
-        match op.run(&self.handle, main, self.mark) {
+        match op.run(&self.handle, main, &mut self.pending) {
             Poll::Ready(reply) => {
                 let op = self.op.take().expect("a call resolves once");
                 Poll::Ready(reply.map(|reply| op.finish(reply, None)))

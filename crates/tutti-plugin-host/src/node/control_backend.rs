@@ -204,7 +204,7 @@ where
         let job = AfterWrites {
             inner: Arc::clone(&self.inner),
             post: self.edits.clone(),
-            mark: self.edits.mark(),
+            pending: self.edits.pending(),
             collector: self.work.clone(),
             work,
             reply,
@@ -289,7 +289,7 @@ pub(super) fn queue_inform(
 struct AfterWrites<L: InProcess, W, P> {
     inner: Arc<Mutex<Instance<L>>>,
     post: super::host_edits::EditPost,
-    mark: tutti_rt::Generation,
+    pending: crate::PendingWrites,
     collector: MainWorkHandle,
     work: W,
     reply: P,
@@ -306,11 +306,11 @@ where
     /// Settles the writes and runs the work; a node draining them now leaves it
     /// for the next tick, or answers `None` when no main thread ticks. The
     /// re-asks end: the claim's holder is one bounded audio-thread drain.
-    fn step(self, main: MainThreadMarker) {
+    fn step(mut self, main: MainThreadMarker) {
         let settled = {
             let mut instance = self.inner.lock();
             match instance.control() {
-                Some(control) => self.post.settle(main, control, self.mark),
+                Some(control) => self.post.settle(main, control, &mut self.pending),
                 None => Poll::Ready(()),
             }
         };
@@ -563,13 +563,13 @@ where
         }
     }
 
-    fn writes(&self) -> tutti_rt::Generation {
-        self.edits.mark()
+    fn writes(&self) -> crate::PendingWrites {
+        self.edits.pending()
     }
 
-    fn settle(&self, main: MainThreadMarker, mark: tutti_rt::Generation) -> Poll<()> {
+    fn settle(&self, main: MainThreadMarker, pending: &mut crate::PendingWrites) -> Poll<()> {
         match self.inner.lock().control() {
-            Some(control) => self.edits.settle(main, control, mark),
+            Some(control) => self.edits.settle(main, control, pending),
             None => Poll::Ready(()),
         }
     }

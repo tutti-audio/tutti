@@ -20,7 +20,7 @@
 //!   through the plugin's own `Control`; a claim a node holds is
 //!   [`Pending`](std::task::Poll::Pending), and the caller asks again. The
 //!   write is the plugin's once the reader's sweep has reached the
-//!   [`mark`](EditPost::mark) the caller took, so what it observes holds every
+//!   [`PendingWrites`](crate::PendingWrites) the caller took, so what it observes holds every
 //!   write made before it. A format's Processor applies what its own slots
 //!   hold ahead of a block's parameter changes, so a write made after a settle
 //!   wins over it.
@@ -129,8 +129,8 @@ impl EditPost {
 
     /// How many writes have been made: what a caller takes at its call, and
     /// [`settle`](Self::settle) waits for the plugin to have.
-    pub(super) fn mark(&self) -> Generation {
-        self.0.state.lock().writer.written()
+    pub(super) fn pending(&self) -> crate::PendingWrites {
+        crate::PendingWrites::new(self.0.state.lock().writer.written())
     }
 
     /// Counts `n` writes the plugin did not take.
@@ -157,10 +157,12 @@ impl EditPost {
     /// mark is fixed when it starts, and later writes do not extend it. For a
     /// synchronous caller on the main thread with no later tick to ask again
     /// on (a save, a fork); the rest [`settle`](Self::settle) and are asked
-    /// again.
+    /// again. It does not wait for a value a Controller queued for its
+    /// Processor's next block: with no block stepping, nothing would end that
+    /// wait.
     pub(super) fn settle_now(&self, main: MainThreadMarker, control: &mut dyn Control) {
-        let mark = self.mark();
-        while self.settle(main, control, mark).is_pending() {
+        let host = self.pending().host();
+        while self.sweep(main, control, host).is_pending() {
             std::thread::yield_now();
         }
     }
@@ -224,10 +226,41 @@ impl EditPost {
     /// `Control` ([`Control::set_parameter`]), so a read or a save made now sees
     /// them. `Ready` once every write up to `mark` is the plugin's, whether this
     /// call or a block took it; `Pending` while a node holds the reader for a
-    /// drain, or a write overlapped this sweep: ask again. A write the plugin
+    /// drain, a write overlapped this sweep, or the plugin's Controller holds a
+    /// value for the Processor's next block: ask again. A write the plugin
     /// refuses is counted ([`refused`](Self::refused)). Control thread, main
     /// thread.
     pub(super) fn settle(
+        &self,
+        main: MainThreadMarker,
+        control: &mut dyn Control,
+        pending: &mut crate::PendingWrites,
+    ) -> Poll<()> {
+        if self.sweep(main, control, pending.host()).is_pending() {
+            return Poll::Pending;
+        }
+        // The host's writes are the Control's. A value it queued for its
+        // Processor is the plugin's once the call that took it has returned;
+        // the mark is the queue as it stood when the sweep finished, and later
+        // writes do not move it. Wake the node that runs that block. With no
+        // block stepping (an undriven graph), the caller's next one delivers it.
+        if let Some(upto) = pending.queue_mark(|| control.queued())
+            && !control.delivered(upto)
+        {
+            if let Some(wake) = &*self.0.wake.lock() {
+                wake.notify();
+            }
+            return Poll::Pending;
+        }
+        Poll::Ready(())
+    }
+
+    /// The host's writes up to `mark` are the plugin's `Control`'s: taken from
+    /// the slots and applied through [`Control::set_parameter`], by this call
+    /// or a block's drain. `Pending` while a node holds the reader or a write
+    /// overlapped the sweep. A value the Controller then queues for its
+    /// Processor is not waited for here ([`settle`](Self::settle) does).
+    fn sweep(
         &self,
         main: MainThreadMarker,
         control: &mut dyn Control,
@@ -362,10 +395,12 @@ mod tests {
         post.write(id(1), Normalized::of(0.25)).unwrap();
         assert_eq!(drained(&port), [(id(1), 0.25)], "a block took the first");
         post.write(id(2), Normalized::of(0.5)).unwrap();
-        let mark = post.mark();
+        let mut pending = post.pending();
+        // The fake's Controller queues the write to its Processor, which has not
+        // run a block: the plugin has the write when one does.
         assert!(
-            post.settle(tutti_fixtures::main_thread(), &mut controller, mark)
-                .is_ready()
+            post.settle(tutti_fixtures::main_thread(), &mut controller, &mut pending)
+                .is_pending()
         );
         let set: Vec<_> = fake
             .calls()
@@ -398,16 +433,17 @@ mod tests {
         let main = tutti_fixtures::main_thread();
         let (post, port) = host_edits([id(1)]);
         post.write(id(1), Normalized::of(0.5)).unwrap();
-        let mark = post.mark();
+        let mut pending = post.pending();
         let held = post.0.reader.try_borrow_mut().expect("free");
         assert!(
-            post.settle(main, &mut controller, mark).is_pending(),
+            post.settle(main, &mut controller, &mut pending)
+                .is_pending(),
             "the reader is held"
         );
         drop(held);
         assert_eq!(drained(&port), [(id(1), 0.5)], "a block took the write");
         assert!(
-            post.settle(main, &mut controller, mark).is_ready(),
+            post.settle(main, &mut controller, &mut pending).is_ready(),
             "a block's sweep counts"
         );
     }
@@ -471,9 +507,9 @@ mod tests {
         // Declared to the slots, not to the fake: its policy refuses the id.
         let (post, _port) = host_edits([id(7)]);
         post.write(id(7), Normalized::of(0.5)).unwrap();
-        let mark = post.mark();
+        let mut pending = post.pending();
         assert!(
-            post.settle(tutti_fixtures::main_thread(), &mut controller, mark)
+            post.settle(tutti_fixtures::main_thread(), &mut controller, &mut pending)
                 .is_ready()
         );
         assert_eq!(post.refused(), 1);
