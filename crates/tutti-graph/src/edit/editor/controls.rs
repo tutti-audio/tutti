@@ -7,7 +7,7 @@ use tutti_buffers::Float;
 use tutti_rt::ParamCell;
 use tutti_units::{Gain, Mix};
 
-use super::{CommitError, Editor};
+use super::{CommitError, Editor, write};
 use crate::NodeKey;
 use crate::model::bus_edge::{BusOutputPort, NodeBus};
 use crate::model::gain::{EdgeFade, EdgeGain, EdgeGainError, GainCell};
@@ -68,11 +68,11 @@ impl<F: Float> Editor<F> {
         self.values.set_range(at, range);
         if at.param == NodeMix::ADDR {
             // The node's mix: its range is the mode cell's.
-            if let Some(cell) = self.cells.modes.get(at.node) {
+            if let Some(cell) = self.entries.mode(at.node) {
                 cell.store_range(range);
             }
         } else {
-            self.cells.ranges.store(at, range);
+            self.entries.store_range(at, range);
         }
         Ok(())
     }
@@ -93,9 +93,9 @@ impl<F: Float> Editor<F> {
     /// running, keeps the range it had.
     pub fn param_range_cell(&self, at: ParamIn) -> Option<ParamRangeCell> {
         if at.param == NodeMix::ADDR {
-            return self.cells.modes.get(at.node).map(ModeCell::range_cell);
+            return self.entries.mode(at.node).map(ModeCell::range_cell);
         }
-        self.cells.ranges.cell(at)
+        self.entries.range_cell(at)
     }
 
     /// A read-only handle on the value `at`'s lane last delivered: what the
@@ -111,7 +111,7 @@ impl<F: Float> Editor<F> {
         if at.param == NodeMix::ADDR {
             return None;
         }
-        self.cells.ranges.effective(at)
+        self.entries.effective(at)
     }
 
     /// Frees the ranges [`set_param_range`](Self::set_param_range),
@@ -120,7 +120,7 @@ impl<F: Float> Editor<F> {
     /// Control side, and cheap when nothing is retired: call it on a tick
     /// the owner already has (the session's reclaim phase).
     pub fn reclaim(&self) -> usize {
-        self.cells.reclaim()
+        self.entries.reclaim() + self.gains.reclaim()
     }
 
     /// Moves edge `id`'s weight to `base` from the next block on, without a
@@ -149,7 +149,7 @@ impl<F: Float> Editor<F> {
         self.touch();
         self.declare_lane(id);
         self.values.set_base(id, base);
-        if let Some(cell) = self.cells.gains.get(id) {
+        if let Some(cell) = self.gains.get(id) {
             cell.store(base);
         }
         Ok(())
@@ -161,10 +161,10 @@ impl<F: Float> Editor<F> {
     pub(super) fn declare_lane(&mut self, id: EdgeId) {
         if !self.spec.gains.contains_key(&id) {
             self.values.forget_edge(id);
-            self.spec.set_edge_gain(id, EdgeGain::default());
-            self.cells.gains.declare(id, &self.values);
-        } else if !self.cells.gains.has(id) {
-            self.cells.gains.declare(id, &self.values);
+            self.spec_mut().set_edge_gain(id, EdgeGain::default());
+            self.gains.declare(id, &self.values);
+        } else if !self.gains.has(id) {
+            self.gains.declare(id, &self.values);
         }
     }
 
@@ -177,10 +177,11 @@ impl<F: Float> Editor<F> {
     /// retains the values of the graph's edges at each switch).
     pub(crate) fn enter_gains(&mut self, entries: BTreeMap<EdgeId, EdgeGain>) {
         self.touch();
-        self.spec.gains.retain(|id, _| entries.contains_key(id));
+        let spec = write(&mut self.spec, &mut self.structure);
+        spec.gains.retain(|id, _| entries.contains_key(id));
         for (id, entry) in entries {
-            if self.spec.gains.insert(id, entry).is_none() {
-                self.cells.gains.declare(id, &self.values);
+            if spec.gains.insert(id, entry).is_none() {
+                self.gains.declare(id, &self.values);
             }
         }
     }
@@ -206,7 +207,7 @@ impl<F: Float> Editor<F> {
         self.touch();
         self.declare_lane(id);
         self.values.set_fade(id, fade);
-        if let Some(cell) = self.cells.gains.get(id) {
+        if let Some(cell) = self.gains.get(id) {
             cell.store_fade(fade);
         }
         Ok(())
@@ -223,8 +224,7 @@ impl<F: Float> Editor<F> {
         to: Option<NodeBus>,
         fade: EdgeFade,
     ) -> bool {
-        self.touch();
-        self.spec.set_bus_fade(from, to, fade)
+        self.spec_mut().set_bus_fade(from, to, fade)
     }
 
     /// Whether edge `id` has been sent in a plan, so that a fade out of it
@@ -271,14 +271,14 @@ impl<F: Float> Editor<F> {
         while let Some((id, kind)) = self.link.pop_edge_fade() {
             changed |= self.settle_edge(id, kind);
         }
-        let leaving = self.placements.leaving();
+        let leaving = self.entries.leaving();
         if !leaving.is_empty() {
             let gone: Vec<NodeKey> = leaving
                 .into_iter()
                 .filter(|&k| !self.feeds_anything(k))
                 .collect();
             for key in gone {
-                self.placements.stop_leaving(key);
+                self.entries.stop_leaving(key);
                 self.remove(key);
                 changed = true;
             }
@@ -306,9 +306,9 @@ impl<F: Float> Editor<F> {
             };
             return match kind {
                 EdgeFade::Out => match (id.sink, id.from) {
-                    (PortSink::Port(at), from) => self.spec.disconnect(at, from),
+                    (PortSink::Port(at), from) => self.spec_mut().disconnect(at, from),
                     (PortSink::Output(c), Edge::Direct(s)) => {
-                        self.spec.disconnect_output(usize::from(c), s)
+                        self.spec_mut().disconnect_output(usize::from(c), s)
                     }
                     (PortSink::Output(_), Edge::Feedback(_)) => false,
                 },
@@ -317,7 +317,7 @@ impl<F: Float> Editor<F> {
                         && self.values.base(id) == Gain::UNITY
                         && self.values.gain_range(id) == EdgeGain::DEFAULT_RANGE;
                     if plain {
-                        self.spec.clear_edge_gain(id);
+                        self.spec_mut().clear_edge_gain(id);
                         self.values.forget_edge(id);
                     } else {
                         self.values.set_fade(id, EdgeFade::None);
@@ -338,10 +338,10 @@ impl<F: Float> Editor<F> {
         }
         match kind {
             EdgeFade::Out => match to {
-                Some(to) => self.spec.disconnect_bus(from, to),
-                None => self.spec.disconnect_bus_from_main_output(from),
+                Some(to) => self.spec_mut().disconnect_bus(from, to),
+                None => self.spec_mut().disconnect_bus_from_main_output(from),
             },
-            EdgeFade::In => self.spec.set_bus_fade(from, to, EdgeFade::None),
+            EdgeFade::In => self.spec_mut().set_bus_fade(from, to, EdgeFade::None),
             EdgeFade::None => false,
         }
     }
@@ -384,7 +384,7 @@ impl<F: Float> Editor<F> {
         self.touch();
         self.declare_lane(id);
         self.values.set_gain_range(id, range);
-        if let Some(cell) = self.cells.gains.get(id) {
+        if let Some(cell) = self.gains.get(id) {
             cell.store_range(range);
         }
         Ok(())
@@ -409,8 +409,7 @@ impl<F: Float> Editor<F> {
 
     /// Edge `id`'s cell, while its entry is in the spec.
     fn gain_cell(&self, id: EdgeId) -> Option<&GainCell> {
-        self.cells
-            .gains
+        self.gains
             .get(id)
             .filter(|_| self.spec.gains.contains_key(&id))
     }
@@ -504,7 +503,7 @@ impl<F: Float> Editor<F> {
         }
         self.touch();
         self.values.set_mode(key, mode);
-        if let Some(cell) = self.cells.modes.get(key) {
+        if let Some(cell) = self.entries.mode(key) {
             cell.store(mode);
         }
         Ok(())
@@ -550,7 +549,7 @@ impl<F: Float> Editor<F> {
         }
         self.touch();
         self.values.set_mix(key, mix);
-        if let Some(cell) = self.cells.modes.get(key) {
+        if let Some(cell) = self.entries.mode(key) {
             cell.store_mix(mix);
         }
         Ok(())
@@ -561,9 +560,8 @@ impl<F: Float> Editor<F> {
     /// knob); it is the base a driving lane modulates around, not the lane's
     /// value.
     pub fn mix(&self, key: NodeKey) -> Mix {
-        self.cells
-            .modes
-            .get(key)
+        self.entries
+            .mode(key)
             .filter(|_| self.spec.topology.nodes.contains_key(&key))
             .map_or_else(|| self.values.mix(key), ModeCell::load_mix)
     }
@@ -575,7 +573,7 @@ impl<F: Float> Editor<F> {
     /// the mix without touching the editor's value: [`mix`](Self::mix) reads
     /// the cell.
     pub fn mix_cell(&self, key: NodeKey) -> Option<ParamCell> {
-        self.cells.modes.get(key).map(ModeCell::knob)
+        self.entries.mode(key).map(ModeCell::knob)
     }
 
     /// Edge `id`'s base, if the edge has an entry: the live cell's (the one
@@ -584,8 +582,7 @@ impl<F: Float> Editor<F> {
     pub fn edge_gain(&self, id: EdgeId) -> Option<Gain> {
         self.spec.gains.get(&id)?;
         Some(
-            self.cells
-                .gains
+            self.gains
                 .get(id)
                 .map_or_else(|| self.values.base(id), GainCell::load),
         )
@@ -604,11 +601,5 @@ impl<F: Float> Editor<F> {
     pub fn edge_gain_range(&self, id: EdgeId) -> Option<ParamRange> {
         self.spec.gains.get(&id)?;
         Some(self.values.gain_range(id))
-    }
-
-    /// Write every live cell from the values and the spec's fades: every
-    /// range, mode and fade.
-    pub(super) fn sync_ranges(&self) {
-        self.cells.sync(&self.spec, &self.values);
     }
 }

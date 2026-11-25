@@ -8,7 +8,7 @@ use tutti_buffers::Float;
 use tutti_units::{Latency, Tail};
 
 use super::outlets::Closed;
-use super::{CommitError, Editor, Inserted, Unwired};
+use super::{CommitError, Editor, Inserted, Unwired, write};
 use crate::model::bus_edge::{BusOutputPort, NodeBus};
 use crate::model::fade::Fade;
 use crate::model::gain::EdgeFade;
@@ -214,7 +214,7 @@ impl<F: Float> Editor<F> {
         }
         let unwired = self.place(key, kind, unit, wake, shape, fork);
         if fits {
-            self.placements.set_fade(key, fade);
+            self.entries.set_fade(key, fade);
         }
         Ok(Inserted { controls, unwired })
     }
@@ -231,18 +231,18 @@ impl<F: Float> Editor<F> {
         shape: Shape,
         fork: Option<Box<dyn ForkSource<F>>>,
     ) -> Unwired {
-        self.touch();
         // A later placement at a key takes an earlier fade back (the fade
         // was for the unit this one supersedes), and a unit that hands no
         // fork source over makes the key unforkable.
-        let generation = self.placements.place(key, unit, wake, fork);
-        let spec = NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
+        let generation = self.entries.place(key, unit, wake, fork);
+        let node = NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
             .latency(shape.latency.samples())
             .tail(shape.tail);
-        self.spec.topology.nodes.insert(key, spec);
-        self.spec.generations.insert(key, generation);
-        self.shapes.insert(key, shape);
-        self.cells.stage(key, shape.params, &self.values);
+        let spec = self.spec_mut();
+        spec.topology.nodes.insert(key, node);
+        spec.generations.insert(key, generation);
+        self.shapes_mut().insert(key, shape);
+        self.entries.stage_cells(key, shape.params, &self.values);
         self.unwire(key, &shape)
     }
 
@@ -304,19 +304,14 @@ impl<F: Float> Editor<F> {
                 limit,
             });
         }
-        let (Some(node), Some(shape)) = (
-            self.spec.topology.nodes.get_mut(&key),
-            self.shapes.get_mut(&key),
-        ) else {
-            return Err(CommitError::NoSuchNode { node: key });
-        };
-        node.latency = latency.samples();
-        shape.latency = latency;
-        self.touch();
+        self.edit_figures(key, |node, shape| {
+            node.latency = latency.samples();
+            shape.latency = latency;
+        })?;
         // A hard edit for a crossfade: its two units must share the latency
         // the plan compensates, so a fade running or waiting here is cut by
         // the next commit, and a replace not yet committed lands as a swap.
-        self.placements.cut_latency(key);
+        self.entries.cut_latency(key);
         Ok(())
     }
 
@@ -373,15 +368,29 @@ impl<F: Float> Editor<F> {
                 limit,
             });
         }
-        let (Some(node), Some(shape)) = (
-            self.spec.topology.nodes.get_mut(&key),
-            self.shapes.get_mut(&key),
-        ) else {
+        self.edit_figures(key, |node, shape| {
+            node.tail = tail;
+            shape.tail = tail;
+        })
+    }
+
+    /// Writes a figure `key`'s node and shape both hold: `NoSuchNode` for a
+    /// key either lacks, and nothing changes.
+    fn edit_figures(
+        &mut self,
+        key: NodeKey,
+        write_to: impl FnOnce(&mut NodeSpec, &mut Shape),
+    ) -> Result<(), CommitError> {
+        if !self.spec.topology.nodes.contains_key(&key) || !self.shapes.contains_key(&key) {
             return Err(CommitError::NoSuchNode { node: key });
-        };
-        node.tail = tail;
-        shape.tail = tail;
+        }
         self.touch();
+        let spec = write(&mut self.spec, &mut self.structure);
+        let shapes = write(&mut self.shapes, &mut self.structure);
+        if let (Some(node), Some(shape)) = (spec.topology.nodes.get_mut(&key), shapes.get_mut(&key))
+        {
+            write_to(node, shape);
+        }
         Ok(())
     }
 
@@ -389,7 +398,7 @@ impl<F: Float> Editor<F> {
     /// [`remove_declicked`](Self::remove_declicked) until its output fades.
     #[must_use]
     pub fn is_leaving(&self, key: NodeKey) -> bool {
-        self.placements.is_leaving(key)
+        self.entries.is_leaving(key)
     }
 
     /// [`remove`](Self::remove) with the node's output edges faded out
@@ -457,9 +466,9 @@ impl<F: Float> Editor<F> {
             self.values.set_fade(id, EdgeFade::Out);
         }
         for (from, to) in feeds {
-            self.spec.set_bus_fade(from, to, EdgeFade::Out);
+            self.spec_mut().set_bus_fade(from, to, EdgeFade::Out);
         }
-        self.placements.leave(key);
+        self.entries.leave(key);
         false
     }
 
@@ -485,7 +494,7 @@ impl<F: Float> Editor<F> {
     /// are left empty (silence).
     pub fn remove(&mut self, key: NodeKey) {
         // A node that was leaving is cut now.
-        self.placements.stop_leaving(key);
+        self.entries.stop_leaving(key);
         self.remove_keeping(key, None);
     }
 
@@ -499,22 +508,23 @@ impl<F: Float> Editor<F> {
         keep: Option<(&BTreeSet<EdgeId>, &[(BusOutputPort, Option<NodeBus>)])>,
     ) {
         self.touch();
+        let spec = write(&mut self.spec, &mut self.structure);
         let leaving = keep.is_some();
         let no_edges = BTreeSet::new();
         let (kept_edges, kept_feeds) = keep.unwrap_or((&no_edges, &[]));
         // A bus edge that touches the node goes with it, as its edges do.
-        self.spec.main_output_sources.retain(|f| {
+        spec.main_output_sources.retain(|f| {
             !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                 || kept_feeds.contains(&(f.source, None))
         });
-        self.spec.bus_edges.retain(|to, sources| {
+        spec.bus_edges.retain(|to, sources| {
             sources.retain(|f| {
                 !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                     || kept_feeds.contains(&(f.source, Some(*to)))
             });
             to.node != key && !sources.is_empty()
         });
-        let t = &mut self.spec.topology;
+        let t = &mut spec.topology;
         if !leaving {
             t.nodes.remove(&key);
         }
@@ -603,25 +613,22 @@ impl<F: Float> Editor<F> {
                 }
             }
         }
-        self.spec.events.retain(|at, _| at.node != key);
-        for sources in self.spec.events.values_mut() {
+        spec.events.retain(|at, _| at.node != key);
+        for sources in spec.events.values_mut() {
             sources.retain(|e: &EventEdge| e.from().node != key);
         }
-        self.spec
-            .required_resolution
+        spec.required_resolution
             .retain(|(at, from), _| at.node != key && from.node != key);
-        self.spec
-            .params
+        spec.params
             .retain(|at, from| at.node != key && from.node != key);
         // A lane the node drove stops driving: its edge keeps its entry and
         // reads its base.
-        for g in self.spec.gains.values_mut() {
+        for g in spec.gains.values_mut() {
             if g.source.is_some_and(|s| s.node == key) {
                 g.source = None;
             }
         }
         // The gain of an edge that went with the node goes with it.
-        let spec = &self.spec;
         let stale: Vec<EdgeId> = spec
             .gains
             .keys()
@@ -629,16 +636,15 @@ impl<F: Float> Editor<F> {
             .filter(|id| !spec.has_edge(*id))
             .collect();
         for id in stale {
-            self.spec.gains.remove(&id);
+            spec.gains.remove(&id);
             self.values.forget_edge(id);
         }
         if leaving {
             return;
         }
         self.values.forget(key);
-        self.cells.forget(key);
-        self.spec.generations.remove(&key);
-        self.shapes.remove(&key);
-        self.placements.forget(key);
+        spec.generations.remove(&key);
+        self.shapes_mut().remove(&key);
+        self.entries.forget(key);
     }
 }
