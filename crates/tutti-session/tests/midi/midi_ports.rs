@@ -18,7 +18,8 @@ use tutti_session::{
     PortCause, Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
 };
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, U7, Voice2,
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, U7,
+    Ump, Voice2,
 };
 use tutti_units::{Beat, BeatDuration, SampleRate};
 
@@ -1147,12 +1148,15 @@ fn setup_sent(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
         .collect()
 }
 
-/// **A device that returns to a port a clip plays into hears the setup again:
-/// the header, then the chase, once.** The device lost its program and
-/// controllers with its power; the next update tells the clip,
-/// and the following block's burst is drained to the reopened device.
+/// **A device that returns to a port a clip plays into is caught up to the
+/// state the port said, once, when it returns.** The device lost its program and
+/// controllers with its power; the port's record has the last program and the
+/// volume (the header's program 1 was replaced by the clip's program 5), and the
+/// returned device hears them at the return: program first, then the
+/// controller, the record's catch-up order (the channel's bank and program, then
+/// its controllers).
 #[test]
-fn a_returned_output_device_gets_the_clips_setup_once() {
+fn a_returned_output_device_is_caught_up_to_the_ports_state_once() {
     let (mut s, fake, out) = clip_into_synth();
     play(&s);
     blocks(&mut s, 2);
@@ -1167,28 +1171,64 @@ fn a_returned_output_device_gets_the_clips_setup_once() {
     let _ = s.update();
     blocks(&mut s, 2);
     let _ = s.update();
+    let _ = setup_sent(&fake);
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     assert_eq!(out.presence(), Presence::Live);
-    let _ = setup_sent(&fake);
-    blocks(&mut s, 1);
-    // The return is noted in the update's poll; the next update's collect
-    // tells the clip, and the block after it carries the burst.
-    let _ = s.update();
-    blocks(&mut s, 1);
-    let _ = s.update();
     assert_eq!(
         setup_sent(&fake),
-        [program(1), volume(), program(5)],
-        "the returned device hears the header, then the chase"
+        [program(5), volume()],
+        "the returned device hears the state at the return"
     );
     blocks(&mut s, 4);
     let _ = s.update();
     assert_eq!(setup_sent(&fake), [], "once");
 }
 
-/// **A replug while stopped sends nothing; the next start sends the header
-/// once.**
+/// **What a live source sent through the port comes back with the device**: a
+/// program, a controller and a key held down, whichever node sent them, in the
+/// record's catch-up order: the program, the controller, then the key (held notes
+/// last, so each sounds on its channel's patch).
+#[test]
+fn a_returned_output_device_hears_what_a_live_source_sent_through_the_port() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    let mut keys = s.midi().input(out.node()).expect("the output takes MIDI");
+    let _ = s.update();
+    let note: Ump = Message::midi2(
+        MidiChannel::FIRST,
+        Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0x8000)),
+    )
+    .into();
+    for ump in [note, volume(), program(5)] {
+        keys.push(Stamp::NextBlock, ump).expect("room");
+    }
+    blocks(&mut s, 2);
+    let _ = s.update();
+    let heard = |fake: &FakeCounters| -> Vec<Ump> {
+        fake.take_sent(EndpointId::from_raw(10))
+            .into_iter()
+            .filter(|u| [program(5), volume(), note].contains(u))
+            .collect()
+    };
+    assert_eq!(heard(&fake), [note, volume(), program(5)], "as sent");
+
+    unplug(&fake, 10);
+    let _ = s.update();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(
+        heard(&fake),
+        [program(5), volume(), note],
+        "the program and controller, then the key that is down"
+    );
+}
+
+/// **A replug while stopped sends nothing, as the port has said nothing; the
+/// next start sends the header once.**
 #[test]
 fn a_returned_output_device_while_stopped_hears_the_header_at_the_start() {
     let (mut s, fake, _out) = clip_into_synth();
