@@ -1813,13 +1813,13 @@ impl<F: Float> Midi<'_, F> {
 
     // --- Holding what is played ---
 
-    /// Opens a [`HeldReader`] on `instrument`'s main event input
+    /// Opens a [`HeldReader`](crate::HeldReader) on `instrument`'s main event input
     /// ([`Key::event_input`](crate::Key::event_input) 0): the keys and
     /// controllers held there, of everything it hears with every source
     /// merged. It rides an event tap of `capacity` events
     /// ([`EventCapacity`](tutti_graph::EventCapacity), as for
     /// [`tap`](Self::tap)); what the tap loses is counted in each
-    /// [`update`](HeldReader::update).
+    /// [`update`](crate::HeldReader::update).
     ///
     /// The tap is closed when the reader is dropped (the next
     /// [`Reclaim`](crate::Phase::Reclaim) phase) or with
