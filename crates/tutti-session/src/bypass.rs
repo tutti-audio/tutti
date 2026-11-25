@@ -282,7 +282,7 @@ pub(crate) mod tests {
             &self,
             _id: ParamId,
             value: Normalized,
-        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             self.writes.fetch_add(1, SeqCst);
             if self.accepts.load(SeqCst) {
                 self.held.store(is_bypassed(value), SeqCst);

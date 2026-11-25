@@ -81,8 +81,7 @@ struct Shared {
     epoch: tutti_rt::EpochWatch,
     /// The wake of the node the writes are for, bound when the node is.
     wake: Mutex<Option<tutti_graph::Wake>>,
-    /// Writes the plugin did not take: refused when applied, or made to a lost
-    /// plugin.
+    /// Writes the plugin did not take: refused when applied.
     refused: AtomicU64,
     /// A state or preset load is running: a drain yields nothing until it ends.
     restoring: AtomicBool,
@@ -135,7 +134,7 @@ impl EditPost {
     }
 
     /// Counts `n` writes the plugin did not take.
-    pub(super) fn refuse(&self, n: u64) {
+    fn refuse(&self, n: u64) {
         self.0.refused.fetch_add(n, Ordering::Relaxed);
     }
 

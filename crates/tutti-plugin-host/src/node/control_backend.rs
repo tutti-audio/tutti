@@ -43,7 +43,7 @@ use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health,
-    InProcess, OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
+    InProcess, OwnBypass, ParamWriteError, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -368,12 +368,11 @@ where
     /// The slot holds a `Normalized`, so no out-of-range or NaN value reaches
     /// the plugin. A read-only parameter is written like any other: the
     /// session checks that policy before it hands a write over.
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError> {
         if self.lost.is_lost() {
-            // No node drains a lost plugin's slots: the write is counted, as
-            // `Health::refused_edits` reads it, and not stored.
-            self.edits.refuse(1);
-            return Ok(());
+            // No node drains a lost plugin's slots: the write is refused at the
+            // call, not stored and not counted.
+            return Err(ParamWriteError::Lost(id));
         }
         self.edits.write(id, value)?;
         self.inform_controller_later();
@@ -393,7 +392,8 @@ where
             OwnBypass::Parameter(id) => {
                 match self.set_parameter_value(id, bypass_value(bypassed)) {
                     Ok(()) => BypassWrite::Sent,
-                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                    Err(ParamWriteError::Lost(_)) => BypassWrite::Lost,
+                    Err(_) => BypassWrite::Refused,
                 }
             }
             OwnBypass::Property => self
@@ -969,7 +969,9 @@ mod off_main_tests {
             handle
                 .any_thread()
                 .set_parameter_value(ParamId::new(9_999), Normalized::of(0.5)),
-            Err(tutti_plugin_types::UnknownParam(ParamId::new(9_999)))
+            Err(tutti_plugin_types::ParamWriteError::Undeclared(
+                ParamId::new(9_999)
+            ))
         );
     }
 

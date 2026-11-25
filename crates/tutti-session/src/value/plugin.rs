@@ -358,7 +358,8 @@ pub(crate) struct PluginEntry {
     reporter: ParamReporter,
     /// The parameters the plugin declares, `None` until its read lands.
     declared: Option<BTreeMap<ParamId, Declared>>,
-    /// The writes the plugin refused after `writable` passed, which the
+    /// The writes the plugin did not take after `writable` passed (a dropped
+    /// parameter, a lost plugin, one that did not answer), which the
     /// plugin's record counts in its losses.
     refused: Arc<AtomicU64>,
 }
@@ -501,11 +502,12 @@ impl PluginEntry {
     /// [`writable`](Self::writable) passed; called under the value lock.
     fn write(&self, id: ParamId, value: Normalized) {
         self.note(id, value);
-        // `writable` passed, so the plugin declared `id` when its parameters
-        // were read; one it dropped since (a rescan) is refused by the send. A
-        // value table's `store` is infallible and a batch lands whole, so the
-        // write is counted in the plugin's losses, and the mirror resyncs at the
-        // next read of its list, which makes `id` no such target.
+        // A value table's `store` is infallible and a batch lands whole, so a
+        // write the send refuses is counted in the plugin's losses: `id` was
+        // dropped by a rescan (the mirror resyncs at the next read of its list,
+        // which makes `id` no such target), or the plugin is lost or did not
+        // answer. A recovery replaces the mirror with the replacement's own
+        // read, so the value `note` stored is not sent again.
         if !self.driven.write(id, value) && self.handle.send_parameter(id, value).is_err() {
             self.refused.fetch_add(1, Ordering::Relaxed);
         }

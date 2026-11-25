@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, UnknownParam,
+    Health, ParamWriteError, PluginError, PluginFailure, RenderMode, StateError, TerminationReason,
     WindowHandle,
 };
 use tutti_plugin_types::{BypassWrite, PipelineCounts};
@@ -441,8 +441,10 @@ impl PluginHandle {
     ///
     /// # Errors
     ///
-    /// [`UnknownParam`] when the plugin did not declare `id`.
-    pub fn send_parameter(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+    /// [`ParamWriteError`] when the plugin did not declare `id`, is lost, or
+    /// gave no parameter list to check it against
+    /// ([`AnyThread::set_parameter_value`]).
+    pub fn send_parameter(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError> {
         self.any_thread.set_parameter_value(id, value)
     }
 
@@ -1293,7 +1295,7 @@ mod tests {
                 &self,
                 _id: ParamId,
                 _value: Normalized,
-            ) -> Result<(), tutti_plugin_types::UnknownParam> {
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
                 Ok(())
             }
             fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {

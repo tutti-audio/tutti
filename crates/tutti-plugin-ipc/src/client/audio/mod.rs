@@ -42,8 +42,8 @@ use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::Answer;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
-    PresetError, StateError, StateUse, UnknownParam, edit_slots,
+    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, ParamWriteError,
+    PluginFailure, PresetError, StateError, StateUse, edit_slots,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -94,20 +94,6 @@ impl Submitted {
     pub(crate) fn took_params(self) -> bool {
         matches!(self, Self::BlockAndParams)
     }
-}
-
-/// Why a parameter write was not stored for the plugin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum WriteRefused {
-    /// The plugin did not declare the parameter.
-    #[error(transparent)]
-    Unknown(#[from] UnknownParam),
-    /// The plugin crashed.
-    #[error("the plugin crashed")]
-    Crashed,
-    /// The plugin did not answer its parameter list.
-    #[error("the plugin did not answer its parameter list")]
-    Unlisted,
 }
 
 use ask::Ask;
@@ -463,23 +449,22 @@ impl AudioBridge {
     /// the first write asks the plugin for its parameters, once.
     ///
     /// A crashed plugin, or one that does not answer the parameter list, stores
-    /// nothing and is refused by name: its recovery restores from the host's
-    /// mirror.
+    /// nothing and is refused by name.
     ///
     /// # Errors
     ///
-    /// [`WriteRefused::Unknown`] when the parameters the table holds do not
-    /// include `id`. The table follows the plugin's own word that its list
+    /// [`ParamWriteError::Undeclared`] when the parameters the table holds do
+    /// not include `id`. The table follows the plugin's own word that its list
     /// changed ([`invalidate_host_edits`](Self::invalidate_host_edits)), never a
-    /// write. [`WriteRefused::Crashed`] and [`WriteRefused::Unlisted`] for the
-    /// two cases above.
+    /// write. [`ParamWriteError::Lost`] for a crashed plugin and
+    /// [`ParamWriteError::Unanswered`] for one that gave no list.
     pub(crate) fn write_parameter(
         &self,
         id: ParamId,
         value: Normalized,
-    ) -> Result<(), WriteRefused> {
+    ) -> Result<(), ParamWriteError> {
         if self.lifecycle.is_crashed() {
-            return Err(WriteRefused::Crashed);
+            return Err(ParamWriteError::Lost(id));
         }
         if let Some(table) = self.host_edits.lock().as_mut() {
             table.written = true;
@@ -488,7 +473,7 @@ impl AudioBridge {
         // No table: the plugin's list is asked, once, outside the lock (a round
         // trip), and the table is built from it.
         let Some(infos) = self.parameters() else {
-            return Err(WriteRefused::Unlisted);
+            return Err(ParamWriteError::Unanswered(id));
         };
         self.declare_host_edits(infos.iter().map(ParameterInfo::id));
         match self.host_edits.lock().as_mut() {
@@ -496,7 +481,7 @@ impl AudioBridge {
                 table.written = true;
                 Ok(table.writer.write(id, value)?)
             }
-            None => Err(WriteRefused::Unlisted),
+            None => Err(ParamWriteError::Unanswered(id)),
         }
     }
 
