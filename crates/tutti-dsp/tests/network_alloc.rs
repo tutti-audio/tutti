@@ -62,12 +62,12 @@ fn freeverb_retargets_and_renders_without_allocating() {
 #[test]
 fn the_fdn_retargets_and_renders_without_allocating() {
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
-    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay};
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeControls, MaxDecay};
     use tutti_units::{Bipolar, Db, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
     let layout = FdnLayout::new(8, MaxDecay::DEFAULT).unwrap();
-    let mut bank = FdnBank::<f32>::new(&layout, rate);
+    let mut bank = FdnBank::<f32, FdnLayout>::new(&layout, rate);
     let mut ramps = bank.ramps();
     let input = vec![0.25f32; 64];
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
@@ -86,11 +86,12 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             rate: Hz::new(0.1 + k),
             width: StereoWidth::new(2.0 * k),
             wet: Db::new(-12.0 * k),
+        };
+        let freeze = FreezeControls {
             freeze: block % 11 == 0,
-            ..FdnControls::DEFAULT
         };
         let n = allocations(|| {
-            bank.retarget(&mut ramps, &c);
+            bank.retarget(&mut ramps, &c, &freeze);
             bank.process(
                 &mut ramps,
                 &mut InputOutput::paired(
@@ -100,7 +101,7 @@ fn the_fdn_retargets_and_renders_without_allocating() {
                 .unwrap(),
             )
             .unwrap();
-            std::hint::black_box(bank.tail_of(&ramps, &c));
+            std::hint::black_box(bank.tail_of(&ramps, &c, &freeze));
         });
         assert_eq!(n, 0, "the block allocated");
     }
@@ -112,13 +113,18 @@ fn the_fdn_retargets_and_renders_without_allocating() {
 /// three times, so building one needs well over that.
 #[test]
 fn the_fdns_design_into_needs_no_network_sized_stack() {
-    use tutti_dsp::{FdnControls, FdnLayout};
+    use tutti_dsp::{FdnControls, FdnLayout, FreezeControls};
     let rate = SampleRate::SR_44K1;
     let mut network = Box::new(tutti_dsp::Network::new(rate));
     let handle = std::thread::Builder::new()
         .stack_size(140 * 1024)
         .spawn(move || {
-            FdnLayout::default().design_into(&FdnControls::DEFAULT, rate, &mut network);
+            FdnLayout::default().design_into(
+                &FdnControls::DEFAULT,
+                &FreezeControls::DEFAULT,
+                rate,
+                &mut network,
+            );
             network.stages.len()
         })
         .unwrap();

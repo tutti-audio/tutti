@@ -14,12 +14,14 @@
 //! | `motion` (crate-private) | the transport's `Timeline`, and the session's playhead | the FSM is the engine's |
 //! | `seek` ([`PendingSeek`]) | `TransportClock` | consumed once per buffer |
 //!
-//! The settings half — tempo, recording — lives in
+//! The settings half — tempo — lives in
 //! [`TransportSettings`] and is not routed through
 //! this queue: nothing decides those, they are just values. The loop region
 //! is the engine's: an edit is a scheduled
 //! [`TransportCommand::Loop`], and
-//! [`MotionFsm::loop_region`] reads what the engine published.
+//! [`MotionFsm::loop_region`] reads what the engine published. The takes
+//! recording are the engine's too: a take's start and stop are scheduled
+//! [`TransportCommand::Recording`]s.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -30,8 +32,11 @@ use super::fsm::{DeclickOutcome, Settled, TransitionResult, TransportFsm};
 use super::loop_region::{LoopOwner, LoopReader, LoopRegion};
 use super::settings::TransportSettings;
 use super::state::PendingSeek;
-use super::timed::{CommandQueue, TimedError, TransportCommand};
+use super::timed::{
+    CommandQueue, RECORDING_CAPACITY, Recording, TakeId, TimedError, TransportCommand,
+};
 use std::sync::atomic::AtomicU8;
+use tutti_rt::Mint;
 use tutti_units::At;
 use tutti_units::Beat;
 
@@ -101,7 +106,44 @@ pub enum MotionCommand {
     EndScrub,
 }
 
+/// What a [`MotionCommand`] does to whether the transport rolls
+/// ([`MotionCommand::roll`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Roll {
+    /// The transport rolls once the command applies: a play, or a locate that
+    /// then plays.
+    Starts,
+    /// It does not: a stop, or a locate that then stops.
+    Stops,
+    /// The command leaves it as it was: a locate that keeps, or a scrub.
+    Keeps,
+}
+
 impl MotionCommand {
+    /// Whether the transport rolls once this command applies.
+    #[must_use]
+    pub const fn roll(self) -> Roll {
+        match self {
+            Self::Play
+            | Self::Locate {
+                then: AfterLocate::Play,
+                ..
+            } => Roll::Starts,
+            Self::Stop { .. }
+            | Self::Locate {
+                then: AfterLocate::Stop,
+                ..
+            } => Roll::Stops,
+            Self::Locate {
+                then: AfterLocate::Keep,
+                ..
+            }
+            | Self::FastForward
+            | Self::Rewind
+            | Self::EndScrub => Roll::Keeps,
+        }
+    }
+
     /// Returns a stop with a fade-out, the default stop.
     pub const fn stop() -> Self {
         Self::Stop {
@@ -177,12 +219,52 @@ pub struct MotionFsm {
     home: Arc<ArrayQueue<Home>>,
     /// The read side of the loop region the engine publishes.
     loop_region: LoopReader,
+    /// Numbers the takes recording on this transport, shared by every clone.
+    takes: Arc<Mint>,
 }
 
-/// What outlives an engine: the FSM and the loop region.
+/// What outlives an engine: the FSM, the loop region and the takes recording.
 struct Home {
     fsm: TransportFsm,
     owner: LoopOwner,
+    recording: Recordings,
+}
+
+/// The takes recording, in a fixed set: no allocation, so it is the audio
+/// thread's to edit.
+#[derive(Clone, Copy, Debug, Default)]
+struct Recordings {
+    ids: [Option<TakeId>; RECORDING_CAPACITY],
+}
+
+impl Recordings {
+    /// Adds `id`; one already in is left as it is. `false` when the set is
+    /// full, which the session's control side keeps from happening.
+    fn insert(&mut self, id: TakeId) -> bool {
+        if self.ids.contains(&Some(id)) {
+            return true;
+        }
+        match self.ids.iter_mut().find(|place| place.is_none()) {
+            Some(place) => {
+                *place = Some(id);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes `id`; one not in is left alone.
+    fn remove(&mut self, id: TakeId) {
+        for place in &mut self.ids {
+            if *place == Some(id) {
+                *place = None;
+            }
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.ids.iter().any(Option::is_some)
+    }
 }
 
 /// Reports the *published* state only. The FSM is the engine's.
@@ -206,6 +288,7 @@ impl MotionFsm {
         let _ = home.push(Home {
             fsm: TransportFsm::Stopped,
             owner,
+            recording: Recordings::default(),
         });
         Self {
             motion: Arc::new(AtomicU8::new(MotionState::Stopped.into())),
@@ -214,7 +297,15 @@ impl MotionFsm {
             timed: CommandQueue::new(),
             home,
             loop_region,
+            takes: Arc::new(Mint::new()),
         }
+    }
+
+    /// The id of the next take to record on this transport: no two takes on
+    /// it, from any clone of this handle, share one.
+    #[must_use]
+    pub fn next_take_id(&self) -> TakeId {
+        TakeId::mint(&self.takes)
     }
 
     /// The loop region the engine holds, as of its last edit: the bounds
@@ -234,10 +325,15 @@ impl MotionFsm {
     /// returned value is dropped. `None` while another holds it (on this
     /// handle or a clone), so there is one FSM per transport.
     pub(crate) fn audio(&self) -> Option<MotionAudio> {
-        let Home { fsm, owner } = self.home.pop()?;
+        let Home {
+            fsm,
+            owner,
+            recording,
+        } = self.home.pop()?;
         Some(MotionAudio {
             fsm,
             owner: Some(owner),
+            recording,
             motion: Arc::clone(&self.motion),
             seek: self.seek.clone(),
             settings: self.settings.clone(),
@@ -328,6 +424,9 @@ impl MotionFsm {
     /// stays as the engine last applied it. (A rate change does not drop
     /// commands; it only moves `At::Frame` ones.) Takes effect at the
     /// engine's next block.
+    ///
+    /// A take's [`Recording`] command is not taken back either: a take's
+    /// start or stop is never lost.
     pub fn cancel_scheduled(&self) {
         self.timed.cancel_all();
     }
@@ -415,6 +514,8 @@ pub(crate) struct MotionAudio {
     fsm: TransportFsm,
     /// The loop region. `None` only once handed back.
     owner: Option<LoopOwner>,
+    /// The takes recording: the transport records while any is.
+    recording: Recordings,
     motion: Arc<AtomicU8>,
     seek: PendingSeek,
     settings: TransportSettings,
@@ -444,12 +545,18 @@ impl MotionAudio {
             // Lock-free, so a drop on the audio thread is safe. Never full:
             // the FSM was popped from it, and only this value puts one back.
             let fsm = std::mem::take(&mut self.fsm);
-            let _ = home.push(Home { fsm, owner });
+            let recording = self.recording;
+            let _ = home.push(Home {
+                fsm,
+                owner,
+                recording,
+            });
         }
     }
 
     /// Apply one scheduled command now: a motion change goes through the
-    /// state machine.
+    /// state machine, a loop edit to the region, a take's start or stop to
+    /// the set of takes recording.
     pub(crate) fn apply(&mut self, command: TransportCommand) {
         match command {
             TransportCommand::Motion(event) => self.step(event),
@@ -458,7 +565,17 @@ impl MotionAudio {
                     owner.apply(edit);
                 }
             }
+            TransportCommand::Recording(Recording::Start(id)) => {
+                let room = self.recording.insert(id);
+                debug_assert!(room, "the control side admits at most RECORDING_CAPACITY");
+            }
+            TransportCommand::Recording(Recording::Stop(id)) => self.recording.remove(id),
         }
+    }
+
+    /// Whether any take is recording.
+    pub(crate) fn recording(&self) -> bool {
+        self.recording.any()
     }
 
     /// The loop region the engine renders under.

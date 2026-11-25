@@ -14,6 +14,11 @@
 //!            = base_ramp[i], before that
 //! ```
 //!
+//! A source with nothing to say is not a source: a port delivers these frames
+//! only through a connect or disconnect declick and from its source's first
+//! event on. A source that has not spoken leaves the port on its base, as an
+//! unconnected port reads.
+//!
 //! A circular param ([`UnitParam::is_circular`], `Azimuth`) is wrapped onto
 //! `-180..180`, never clamped, and its moves take the short arc. **The port's
 //! frames jump by 360 where a move crosses the seam**: a ramp from 170 to
@@ -741,6 +746,15 @@ impl Ramp {
     }
 }
 
+/// Whether `event` moves `param`: a ramp or curve segment addressed to it.
+fn speaks_for(event: &ParamEvent, param: UnitAddr) -> bool {
+    let want = ParamAddr::unit(param);
+    match event.kind {
+        ParamKind::Ramp(r) => r.addr() == want,
+        ParamKind::Segment(s) => s.is_for(want),
+    }
+}
+
 /// Render one event source's values for a block into `out`: the ramps and
 /// curve segments its events for `param` start, frame by frame, and
 /// `base(i)` on each frame before its first event ever. A first ramp starts
@@ -1041,9 +1055,6 @@ impl ParamRangeReader {
 /// blocks and plans.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PortState<F: Float> {
-    /// Whether the port has not run yet: its first block takes its source
-    /// without a declick (see the module docs).
-    fresh: bool,
     /// The event source it last ran with (`None`: none).
     source: Option<EventOutputPort>,
     /// Whether the last block delivered frames.
@@ -1078,7 +1089,6 @@ impl<F: Float> PortState<F> {
     /// A port that has not run.
     fn new() -> Self {
         Self {
-            fresh: true,
             source: None,
             modulated: false,
             shown: Shown::Unknown,
@@ -1103,6 +1113,9 @@ pub(crate) struct ParamState<F: Float> {
     /// yet to run: a unit for which this is false and whose op lists no
     /// driven port skips the whole step.
     busy: bool,
+    /// Where the unit is in its blocks: its first takes every port's source
+    /// without a declick (see the module docs), and steps every port.
+    run: Run,
     /// Each port's live range reader, in port order (see [`ParamRanges`]);
     /// empty for a unit with no declared params and for one whose ports are
     /// unbounded.
@@ -1110,6 +1123,18 @@ pub(crate) struct ParamState<F: Float> {
     /// Each port's delivered-value cell, in port order; empty where `ranges`
     /// is.
     lanes: Vec<EffectiveCell>,
+}
+
+/// Where a [`ParamState`] is in its blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Run {
+    /// No block begun.
+    New,
+    /// The unit's first block: every port runs, and takes its source with
+    /// nothing to fade from.
+    First,
+    /// Every later block.
+    Later,
 }
 
 /// The per-frame values the declared ports delivered this block, and the
@@ -1173,6 +1198,7 @@ impl<F: Float> Default for ParamState<F> {
             ports: Vec::new(),
             delivered: PortFrames::new(0, 0),
             busy: false,
+            run: Run::New,
             ranges: Vec::new(),
             lanes: Vec::new(),
         }
@@ -1197,8 +1223,9 @@ impl<F: Float> ParamState<F> {
             ports: vec![PortState::new(); ports],
             delivered: PortFrames::new(ports, max),
             // Its first block runs the step whatever the plan says, to
-            // seed each port (see `PortState::fresh`).
+            // seed each port (see `Run::First`).
             busy: true,
+            run: Run::New,
             ranges,
             lanes,
         }
@@ -1233,7 +1260,7 @@ impl<F: Float> ParamState<F> {
     /// The lane has run a block undriven: its first block under a source is
     /// a connection to a running port, not a first block.
     pub(crate) fn resume(&mut self) {
-        self.ports[0].fresh = false;
+        self.run = Run::Later;
     }
 
     /// Whether the state can serve blocks of up to `max` frames.
@@ -1264,6 +1291,21 @@ impl<F: Float> ParamState<F> {
     pub(crate) fn begin(&mut self) {
         self.delivered.begin();
         self.busy = false;
+        self.run = match self.run {
+            Run::New => Run::First,
+            Run::First | Run::Later => Run::Later,
+        };
+    }
+
+    /// Whether port `k`, undriven this block, has nothing to do: its step
+    /// would change no state and deliver nothing. Never in the unit's first
+    /// block. A port is not at rest while its last source still stands (it
+    /// changes this block), while a declick runs, or while its last block
+    /// delivered (the lane is released on the block after).
+    #[inline]
+    pub(crate) fn at_rest(&self, k: usize) -> bool {
+        let st = &self.ports[k];
+        self.run != Run::First && st.source.is_none() && !st.modulated && !st.progress.running()
     }
 
     /// Run the fused step for declared port `k` (param `param`) over one
@@ -1299,9 +1341,8 @@ impl<F: Float> ParamState<F> {
             return;
         };
         let source = m.map(|(from, _)| from);
-        if st.fresh {
-            // The first block: nothing to fade from (module docs).
-            st.fresh = false;
+        if self.run == Run::First {
+            // The unit's first block: nothing to fade from (module docs).
             st.source = source;
         } else if source != st.source {
             // The source changed: fade from where the port was, and start
@@ -1312,7 +1353,11 @@ impl<F: Float> ParamState<F> {
             st.ramp = Ramp::default();
         }
         let fading = st.progress.running();
-        if source.is_none() && !fading {
+        // A source with nothing to say is not a source: until its first event
+        // for this param, outside a declick, the port reads its base.
+        let silent = !st.ramp.started
+            && m.is_none_or(|(_, events)| !events.iter().any(|e| speaks_for(e, param)));
+        if (source.is_none() || silent) && !fading {
             if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
             {

@@ -327,8 +327,8 @@ fn a_fork_at_another_rate_resamples() {
 /// saw: it plays frames `0..3000`, then `1000..3000` over and over.
 ///
 /// Crossfaded, the last 100 frames before the end blend toward the 100 that
-/// lead into the loop's start (`[900, 1000)`), frame `k` of the fade weighing
-/// the lead-in `(k + 1) / 101`, and the wrap then plays 1000: the join is the
+/// lead into the loop's start (`[900, 1000)`), frame `k` of the fade taking
+/// the equal-power gains at position `(k + 1) / 101`, and the wrap then plays 1000: the join is the
 /// file's own step (`LoopSpan`). At unit speed on whole frames
 /// every read is a frame of that sequence exactly.
 #[test]
@@ -359,8 +359,13 @@ fn a_fork_loops_as_the_stream_is_looped_when_it_is_taken() {
             let p = at(k);
             let want = if p >= 3_000 - fade {
                 let into = p - (3_000 - fade);
-                let t = (into + 1) as f32 / (fade + 1) as f32;
-                value(p) * (1.0 - t) + value(1_000 - fade + into) * t
+                // Smootherstep `s = x³(6x² − 15x + 10)` of the position, then
+                // `cos(πs/2)` for the tail and `sin(πs/2)` for the lead-in.
+                let x = (into + 1) as f64 / (fade + 1) as f64;
+                let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+                let a = s * std::f64::consts::FRAC_PI_2;
+                (f64::from(value(p)) * a.cos() + f64::from(value(1_000 - fade + into)) * a.sin())
+                    as f32
             } else {
                 value(p)
             };

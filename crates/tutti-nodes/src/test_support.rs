@@ -242,7 +242,9 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Ve
 /// What the driver does to a kernel that cuts at every grid point ([`Kernel::CUT_ALWAYS`]) for
 /// the frames of `input`: a retarget at every grid point and at every frame of `moves` (a
 /// control that moved), each at the controls in force there (`moves` is `(frame, controls)`
-/// in order, the first at frame 0), the frames between rendered together.
+/// in order, the first at frame 0), the frames between rendered together. The first design of
+/// the call lands whole, as [`KernelNode`](crate::KernelNode)'s first design after a prepare or
+/// a reset does.
 pub(crate) fn drive_kernel<K: Kernel>(
     k: &mut K,
     moves: &[(usize, <K::Set as ControlSet>::Controls)],
@@ -255,9 +257,12 @@ pub(crate) fn drive_kernel<K: Kernel>(
     stops.dedup();
     stops.push(frames);
     let mut out = vec![Vec::new(); input.len()];
-    for w in stops.windows(2) {
+    for (i, w) in stops.windows(2).enumerate() {
         let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
         k.retarget(&at);
+        if i == 0 {
+            k.jump_to_target();
+        }
         let piece: Vec<Vec<K::Float>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
         for (o, y) in out.iter_mut().zip(render_kernel(k, &piece)) {
             o.extend(y);

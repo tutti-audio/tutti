@@ -46,45 +46,47 @@ pub(crate) struct Control {
     /// The engine's loop region. Not read off the settings: the engine owns
     /// it, and an edit reaches it as a command.
     pub loop_region: LoopRegion,
-    /// Whether the session is recording, for the graph's
-    /// [`Transport::recording`](tutti_graph::TransportPosition::recording). Read once
-    /// per block, like the rest; no command moves it mid-block.
+    /// Whether any take is recording, for the graph's
+    /// [`Transport::recording`](tutti_graph::TransportPosition::recording). The set of
+    /// takes recording is the engine's, read at the block's start; a
+    /// [`Recording`](super::Recording) command moves it on its frame
+    /// ([`apply`](Self::apply)).
     pub recording: bool,
-    /// Whether a count-in is running, for the graph's
-    /// [`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in). Read
-    /// once per block, like the rest.
-    pub count_in: bool,
 }
 
 impl Control {
-    /// Read the live inputs, and take the loop region from the engine and the
-    /// tempo from the caller, which follows the published map
-    /// ([`TransportAudio`](super::TransportAudio)).
+    /// Read the live inputs, and take the loop region and whether a take is
+    /// recording from the engine and the tempo from the caller, which follows
+    /// the published map ([`TransportAudio`](super::TransportAudio)).
     pub(crate) fn read(
         settings: &super::TransportSettings,
         loop_region: LoopRegion,
+        recording: bool,
         tempo: Bpm,
     ) -> Self {
         Self {
             tempo,
             paused: settings.is_paused(),
             loop_region,
-            recording: settings.is_recording(),
-            count_in: settings.in_preroll(),
+            recording,
         }
     }
 
     /// Carry `command`'s effect, and nothing else. A motion change's effect
     /// is pausedness, which only the motion machine writes, on this thread. A
-    /// loop edit is replayed on this copy of the region.
+    /// loop edit is replayed on this copy of the region, and a take's start
+    /// or stop reads whether any take records now (`recording`, from the
+    /// motion machine that applied it).
     pub(crate) fn apply(
         &mut self,
         command: &super::TransportCommand,
         settings: &super::TransportSettings,
+        recording: bool,
     ) {
         match *command {
             super::TransportCommand::Loop(edit) => self.loop_region = self.loop_region.with(edit),
             super::TransportCommand::Motion(_) => self.paused = settings.is_paused(),
+            super::TransportCommand::Recording(_) => self.recording = recording,
         }
     }
 }
@@ -320,7 +322,6 @@ impl TransportClock {
             control.loop_region.active(),
         )
         .with_recording(control.recording)
-        .counting_in(control.count_in)
     }
 
     /// Advance `frames` under `from`, the transport the last
@@ -383,7 +384,6 @@ impl TransportClock {
                     from.looping,
                 )
                 .with_recording(from.recording())
-                .counting_in(from.count_in())
             })
     }
 
@@ -477,7 +477,6 @@ impl TransportClock {
             paused: self.links.paused.load(Ordering::Acquire),
             loop_region,
             recording: false,
-            count_in: false,
         };
         let t = self.begin(&control, true, None);
         let first = self.clock.beat();

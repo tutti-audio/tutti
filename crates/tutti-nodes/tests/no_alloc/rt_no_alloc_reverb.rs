@@ -14,8 +14,8 @@ use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{
-    FdnConfig, FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode,
-    SpringReverbConfig, SpringReverbNode,
+    FdnConfig, FdnControls, FdnLayout, FdnNode, FdnNodeControls, FreezeControls, MaxDecay,
+    PlateReverbConfig, PlateReverbNode, SpringReverbConfig, SpringReverbNode,
 };
 use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
@@ -172,7 +172,10 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
 /// status, on an alternating input of `amplitude`.
 fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<FdnNode<f32>> {
     let mut rig = Direct::new(
-        FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(controls)),
+        FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(FdnNodeControls {
+            network: controls,
+            kind: FreezeControls::DEFAULT,
+        })),
         SampleRate::SR_48K,
         64,
     );

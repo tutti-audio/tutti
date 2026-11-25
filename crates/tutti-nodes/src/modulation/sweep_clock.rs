@@ -32,11 +32,9 @@ pub(crate) struct SweepClock {
     pos: usize,
     /// Whether a segment has been solved since the last reset.
     primed: bool,
-    /// Whether the first retarget since a reset, or a frame, has passed: what a kernel needs
-    /// to land the depth and the feedback before it solves its first segment from them, and
-    /// what the swept delay reads to take a first retarget off a corner. Not the node's
-    /// land-whole fact, which [`KernelNode`](crate::KernelNode) owns.
-    applied: bool,
+    /// Whether the next segment awaits its solve: true from a reset until the first
+    /// [`solve`](Self::solve), and again whenever the frames rendered end on a corner.
+    due: bool,
 }
 
 impl SweepClock {
@@ -47,7 +45,7 @@ impl SweepClock {
             phase: RunningPhase::START,
             pos: 0,
             primed: false,
-            applied: false,
+            due: true,
         }
     }
 
@@ -56,11 +54,7 @@ impl SweepClock {
         self.phase = RunningPhase::START;
         self.pos = 0;
         self.primed = false;
-    }
-
-    /// The next design lands whole, as a fresh effect's first does.
-    pub(crate) fn unland(&mut self) {
-        self.applied = false;
+        self.due = true;
     }
 
     /// The LFO's step per frame, for the next segment.
@@ -68,20 +62,21 @@ impl SweepClock {
         self.inc = PhaseStep::from(inc);
     }
 
-    /// Whether this is the first design since the clock was unlanded: it lands at once.
-    pub(crate) fn lands(&mut self) -> bool {
-        !std::mem::replace(&mut self.applied, true)
+    /// Whether the next segment awaits its solve: the next frame begins a segment that
+    /// [`solve`](Self::solve) has not yet been called for.
+    pub(crate) fn due(&self) -> bool {
+        self.due
     }
 
-    /// Whether the next frame begins a segment.
-    pub(crate) fn at_corner(&self) -> bool {
-        self.pos == 0
-    }
-
-    /// `frames` rendered: the segment position moves on.
+    /// `frames` rendered: the segment position moves on, and the next segment is due when
+    /// the frames end on a corner.
     pub(crate) fn advance(&mut self, frames: usize) {
-        self.applied = true;
+        debug_assert!(
+            self.pos + frames <= COEFF_INTERVAL,
+            "a render chunk never crosses a corner"
+        );
         self.pos = (self.pos + frames) % COEFF_INTERVAL;
+        self.due |= frames > 0 && self.pos == 0;
     }
 
     /// Solves the next segment into `ramps`, one per channel: its start corner is the last
@@ -118,10 +113,51 @@ impl SweepClock {
         }
         self.phase = end;
         self.primed = true;
+        self.due = false;
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&self) -> (RunningPhase, usize, bool) {
-        (self.phase, self.pos, self.primed)
+    pub(crate) fn state(&self) -> (RunningPhase, usize, bool, bool) {
+        (self.phase, self.pos, self.primed, self.due)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The segment is due from a reset until it is solved, and again exactly when the frames
+    /// rendered end on a corner: a chunk that ends off the grid, or begins at an off-grid corner
+    /// of a driving port and ends before the next grid corner, solves nothing, and a chunk of
+    /// no frames at a corner does not make the segment due again.
+    #[test]
+    fn a_segment_is_due_only_when_the_frames_rendered_end_on_a_corner() {
+        let mut clock = SweepClock::new([PhaseIncrement::new(0.0); MAX_CHANNELS]);
+        clock.set_inc(PhaseIncrement::new(0.01));
+        let mut ramps = [Ramp::new(0.0f32)];
+        let solve = |clock: &mut SweepClock, ramps: &mut [Ramp<f32>; 1]| {
+            clock.solve(ramps, |lfo, _| lfo.get() as f32);
+        };
+        assert!(clock.due(), "due from the start");
+        solve(&mut clock, &mut ramps);
+        assert!(!clock.due());
+        let solved = clock.state().0;
+        clock.advance(0);
+        assert!(!clock.due(), "no frames end nowhere");
+        for chunk in [5, 7] {
+            clock.advance(chunk);
+            assert!(!clock.due(), "a chunk ending off a corner");
+            assert_eq!(clock.state().0, solved, "nothing is solved");
+        }
+        clock.advance(SEGMENT as usize - 12);
+        assert!(clock.state().1 == 0 && clock.due(), "the corner is due");
+        solve(&mut clock, &mut ramps);
+        assert_ne!(
+            clock.state().0,
+            solved,
+            "the corner solved the next segment"
+        );
+        clock.reset();
+        assert!(clock.due(), "due again after a reset");
     }
 }

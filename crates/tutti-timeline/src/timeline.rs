@@ -39,10 +39,11 @@ use tutti_units::Beat;
 ///
 /// # What is deliberately NOT here
 ///
-/// Recording, looping, and preroll are live-session facts, not timeline
-/// facts: they live on [`TransportSettings`](super::TransportSettings) and
-/// [`MotionFsm::loop_region`](super::MotionFsm::loop_region), read only where a
-/// genuinely live transport is required.
+/// Recording and looping are live-session facts, not timeline facts: they
+/// live in the engine's motion machine
+/// ([`MotionFsm::loop_region`](super::MotionFsm::loop_region), and the takes
+/// recording, [`Recording`](super::Recording)), read only where a genuinely
+/// live transport is required.
 pub trait Timeline: Send + Sync {
     /// Returns the playhead, as a [`Beat`] position. May be negative during a
     /// count-in.

@@ -381,7 +381,7 @@ fn a_shape_mismatch_is_refused() {
     let valid = spec.validate().expect("valid");
     let (plan, mut delta) =
         compile(&valid, &shapes, &prepare(128), ed.base().map(|p| &**p)).expect("compiles");
-    delta.fades = vec![(lagged, fade)];
+    delta.attach(vec![(lagged, fade)], Vec::new());
     let units: BTreeMap<NodeKey, Box<dyn Node>> =
         [(lagged, Box::new(TestNode::new(later)) as Box<dyn Node>)]
             .into_iter()

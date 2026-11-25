@@ -498,41 +498,49 @@ fn a_loop_wraps_to_its_start_not_to_zero() {
     );
 }
 
-/// A crossfaded loop must not leave a hole at the seam.
+/// A crossfaded loop's seam follows the equal-power law.
 ///
-/// This is the property that matters and the one nothing checked. The crossfade
-/// is linear (`fade_out = 1-t`, `fade_in = t`), not equal-power, so on
-/// *uncorrelated* material the seam dips ~3 dB by construction. On the material
-/// used here — a constant either side of the loop point — a linear fade is
-/// exactly flat, so any dip is a defect rather than the known trade-off.
+/// The material is a constant either side of the loop point, so the tail and
+/// the lead-in are equal and frame `k` of the `n`-frame fade reads
+/// `0.5 * (cos(πs/2) + sin(πs/2))` with `s = x³(6x² − 15x + 10)` at
+/// `x = (k + 1) / (n + 1)`: never below the constant (no hole), and up to
+/// `sqrt(2)` times it mid-fade, which is the cost of a law that holds the
+/// level of uncorrelated material. Outside the fade it reads the constant.
 ///
-/// Constants rather than a ramp: the question is "does the level hold across the
-/// join", and a ramp's own slope would be indistinguishable from a fade.
+/// Constants rather than a ramp: the question is the level across the join,
+/// and a ramp's own slope would be indistinguishable from a fade.
 #[test]
-fn a_crossfaded_loop_holds_its_level_across_the_seam() {
+fn a_crossfaded_loop_follows_the_equal_power_law_across_the_seam() {
     const LEN: usize = 8192;
-    let (start, end) = (1000.0f64, 3000.0f64);
+    let (start, end) = (1000usize, 3000usize);
     const XFADE: usize = 256;
 
-    // Constant 0.5 everywhere: the pre-loop tail and the loop start carry the
-    // same value, so a correct linear crossfade between them is flat at 0.5.
     let mut w = Wave::new(2, SampleRate::of(SR));
     for _ in 0..LEN {
         w.append(Interleaved::new(&[0.5f32, 0.5f32], w.layout()).unwrap())
             .unwrap();
     }
-    let mut source = looping_source(Arc::new(w), start, end, XFADE);
+    let mut source = looping_source(Arc::new(w), start as f64, end as f64, XFADE);
 
     let out = render(&mut source, 150);
 
     // Skip the first block: the source starts mid-range and the very first
     // frames are the read settling, not a seam.
     for (i, &s) in out.iter().enumerate().skip(BLOCK) {
+        // The source starts on `start` and plays `[start, end)` over and over.
+        let k = (i % (end - start)).checked_sub(end - start - XFADE);
+        let want = match k {
+            Some(k) => {
+                let x = (k + 1) as f64 / (XFADE + 1) as f64;
+                let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+                let a = s * std::f64::consts::FRAC_PI_2;
+                (0.5 * (a.cos() + a.sin())) as f32
+            }
+            None => 0.5,
+        };
         assert!(
-            (s - 0.5).abs() < 0.02,
-            "sample {i} is {s}, expected 0.5 — the crossfade leaves a \
-             {:.1}% hole at the loop seam",
-            (0.5 - s) / 0.5 * 100.0
+            (s - want).abs() < 1e-5,
+            "sample {i} is {s}, expected {want} (fade frame {k:?})"
         );
     }
 }
