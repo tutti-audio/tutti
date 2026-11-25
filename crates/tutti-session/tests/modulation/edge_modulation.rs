@@ -253,3 +253,44 @@ fn a_gain_reads_its_effective_value_beside_its_base() {
     let _ = render(&mut s, 12, BLOCK);
     assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
 }
+
+/// **A lane on an edge that had no gain entry is the same lane after an
+/// unrelated edit.** The lane declares the entry and binds its cell; the edit
+/// of another node applies again, finds the lane it built, and sends its own
+/// plan alone.
+#[test]
+fn a_lane_on_an_edge_without_a_gain_survives_an_unrelated_edit() {
+    let mut s = offline_48k();
+    let level = || {
+        ForkByClone(Pulse {
+            from: 0,
+            to: u64::MAX,
+            level: A,
+        })
+    };
+    let a = s.graph().add(level());
+    s.graph()
+        .connect(OutputPort::new(a, 0), MainOutput::channel(0))
+        .unwrap()
+        .unfaded();
+    let edge = ChannelEdge::new(OutputPort::new(a, 0), MainOutput::channel(0));
+    let mut m = s.mods_mut();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
+    let source = m.macro_(0.5);
+    m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
+        .unwrap();
+    let key = m.key(edge);
+    settle(&mut s);
+    let lane = |s: &Session| s.mod_state().lane(key).expect("a lane").0;
+    let built = lane(&s);
+    let plans = s.graph_ref().testing().commits_sent();
+
+    let _ = s.graph().add(level());
+    settle(&mut s);
+    assert_eq!(lane(&s), built, "the lane's node is the one built");
+    assert_eq!(
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "the edit's own plan alone"
+    );
+}

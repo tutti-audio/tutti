@@ -17,11 +17,10 @@ use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_modulation::ControlProgram;
 use tutti_modulation::{Follower, Lfo, Polarity, TargetKey};
-use tutti_nodes::ReconcileError;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_session::{
-    MainOutput, ModRefusal, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
-    RouteSpec, Session, SessionEvent, TargetName,
+    MainOutput, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError, RouteSpec,
+    Session, SessionEvent, TargetName,
 };
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, UnitParam};
@@ -234,13 +233,9 @@ fn a_refusal_names_the_node_and_the_param() {
         })
         .collect();
     assert_eq!(refused.len(), 1, "reported once: {refused:?}");
-    let Problem::Refused { cause, at } = &refused[0] else {
+    let Problem::Uncompilable { at, .. } = &refused[0] else {
         panic!("a refusal: {:?}", refused[0]);
     };
-    assert!(matches!(
-        cause,
-        ModRefusal::Apply(ReconcileError::Compile(_))
-    ));
     assert_eq!(*at, Some(TargetName::Own(cutoff.into())));
     let text = refused[0].to_string();
     assert!(
@@ -439,7 +434,7 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
 /// replacement**: a route's polarity edited while a borrow on the lane's cell
 /// (a block in progress) is held republishes the lane's program, and once
 /// the borrow goes the next update's `Reclaim` phase frees the old one with
-/// nothing published again. The lanes are inserted by the reconciler, not
+/// nothing published again. The lanes are inserted by the apply, not
 /// through `Graph::add`, so the session sweeps them itself.
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
@@ -469,7 +464,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
 }
 
 /// **The update frees the program a block held across a republish of a lane
-/// the app added with `Graph::add`**: the reconciler sweeps only the lanes it
+/// the app added with `Graph::add`**: the session sweeps only the lanes it
 /// wired, so the node's own reclaimer is what frees this one.
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_hand_added_lanes_republish() {
@@ -493,8 +488,8 @@ fn an_update_frees_a_program_a_block_held_across_a_hand_added_lanes_republish() 
 }
 
 /// **An edit through `Session::mods` after a steady state applies.** The
-/// session keeps its own declarations built between edits, and the
-/// reconciler skips an apply whose inputs are all unchanged; a route edit,
+/// session keeps its own declarations built between edits, and an
+/// update skips an apply whose inputs are all unchanged; a route edit,
 /// a range edit and a new route each reach the graph on the next update.
 #[test]
 fn an_own_edit_after_a_steady_state_applies() {
@@ -533,4 +528,101 @@ fn an_own_edit_after_a_steady_state_applies() {
     let _ = s.update();
     let range = s.mods().range_of(probe.cutoff()).expect("a declared range");
     assert_eq!(*range.end(), 2_000.0, "the range edit is stored");
+}
+
+/// **A steady update applies nothing.** A lane on a probe's cutoff, settled:
+/// every further update sends no plan, leaves the lane's published program as
+/// it was and reports nothing. After an update whose apply committed (a
+/// follower routed in), the next one is as steady as any.
+#[test]
+fn a_steady_update_sends_nothing_and_publishes_nothing() {
+    let mut s = offline_48k();
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let other = s.graph().add(ProbeUnit::new(0.1));
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    let read = |s: &Session| {
+        (
+            s.graph_ref().testing().commits_sent(),
+            s.mod_state()
+                .lane(cutoff.key())
+                .expect("a lane")
+                .1
+                .program(),
+        )
+    };
+    let steady = |s: &mut Session, (plans, program): &(u64, std::sync::Arc<_>)| {
+        for _ in 0..8 {
+            let events = s.update();
+            assert!(events.is_empty(), "nothing to report: {events:?}");
+            let now = read(s);
+            assert_eq!(now.0, *plans, "no plan was sent");
+            assert!(
+                std::sync::Arc::ptr_eq(&now.1, program),
+                "no program was published"
+            );
+        }
+    };
+    let before = read(&s);
+    steady(&mut s, &before);
+
+    let mut m = s.mods_mut();
+    let follower = m.follower(Follower::default(), other);
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.25)))
+        .unwrap();
+    let _ = s.update();
+    let applied = read(&s);
+    assert_eq!(
+        applied.0,
+        before.0 + 1,
+        "the follower's node and edge were committed"
+    );
+    assert!(
+        !std::sync::Arc::ptr_eq(&applied.1, &before.1),
+        "and the lane's program published"
+    );
+    steady(&mut s, &applied);
+}
+
+/// **A play start applies again.** An LFO's rate edit while stopped is dated
+/// from an anchor that is only valid within the play epoch: after the edit
+/// applies and settles, starting the transport moves the epoch, and the next
+/// update republishes the lane's program without the anchor.
+#[test]
+fn a_play_start_republishes_an_anchored_program() {
+    let mut s = offline_48k();
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    s.set(lfo.rate().to(Hz::new(3.0))).unwrap();
+    let _ = s.update();
+    let program = |s: &Session| {
+        s.mod_state()
+            .lane(cutoff.key())
+            .expect("a lane")
+            .1
+            .program()
+    };
+    let anchored = program(&s);
+    let _ = s.update();
+    assert!(std::sync::Arc::ptr_eq(&anchored, &program(&s)), "steady");
+
+    s.play().expect("room");
+    let mut buf = vec![0.0f32; 256];
+    s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+    let _ = s.update();
+    assert!(
+        !std::sync::Arc::ptr_eq(&anchored, &program(&s)),
+        "the play start dropped the anchor from the program"
+    );
 }

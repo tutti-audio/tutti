@@ -91,10 +91,10 @@ impl MidiLearn {
     pub fn live_controller_input(&self, channel: i16, controller: i16) {
         // Serialised with the plugin's teardown by the claim, and refused once
         // it has run: the interface is terminated by then.
-        let Some(_claim) = self.shared.lock_live() else {
+        let Some(_claim) = self.shared.claim() else {
             return;
         };
-        // SAFETY: a plain call on an interface of a plugin that is not retired,
+        // SAFETY: a plain call on an interface of a plugin that is not torn down,
         // so not terminated; the claim is held, so it cannot be torn down
         // meanwhile.
         unsafe {

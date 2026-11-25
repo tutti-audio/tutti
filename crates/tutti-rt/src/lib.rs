@@ -187,7 +187,6 @@ mod bells;
 mod blocking;
 mod id;
 mod job_gate;
-mod last_out;
 mod level_cell;
 mod mint;
 mod param;
@@ -225,7 +224,6 @@ pub use gauge::{
 };
 pub use handoff::{Handback, Handoff, Rt, handoff};
 pub use job_gate::JobGate;
-pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use mint::Mint;
 pub use param::{Param, Param64, ParamCell};

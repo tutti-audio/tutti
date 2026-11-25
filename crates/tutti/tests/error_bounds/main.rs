@@ -79,7 +79,6 @@ fn modulation_errors_are_boxable() {
 
 #[cfg(feature = "session")]
 fn session_modulation_errors_are_boxable() {
-    err::<tutti::session::ModRefusal>();
     err::<tutti::session::Problem>();
 }
 
