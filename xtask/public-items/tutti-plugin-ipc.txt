@@ -13,6 +13,7 @@ enum protocol::envelope::AudioReply
 enum protocol::envelope::AudioRequest
 enum protocol::envelope::ControlFrame
 enum protocol::envelope::Lane
+enum protocol::envelope::ModeOutcome
 enum protocol::envelope::News
 enum protocol::envelope::Working
 enum protocol::message::Reaction
