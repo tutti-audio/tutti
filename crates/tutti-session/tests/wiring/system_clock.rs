@@ -24,7 +24,9 @@ fn system() -> SystemSession {
 /// **A system session renders its graph with no device and no host.** A
 /// constant wired to both outputs reaches the heard tap, in whole stereo
 /// frames, and the playhead moves in whole timer blocks: the timer thread is
-/// the only thing that called the engine.
+/// the only thing that called the engine. Those blocks report no fault but
+/// [`StreamFaultKind::Overrun`], which says the machine was late and not that
+/// the timer is wrong: the pacer's own tests pin when one is raised.
 #[test]
 fn a_system_session_renders_its_graph_with_no_device() {
     let mut system = system();
@@ -41,11 +43,14 @@ fn a_system_session_renders_its_graph_with_no_device() {
 
     s.play().expect("room");
     let mut heard = vec![0.0f32; 2 * BLOCK];
+    let mut faults = Vec::new();
     tutti_fixtures::wait_until(
         "the constant to reach the tap",
         tutti_fixtures::HANG_GUARD,
         || {
-            let _ = s.update();
+            faults.extend(s.update().into_iter().filter(
+                |e| matches!(e, SessionEvent::Fault(f) if f.kind != StreamFaultKind::Overrun),
+            ));
             let frames = tap
                 .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
                 .unwrap()
@@ -53,17 +58,10 @@ fn a_system_session_renders_its_graph_with_no_device() {
             frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25)
         },
     );
+    assert!(faults.is_empty(), "{faults:?}");
     let head = s.playhead();
     assert!(head.playing(), "the transport rolls on the timer's blocks");
     assert_eq!(head.frame().get() % BLOCK as u64, 0);
-}
-
-/// **A timer that has fallen behind by nothing has recorded no fault**: the
-/// fault count of a fresh system session is zero.
-#[test]
-fn a_fresh_system_session_has_no_faults() {
-    let system = system();
-    assert_eq!(system.faults().count(), 0);
 }
 
 /// A source whose render always panics.
@@ -157,16 +155,4 @@ fn an_overrun_after_a_reported_panic_is_its_own_event_and_not_the_panic_again() 
         "the panic is not reported again: {second:?}"
     );
     assert!(second.contains(&StreamFaultKind::Overrun), "{second:?}");
-}
-
-/// **A fresh session on any real-time clock reports no fault event**: the
-/// first update after the build has nothing to say of the stream.
-#[test]
-fn a_fresh_system_session_reports_no_fault_event() {
-    let mut system = system();
-    let events = system.update();
-    assert!(
-        events.iter().all(|e| !matches!(e, SessionEvent::Fault(_))),
-        "{events:?}"
-    );
 }
