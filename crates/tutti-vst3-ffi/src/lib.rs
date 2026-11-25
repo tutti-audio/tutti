@@ -42,8 +42,8 @@
 //! channel or the aux block, or whose buses are not the plugin's arrangement (read
 //! when it was activated).
 //!
-//! The audio half holds no reference to the plugin, only a pointer it may use under
-//! the instance's claim, which the audio thread only ever `try_claim`s. The plugin's
+//! The audio half reaches the processor only under the instance's claim, which owns
+//! it and which the audio thread only ever `try_claim`s. The plugin's
 //! `Drop` takes the claim's data first, so a later block answers `NotInitialized`
 //! without waiting, and the plugin and its module are destroyed on the thread that
 //! drops the `Plugin`, never on the audio thread that drops an `AudioSide`.

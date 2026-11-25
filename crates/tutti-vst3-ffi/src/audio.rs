@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tutti_rt::{Claim, ClaimGuard};
 use vst3::Steinberg::Vst::{
-    IAudioProcessor, IAudioProcessorTrait, ProcessContext, ProcessData, ProcessSetup,
+    IAudioProcessor, IAudioProcessorTrait, IComponent, IComponentTrait, ProcessContext,
+    ProcessData, ProcessSetup,
 };
 use vst3::{ComPtr, ComWrapper};
 
@@ -83,9 +84,9 @@ pub(crate) struct Live {
 }
 
 // SAFETY: the processor is used only through a claim guard, and released only
-// by the `take` in `Parts::drop` (or the deactivation that `set_active(false)`
-// runs on a dead claim), on the thread that drops the plugin, so moving the
-// `Live` moves no access of its own.
+// by the `take` in `Shared::deactivate`, which the plugin's owner runs (its drop,
+// or `set_active(false)` on a dead claim), so moving the `Live` moves no access
+// of its own.
 unsafe impl Send for Live {}
 
 impl Shared {
@@ -112,15 +113,10 @@ impl Shared {
         self.active.load(Ordering::Acquire)
     }
 
-    /// Records an activation and the bus layout read with it, under the claim
-    /// (`live` proves it).
-    pub(crate) fn record_activation(
-        &self,
-        live: &mut ClaimGuard<'_, Live>,
-        active: bool,
-        buses: Option<Arrangement>,
-    ) {
-        live.state.buses = buses;
+    /// Records an activation, under the claim (`live` proves it), and forgets
+    /// the bus layout of the one before.
+    pub(crate) fn record_activation(&self, live: &mut ClaimGuard<'_, Live>, active: bool) {
+        live.state.buses = None;
         self.active.store(active, Ordering::Release);
     }
 
@@ -151,12 +147,23 @@ impl Shared {
         Ok(live)
     }
 
-    /// Ends the claim, waiting out an entry in flight, and returns whether the
-    /// plugin was active (and is now recorded as not). No entry runs after
-    /// this returns, and a second call finds nothing to end.
-    pub(crate) fn teardown(&self) -> bool {
-        drop(self.live.take());
-        self.active.swap(false, Ordering::AcqRel)
+    /// Ends the claim, which waits out an entry in flight and refuses every
+    /// later one, and then stops and deactivates a plugin recorded active (one
+    /// dropped while activated, its halves never rejoined, or one whose claim
+    /// died): `terminate` is for an inactive component. A second call finds
+    /// nothing to end and calls nothing, so the plugin is deactivated once,
+    /// whoever reaches it first.
+    pub(crate) fn deactivate(&self, component: &ComPtr<IComponent>) {
+        let live = self.live.take();
+        let was_active = self.active.swap(false, Ordering::AcqRel);
+        if let Some(live) = live.filter(|_| was_active) {
+            // SAFETY: plain calls on live interfaces; the claim is gone, so the
+            // audio half is not inside `process` and never enters again.
+            unsafe {
+                live.processor.setProcessing(0);
+                let _ = component.setActive(0);
+            }
+        }
     }
 
     /// Takes the one audio half, if the plugin is set up and active and none
@@ -396,19 +403,72 @@ mod tests {
     use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PointPool;
     use vst3::Class;
-    use vst3::Steinberg::Vst::{ProcessSetup, SpeakerArrangement};
-    use vst3::Steinberg::{kResultOk, tresult};
+    use vst3::Steinberg::Vst::{
+        BusDirection, BusInfo, IoMode, MediaType, ProcessSetup, RoutingInfo, SpeakerArrangement,
+    };
+    use vst3::Steinberg::{
+        FUnknown, IBStream, IPluginBaseTrait, TBool, TUID, kNotImplemented, kResultOk, tresult,
+    };
 
     const BLOCK: usize = 64;
 
-    /// A processor that counts the calls that reach it.
+    /// A component and processor that counts the calls that reach it.
     struct Stub {
         processed: AtomicUsize,
         processing: AtomicUsize,
+        deactivated: AtomicUsize,
     }
 
     impl Class for Stub {
-        type Interfaces = (IAudioProcessor,);
+        type Interfaces = (IAudioProcessor, IComponent);
+    }
+
+    impl IPluginBaseTrait for Stub {
+        unsafe fn initialize(&self, _: *mut FUnknown) -> tresult {
+            kResultOk
+        }
+        unsafe fn terminate(&self) -> tresult {
+            kResultOk
+        }
+    }
+
+    impl IComponentTrait for Stub {
+        unsafe fn getControllerClassId(&self, _: *mut TUID) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn setIoMode(&self, _: IoMode) -> tresult {
+            kResultOk
+        }
+        unsafe fn getBusCount(&self, _: MediaType, _: BusDirection) -> i32 {
+            0
+        }
+        unsafe fn getBusInfo(
+            &self,
+            _: MediaType,
+            _: BusDirection,
+            _: i32,
+            _: *mut BusInfo,
+        ) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn getRoutingInfo(&self, _: *mut RoutingInfo, _: *mut RoutingInfo) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn activateBus(&self, _: MediaType, _: BusDirection, _: i32, _: TBool) -> tresult {
+            kResultOk
+        }
+        unsafe fn setActive(&self, state: TBool) -> tresult {
+            if state == 0 {
+                self.deactivated.fetch_add(1, Ordering::SeqCst);
+            }
+            kResultOk
+        }
+        unsafe fn setState(&self, _: *mut IBStream) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn getState(&self, _: *mut IBStream) -> tresult {
+            kNotImplemented
+        }
     }
 
     impl IAudioProcessorTrait for Stub {
@@ -464,12 +524,13 @@ mod tests {
         let stub = ComWrapper::new(Stub {
             processed: AtomicUsize::new(0),
             processing: AtomicUsize::new(0),
+            deactivated: AtomicUsize::new(0),
         });
         let ptr = stub.to_com_ptr::<IAudioProcessor>().unwrap();
         let shared = Arc::new(Shared::new(&ptr));
         {
             let mut live = shared.claim().expect("live");
-            shared.record_activation(&mut live, true, None);
+            shared.record_activation(&mut live, true);
             live.state.setup = Some(Setup {
                 symbolic_size: width.symbolic_size(),
                 max_block,
@@ -520,8 +581,17 @@ mod tests {
 
         fn set_active(&self, active: bool) {
             let mut live = self.shared.claim().expect("live");
-            let buses = live.state.buses.take();
-            self.shared.record_activation(&mut live, active, buses);
+            self.shared.record_activation(&mut live, active);
+        }
+
+        fn deactivate(&self) {
+            let component = self.stub.to_com_ptr::<IComponent>().unwrap();
+            self.shared.deactivate(&component);
+        }
+
+        /// The `setActive(0)` calls that reached the plugin.
+        fn deactivated(&self) -> usize {
+            self.stub.deactivated.load(Ordering::SeqCst)
         }
 
         fn processed(&self) -> usize {
@@ -615,14 +685,18 @@ mod tests {
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
         rig.set_active(true);
         assert_eq!(rig.run_f32(8), Ok(()));
-        assert!(rig.shared.teardown());
+        rig.deactivate();
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
         assert_eq!(
             rig.side.set_processing(true),
             Err(Vst3Error::NotInitialized)
         );
         assert_eq!(rig.processed(), 1);
-        assert_eq!(rig.stub.processing.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            rig.stub.processing.load(Ordering::SeqCst),
+            1,
+            "the deactivation's own setProcessing(0)"
+        );
     }
 
     /// The audio half is handed out once, only for a set-up, active plugin; the
@@ -639,6 +713,7 @@ mod tests {
         let stub = ComWrapper::new(Stub {
             processed: AtomicUsize::new(0),
             processing: AtomicUsize::new(0),
+            deactivated: AtomicUsize::new(0),
         });
         let fresh = Arc::new(Shared::new(&stub.to_com_ptr::<IAudioProcessor>().unwrap()));
         assert!(fresh.take_audio_side().is_none(), "not set up, not active");
@@ -663,28 +738,33 @@ mod tests {
         assert_eq!(rig.run_f32(8), Ok(()));
     }
 
-    /// Teardown says whether the plugin was active and ends the claim for good:
-    /// no control or audio entry runs after it, and a second teardown finds
-    /// nothing.
+    /// Deactivating ends the claim for good, whether or not the plugin was
+    /// active: no control or audio entry runs after it. An active plugin gets
+    /// one `setActive(0)` however often it is asked, an inactive one none.
     #[test]
-    fn teardown_ends_the_claim_and_says_whether_it_was_active() {
-        let mut rig = rig(SampleWidth::F32, BLOCK);
-        assert!(rig.shared.teardown());
-        assert!(rig.shared.claim().is_none(), "gone for good");
-        assert!(!rig.shared.is_active());
-        assert_eq!(
-            rig.shared.lock_for_control().map(drop),
-            Err(Vst3Error::NotInitialized)
-        );
-        assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
-        assert!(!rig.shared.teardown(), "nothing left to tear down");
+    fn deactivating_ends_the_claim_and_calls_an_active_plugin_once() {
+        for (active, calls) in [(true, 1), (false, 0)] {
+            let mut rig = rig(SampleWidth::F32, BLOCK);
+            rig.set_active(active);
+            for _ in 0..2 {
+                rig.deactivate();
+                assert_eq!(rig.deactivated(), calls);
+                assert!(rig.shared.claim().is_none(), "gone for good");
+                assert!(!rig.shared.is_active());
+                assert_eq!(
+                    rig.shared.lock_for_control().map(drop),
+                    Err(Vst3Error::NotInitialized)
+                );
+                assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
+            }
+        }
     }
 
-    /// A panic under the claim poisons it: both sides answer `Poisoned`,
-    /// `is_active` still answers, the teardown reports the activation once, and
-    /// afterwards the answer is `NotInitialized`.
+    /// A panic under the claim poisons it: both sides answer `Poisoned` and
+    /// `is_active` still answers. Deactivating still reaches the plugin, once,
+    /// and afterwards the answer is `NotInitialized`.
     #[test]
-    fn a_dead_claim_answers_poisoned_until_the_teardown_ends_it() {
+    fn a_dead_claim_answers_poisoned_and_is_deactivated_once() {
         let mut rig = rig(SampleWidth::F32, BLOCK);
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _live = rig.shared.claim().expect("live");
@@ -698,14 +778,16 @@ mod tests {
             Err(Vst3Error::Poisoned)
         );
         assert!(rig.shared.is_active(), "active reads right on a dead claim");
-        assert!(rig.shared.teardown(), "was active, reported once");
-        assert!(!rig.shared.is_active());
-        assert!(!rig.shared.teardown());
-        assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
-        assert_eq!(
-            rig.shared.lock_for_control().map(drop),
-            Err(Vst3Error::NotInitialized)
-        );
+        for _ in 0..2 {
+            rig.deactivate();
+            assert_eq!(rig.deactivated(), 1);
+            assert!(!rig.shared.is_active());
+            assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
+            assert_eq!(
+                rig.shared.lock_for_control().map(drop),
+                Err(Vst3Error::NotInitialized)
+            );
+        }
         assert_eq!(rig.processed(), 0);
     }
 
@@ -716,6 +798,7 @@ mod tests {
     fn a_block_racing_a_teardown_runs_whole_or_is_refused() {
         let mut rig = rig(SampleWidth::F32, BLOCK);
         let shared = rig.shared.clone();
+        let component = rig.stub.to_com_ptr::<IComponent>().unwrap();
         let blocks = std::thread::scope(|s| {
             let audio = s.spawn(|| {
                 let mut ran = 0;
@@ -731,7 +814,7 @@ mod tests {
                     }
                 }
             });
-            assert!(shared.teardown());
+            shared.deactivate(&component);
             audio.join().expect("audio thread")
         });
         assert_eq!(

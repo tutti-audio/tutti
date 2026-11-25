@@ -208,7 +208,7 @@ impl Parts {
         let mut live = match self.shared.lock_for_control() {
             Ok(live) => live,
             Err(Vst3Error::Poisoned) if !active => {
-                self.deactivate();
+                self.shared.deactivate(&self.component);
                 return Ok(());
             }
             Err(error) => return Err(error),
@@ -219,14 +219,18 @@ impl Parts {
         // Deactivating is recorded whatever the plugin answers: there is no
         // third state to recover to, and teardown must not retry it.
         if result.is_ok() || !active {
+            // Recorded before anything else runs, so a panic below leaves an
+            // activated plugin to be deactivated.
+            self.shared.record_activation(&mut live, active);
+        }
+        if result.is_ok() && active {
             // The layout `process` holds the bound buses to is read now, from
             // the plugin as it stands once active (it may settle its buses
             // only then), and forgotten on deactivation.
-            let buses = (active && result.is_ok()).then(|| Arrangement {
+            live.state.buses = Some(Arrangement {
                 inputs: self.audio_bus_channels(main, BusDirection::Input).into(),
                 outputs: self.audio_bus_channels(main, BusDirection::Output).into(),
             });
-            self.shared.record_activation(&mut live, active, buses);
         }
         result
     }
@@ -274,29 +278,11 @@ impl Parts {
     }
 }
 
-impl Parts {
-    /// Ends the claim, which waits out a block in flight and refuses every
-    /// later one, and then stops and deactivates a plugin still active (one
-    /// dropped while activated, its halves never rejoined, or one whose claim
-    /// died): `terminate` is for an inactive component. Calls nothing for a
-    /// plugin already deactivated, so it runs once whoever reaches it first.
-    fn deactivate(&self) {
-        if self.shared.teardown() {
-            // SAFETY: plain calls on live interfaces; the claim is gone, so the
-            // audio half is not inside `process` and never enters again.
-            unsafe {
-                self.processor.setProcessing(0);
-                let _ = self.component.setActive(0);
-            }
-        }
-    }
-}
-
 impl Drop for Parts {
     fn drop(&mut self) {
         // Where an editor is open this runs on the main thread: `Plugin`'s drop hands
         // the whole value there otherwise.
-        self.deactivate();
+        self.shared.deactivate(&self.component);
         // Drop has no token and may run on any thread: the editor is detached
         // only on the thread the plugin was made on (`release_editor`).
         let here = self.home.here();
