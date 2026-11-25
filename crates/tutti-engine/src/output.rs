@@ -126,6 +126,29 @@ impl<F: Float> MainOutputFolds<F> {
     fn fold(&self, device: &OutputPlacement, routing: &Routing) -> Option<Fold<F>> {
         self.build(device, routing).unwrap_or_default()
     }
+
+    /// Folds this main output into each device held, slot `d - 1` for a
+    /// device of `d` channels.
+    fn refold(&mut self, devices: &[Option<OutputPlacement>], routing: &Routing) {
+        self.by_device = devices
+            .iter()
+            .map(|d| d.as_ref().and_then(|d| self.fold(d, routing)))
+            .collect();
+    }
+
+    /// Folds this main output into `device`, held at `slot`.
+    fn refold_device(&mut self, device: &OutputPlacement, slot: usize, routing: &Routing) {
+        if self.by_device.len() <= slot {
+            self.by_device.resize(slot + 1, None);
+        }
+        self.by_device[slot] = self.fold(device, routing);
+    }
+
+    /// The fold into a device of `device` channels, if one is held and the
+    /// pair can be placed.
+    fn for_device(&self, device: usize) -> Option<&Fold<F>> {
+        self.by_device.get(device.checked_sub(1)?)?.as_ref()
+    }
 }
 
 /// The folds from each published main output to each device width supported.
@@ -195,10 +218,7 @@ impl<F: Float> OutputFolds<F> {
             self.devices.resize(slot + 1, None);
         }
         for main_output in &mut self.main_outputs {
-            if main_output.by_device.len() <= slot {
-                main_output.by_device.resize(slot + 1, None);
-            }
-            main_output.by_device[slot] = main_output.fold(&device, &self.routing);
+            main_output.refold_device(&device, slot, &self.routing);
         }
         self.devices[slot] = Some(device);
     }
@@ -249,11 +269,7 @@ impl<F: Float> OutputFolds<F> {
     fn set_routing(&mut self, routing: Routing) {
         self.routing = routing;
         for main_output in &mut self.main_outputs {
-            main_output.by_device = self
-                .devices
-                .iter()
-                .map(|d| d.as_ref().and_then(|d| main_output.fold(d, &self.routing)))
-                .collect();
+            main_output.refold(&self.devices, &self.routing);
         }
     }
 
@@ -262,8 +278,10 @@ impl<F: Float> OutputFolds<F> {
     /// retired), a main output of no channels, a device not supported, or a
     /// pair that cannot be placed.
     pub(crate) fn get(&self, main_output: MainOutputId, device: usize) -> Option<&Fold<F>> {
-        let main_output = self.main_outputs.iter().find(|r| r.id == main_output)?;
-        main_output.by_device.get(device.checked_sub(1)?)?.as_ref()
+        self.main_outputs
+            .iter()
+            .find(|r| r.id == main_output)?
+            .for_device(device)
     }
 
     /// Whether a device of `device` channels is held (its pairs may still be
@@ -529,11 +547,7 @@ impl<F: Float> OutputControl<F> {
                     limit: MAX_PENDING_MAIN_OUTPUTS,
                 });
             }
-            entry.by_device = folds
-                .devices
-                .iter()
-                .map(|d| d.as_ref().and_then(|d| entry.fold(d, &folds.routing)))
-                .collect();
+            entry.refold(&folds.devices, &folds.routing);
             folds.main_outputs.push(entry);
             Ok(true)
         })
