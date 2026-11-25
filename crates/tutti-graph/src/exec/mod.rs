@@ -261,9 +261,7 @@ mod stage;
 mod state;
 mod update;
 
-pub(crate) use commit::{
-    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
-};
+pub(crate) use commit::{Commit, CommitSeq, Crossfade, ExecLink, Opened, Participants, Rendered};
 pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
 use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
@@ -304,7 +302,7 @@ pub const FADE_CAPACITY: usize = 256;
 /// How many ended edge fades the executor can have waiting for the editor. A
 /// lane that finds the ring full offers its report again next block, so a
 /// full ring delays an edge's removal and loses nothing.
-const EDGE_FADE_CAPACITY: usize = 1024;
+pub(crate) const EDGE_FADE_CAPACITY: usize = 1024;
 
 /// The audio-thread half of a graph: runs the current [`Plan`] one block at a
 /// time, on the calling thread or spread over a [`Pool`] (see [`set_pool`](Self::set_pool)).
@@ -535,24 +533,18 @@ fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
 }
 
 impl<F: Float> Executor<F> {
-    pub(crate) fn new(
-        prepare: Prepare,
-        cap: usize,
-        ends: ExecutorEnds<F>,
-        commands: CommandRx,
-    ) -> Self {
-        let readings = ends.readings;
+    pub(crate) fn new(prepare: Prepare, cap: usize, link: ExecLink<F>) -> Self {
         Self {
             prepare,
             event_cap: cap,
             inbox: Inbox {
-                queue: ends.queue,
-                back: ends.back,
-                fade_back: ends.fade_back,
-                losses: ends.losses,
-                unreported: readings.unreported,
-                edge_fades: ends.edge_fades,
-                commands,
+                queue: link.queue,
+                back: link.back,
+                fade_back: link.fade_back,
+                losses: link.losses,
+                unreported: link.unreported,
+                edge_fades: link.edge_fades,
+                commands: link.commands,
                 applied: 0,
             },
             plan: None,
@@ -561,16 +553,16 @@ impl<F: Float> Executor<F> {
             clock: Clock {
                 frame: Frame::ZERO,
                 history: Box::new(TransportHistory::new()),
-                play: PlayState::new(readings.play),
+                play: PlayState::new(link.played),
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
             parked: CappedVec::with_capacity(0),
             chase: CappedVec::default(),
             pool: None,
-            pool_participants: readings.pool,
-            rendered: RenderedBlocks::new(readings.rendered),
-            main_output_fade: MainOutputFades::new(readings.main_output_fade_ended),
+            pool_participants: link.participants,
+            rendered: RenderedBlocks::new(link.rendered),
+            main_output_fade: MainOutputFades::new(link.fade_ended),
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -950,6 +942,7 @@ mod tests {
     /// come out as their exact `f64` sum times the gain, `3 * (1 + 1.5 * 2^-40)`.
     #[test]
     fn an_f64_executor_sums_and_scales_in_f64() {
+        use crate::edit::editor::link::link;
         use crate::model::graph::{Edge, InputPort, NodeSpec, OutputPort, PortSource, Topology};
         use crate::model::mode::{ModeCell, ModeState, NodeMode};
         use crate::model::spec::GraphSpec;
@@ -984,14 +977,9 @@ mod tests {
                 .expect("compiles");
         let plan = Arc::new(plan);
 
-        let (mut channels, ends) = channels::<f64>();
-        let (_commands, command_rx) = crate::exec::command::command_channel();
-        let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
-        let mut stager = Stager::new(
-            DEFAULT_EVENT_CAPACITY,
-            channels.readings.pool.clone(),
-            channels.readings.rendered.clone(),
-        );
+        let (mut edit, exec_link) = link::<f64>();
+        let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, exec_link);
+        let mut stager = edit.stager(DEFAULT_EVENT_CAPACITY);
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),
@@ -1014,7 +1002,7 @@ mod tests {
                 mix_lane: &|_| None,
             },
         );
-        assert!(channels.to_executor.push(commit).is_ok(), "queued");
+        edit.send(commit, 0);
 
         let mut out = vec![0.0f64; 64];
         exec.process(64, &TransportPosition::default(), &[], &mut [&mut out[..]]);
