@@ -74,8 +74,9 @@ const SILENT_WET: Db = Db::new(-120.0);
 /// The loudest wet gain.
 const MAX_WET: Db = Db::new(24.0);
 
-/// The controls every feedback delay network has, in tutti units: what a layout's kind adds
-/// ([`FdnKind::Controls`](crate::FdnKind)) is its own.
+/// The controls every feedback delay network has, in tutti units. Each kind adds its own:
+/// an [`FdnLayout`] takes [`FreezeControls`](crate::FreezeControls) and a
+/// [`ShimmerLayout`](crate::ShimmerLayout) takes [`ShimmerControls`](crate::ShimmerControls).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnControls {
     /// The RT60 of the mid band (index 0 of [`UnitParam::Decay`](tutti_units::UnitParam)),

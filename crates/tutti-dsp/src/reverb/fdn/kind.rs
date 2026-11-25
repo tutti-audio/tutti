@@ -85,7 +85,10 @@ impl ShimmerLayout {
     }
 }
 
-/// A kind of feedback delay network: [`FdnLayout`] (plain) or [`ShimmerLayout`]. Sealed.
+/// A kind of feedback delay network, and the controls it adds to [`FdnControls`]: an
+/// [`FdnLayout`] (plain) takes [`FreezeControls`], a [`ShimmerLayout`] takes
+/// [`ShimmerControls`]. [`FdnBank`](crate::FdnBank) and [`FdnRamps`](crate::FdnRamps) take a
+/// kind's controls beside the network's. Sealed.
 pub trait FdnKind: sealed::Sealed {}
 
 impl FdnKind for FdnLayout {}
@@ -98,13 +101,13 @@ pub(super) mod sealed {
     use tutti_buffers::Float;
 
     /// What a [`FdnBank`](crate::FdnBank) asks of its kind.
-    pub trait Sealed: Copy + Debug + PartialEq {
+    pub trait Sealed: Copy + Debug + PartialEq + Send + 'static {
         /// What the kind adds to [`FdnControls`].
-        type Controls: Copy + PartialEq + Debug;
+        type Controls: Copy + PartialEq + Debug + Send;
         /// What the kind keeps in the feedback path.
-        type State<F: FftFloat>: Shifter<F>;
+        type State<F: FftFloat>: Shifter<F> + Send;
         /// What the kind's ramps hold beyond the network's.
-        type Ramps<F: Float + Lerp>: ShiftRamps<F, Self::Controls>;
+        type Ramps<F: Float + Lerp>: ShiftRamps<F, Self::Controls> + Send;
 
         /// The lines and longest decay.
         fn layout(&self) -> &FdnLayout;

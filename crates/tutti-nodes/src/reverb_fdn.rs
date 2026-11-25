@@ -7,7 +7,7 @@
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnKind, FdnLayout, FdnRamps, FftFloat, FreezeControls,
-    Lerp, MaxDecay, ShimmerLayout,
+    Lerp, MaxDecay,
 };
 use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
@@ -171,87 +171,102 @@ impl<F: FftFloat + Lerp, L: FdnKind> FdnKernel<F, L> {
     }
 }
 
-/// The [`Kernel`] of an [`FdnKernel`] of the layout `$layout`, whose controls are `$set`'s.
-macro_rules! fdn_kernel {
-    ($layout:ty, $set:ty) => {
-        impl<F: FftFloat + Lerp> Kernel for FdnKernel<F, $layout> {
-            type Float = F;
-            type Set = $set;
+mod sealed {
+    use tutti_dsp::{FdnKind, FdnLayout, ShimmerLayout};
 
-            /// A cell that moves reaches the render at a chunk's start, wherever the blocks
-            /// fall.
-            const GRID: usize = FdnBank::<F, $layout>::CHUNK;
+    use super::FdnNodeControls;
+    use crate::ControlSet;
 
-            fn shape(&self) -> Shape {
-                Shape::buses(
-                    Buses::main(ChannelTopology::MONO),
-                    Buses::main(ChannelTopology::STEREO),
-                )
-                .cost(Cost::Moderate)
-            }
+    /// A network kind the nodes run: its layout and the control set its node declares.
+    pub trait FdnNodeKind: FdnKind {
+        /// The rows of the kind's node.
+        type Set: ControlSet<Controls = FdnNodeControls<Self>>;
+    }
 
-            /// Sizes the lines, the pre-delay and the scratch of a design at `rate`: a
-            /// re-prepare empties them.
-            fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-                let bank = FdnBank::new(&self.layout, rate);
-                let ramps = bank.ramps();
-                self.running = Some(Running { rate, bank, ramps });
-            }
+    impl FdnNodeKind for FdnLayout {
+        type Set = super::FdnSet;
+    }
 
-            fn reset(&mut self) {
-                if let Some(r) = &mut self.running {
-                    r.bank.reset();
-                }
-            }
-
-            fn retarget(&mut self, controls: &FdnNodeControls<$layout>) {
-                let Some(r) = &mut self.running else { return };
-                r.bank
-                    .retarget(&mut r.ramps, &controls.network, &controls.kind);
-            }
-
-            fn jump_to_target(&mut self) {
-                if let Some(r) = &mut self.running {
-                    r.ramps.jump_to_target();
-                }
-            }
-
-            fn render(
-                &mut self,
-                block: &mut InputOutput<'_, F>,
-                _: ControlSignals<'_, F>,
-            ) -> Result<(), BlockMismatch> {
-                match &mut self.running {
-                    Some(r) => r.bank.process(&mut r.ramps, block),
-                    None => Ok(()),
-                }
-            }
-
-            /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes
-            /// as a finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out
-            /// is declared unbounded, not as a figure the graph would refuse or count as never
-            /// decaying. The node still narrows it each block to what rings.
-            fn tail(&self) -> Tail {
-                match self.running.as_ref().map(|r| (r.rate, r.bank.tail())) {
-                    None => Tail::Unknown,
-                    Some((rate, Tail::Finite(n))) if n > MAX_NODE_TAIL.to_samples_ceil(rate) => {
-                        Tail::Unbounded
-                    }
-                    Some((_, tail)) => tail,
-                }
-            }
-
-            fn tail_of(&mut self, controls: &FdnNodeControls<$layout>) -> Tail {
-                self.running.as_mut().map_or(Tail::Unknown, |r| {
-                    r.bank.tail_of(&r.ramps, &controls.network, &controls.kind)
-                })
-            }
-        }
-    };
+    impl FdnNodeKind for ShimmerLayout {
+        type Set = crate::ShimmerSet;
+    }
 }
 
-fdn_kernel!(FdnLayout, FdnSet);
-fdn_kernel!(ShimmerLayout, crate::ShimmerSet);
+use sealed::FdnNodeKind;
+
+impl<F: FftFloat + Lerp, L: FdnNodeKind> Kernel for FdnKernel<F, L> {
+    type Float = F;
+    type Set = L::Set;
+
+    /// A cell that moves reaches the render at a chunk's start, wherever the blocks
+    /// fall.
+    const GRID: usize = FdnBank::<F, L>::CHUNK;
+
+    fn shape(&self) -> Shape {
+        Shape::buses(
+            Buses::main(ChannelTopology::MONO),
+            Buses::main(ChannelTopology::STEREO),
+        )
+        .cost(Cost::Moderate)
+    }
+
+    /// Sizes the lines, the pre-delay and the scratch of a design at `rate`: a
+    /// re-prepare empties them.
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        let bank = FdnBank::new(&self.layout, rate);
+        let ramps = bank.ramps();
+        self.running = Some(Running { rate, bank, ramps });
+    }
+
+    fn reset(&mut self) {
+        if let Some(r) = &mut self.running {
+            r.bank.reset();
+        }
+    }
+
+    fn retarget(&mut self, controls: &FdnNodeControls<L>) {
+        let Some(r) = &mut self.running else { return };
+        r.bank
+            .retarget(&mut r.ramps, &controls.network, &controls.kind);
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(r) = &mut self.running {
+            r.ramps.jump_to_target();
+        }
+    }
+
+    fn render(
+        &mut self,
+        block: &mut InputOutput<'_, F>,
+        _: ControlSignals<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.running {
+            Some(r) => r.bank.process(&mut r.ramps, block),
+            None => Ok(()),
+        }
+    }
+
+    /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes
+    /// as a finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out
+    /// is declared unbounded, not as a figure the graph would refuse or count as never
+    /// decaying. The node still narrows it each block to what rings.
+    fn tail(&self) -> Tail {
+        match self.running.as_ref().map(|r| (r.rate, r.bank.tail())) {
+            None => Tail::Unknown,
+            Some((rate, Tail::Finite(n))) if n > MAX_NODE_TAIL.to_samples_ceil(rate) => {
+                Tail::Unbounded
+            }
+            Some((_, tail)) => tail,
+        }
+    }
+
+    fn tail_of(&mut self, controls: &FdnNodeControls<L>) -> Tail {
+        self.running.as_mut().map_or(Tail::Unknown, |r| {
+            r.bank.tail_of(&r.ramps, &controls.network, &controls.kind)
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {

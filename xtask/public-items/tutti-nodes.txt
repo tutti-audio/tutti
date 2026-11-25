@@ -517,6 +517,7 @@ trait params::ControlSet
 trait params::HasControl
 trait params::HasControls
 trait reconcile::ModHost
+trait reverb_fdn::sealed::FdnNodeKind
 trait signal::sender::SourcePorts
 type additive::AdditiveNode
 type auto_pan::AutoPanNode
