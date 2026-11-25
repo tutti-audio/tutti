@@ -14,7 +14,7 @@ use crate::compile::ids::{PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
-use crate::exec::par::Block;
+use crate::exec::par::{Block, BlockInputs};
 use crate::exec::slots::SlotFlags;
 use crate::node::play::PlayClock;
 use crate::node::time::{Env, TransportChanges, TransportPosition};
@@ -351,16 +351,20 @@ impl<F: Float> Executor<F> {
                 par.as_mut().expect("a staged plan carries its par"),
                 pool.as_ref(),
                 Block {
+                    read: BlockInputs {
+                        plan,
+                        env: &env,
+                        history,
+                        meter,
+                        tempo,
+                        frames,
+                        max,
+                        cap,
+                        declick: plan.prepare.declick(),
+                        inputs,
+                        due,
+                    },
                     dropped: &mut *dropped,
-                    plan,
-                    env: &env,
-                    history,
-                    meter,
-                    tempo,
-                    frames,
-                    max,
-                    cap,
-                    inputs,
                     // The claim table is sized for the plan's width; slices
                     // past it are ignored.
                     outputs: &mut outputs[..plan.rendered_outputs()],
@@ -379,7 +383,6 @@ impl<F: Float> Executor<F> {
                     inject,
                     has_inject,
                     has_due,
-                    due,
                     logs: &mut logs.lanes[..],
                     log_claims: &mut logs.claims,
                 },
