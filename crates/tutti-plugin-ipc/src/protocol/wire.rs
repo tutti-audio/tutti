@@ -215,10 +215,10 @@ mod tests {
             param_id: ParamId::new(0x0102_0304),
             value: Normalized::of(0.25),
         };
-        // variant 13, id 0x0102_0304 as a varint, 0.25f64
+        // variant 12, id 0x0102_0304 as a varint, 0.25f64
         assert_eq!(
             postcard::to_allocvec(&text).unwrap(),
-            [13, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
+            [12, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
         );
 
         let rate = ControlRequest::SetSampleRate {

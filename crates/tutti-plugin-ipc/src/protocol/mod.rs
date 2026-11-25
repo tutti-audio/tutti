@@ -641,7 +641,7 @@ mod tests {
             (
                 "SetRenderMode",
                 ControlReply::RenderModeSet {
-                    mode: RenderMode::Realtime,
+                    mode: tutti_plugin_types::RenderMode::Realtime,
                     outcome: ModeOutcome::Took,
                 },
             ),
@@ -721,23 +721,23 @@ mod tests {
                 param_id,
                 text: "ab".into(),
             }),
-            [14, 3, 2, b'a', b'b'],
-            "row 14: `param_id`, `text`"
+            [13, 3, 2, b'a', b'b'],
+            "row 13: `param_id`, `text`"
         );
         assert_eq!(
             bytes(ControlRequest::GetParameterNormalized {
                 param_id,
                 plain: 0.5,
             }),
-            [17, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
-            "row 17: `param_id`, `plain`"
+            [16, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
+            "row 16: `param_id`, `plain`"
         );
         assert_eq!(
             bytes(ControlRequest::ArmPluginMidiLearn { armed: true }),
-            [24, 1],
-            "row 24: `armed`"
+            [23, 1],
+            "row 23: `armed`"
         );
-        assert_eq!(bytes(ControlRequest::GetWiring), [25], "row 25: no fields");
+        assert_eq!(bytes(ControlRequest::GetWiring), [24], "row 24: no fields");
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {
