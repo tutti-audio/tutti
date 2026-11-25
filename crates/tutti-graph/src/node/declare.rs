@@ -209,6 +209,10 @@ impl<U: Scalar> ParamEntry for Option<U> {
 /// node has the param only sometimes.
 #[doc(hidden)]
 pub trait Cells<U: ParamValue> {
+    /// Whether the node has the param only sometimes: its value then cannot
+    /// be interpolated (an encoded `None`), so its port lands whole.
+    const OPTIONAL: bool = false;
+
     /// The cell's value as an `f64`, or `None` where the node has no such
     /// param.
     fn base(&self) -> Option<f64>;
@@ -228,6 +232,8 @@ impl<U: Scalar> Cells<U> for &Param<U> {
 }
 
 impl<U: Scalar> Cells<U> for &Option<Param<U>> {
+    const OPTIONAL: bool = true;
+
     fn base(&self) -> Option<f64> {
         self.as_ref().map(|cell| cell.load().to_cell())
     }
@@ -248,6 +254,8 @@ impl Cells<bool> for &Arc<AtomicF64> {
 }
 
 impl<U: ParamValue, C: Cells<U>> Cells<U> for Option<C> {
+    const OPTIONAL: bool = true;
+
     fn base(&self) -> Option<f64> {
         self.as_ref().and_then(Cells::base)
     }
@@ -263,6 +271,7 @@ pub struct Row<'a> {
     addr: UnitAddr,
     unit: DeclaredUnit,
     port: bool,
+    whole: bool,
     base: f64,
     cell: &'a dyn Fn() -> Option<ParamCell>,
 }
@@ -272,6 +281,7 @@ impl std::fmt::Debug for Row<'_> {
         f.debug_struct("Row")
             .field("addr", &self.addr)
             .field("port", &self.port)
+            .field("whole", &self.whole)
             .field("base", &self.base)
             .finish_non_exhaustive()
     }
@@ -288,6 +298,7 @@ pub fn row<U: ParamValue, C: Cells<U>>(
     visit: Visit<'_>,
     addr: UnitAddr,
     port: bool,
+    whole: bool,
     cell: C,
 ) -> bool {
     let Some(base) = cell.base() else {
@@ -297,6 +308,7 @@ pub fn row<U: ParamValue, C: Cells<U>>(
         addr,
         unit: DeclaredUnit::of::<U>(),
         port,
+        whole: whole || C::OPTIONAL,
         base,
         cell: &|| cell.cell(),
     })
@@ -307,15 +319,16 @@ pub fn row<U: ParamValue, C: Cells<U>>(
 #[doc(hidden)]
 pub fn ports(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamPorts {
     let mut addrs = [UnitAddr::first(tutti_units::UnitParam::Cutoff); MAX_PARAM_PORTS];
-    let mut n = 0;
+    let (mut n, mut whole) = (0, 0u32);
     walk(&mut |row| {
         if row.port {
             addrs[n] = row.addr;
+            whole |= u32::from(row.whole) << n;
             n += 1;
         }
         true
     });
-    ParamPorts::of(&addrs[..n])
+    ParamPorts::of(&addrs[..n]).whole(whole)
 }
 
 /// The [`ParamSet`] a declaration gives the node: every param it has.
@@ -439,10 +452,16 @@ pub fn input<'a, F: Float>(
 ///   indexed `HasParams`.
 /// - **A param that is not a port** (set by address, never modulated) follows
 ///   a `;` in its group, or in the node's rows.
+/// - **A param that lands whole** takes the flag `{ whole }` after its unit
+///   (`Volume => Amplitude { whole } = &n.gain`): the graph never smooths its
+///   base ([`ParamPorts::whole`]). Mark a param the node smooths itself,
+///   or whose value cannot be interpolated. A row whose cell is an `Option`
+///   lands whole by construction, with no flag. In the cells form the flag
+///   follows the unit too (`Volume => gain: Amplitude { whole } = default`).
 ///
 /// It generates, on the type, `declared_ports` (a
-/// [`ParamPorts`] for the shape's
-/// [`param_addrs`](crate::Shape::param_addrs)), `declared_set` (the
+/// [`ParamPorts`], marks included, for the shape's
+/// [`param_ports`](crate::Shape::param_ports)), `declared_set` (the
 /// node's [`ParamSet`], for [`ParamNode::param_set`](crate::ParamNode::param_set)) and
 /// `declared_base` (port `k`'s cell value, for
 /// [`Node::param_base`](crate::Node::param_base)), and the type's
@@ -594,7 +613,7 @@ pub fn input<'a, F: Float>(
 ///   [`IntoNode`](crate::IntoNode), whose controls are the node's [`ParamSet`].
 ///
 /// The node's `Node` impl forwards to the declaration: `shape` takes
-/// `self.declared_ports().as_slice()` and `param_base` answers
+/// `self.declared_ports()` ([`Shape::param_ports`](crate::Shape::param_ports)) and `param_base` answers
 /// `self.declared_base(port)`. The fields of `Cells` and `Config`
 /// are private to the declaring module, where the node's `From<Config>` builds
 /// its cells with `Cells::from_config`.
@@ -626,7 +645,7 @@ pub fn input<'a, F: Float>(
 /// impl<F: Float> Node<F> for Tone<F> {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(self.declared_ports().as_slice())
+///             .param_ports(self.declared_ports())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -681,7 +700,7 @@ pub fn input<'a, F: Float>(
 /// impl<F: Float> Node<F> for Table<F> {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(self.declared_ports().as_slice())
+///             .param_ports(self.declared_ports())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
@@ -727,7 +746,7 @@ pub fn input<'a, F: Float>(
 /// impl<F: Float> Node<F> for Bands<F> {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(self.declared_ports().as_slice())
+///             .param_ports(self.declared_ports())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
@@ -766,13 +785,14 @@ pub fn input<'a, F: Float>(
 /// impl Node for Tone {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(self.declared_ports().as_slice())
+///             .param_ports(self.declared_ports())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 ///         let level = self
 ///             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-///             .last_frame()
+///             .narrowed()
+///             .and_then(|v| v.last().copied())
 ///             .unwrap_or_else(|| f32::from_unit(self.level.load()));
 ///         io.output(0).fill(level);
 ///         Status::Modified
@@ -848,23 +868,26 @@ macro_rules! declare_params {
     };
     // An entry whose unit is `Option<Unit>`: its row is in `Unit`.
     (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
-        $kind:ident => $field:ident : Option<$unit:ty> = $($rest:tt)*) => {
+        $kind:ident => $field:ident : Option<$unit:ty> $({ $flag:ident })? = $($rest:tt)*) => {
         $crate::declare_params!(@default $ctx [$($acc)*]
             [$mode $kind $field [] [Option<$unit>] [$unit]
-                [<Option<$unit> as $crate::__private::ParamEntry>::Cell] [Option<$unit>]] $($rest)*);
+                [<Option<$unit> as $crate::__private::ParamEntry>::Cell] [Option<$unit>]
+                [$($flag)?]] $($rest)*);
     };
     // An entry of a kind with `N` indices.
     (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
-        $kind:ident => $field:ident [$count:expr] : $unit:ty = $($rest:tt)*) => {
+        $kind:ident => $field:ident [$count:expr] : $unit:ty $({ $flag:ident })? = $($rest:tt)*) => {
         $crate::declare_params!(@default $ctx [$($acc)*]
             [$mode $kind $field [$count] [$unit] [$unit]
-                [[$crate::__private::Param<$unit>; $count]] [[$unit; $count]]] $($rest)*);
+                [[$crate::__private::Param<$unit>; $count]] [[$unit; $count]]
+                [$($flag)?]] $($rest)*);
     };
     (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
-        $kind:ident => $field:ident : $unit:ty = $($rest:tt)*) => {
+        $kind:ident => $field:ident : $unit:ty $({ $flag:ident })? = $($rest:tt)*) => {
         $crate::declare_params!(@default $ctx [$($acc)*]
             [$mode $kind $field [] [$unit] [$unit]
-                [<$unit as $crate::__private::ParamEntry>::Cell] [$unit]] $($rest)*);
+                [<$unit as $crate::__private::ParamEntry>::Cell] [$unit]
+                [$($flag)?]] $($rest)*);
     };
     // An entry's default, then what follows it.
     (@default $ctx:tt [$($acc:tt)*] [$mode:ident $($head:tt)*] $default:expr
@@ -888,7 +911,7 @@ macro_rules! declare_params {
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
         [$($sname:ident [$($skind:ty)?] : $sty:ty = $sdefault:expr,)*]
     } [$(
-        [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$default:expr]]
+        [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$($flag:ident)?] [$default:expr]]
     )*]) => {
         #[doc = concat!("The cells of a [`", stringify!($ty), "`], one per declared param and setting. `Clone` shares them; [`detached`](Self::detached) copies them apart.")]
         #[derive(Clone, Debug)]
@@ -1022,7 +1045,7 @@ macro_rules! declare_params {
         }
 
         $crate::declare_params!(@munch [$($g)*] $ty, n, [];
-            $($mode $kind => $field $([$count])? : $row,)*);
+            $($mode $kind => $field $([$count])? : $row [$($flag)?],)*);
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
         where
@@ -1102,26 +1125,26 @@ macro_rules! declare_params {
         $crate::declare_params!([$($g)*] $ty, $n { $($acc)* });
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
-        port $kind:ident => $field:ident : $unit:ty, $($rest:tt)*) => {
+        port $kind:ident => $field:ident : $unit:ty [$($flag:ident)?], $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* $kind => $unit = &$n.cells.$field,];
+            [$($acc)* $kind => $unit $({ $flag })? = &$n.cells.$field,];
             $($rest)*);
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
-        port $kind:ident => $field:ident [$count:expr] : $unit:ty, $($rest:tt)*) => {
+        port $kind:ident => $field:ident [$count:expr] : $unit:ty [$($flag:ident)?], $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* [i in 0..$count] { $kind => $unit = &$n.cells.$field[i], },]; $($rest)*);
+            [$($acc)* [i in 0..$count] { $kind => $unit $({ $flag })? = &$n.cells.$field[i], },]; $($rest)*);
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
-        set $kind:ident => $field:ident : $unit:ty, $($rest:tt)*) => {
+        set $kind:ident => $field:ident : $unit:ty [$($flag:ident)?], $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* ; $kind => $unit = &$n.cells.$field,];
+            [$($acc)* ; $kind => $unit $({ $flag })? = &$n.cells.$field,];
             $($rest)*);
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
-        set $kind:ident => $field:ident [$count:expr] : $unit:ty, $($rest:tt)*) => {
+        set $kind:ident => $field:ident [$count:expr] : $unit:ty [$($flag:ident)?], $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* [i in 0..$count] { ; $kind => $unit = &$n.cells.$field[i], },]; $($rest)*);
+            [$($acc)* [i in 0..$count] { ; $kind => $unit $({ $flag })? = &$n.cells.$field[i], },]; $($rest)*);
     };
 
     // A default filled to a count.
@@ -1259,31 +1282,37 @@ macro_rules! declare_params {
         $crate::declare_params!(@walk $n $v [] $port; $($($rest)*)?);
     };
     (@walk $n:ident $v:ident [$($i:ident)?] $port:tt;
-        $kind:ident => $unit:ty = $cell:expr $(, $($rest:tt)*)?) => {
-        $crate::declare_params!(@row $v [$($i)?] $port; $kind, $unit, $cell);
+        $kind:ident => $unit:ty $({ $flag:ident })? = $cell:expr $(, $($rest:tt)*)?) => {
+        $crate::declare_params!(@row $v [$($i)?] $port; $kind, $unit, $crate::declare_params!(@whole $($flag)?), $cell);
         $crate::declare_params!(@walk $n $v [$($i)?] $port; $($($rest)*)?);
     };
     (@walk $n:ident $v:ident [$($i:ident)?] $port:tt;
-        $kind:ident => $unit:ty = $cell:expr ; $($rest:tt)*) => {
-        $crate::declare_params!(@row $v [$($i)?] $port; $kind, $unit, $cell);
+        $kind:ident => $unit:ty $({ $flag:ident })? = $cell:expr ; $($rest:tt)*) => {
+        $crate::declare_params!(@row $v [$($i)?] $port; $kind, $unit, $crate::declare_params!(@whole $($flag)?), $cell);
         $crate::declare_params!(@walk $n $v [$($i)?] false; $($rest)*);
     };
 
-    (@row $v:ident [] $port:tt; $kind:ident, $unit:ty, $cell:expr) => {
+    // A row's flag: none, or `whole` (its port lands whole).
+    (@whole) => { false };
+    (@whole whole) => { true };
+
+    (@row $v:ident [] $port:tt; $kind:ident, $unit:ty, $whole:expr, $cell:expr) => {
         if !$crate::__private::row::<$unit, _>(
             &mut *$v,
             $crate::__private::UnitAddr::first($crate::__private::UnitParam::$kind),
             $port,
+            $whole,
             $cell,
         ) {
             return false;
         }
     };
-    (@row $v:ident [$i:ident] $port:tt; $kind:ident, $unit:ty, $cell:expr) => {
+    (@row $v:ident [$i:ident] $port:tt; $kind:ident, $unit:ty, $whole:expr, $cell:expr) => {
         if !$crate::__private::row::<$unit, _>(
             &mut *$v,
             $crate::__private::UnitAddr::new($crate::__private::UnitParam::$kind, $i as u8),
             $port,
+            $whole,
             $cell,
         ) {
             return false;
@@ -1301,12 +1330,12 @@ macro_rules! declare_params {
         $crate::declare_params!(@has [$($g)*] $ty; [] $($($rest)*)?);
     };
     (@has [$($g:tt)*] $ty:ty; [$($grp:ident)?]
-        $kind:ident => $unit:ty = $cell:expr $(, $($rest:tt)*)?) => {
+        $kind:ident => $unit:ty $({ $flag:ident })? = $cell:expr $(, $($rest:tt)*)?) => {
         $crate::declare_params!(@one [$($g)*] $ty; [$($grp)?] $kind, $unit);
         $crate::declare_params!(@has [$($g)*] $ty; [$($grp)?] $($($rest)*)?);
     };
     (@has [$($g:tt)*] $ty:ty; [$($grp:ident)?]
-        $kind:ident => $unit:ty = $cell:expr ; $($rest:tt)*) => {
+        $kind:ident => $unit:ty $({ $flag:ident })? = $cell:expr ; $($rest:tt)*) => {
         $crate::declare_params!(@one [$($g)*] $ty; [$($grp)?] $kind, $unit);
         $crate::declare_params!(@has [$($g)*] $ty; [$($grp)?] $($rest)*);
     };

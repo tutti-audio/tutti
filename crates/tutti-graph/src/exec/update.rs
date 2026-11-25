@@ -292,6 +292,7 @@ impl<F: Float> Executor<F> {
                     } else {
                         place(&mut c.spare_held, staging);
                         x.out = Some(std::mem::replace(&mut u.node, node));
+                        u.params.reseat();
                         u.fade = Some(x);
                         u.quiet = Samples::ZERO;
                         u.last_quiet = false;

@@ -57,13 +57,16 @@ fn a_write_reaches_the_index_it_names() {
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0) && b.iter().all(|&x| x == 500.0));
 
+    // A write ramps over the declick, then holds.
     s.set(node.threshold_at(1).to(Db::new(-6.0))).unwrap();
+    let _ = render(&mut s, 512);
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0), "band 0 did not move");
     assert!(b.iter().all(|&x| x == -6.0), "band 1 took the write");
 
     // A bare `UnitParam` is index 0.
     s.set(node.threshold().to(Db::new(-12.0))).unwrap();
+    let _ = render(&mut s, 512);
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == -12.0));
     assert!(b.iter().all(|&x| x == -6.0));

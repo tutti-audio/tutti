@@ -82,7 +82,7 @@ impl Node for ProbeUnit {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        match io.param(0).frames() {
+        match io.param(0).narrowed() {
             Some(v) => io.output(0).copy_from_slice(v),
             None => {
                 let k = self.knob.load(Ordering::Acquire);

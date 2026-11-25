@@ -476,8 +476,8 @@ impl<F: Float> SumLane<F> {
         };
         if let Some(drive) = &mut self.drive {
             drive.begin();
-            drive.port(0, EdgeGain::ADDR, frames, declick, source, Some(to));
-            if let Some(f) = drive.frames(0, frames) {
+            drive.port(0, EdgeGain::ADDR, frames, declick, source, Some(to.into()));
+            if let Some(f) = drive.narrowed(0, frames) {
                 self.prev = f.last().copied();
                 // The port's frames are not scaled by a fade: it is over.
                 self.fade.progress.cut();

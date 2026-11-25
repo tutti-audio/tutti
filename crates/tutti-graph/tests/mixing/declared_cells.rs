@@ -50,13 +50,15 @@ impl From<BankConfig> for Bank {
 fn show(out: &mut [f32], input: ParamInput<'_>, base: f64) {
     match input {
         ParamInput::Base => out.fill(base as f32),
-        ParamInput::Frames { values: v, .. } => out.copy_from_slice(v),
+        ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+            out.copy_from_slice(v);
+        }
     }
 }
 
 impl Node for Bank {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(self.layout).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -95,7 +97,7 @@ declare_params!([] Old, n {
 
 impl Node for Old {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

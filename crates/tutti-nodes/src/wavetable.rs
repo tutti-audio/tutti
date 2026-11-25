@@ -126,7 +126,7 @@ impl<F: Float> Node<F> for WavetableNode<F> {
         Shape::source_unassigned(self.width)
             .cost(tutti_graph::Cost::Light)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, prepare: &Prepare) {
@@ -140,13 +140,13 @@ impl<F: Float> Node<F> for WavetableNode<F> {
         let size = io.frames();
         let frequency = self
             .declared_param::<{ UnitParam::Frequency as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let level = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let position = self
             .declared_param::<{ UnitParam::Position as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let mut hz = self.good_frequency.read(self.cells.frequency.load().get());
         let mut at = self.good_position.read(self.cells.position.load().get());
         let table = Arc::clone(self.wave.table());

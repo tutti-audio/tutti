@@ -44,14 +44,15 @@ declare_params!([] Declared, n {
 fn show(out: &mut [f32], input: ParamInput<'_>, base: f32) {
     match input {
         ParamInput::Base => out.fill(base),
-        ParamInput::Frames { values: v, .. } => out.copy_from_slice(v),
+        ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+            out.copy_from_slice(v);
+        }
     }
 }
 
 impl Node for Declared {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(4))
-            .param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::from_count(4)).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

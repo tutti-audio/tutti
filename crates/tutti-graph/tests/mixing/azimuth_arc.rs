@@ -43,7 +43,9 @@ impl Node for Probe {
         let base = self.0;
         let write = |out: &mut [f32], p: ParamInput<'_>| match p {
             ParamInput::Base => out.fill(base),
-            ParamInput::Frames { values, .. } => out.copy_from_slice(values),
+            ParamInput::Frames { narrow, .. } | ParamInput::Smoothing { narrow, .. } => {
+                out.copy_from_slice(narrow);
+            }
         };
         let (a, e) = (io.param(0), io.param(1));
         write(io.output(0), a);

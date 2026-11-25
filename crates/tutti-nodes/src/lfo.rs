@@ -288,7 +288,7 @@ impl<F: Float> Node<F> for LfoNode {
         Shape::source_unassigned(ChannelLayout::MONO)
             .cost(tutti_graph::Cost::Moderate)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -310,7 +310,7 @@ impl<F: Float> Node<F> for LfoNode {
         let depth_cell = F::from_unit(self.cells.depth.load());
         let depth_signal = self
             .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let depth_at = |i: usize| {
             depth_signal
                 .map(|l| l[i])
@@ -339,7 +339,7 @@ impl<F: Float> Node<F> for LfoNode {
                 let rate_cell = self.cells.rate.load().get();
                 let rate_signal = self
                     .declared_param::<{ UnitParam::Rate as u16 }, _>(&io)
-                    .frames();
+                    .narrowed();
                 // The step is accumulated in `f64` for as long as the node runs: an
                 // `f32`-rounded step drifts the cycle index off the frame.
                 let out = io.output(0);

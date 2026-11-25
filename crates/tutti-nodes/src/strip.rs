@@ -56,7 +56,7 @@ use tutti_units::{Amplitude, Balance, Tail};
 tutti_graph::declare_params!([] BusStripNode, #[derive(Copy, PartialEq)] BusStripConfig, BusStripCells {
     required { input: ChannelTopology }
     params {
-        Volume => volume: Amplitude = Amplitude::UNITY,
+        Volume => volume: Amplitude { whole } = Amplitude::UNITY,
         Balance => balance: Option<Balance> = None,
     }
 });
@@ -413,7 +413,7 @@ impl<F: Float> Node<F> for BusStripNode {
             // boundary about 0.73. `Light`, as a wrong `Light` costs little.
             .cost(tutti_graph::Cost::Light)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     /// Nothing is rate-dependent: the ramp is one block long, whatever the
@@ -424,9 +424,9 @@ impl<F: Float> Node<F> for BusStripNode {
         let size = io.frames();
         let (volume, balance) = (
             self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-                .frames(),
+                .narrowed(),
             self.declared_param::<{ UnitParam::Balance as u16 }, _>(&io)
-                .frames(),
+                .narrowed(),
         );
         let (inputs, mut outputs) = io.split();
         self.render(&inputs, &mut outputs, size, volume, balance);

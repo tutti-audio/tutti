@@ -54,7 +54,8 @@ impl Bands {
 
 impl Node for Bands {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&[BAND0, BAND1])
+        Shape::source_unassigned(ChannelLayout::from_count(2))
+            .param_ports(ParamPorts::of(&[BAND0, BAND1]))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -64,7 +65,9 @@ impl Node for Bands {
                     let base = thr.load().get();
                     io.output(k).fill(base as f32);
                 }
-                ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
+                ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+                    io.output(k).copy_from_slice(v);
+                }
             }
         }
         Status::Modified
@@ -461,14 +464,16 @@ struct Wide(Vec<UnitAddr>);
 
 impl Node for Wide {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&self.0)
+        Shape::source_unassigned(ChannelLayout::from_count(2)).param_ports(ParamPorts::of(&self.0))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for (out, k) in [(0, 0), (1, 31)] {
             match io.param(k) {
                 ParamInput::Base => io.output(out).fill(0.0),
-                ParamInput::Frames { values: v, .. } => io.output(out).copy_from_slice(v),
+                ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+                    io.output(out).copy_from_slice(v);
+                }
             }
         }
         Status::Modified
