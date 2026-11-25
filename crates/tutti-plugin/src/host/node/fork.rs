@@ -381,7 +381,10 @@ impl Capture {
         if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
-            let _ = fork.bridge.audio().set_render_mode(RenderMode::Offline);
+            let served = fork.served.clone();
+            let _ = fork.live.announce_render_mode(RenderMode::Offline, |mode| {
+                tutti_plugin_types::AnyThread::set_render_mode(&served, mode)
+            });
             // Not pinned end to end here: the out-of-process reference
             // plugin is CLAP, which has no system-time field. The in-process
             // VST2 fork drops its clock the same way, and

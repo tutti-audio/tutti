@@ -1998,7 +1998,11 @@ fn two_mode_asks_before_one_answer_end_running_the_second() {
         "the mode it will run in is not the one asked for"
     );
     let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
-    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
+    assert_eq!(
+        s.applied().map(|p| p.mode()),
+        Some(RenderMode::Realtime),
+        "the answer to the first ask is not the one waited for"
+    );
     let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Realtime)));
     assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Realtime));
     assert_eq!(s.wanted().map(|p| p.mode()), Some(RenderMode::Realtime));
@@ -2126,6 +2130,36 @@ fn an_answer_arriving_after_a_restart_began_changes_nothing() {
     let (s, fx) = go(s, Event::Answered(Told::RateRefused(refusal)));
     assert!(fx.is_empty(), "the activation settled the retune");
     assert_eq!(s.applied(), Some(q));
+}
+
+/// **A taken mode told before a restart is stale once the restart ran**: the
+/// answer is read at the next pump, after the activation that replaced the
+/// mode, and applies nothing.
+#[test]
+fn a_taken_mode_arriving_after_a_restart_finished_changes_nothing() {
+    let p = prep(1);
+    let q = p
+        .with_mode(RenderMode::Realtime)
+        .with_rate(SampleRate::SR_96K);
+    let s = active(RESTARTS, p);
+    let (s, fx) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    assert_eq!(fx, [Fx::SetMode(RenderMode::Offline)]);
+    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
+    let (s, _) = reply(s, Reply::Returned);
+    let (s, _) = reply(s, Reply::Deactivated);
+    let (s, _) = reply(s, Reply::Activated);
+    let (s, _) = reply(s, Reply::Latency(Samples::new(0)));
+    let (s, _) = reply(s, Reply::Tail(PluginTail::Unknown));
+    let (s, _) = reply(s, Reply::Layout(stereo()));
+    let (s, _) = reply(s, Reply::Done);
+    assert_eq!(s.applied(), Some(q));
+    let (s, fx) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
+    assert!(fx.is_empty());
+    assert_eq!(
+        s.applied().map(|a| a.mode()),
+        Some(RenderMode::Realtime),
+        "the activation's mode, not the stale tell's"
+    );
 }
 
 /// **A callback size alone restarts a Processor that retunes, until it is

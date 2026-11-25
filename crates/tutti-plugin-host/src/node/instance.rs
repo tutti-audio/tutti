@@ -666,6 +666,11 @@ impl<L: Loaded> Instance<L> {
     /// Wants the plugin in `mode` and tells it with `tell`, which needs no main
     /// thread; the lifecycle records the tell, so its answer settles it. `false`
     /// when the plugin is lost or `tell` queues nothing, with the want as it was.
+    ///
+    /// `tell` runs under the instance's lock, so the lock order is instance,
+    /// then bridge. No bridge listener callback takes the instance lock: the
+    /// listener writes the answers into `Events::told`, which the pump drains
+    /// under its own lock.
     pub(super) fn announce_mode(
         &mut self,
         mode: RenderMode,

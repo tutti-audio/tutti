@@ -1522,15 +1522,17 @@ impl State {
                     }),
                 );
             }
-            // The server runs the last mode it was told, whoever told it (the
-            // lifecycle, or the host's bridge directly): that is what the
-            // plugin has, and what the host wants stays its own.
+            // What the plugin has is the mode the last tell named, and what the
+            // host wants stays its own. An answer to a tell no longer waited
+            // for (one an activation since settled) is stale: applying it
+            // would put back the mode the activation replaced.
             Told::ModeTook(mode) => {
+                if self.asking != Some(mode) {
+                    return;
+                }
+                self.asking = None;
                 if let Some(applied) = &mut self.applied {
                     applied.mode = mode;
-                }
-                if self.asking == Some(mode) {
-                    self.asking = None;
                 }
             }
             Told::ModeRefused(mode) => {
