@@ -10,11 +10,11 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, ModeTold, OwnBypass,
-    ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    PluginWiring, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope,
-    Samples, StateUse, TimerId, TrackInfo, WindowHandle, Wraps, bypass_parameter,
+    EditorOpened, EditorPresence, EditorWindow, Features, Layout, ModeTold, OwnBypass, ParamAccess,
+    ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
+    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PluginWiring, PresetId,
+    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
+    TrackInfo, Widths, WindowHandle, Wraps, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -103,7 +103,7 @@ impl ClapLoaded {
     pub(crate) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
         let bits = editor_bits(self.has_editor(main), self.has_floating_editor(main));
         PluginDescriptor {
-            widths: Some(Loaded::widths(self)),
+            widths: Some(Widths::new(self.audio.supports_f64)),
             ..descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
         }
     }

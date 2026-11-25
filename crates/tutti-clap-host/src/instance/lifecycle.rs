@@ -25,7 +25,7 @@ use tutti_clap_ffi::ActivateError;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
-    Control, Loaded, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
+    Control, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
@@ -61,7 +61,7 @@ pub(crate) fn plugin_error(error: ClapError) -> PluginError {
 
 impl ClapLoaded {
     /// Whether every one of the plugin's audio ports, inputs and outputs,
-    /// advertises 64-bit support (and it has at least one). Activating as
+    /// advertised 64-bit support at the last port read (and it has at least one). Activating as
     /// `f64` requires this, because the host hands one sample width for every
     /// buffer.
     #[must_use]
@@ -72,31 +72,6 @@ impl ClapLoaded {
     /// Metadata read from the plugin's descriptor at load time.
     pub fn info(&self) -> &PluginInfo {
         &self.info
-    }
-
-    /// The format an activation runs at when `requested` is asked of this
-    /// plugin: 64-bit only when asked for and every port advertises it, else
-    /// 32-bit ([`Widths::negotiate`](tutti_plugin_types::Widths::negotiate)). The audio ports are read
-    /// again first, so the answer is the plugin's capability now, not as of
-    /// load. A caller that wants the fallback negotiates here and puts the
-    /// result in [`Prepare::format`]; [`Loaded::activate`] reads the ports once
-    /// more and refuses a 64-bit request the plugin can no longer take rather
-    /// than quietly changing it, and hands the plugin back for a retry.
-    ///
-    /// # Errors
-    ///
-    /// [`ClapError::NotSupported`] while the plugin is active (the ports are
-    /// `[!active]`).
-    ///
-    /// [`Loaded::activate`]: tutti_plugin_types::Loaded::activate
-    /// [`ClapError::NotSupported`]: crate::ClapError::NotSupported
-    pub fn negotiate_format(
-        &mut self,
-        main: MainThreadMarker,
-        requested: FloatWidth,
-    ) -> crate::Result<FloatWidth> {
-        self.rescan_audio_ports(main)?;
-        Ok(self.widths().negotiate(requested))
     }
 
     /// Activates the plugin at the sample format `prepare` names, splitting it
@@ -112,10 +87,11 @@ impl ClapLoaded {
     /// # Errors
     ///
     /// [`Refused`] carries the **unconsumed** `ClapLoaded` beside the reason, so
-    /// a refusal costs the configuration and not the instance: a plugin that
-    /// declines 64-bit audio is retried at `f32` (see
-    /// [`negotiate_format`](Self::negotiate_format)) against the same mapped
-    /// library and the same instance. Both failure paths preserve it: the
+    /// a refusal costs the configuration and not the instance: a caller
+    /// chooses the width from [`Loaded::widths`](tutti_plugin_types::Loaded::widths)
+    /// before it activates, and a refused activation is retried, if at all,
+    /// against the same mapped library and the same instance. Both failure
+    /// paths preserve it: the
     /// `f64` check returns before any FFI runs, and a plugin-side refusal
     /// leaves the instance untouched and not active.
     // The `Err` variant deliberately hands `self` (a large `ClapLoaded`) back so

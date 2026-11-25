@@ -477,6 +477,13 @@ pub(crate) mod test_utils {
         clap().activation_count()
     }
 
+    /// How many times the reference plugin refused `activate` since
+    /// [`clap_probe_reset_activation_count`].
+    #[cfg(feature = "clap")]
+    pub(crate) fn clap_probe_refusal_count() -> u32 {
+        clap().refusal_count()
+    }
+
     /// Zeroes [`clap_probe_activation_count`].
     #[cfg(feature = "clap")]
     pub(crate) fn clap_probe_reset_activation_count() {

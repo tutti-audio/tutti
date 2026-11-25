@@ -317,8 +317,21 @@ impl ClapProbe {
         }
     }
 
-    /// Zeroes [`activation_count`](Self::activation_count) and the last
-    /// accepted rate.
+    /// How many times the plugin refused `activate` since
+    /// [`reset_activation`](Self::reset_activation).
+    pub fn refusal_count(&self) -> u32 {
+        // SAFETY: `tutti_test_plugin_activate_refusals` is `#[no_mangle] pub
+        // unsafe extern "C" fn() -> u32` in `refusal.rs`.
+        unsafe {
+            get::<unsafe extern "C" fn() -> u32>(
+                &self.artifact,
+                b"tutti_test_plugin_activate_refusals\0",
+            )()
+        }
+    }
+
+    /// Zeroes [`activation_count`](Self::activation_count),
+    /// [`refusal_count`](Self::refusal_count) and the last accepted rate.
     pub fn reset_activation(&self) {
         call_unit(&self.artifact, b"tutti_test_plugin_reset_activation\0");
     }
