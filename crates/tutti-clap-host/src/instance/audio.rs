@@ -393,16 +393,24 @@ impl ClapProcessor {
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let drain = &mut self.drain;
+            let (drain, held) = (&mut self.drain, &mut self.held);
+            // Both sources of a value, the Controller's edits and the host's
+            // changes, take one route: a parameter that waits for `process` is
+            // kept for the block, any other goes out of band now.
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(each);
+                drain.drain(|id, value| {
+                    if waits_for_process(&table.ranges, id) {
+                        kept &= keep_latest(held, id, value);
+                    } else {
+                        each(id, value);
+                    }
+                });
             });
             for queue in &changes.queues {
-                let bounds = ParamBounds::find(&table.ranges, queue.param_id);
-                if bounds.is_some_and(|b| b.requires_process && !b.read_only)
+                if waits_for_process(&table.ranges, queue.param_id)
                     && let Some(point) = queue.points.last()
                 {
-                    kept &= keep_latest(&mut self.held, queue.param_id, point.value);
+                    kept &= keep_latest(held, queue.param_id, point.value);
                 }
             }
             if !changes.is_empty() {
@@ -419,7 +427,11 @@ impl ClapProcessor {
         } = &mut *self.scratch;
         let flushed = self.audio_side.params_flush(&*input_events, output_events);
         if flushed {
-            self.published.publish(self.drain.swept());
+            // The Controller's values the flush took out of band are delivered;
+            // one kept for the block is not, and the block publishes it.
+            if self.held.is_empty() {
+                self.published.publish(self.drain.swept());
+            }
             // What the plugin said while it took them (its own edits and
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
@@ -619,6 +631,13 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
         tsig_num: transport.timing.signature.beats_per_bar().into(),
         tsig_denom: transport.timing.signature.note_value().into(),
     }
+}
+
+/// Whether a change to `id` waits for the next block's `process`: the plugin is
+/// active and the parameter requires it (`CLAP_PARAM_REQUIRES_PROCESS`), so a
+/// flush never delivers it.
+fn waits_for_process(ranges: &[ParamBounds], id: ParamId) -> bool {
+    ParamBounds::find(ranges, id).is_some_and(|b| b.requires_process && !b.read_only)
 }
 
 /// Keeps `value` as the latest of `id` in `held`, which has room for every

@@ -811,6 +811,38 @@ fn a_flushed_requires_process_value_waits_for_the_next_block() {
     assert!(!Processor::holds_parameters(&processor));
 }
 
+/// **A Controller's value for a `REQUIRES_PROCESS` parameter waits for the next
+/// block too**: a flush with no changes of its own does not deliver it, holds it
+/// (so the server answers `Deferred`) and does not report it delivered.
+#[test]
+fn a_controllers_requires_process_edit_waits_for_the_next_block() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            ParamId::new(MANUAL_PARAM_ID),
+            Normalized::of(1.0),
+        )
+        .expect("a declared, writable parameter");
+    let upto = Control::queued(&controller).expect("a queue");
+    let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
+    assert!(processor.flush_parameters(&none), "the plugin flushes");
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "kept for the block");
+    assert!(Processor::holds_parameters(&processor));
+    assert!(
+        !Control::delivered(&controller, upto),
+        "not delivered by a flush"
+    );
+    render(&mut processor, FloatWidth::F32).expect("a block");
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(1.0), "taken by the block");
+    assert!(Control::delivered(&controller, upto));
+}
+
 /// **An errored block allocates nothing**, whatever the reason: a block longer
 /// than the activation, and a block after the Controller went.
 #[test]
