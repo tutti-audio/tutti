@@ -10,15 +10,14 @@ use std::marker::PhantomData;
 
 use tutti_buffers::{Float, InputOutput};
 use tutti_clap_host::{
-    ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, NoteSend,
-    instance::ProcessOutputRef,
+    ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{MainThreadMarker, MaxBlock, PluginError, Prepare, SampleRate, Samples};
 
 /// CLAP's activation at the width `T`.
 #[derive(Debug)]
-pub struct Clap<T>(PhantomData<fn() -> T>);
+pub(crate) struct Clap<T>(PhantomData<fn() -> T>);
 
 impl<T: Float> Activation for Clap<T> {
     type Loaded = ClapLoaded;
@@ -43,7 +42,7 @@ impl<T: Float> Activation for Clap<T> {
 }
 
 /// The two halves of one activation, at the width `T`.
-pub type Active<T> = tutti_fixtures::Active<Clap<T>>;
+pub(crate) type Active<T> = tutti_fixtures::Active<Clap<T>>;
 
 fn prepare_for<T: Float>(rate: f64, frames: u32) -> Prepare {
     let block =
@@ -52,7 +51,7 @@ fn prepare_for<T: Float>(rate: f64, frames: u32) -> Prepare {
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
-pub trait Activate {
+pub(crate) trait Activate {
     /// Activates as `T`; a refusal hands the plugin back with the reason.
     fn activate_at<T: Float>(
         self,
@@ -74,7 +73,7 @@ impl Activate for ClapLoaded {
 
 /// What a suite calls on an [`Active`] besides the Controller: a block through
 /// the Processor at the width `T`, its counters, and the loaded plugin.
-pub trait ActiveExt<T: Float> {
+pub(crate) trait ActiveExt<T: Float> {
     /// One block through the Processor.
     fn process(
         &mut self,
@@ -103,8 +102,6 @@ pub trait ActiveExt<T: Float> {
     fn is_tailing(&self) -> bool;
     /// [`ClapProcessor::is_sleeping`].
     fn is_sleeping(&self) -> bool;
-    /// [`ClapProcessor::note_send`].
-    fn note_send(&self) -> NoteSend;
     /// Deactivates and activates at `rate` and `frames`, as a rate change does.
     ///
     /// # Panics
@@ -174,10 +171,6 @@ impl<T: Float> ActiveExt<T> for Active<T> {
         self.processor_shared().is_sleeping()
     }
 
-    fn note_send(&self) -> NoteSend {
-        self.processor_shared().note_send()
-    }
-
     fn reconfigure_at(&mut self, rate: f64, frames: u32) -> Result<(), PluginError> {
         let wanted = prepare_for::<T>(rate, frames);
         self.reconfigure(wanted).inspect_err(|reason| {
@@ -200,7 +193,7 @@ impl<T: Float> ActiveExt<T> for Active<T> {
 
 /// One silent stereo block of `frames` frames through `inst` at 48 kHz, which
 /// must process.
-pub fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessContext<'_>) {
+pub(crate) fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessContext<'_>) {
     let mut out_l = vec![0.0f32; frames];
     let mut out_r = vec![0.0f32; frames];
     let in_l = vec![0.0f32; frames];

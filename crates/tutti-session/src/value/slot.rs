@@ -139,10 +139,13 @@ impl SlotId {
         }
     }
 
-    /// The node the value is of, or `None` for one of the session's own.
+    /// The node the value is of: its params' automation, its mode and mix, its
+    /// settings and what its kind holds. `None` for a value of the session, of an
+    /// edge or of a declaration (a source, a route, a range). Every variant is
+    /// listed, so a new one chooses.
     pub(crate) const fn node(self) -> Option<NodeKey> {
         match self {
-            Self::Setting(node, _) => Some(node),
+            Self::Setting(node, _) | Self::Mode(node) | Self::Mix(node) => Some(node),
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
             #[cfg(feature = "sampler")]
@@ -154,17 +157,36 @@ impl SlotId {
             Self::PluginAutomationMode(node)
             | Self::PluginTrackInfo(node)
             | Self::PluginMidiMap(node) => Some(node),
-            Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
-            _ => None,
+            Self::Automation(TargetKey::Param { node, .. } | TargetKey::Mix(node)) => {
+                Some(NodeKey(node))
+            }
+            Self::Automation(TargetKey::Edge(_))
+            | Self::Tempo
+            | Self::Meter
+            | Self::Loop
+            | Self::ClickVolume
+            | Self::ClickMode
+            | Self::OutputPolicy
+            | Self::RoutePolarity(_)
+            | Self::RouteCurve(_)
+            | Self::SourceRate(_)
+            | Self::SourceValue(_)
+            | Self::Gain(_)
+            | Self::Range(_)
+            | Self::RouteDepth(_) => None,
+            #[cfg(feature = "midi-hardware")]
+            Self::MidiPolicy => None,
+            #[cfg(feature = "midi")]
+            Self::OutputLatency | Self::MpeMode => None,
         }
     }
 
     /// The node whose *instance* holds the value, or `None` for a value that
-    /// outlives a replace of the node: an automation is a declaration on the
-    /// node's key, so a replacement keeps it.
+    /// outlives a replace of the node: an automation, a mode and a mix are
+    /// declarations on the node's key, so a replacement keeps them.
     pub(crate) const fn instance_node(self) -> Option<NodeKey> {
         match self {
-            Self::Automation(_) => None,
+            Self::Automation(_) | Self::Mode(_) | Self::Mix(_) => None,
             _ => self.node(),
         }
     }

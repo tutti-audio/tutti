@@ -314,24 +314,19 @@ pub(crate) struct FollowTap {
     reader: EventTapReader,
     /// The follower's name in the warning of what the tap lost.
     name: &'static str,
-}
-
-/// What [`FollowTap::reopen`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Reopened {
-    /// The tap is on the graph's rate.
-    Unchanged,
-    /// A new reader is open at the graph's rate.
-    Opened,
-    /// The tap's node is gone: nothing can be opened and the reader hears
-    /// nothing more, so its follower ends.
-    Gone,
+    /// Whether the reader's source was gone when the last [`heard`](Self::heard)
+    /// asked, before it drained.
+    gone: bool,
 }
 
 impl FollowTap {
     /// A reader for the follower called `name`.
     pub(crate) fn new(reader: EventTapReader, name: &'static str) -> Self {
-        Self { reader, name }
+        Self {
+            reader,
+            name,
+            gone: false,
+        }
     }
 
     /// The rate its frames are on.
@@ -339,8 +334,11 @@ impl FollowTap {
         self.reader.rate()
     }
 
-    /// What the tap held, in order; warns of what it lost.
+    /// What the tap held, in order; warns of what it lost. Asks whether the
+    /// source is gone before it drains, so [`source_gone`](Self::source_gone)
+    /// is true only once the last drain had everything the ring would hold.
     pub(crate) fn heard(&mut self) -> Vec<TapEvent> {
+        self.gone = self.reader.source_gone();
         let heard = self.reader.drain().collect();
         let lost = self.reader.take_lost();
         if lost > 0 {
@@ -349,20 +347,28 @@ impl FollowTap {
         heard
     }
 
+    /// Whether the node the tap is on was removed before the last
+    /// [`heard`](Self::heard): that drain was the last, and the follower ends.
+    pub(crate) fn source_gone(&self) -> bool {
+        self.gone
+    }
+
     /// Re-opens the tap when the graph is prepared at another rate than its
-    /// frames are on. The graph marks itself edited when it tries to open a tap
-    /// it holds; a tap it has dropped is `Gone` and edits nothing, and the
-    /// follower ends there ([`FollowCx::end`]).
-    pub(crate) fn reopen<F: Float>(&mut self, graph: &mut Graph<F>) -> Reopened {
+    /// frames are on, and whether it did: the reader it replaces ends, and is
+    /// dropped here, never asked. The graph marks itself edited when it tries to
+    /// open a tap it holds. A tap the graph has dropped (its node was removed)
+    /// stays as it is: its reader says its source is gone once the removal is
+    /// applied ([`source_gone`](Self::source_gone)).
+    pub(crate) fn reopen<F: Float>(&mut self, graph: &mut Graph<F>) -> bool {
         if self.rate() == graph.prepared().sample_rate() {
-            return Reopened::Unchanged;
+            return false;
         }
         match graph.taps().reopen_event(self.reader.id()) {
             Some(reader) => {
                 self.reader = reader;
-                Reopened::Opened
+                true
             }
-            None => Reopened::Gone,
+            None => false,
         }
     }
 }

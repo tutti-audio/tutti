@@ -13,4 +13,4 @@
 //! The in-process audio + editor node, generic over any
 //! `tutti_plugin_types::InProcess` format, is `tutti-plugin-host`'s.
 
-pub mod gui;
+pub(crate) mod gui;

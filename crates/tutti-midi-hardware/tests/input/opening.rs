@@ -13,7 +13,7 @@ use tutti_platform::{Executor, Instant, MainThreadMarker};
 const PATIENCE: Duration = Duration::from_secs(30);
 
 /// Polls `opening` until it is the endpoint or an error.
-pub fn finished(
+pub(crate) fn finished(
     mut opening: OpeningVirtualEndpoint,
     main: MainThreadMarker,
 ) -> Result<VirtualEndpoint, MidiHardwareError> {
@@ -30,7 +30,7 @@ pub fn finished(
 
 /// The endpoint `spec` describes, once the backend has started and the opening has
 /// finished.
-pub fn open(
+pub(crate) fn open(
     executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
@@ -46,6 +46,6 @@ pub fn open(
 }
 
 /// The proof that `session`'s backend has started.
-pub fn started(session: &MidiSession) -> Started {
+pub(crate) fn started(session: &MidiSession) -> Started {
     tutti_fixtures::block_on(session.start()).expect("the backend starts")
 }

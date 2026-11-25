@@ -110,7 +110,7 @@ fn open(
 ///
 /// CoreMIDI's listing on macOS 15 reports every block's direction as 0, so there
 /// it reads `Reserved(0)`; from macOS 26 it is the registered direction.
-pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
+pub(crate) fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
     let name = &unique_name("tutti-vend-blocks");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
@@ -176,7 +176,7 @@ pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
 
 /// CoreMIDI has no MIDI-CI version on a block, so a spec that declares one is
 /// refused with the refusal named, never opened without it, on every macOS.
-pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
+pub(crate) fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
         BlockDirection::Bidirectional,
@@ -222,7 +222,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 /// The inlet holds more than the burst plus the few messages CoreMIDI sends the
 /// endpoint itself (MIDI-CI and stream messages, mostly at creation), so nothing
 /// can overflow it; those messages are skipped by matching only the notes sent.
-pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
+pub(crate) fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
     const BURST: u16 = 100;
     let name = &unique_name("tutti-vend-input");
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::ZERO);
@@ -293,7 +293,7 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
 
 /// A sender whose endpoint was dropped is refused by name, and one sent while it
 /// lived was accepted.
-pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
+pub(crate) fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
     let session = started(
@@ -328,7 +328,7 @@ pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
 }
 
 /// Runs every case on the main thread, as `harness = false` does.
-pub fn cases() {
+pub(crate) fn cases() {
     tutti_fixtures::main_thread_cases(tutti_fixtures::cases![
         an_endpoint_with_function_blocks_is_listed_with_those_blocks,
         a_block_declaring_a_midi_ci_version_is_refused_by_name,

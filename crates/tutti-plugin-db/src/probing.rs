@@ -16,7 +16,7 @@ pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What a probe the catalog hands its scanner does.
 #[derive(Debug, Clone)]
-pub enum Probing {
+pub(crate) enum Probing {
     /// Read each plugin's descriptor; a missing `plugin-probe` is a failure of
     /// the file.
     Describe,

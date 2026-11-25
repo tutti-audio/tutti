@@ -529,13 +529,11 @@ fn exec::pool::WorkerPoolBuilder::start_handler
 fn exec::pool::WorkerPoolBuilder::thread_name
 fn exec::published::ErasedPublished::cell
 fn exec::published::ErasedPublished::kind_name
+fn exec::published::ErasedPublished::reclaim
 fn exec::published::PublishedCell::detached
 fn exec::published::PublishedCell::lend
 fn exec::published::PublishedCell::new
 fn exec::published::PublishedCell::publisher
-fn exec::published::Sweep::is_empty
-fn exec::published::Sweep::new
-fn exec::published::Sweep::with
 fn exec::render::Executor::process
 fn exec::render::Executor::process_with_changes
 fn exec::render::Executor::render_applied
@@ -1045,7 +1043,6 @@ struct exec::pool::WorkerPool
 struct exec::pool::WorkerPoolBuilder
 struct exec::published::ErasedPublished
 struct exec::published::PublishedCell
-struct exec::published::Sweep
 struct model::bus_edge::BusFeed
 struct model::bus_edge::Lowering
 struct model::bus_edge::NodeBus

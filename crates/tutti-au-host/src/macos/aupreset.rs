@@ -170,7 +170,7 @@ pub fn read_preset_metadata(path: &Path) -> Result<AuPresetIdentity> {
 /// that answers the property with an array or a data blob cannot be saved as a
 /// preset, and writing it would produce a file nothing can load), or
 /// [`AuError::PresetIo`] if the file cannot be written.
-pub fn save_preset_file(
+pub(crate) fn save_preset_file(
     unit: &Unit,
     component: AuComponentRef,
     path: &Path,
@@ -237,7 +237,7 @@ pub fn save_preset_file(
 ///   garbage parameters. The AU is left untouched and is still renderable.
 /// * [`AuError::OsStatus`] — the AU itself rejected a correctly-identified
 ///   dictionary (a genuinely corrupt `data` blob, or a version it will not read).
-pub fn load_preset_file(
+pub(crate) fn load_preset_file(
     unit: &Unit,
     component: AuComponentRef,
     path: &Path,

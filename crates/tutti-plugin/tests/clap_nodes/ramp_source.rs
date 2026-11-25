@@ -7,14 +7,14 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::Tail;
 
 /// Input frame `t`: distinct, never zero, exact in `f32`.
-pub fn ramp(t: u64) -> f32 {
+pub(crate) fn ramp(t: u64) -> f32 {
     ((t % 997) + 1) as f32 / 1024.0
 }
 
 /// A ramp source reading its block's `Env`: frame `t` is [`ramp`]`(t)`. It holds nothing, so
 /// it forks by clone.
 #[derive(Clone)]
-pub struct RampSource;
+pub(crate) struct RampSource;
 
 impl Node for RampSource {
     fn shape(&self) -> Shape {

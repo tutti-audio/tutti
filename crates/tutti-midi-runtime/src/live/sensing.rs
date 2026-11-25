@@ -42,7 +42,7 @@ pub(crate) struct ActiveSensing {
 impl ActiveSensing {
     /// A watch that judges a Group gone `limit` after its last message.
     #[must_use]
-    pub const fn new(limit: Samples) -> Self {
+    pub(super) const fn new(limit: Samples) -> Self {
         Self {
             limit,
             watched: [None; MidiGroup::COUNT as usize],
@@ -59,7 +59,7 @@ impl ActiveSensing {
     /// Group, and an Active Sensing (`sensing`) starts watching one. Calls
     /// are in time order; one at an earlier frame than the last is taken as
     /// at the last.
-    pub fn heard(&mut self, group: MidiGroup, at: Frame, sensing: bool) {
+    pub(super) fn heard(&mut self, group: MidiGroup, at: Frame, sensing: bool) {
         let slot = &mut self.watched[group.index()];
         match slot {
             Some(last) => *last = (*last).max(at),
@@ -85,7 +85,7 @@ impl ActiveSensing {
     }
 
     /// Stops watching `group` (its source reset, or went).
-    pub fn forget(&mut self, group: MidiGroup) {
+    pub(super) fn forget(&mut self, group: MidiGroup) {
         self.watched[group.index()] = None;
     }
 

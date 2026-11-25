@@ -153,8 +153,9 @@ impl<K> AnyTarget<K> {
         sealed::Sealed::id(target) == self.id
     }
 
-    /// The node the target is on, or `None` for one of the session's own
-    /// values (its tempo, meter or click).
+    /// The node the target is on (a param, mode, mix, setting or what its
+    /// kind holds), or `None` for a value of the session (its tempo, meter or
+    /// click), of an edge or of a modulation declaration.
     #[must_use]
     pub fn node(&self) -> Option<NodeKey> {
         match self.id {

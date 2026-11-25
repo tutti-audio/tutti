@@ -5,9 +5,9 @@
 //! - [`MidiClipNode`] plays a clip's [`TimedMidiEvent`]s out of an event port.
 //! - [`HarmonyNode`] sends a sequencer's chord and scale lanes.
 
-pub mod clip_node;
-pub mod harmony_node;
-pub mod timed;
+pub(crate) mod clip_node;
+pub(crate) mod harmony_node;
+pub(crate) mod timed;
 mod walk;
 
 pub use clip_node::{

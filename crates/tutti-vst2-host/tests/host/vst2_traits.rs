@@ -223,9 +223,9 @@ fn preset_trace() -> Vec<i32> {
 
 /// The program opcodes `preset_trace` records. Mirrored from the probe.
 mod preset_event {
-    pub const BEGIN: i32 = 1;
-    pub const CHANGE: i32 = 2;
-    pub const END: i32 = 3;
+    pub(super) const BEGIN: i32 = 1;
+    pub(super) const CHANGE: i32 = 2;
+    pub(super) const END: i32 = 3;
 }
 
 /// What one silent stereo block reports in its [`ProcessOutput`].

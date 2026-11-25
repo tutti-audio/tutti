@@ -474,13 +474,8 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
         let fork = HarmonyFork {
             cell: self.cell.clone(),
         };
-        NodeParts::new(
-            Box::new(self),
-            controls.clone(),
-            Some(Box::new(fork)),
-            Some(Box::new(controls.clone())),
-        )
-        .published::<HarmonyNode, HarmonyChangesKind>(Arc::new(controls))
+        NodeParts::new(Box::new(self), controls.clone(), Some(Box::new(fork)), None)
+            .published::<HarmonyNode, HarmonyChangesKind>(Arc::new(controls))
     }
 }
 

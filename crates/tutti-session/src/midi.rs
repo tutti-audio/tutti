@@ -36,7 +36,7 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow, Placed, Reopened,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
 use crate::{
     ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
@@ -980,17 +980,17 @@ impl MidiState {
             return (Vec::new(), false);
         };
         let actions = clock.heard(cx, out);
-        let reopened = clock.tap.reopen(graph);
-        if reopened == Reopened::Gone
-            && let Some(ended) = self.clock.take()
-        {
-            cx.end(
-                FollowKind::Clock(ended.kind()),
-                UnfollowCause::InputGone,
-                out,
-            );
+        if clock.tap.source_gone() {
+            if let Some(ended) = self.clock.take() {
+                cx.end(
+                    FollowKind::Clock(ended.kind()),
+                    UnfollowCause::InputGone,
+                    out,
+                );
+            }
+            return (actions, false);
         }
-        (actions, reopened == Reopened::Opened)
+        (actions, clock.tap.reopen(graph))
     }
 
     /// `Phase::Poll`, for the Machine Control the session follows: reads its
@@ -1011,12 +1011,12 @@ impl MidiState {
             .into_iter()
             .map(ClockAction::at_next_block)
             .collect();
-        let reopened = machine.tap.reopen(graph);
-        if reopened == Reopened::Gone {
+        if machine.tap.source_gone() {
             self.machine = None;
             cx.end(FollowKind::MachineControl, UnfollowCause::InputGone, out);
+            return (actions, false);
         }
-        (actions, reopened == Reopened::Opened)
+        (actions, machine.tap.reopen(graph))
     }
 
     /// `Phase::Poll`, for the tempo the session follows: reports what
@@ -1037,13 +1037,13 @@ impl MidiState {
         // What the tap holds is read at the scale it was opened at, then the
         // tap is reopened if the graph has been re-prepared at another rate.
         let heard = follow.heard();
-        let reopened = follow.tap.reopen(graph);
         cx.apply(&heard, out);
-        if reopened == Reopened::Gone {
+        if follow.tap.source_gone() {
             self.follow = None;
             cx.end(FollowKind::Tempo, UnfollowCause::InputGone, out);
+            return false;
         }
-        reopened == Reopened::Opened
+        follow.tap.reopen(graph)
     }
 
     /// The outputs' taps are on one scale of frames, the rate they were opened
@@ -1845,11 +1845,11 @@ impl<F: Float> Midi<'_, F> {
     /// steps laid so far stay over the base, and the tempo in force stays until
     /// the new source sends one.
     ///
-    /// **A follower whose input node is removed ends** at the next
-    /// [`Poll`](crate::Phase::Poll) that finds its tap gone (when the graph's rate
-    /// changes): it is dropped, the base maps are published again as
-    /// [`unfollow_tempo`](Self::unfollow_tempo) does, and the update reports
-    /// [`MidiEvent::Unfollowed`].
+    /// **A follower whose input node is removed ends** at the
+    /// [`Poll`](crate::Phase::Poll) after the removal is applied, once it has
+    /// applied what its tap still held: it is dropped, the base maps are
+    /// published again as [`unfollow_tempo`](Self::unfollow_tempo) does, and
+    /// the update reports [`MidiEvent::Unfollowed`].
     ///
     /// # Errors
     ///

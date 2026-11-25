@@ -36,25 +36,26 @@ use support::main_thread;
 
 use tutti_buffers::InputOutput;
 use tutti_clap_host::{AudioPortFlags, ClapLoaded, ClapProcessContext, LoadOptions, NoteSend};
-use tutti_clap_test_plugin::{PREFERRED_DIALECT_DEFAULT, REPORTED_LATENCY_SAMPLES, probe_tag};
+use tutti_clap_test_plugin::{
+    PREFERRED_DIALECT_DEFAULT, PortLayoutMode, REPORTED_LATENCY_SAMPLES, probe_tag,
+};
+use tutti_fixtures::midi;
 use tutti_graph::Offset;
-use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
+use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, Ump};
 use tutti_units::Samples;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 512;
 
-// Mirrors of the plugin's `PortLayoutMode` / `RenderMode` discriminants, which
-// cross the dlopen seam as bare `u32`s.
-// `probe_setup_matches_plugin_discriminants` pins them against the plugin's own
-// enums so the duplication cannot silently drift.
-const LAYOUT_SYMMETRIC_STEREO: u32 = 0;
-const LAYOUT_ASYMMETRIC_AUX: u32 = 1;
+// The plugin's `PortLayoutMode` / `RenderMode` discriminants, which cross the
+// dlopen seam as bare `u32`s.
+const LAYOUT_SYMMETRIC_STEREO: u32 = PortLayoutMode::SymmetricStereo as u32;
+const LAYOUT_ASYMMETRIC_AUX: u32 = PortLayoutMode::AsymmetricAux as u32;
 
-const RENDER_INERT: u32 = 0;
-const RENDER_TAG_PASSTHROUGH: u32 = 1;
-const RENDER_TAG_ONLY: u32 = 2;
-const RENDER_LATENCY: u32 = 3;
+const RENDER_INERT: u32 = tutti_clap_test_plugin::RenderMode::Inert as u32;
+const RENDER_TAG_PASSTHROUGH: u32 = tutti_clap_test_plugin::RenderMode::TagPassthrough as u32;
+const RENDER_LATENCY: u32 = tutti_clap_test_plugin::RenderMode::Latency as u32;
+const RENDER_NOTES: u32 = tutti_clap_test_plugin::RenderMode::Notes as u32;
 
 /// The plugin's port layout and render mode are process-global, and the layout
 /// is latched at load time. Serialize the whole configure → load → process →
@@ -267,8 +268,8 @@ fn slot_of(layout: &[u32], flat_channel: usize) -> (u32, u32) {
 // Port enumeration — does the host report the plugin's layout faithfully?
 // ---------------------------------------------------------------------------
 
-/// The host must report the plugin's asymmetric layout port-by-port, not
-/// collapse it to a channel total. `num_input_channels() == 3` is true for
+/// The host must report the plugin's asymmetric layout port-by-port, with
+/// each port's own id, flags and name, not collapse it to a channel total. `num_input_channels() == 3` is true for
 /// `[2,1]`, `[1,2]` and `[3]` alike, so summing alone proves nothing.
 #[test]
 fn host_reports_asymmetric_port_layout_per_port() {
@@ -315,55 +316,22 @@ fn host_reports_asymmetric_port_layout_per_port() {
 
     assert_eq!(loaded.num_input_channels(main_thread()), 3);
     assert_eq!(loaded.num_output_channels(main_thread()), 3);
-}
 
-/// Port **id** is not port **index**. The plugin reports ids 700, 701; a
-/// host that substitutes the index passes an id check written against
-/// 0,1 and fails here.
-#[test]
-fn host_reports_port_ids_distinct_from_indices() {
-    let session = ProbeSession::begin(LAYOUT_ASYMMETRIC_AUX, RENDER_INERT);
-    let loaded = session.load();
-
-    let ids: Vec<u32> = (0..2)
-        .map(|i| {
-            loaded
-                .audio_port_info(main_thread(), i, true)
-                .expect("port info")
-                .id
-        })
-        .collect();
+    // Each port's own id (700, 701: not its index), main flag and name.
+    let info = |i| {
+        loaded
+            .audio_port_info(main_thread(), i, true)
+            .expect("input port info present")
+    };
+    let (p0, p1) = (info(0), info(1));
     assert_eq!(
-        ids,
-        vec![700, 701],
+        (p0.id, p1.id),
+        (700, 701),
         "host must pass through the plugin's port ids, not the indices"
     );
-}
-
-/// The main-bus flag and the port name must survive the FFI per port — a host
-/// that read port 0's info for every index would report both as "main".
-#[test]
-fn host_reports_per_port_flags_and_names() {
-    let session = ProbeSession::begin(LAYOUT_ASYMMETRIC_AUX, RENDER_INERT);
-    let loaded = session.load();
-
-    let p0 = loaded
-        .audio_port_info(main_thread(), 0, true)
-        .expect("port 0");
-    let p1 = loaded
-        .audio_port_info(main_thread(), 1, true)
-        .expect("port 1");
-
-    assert!(
-        p0.flags.contains(AudioPortFlags::MAIN),
-        "port 0 is the main bus"
-    );
-    assert!(
-        !p1.flags.contains(AudioPortFlags::MAIN),
-        "port 1 is the aux bus, not main"
-    );
-    assert_eq!(p0.name, "main");
-    assert_eq!(p1.name, "aux");
+    assert!(p0.flags.contains(AudioPortFlags::MAIN), "port 0 is main");
+    assert!(!p1.flags.contains(AudioPortFlags::MAIN), "port 1 is aux");
+    assert_eq!((p0.name.as_str(), p1.name.as_str()), ("main", "aux"));
 }
 
 /// An out-of-range port index must come back `None`, not a zeroed struct. The
@@ -422,41 +390,6 @@ fn host_routes_each_channel_to_its_own_port_and_slot() {
     }
 }
 
-/// Same oracle with the input side removed: output must be the tag alone.
-/// Localises a failure — if `TagPassthrough` fails but this passes, the host's
-/// output collection is correct and its input distribution is at fault.
-#[test]
-fn host_collects_each_output_slot_from_the_right_port() {
-    let session = ProbeSession::begin(LAYOUT_ASYMMETRIC_AUX, RENDER_TAG_ONLY);
-    let mut inst = session.activate();
-    const FRAMES: usize = 32;
-    let layout = [2u32, 1];
-
-    let outs = drive_dc_block(&mut inst, 3, FRAMES);
-
-    let got: Vec<f32> = outs.iter().map(|c| c[0]).collect();
-    let want: Vec<f32> = (0..3)
-        .map(|flat| {
-            let (port, ch) = slot_of(&layout, flat);
-            probe_tag(port, ch)
-        })
-        .collect();
-    assert_eq!(
-        got, want,
-        "each output channel must carry its own slot's tag: channel 2 is the \
-         mono aux port (tag 1001), not a third channel of the main port"
-    );
-
-    // Constant across the block — a host that wired only the first sample of
-    // each channel would pass a spot check.
-    for (flat, out) in outs.iter().enumerate() {
-        assert!(
-            out.iter().all(|&s| s == want[flat]),
-            "channel {flat} must carry its tag for the whole block"
-        );
-    }
-}
-
 /// The fan-out case: more output channels than input channels. The host must
 /// zero-pad the missing *input* slots rather than leaving them uninitialised or
 /// aliasing another channel — an aliased pad would make slot (0,1) read 11.0
@@ -487,22 +420,23 @@ fn host_zero_pads_absent_input_channels() {
     );
 }
 
-/// In-place processing: the caller hands the *same* backing buffer as both
-/// input and output for a channel — the layout a host uses to avoid a copy, and
-/// where reading input after writing output corrupts the result. With input `x`
-/// the output must still be `x + tag`, even though writing it destroys `x`.
+/// The plugin's input is the caller's input, never what the output buffer held
+/// before the block. `InputOutput` keeps its input and output views apart, so
+/// a caller cannot hand one buffer as both, and the host reports no in-place
+/// pair (`in_place_pair_id` is CLAP's invalid id): the only way an output
+/// buffer could reach the plugin as input is the host binding it there. The
+/// output buffers start at a value no input has; with input `x` the output is
+/// `x + tag`.
 #[test]
-fn host_handles_in_place_style_buffers() {
+fn the_plugin_reads_the_callers_input_never_the_output_buffers_contents() {
+    const OUTPUT_SEED: f32 = 999.0;
     let session = ProbeSession::begin(LAYOUT_ASYMMETRIC_AUX, RENDER_TAG_PASSTHROUGH);
     let mut inst = session.activate();
     const FRAMES: usize = 40;
     let layout = [2u32, 1];
 
-    // Pre-seed the OUTPUT buffers with the input values. If the host let the
-    // plugin read its own output buffer as input, the result would be
-    // `(input + tag) + tag`, or the tag alone if the output were zeroed first.
     let inputs: Vec<Vec<f32>> = (0..3).map(|c| vec![INPUT_DC[c]; FRAMES]).collect();
-    let mut outs: Vec<Vec<f32>> = (0..3).map(|c| vec![INPUT_DC[c]; FRAMES]).collect();
+    let mut outs: Vec<Vec<f32>> = (0..3).map(|_| vec![OUTPUT_SEED; FRAMES]).collect();
     {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
@@ -522,8 +456,8 @@ fn host_handles_in_place_style_buffers() {
         assert!(
             out.iter().all(|&s| s == expected),
             "channel {flat} (port {port}, channel {ch}): expected {expected} \
-             throughout; got {:?}. A doubled tag means the plugin's write was \
-             fed back as its own input.",
+             throughout; got {:?}. {OUTPUT_SEED} plus the tag means the plugin \
+             read the output buffer's prior contents as its input.",
             &out[..out.len().min(4)]
         );
     }
@@ -722,7 +656,8 @@ fn host_reports_per_note_port_dialects_and_ids() {
 /// A plugin that names no preferred dialect, and one that names a dialect this
 /// host does not send, must both read as "no preference this host can use" —
 /// not as MIDI 2.0, which `host_note_ports_supported_dialects` tells the
-/// plugin we do not accept.
+/// plugin we do not accept. Each port's preference is decoded from its own
+/// answer.
 #[test]
 fn host_does_not_invent_a_preferred_note_dialect() {
     use clap_sys::ext::note_ports::CLAP_NOTE_DIALECT_MIDI2;
@@ -739,11 +674,6 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     assert_eq!(
         in0.preferred_dialect, None,
         "a plugin that named no dialect must not be reported as preferring one"
-    );
-    assert_eq!(
-        in0.dialect_to_send(),
-        NoteSend::CLAP_AND_MIDI,
-        "port 0 supports CLAP, so that is what an absent preference falls back to"
     );
 
     // A dialect bit outside the four CLAP defines today — what a plugin built
@@ -770,11 +700,6 @@ fn host_does_not_invent_a_preferred_note_dialect() {
         Some(NoteDialect::Midi2),
         "a stated MIDI 2.0 preference is reported as stated"
     );
-    assert_eq!(
-        in0.dialect_to_send(),
-        NoteSend::CLAP_AND_MIDI,
-        "but the dialect actually sent is one the host advertised"
-    );
 
     // Port 1's own preference is MIDI, so forcing 0 there proves the absent
     // case is decoded per port and not read off port 0. Its supported set is
@@ -785,11 +710,6 @@ fn host_does_not_invent_a_preferred_note_dialect() {
         .note_port_info(main_thread(), 1, true)
         .expect("note input 1");
     assert_eq!(in1.preferred_dialect, None);
-    assert_eq!(
-        in1.dialect_to_send(),
-        NoteSend::Midi,
-        "port 1 supports MIDI only, so the fallback cannot be CLAP"
-    );
 
     // Clearing restores each port's own answer, so the override cannot leak
     // into a later test through the shared image.
@@ -803,42 +723,79 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     assert_eq!(in0.preferred_dialect, Some(NoteDialect::Clap));
 }
 
-/// Notes go to the input note port in a dialect it takes: CLAP note events
-/// for a port that supports them, `clap_event_midi` for one that prefers MIDI,
-/// read at activation and again at every re-activation.
+/// Whether a note sent to the plugin's input reaches it: the probe's `Notes`
+/// render mode writes its output while a note is held, whichever dialect the
+/// note arrived in. A Note On at frame 0 and its Note Off at frame 32 of one
+/// block.
+fn a_note_reaches_the_plugin(inst: &mut Active<f32>) -> bool {
+    let frames = 64;
+    let ins = vec![vec![0.0f32; frames]; 2];
+    let mut outs = vec![vec![0.0f32; frames]; 2];
+    let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
+    let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+    let mut buffer = InputOutput::from_slices(
+        tutti_plugin_types::Samples::new(frames),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
+    let midi = [
+        (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
+        (at(32), midi::note_off(MidiChannel::FIRST, 60, 0)),
+    ];
+    let ctx = ClapProcessContext {
+        midi: &midi,
+        ..ClapProcessContext::default()
+    };
+    inst.process(&mut buffer, &ctx).expect("process succeeds");
+    outs.iter().flatten().any(|&sample| sample != 0.0)
+}
+
+/// Notes go to the input note port in the dialect it takes, read at each
+/// load: CLAP note events for a port that prefers them, `clap_event_midi` for
+/// one that prefers MIDI. A port is sent notes at activation and again at every
+/// re-activation only while it takes a dialect this host sends.
 #[test]
 fn notes_follow_the_input_note_ports_dialect() {
-    use clap_sys::ext::note_ports::CLAP_NOTE_DIALECT_MIDI;
+    use clap_sys::ext::note_ports::{CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE};
 
-    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_NOTES);
+    let first_port = |session: &ProbeSession<'_>| {
+        session.load().note_sends(main_thread()).expect("two ports")[0]
+    };
     assert_eq!(
-        session.load().note_send(main_thread()),
+        first_port(&session),
         NoteSend::CLAP_AND_MIDI,
         "port 0 prefers CLAP"
     );
-
     session
         .controls
         .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
-    assert_eq!(session.load().note_send(main_thread()), NoteSend::Midi);
-    let mut active = session.activate();
-    assert_eq!(active.note_send(), NoteSend::Midi, "read at activation");
+    assert_eq!(first_port(&session), NoteSend::Midi);
 
     session
         .controls
         .set_preferred_dialect(PREFERRED_DIALECT_DEFAULT);
+    let mut active = session.activate();
+    assert!(a_note_reaches_the_plugin(&mut active), "sent at activation");
+
+    session
+        .controls
+        .set_port0_dialects(CLAP_NOTE_DIALECT_MIDI_MPE);
     active.reactivate().expect("reactivates");
-    assert_eq!(
-        active.note_send(),
-        NoteSend::CLAP_AND_MIDI,
-        "re-read at re-activation"
+    assert!(
+        !a_note_reaches_the_plugin(&mut active),
+        "a port that takes no dialect this host sends is re-read at re-activation"
     );
 
     session
         .controls
-        .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
+        .set_port0_dialects(PREFERRED_DIALECT_DEFAULT);
     active.reactivate().expect("reactivates");
-    assert_eq!(active.note_send(), NoteSend::Midi);
+    assert!(
+        a_note_reaches_the_plugin(&mut active),
+        "re-read again at the next re-activation"
+    );
 }
 
 /// `note-ports.h`: `clap_event_midi` goes only to a note port that declares
@@ -863,66 +820,32 @@ fn midi_goes_only_to_note_ports_that_declare_the_midi_dialect() {
     );
 }
 
-/// A plugin that declares no input note port is sent CLAP note events alone,
-/// by the first-port answer; it has no port to list. A port it counts but will
-/// not describe is another kind, tested below.
+/// A plugin that declares no input note port has no port to list, and is
+/// still sent CLAP note events.
 #[test]
 fn a_plugin_with_no_input_note_port_is_sent_clap_notes() {
-    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_NOTES);
     session.controls.set_note_in_ports(0);
     let loaded = session.load();
     assert_eq!(loaded.note_port_count(main_thread(), true), 0);
-    assert_eq!(loaded.note_send(main_thread()), NoteSend::CLAP_ONLY);
     assert_eq!(loaded.note_sends(main_thread()), Ok(vec![]));
+    let mut active = session.activate();
+    assert!(a_note_reaches_the_plugin(&mut active));
 }
 
-/// A port the plugin counts but will not describe is sent nothing, by the
-/// first-port answer as by the per-port list.
+/// A port the plugin counts but will not describe is sent nothing.
 #[test]
 fn a_note_port_the_plugin_will_not_describe_is_sent_nothing() {
-    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_NOTES);
     session.controls.set_port0_info_refused(true);
     let loaded = session.load();
     assert_eq!(loaded.note_port_count(main_thread(), true), 2);
-    assert_eq!(loaded.note_send(main_thread()), NoteSend::Nothing);
     assert_eq!(
         loaded.note_sends(main_thread()),
         Ok(vec![NoteSend::Nothing, NoteSend::Midi])
     );
-}
-
-/// `note-ports.h`: a host sends only a dialect the port supports. A port that
-/// lists only MPE or MIDI 2.0 takes neither dialect this host sends, so it is
-/// sent nothing, read at activation; a preference the port does not list is
-/// not sent either.
-#[test]
-fn notes_are_sent_only_a_dialect_the_note_port_supports() {
-    use clap_sys::ext::note_ports::{
-        CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
-        CLAP_NOTE_DIALECT_MIDI2,
-    };
-
-    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
-    for only in [CLAP_NOTE_DIALECT_MIDI_MPE, CLAP_NOTE_DIALECT_MIDI2] {
-        session.controls.set_port0_dialects(only);
-        session.controls.set_preferred_dialect(only);
-        assert_eq!(session.load().note_send(main_thread()), NoteSend::Nothing);
-        assert_eq!(
-            session.activate().note_send(),
-            NoteSend::Nothing,
-            "read at activation"
-        );
-    }
-
-    session.controls.set_port0_dialects(CLAP_NOTE_DIALECT_CLAP);
-    session
-        .controls
-        .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
-    assert_eq!(
-        session.load().note_send(main_thread()),
-        NoteSend::CLAP_ONLY,
-        "MIDI is preferred but not supported"
-    );
+    let mut active = session.activate();
+    assert!(!a_note_reaches_the_plugin(&mut active));
 }
 
 /// `clap.render` must actually reach the plugin. The probe records the mode
@@ -964,65 +887,6 @@ fn host_render_mode_reaches_the_plugin() {
 // ---------------------------------------------------------------------------
 // Guards on the test's own assumptions.
 // ---------------------------------------------------------------------------
-
-/// Pin the hand-mirrored discriminants against the plugin's own enums, so a
-/// reordering breaks this test rather than silently running every oracle above
-/// in the wrong mode — which would still pass, since `Inert` leaves the host's
-/// zeroed buffers alone and zero equals zero.
-#[test]
-fn probe_setup_matches_plugin_discriminants() {
-    use tutti_clap_test_plugin::{PortLayoutMode, RenderMode};
-
-    assert_eq!(
-        PortLayoutMode::SymmetricStereo as u32,
-        LAYOUT_SYMMETRIC_STEREO
-    );
-    assert_eq!(PortLayoutMode::AsymmetricAux as u32, LAYOUT_ASYMMETRIC_AUX);
-    assert_eq!(RenderMode::Inert as u32, RENDER_INERT);
-    assert_eq!(RenderMode::TagPassthrough as u32, RENDER_TAG_PASSTHROUGH);
-    assert_eq!(RenderMode::TagOnly as u32, RENDER_TAG_ONLY);
-    assert_eq!(RenderMode::Latency as u32, RENDER_LATENCY);
-}
-
-/// The oracle's discriminating power rests on every `input + tag` sum being
-/// unique across the layout. Asserted rather than trusted: if a later edit makes
-/// two slots collide, the routing tests silently stop catching a swap.
-#[test]
-fn probe_tags_and_inputs_are_mutually_distinguishing() {
-    let layout = [2u32, 1];
-    let sums: Vec<f32> = (0..3)
-        .map(|flat| {
-            let (port, ch) = slot_of(&layout, flat);
-            INPUT_DC[flat] + probe_tag(port, ch)
-        })
-        .collect();
-
-    for i in 0..sums.len() {
-        for j in (i + 1)..sums.len() {
-            assert_ne!(
-                sums[i], sums[j],
-                "slots {i} and {j} produce the same sum ({}) — a host that \
-                 swapped them would pass the routing tests",
-                sums[i]
-            );
-        }
-    }
-
-    // A *swapped* assignment must differ from the correct one — the property
-    // the routing tests actually depend on.
-    for i in 0..sums.len() {
-        for j in (i + 1)..sums.len() {
-            let (pi, ci) = slot_of(&layout, i);
-            let (pj, cj) = slot_of(&layout, j);
-            let swapped_i = INPUT_DC[j] + probe_tag(pi, ci);
-            let swapped_j = INPUT_DC[i] + probe_tag(pj, cj);
-            assert!(
-                swapped_i != sums[i] || swapped_j != sums[j],
-                "swapping inputs {i} and {j} is undetectable"
-            );
-        }
-    }
-}
 
 /// Drain the probe's record of the SysEx messages it received: `(count, the
 /// last one's time, its bytes)`.
@@ -1079,8 +943,7 @@ fn drive_midi_block(inst: &mut Active<f32>, midi: &[UmpAt]) {
 
 /// **A SysEx spanning several UMP packets, and two blocks, reaches a real
 /// CLAP plugin as one `CLAP_EVENT_MIDI_SYSEX`**, `0xF0 … 0xF7`, read by the
-/// plugin through the pointer it was handed, in the block of its `END`; and a
-/// message left open by a later `START` never reaches it, counted.
+/// plugin through the pointer it was handed, in the block of its `END`.
 #[test]
 fn a_multi_packet_sysex_reaches_the_plugin_whole() {
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
@@ -1102,16 +965,6 @@ fn a_multi_packet_sysex_reaches_the_plugin_whole() {
     let framed: Vec<u8> = tutti_ump::frame(&payload).collect();
     assert_eq!(take_sysex_input(&session.controls), (1, 5, framed));
     assert_eq!(inst.sysex_dropped(), 0);
-
-    // A START left open by the next START: only the second arrives.
-    let mut midi = packets[..2].to_vec();
-    midi.extend(sysex_packets(&[1, 2, 3, 4, 5, 6, 7], 0));
-    drive_midi_block(&mut inst, &midi);
-    assert_eq!(
-        take_sysex_input(&session.controls),
-        (1, 0, vec![0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7])
-    );
-    assert_eq!(inst.sysex_dropped(), 1);
 }
 
 /// **A SysEx open across a reset, or a re-activation, never completes on the

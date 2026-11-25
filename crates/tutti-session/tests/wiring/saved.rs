@@ -202,3 +202,52 @@ fn a_capture_restores_from_the_values_handle_on_another_thread() {
 
     assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(1_000.0));
 }
+
+/// **Every saved entry of a removed node is found by the node**: an app that drops a removed
+/// node's entries from a saved map filters by `AnyTarget::node`, and the node's mode, mix and
+/// setting entries are among those it finds, so none survives to land on a node that reuses the
+/// key.
+#[test]
+fn a_removed_nodes_mode_mix_and_setting_are_found_by_its_node() {
+    use tutti_buffers::ChannelTopology;
+    use tutti_music::NoteDuration;
+    use tutti_nodes::{DelayConfig, DelayLayout, DelayNode, DelaySync, MaxDelay, NoteTimes};
+    use tutti_units::{Mix, Seconds};
+
+    let mut s = detached();
+    let layout = DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(2.0)))
+        .notes(NoteTimes::all(NoteDuration::QUARTER))
+        .build()
+        .expect("a layout");
+    let delay = s
+        .graph()
+        .add(DelayNode::<f32>::from(DelayConfig::new(layout)));
+    s.set((
+        delay.mix().to(Mix::new(0.5)),
+        delay.sync().to(DelaySync::Synced),
+    ))
+    .unwrap();
+    let mut saved = s.saved_values().unwrap();
+    s.remove(delay).unwrap();
+
+    let ours: Vec<_> = saved
+        .iter()
+        .map(|(target, _)| target)
+        .filter(|target| target.node() == Some(delay.into()))
+        .collect();
+    assert!(ours.iter().any(|t| t.is(delay.mix())), "the mix is found");
+    assert!(ours.iter().any(|t| t.is(delay.mode())), "the mode is found");
+    assert!(
+        ours.iter().any(|t| t.is(delay.sync())),
+        "the setting is found"
+    );
+    for target in &ours {
+        saved.remove(target);
+    }
+    assert!(
+        saved
+            .iter()
+            .all(|(t, _)| !t.is(delay.mix()) && !t.is(delay.mode()) && !t.is(delay.sync())),
+        "no entry of the removed node survives its filter"
+    );
+}

@@ -25,7 +25,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
-pub use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker};
+pub(crate) use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker};
 use interprocess::local_socket::Stream;
 use std::io::Read;
 use std::thread;
@@ -43,7 +43,7 @@ pub type ControlStream = Stream;
 /// nothing for this long is hung, and a send that gives up part-way has
 /// unframed the stream, so the bridge crashes on it. Generous,
 /// because a slow plugin call delays the server's next read by its length.
-pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Write one frame.
 ///
@@ -54,7 +54,7 @@ pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// itself declines is not a crash. A write the peer does not take within the
 /// send deadline is [`IpcError::Timeout`] with `partial` set: some of the
 /// frame may be on the wire, and the connection cannot go on.
-pub fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> IpcResult<()> {
+pub(crate) fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> IpcResult<()> {
     write_frame(stream, msg).map_err(|e| match e {
         IpcError::Io(io) => send_failed(io),
         other => other,
@@ -479,7 +479,7 @@ fn read_exact_by(
 /// stream whose position it describes. Sharing one between streams would resume
 /// one socket's frame from another's cursor.
 #[derive(Default)]
-pub struct PartialFrame {
+pub(crate) struct PartialFrame {
     /// The 4-byte length prefix, and how much of it is in.
     prefix: [u8; 4],
     prefix_filled: usize,
@@ -500,13 +500,13 @@ impl PartialFrame {
     /// A caller must not abandon the stream in this state: the unread remainder
     /// would be parsed as the next frame's length. Either resume this frame or
     /// treat the connection as lost.
-    pub fn in_progress(&self) -> bool {
+    pub(crate) fn in_progress(&self) -> bool {
         self.prefix_filled > 0 || self.have_len
     }
 
     /// The blob the last frame read announced, if it announced one and it has
     /// not been taken.
-    pub fn take_blob(&mut self) -> Option<Received> {
+    pub(crate) fn take_blob(&mut self) -> Option<Received> {
         self.blob.take()
     }
 
@@ -613,7 +613,10 @@ fn recv_by<T: Framed>(
 /// to survive a timeout and keep the connection must use [`recv_resumable`]
 /// instead; this one is for the paths where a timeout is already fatal
 /// (handshake, probe, launch).
-pub fn recv_within<T: Framed>(stream: &mut ControlStream, timeout: Duration) -> IpcResult<T> {
+pub(crate) fn recv_within<T: Framed>(
+    stream: &mut ControlStream,
+    timeout: Duration,
+) -> IpcResult<T> {
     let mut partial = PartialFrame::default();
     recv_resumable(stream, timeout, &mut partial)
 }
@@ -628,7 +631,7 @@ pub fn recv_within<T: Framed>(stream: &mut ControlStream, timeout: Duration) -> 
 ///
 /// Check [`PartialFrame::in_progress`] on a timeout to tell "nothing arrived, the
 /// stream is on a boundary" from "a frame is half-read and must be finished".
-pub fn recv_resumable<T: Framed>(
+pub(crate) fn recv_resumable<T: Framed>(
     stream: &mut ControlStream,
     timeout: Duration,
     partial: &mut PartialFrame,

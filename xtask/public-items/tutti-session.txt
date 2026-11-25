@@ -69,6 +69,7 @@ enum modulation::ModRefusal
 enum modulation::ModTarget
 enum modulation::Problem
 enum modulation::RouteError
+enum modulation::SourceError
 enum modulation::SourceName
 enum modulation::TargetName
 enum peer::PeerError
@@ -521,7 +522,6 @@ fn modulation::Mods::remove_route
 fn modulation::Mods::remove_source
 fn modulation::Mods::route
 fn modulation::Mods::set_source
-fn modulation::Mods::source
 fn modulation::Mods::take_mut
 fn modulation::Mods::view
 fn modulation::ModsView::is_automated

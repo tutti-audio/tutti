@@ -33,7 +33,7 @@ use tutti_units::Seconds;
 /// refill. There is no lock, so a refill never waits for a
 /// measurement and no sample is dropped to avoid waiting.
 #[derive(Default)]
-pub struct Metrics {
+pub(super) struct Metrics {
     /// Bytes per second over the trailing window; `0.0` before the first read.
     read_rate: AtomicF64,
 }
@@ -41,14 +41,14 @@ pub struct Metrics {
 impl Metrics {
     /// A meter reporting a read rate of zero until a read
     /// publishes one.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::default()
     }
 
     /// Read throughput in bytes/second over the trailing one-second window, or
     /// `0.0` before the first read. Varifill scales its chunk size by the square
     /// root of this against a 10 MB/s baseline.
-    pub fn read_rate(&self) -> f64 {
+    pub(super) fn read_rate(&self) -> f64 {
         self.read_rate.load(Ordering::Relaxed)
     }
 

@@ -45,9 +45,6 @@ mod ump;
 // The one platform seam: the Windows half, or nothing.
 #[cfg(windows)]
 mod os;
-#[cfg(not(windows))]
-mod os {}
 
-// Empty off Windows, where `os` has nothing to export.
-#[allow(unused_imports)]
+#[cfg(windows)]
 pub use os::*;

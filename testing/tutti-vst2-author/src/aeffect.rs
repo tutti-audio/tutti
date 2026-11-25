@@ -17,7 +17,7 @@ use crate::plugin::{Info, Plugin, PluginParameters};
 /// it sound is the documented one on each method: the host serialises its calls
 /// per instance.
 #[allow(clippy::mut_from_ref)]
-pub trait AEffectExt {
+pub(crate) trait AEffectExt {
     /// Return handle to Plugin object. Only works for plugins created using this library.
     ///
     /// # Safety

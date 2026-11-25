@@ -1371,7 +1371,16 @@ impl<F: Float, K: LaneKind> IntoNode<F> for ControlLaneNode<K> {
             addr: self.addr,
             source: self.source.clone(),
         };
-        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
+        // The program cell, so a lane added to a session graph is swept like
+        // any node's; the reconciler inserts through an `Editor`, which
+        // discards the reclaimer, and sweeps its lanes itself.
+        let program = self.shared.program.clone();
+        NodeParts::new(
+            Box::new(self),
+            controls,
+            Some(Box::new(fork)),
+            Some(Box::new(program)),
+        )
     }
 }
 

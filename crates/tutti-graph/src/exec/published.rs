@@ -24,9 +24,11 @@ pub trait PublishedKind: 'static {
 /// session leaves it out.
 pub trait HasPublished<K: PublishedKind> {}
 
-/// A cell the control side reads and replaces one published value through.
-/// Control thread only: the session calls it under its value lock.
-pub trait Published: Send + Sync + 'static {
+/// A cell the control side reads and replaces one published value through,
+/// and sweeps ([`Reclaim`]): a published cell frees what it retired because it
+/// is published. Control thread only: the session calls it under its value
+/// lock.
+pub trait Published: Reclaim + Send + Sync + 'static {
     /// The value in force.
     type Value: Clone + PartialEq + Send + Sync + 'static;
 
@@ -53,11 +55,13 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Published for Publisher<T> {
 }
 
 /// One published cell of a node as `NodeParts` carries it: its kind and the
-/// cell, an `Arc<dyn Published<Value = K::Value>>` behind `Any`.
+/// cell, an `Arc<dyn Published<Value = K::Value>>` behind `Any`, and the same
+/// cell as a [`Reclaim`], so the entry sweeps without knowing its kind.
 pub struct ErasedPublished {
     kind: TypeId,
     kind_name: &'static str,
     cell: Arc<dyn Any + Send + Sync>,
+    sweep: Arc<dyn Reclaim + Send + Sync>,
 }
 
 impl ErasedPublished {
@@ -65,8 +69,16 @@ impl ErasedPublished {
         Self {
             kind: TypeId::of::<K>(),
             kind_name: std::any::type_name::<K>(),
+            sweep: cell.clone(),
             cell: Arc::new(cell),
         }
+    }
+
+    /// Frees what the cell retired and no reader holds; returns how many
+    /// retired values are still pinned. Control thread, from the owner's tick:
+    /// the session's reclaim phase sweeps every entry of every node.
+    pub fn reclaim(&self) -> usize {
+        self.sweep.reclaim()
     }
 
     /// The name of the kind's type.
@@ -129,7 +141,7 @@ impl<T> PublishedCell<T> {
         self.reader.lend()
     }
 
-    /// The publisher, for the session's cell and the reclaimer.
+    /// The publisher, for the session's cell.
     #[must_use]
     pub fn publisher(&self) -> &Publisher<T> {
         &self.publisher
@@ -145,43 +157,5 @@ impl<T> Clone for PublishedCell<T> {
 impl<T> std::fmt::Debug for PublishedCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PublishedCell").finish_non_exhaustive()
-    }
-}
-
-/// The reclaimer of a node's published cells: each one's publisher, swept on
-/// the owner's tick.
-#[derive(Default)]
-pub struct Sweep(Vec<Box<dyn Reclaim + Send>>);
-
-impl Sweep {
-    /// A sweep of nothing.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// This sweep and `cell`'s publisher.
-    #[must_use]
-    pub fn with<T: Send + Sync + 'static>(mut self, cell: &PublishedCell<T>) -> Self {
-        self.0.push(Box::new(cell.publisher.clone()));
-        self
-    }
-
-    /// Whether it sweeps nothing.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl Reclaim for Sweep {
-    fn reclaim(&self) -> usize {
-        self.0.iter().map(|each| each.reclaim()).sum()
-    }
-}
-
-impl std::fmt::Debug for Sweep {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Sweep").finish_non_exhaustive()
     }
 }
