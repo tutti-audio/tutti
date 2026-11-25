@@ -49,6 +49,8 @@ pub enum ClapSwitch {
     /// The period (milliseconds) the plugin's next registered timer asks for;
     /// 0 for due on every poll.
     TimerPeriod,
+    /// Whether `clap.render.set` refuses the offline mode (0 or 1).
+    RefuseOffline,
 }
 
 impl ClapSwitch {
@@ -74,6 +76,7 @@ impl ClapSwitch {
             Self::NoteOutPorts => b"tutti_test_plugin_set_note_out_ports\0",
             Self::TimerStall => b"tutti_test_plugin_set_timer_stall_ms\0",
             Self::TimerPeriod => b"tutti_test_plugin_set_timer_period_ms\0",
+            Self::RefuseOffline => b"tutti_test_plugin_set_refuse_offline\0",
         }
     }
 }

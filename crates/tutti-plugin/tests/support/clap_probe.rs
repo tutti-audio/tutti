@@ -349,6 +349,12 @@ impl ProbeEnv {
         self
     }
 
+    /// Make `clap.render.set` refuse the offline mode.
+    pub(crate) fn refuse_offline(mut self) -> Self {
+        self.set("TUTTI_CLAP_PROBE_REFUSE_OFFLINE", "1".to_string());
+        self
+    }
+
     /// Apply `kParamGain`-equivalent gain to the rendered output.
     pub(crate) fn gain_enabled(mut self, on: bool) -> Self {
         self.set("TUTTI_CLAP_PROBE_APPLY_GAIN", u8::from(on).to_string());
