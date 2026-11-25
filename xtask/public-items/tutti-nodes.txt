@@ -21,8 +21,6 @@ enum params::ControlRead
 enum params::ControlValid
 enum params::Ring
 enum polarity::PolarityError
-enum reconcile::Feed
-enum reconcile::ReconcileError
 enum spatial::ambisonic::AmbisonicError
 enum spatial::ambisonic::Decoding
 enum spatial::vbap::error::VbapError
@@ -50,6 +48,7 @@ fn automation::control_lane::LaneControls::blocks_unranged
 fn automation::control_lane::LaneControls::probe_reader
 fn automation::control_lane::LaneControls::program
 fn automation::control_lane::LaneControls::publish
+fn automation::control_lane::LaneControls::reclaim
 fn automation::control_lane::LaneControls::resync
 fn automation::control_lane::LaneControls::retired_programs
 fn automation::control_lane::LaneControls::value
@@ -226,17 +225,6 @@ fn pitch_shifter::PitchShifterConfig::new
 fn pitch_shifter::PitchShifterConfig::pitch
 fn polarity::PolarityConfig::new
 fn polarity::PolarityConfig::only
-fn reconcile::Modulation::apply
-fn reconcile::Modulation::commit
-fn reconcile::Modulation::lane
-fn reconcile::Modulation::new
-fn reconcile::Modulation::plugin_lanes
-fn reconcile::Modulation::reclaim
-fn reconcile::Modulation::resyncs_dropped
-fn reconcile::Modulation::resyncs_owed
-fn reconcile::Modulation::send_resyncs
-fn reconcile::Modulation::skipped
-fn reconcile::Modulation::source
 fn reverb_fdn::FdnConfig::controls
 fn reverb_fdn::FdnConfig::layout
 fn reverb_fdn::FdnConfig::new
@@ -455,8 +443,6 @@ struct pitch_shifter::PitchShifterKernel
 struct pitch_shifter::PitchShifterSet
 struct polarity::PolarityConfig
 struct polarity::PolarityNode
-struct reconcile::Applied
-struct reconcile::Modulation
 struct reverb_fdn::FdnConfig
 struct reverb_fdn::FdnKernel
 struct reverb_fdn::FdnNodeControls
@@ -515,7 +501,6 @@ trait kernel::Kernel
 trait params::ControlSet
 trait params::HasControl
 trait params::HasControls
-trait reconcile::ModHost
 trait reverb_fdn::sealed::Sealed
 trait signal::sender::SourcePorts
 type additive::AdditiveNode

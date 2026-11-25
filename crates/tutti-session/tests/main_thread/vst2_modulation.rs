@@ -68,9 +68,11 @@ fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
         tutti_fixtures::HANG_GUARD,
         || {
             assert!(
-                !s.mod_state()
-                    .problems()
-                    .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
+                !s.mod_state().problems().any(|p| !matches!(
+                    p,
+                    tutti_session::Problem::Unresolved { .. }
+                        | tutti_session::Problem::Unfed { .. }
+                )),
                 "the declarations apply"
             );
             knob = s

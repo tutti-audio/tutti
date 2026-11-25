@@ -113,8 +113,8 @@
 //!   evaluates a `tutti_modulation::ControlProgram` into a param port,
 //!   the signal sources that feed a lane (`SourceNode<S>`, the one sender of a
 //!   `tutti_modulation::ControlSource`: `EnvelopeFollowerNode`,
-//!   `NoteEnvelopeNode`), and `Modulation`, the reconciler that builds them from
-//!   `tutti_modulation` declarations.
+//!   `NoteEnvelopeNode`); the session lowers `tutti_modulation` declarations to
+//!   them.
 //! - **Automation / convolution** — the `automation` module's `AutomationLaneNode`
 //!   (a curve as audio) and recording units, and `ConvolverNode`.
 //!
@@ -306,9 +306,7 @@ pub use tutti_units::{
 };
 
 // The boundary this crate holds: pure DSP graph nodes plus the `ParamSet` /
-// controls surface a host drives them through, and the modulation reconciler
-// (`Modulation`) that builds this crate's lanes and signal nodes from
-// `tutti_modulation` declarations. DAW-param policy is the host's, and
+// controls surface a host drives them through. DAW-param policy is the host's, and
 // deliberately outside this workspace.
 
 mod click;
@@ -570,10 +568,6 @@ pub use signal::{
     SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
 };
 
-// Declarations compiled and applied to an `Editor` as lanes, signal-source
-// nodes and edges.
-mod reconcile;
-pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError};
 mod convolution;
 pub use convolution::{
     ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,
