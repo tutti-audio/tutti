@@ -1010,60 +1010,15 @@ mod owed_tests {
         );
     }
 
-    /// **A SysEx open across the node's reset is not completed past it**:
-    /// its tail is skipped, counted, and the plugin's host drops it at the
-    /// next `START`, as the CLAP and VST3 hosts do on a plugin reset.
-    #[test]
-    fn a_sysex_open_across_a_reset_is_not_completed() {
-        use tutti_graph::Node as _;
-        let (client, _handle) = load_client(
-            main_thread(),
-            tutti_fixtures::vst2_probe(),
-            SampleRate::SR_48K,
-        )
-        .unwrap_or_else(|e| {
-            panic!(
-                "in-process load of the probe at {:?}: {e:?}",
-                tutti_fixtures::vst2_probe()
-            )
-        });
-        let controls = client.controls();
-        let mut unit = Direct::new(
-            client.bind(tutti_fixtures::tempo()),
-            SampleRate::SR_48K,
-            BLOCK,
-        );
-        let unit_in = unit
-            .node
-            .shape()
-            .event_input(0)
-            .expect("the node declares an event input");
-        let (cut, next) = dumps();
-
-        unit.events(unit_in, &cut[..3]);
-        unit.block();
-        unit.node.reset();
-        let tail: Vec<Event> = cut[3..].iter().chain(&next).copied().collect();
-        unit.events(unit_in, &tail);
-        unit.block();
-
-        let processor = unit.node.rt.held().expect("lent");
-        assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
-        assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
-        assert_eq!(
-            unit.node.controls().block_losses().inputs_refused,
-            1,
-            "the dump the plugin's host dropped whole, counted in its own unit"
-        );
-    }
-
-    /// **The plugin's host dropping a cut dump does not cut the next one.** A dump cut by a
-    /// reset is dropped whole by the plugin's host at the next dump's `START`; that drop is
+    /// **A SysEx open across the node's reset is not completed past it, and the plugin's host
+    /// dropping that cut dump does not cut the next one.** The cut dump's tail is skipped and
+    /// counted; the plugin's host drops the dump whole at the next dump's `START`, as the CLAP
+    /// and VST3 hosts do on a plugin reset. That drop is
     /// the host's, counted in its own unit, and the node's open SysEx (the new dump, here
     /// spanning two blocks) is not skipped for it: its `END` reaches the plugin, and no event
     /// beyond the reset's tail counts as lost.
     #[test]
-    fn a_host_drop_does_not_cut_the_next_dump() {
+    fn a_sysex_open_across_a_reset_is_skipped_and_the_hosts_drop_does_not_cut_the_next_dump() {
         use tutti_graph::Node as _;
         let (client, _handle) = load_client(
             main_thread(),
