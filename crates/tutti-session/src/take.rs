@@ -519,7 +519,7 @@ impl Drop for Report {
 }
 
 /// A take's way to the transport: its [`Recording`] commands, sent through the
-/// session's handle.
+/// session's handle from the take's handle or its pump.
 #[derive(Clone, Debug)]
 struct Recorder {
     /// Shared, so a `Take` stays small.
@@ -550,11 +550,10 @@ impl Recorder {
     }
 
     /// The take stops recording at the next block: a repeat of a stop already
-    /// sent is not sent again.
+    /// sent is not sent again, and one the queue refuses is owed and sent by
+    /// a later [`Session::update`].
     fn stop(&self) {
-        if let Err(error) = self.stop_at(When::NextBlock) {
-            tracing::warn!("take {} may keep the transport recording: {error}", self.id);
-        }
+        let _owed = self.stop_at(When::NextBlock);
     }
 }
 

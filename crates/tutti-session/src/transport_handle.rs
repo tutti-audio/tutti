@@ -177,20 +177,6 @@ impl TransportHandle {
         Ok(())
     }
 
-    /// Sends a take's [`Recording`] command, keeping the control side's set of
-    /// open takes ([`OpenTakes`]). Only a take sends one: an app records
-    /// through [`Session::record`](crate::Session::record).
-    ///
-    /// A `Start` for a take already open sends nothing and succeeds. A `Stop`
-    /// for a take that is not open sends nothing and changes nothing; one for
-    /// an open take that would not end its recording sooner than the `Stop`
-    /// already sent sends nothing either.
-    ///
-    /// # Errors
-    ///
-    /// [`TimedError::Full`] with the command when [`RECORDING_CAPACITY`] takes
-    /// are open (none with a `Stop` the engine has rendered past), or when the
-    /// transport's command queue is full.
     /// The id of the next take, minted by the transport it records on.
     #[cfg_attr(
         not(feature = "capture"),
@@ -200,6 +186,22 @@ impl TransportHandle {
         self.transport.motion().next_take_id()
     }
 
+    /// Sends a take's [`Recording`] command, keeping the control side's set of
+    /// open takes ([`OpenTakes`]). Only a take sends one: an app records
+    /// through [`Session::record`](crate::Session::record).
+    ///
+    /// A `Start` for a take already open sends nothing and succeeds. A `Stop`
+    /// for a take that is not open sends nothing and changes nothing; one for
+    /// an open take that would not end its recording sooner than the `Stop`
+    /// already sent sends nothing either. A `Stop` the queue refuses is owed:
+    /// [`send_owed_stops`](Self::send_owed_stops) sends it at a next block, so
+    /// a take's stop is never lost.
+    ///
+    /// # Errors
+    ///
+    /// [`TimedError::Full`] with the command when [`RECORDING_CAPACITY`] takes
+    /// are open (none with a `Stop` the engine has rendered past), or when the
+    /// transport's command queue is full.
     #[cfg_attr(
         not(feature = "capture"),
         expect(dead_code, reason = "a take (feature `capture`) is the one sender")
@@ -237,11 +239,40 @@ impl TransportHandle {
                 if !open.ends_sooner(id, ends) {
                     return Ok(());
                 }
-                self.transport.motion().schedule(at, recording)?;
+                if let Err(refused) = self.transport.motion().schedule(at, recording) {
+                    open.owe(id);
+                    return Err(refused);
+                }
                 open.stop(id, ends);
             }
         }
         Ok(())
+    }
+
+    /// Sends, at the next block, every take's `Stop` the queue refused
+    /// ([`send_recording`](Self::send_recording)), oldest first, until the
+    /// queue refuses one; the rest stay owed for the next call.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+    )]
+    pub(crate) fn send_owed_stops(&self) {
+        let mut open = self.open.lock();
+        if !open.owes() {
+            return;
+        }
+        let next = Sent::next_frame(&self.playhead());
+        for id in open.owed() {
+            if self
+                .transport
+                .motion()
+                .schedule(At::NextBlock, Recording::Stop(id))
+                .is_err()
+            {
+                return;
+            }
+            open.stop(id, next);
+        }
     }
 
     /// Whether the transport rolls as far as the control side knows: the
@@ -312,15 +343,30 @@ impl Sent {
 
 /// The takes that may be recording, as the control side knows them: at most
 /// [`RECORDING_CAPACITY`], each with the frame its `Stop` takes effect, `None`
-/// until one is sent. The engine's set of takes recording is a subset of this
-/// one at every instant, so it never overflows.
+/// until one is sent, and whether a `Stop` the queue refused is owed. The
+/// engine's set of takes recording is a subset of this one at every instant,
+/// so it never overflows.
 #[derive(Debug, Default)]
 #[cfg_attr(
     not(feature = "capture"),
     expect(dead_code, reason = "a take (feature `capture`) is the one sender")
 )]
 struct OpenTakes {
-    takes: Vec<(TakeId, Option<u64>)>,
+    takes: Vec<OpenTake>,
+}
+
+/// One take in [`OpenTakes`].
+#[derive(Debug)]
+#[cfg_attr(
+    not(feature = "capture"),
+    expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+)]
+struct OpenTake {
+    id: TakeId,
+    /// The frame its `Stop` takes effect; `None` until one is sent.
+    ends: Option<u64>,
+    /// A `Stop` the queue refused, to send at a next block.
+    owed: bool,
 }
 
 #[cfg_attr(
@@ -332,11 +378,11 @@ impl OpenTakes {
     /// is before `next`, the first frame of the next render.
     fn free_stopped(&mut self, next: u64) {
         self.takes
-            .retain(|&(_, ends)| ends.is_none_or(|ends| ends >= next));
+            .retain(|take| take.ends.is_none_or(|ends| ends >= next));
     }
 
     fn contains(&self, id: TakeId) -> bool {
-        self.takes.iter().any(|&(open, _)| open == id)
+        self.takes.iter().any(|take| take.id == id)
     }
 
     fn is_full(&self) -> bool {
@@ -344,7 +390,11 @@ impl OpenTakes {
     }
 
     fn insert(&mut self, id: TakeId) {
-        self.takes.push((id, None));
+        self.takes.push(OpenTake {
+            id,
+            ends: None,
+            owed: false,
+        });
     }
 
     /// Whether a `Stop` taking effect at `ends` ends `id` sooner than any sent
@@ -352,14 +402,39 @@ impl OpenTakes {
     fn ends_sooner(&self, id: TakeId, ends: u64) -> bool {
         self.takes
             .iter()
-            .any(|&(open, was)| open == id && was.is_none_or(|was| ends < was))
+            .any(|take| take.id == id && take.ends.is_none_or(|was| ends < was))
     }
 
+    /// Records the `Stop` sent for `id`, taking effect at `ends`: what it owed
+    /// is paid.
     fn stop(&mut self, id: TakeId, ends: u64) {
-        for (open, was) in &mut self.takes {
-            if *open == id {
-                *was = Some(ends);
+        for take in &mut self.takes {
+            if take.id == id {
+                take.ends = Some(ends);
+                take.owed = false;
             }
         }
+    }
+
+    /// Marks a `Stop` of `id` the queue refused as owed.
+    fn owe(&mut self, id: TakeId) {
+        for take in &mut self.takes {
+            if take.id == id {
+                take.owed = true;
+            }
+        }
+    }
+
+    fn owes(&self) -> bool {
+        self.takes.iter().any(|take| take.owed)
+    }
+
+    /// The takes owed a `Stop`, oldest first.
+    fn owed(&self) -> Vec<TakeId> {
+        self.takes
+            .iter()
+            .filter(|take| take.owed)
+            .map(|take| take.id)
+            .collect()
     }
 }

@@ -225,3 +225,54 @@ fn a_take_is_refused_while_the_capacity_is_open_and_taken_once_a_render_passes_t
         .send_recording(extra, When::NextBlock)
         .expect("the render passed every stop");
 }
+
+/// **A take's stop the transport's queue refuses is owed, and the next update
+/// sends it.** Sixteen takes record; next-block commands fill the queue, so
+/// the first take's stop is refused. A render frees the queue, but the take
+/// still holds its place (a seventeenth start is refused) until an update
+/// sends the owed stop and a render passes it.
+#[cfg(feature = "capture")]
+#[test]
+fn a_takes_stop_the_queue_refuses_is_sent_by_the_next_update() {
+    use crate::transport_handle::When;
+    use tutti_buffers::InterleavedMut;
+    use tutti_timeline::{MotionCommand, RECORDING_CAPACITY, Recording, TimedError};
+    use tutti_units::At;
+
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build()
+        .expect("builds");
+    let handle = s.transport_handle();
+    let mut block = vec![0.0f32; 512];
+    let takes: Vec<_> = (0..RECORDING_CAPACITY)
+        .map(|_| handle.next_take_id())
+        .collect();
+    for &take in &takes {
+        handle
+            .send_recording(Recording::Start(take), When::NextBlock)
+            .expect("room");
+    }
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
+    while handle.schedule(At::NextBlock, MotionCommand::Play).is_ok() {}
+    let stop = Recording::Stop(takes[0]);
+    assert_eq!(
+        handle.send_recording(stop, When::NextBlock),
+        Err(TimedError::Full(stop))
+    );
+
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
+    let extra = Recording::Start(handle.next_take_id());
+    assert_eq!(
+        handle.send_recording(extra, When::NextBlock),
+        Err(TimedError::Full(extra)),
+        "the first take records on: its stop was not sent"
+    );
+
+    let _ = s.update();
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
+    assert_eq!(handle.scheduled_outstanding(), 0, "the owed stop applied");
+    handle
+        .send_recording(extra, When::NextBlock)
+        .expect("the render passed the owed stop");
+}
