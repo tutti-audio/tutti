@@ -504,7 +504,7 @@ mod kernel;
 pub use kernel::{ControlSignals, Kernel, KernelConfig, KernelNode, MAX_SIGNALS};
 
 pub use params::{
-    At, Control, ControlRead, ControlSet, ControlValid, HasControl, NoControls, Params, Ring,
+    Control, ControlRead, ControlSet, ControlValid, HasControl, NoControls, Params, Ring,
 };
 
 // Freeverb as a `KernelNode`: mono in, stereo wet out; the SoundFont player's General MIDI

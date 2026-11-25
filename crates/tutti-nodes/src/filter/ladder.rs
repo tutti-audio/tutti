@@ -425,12 +425,12 @@ mod tests {
 
     // ── Per-block reads ──────────────────────────────────────────────────────
 
-    /// A cutoff written between blocks ramps on the stream clock: the render is the
-    /// same at every block length, under way one 64-frame block in, and arrived
-    /// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP) (240 frames at 48 kHz) after the block it
-    /// was first seen in.
+    /// A cutoff written between blocks renders the same at every block length and arrives
+    /// at the new design: before the write a block's level is the 1000 Hz design's gain,
+    /// and from the second block after it the 1400 Hz design's. The graph ramps the cell
+    /// on the port; read straight, the cell lands whole.
     #[test]
-    fn a_cutoff_written_between_blocks_ramps_on_the_stream() {
+    fn a_cutoff_written_between_blocks_arrives_at_its_design_whatever_the_blocks() {
         const FS: f64 = 48_000.0;
         const HZ: f64 = 1_500.0;
         const RES: f64 = 0.4;
@@ -449,90 +449,25 @@ mod tests {
 
         // The spec: `1 / ((1 + s/wc)^4 + k)`, `k = 4 res`, under the bilinear map prewarped
         // at the cutoff, the same figure the bank's held-response test pins.
-        let gain = |g: f64| {
+        let level = |fc: f64| {
             let one = Complex64::new(1.0, 0.0);
             let zi = Complex64::from_polar(1.0, -2.0 * core::f64::consts::PI * HZ / FS);
-            let s = (one - zi) / (one + zi) / g;
+            let s = (one - zi) / (one + zi) / libm::tan(core::f64::consts::PI * fc / FS);
             let p = one + s;
-            1.0 / (p * p * p * p + 4.0 * RES).norm()
+            1e-3 * core::f64::consts::FRAC_1_SQRT_2 / (p * p * p * p + 4.0 * RES).norm()
         };
-        let g_of = |fc: f64| libm::tan(core::f64::consts::PI * fc / FS);
-        // The cell ramps 1000 to 1400 Hz over 240 frames from the write at stream frame 256
-        // (the grid point at its first block): step `k = frame - 255` at a grid point's
-        // frame. A design is taken at each grid point (every 16 frames) and the
-        // coefficients ramp to it over the 16 frames after: frame `t` is `(t - p + 1) / 16`
-        // of the way from the design at the grid point `p` before it to the one at `p`.
-        let cell = |p: i64| {
-            let k = (p - 255).clamp(0, 240) as f64;
-            1_000.0 + 400.0 * k / 240.0
-        };
-        let expect = |block: usize| {
-            let mut sum = 0.0;
-            for i in 0..64 {
-                let t = 256 + 64 * block as i64 + i;
-                let p = t - t % 16;
-                let w = (t - p + 1) as f64 / 16.0;
-                let g = g_of(cell(p - 16)) * (1.0 - w) + g_of(cell(p)) * w;
-                sum += gain(g).powi(2);
-            }
-            1e-3 * core::f64::consts::FRAC_1_SQRT_2 * (sum / 64.0).sqrt()
-        };
-        // The tone is steady-state at each block's design, so the ramp's lag in the stages
-        // costs a few percent; a cutoff that never moved or jumped is off by tens.
+        // The stages settle a few percent off after the step; a cutoff that never moved is a
+        // third of the arrived level.
         let near = |got: f64, want: f64, what: &str| {
             assert!(
                 (got - want).abs() < 0.10 * want,
                 "{what}: {got} against {want}"
             );
         };
-        near(
-            low,
-            1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_000.0)),
-            "before",
-        );
-        for (j, &level) in blocks.iter().enumerate() {
-            near(level, expect(j), &format!("block {j} after the write"));
+        near(low, level(1_000.0), "before");
+        for (j, &l) in blocks.iter().enumerate().skip(1) {
+            near(l, level(1_400.0), &format!("block {j} after the write"));
         }
-        // A cutoff that jumped would put block 0 at the final gain, three times the
-        // held one; the ramp's first block is well under it.
-        let arrived = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
-        assert!(blocks[0] < 0.8 * arrived, "block 0 is not yet arrived");
-    }
-
-    /// Drive multiplies straight into the saturator, so a step would click: a drive
-    /// written between blocks ramps on the stream clock like a cutoff, and arrives. The
-    /// level of a high-pass tone below the saturator's knee rises on every block of the ramp
-    /// (a drive that jumped would start at its final level, and one that never moved would
-    /// not rise), starts well under it, and settles on it.
-    #[test]
-    fn a_drive_written_between_blocks_ramps_on_the_stream() {
-        // A high-pass tap, so the saturator's input reaches the output unfiltered.
-        let make = || {
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::HP24)
-                    .freq(Hz::new(500.0))
-                    .res(Resonance::new(0.4)),
-            )
-        };
-        let change = |n: &LadderFilterNode<f32>| {
-            assert!(n.param_set().set(UnitParam::Drive, 9.0));
-        };
-        let (low, blocks) = block_levels(make, change, 6_000.0, 0.1);
-        let arrived = blocks[7];
-        assert!(arrived > 4.0 * low, "the drive arrived: {low} to {arrived}");
-        assert!(
-            blocks[0] > low && blocks[0] < 0.5 * arrived,
-            "block 0 is under way: {low} < {} < {arrived}",
-            blocks[0]
-        );
-        // Four 64-frame blocks of a 240-frame ramp: each one louder than the last, then
-        // at rest (the ramp is done by block 4).
-        assert!(blocks[..5].windows(2).all(|w| w[1] > w[0]), "{blocks:?}");
-        assert!(
-            blocks[5..]
-                .iter()
-                .all(|&l| (l - arrived).abs() < 0.01 * arrived)
-        );
     }
 
     /// A stereo node over a tone of `hz` (whole periods in 64 frames) at `amplitude`:
@@ -544,13 +479,13 @@ mod tests {
         hz: f64,
         amplitude: f32,
     ) -> (f64, Vec<f64>) {
-        use crate::test_support::{assert_cell_ramps, drive_block, prepared, render_change, sine};
+        use crate::test_support::{assert_block_free, drive_block, prepared, render_change, sine};
         let x: Vec<f32> = sine::<f32>(hz, 48_000.0, 256 + 512)
             .into_iter()
             .map(|s| amplitude * s)
             .collect();
         let (before, after) = ([&x[..256], &x[..256]], [&x[256..], &x[256..]]);
-        assert_cell_ramps(&make, &change, &before, &after, "ladder");
+        assert_block_free(&make, &change, &before, &after, "ladder");
         let mut start = prepared(make());
         let low = rms(&drive_block(&mut start, &before)[0][192..]);
         let (_, out) = render_change(&make, &change, &before, &after, 64);

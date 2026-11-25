@@ -281,7 +281,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{
-        RATE, assert_cell_ramps, drive_block, prepared, render_change, render_chunked, sine,
+        RATE, assert_block_free, drive_block, prepared, render_change, render_chunked, sine,
     };
     use tutti_buffers::Planes;
     use tutti_dsp::SecondOrderShape;
@@ -387,7 +387,7 @@ mod tests {
         };
         let before = vec![0.2f32; 64];
         let after = vec![0.2f32; 600];
-        assert_cell_ramps(make, change, &[&before], &[&after], "drive");
+        assert_block_free(make, change, &[&before], &[&after], "drive");
         let (_, out) = render_change(make, change, &[&before], &[&after], 64);
         let n = tutti_dsp::GAIN_RAMP.to_samples_ceil(RATE).get();
         for (i, &y) in out[0].iter().enumerate().take(n) {

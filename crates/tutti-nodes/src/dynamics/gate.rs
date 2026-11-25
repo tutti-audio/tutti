@@ -164,7 +164,7 @@ control_set! {
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
     Release => Seconds = release { whole },
-    // The range ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
+    // The range ramps in the bank, over `GAIN_RAMP`: the graph must not ramp it
     // across the block as well.
     Range => Db = range { whole },
     // A ratio of `+inf` is a gate, so it is valid at infinity.

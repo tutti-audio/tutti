@@ -121,12 +121,12 @@ pub(crate) fn render_change<N: Node>(
     (node, out)
 }
 
-/// Asserts that a cell moved between blocks ramps on the stream clock, so a write
-/// renders the same whatever the host's blocks: the render of `after` is the same, bit
-/// for bit, at blocks of 1, 17, 64 and 256 frames, and it is not the render with the cell
-/// left alone. Returns the node rendered at blocks of 64.
+/// Asserts that a cell moved between blocks renders the same whatever the host's blocks:
+/// the render of `after` is the same, bit for bit, at blocks of 1, 17, 64 and 256 frames,
+/// and it is not the render with the cell left alone. Returns the node rendered at blocks
+/// of 64.
 #[track_caller]
-pub(crate) fn assert_cell_ramps<N: Node>(
+pub(crate) fn assert_block_free<N: Node>(
     make: impl Fn() -> N,
     change: impl Fn(&N),
     before: &[&[f32]],
@@ -141,13 +141,13 @@ pub(crate) fn assert_cell_ramps<N: Node>(
                 .flatten()
                 .zip(at64.iter().flatten())
                 .all(|(a, b)| a.to_bits() == b.to_bits()),
-            "{what}: the ramp at blocks of {block} is not the ramp at blocks of 64"
+            "{what}: the render at blocks of {block} is not the render at blocks of 64"
         );
     }
     let (_, held) = render_change(&make, |_: &N| {}, before, after, 64);
     assert!(
         held != at64,
-        "{what}: the change is inaudible, so this run cannot see a ramp"
+        "{what}: the change is inaudible, so this run cannot see it"
     );
     node
 }
