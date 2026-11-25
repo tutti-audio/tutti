@@ -1013,3 +1013,25 @@ fn an_adopted_plugin_is_in_the_state_a_driven_activation_leaves() {
         "lent to the realtime end"
     );
 }
+
+/// **A render mode a plugin has no concept of is not a refusal**: told to a
+/// plugin that takes none (`Unsupported`), the lifecycle's applied `Prepare`
+/// is as it was, the host is told nothing, and the plugin keeps rendering.
+#[test]
+fn a_mode_for_a_plugin_with_no_mode_leaves_the_state_and_the_host_unchanged() {
+    let mut rig = Rig::new();
+    let prepared = prepare(48_000.0);
+    rig.op(HostOp::Activate(prepared));
+    rig.take_notices();
+    rig.op(HostOp::SetMode(RenderMode::Offline));
+    assert_eq!(
+        rig.state.applied(),
+        Some(prepared),
+        "the applied mode stands"
+    );
+    assert!(
+        rig.take_notices().is_empty(),
+        "an unsupported mode is no refusal"
+    );
+    assert!(rig.state.renders());
+}

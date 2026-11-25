@@ -368,9 +368,10 @@ impl<L: Loaded> Lifecycle<L> {
             Effect::SetMode(mode) => match self.control() {
                 Some(control) => match control.set_render_mode(main, mode) {
                     ModeTold::Took => Reply::Answered(Told::ModeTook(mode)),
-                    ModeTold::Refused | ModeTold::Unsupported => {
-                        Reply::Answered(Told::ModeRefused(mode))
-                    }
+                    ModeTold::Refused => Reply::Answered(Told::ModeRefused(mode)),
+                    // No mode to refuse: what the plugin runs in, and whether
+                    // it renders, is as it was.
+                    ModeTold::Unsupported => Reply::Done,
                     ModeTold::Asked => Reply::Asked,
                 },
                 None => Reply::NotActive,

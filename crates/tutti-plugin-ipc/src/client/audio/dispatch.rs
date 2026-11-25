@@ -1170,14 +1170,6 @@ fn mode_told(mode: RenderMode, outcome: ModeOutcome) -> Told {
     }
 }
 
-/// Tells the host a plugin that has a render mode did not take it. A plugin
-/// with none runs as it did, which the host already knows.
-fn apply_mode_reply(inbox: &mut Unsolicited, mode: RenderMode, outcome: ModeOutcome) {
-    if outcome == ModeOutcome::Refused {
-        inbox.render_mode_not_applied(mode);
-    }
-}
-
 /// Puts an unsolicited event into `inbox`.
 fn file_news(inbox: &mut Unsolicited, news: News) {
     match news {
