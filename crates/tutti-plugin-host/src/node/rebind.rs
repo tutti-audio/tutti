@@ -505,8 +505,8 @@ mod tests {
         );
     }
 
-    /// **A write made after a flush is the plugin's last word**, through a node:
-    /// the first write is applied by a flush (the plugin's own `Control`), the
+    /// **A write made after a settle is the plugin's last word**, through a node:
+    /// the first write is applied by a settle (the plugin's own `Control`), the
     /// second rides the next block, and nothing the plugin is told after the
     /// block undoes it.
     #[test]
@@ -515,7 +515,12 @@ mod tests {
         let id = ParamId::new(1);
         post.write(id, tutti_units::Normalized::of(0.25))
             .expect("a declared parameter");
-        post.flush(main_thread(), inner.lock().control().expect("alive"));
+        let mark = post.mark();
+        assert!(
+            post.settle(main_thread(), inner.lock().control().expect("alive"), mark)
+                .is_ready(),
+            "no node holds the reader"
+        );
         post.write(id, tutti_units::Normalized::of(0.75))
             .expect("a declared parameter");
         unit.block();
@@ -530,7 +535,7 @@ mod tests {
                 Call::SetParameter(id),
                 Call::BlockParam(id, tutti_units::Normalized::of(0.75)),
             ],
-            "the flushed write first, the block's later write last"
+            "the settled write first, the block's later write last"
         );
     }
 

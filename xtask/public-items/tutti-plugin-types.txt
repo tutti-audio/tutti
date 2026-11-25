@@ -233,8 +233,10 @@ fn edit_slots::EditReader::drain
 fn edit_slots::EditReader::drain_in_epoch
 fn edit_slots::EditReader::epoch
 fn edit_slots::EditReader::epoch_watch
+fn edit_slots::EditReader::swept
 fn edit_slots::EditWriter::reset
 fn edit_slots::EditWriter::write
+fn edit_slots::EditWriter::written
 fn edit_slots::edit_slots
 fn edit_slots::epoch_before
 fn editor::ContentScale::get

@@ -3,7 +3,7 @@
 //! each a value by where the plugin runs, as [`Session::load_plugin`] does.
 //!
 //! A plugin in this process has its state calls on the main thread: its value
-//! (`SaveStateInProcess`, `RestoreStateInProcess`) is `!Send` and its `run` takes
+//! (`SaveStateInProcess`, `RestoreStateInProcess`) is `!Send` and its `poll` takes
 //! the [`MainThreadMarker`]. A plugin in a `plugin-server` process answers over
 //! IPC from any thread: its value (`SaveStateOutOfProcess`,
 //! `RestoreStateOutOfProcess`) is `Send` and a [`Future`] through [`IntoFuture`],
@@ -19,10 +19,14 @@
 //! the plugin's editor-only in-process instance (an Audio Unit's) load the state,
 //! on the main thread at the session's next update.
 
+use std::task::Poll;
+use std::time::Duration;
+
 use tutti_graph::NodeKey;
 use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
+use tutti_rt::Generation;
 
 use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::{AnyPlugin, Gate};
@@ -59,7 +63,7 @@ pub enum PluginApplyError {
 
 /// A plugin's state to save ([`Session::save_state`]), by where the plugin
 /// runs: a [`SaveStateInProcess`] the app runs on the main thread, or a
-/// [`SaveStateOutOfProcess`] it awaits on any thread. This enum has no `run`.
+/// [`SaveStateOutOfProcess`] it awaits on any thread. This enum has no `poll`.
 ///
 /// ```compile_fail
 /// fn send<T: Send>() {}
@@ -75,7 +79,7 @@ pub type SaveState = Op<SaveStateOp>;
 
 /// The value [`Session::save_state`] returns for a plugin in this process:
 /// `!Send`, run on the
-/// main thread. Its [`run`](InProcessOp::run) asks the plugin for its state and
+/// main thread. Its [`poll`](InProcessOp::poll) asks the plugin for its state and
 /// yields the [`PeerState`]; it ends in [`StateError::Lost`] when the node was
 /// removed or the plugin replaced since the value was made (nothing is asked),
 /// otherwise the plugin's own error: it is gone, busy, refused, or has no state
@@ -131,8 +135,17 @@ impl PluginOp for SaveStateOp {
         StateError::PluginCrashed
     }
 
-    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Result<Vec<u8>, StateError> {
-        handle.save_state_on(main, self.state_use)
+    fn stalled(after: Duration) -> StateError {
+        StateError::Stalled { after }
+    }
+
+    fn run(
+        &self,
+        handle: &PluginHandle,
+        main: MainThreadMarker,
+        mark: Generation,
+    ) -> Poll<Result<Vec<u8>, StateError>> {
+        handle.save_state_on(main, self.state_use, mark)
     }
 
     fn send(&self, answers: &PluginAnswers) -> Answer<Result<Vec<u8>, StateError>> {
@@ -147,7 +160,7 @@ impl PluginOp for SaveStateOp {
 /// A saved state to put back into a plugin ([`Session::restore_state`]), by
 /// where the plugin runs: a [`RestoreStateInProcess`] the app runs on the main
 /// thread, or a [`RestoreStateOutOfProcess`] it awaits on any thread. This enum
-/// has no `run`.
+/// has no `poll`.
 ///
 /// ```compile_fail
 /// fn send<T: Send>() {}
@@ -163,7 +176,7 @@ impl PluginOp for SaveStateOp {
 pub type RestoreState = Op<RestoreStateOp>;
 
 /// The value [`Session::restore_state`] returns for a plugin in this process:
-/// `!Send`, run on the main thread. Its [`run`](InProcessOp::run) loads the state and yields the
+/// `!Send`, run on the main thread. Its [`poll`](InProcessOp::poll) loads the state and yields the
 /// [`RestoredState`], which [`Session::apply`] takes back and which has the
 /// session read the plugin's parameters again. It ends in [`StateError::Lost`]
 /// when the node was removed or the plugin replaced since the value was made
@@ -223,7 +236,16 @@ impl PluginOp for RestoreStateOp {
         StateError::PluginCrashed
     }
 
-    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Result<(), StateError> {
+    fn stalled(after: Duration) -> StateError {
+        StateError::Stalled { after }
+    }
+
+    fn run(
+        &self,
+        handle: &PluginHandle,
+        main: MainThreadMarker,
+        _mark: Generation,
+    ) -> Poll<Result<(), StateError>> {
         handle.load_state(main, self.state.bytes())
     }
 
@@ -303,7 +325,7 @@ impl Landed {
     }
 }
 
-/// A state the plugin took ([`RestoreStateInProcess::run`] or
+/// A state the plugin took ([`RestoreStateInProcess::poll`] or
 /// [`RestoreStateOutOfProcess`]), which [`Session::apply`]
 /// takes back.
 ///
@@ -336,7 +358,7 @@ impl<F: SessionFloat> Sealed<F> for RestoredState {
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The state of the plugin hosted at `node`, to save for `state_use`
     /// ([`StateUse::Project`] is the state a project keeps): run it on the main
-    /// thread with [`SaveStateInProcess::run`] or, for a plugin in a plugin
+    /// thread with [`SaveStateInProcess::poll`] or, for a plugin in a plugin
     /// server, await it ([`SaveStateOutOfProcess`]).
     ///
     /// # Errors
@@ -359,7 +381,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     }
 
     /// Puts `state` back into the plugin hosted at `node`: run it on the main
-    /// thread with [`RestoreStateInProcess::run`] or await it
+    /// thread with [`RestoreStateInProcess::poll`] or await it
     /// ([`RestoreStateOutOfProcess`]), then hand its output to
     /// [`apply`](Self::apply).
     ///

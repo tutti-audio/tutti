@@ -51,6 +51,19 @@ use tutti_units::Normalized;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
+/// An in-process call, asked again until the plugin's node has let go of the
+/// writes made before it (a drain lasts microseconds).
+fn ready<O: tutti::PluginOp>(
+    mut op: tutti::InProcessOp<O>,
+    main: tutti::plugin::MainThreadMarker,
+) -> Result<O::Output, O::Error> {
+    loop {
+        if let std::task::Poll::Ready(result) = op.poll(main, tutti_platform::Instant::now()) {
+            return result;
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);
     let (Some(name), Some(out)) = (args.next(), args.next()) else {
@@ -174,7 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    came from, so a project that keeps it restores it into that plugin and
     //    no other (`restore_state`, run, then `apply`).
     let state = match session.save_state(&node, StateUse::Project)? {
-        SaveState::InProcess(save) => save.run(main)?,
+        SaveState::InProcess(save) => ready(save, main)?,
         SaveState::OutOfProcess(save) => block_on(save.into_future())?,
     };
     let state_path = out.with_extension("state");
@@ -186,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state_path.display()
     );
     let restored = match session.restore_state(&node, state)? {
-        RestoreState::InProcess(restore) => restore.run(main)?,
+        RestoreState::InProcess(restore) => ready(restore, main)?,
         RestoreState::OutOfProcess(restore) => block_on(restore.into_future())?,
     };
     session.apply(restored)?;
@@ -207,7 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("{} preset(s)", presets.len());
                 if let Some(first) = presets.iter().next() {
                     let loaded = match session.load_preset(&node, &first)? {
-                        LoadPreset::InProcess(load) => load.run(main)?,
+                        LoadPreset::InProcess(load) => ready(load, main)?,
                         LoadPreset::OutOfProcess(load) => block_on(load.into_future())?,
                     };
                     session.apply(loaded)?;

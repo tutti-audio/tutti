@@ -47,9 +47,12 @@ fn through_server<F: Format>(path: PathBuf) {
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("saves");
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
-    handle
-        .load_state(main_thread(), &F::embed_blob(&state, &blob))
-        .expect("loads");
+    assert!(
+        handle
+            .load_state(main_thread(), &F::embed_blob(&state, &blob))
+            .map(|loaded| loaded.expect("loads"))
+            .is_ready()
+    );
 
     let saved = handle
         .save_state(tutti_plugin_types::StateUse::Project)

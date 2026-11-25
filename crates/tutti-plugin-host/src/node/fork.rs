@@ -144,7 +144,7 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,
-    /// The host's parameter writes no block has taken: applied before the state
+    /// The host's parameter writes no block has taken: settled before the state
     /// is read, so the fork starts from them.
     edits: Option<super::host_edits::EditPost>,
     /// The width the live node renders at, which the second instance is
@@ -194,7 +194,8 @@ where
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
             if let Some(edits) = &self.edits {
-                edits.flush(main, control);
+                // `Node::fork` is synchronous: there is no tick to ask again on.
+                edits.settle_now(main, control);
             }
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).

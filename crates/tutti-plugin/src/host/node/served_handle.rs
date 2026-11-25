@@ -92,6 +92,10 @@ impl Health for ServedHandle {
         self.served.block_counts()
     }
 
+    fn refused_edits(&self) -> u64 {
+        self.served.refused_edits()
+    }
+
     fn terminate(&self, reason: TerminationReason) {
         self.served.terminate(reason);
     }

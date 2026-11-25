@@ -441,6 +441,10 @@ impl Health for IpcController {
         self.link.bridge.audio().block_counts()
     }
 
+    fn refused_edits(&self) -> u64 {
+        self.link.counters.server_losses().edits_refused
+    }
+
     fn terminate(&self, reason: TerminationReason) {
         // The cause first: the kill makes the bridge thread read an EOF, and
         // the first cause latched wins.
