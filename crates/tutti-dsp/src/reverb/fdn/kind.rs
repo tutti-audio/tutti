@@ -86,7 +86,7 @@ impl ShimmerLayout {
 }
 
 /// A kind of feedback delay network: [`FdnLayout`] (plain) or [`ShimmerLayout`]. Sealed.
-pub trait FdnKind: sealed::Kind {}
+pub trait FdnKind: sealed::Sealed {}
 
 impl FdnKind for FdnLayout {}
 impl FdnKind for ShimmerLayout {}
@@ -95,7 +95,7 @@ pub(super) mod sealed {
     use super::*;
 
     /// What a [`FdnBank`](crate::FdnBank) asks of its kind.
-    pub trait Kind: Copy + Debug + PartialEq {
+    pub trait Sealed: Copy + Debug + PartialEq {
         /// What the kind adds to [`FdnControls`].
         type Controls: Copy + PartialEq + Debug;
         /// What the kind keeps in the feedback path.
@@ -173,7 +173,7 @@ pub(super) mod sealed {
         }
     }
 
-    impl Kind for FdnLayout {
+    impl Sealed for FdnLayout {
         type Controls = FreezeControls;
         type State<F: FftFloat> = ();
 
@@ -199,7 +199,7 @@ pub(super) mod sealed {
         }
     }
 
-    impl Kind for ShimmerLayout {
+    impl Sealed for ShimmerLayout {
         type Controls = ShimmerControls;
         type State<F: FftFloat> = Shimmer<F>;
 

@@ -1340,7 +1340,7 @@ trait model::lti::Lti
 trait model::system::System
 trait ramp::Lerp
 trait reverb::fdn::kind::FdnKind
-trait reverb::fdn::kind::sealed::Kind
+trait reverb::fdn::kind::sealed::Sealed
 trait reverb::fdn::kind::sealed::Shifter
 trait stft::window::Window
 trait viterbi::Transition

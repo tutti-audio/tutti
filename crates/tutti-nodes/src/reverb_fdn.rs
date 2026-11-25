@@ -150,7 +150,7 @@ struct Running<F: FftFloat, L: FdnKind> {
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
 /// the ramps its design is set through, of the kind `L`: [`FdnLayout`] for the plain network
-/// ([`FdnSet`]) or [`ShimmerLayout`](tutti_dsp::ShimmerLayout) for the shimmer
+/// ([`FdnSet`]) or [`ShimmerLayout`] for the shimmer
 /// ([`ShimmerSet`](crate::ShimmerSet)).
 ///
 /// The bank's state is `F`, the float of the graph.

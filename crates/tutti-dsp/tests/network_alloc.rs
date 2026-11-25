@@ -86,7 +86,6 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             rate: Hz::new(0.1 + k),
             width: StereoWidth::new(2.0 * k),
             wet: Db::new(-12.0 * k),
-            ..FdnControls::DEFAULT
         };
         let freeze = FreezeControls {
             freeze: block % 11 == 0,

@@ -1,7 +1,7 @@
 use tutti_units::{Amplitude, Gain, SampleSpan};
 
 use super::*;
-use crate::reverb::fdn::kind::sealed::Kind as _;
+use crate::reverb::fdn::kind::sealed::Sealed as _;
 use crate::reverb::network::{Band, Fdn, Matrix, Network, NetworkStage};
 use crate::{DecayTime, ShimmerLayout};
 use crate::{Lti as _, System as _};
@@ -58,7 +58,6 @@ fn every_control_designs_a_stable_network() {
             rate: Hz::new(x),
             width: StereoWidth::new(x),
             wet: Db::new(x),
-            ..FdnControls::DEFAULT
         };
         let freeze = FreezeControls { freeze: x > 0.5 };
         let n = design_with(&d, &c, &freeze, SampleRate::SR_48K);

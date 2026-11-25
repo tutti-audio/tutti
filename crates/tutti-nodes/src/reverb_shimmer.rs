@@ -199,7 +199,7 @@ mod tests {
     }
 
     /// The controls the last `retarget` of the wrapped kernel took.
-    type Seen = std::sync::Arc<std::sync::Mutex<Option<FdnNodeControls<ShimmerLayout>>>>;
+    type Seen = tutti_fixtures::Shared<Option<FdnNodeControls<ShimmerLayout>>>;
 
     /// A shimmer kernel that records what its `retarget` is given.
     #[derive(Clone, Debug)]
