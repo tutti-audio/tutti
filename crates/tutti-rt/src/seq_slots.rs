@@ -109,6 +109,7 @@ pub fn seq_slots<T: Pod>(len: usize) -> (SeqSlotsWriter<T>, SeqSlotsReader<T>) {
     let readers = cells.iter().map(SeqWriter::reader).collect();
     let epoch = Arc::new(AtomicU32::new(0));
     let dirty = Arc::new(AtomicU32::new(0));
+    let swept = Arc::new(AtomicU32::new(0));
     (
         SeqSlotsWriter {
             cells,
@@ -124,6 +125,7 @@ pub fn seq_slots<T: Pod>(len: usize) -> (SeqSlotsWriter<T>, SeqSlotsReader<T>) {
             epoch,
             generation: 0,
             dirty,
+            swept,
         },
     )
 }
@@ -197,6 +199,26 @@ impl std::fmt::Debug for EpochWatch {
     }
 }
 
+/// Reads [`SeqSlotsReader::swept`] from any thread
+/// ([`SeqSlotsReader::swept_watch`]).
+#[derive(Clone)]
+pub struct SweptWatch(Arc<AtomicU32>);
+
+impl SweptWatch {
+    /// The generation of the reader's last sweep no write overlapped, as
+    /// [`SeqSlotsReader::swept`] reads it. Wait-free.
+    #[must_use]
+    pub fn get(&self) -> Generation {
+        Generation(self.0.load(Ordering::Acquire))
+    }
+}
+
+impl std::fmt::Debug for SweptWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SweptWatch").finish_non_exhaustive()
+    }
+}
+
 /// The one reader of an array of sequence slots.
 pub struct SeqSlotsReader<T: Pod> {
     cells: Vec<SeqReader<Stamped<T>>>,
@@ -208,6 +230,8 @@ pub struct SeqSlotsReader<T: Pod> {
     /// The generation of the last sweep that no write overlapped.
     generation: u32,
     dirty: Arc<AtomicU32>,
+    /// `generation`, published for [`SweptWatch`].
+    swept: Arc<AtomicU32>,
 }
 
 impl<T: Pod> SeqSlotsReader<T> {
@@ -249,6 +273,13 @@ impl<T: Pod> SeqSlotsReader<T> {
         EpochWatch(Arc::clone(&self.epoch))
     }
 
+    /// A handle that reads [`swept`](Self::swept) without the reader, so a
+    /// thread that does not hold it learns that a sweep covered a write.
+    #[must_use]
+    pub fn swept_watch(&self) -> SweptWatch {
+        SweptWatch(Arc::clone(&self.swept))
+    }
+
     /// Phase one: reads every slot a write has changed into the scratch buffer.
     fn collect(&mut self) {
         // Before the reads, and recorded only when no slot was contended.
@@ -272,6 +303,7 @@ impl<T: Pod> SeqSlotsReader<T> {
         }
         if !contended {
             self.generation = generation;
+            self.swept.store(generation, Ordering::Release);
         }
     }
 

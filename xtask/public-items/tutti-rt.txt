@@ -238,9 +238,11 @@ fn seq_slots::SeqSlotsReader::drain_in_epoch
 fn seq_slots::SeqSlotsReader::epoch
 fn seq_slots::SeqSlotsReader::epoch_watch
 fn seq_slots::SeqSlotsReader::swept
+fn seq_slots::SeqSlotsReader::swept_watch
 fn seq_slots::SeqSlotsWriter::new_epoch
 fn seq_slots::SeqSlotsWriter::write
 fn seq_slots::SeqSlotsWriter::written
+fn seq_slots::SweptWatch::get
 fn seq_slots::seq_slots
 fn split::ClaimTable::new
 fn split::Held::new
@@ -357,6 +359,7 @@ struct seq_slots::EpochWatch
 struct seq_slots::Generation
 struct seq_slots::SeqSlotsReader
 struct seq_slots::SeqSlotsWriter
+struct seq_slots::SweptWatch
 struct spin::BlockWaits
 struct split::ClaimConflict
 struct split::ClaimTable

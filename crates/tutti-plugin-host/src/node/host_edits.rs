@@ -156,10 +156,12 @@ impl EditPost {
     /// waiting for a node's drain to let go of the reader. The claim's holder
     /// is a bounded audio-thread drain, so the wait ends. For a synchronous
     /// caller on the main thread with no later tick to ask again on (a save, a
-    /// fork); the rest [`settle`](Self::settle) and are asked again.
+    /// fork); the rest [`settle`](Self::settle) and are asked again. It does not
+    /// wait for a value a Controller queued for its Processor's next block:
+    /// with no block stepping, nothing would end that wait.
     pub(super) fn settle_now(&self, main: MainThreadMarker, control: &mut dyn Control) {
         let mark = self.mark();
-        while self.settle(main, control, mark).is_pending() {
+        while self.sweep(main, control, mark).is_pending() {
             std::thread::yield_now();
         }
     }
@@ -223,10 +225,38 @@ impl EditPost {
     /// `Control` ([`Control::set_parameter`]), so a read or a save made now sees
     /// them. `Ready` once every write up to `mark` is the plugin's, whether this
     /// call or a block took it; `Pending` while a node holds the reader for a
-    /// drain, or a write overlapped this sweep: ask again. A write the plugin
+    /// drain, a write overlapped this sweep, or the plugin's Controller holds a
+    /// value for the Processor's next block: ask again. A write the plugin
     /// refuses is counted ([`refused`](Self::refused)). Control thread, main
     /// thread.
     pub(super) fn settle(
+        &self,
+        main: MainThreadMarker,
+        control: &mut dyn Control,
+        mark: Generation,
+    ) -> Poll<()> {
+        if self.sweep(main, control, mark).is_pending() {
+            return Poll::Pending;
+        }
+        // A value the plugin's Controller queued for its Processor is the
+        // plugin's once a block took it: wake the node that runs that block.
+        // With no block stepping (an undriven graph), it is delivered by the
+        // caller's next one.
+        if !control.writes_delivered() {
+            if let Some(wake) = &*self.0.wake.lock() {
+                wake.notify();
+            }
+            return Poll::Pending;
+        }
+        Poll::Ready(())
+    }
+
+    /// The host's writes up to `mark` are the plugin's `Control`'s: taken from
+    /// the slots and applied through [`Control::set_parameter`], by this call
+    /// or a block's drain. `Pending` while a node holds the reader or a write
+    /// overlapped the sweep. A value the Controller then queues for its
+    /// Processor is not waited for here ([`settle`](Self::settle) does).
+    fn sweep(
         &self,
         main: MainThreadMarker,
         control: &mut dyn Control,
@@ -362,9 +392,11 @@ mod tests {
         assert_eq!(drained(&port), [(id(1), 0.25)], "a block took the first");
         post.write(id(2), Normalized::of(0.5)).unwrap();
         let mark = post.mark();
+        // The fake's Controller queues the write to its Processor, which has not
+        // run a block: the plugin has the write when one does.
         assert!(
             post.settle(tutti_fixtures::main_thread(), &mut controller, mark)
-                .is_ready()
+                .is_pending()
         );
         let set: Vec<_> = fake
             .calls()

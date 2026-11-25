@@ -26,7 +26,7 @@
 
 use std::sync::Arc;
 
-use tutti_rt::{Generation, SeqSlotsReader, SeqSlotsWriter, seq_slots};
+use tutti_rt::{Generation, SeqSlotsReader, SeqSlotsWriter, SweptWatch, seq_slots};
 use tutti_units::{Normalized, ParamId};
 
 /// A write to a parameter the activation did not declare.
@@ -135,6 +135,13 @@ impl EditReader {
     #[must_use]
     pub const fn swept(&self) -> Generation {
         self.slots.swept()
+    }
+
+    /// A handle that reads [`swept`](Self::swept) from any thread, without the
+    /// reader the audio side holds.
+    #[must_use]
+    pub fn swept_watch(&self) -> SweptWatch {
+        self.slots.swept_watch()
     }
 
     /// The epoch now: it moves with each [`EditWriter::reset`].

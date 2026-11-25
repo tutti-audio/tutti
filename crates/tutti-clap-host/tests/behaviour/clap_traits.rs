@@ -402,6 +402,33 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
     assert!((event.value - 350.0).abs() < 1e-9, "100 + 0.25 * 1000");
 }
 
+/// **A write queued to the Controller is delivered once a block took it**:
+/// `writes_delivered` is `false` after the write and `true` after the block
+/// that carries it, and the value is in the plugin by then.
+#[test]
+fn a_controller_write_is_delivered_once_a_block_took_it() {
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let id = ParamId::new(probe_params()[0].id);
+
+    assert!(
+        Control::writes_delivered(&controller),
+        "nothing was written"
+    );
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
+    assert!(
+        !Control::writes_delivered(&controller),
+        "the Processor has not taken the write"
+    );
+    render(&mut processor, FloatWidth::F32).expect("block");
+    assert!(Control::writes_delivered(&controller), "a block took it");
+}
+
 /// **A state load makes the writes queued before it stale**: they were written
 /// against values the load replaced, and the next block must not put them
 /// back over it.

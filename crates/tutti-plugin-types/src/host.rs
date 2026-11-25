@@ -163,6 +163,15 @@ pub trait Control: EditorWindow {
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
 
+    /// Whether every value [`set_parameter`](Self::set_parameter) took is the
+    /// plugin's: `false` while a value waits in a queue the Processor takes at
+    /// the head of its next block (a CLAP Controller's), which a read or a save
+    /// made now would not see. The default is a format that writes the plugin
+    /// at the call.
+    fn writes_delivered(&self) -> bool {
+        true
+    }
+
     /// Tells the plugin's edit controller of a value the host wrote and the
     /// Processor was handed another way (in the block's parameter changes), so
     /// the controller's own value and the plugin's editor follow it. VST3 hosts
@@ -696,6 +705,12 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
+    /// Whether the writes [`queue_write`](Self::queue_write) handed the
+    /// Processor are the plugin's: the Processor has taken them.
+    fn writes_delivered(&self) -> bool {
+        true
+    }
+
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
     fn queue_write(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
@@ -828,6 +843,10 @@ impl<W: Wraps> Control for W {
 
     fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         Wraps::inform_controller(self, main, id, value);
+    }
+
+    fn writes_delivered(&self) -> bool {
+        Wraps::writes_delivered(self)
     }
 
     fn set_parameter(

@@ -724,6 +724,12 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
+    /// The Processor has taken every value queued to it: its drain's sweep has
+    /// reached the writes made.
+    fn writes_delivered(&self) -> bool {
+        self.queue_delivered()
+    }
+
     /// Applied at the head of the Processor's next block: the slot of the
     /// parameter keeps the latest value.
     fn queue_write(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {

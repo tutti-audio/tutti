@@ -505,6 +505,33 @@ mod tests {
         );
     }
 
+    /// **A write the plugin holds only once a block took it is not settled
+    /// before that block.** A CLAP Controller queues a host write to its
+    /// Processor, which applies it at the head of its next block: the settle
+    /// is `Pending` until that block ran, and a read made then sees the write.
+    #[test]
+    fn a_settle_waits_for_the_block_that_takes_a_controller_queued_write() {
+        let (fake, post, mut unit, inner) = edited_node();
+        let id = ParamId::new(1);
+        post.write(id, tutti_units::Normalized::of(0.25))
+            .expect("a declared parameter");
+        let mark = post.mark();
+        let settle = |post: &super::super::host_edits::EditPost| {
+            post.settle(main_thread(), inner.lock().control().expect("alive"), mark)
+        };
+        assert!(
+            settle(&post).is_pending(),
+            "the Processor has not taken the write"
+        );
+        unit.block();
+        assert!(settle(&post).is_ready(), "a block took it");
+        assert!(
+            fake.calls()
+                .contains(&Call::Edit(id, tutti_units::Normalized::of(0.25))),
+            "the Processor applied it at the head of the block"
+        );
+    }
+
     /// **A write made after a settle is the plugin's last word**, through a node:
     /// the first write is applied by a settle (the plugin's own `Control`), the
     /// second rides the next block, and nothing the plugin is told after the
@@ -518,8 +545,8 @@ mod tests {
         let mark = post.mark();
         assert!(
             post.settle(main_thread(), inner.lock().control().expect("alive"), mark)
-                .is_ready(),
-            "no node holds the reader"
+                .is_pending(),
+            "the Controller's write waits for the Processor's block"
         );
         post.write(id, tutti_units::Normalized::of(0.75))
             .expect("a declared parameter");

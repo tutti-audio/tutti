@@ -43,6 +43,8 @@ pub struct ClapController {
     loaded: Option<ClapLoaded>,
     /// The writes to the Processor: one slot per declared parameter.
     edits: EditWriter,
+    /// What the Processor's drain has swept of `edits`.
+    swept: tutti_rt::SweptWatch,
     /// The ranges the Processor denormalizes against, republished after a
     /// rescan that changed the parameters.
     pub(crate) ranges: Publisher<RangeTable>,
@@ -67,7 +69,7 @@ impl std::fmt::Debug for ClapController {
 impl ClapController {
     pub(crate) fn new(
         loaded: ClapLoaded,
-        edits: EditWriter,
+        (edits, swept): (EditWriter, tutti_rt::SweptWatch),
         ranges: Publisher<RangeTable>,
         pools: Publisher<PoolCell>,
         (reported, reports_dropped): (ReportDrain, Arc<AtomicU64>),
@@ -75,6 +77,7 @@ impl ClapController {
         Self {
             loaded: Some(loaded),
             edits,
+            swept,
             ranges,
             pools,
             reported,
@@ -177,6 +180,12 @@ impl ClapController {
         // this call, so the slot exists.
         let written = self.edits.write(id, value);
         debug_assert!(written.is_ok(), "{written:?}");
+    }
+
+    /// Whether the Processor has taken every value [`queue_edit`](Self::queue_edit)
+    /// stored: its drain's sweep has reached the writes made.
+    pub(crate) fn queue_delivered(&self) -> bool {
+        self.swept.get().has_reached(self.edits.written())
     }
 
     /// Makes every write made so far stale (see [`EditWriter::reset`]).

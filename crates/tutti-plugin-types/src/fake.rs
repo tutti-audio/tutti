@@ -705,6 +705,8 @@ pub struct FakeController {
     shared: Arc<Shared>,
     descriptor: PluginDescriptor,
     sink: EditWriter,
+    /// What the Processor's drain has swept of `sink`.
+    swept: tutti_rt::SweptWatch,
     values: Vec<(ParamId, Normalized)>,
 }
 
@@ -721,8 +723,13 @@ fn set_value(values: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normal
 }
 
 macro_rules! fake_control {
-    ($ty:ty, $set:expr, $flush:expr) => {
+    ($ty:ty, $set:expr, $flush:expr, $delivered:expr) => {
         impl Control for $ty {
+            fn writes_delivered(&self) -> bool {
+                let delivered: fn(&Self) -> bool = $delivered;
+                delivered(self)
+            }
+
             fn info(&self) -> &PluginDescriptor {
                 &self.descriptor
             }
@@ -986,7 +993,7 @@ macro_rules! fake_control {
     };
 }
 
-fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {});
+fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {}, |_| true);
 fake_control!(
     FakeController,
     |this, id, value| {
@@ -994,7 +1001,8 @@ fake_control!(
         // write policy refused an undeclared id before this call.
         let _ = this.sink.write(id, value);
     },
-    |_, _| {}
+    |_, _| {},
+    |this| this.swept.get().has_reached(this.sink.written())
 );
 
 impl Loaded for FakeLoaded {
@@ -1046,6 +1054,7 @@ impl Loaded for FakeLoaded {
         }
         let shell = Arc::new(ActivationShell);
         let (sink, drain) = edit_slots(shared.declared().into_iter().map(|(id, _)| id));
+        let swept = drain.swept_watch();
         Ok((
             FakeProcessor {
                 shell: shell.clone(),
@@ -1058,6 +1067,7 @@ impl Loaded for FakeLoaded {
                 shared,
                 descriptor: self.descriptor,
                 sink,
+                swept,
                 values: self.values,
             },
         ))

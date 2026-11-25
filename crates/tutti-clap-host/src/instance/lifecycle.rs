@@ -200,6 +200,7 @@ impl ClapLoaded {
         // One slot per declared parameter: the list changes only across a
         // reactivation, so the table cannot go stale while this activation lasts.
         let (sink, drain) = tutti_plugin_types::edit_slots(declared);
+        let swept = drain.swept_watch();
         let (reports, reported) = tutti_plugin_types::reports(REPORT_CAPACITY);
         let reports_dropped = Arc::new(AtomicU64::new(0));
         let processor = ClapProcessor::new(ProcessorParts {
@@ -214,8 +215,13 @@ impl ClapLoaded {
             reports,
             reports_dropped: Arc::clone(&reports_dropped),
         });
-        let controller =
-            ClapController::new(self, sink, ranges, pools, (reported, reports_dropped));
+        let controller = ClapController::new(
+            self,
+            (sink, swept),
+            ranges,
+            pools,
+            (reported, reports_dropped),
+        );
         Ok((processor, controller))
     }
 

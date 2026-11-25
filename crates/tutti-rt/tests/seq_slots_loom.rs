@@ -42,9 +42,11 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
             writer.write(0, 2);
         });
 
+        let watch = reader.swept_watch();
         let mut yielded = Vec::new();
         let observed = loaded.load(Ordering::Relaxed);
         reader.drain_in_epoch(|_, value, _| yielded.push(value));
+        assert_eq!(watch.get(), reader.swept(), "the watch reads the sweep");
         if observed {
             assert!(
                 !yielded.contains(&1),
@@ -63,6 +65,7 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
 
         reader.drain_in_epoch(|_, value, _| yielded.push(value));
         assert_eq!(reader.swept(), Generation::new(2), "a quiet drain");
+        assert_eq!(watch.get(), Generation::new(2), "the watch follows it");
         assert_eq!(
             yielded.last(),
             Some(&2),
