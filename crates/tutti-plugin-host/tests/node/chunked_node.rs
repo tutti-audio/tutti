@@ -276,7 +276,7 @@ impl Loaded for Rec {
     type Controller = RecController;
     const RESTARTS: RestartRules = RestartRules::CLAP;
 
-    fn widths(&self) -> Widths {
+    fn widths(&mut self, _: MainThreadMarker) -> Widths {
         Widths::BOTH
     }
 

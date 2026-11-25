@@ -1,7 +1,7 @@
 //! A graph rendered at `f64` end to end: a figure `f32` cannot hold survives the
 //! builder, the executor's fan-in sum and the renderer's views unrounded.
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct, drive};
 use tutti_graph::testing::{agree_across_workers, bits, pooled};
@@ -59,7 +59,10 @@ fn prepare() -> Prepare {
 #[test]
 fn a_fan_in_sum_and_a_gain_keep_the_figure_f32_rounds_away() {
     assert_ne!(f64::from(FINE as f32), FINE, "FINE is not an f32");
-    let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::STEREO);
+    let mut g = GraphBuilder::<f64>::with_format(
+        ChannelLayout::EMPTY,
+        ChannelSet::default_for(ChannelLayout::STEREO),
+    );
     let (a, b) = (g.add(ForkByClone(Dc(FINE))), g.add(ForkByClone(Dc(FINE))));
     let half = g.add(ForkByClone(Half));
     g.connect(a, 0, half, 0);
@@ -82,7 +85,10 @@ fn a_fan_in_sum_and_a_gain_keep_the_figure_f32_rounds_away() {
 /// A caller's `f64` planes are read as they are.
 #[test]
 fn caller_planes_cross_the_renderer_at_f64() {
-    let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::MONO, ChannelLayout::MONO);
+    let mut g = GraphBuilder::<f64>::with_format(
+        ChannelLayout::MONO,
+        ChannelSet::default_for(ChannelLayout::MONO),
+    );
     let half = g.add(ForkByClone(Half));
     g.connect_input(0, half, 0).connect_output(half, 0, 0);
     let mut r = g.renderer(prepare()).expect("builds at f64");
@@ -95,7 +101,10 @@ fn caller_planes_cross_the_renderer_at_f64() {
 /// with a sentinel reads `FINE` in every sample afterwards.
 #[test]
 fn render_into_overwrites_the_callers_f64_planes() {
-    let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let mut g = GraphBuilder::<f64>::with_format(
+        ChannelLayout::EMPTY,
+        ChannelSet::default_for(ChannelLayout::MONO),
+    );
     let dc = g.add(ForkByClone(Dc(FINE)));
     g.connect_output(dc, 0, 0);
     let mut r = g.renderer(prepare()).expect("builds at f64");
@@ -180,7 +189,10 @@ impl<F: Float> ParamNode<F> for Gain {
 
 /// `FINE` through `lanes` gains into one output: the sum of `FINE * g` over the lanes.
 fn gain_graph(lanes: usize) -> (GraphBuilder<f64>, Vec<ParamSet>) {
-    let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let mut g = GraphBuilder::<f64>::with_format(
+        ChannelLayout::EMPTY,
+        ChannelSet::default_for(ChannelLayout::MONO),
+    );
     let dc = g.add(ForkByClone(Dc(FINE)));
     let mut sets = Vec::new();
     for _ in 0..lanes {

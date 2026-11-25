@@ -1,8 +1,7 @@
 //! The folds from the graph's main output to the device: built once on the control side,
 //! lent to the audio thread.
 //!
-//! The main output renders at the width of its plan (at most
-//! [`MAX_CHANNELS`]) and the device
+//! The main output renders at the width of its plan and the device
 //! callback hands over a buffer of its own width. [`Fold`]
 //! allocates when built, and a plan arrives on the audio thread (a commit
 //! installed at a block's start), so the folds are built ahead of time for
@@ -15,12 +14,13 @@
 //!
 //! # Main outputs
 //!
-//! Each main output generation ([`MainOutputId`]) is published with the topology it was
-//! declared with, before the commit that carries its id is sent
-//! ([`OutputControl::publish_main_output`]). A main output with no declaration is the
-//! engine's order for the plan's width
-//! ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for)), at
-//! every width. A main output's folds stay published until a plan of a later main output has
+//! Each main output generation ([`MainOutputId`]) is published with the
+//! [`ChannelSet`] it was declared with, before the commit that carries its id is sent
+//! ([`OutputControl::publish_main_output`]); the engine's first main output is the
+//! editor's declaration at [`Engine::new`](crate::Engine::new). A main output has one fold
+//! into each device, by speaker. A main output with no channels has no
+//! fold, and one past [`MAX_CHANNELS`] is refused at its
+//! publish: the engine renders no more. A main output's folds stay published until a plan of a later main output has
 //! rendered a block ([`OutputControl::reclaim`]). A main output change that cuts ends
 //! the older main output at the commit's block. One that crossfades
 //! ([`Editor::set_main_output_fade`](tutti_graph::Editor::set_main_output_fade)) keeps the
@@ -64,7 +64,7 @@ use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::{BufferError, Float, Fold, FoldError};
-use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, MAX_CHANNELS, Placement};
+use tutti_buffers::{ChannelLayout, ChannelSet, MAX_CHANNELS, Placement, Speaker};
 use tutti_graph::{MainOutputError, MainOutputId};
 use tutti_rt::{Mutex, Publisher};
 
@@ -82,63 +82,53 @@ pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 #[derive(Debug, Clone)]
 struct MainOutputFolds<F: Float> {
     id: MainOutputId,
-    /// What the main output was declared with; `None` is the engine's order for the
-    /// plan's width, at every width.
-    topology: Option<ChannelTopology>,
-    /// Index `d - 1` holds the folds into a device of `d` channels, `None` for
-    /// a width not supported; inside, index `w - 1` folds a main output of `w`.
-    by_device: Vec<Option<Box<[Option<Fold<F>>]>>>,
+    /// What the main output was declared with.
+    main_output: ChannelSet,
+    /// Index `d - 1` holds the fold into a device of `d` channels: `None` for
+    /// a device not held, a main output with no channels, or a pair that
+    /// cannot be placed.
+    by_device: Vec<Option<Fold<F>>>,
 }
 
 impl<F: Float> MainOutputFolds<F> {
-    /// The fold of this main output at `width` channels into `device`: `None` for a
-    /// width a declared main output does not have (it renders at the one it was
-    /// declared at), and the routing's refusal for a pair that cannot be placed.
+    fn new(id: MainOutputId, main_output: ChannelSet) -> Self {
+        Self {
+            id,
+            main_output,
+            by_device: Vec::new(),
+        }
+    }
+
+    /// The fold of this main output into `device`: `None` for a main output
+    /// with no channels, which has nothing to fold, and the routing's refusal
+    /// for a pair that cannot be placed. A set past `MAX_CHANNELS` has no
+    /// topology to place: its first channel past the cap is the one with no place.
     fn build(
         &self,
-        width: usize,
         device: &OutputPlacement,
         routing: &Routing,
     ) -> Result<Option<Fold<F>>, RoutingError> {
-        let default;
-        let main_output = match &self.topology {
-            Some(main_output) if usize::from(main_output.width().count()) != width => {
-                return Ok(None);
-            }
-            Some(main_output) => main_output,
-            None => {
-                default = ChannelTopology::default_for(
-                    ChannelLayout::try_from(width)
-                        .expect("a main output width is within MAX_CHANNELS"),
-                )
-                .expect("a main output width is within MAX_CHANNELS");
-                &default
-            }
+        if self.main_output.width() == ChannelLayout::EMPTY {
+            return Ok(None);
+        }
+        let Some(topology) = self.main_output.topology() else {
+            return Err(RoutingError::Fold(FoldError::Unplaced {
+                channel: MAX_CHANNELS,
+                speaker: Speaker::Unassigned,
+            }));
         };
-        routing.fold(main_output, &device.channels).map(Some)
+        routing.fold(topology, &device.channels).map(Some)
     }
 
-    /// The folds of every main output width this main output has into `device`. A width the
-    /// routing cannot place has no fold, and renders a silent, counted block
-    /// into the device; [`OutputControl::set_routing`] refuses before that for
-    /// the pair in use.
-    fn column(&self, device: &OutputPlacement, routing: &Routing) -> Box<[Option<Fold<F>>]> {
-        (1..=MAX_CHANNELS)
-            .map(|w| self.build(w, device, routing).unwrap_or_default())
-            .collect()
-    }
-
-    /// Whether a main output of `width` channels is one this main output can render.
-    fn has_width(&self, width: usize) -> bool {
-        self.topology
-            .as_ref()
-            .is_none_or(|main_output| usize::from(main_output.width().count()) == width)
-            && (1..=MAX_CHANNELS).contains(&width)
+    /// The fold into `device`. A pair the routing cannot place has no fold,
+    /// and renders a silent, counted block into the device;
+    /// [`OutputControl::set_routing`] refuses before that for the pair in use.
+    fn fold(&self, device: &OutputPlacement, routing: &Routing) -> Option<Fold<F>> {
+        self.build(device, routing).unwrap_or_default()
     }
 }
 
-/// The folds from each published main output, at each width it renders, to each
-/// device width supported.
+/// The folds from each published main output to each device width supported.
 #[derive(Debug, Clone)]
 pub(crate) struct OutputFolds<F: Float> {
     /// Index `d - 1` is the device of `d` channels, `None` for a width not
@@ -157,16 +147,12 @@ pub(crate) struct OutputFolds<F: Float> {
 }
 
 impl<F: Float> OutputFolds<F> {
-    /// The folds into devices of `1..=widest` channels, for the undeclared
-    /// first main output. Control side: it allocates.
-    pub(crate) fn up_to(widest: usize) -> Self {
+    /// The folds into devices of `1..=widest` channels, for the first main
+    /// output `id`, declared as `main_output`. Control side: it allocates.
+    pub(crate) fn up_to(widest: usize, id: MainOutputId, main_output: ChannelSet) -> Self {
         let mut folds = Self {
             devices: Vec::new(),
-            main_outputs: vec![MainOutputFolds {
-                id: MainOutputId::GENESIS,
-                topology: None,
-                by_device: Vec::new(),
-            }],
+            main_outputs: vec![MainOutputFolds::new(id, main_output)],
             routing: Routing::default(),
             generation: 0,
             previous: None,
@@ -212,7 +198,7 @@ impl<F: Float> OutputFolds<F> {
             if main_output.by_device.len() <= slot {
                 main_output.by_device.resize(slot + 1, None);
             }
-            main_output.by_device[slot] = Some(main_output.column(&device, &self.routing));
+            main_output.by_device[slot] = main_output.fold(&device, &self.routing);
         }
         self.devices[slot] = Some(device);
     }
@@ -240,12 +226,12 @@ impl<F: Float> OutputFolds<F> {
     }
 
     /// Whether every main output can be placed on the device of `device` channels
-    /// under `routing`, a main output of no declared width at `width` channels.
+    /// under `routing`.
     ///
     /// # Errors
     ///
     /// The first [`RoutingError`] a main output's fold into the device meets.
-    fn place(&self, routing: &Routing, width: usize, device: usize) -> Result<(), RoutingError> {
+    fn place(&self, routing: &Routing, device: usize) -> Result<(), RoutingError> {
         let Some(entry) = device
             .checked_sub(1)
             .and_then(|slot| self.devices.get(slot))
@@ -254,11 +240,7 @@ impl<F: Float> OutputFolds<F> {
             return Ok(());
         };
         for main_output in &self.main_outputs {
-            let width = main_output
-                .topology
-                .as_ref()
-                .map_or(width, |t| usize::from(t.width().count()));
-            main_output.build(width, entry, routing)?;
+            main_output.build(entry, routing)?;
         }
         Ok(())
     }
@@ -270,28 +252,18 @@ impl<F: Float> OutputFolds<F> {
             main_output.by_device = self
                 .devices
                 .iter()
-                .map(|d| d.as_ref().map(|d| main_output.column(d, &self.routing)))
+                .map(|d| d.as_ref().and_then(|d| main_output.fold(d, &self.routing)))
                 .collect();
         }
     }
 
-    /// The fold of a main output of `width` channels, of the main output generation `main_output`,
-    /// into a device of `device` channels, or `None` for a main output not published
-    /// (or retired), a main output of no channels (or more than the engine renders), a
-    /// device not supported, or a pair that cannot be placed.
-    pub(crate) fn get(
-        &self,
-        main_output: MainOutputId,
-        device: usize,
-        width: usize,
-    ) -> Option<&Fold<F>> {
+    /// The fold of the main output generation `main_output` into a device of
+    /// `device` channels, or `None` for a main output not published (or
+    /// retired), a main output of no channels, a device not supported, or a
+    /// pair that cannot be placed.
+    pub(crate) fn get(&self, main_output: MainOutputId, device: usize) -> Option<&Fold<F>> {
         let main_output = self.main_outputs.iter().find(|r| r.id == main_output)?;
-        main_output
-            .by_device
-            .get(device.checked_sub(1)?)?
-            .as_ref()?
-            .get(width.checked_sub(1)?)?
-            .as_ref()
+        main_output.by_device.get(device.checked_sub(1)?)?.as_ref()
     }
 
     /// Whether a device of `device` channels is held (its pairs may still be
@@ -355,20 +327,14 @@ pub struct OutputControl<F: Float = f32> {
     /// The newest routing generation whose crossfade the audio thread has
     /// finished or cut: its `previous` table is no longer read.
     routing_ended: Arc<AtomicU64>,
-    /// The main output width and the device width of the last block rendered, packed
-    /// by [`pack_in_use`]; `0` before one has. Written by the audio thread and
+    /// The device width of the last block rendered; `0` before one has.
+    /// Written by the audio thread and
     /// cleared on the control side wherever the device in use changes
     /// ([`state_device`](Self::state_device) onto another width, a new
     /// [`OutputBlock`](crate::OutputBlock)). A late write from the last
     /// callback of a stream being replaced can put the old pair back, until
     /// that stream stops.
     in_use: Arc<AtomicU64>,
-}
-
-/// The widths of the pair a block renders, in one word: the main output's width above
-/// the device's. Both are at least one in a block that renders a main output.
-pub(crate) fn pack_in_use(width: usize, device: usize) -> u64 {
-    ((width as u64) << 32) | device as u64
 }
 
 impl<F: Float> OutputControl<F> {
@@ -393,16 +359,10 @@ impl<F: Float> OutputControl<F> {
         self.in_use.store(0, Ordering::Relaxed);
     }
 
-    /// The widths of the (main output, device) pair the last block rendered, once one
-    /// has: the main output's, then the device's.
-    fn in_use(&self) -> Option<(usize, usize)> {
-        let packed = self.in_use.load(Ordering::Relaxed);
-        (packed != 0).then(|| {
-            (
-                (packed >> 32) as usize,
-                (packed & u64::from(u32::MAX)) as usize,
-            )
-        })
+    /// The width of the device the last block rendered into, once one has.
+    fn in_use(&self) -> Option<usize> {
+        let device = self.in_use.load(Ordering::Relaxed);
+        (device != 0).then_some(device as usize)
     }
 
     pub(crate) fn routing_ended(&self) -> &Arc<AtomicU64> {
@@ -479,7 +439,7 @@ impl<F: Float> OutputControl<F> {
         let Some(slot) = usize::from(device.channels.width().count()).checked_sub(1) else {
             return Err(BufferError::ZeroWidth.into());
         };
-        if self.in_use().is_some_and(|(_, d)| d != slot + 1) {
+        if self.in_use().is_some_and(|d| d != slot + 1) {
             self.forget_in_use();
         }
         self.update(|folds| {
@@ -504,16 +464,17 @@ impl<F: Float> OutputControl<F> {
         folds.devices.get(slot)?.clone()
     }
 
-    /// Publishes the main output generation `id`, declared as `main_output` (`None` is the
-    /// engine's order for the plan's width), before the commit that carries
-    /// `id` is sent: a plan of that main output finds its folds on its first block.
-    /// The older main outputs' folds stay until [`reclaim`](Self::reclaim) finds a
-    /// plan of a later main output has rendered.
+    /// Publishes the main output generation `id`, declared as `main_output`,
+    /// before the commit that carries `id` is sent: a plan of that main output
+    /// finds its folds on its first block. The older main outputs' folds stay
+    /// until [`reclaim`](Self::reclaim) finds a plan of a later main output has
+    /// rendered.
     ///
     /// A declaration of independent buses
-    /// ([`ChannelTopology::unassigned`]) stays by index: a 4-wide one into a
-    /// 6-wide device keeps channels 2 and 3 at 2 and 3 (undeclared, a 4-wide
-    /// main output is quad, and they land on the side pair).
+    /// ([`ChannelTopology::unassigned`](tutti_buffers::ChannelTopology::unassigned)) stays by
+    /// index: a 4-wide one into a 6-wide device keeps channels 2 and 3 at 2 and 3
+    /// (declared as the width's order, a 4-wide main output is quad, and they land
+    /// on the side pair).
     ///
     /// Control side: it allocates, and publishes the new set for the next
     /// block. A callback mid-block keeps the folds it lent.
@@ -523,7 +484,9 @@ impl<F: Float> OutputControl<F> {
     /// Nothing is published on an error.
     ///
     /// - [`MainOutputError::Fold`] when the declaration cannot be placed on `device`
-    ///   (an unassigned main output wider than it, or an unnamed channel). A device
+    ///   (an unassigned main output wider than it, a set past
+    ///   [`MAX_CHANNELS`], which has no place in any device, or an
+    ///   unnamed channel). A device
     ///   the engine holds that cannot take it has no fold
     ///   ([`has_fold`](Self::has_fold)).
     /// - [`MainOutputError::NotPast`] when `id` is not past every main output published.
@@ -533,20 +496,18 @@ impl<F: Float> OutputControl<F> {
     pub fn publish_main_output(
         &self,
         id: MainOutputId,
-        main_output: Option<ChannelTopology>,
+        main_output: ChannelSet,
         device: ChannelLayout,
     ) -> Result<(), MainOutputError> {
-        if let Some(main_output) = &main_output {
-            let placed = self
-                .device(device)
-                .map_or_else(|| ChannelSet::default_for(device), |d| d.channels);
-            // A refusal of the fold itself is the call's; a map that does not
-            // fit leaves the pair with no fold, which a commit names.
-            if let Err(RoutingError::Fold(refused)) =
-                self.cell.current().routing.fold::<F>(main_output, &placed)
-            {
-                return Err(refused.into());
-            }
+        let mut entry = MainOutputFolds::new(id, main_output);
+        let placed = self
+            .device(device)
+            .unwrap_or_else(|| OutputPlacement::default_for(device));
+        // A refusal of the fold itself is the call's; a map that does not
+        // fit leaves the pair with no fold, which a commit names.
+        if let Err(RoutingError::Fold(refused)) = entry.build(&placed, &self.cell.current().routing)
+        {
+            return Err(refused.into());
         }
         let installed = self.installed.load(Ordering::Acquire);
         self.update(|folds| {
@@ -568,42 +529,25 @@ impl<F: Float> OutputControl<F> {
                     limit: MAX_PENDING_MAIN_OUTPUTS,
                 });
             }
-            let mut entry = MainOutputFolds {
-                id,
-                topology: main_output,
-                by_device: Vec::new(),
-            };
             entry.by_device = folds
                 .devices
                 .iter()
-                .map(|d| d.as_ref().map(|d| entry.column(d, &folds.routing)))
+                .map(|d| d.as_ref().and_then(|d| entry.fold(d, &folds.routing)))
                 .collect();
             folds.main_outputs.push(entry);
             Ok(true)
         })
     }
 
-    /// Whether the main output generation `main_output` has a fold at `width` channels into
-    /// a device of `device` channels: the pair a commit of that width, or a
-    /// restart onto that device, must be able to place.
+    /// Whether the main output generation `main_output` has a fold into a
+    /// device of `device` channels: the pair a commit, or a restart onto that
+    /// device, must be able to place.
     #[must_use]
-    pub fn has_fold(&self, main_output: MainOutputId, width: usize, device: ChannelLayout) -> bool {
+    pub fn has_fold(&self, main_output: MainOutputId, device: ChannelLayout) -> bool {
         self.cell
             .current()
-            .get(main_output, usize::from(device.count()), width)
+            .get(main_output, usize::from(device.count()))
             .is_some()
-    }
-
-    /// Whether a main output of `width` channels is one the generation `main_output` can
-    /// render at all, whichever device (a declared main output has the one width).
-    #[must_use]
-    pub fn has_width(&self, main_output: MainOutputId, width: usize) -> bool {
-        self.cell
-            .current()
-            .main_outputs
-            .iter()
-            .find(|r| r.id == main_output)
-            .is_some_and(|r| r.has_width(width))
     }
 
     /// Sets where the mix lands: the format the main output is heard in and the map
@@ -626,8 +570,7 @@ impl<F: Float> OutputControl<F> {
     /// # Errors
     ///
     /// The [`RoutingError`] of the first main output the routing cannot place on the
-    /// device the last block rendered into (a main output of no declared width at the
-    /// width that block rendered); nothing is published. Before a block has
+    /// device the last block rendered into; nothing is published. Before a block has
     /// rendered no device is in use and every routing is taken.
     pub fn set_routing(&self, routing: Routing) -> Result<(), RoutingError> {
         let in_use = self.in_use();
@@ -635,8 +578,8 @@ impl<F: Float> OutputControl<F> {
             if folds.routing == routing {
                 return Ok(false);
             }
-            if let Some((width, device)) = in_use {
-                folds.place(&routing, width, device)?;
+            if let Some(device) = in_use {
+                folds.place(&routing, device)?;
             }
             let in_flight = self.fade_in_flight(folds);
             folds.begin_fade(in_flight);
@@ -701,7 +644,11 @@ impl<F: Float> OutputControl<F> {
 }
 
 impl<F: Float> tutti_graph::MainOutputGate for OutputControl<F> {
-    fn published(&self, main_output: MainOutputId, outputs: usize) -> bool {
-        self.has_width(main_output, outputs)
+    fn published(&self, main_output: MainOutputId) -> bool {
+        self.cell
+            .current()
+            .main_outputs
+            .iter()
+            .any(|r| r.id == main_output)
     }
 }

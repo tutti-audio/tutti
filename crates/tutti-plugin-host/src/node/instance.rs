@@ -347,13 +347,13 @@ impl<L: Loaded> Instance<L> {
     /// plugin refuses the activation.
     pub(super) fn start(
         main: MainThreadMarker,
-        loaded: L,
+        mut loaded: L,
         origin: Option<PluginRef>,
         sample_rate: SampleRate,
         block_size: usize,
         width: FloatWidth,
     ) -> IpcResult<(Self, Rt<L::Processor>)> {
-        let widths = loaded.widths();
+        let widths = loaded.widths(main);
         let wiring = tutti_plugin_types::Control::wiring(&loaded, main);
         let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
@@ -1211,6 +1211,30 @@ mod tests {
         assert_eq!(instance.width(), FloatWidth::F32);
         assert_eq!(fake.activated_width(), Some(FloatWidth::F32));
         assert!(instance.renders());
+    }
+
+    /// **A plugin that declares 64-bit audio and refuses the activation fails
+    /// it, asked once**: the width is chosen before the activation, and a
+    /// refusal is not retried at 32-bit.
+    #[test]
+    fn a_plugin_that_declares_64_bit_and_refuses_it_fails_the_activation() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        fake.refuse_64_bit();
+        let refused = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F64,
+        );
+        assert!(matches!(refused, Err(IpcError::ActivationFailed(_))));
+        let activations = fake
+            .calls()
+            .iter()
+            .filter(|call| matches!(call, tutti_plugin_types::fake::Call::Activate(..)))
+            .count();
+        assert_eq!(activations, 1);
     }
 
     /// **A plugin that processes both widths, started for 64-bit, is activated

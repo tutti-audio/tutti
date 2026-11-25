@@ -8,7 +8,7 @@ use tutti_buffers::MaxBlock;
 use tutti_units::{Latency, Mix, SampleRate, Samples};
 
 use super::Editor;
-use crate::testing::{Kind, TestNode};
+use crate::testing::{Kind, TestNode, WireDeclared, declare_outputs};
 use crate::{
     Edge, EdgeId, Fade, InputPort, NodeKey, NodeMode, OutputPort, PortSource, Prepare, TapAlign,
     TapId, TapOptions, Unforkable,
@@ -47,7 +47,7 @@ fn committed() -> (Editor, crate::Executor, EdgeId) {
     );
     let feed = EdgeId::into_port(InputPort::new(NodeKey(2), 0), Edge::Direct(out(1)));
     ed.connect_edge(feed).expect("both nodes exist");
-    ed.wire_outputs([out(2)]).expect("the node exists");
+    ed.wire_declared_outputs([out(2)]).expect("the node exists");
     ed.set_edge_gain(feed, tutti_units::Gain::UNITY)
         .expect("the edge exists");
     ed.commit().expect("compiles");
@@ -103,7 +103,7 @@ fn every_structural_write_moves_the_structure_and_the_commit_compiles() {
             "spec",
             true,
             Box::new(|e| {
-                let _ = e.resize_outputs(tutti_buffers::ChannelLayout::STEREO);
+                declare_outputs(e, tutti_buffers::ChannelLayout::STEREO);
             }),
         ),
         (

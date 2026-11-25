@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Float};
 use tutti_graph::testing::{self as common, Harness, Kind};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Edge, EdgeGain, EdgeId, EventOutputPort, GraphSpec,
@@ -454,6 +454,7 @@ fn bus_graph_from(rng: &mut Rng) -> BusGraph {
             .map(|port| PortSource::Node(OutputPort::new(last, port)))
             .collect::<Vec<_>>(),
     );
+    common::declare_spec_outputs(&mut spec);
     BusGraph { spec, kinds }
 }
 
@@ -466,8 +467,8 @@ pub(crate) fn main_output_bus_graph(seed: u64) -> BusGraph {
     let mut graph = bus_graph_from(&mut rng);
     let width = rng.pick(&[1usize, 2, 2, 6]).expect("a width");
     let main_output = bus_of(width, rng.chance(75)).topology;
-    graph.spec.main_output = Some(main_output);
-    graph.spec.topology.outputs.truncate(width);
+    graph.spec.main_output = ChannelSet::from(main_output);
+    graph.spec.topology.outputs.resize(width, Vec::new());
     let nodes: Vec<NodeKey> = graph.kinds.keys().copied().collect();
     for _ in 0..1 + rng.below(3) {
         let Some(node) = rng.pick(&nodes) else {

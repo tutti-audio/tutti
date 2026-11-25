@@ -113,7 +113,7 @@ use tutti_graph::{
 
 use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
 use crate::load::{self, BlockCounts, Budget, Load, Writers};
-use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds, pack_in_use};
+use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
 use crate::routing::StageTargets;
 use crate::stage::OutputStage;
 use std::sync::Arc;
@@ -253,7 +253,7 @@ struct GraphRender<F: Float> {
     /// The main output of the plan the last block rendered, for the control side to
     /// retire the older main outputs' folds by ([`OutputControl::reclaim`]).
     installed: Arc<AtomicU64>,
-    /// The widths of the pair the last block rendered
+    /// The width of the device the last block rendered into
     /// ([`OutputControl::set_routing`] checks the new routing against it).
     in_use: Arc<AtomicU64>,
     /// Where each device output's gain ramp stands.
@@ -517,9 +517,13 @@ impl<F: Float> Engine<F> {
         let (heard_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
         let clock_reader = clock.reader();
-        // Every bare main output width places into every bare device width up to
-        // `DEFAULT_DEVICE_WIDTHS` (`every_main_output_width_places_into_any_device`).
-        let output = OutputControl::new(OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS));
+        // The editor's main output is the first published, into every bare device width
+        // up to `DEFAULT_DEVICE_WIDTHS`.
+        let output = OutputControl::new(OutputFolds::up_to(
+            DEFAULT_DEVICE_WIDTHS,
+            editor.spec().main_output_id,
+            editor.spec().main_output,
+        ));
         editor.set_main_output_gate(Arc::new(output.clone()));
         let folds = AudioThreadCell::new(output.cell().reader());
         let stage = AudioThreadCell::new(output.stage().reader());
@@ -557,28 +561,29 @@ impl<F: Float> Engine<F> {
         })
     }
 
-    /// Builds the fold from every main output width into a device of `device`
+    /// Builds the fold from every main output published into a device of `device`
     /// channels, so the engine can render into a buffer of that width.
     ///
     /// A new engine renders into buffers of up to 16 channels without being
-    /// asked: the folds from each main output width (1 to `MAX_CHANNELS`) to each
-    /// device width are built on the control side, in
-    /// [`Engine::new`](Self::new), and published through a `Publisher` that each
-    /// call lends once, so a plan change needs no rebuild and the audio thread
-    /// never builds a fold. Call this when a stream is built for a device
-    /// wider than that (or at all, to say so); it is a no-op for a width
-    /// already supported. The device is taken to be the engine's order for its
-    /// width where it has one, and the main output the same: see
+    /// asked: the fold from each main output to each device width is built on
+    /// the control side, in [`Engine::new`](Self::new) and at each
+    /// [`publish_main_output`](OutputControl::publish_main_output), and published
+    /// through a `Publisher` that each call lends once, so a plan change needs
+    /// no rebuild and the audio thread never builds a fold. Call this when a
+    /// stream is built for a device wider than that (or at all, to say so); it
+    /// is a no-op for a width already supported. The device is taken to be the
+    /// engine's order for its width where it has one: see
     /// [`fold_to_width`](tutti_graph::fold_to_width). A buffer of a width not
     /// supported is not rendered into: the call is silent and counted in
     /// [`BlockCounts::silenced`], in
     /// every build.
     ///
     /// Where a mono main output lands: the centre of a 6, 8 or 12-wide device, the
-    /// front pair of a 4-wide (quad) or a stereo one. An undeclared 4-wide
-    /// main output is **treated as quad** into a 6, 8 or 12-wide device (its rears are
-    /// the back pair, not the centre and LFE); a main output of independent buses says
-    /// so with [`OutputControl::publish_main_output`] and stays by index.
+    /// front pair of a 4-wide (quad) or a stereo one. A 4-wide main output
+    /// declared as the width's order is **quad** into a 6, 8 or 12-wide device
+    /// (its rears are the back pair, not the centre and LFE); a main output of
+    /// independent buses says so with [`OutputControl::publish_main_output`] and
+    /// stays by index.
     ///
     /// A callback mid-block keeps the folds it lent, and the next call reads
     /// the new ones. Returns at once, publishing nothing, for a width already
@@ -1513,8 +1518,7 @@ impl<F: Float> GraphRender<F> {
         debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
         let width = width.min(MAX_CHANNELS);
         if width > 0 && out_ch > 0 {
-            self.in_use
-                .store(pack_in_use(width, out_ch), Ordering::Relaxed);
+            self.in_use.store(out_ch as u64, Ordering::Relaxed);
         }
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
@@ -1583,8 +1587,9 @@ impl<F: Float> GraphRender<F> {
         // The fold of this width into the device, built on the control side.
         // `width` is within `1..=MAX_CHANNELS` (the editor's limits), so a
         // fold is there.
-        match lent.folds.get(main_output, out_ch, width) {
+        match lent.folds.get(main_output, out_ch) {
             Some(fold) => {
+                debug_assert_eq!(usize::from(fold.src_layout().count()), width);
                 let mut device = ChannelLayout::try_from(out_ch)
                     .ok()
                     .and_then(|layout| InterleavedMut::new(block, layout).ok())
@@ -1602,7 +1607,7 @@ impl<F: Float> GraphRender<F> {
                     .folds
                     .previous()
                     .filter(|_| fade.is_none() && self.routing.done < length)
-                    .and_then(|previous| previous.get(main_output, out_ch, width));
+                    .and_then(|previous| previous.get(main_output, out_ch));
                 let folded = match fade {
                     None => match old_routing {
                         Some(old) => mixing.crossfade(
@@ -1633,7 +1638,7 @@ impl<F: Float> GraphRender<F> {
                                 new: (fold, &table[..width]),
                                 old: lent
                                     .folds
-                                    .get(fade.old, out_ch, old)
+                                    .get(fade.old, out_ch)
                                     .map(|fold| (fold, &old_table[..old])),
                                 fade: FadeRun {
                                     law: fade.fade.law,
@@ -2057,18 +2062,34 @@ mod tests {
         ed.commit().expect("commits");
     }
 
+    /// [`rewire`] on an editor attached to an engine: a width change is a new
+    /// main output, whose folds are published first.
+    fn rewire_published(ed: &mut Editor, control: &OutputControl, width: u16) {
+        let device = ChannelLayout::from(width);
+        if ed.spec().main_output.width() != device {
+            control
+                .publish_main_output(
+                    ed.spec().main_output_id.next(),
+                    ChannelSet::default_for(device),
+                    device,
+                )
+                .expect("places");
+        }
+        rewire(ed, width);
+    }
+
     /// Declares `main_output` as the next main output generation the way a session does:
     /// its folds are published first, then the spec carries the id and the
     /// commit is sent.
     fn declare(
         ed: &mut Editor,
         control: &OutputControl,
-        main_output: Option<ChannelTopology>,
+        main_output: ChannelSet,
         device: ChannelLayout,
     ) -> Result<MainOutputId, tutti_graph::MainOutputError> {
         let id = ed.spec().main_output_id.next();
         control.publish_main_output(id, main_output, device)?;
-        ed.declare_main_output(ed.spec().main_output, id);
+        ed.declare_main_output(main_output, id).unwrap();
         ed.commit().expect("commits");
         Ok(id)
     }
@@ -2131,12 +2152,19 @@ mod tests {
     /// truncation.
     #[test]
     fn every_main_output_width_places_into_any_device() {
-        let folds = OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS);
+        let folds_of = |width: usize| {
+            OutputFolds::up_to(
+                DEFAULT_DEVICE_WIDTHS,
+                MainOutputId::GENESIS,
+                ChannelSet::default_for(ChannelLayout::try_from(width).unwrap()),
+            )
+        };
         for main_output in 1..=MAX_CHANNELS {
+            let folds = folds_of(main_output);
             for device in 1..=DEFAULT_DEVICE_WIDTHS {
                 let ordered = |w: usize| [1, 2, 4, 6, 8, 12].contains(&w);
                 let refused = main_output > device && !(ordered(main_output) && ordered(device));
-                let Some(fold) = folds.get(MainOutputId::GENESIS, device, main_output) else {
+                let Some(fold) = folds.get(MainOutputId::GENESIS, device) else {
                     assert!(refused, "{main_output} -> {device} has no fold");
                     continue;
                 };
@@ -2145,29 +2173,23 @@ mod tests {
                 assert_eq!(usize::from(fold.dst_layout().count()), device);
             }
         }
-        for (main_output, device) in [(5, 3), (6, 5), (8, 7), (3, 1), (4, 3)] {
-            assert!(
-                folds
-                    .get(MainOutputId::GENESIS, device, main_output)
-                    .is_none(),
-                "{main_output} -> {device}"
-            );
-            assert!(folds.has_device(device));
-        }
-        let first = |device, main_output| folds.get(MainOutputId::GENESIS, device, main_output);
-        assert!(first(DEFAULT_DEVICE_WIDTHS + 1, 2).is_none());
-        assert!(first(2, MAX_CHANNELS + 1).is_none());
-        assert!(first(0, 2).is_none() && first(2, 0).is_none());
+        let folds = folds_of(2);
         assert!(
-            folds.get(MainOutputId::GENESIS.next(), 2, 2).is_none(),
+            folds
+                .get(MainOutputId::GENESIS, DEFAULT_DEVICE_WIDTHS + 1)
+                .is_none()
+        );
+        assert!(folds.get(MainOutputId::GENESIS, 0).is_none());
+        assert!(
+            folds.get(MainOutputId::GENESIS.next(), 2).is_none(),
             "a main output never published has no fold"
         );
 
         let m = <f32 as Float>::MINUS_3_DB;
         let run = |main_output: usize, device: usize, frame: &[f32]| {
             let mut out = vec![9.0f32; device];
-            folds
-                .get(MainOutputId::GENESIS, device, main_output)
+            folds_of(main_output)
+                .get(MainOutputId::GENESIS, device)
                 .unwrap()
                 .frame(frame, &mut out);
             out
@@ -2180,6 +2202,42 @@ mod tests {
         assert_eq!(run(3, 5, &[1.0, 2.0, 3.0]), [1.0, 2.0, 3.0, 0.0, 0.0]);
     }
 
+    /// An engine renders no more than `MAX_CHANNELS` main outputs: a set past
+    /// it has no fold, and its publish is refused by name, nothing published.
+    /// A main output of no channels has no fold into any device.
+    #[test]
+    fn a_main_output_past_the_topology_cap_is_refused_at_publish() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let control = engine.output_control();
+        let wide = ChannelSet::default_for(ChannelLayout::from(20u16));
+        assert!(wide.topology().is_none());
+        let twenty = ChannelLayout::from(20u16);
+        engine.support_output(twenty).unwrap();
+        let id = MainOutputId::GENESIS.next();
+        assert!(matches!(
+            control.publish_main_output(id, wide, twenty),
+            Err(tutti_graph::MainOutputError::Fold(FoldError::Unplaced {
+                channel,
+                ..
+            })) if channel == MAX_CHANNELS
+        ));
+        assert!(!control.has_fold(id, twenty), "nothing was published");
+
+        let none = OutputFolds::<f32>::up_to(
+            DEFAULT_DEVICE_WIDTHS,
+            MainOutputId::GENESIS,
+            ChannelSet::unassigned(ChannelLayout::EMPTY),
+        );
+        for device in 1..=DEFAULT_DEVICE_WIDTHS {
+            assert!(none.get(MainOutputId::GENESIS, device).is_none());
+        }
+    }
+
     /// A device wider than the default is added on the control side, and a
     /// buffer of a width nobody added is a silent counted block rather than a
     /// fold built on the audio thread.
@@ -2190,8 +2248,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let wide = ChannelLayout::from(20u16);
         engine.support_output(wide).expect("a width");
         let mut out = vec![-9.0f32; 20 * 8];
@@ -2225,8 +2283,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 5);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let three = ChannelLayout::from(3u16);
         let mut out = vec![-9.0f32; 3 * 8];
         engine.process_segment(&mut InterleavedMut::new(&mut out, three).unwrap());
@@ -2258,9 +2316,9 @@ mod tests {
         first_frame(engine, device)
     }
 
-    /// A main output of four independent buses, declared, stays by index on a 6-wide
-    /// device: channels 2 and 3 land at 2 and 3. Undeclared, the same main output is
-    /// quad, and its rears land on the side pair at 4 and 5.
+    /// A main output of four independent buses stays by index on a 6-wide
+    /// device: channels 2 and 3 land at 2 and 3. Declared as the width's order, the
+    /// same main output is quad, and its rears land on the side pair at 4 and 5.
     #[test]
     fn a_declared_unassigned_main_output_keeps_its_channels_by_index() {
         let transport = Transport::new(SampleRate::SR_48K);
@@ -2268,19 +2326,20 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let six = ChannelLayout::from(6u16);
         // The first block installs the plan (silent); the rows read the next.
         let _ = first_frame(&engine, 6);
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
 
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
+        let buses = ChannelSet::unassigned(ChannelLayout::QUAD);
         declare(&mut ed, &control, buses, six).expect("buses place by index");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
 
-        declare(&mut ed, &control, None, six).expect("undeclared");
+        let quad = ChannelSet::default_for(ChannelLayout::QUAD);
+        declare(&mut ed, &control, quad, six).expect("the width's order");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
     }
 
@@ -2298,15 +2357,21 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let m = <f32 as Float>::MINUS_3_DB;
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
         let five_one = tutti_buffers::Bed::Surround51.topology();
-        declare(&mut ed, &control, Some(five_one), ChannelLayout::STEREO).expect("5.1 into stereo");
+        declare(
+            &mut ed,
+            &control,
+            ChannelSet::from(five_one),
+            ChannelLayout::STEREO,
+        )
+        .expect("5.1 into stereo");
         assert_eq!(first_frame(&engine, 2), folded);
         // The same six channels declared with the front pair swapped.
         let swapped = ChannelTopology::new([
@@ -2318,7 +2383,13 @@ mod tests {
             SideRight,
         ])
         .unwrap();
-        declare(&mut ed, &control, Some(swapped), ChannelLayout::STEREO).expect("places");
+        declare(
+            &mut ed,
+            &control,
+            ChannelSet::from(swapped),
+            ChannelLayout::STEREO,
+        )
+        .expect("places");
         assert_eq!(
             first_frame(&engine, 2),
             [62.0 + m * 63.0 + m * 65.0, 61.0 + m * 63.0 + m * 66.0]
@@ -2337,8 +2408,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let eight = ChannelLayout::from(8u16);
         let _ = first_frame(&engine, 8);
         let control = engine.output_control();
@@ -2352,7 +2423,7 @@ mod tests {
         ] {
             id = id.next();
             control
-                .publish_main_output(id, Some(main_output), eight)
+                .publish_main_output(id, ChannelSet::from(main_output), eight)
                 .unwrap();
             assert_eq!(first_frame(&engine, 8), quad_on_eight, "{id}");
         }
@@ -2361,11 +2432,11 @@ mod tests {
         control
             .publish_main_output(
                 id,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
+                ChannelSet::from(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 eight,
             )
             .unwrap();
-        ed.declare_main_output(ed.spec().main_output, id);
+        ed.declare_main_output(ed.spec().main_output, id).unwrap();
         ed.commit().unwrap();
         assert_eq!(
             first_frame(&engine, 8),
@@ -2401,7 +2472,7 @@ mod tests {
             declare(
                 &mut ed.borrow_mut(),
                 &control,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
+                ChannelSet::from(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 six,
             )
             .unwrap();
@@ -2419,12 +2490,12 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let six = ChannelLayout::from(6u16);
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
+        let buses = ChannelSet::unassigned(ChannelLayout::QUAD);
         declare(&mut ed, &control, buses, six).unwrap();
         let before = engine.blocks().get().silenced;
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
@@ -2449,8 +2520,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let six = ChannelLayout::from(6u16);
         let done = AtomicBool::new(false);
@@ -2467,12 +2538,15 @@ mod tests {
                 engine.blocks().get().silenced
             });
             for i in 0..2_000 {
-                let main_output =
-                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
+                let main_output = if i % 2 == 0 {
+                    ChannelSet::unassigned(ChannelLayout::QUAD)
+                } else {
+                    ChannelSet::default_for(ChannelLayout::QUAD)
+                };
                 let id = ed.spec().main_output_id.next();
                 match control.publish_main_output(id, main_output, six) {
                     Ok(()) => {
-                        ed.declare_main_output(ed.spec().main_output, id);
+                        ed.declare_main_output(main_output, id).unwrap();
                         // The queue can be full while the callback lags.
                         while ed.commit().is_err() {
                             std::thread::yield_now();
@@ -2508,10 +2582,12 @@ mod tests {
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
         let first = MainOutputId::GENESIS.next();
-        control.publish_main_output(first, None, stereo).unwrap();
+        control
+            .publish_main_output(first, ChannelSet::default_for(stereo), stereo)
+            .unwrap();
         for stale in [MainOutputId::GENESIS, first] {
             assert_eq!(
-                control.publish_main_output(stale, None, stereo),
+                control.publish_main_output(stale, ChannelSet::default_for(stereo), stereo),
                 Err(tutti_graph::MainOutputError::NotPast {
                     id: stale,
                     last: first
@@ -2531,34 +2607,36 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
-        let mut id = MainOutputId::GENESIS;
+        let mut id = ed.spec().main_output_id;
         for _ in 0..crate::MAX_PENDING_MAIN_OUTPUTS {
             id = id.next();
-            control.publish_main_output(id, None, stereo).unwrap();
+            control
+                .publish_main_output(id, ChannelSet::default_for(stereo), stereo)
+                .unwrap();
         }
         assert_eq!(
-            control.publish_main_output(id.next(), None, stereo),
+            control.publish_main_output(id.next(), ChannelSet::default_for(stereo), stereo),
             Err(tutti_graph::MainOutputError::TooManyPending {
                 limit: crate::MAX_PENDING_MAIN_OUTPUTS
             })
         );
         assert!(
-            !control.has_fold(id.next(), 2, stereo),
+            !control.has_fold(id.next(), stereo),
             "nothing was published"
         );
         // The newest pending main output is committed and rendered: the older ones
         // are retired and the room is back.
-        ed.declare_main_output(ed.spec().main_output, id);
+        ed.declare_main_output(ed.spec().main_output, id).unwrap();
         ed.commit().unwrap();
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
         control
-            .publish_main_output(id.next(), None, stereo)
+            .publish_main_output(id.next(), ChannelSet::default_for(stereo), stereo)
             .unwrap();
     }
 
@@ -2590,11 +2668,12 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
-        let unheard = MainOutputId::GENESIS.next();
-        ed.declare_main_output(ed.spec().main_output, unheard);
+        let unheard = ed.spec().main_output_id.next();
+        ed.declare_main_output(ed.spec().main_output, unheard)
+            .unwrap();
         assert_eq!(
             ed.commit(),
             Err(CommitError::MainOutputNotPublished {
@@ -2605,7 +2684,11 @@ mod tests {
         assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
         engine
             .output_control()
-            .publish_main_output(unheard, None, ChannelLayout::STEREO)
+            .publish_main_output(
+                unheard,
+                ChannelSet::default_for(ChannelLayout::STEREO),
+                ChannelLayout::STEREO,
+            )
             .unwrap();
         ed.commit().expect("published, so it commits");
     }
@@ -2622,8 +2705,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
         let m = <f32 as Float>::MINUS_3_DB;
@@ -2646,7 +2729,7 @@ mod tests {
         );
         // The same routing on a stereo device has no place for outputs 3 and 4:
         // no fold, so a commit or restart would name it.
-        assert!(!control.has_fold(MainOutputId::GENESIS, 6, ChannelLayout::STEREO));
+        assert!(!control.has_fold(MainOutputId::GENESIS, ChannelLayout::STEREO));
         // Taken back: by speaker again.
         control
             .set_routing(Routing::default())
@@ -2669,8 +2752,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let past = || Routing {
             map: OutputMap::channels([0, 2]).unwrap(),
@@ -2704,8 +2787,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
         let to_five = Routing {
@@ -2753,8 +2836,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         engine
             .output_control()
@@ -2791,8 +2874,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
         let folds = control.cell().current();
@@ -2853,8 +2936,8 @@ mod tests {
 
     /// A main output with no fold into the device (five buses into three) is
     /// reported by `has_fold` before any block runs, so the session can
-    /// refuse the commit that would make it; a width a declared main output does not
-    /// have is not one it renders.
+    /// refuse the commit that would make it; a main output of no channels has
+    /// a fold into no device.
     #[test]
     fn has_fold_names_the_pairs_a_commit_would_make() {
         let transport = Transport::new(SampleRate::SR_48K);
@@ -2865,28 +2948,24 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let three = ChannelLayout::from(3u16);
+        let five = ChannelLayout::from(5u16);
         let genesis = MainOutputId::GENESIS;
-        assert!(control.has_fold(genesis, 3, three));
         assert!(
-            control.has_fold(genesis, 2, three),
-            "stereo into 3: zero-filled"
+            !control.has_fold(genesis, three),
+            "the editor's main output has no channels: nothing to fold"
         );
-        assert!(!control.has_fold(genesis, 5, three), "5 into 3 drops two");
-        let id = genesis.next();
+        let two = genesis.next();
         control
-            .publish_main_output(
-                id,
-                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16)).unwrap()),
-                three,
-            )
+            .publish_main_output(two, ChannelSet::unassigned(ChannelLayout::STEREO), three)
             .unwrap();
-        assert!(control.has_fold(id, 2, three));
-        assert!(
-            !control.has_fold(id, 3, three),
-            "the main output is declared 2 wide"
-        );
-        assert!(control.has_width(id, 2) && !control.has_width(id, 3));
-        assert!(!control.has_fold(id.next(), 2, three), "not published");
+        assert!(control.has_fold(two, three), "2 into 3: zero-filled");
+        let five_buses = two.next();
+        control
+            .publish_main_output(five_buses, ChannelSet::unassigned(five), five)
+            .unwrap();
+        assert!(control.has_fold(five_buses, five));
+        assert!(!control.has_fold(five_buses, three), "5 into 3 drops two");
+        assert!(!control.has_fold(five_buses.next(), three), "not published");
     }
 
     /// A device whose wiring is stated is folded into by speaker, and is
@@ -2901,8 +2980,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
         // Default stereo; a 2-wide main output passes through.
@@ -2944,24 +3023,24 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
         let _ = first_frame(&engine, 2);
         let old = ed.spec().main_output_id;
-        let new = declare(&mut ed, &control, None, stereo).unwrap();
+        let new = declare(&mut ed, &control, ChannelSet::default_for(stereo), stereo).unwrap();
         // Committed and published, not yet rendered: both main outputs are held.
         let _ = control.reclaim();
-        assert!(control.has_fold(old, 2, stereo) && control.has_fold(new, 2, stereo));
+        assert!(control.has_fold(old, stereo) && control.has_fold(new, stereo));
         // The new plan's first block.
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
         assert!(
-            !control.has_fold(old, 2, stereo),
+            !control.has_fold(old, stereo),
             "the old main output is gone"
         );
-        assert!(control.has_fold(new, 2, stereo));
+        assert!(control.has_fold(new, stereo));
         assert_eq!(control.reclaim(), 0, "nothing is left pinned");
     }
 
@@ -3074,21 +3153,20 @@ mod tests {
         (engine, ed)
     }
 
-    /// Declares a main output of `width` channels (`None` the engine's order) with
-    /// the constant on its channel `channel`, and commits.
+    /// Declares `main_output` with the constant on its channel `channel`, and
+    /// commits.
     fn move_main_output(
         ed: &mut Editor,
         control: &OutputControl,
-        main_output: Option<ChannelTopology>,
-        width: usize,
+        main_output: ChannelSet,
         channel: usize,
     ) {
         let id = ed.spec().main_output_id.next();
         control
             .publish_main_output(id, main_output, ChannelLayout::STEREO)
             .expect("places");
-        ed.declare_main_output(ed.spec().main_output, id);
-        feed(ed, width, channel);
+        ed.declare_main_output(main_output, id).unwrap();
+        feed(ed, usize::from(main_output.width().count()), channel);
         ed.commit().expect("commits");
     }
 
@@ -3101,8 +3179,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 4);
         engine
             .output_control()
@@ -3190,7 +3268,12 @@ mod tests {
         use crate::{OutputMap, Routing};
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_main_output(&mut ed, &control, None, 2, 1);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::default_for(ChannelLayout::STEREO),
+            1,
+        );
         let mut heard = block_with(&engine, 2, || {});
         control
             .set_routing(Routing {
@@ -3283,11 +3366,11 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 5);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let _ = first_frame(&engine, 3);
-        assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
+        assert!(!control.has_fold(MainOutputId::GENESIS, ChannelLayout::from(3u16)));
         assert!(control.set_routing(change()).is_err());
         let swapped = ChannelTopology::new([
             tutti_buffers::Speaker::FrontRight,
@@ -3298,7 +3381,7 @@ mod tests {
         control
             .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
-        assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
+        assert!(!control.has_fold(MainOutputId::GENESIS, ChannelLayout::from(3u16)));
         assert!(control.cell().current().previous().is_some());
         let _ = first_frame(&engine, 3);
         let _ = control.reclaim();
@@ -3343,8 +3426,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let swapped = ChannelTopology::new([
             tutti_buffers::Speaker::FrontRight,
@@ -3383,7 +3466,12 @@ mod tests {
     fn a_main_output_change_crossfades_the_old_main_output_out_and_the_new_in() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_main_output(&mut ed, &control, None, 2, 1);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::default_for(ChannelLayout::STEREO),
+            1,
+        );
         let heard: Vec<f32> = (0..4).flat_map(|_| block_with(&engine, 2, || {})).collect();
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
@@ -3406,7 +3494,12 @@ mod tests {
     fn each_main_output_is_folded_by_its_own_fold_through_the_crossfade() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_main_output(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::from(Bed::Surround51.topology()),
+            2,
+        );
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         let centre = std::f32::consts::FRAC_1_SQRT_2;
         for (k, frame) in frames_of(&heard, 2).enumerate().take(24) {
@@ -3430,7 +3523,12 @@ mod tests {
         let (engine, mut ed) = crossfading_engine(20);
         ed.set_main_output_fade(None);
         let control = engine.output_control();
-        move_main_output(&mut ed, &control, None, 2, 1);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::default_for(ChannelLayout::STEREO),
+            1,
+        );
         assert_eq!(block_with(&engine, 2, || {}), [0.0, 1.0].repeat(8));
         assert!(
             ed.base().is_some_and(|p| p.main_output_bank().is_none()),
@@ -3447,24 +3545,29 @@ mod tests {
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
         let old = ed.spec().main_output_id;
-        move_main_output(&mut ed, &control, None, 2, 1);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::default_for(ChannelLayout::STEREO),
+            1,
+        );
         let new = ed.spec().main_output_id;
         // Frames 0..8, 8..16 and 16..24: the third ends the 20-frame fade.
         for block in 0..2 {
             let _ = block_with(&engine, 2, || {});
             let _ = control.reclaim();
             assert!(
-                control.has_fold(old, 2, stereo),
+                control.has_fold(old, stereo),
                 "the old main output is folded until the fade ends (block {block})"
             );
         }
         let _ = block_with(&engine, 2, || {});
         let _ = control.reclaim();
         assert!(
-            !control.has_fold(old, 2, stereo),
+            !control.has_fold(old, stereo),
             "the old main output is gone"
         );
-        assert!(control.has_fold(new, 2, stereo));
+        assert!(control.has_fold(new, stereo));
         assert_eq!(control.reclaim(), 0, "nothing is left pinned");
         // The editor learns the fade is over and compiles the old channels away.
         let _ = ed.collect();
@@ -3484,7 +3587,12 @@ mod tests {
     fn a_commit_that_lands_mid_fade_continues_it() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_main_output(&mut ed, &control, None, 2, 1);
+        move_main_output(
+            &mut ed,
+            &control,
+            ChannelSet::default_for(ChannelLayout::STEREO),
+            1,
+        );
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc =
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(tutti_graph::NodeKey(1), 0));
@@ -3581,9 +3689,13 @@ mod tests {
         }
         let id = ed.spec().main_output_id.next();
         control
-            .publish_main_output(id, None, ChannelLayout::STEREO)
+            .publish_main_output(
+                id,
+                ChannelSet::default_for(ChannelLayout::STEREO),
+                ChannelLayout::STEREO,
+            )
             .unwrap();
-        ed.declare_main_output(ed.spec().main_output, id);
+        ed.declare_main_output(ed.spec().main_output, id).unwrap();
         ed.wire_declared_outputs([late, count]).unwrap();
         ed.commit().expect("commits");
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
@@ -3640,9 +3752,13 @@ mod tests {
         );
         let id = ed.spec().main_output_id.next();
         control
-            .publish_main_output(id, None, ChannelLayout::STEREO)
+            .publish_main_output(
+                id,
+                ChannelSet::default_for(ChannelLayout::STEREO),
+                ChannelLayout::STEREO,
+            )
             .unwrap();
-        ed.declare_main_output(ed.spec().main_output, id);
+        ed.declare_main_output(ed.spec().main_output, id).unwrap();
         ed.wire_declared_outputs([count, PortSource::Zero]).unwrap();
         ed.commit().expect("commits");
         assert_eq!(
@@ -3690,7 +3806,7 @@ mod tests {
         control
             .publish_main_output(
                 ed.spec().main_output_id.next(),
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
+                ChannelSet::from(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::from(6u16),
             )
             .unwrap();
@@ -3709,8 +3825,8 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = first_frame(&engine, 2);
         let before = first_frame(&engine, 2);
         let control = engine.output_control();
@@ -3718,7 +3834,7 @@ mod tests {
         assert_eq!(
             control.publish_main_output(
                 next,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
+                ChannelSet::from(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::STEREO
             ),
             Err(tutti_graph::MainOutputError::Fold(FoldError::Unplaced {
@@ -3734,12 +3850,12 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            control.publish_main_output(next, Some(lfe2), ChannelLayout::STEREO),
+            control.publish_main_output(next, ChannelSet::from(lfe2), ChannelLayout::STEREO),
             Err(tutti_graph::MainOutputError::Fold(
                 FoldError::Unnamed { .. }
             ))
         ));
-        assert!(!control.has_fold(next, 4, ChannelLayout::STEREO));
+        assert!(!control.has_fold(next, ChannelLayout::STEREO));
         assert_eq!(first_frame(&engine, 2), before);
     }
 
@@ -3763,13 +3879,20 @@ mod tests {
                 .collect()
         };
         // No plan at `settle`: this block is silent.
-        let got = block_with(&engine, 2, || rewire(&mut ed.borrow_mut(), 2));
+        let control = engine.output_control();
+        let got = block_with(&engine, 2, || {
+            rewire_published(&mut ed.borrow_mut(), &control, 2);
+        });
         assert_eq!(got, vec![0.0; 16]);
         // The next one has it.
         assert_eq!(block_with(&engine, 2, || {}), want(2));
         // Widening to 4 in the gap: this block is still 2 wide.
         assert_eq!(
-            block_with(&engine, 2, || rewire(&mut ed.borrow_mut(), 4)),
+            block_with(&engine, 2, || rewire_published(
+                &mut ed.borrow_mut(),
+                &control,
+                4
+            )),
             want(2)
         );
         assert_eq!(block_with(&engine, 4, || {}), want(4));
@@ -3791,7 +3914,10 @@ mod tests {
         let wide: Vec<f32> = (0..8).flat_map(|_| [41.0, 42.0, 43.0, 44.0]).collect();
         let narrow: Vec<f32> = (0..8).flat_map(|_| [21.0, 22.0]).collect();
         assert_eq!(block_with(&engine, 4, || {}), wide);
-        let got = block_with(&engine, 4, || rewire(&mut ed.borrow_mut(), 2));
+        let control = engine.output_control();
+        let got = block_with(&engine, 4, || {
+            rewire_published(&mut ed.borrow_mut(), &control, 2);
+        });
         assert_eq!(got, wide);
         assert_eq!(block_with(&engine, 2, || {}), narrow);
     }
@@ -3803,13 +3929,13 @@ mod tests {
     fn a_resume_between_settle_and_render_waits_for_the_next_block() {
         use std::cell::RefCell;
         let transport = Transport::new(SampleRate::SR_48K);
-        let (mut ed, exec) = Editor::new(Prepare::new(
+        let (ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        rewire(&mut ed, 2);
         let ed = RefCell::new(ed);
         let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("within limits");
+        rewire_published(&mut ed.borrow_mut(), &engine.output_control(), 2);
         ed.borrow_mut()
             .reprepare(Prepare::new(
                 SampleRate::SR_48K,

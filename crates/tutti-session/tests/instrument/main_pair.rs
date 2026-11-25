@@ -139,14 +139,17 @@ fn the_handle_counts_what_its_queue_dropped() {
 #[test]
 fn a_wide_main_output_is_fed_from_the_main_pair_not_the_sends() {
     use tutti_session::OutputPort;
-    let mut session = crate::instrument_support::rig::offline_session();
+    // A five-channel device: the main output is as wide as it.
+    let mut session = tutti_session::Session::builder()
+        .sample_rate(tutti_units::SampleRate::SR_48K)
+        .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)))
+        .outputs(tutti_buffers::ChannelLayout::from(5u16))
+        .build()
+        .expect("an offline session builds");
+    assert_eq!(session.graph_ref().outputs(), 5);
     let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
-    session
-        .graph()
-        .widen_outputs(5)
-        .expect("a wider main output");
     let node = handle.node();
     session.graph().connect(node, MainOutput).unwrap();
     let wrapped: Vec<_> = (0..5)

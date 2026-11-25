@@ -117,6 +117,11 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { at: 0 }));
     let port = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
+    ed.declare_main_output(
+        tutti_buffers::ChannelSet::default_for(ChannelLayout::STEREO),
+        ed.spec().main_output_id.next(),
+    )
+    .unwrap();
     ed.wire_outputs(vec![port(0), port(1)]).unwrap();
     let reader = ed
         .open_tap(

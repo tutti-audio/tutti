@@ -589,9 +589,13 @@ impl Loaded for Vst3Loaded {
     /// VST3 restarts for latency and for the buses (`kIoChanged`).
     const RESTARTS: RestartRules = RestartRules::VST3;
 
-    /// 64-bit when the plugin answers `canProcessSampleSize(kSample64)`.
-    fn widths(&self) -> Widths {
-        Widths::new(self.info.supports_f64)
+    /// 64-bit when the plugin answers `canProcessSampleSize(kSample64)` now:
+    /// the query is `[UI-thread & (Initialized | Connected)]`, so it is asked
+    /// again here.
+    fn widths(&mut self, main: MainThreadMarker) -> Widths {
+        let supports_f64 = self.plugin.can_process_f64(main);
+        self.info = self.info.clone().f64_support(supports_f64);
+        Widths::new(supports_f64)
     }
 
     fn activate(

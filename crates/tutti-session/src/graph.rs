@@ -655,10 +655,18 @@ impl<F: Float> Graph<F> {
         #[cfg(feature = "plugin")] tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
-        // `outputs` is a `ChannelLayout`'s count where the session is built.
-        editor.resize_outputs(
-            ChannelLayout::try_from(outputs).expect("a channel count: it was a ChannelLayout's"),
-        );
+        // `outputs` is a `ChannelLayout`'s count where the session is built. The
+        // engine, built over this editor later, publishes this declaration first.
+        let id = editor.spec().main_output_id.next();
+        editor
+            .declare_main_output(
+                tutti_buffers::ChannelSet::default_for(
+                    ChannelLayout::try_from(outputs)
+                        .expect("a channel count: it was a ChannelLayout's"),
+                ),
+                id,
+            )
+            .expect("a new id declares anything");
         // Declared and on from the start: a host reads the main output level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
@@ -3580,15 +3588,15 @@ impl<F: Float> Graph<F> {
             None
         };
         self.widen_refusal = refused;
-        // `channels` is within MAX_CHANNELS here (the refusal above takes the
-        // rest), so it is always a width.
-        if refused.is_none()
-            && self.editor.spec().topology.outputs.len() < channels
-            && let Ok(width) = ChannelLayout::try_from(channels)
-        {
-            self.editor.resize_outputs(width);
-            self.edited = true;
-        }
+        // A widening is a declaration of the width's order, as a restart makes
+        // it: the new channels are silent, and no fade is taken.
+        let refused = match refused {
+            None if self.editor.spec().topology.outputs.len() < channels => self
+                .apply_main_output(None, true, channels)
+                .err()
+                .inspect(|e| self.widen_refusal = Some(*e)),
+            refused => refused,
+        };
         self.publish_output_facts();
         refused.map_or(Ok(()), Err)
     }
@@ -3837,14 +3845,17 @@ impl<F: Float> Graph<F> {
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
         // was.
-        let next = if main_output == self.main_output {
+        // `None` is the engine's order for the width.
+        let set = main_output.map_or_else(
+            || tutti_buffers::ChannelSet::default_for(ChannelLayout::clamped(width)),
+            tutti_buffers::ChannelSet::from,
+        );
+        let next = if set == self.editor.spec().main_output {
             None
         } else {
             let id = self.editor.spec().main_output_id.next();
             if let Some(placed) = &self.output {
-                placed
-                    .control
-                    .publish_main_output(id, main_output, placed.device)?;
+                placed.control.publish_main_output(id, set, placed.device)?;
             }
             Some(id)
         };
@@ -3853,20 +3864,20 @@ impl<F: Float> Graph<F> {
             tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
         let spec = self.editor.spec();
-        if spec.main_output != main_output {
+        if spec.main_output != set {
             // The main output's bus edges fold to the new topology at the next
             // commit.
             self.edited |= !spec.main_output_sources.is_empty();
         }
+        let before = spec.topology.outputs.len();
         let id = next.unwrap_or(spec.main_output_id);
         self.edited |= next.is_some();
-        self.editor.declare_main_output(main_output, id);
+        self.editor
+            .declare_main_output(set, id)
+            .expect("the id is new, or the declaration is the one it holds");
         self.main_output = main_output;
         self.widen_refusal = None;
-        // The width a declaration places is at most MAX_CHANNELS (`check_declaration`).
-        let resized = self.editor.resize_outputs(
-            ChannelLayout::try_from(width).expect("a placed width is within MAX_CHANNELS"),
-        );
+        let resized = self.editor.spec().topology.outputs.len() != before;
         if resized {
             // The channels cut took their gain entries with them.
             self.sweep_gain_targets();
@@ -4057,8 +4068,8 @@ impl<F: Float> Graph<F> {
         let Placed { control, device } = self.output.as_ref()?;
         let device = *device;
         let spec = self.editor.spec();
-        let width = spec.topology.outputs.len();
-        (width > 0 && !control.has_fold(spec.main_output_id, width, device)).then_some(
+        let width = usize::from(spec.main_output.width().count());
+        (width > 0 && !control.has_fold(spec.main_output_id, device)).then_some(
             CommitError::Unplaceable {
                 main_output: spec.main_output_id,
                 width,
@@ -4282,7 +4293,7 @@ fn test_tempo() -> tutti_timeline::TempoReader {
 mod main_output_fade_tests {
     use super::*;
     use tutti_buffers::Bed;
-    use tutti_graph::{FadeLaw, ForkByClone, MainOutputId, OutputPort, PortSource};
+    use tutti_graph::{FadeLaw, ForkByClone, OutputPort, PortSource};
     use tutti_nodes::testing::Const;
 
     fn graph() -> (Graph, NodeKey) {
@@ -4311,6 +4322,7 @@ mod main_output_fade_tests {
     #[test]
     fn a_main_output_declaration_crossfades_for_the_declick_unless_hard() {
         let (mut g, _) = graph();
+        let first = g.editor.spec().main_output_id;
         g.declare_main_output(Some(Bed::Surround51.topology()), false)
             .expect("declares");
         assert!(matches!(g.commit(), Committed::Sent));
@@ -4318,7 +4330,7 @@ mod main_output_fade_tests {
         let bank = plan
             .main_output_bank()
             .expect("the old main output is carried");
-        assert_eq!(bank.old, MainOutputId::GENESIS);
+        assert_eq!(bank.old, first);
         assert_eq!(bank.base, 6, "the new main output's width");
         assert_eq!(
             plan.rendered_outputs(),

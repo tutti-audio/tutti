@@ -1012,7 +1012,7 @@ impl Loaded for Ipc {
     /// that width and cannot run the other without a reload, and the load reply
     /// names the settled width, not the plugin's capability, so a load that
     /// asked for 32-bit reports 32-bit.
-    fn widths(&self) -> Widths {
+    fn widths(&mut self, _main: MainThreadMarker) -> Widths {
         match self.link.format {
             FloatWidth::F32 => Widths::F32,
             FloatWidth::F64 => Widths::BOTH,

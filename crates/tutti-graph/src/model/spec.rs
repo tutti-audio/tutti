@@ -21,7 +21,7 @@ use crate::{ChannelFeed, LatencyGraph, PortFeed};
 use crate::{Edge, EdgeId, InputPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
-use tutti_buffers::ChannelTopology;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_units::Samples;
 
 use crate::node::Resolution;
@@ -151,7 +151,7 @@ impl EventEdge {
 /// ([`EventInputPort`], [`EventOutputPort`]) are separate types, so an audio port cannot be
 /// used as an event port by accident, and an event input may have several
 /// sources, merged by offset.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GraphSpec {
     /// Nodes, audio edges, main outputs and main input width — unchanged.
     pub topology: Topology,
@@ -200,12 +200,14 @@ pub struct GraphSpec {
     /// [`Editor::commit`](crate::Editor::commit) lowers for you. An empty
     /// `Vec` is the same as an absent key.
     pub bus_edges: BTreeMap<NodeBus, Vec<BusFeed>>,
-    /// The declared topology of the main output, the graph's outputs, as a bus: what a
-    /// bus edge into the main output folds to. `None` is undeclared. Every main output the
-    /// engine renders is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)
-    /// wide, which is a bus's width. The session keeps it in step with its main output
-    /// declaration.
-    pub main_output: Option<ChannelTopology>,
+    /// The declared main output, the graph's outputs, as a bus: what a bus edge
+    /// into the main output folds to. Its width is the width of
+    /// `topology.outputs`, which [`validate`](Self::validate) checks and
+    /// [`Editor::declare_main_output`](crate::Editor::declare_main_output) keeps. A
+    /// width past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) has no topology: a bus
+    /// edge reads it by index. [`GraphSpec::new`] declares the topology's outputs at
+    /// their width; `Default` is empty.
+    pub main_output: ChannelSet,
     /// The main output's generation: a commit that changes the main output's declaration
     /// carries the next one ([`MainOutputId`](crate::MainOutputId)), and the plan it compiles to reports
     /// it ([`Plan::main_output_id`](crate::Plan::main_output_id)).
@@ -216,14 +218,31 @@ pub struct GraphSpec {
     pub main_output_sources: Vec<BusFeed>,
 }
 
+impl Default for GraphSpec {
+    /// An empty graph with an empty main output.
+    fn default() -> Self {
+        Self::new(Topology::default())
+    }
+}
+
 impl GraphSpec {
     /// A spec over `topology` with no event edges and every node at
-    /// generation 0.
+    /// generation 0. Its main output is the topology's outputs declared at
+    /// their width ([`ChannelSet::default_for`]).
     #[must_use]
     pub fn new(topology: Topology) -> Self {
+        let main_output = ChannelSet::default_for(ChannelLayout::clamped(topology.outputs.len()));
         Self {
             topology,
-            ..Self::default()
+            events: BTreeMap::new(),
+            generations: BTreeMap::new(),
+            required_resolution: BTreeMap::new(),
+            params: BTreeMap::new(),
+            gains: BTreeMap::new(),
+            bus_edges: BTreeMap::new(),
+            main_output,
+            main_output_id: crate::MainOutputId::default(),
+            main_output_sources: Vec::new(),
         }
     }
 
@@ -569,7 +588,18 @@ impl GraphSpec {
     /// Every fatal fault found, as a list of [`GraphInvalid`] (never just
     /// the first). An unconnected input is not a fault: it reads silence.
     pub fn validate(&self) -> Result<ValidGraph, Vec<GraphInvalid>> {
+        self.validate_banked(0)
+    }
+
+    /// [`validate`](Self::validate) of a lowered spec that carries `bank` output
+    /// channels after the main output's: the lists differ by exactly those.
+    pub(crate) fn validate_banked(&self, bank: usize) -> Result<ValidGraph, Vec<GraphInvalid>> {
         let mut errs: Vec<GraphInvalid> = Vec::new();
+        let declared = usize::from(self.main_output.width().count());
+        let outputs = self.topology.outputs.len().saturating_sub(bank);
+        if outputs != declared {
+            errs.push(GraphInvalid::OutputWidth { outputs, declared });
+        }
         let valid = match self.topology.validate() {
             Ok(v) => Some(v),
             Err(e) => {
@@ -721,6 +751,15 @@ pub enum GraphInvalid {
     /// declared buses, which `validate` (it sees no shapes) cannot read:
     /// [`GraphSpec::lowered`] first, and validate its `spec`.
     BusEdgesUnlowered,
+    /// The output list is not as wide as the declared main output
+    /// ([`GraphSpec::main_output`]): a width changes by
+    /// [`Editor::declare_main_output`](crate::Editor::declare_main_output) alone.
+    OutputWidth {
+        /// The channels the output list holds.
+        outputs: usize,
+        /// The declared main output's width.
+        declared: usize,
+    },
 }
 
 /// A [`GraphSpec`] that passed [`validate`](GraphSpec::validate).

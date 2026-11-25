@@ -849,7 +849,7 @@ fn bank_continues_the_old_history(workers: usize) {
         Fade::new(Samples::new(8 * BLOCK)).law(FadeLaw::EqualAmplitude),
     ));
     let id = ed.spec().main_output_id.next();
-    ed.declare_main_output(ed.spec().main_output, id);
+    ed.declare_main_output(ed.spec().main_output, id).unwrap();
     ed.wire_declared_outputs(vec![audio(NEW)]).unwrap();
     ed.commit().expect("declares the new main output");
     for b in 3..5 {
