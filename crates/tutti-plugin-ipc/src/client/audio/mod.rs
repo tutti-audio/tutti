@@ -412,9 +412,11 @@ impl AudioBridge {
 
     /// The host parameter writes the plugin did not get, ever: what a flush the
     /// server refused or had no Processor for left undelivered, counted when
-    /// its answer comes, late or not. A flush never answered counts nothing (it
-    /// may still land). A write refused at the call is not here
-    /// ([`ParamWriteError`]).
+    /// its answer comes, late or not. A flush never answered counts nothing: it
+    /// may still land, and a flush in flight when the server is lost has no
+    /// answer to say whether the plugin took it (the loss is the crash, which
+    /// ends the plugin with everything it held). A write refused at the call is
+    /// not here ([`ParamWriteError`]).
     pub(crate) fn unapplied_edits(&self) -> u64 {
         self.channels.unapplied_edits_cell().get()
     }
