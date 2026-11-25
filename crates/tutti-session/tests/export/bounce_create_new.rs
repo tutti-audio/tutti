@@ -3,6 +3,7 @@
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
@@ -24,7 +25,7 @@ fn session() -> DetachedSession {
 }
 
 fn float_wav() -> Format {
-    Format::Wav(Pcm::Float32)
+    Format::Wav(Pcm::Float(FloatWidth::F32))
 }
 
 fn names(dir: &tempfile::TempDir) -> Vec<std::ffi::OsString> {

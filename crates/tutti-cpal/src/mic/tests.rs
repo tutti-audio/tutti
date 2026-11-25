@@ -4,6 +4,7 @@ use tutti_buffers::Planes;
 use tutti_platform::Instant;
 
 use tutti_buffers::{Interleaved, InterleavedMut, Sink};
+use tutti_codec::FloatWidth;
 use tutti_engine::{BackendErrorKind, STALL_GRACE};
 
 /// A device that supports `[min, max]` at `format`.
@@ -489,7 +490,7 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     let mut sink = mic
         .matching_sink(
             std::fs::File::create(&path).unwrap(),
-            Format::Wav(tutti_codec::Pcm::Float32),
+            Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)),
         )
         .unwrap();
 

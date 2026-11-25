@@ -21,6 +21,7 @@ use tutti_session::{
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::f64_device::f64_nodes::FINE;
+use tutti_codec::FloatWidth;
 
 const BLOCK: usize = 256;
 
@@ -74,7 +75,11 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let path = dir.path().join("take.wav");
     let take = session
         .record(
-            Record::new(&input, TakeFile::new(&path, Format::Wav(Pcm::Float64))).punch(
+            Record::new(
+                &input,
+                TakeFile::new(&path, Format::Wav(Pcm::Float(FloatWidth::F64))),
+            )
+            .punch(
                 Punch::new(Frame::new(1_000))
                     .until(Frame::new(1_200))
                     .unwrap(),

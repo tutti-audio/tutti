@@ -23,8 +23,10 @@
 //! a bad bound to be used.
 
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Sink, Source};
+use tutti_codec::FloatWidth;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,
@@ -154,9 +156,9 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
     );
 
     let sink = FileOut::new(
-        &Spec::of_width(
-            Format::Wav(Pcm::Float32),
-            ChannelLayout::STEREO,
+        &Spec::of_channels(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelSet::default_for(ChannelLayout::STEREO),
             SampleRate::SR_48K,
         ),
         std::fs::File::create(&path).expect("file opens"),
@@ -231,9 +233,9 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
     let (mut graph, reader) = graph_tap(2 * 512);
     let src = reader;
     let sink = FileOut::new(
-        &Spec::of_width(
-            Format::Wav(Pcm::Float32),
-            ChannelLayout::STEREO,
+        &Spec::of_channels(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelSet::default_for(ChannelLayout::STEREO),
             SampleRate::SR_48K,
         ),
         std::fs::File::create(&path).expect("file opens"),
@@ -283,9 +285,9 @@ fn a_gap_in_a_take_is_counted_and_the_file_closes_up_over_it() {
     let (mut graph, reader) = graph_tap(512);
     let src = reader;
     let sink = FileOut::new(
-        &Spec::of_width(
-            Format::Wav(Pcm::Float32),
-            ChannelLayout::STEREO,
+        &Spec::of_channels(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelSet::default_for(ChannelLayout::STEREO),
             SampleRate::SR_48K,
         ),
         std::fs::File::create(&path).expect("file opens"),

@@ -91,7 +91,7 @@
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
 //! use tutti_buffers::ChannelLayout;
-//! use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
+//! use tutti_codec::{FlacLevel, Format, IntDepth, IntPcm, Pcm};
 //! use tutti_graph::GraphBuilder;
 //! use tutti_nodes::testing::Osc;
 //!

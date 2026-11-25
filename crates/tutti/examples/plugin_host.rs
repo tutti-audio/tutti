@@ -47,6 +47,8 @@ use tutti::{
     PluginEvent, Range, RestoreState, SampleRate, Samples, SaveState, Session, SessionEvent,
     StateUse,
 };
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_units::Normalized;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -256,7 +258,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendering = session.bounce(
         Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
-            .main_output(out.as_path(), Format::Wav(Pcm::Int24)),
+            .main_output(
+                out.as_path(),
+                Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))),
+            ),
     )?;
     let rendered = block_on(rendering.into_future());
     let written = session.apply(rendered)?.into_main_output();

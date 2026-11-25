@@ -628,16 +628,14 @@ pub mod session {
         Backoff, DeviceLatency, DevicePolicy, DeviceRestart, DeviceRestarted, DeviceWatch, Follow,
         FollowEvent, RestartError, RestartOutcome,
     };
-    #[cfg(feature = "record")]
-    pub use tutti_session::{
-        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
-    };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
         PluginPorts, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure,
         RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
+    #[cfg(feature = "record")]
+    pub use tutti_session::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 }

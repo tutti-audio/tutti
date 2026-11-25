@@ -24,6 +24,8 @@ use tutti::{
     Amplitude, Bounce, ChannelLayout, Format, Hz, Interleaved, MainOutput, Pcm, Range, SampleRate,
     Seconds, Session,
 };
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
 
@@ -56,7 +58,7 @@ fn mono_tone() -> Session {
 }
 
 /// The format of every file here.
-const FORMAT: Format = Format::Wav(Pcm::Int24);
+const FORMAT: Format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)));
 
 /// The first `seconds` of the project.
 fn first(seconds: f64) -> Bounce {

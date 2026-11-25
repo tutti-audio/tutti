@@ -75,7 +75,7 @@ async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() 
 fn a_wav_in_memory_reads_back_equal() {
     let wave = square(1_001);
     let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float32)).expect("encodes");
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F32))).expect("encodes");
     assert!(bytes.starts_with(b"RIFF"), "a WAV file starts with RIFF");
     assert_eq!(read_wave::<f32>(bytes).expect("decodes"), wave);
 }
