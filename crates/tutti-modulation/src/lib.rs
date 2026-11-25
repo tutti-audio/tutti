@@ -35,8 +35,8 @@
 //!   envelope's `NoteAdsr`), but the node that walks the play clock and sends
 //!   them (`SourceNode<S>`, aliased `EnvelopeFollowerNode` and
 //!   `NoteEnvelopeNode`), the control lane that evaluates a program
-//!   (`ControlLaneNode`) and the reconcile that wires them into a graph
-//!   (`Modulation`) are `tutti-nodes`'.
+//!   (`ControlLaneNode`) are `tutti-nodes`'; the session lowers a declaration to
+//!   them.
 //!
 //! It depends only on `tutti-units`, `tutti-music`, `tutti-curve` and `tutti-ump` (for `Law`).
 //!

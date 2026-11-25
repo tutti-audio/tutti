@@ -525,7 +525,7 @@ mod tests {
     }
 
     /// A strip refuses params it does not own, and they change nothing — the
-    /// property that lets the generic reconciler push any param without
+    /// property that lets the generic param writer push any param without
     /// dispatching on node type.
     #[test]
     fn ignores_params_it_does_not_own() {

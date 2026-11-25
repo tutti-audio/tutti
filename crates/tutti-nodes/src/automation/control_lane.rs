@@ -1384,8 +1384,8 @@ impl<F: Float, K: LaneKind> IntoNode<F> for ControlLaneNode<K> {
             source: self.source.clone(),
         };
         // The lane's cells, so a lane added to a session graph is swept like
-        // any node's; the reconciler inserts through an `Editor`, which
-        // discards the reclaimer, and sweeps its lanes itself.
+        // any node's; the session inserts its lanes through an `Editor`, which
+        // discards the reclaimer, and sweeps them itself.
         let cells = LaneCells::<K> {
             program: self.shared.program.clone(),
             source: self.source.clone(),

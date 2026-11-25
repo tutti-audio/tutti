@@ -72,10 +72,9 @@ pub struct RouteKey(pub u64);
 /// A target: one param of one node, one
 /// edge's gain, or one node's mix. A plugin parameter is `ParamAddr::Id`.
 ///
-/// An edge is named by the host's own key for it (`Edge`): what it stands for
-/// (the sink and the source of a graph edge) is the host's to resolve, as a
-/// node's key is (`ModHost::node` of `tutti-nodes`), and the compile never
-/// looks inside it.
+/// An edge is named by the declarer's own key for it (`Edge`): what it stands
+/// for (the sink and the source of a graph edge) is the declarer's to resolve,
+/// as a node's key is, and the compile never looks inside it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TargetKey {
     /// A param of a node.

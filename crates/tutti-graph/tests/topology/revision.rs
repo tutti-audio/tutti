@@ -2,9 +2,9 @@
 //! of the editor sees (the spec, shapes, generations, the plan sent last,
 //! param ranges and their cells, the `Prepare`), and stays put across
 //! reads, a `collect` with nothing to resume and a commit with nothing to
-//! send. The modulation reconcile skips its work on an unchanged revision,
+//! send. The session's modulation apply skips its work on an unchanged revision,
 //! so a call that changes the graph without moving it would leave the
-//! reconcile behind (a lane on a removed node, a range cell never fetched).
+//! apply behind (a lane on a removed node, a range cell never fetched).
 
 use tutti_graph::testing::declare_outputs;
 
