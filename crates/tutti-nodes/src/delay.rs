@@ -256,9 +256,9 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
     }
 
     /// Keeps the block's tempo, and aims the times again when it moved: a synced delay's
-    /// times move through their ramp, and a free one's targets are the same ones. It reads
-    /// the block's tempo before the block's controls, so the retarget that follows
-    /// overrides what this aims.
+    /// times move through their ramp, and a free one's targets are the same ones. It runs
+    /// before the block's controls are read: on the first block after a prepare, a reset or
+    /// a fork, the node's retarget and jump that follow override what this aims.
     fn tempo(&mut self, tempo: Bpm) {
         if self.tempo == Some(tempo) {
             return;
