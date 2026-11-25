@@ -194,13 +194,10 @@ where
     /// `work` on the plugin on the main thread once the host's writes made
     /// before this call are the plugin's, and `reply` told what it gave, or
     /// `None` when it cannot be answered: the collector has never run (no main
-    /// thread to hop to), or a node holds the writes' reader on the main thread
-    /// and `retry` is off. With `retry` a write a node is draining is asked
-    /// again on the main thread's next tick; a job dropped unrun cancels the
-    /// reply.
+    /// thread to hop to). A write a node is draining is asked again on the main
+    /// thread's next tick; a job dropped unrun cancels the reply.
     fn after_writes<R: Send + 'static>(
         &self,
-        retry: bool,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
         reply: impl FnOnce(Option<R>) + Send + 'static,
     ) {
@@ -209,7 +206,6 @@ where
             post: self.edits.clone(),
             mark: self.edits.mark(),
             collector: self.work.clone(),
-            retry,
             work,
             reply,
         };
@@ -295,7 +291,6 @@ struct AfterWrites<L: InProcess, W, P> {
     post: super::host_edits::EditPost,
     mark: tutti_rt::Generation,
     collector: MainWorkHandle,
-    retry: bool,
     work: W,
     reply: P,
 }
@@ -309,7 +304,7 @@ where
     P: FnOnce(Option<R>) + Send + 'static,
 {
     /// Settles the writes and runs the work; a node draining them now leaves it
-    /// for the next tick, or answers `None` when it may not wait.
+    /// for the next tick, or answers `None` when no main thread ticks.
     fn step(self, main: MainThreadMarker) {
         let settled = {
             let mut instance = self.inner.lock();
@@ -323,7 +318,7 @@ where
                 let answer = (self.work)(main, &mut self.inner.lock());
                 (self.reply)(Some(answer));
             }
-            Poll::Pending if self.retry && self.collector.is_pumped() => self.defer(),
+            Poll::Pending if self.collector.is_pumped() => self.defer(),
             Poll::Pending => (self.reply)(None),
         }
     }
@@ -345,7 +340,6 @@ where
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
         let (tx, answer) = Answer::channel();
         self.after_writes(
-            true,
             move |main, instance| instance.control()?.parameter(main, id),
             // A dropped receiver has no one to tell.
             move |read| {
@@ -450,16 +444,20 @@ where
     /// can tell "the plugin has no state" from "asking it failed".
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
-    /// runs this on the session's executor: off the main thread it
-    /// is run by the main thread's next tick (`on_main`), and
+    /// runs this on the session's executor: it is run by the main thread's
+    /// next tick once the host's earlier writes are the plugin's, and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
+    /// On the main thread it is [`StateError::Unavailable`] at once: a caller
+    /// there saves through [`PluginHandle::save_state_on`](crate::PluginHandle::save_state_on),
+    /// which is polled.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+        // The main thread has no later tick to retry a save on: its callers
+        // save through the polled `PluginHandle::save_state_on`.
+        if MainThreadMarker::new().is_some() {
+            return Err(StateError::Unavailable);
+        }
         let (reply, wait) = sync_channel(1);
-        let on_main = MainThreadMarker::new().is_some();
-        // On the main thread a node draining the writes is not waited for: the
-        // wait would be on the tick this thread is in.
         self.after_writes(
-            !on_main,
             move |main, instance| {
                 instance.control().map(|control| {
                     control
@@ -471,20 +469,15 @@ where
                 let _ = reply.send(saved);
             },
         );
-        let saved = if on_main {
-            wait.try_recv().ok().flatten()
-        } else {
-            await_answer(
-                &wait,
-                OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
-                Instant::now,
-            )
-            .flatten()
-        };
-        match saved {
+        match await_answer(
+            &wait,
+            OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
+            Instant::now,
+        )
+        .flatten()
+        {
             Some(Some(state)) => state,
             Some(None) => Err(StateError::PluginCrashed),
-            None if on_main => Err(StateError::Busy),
             None => Err(StateError::Unavailable),
         }
     }

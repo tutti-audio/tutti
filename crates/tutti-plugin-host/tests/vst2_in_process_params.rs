@@ -336,6 +336,19 @@ fn a_save_after_a_write_holds_the_write() {
     assert_eq!(at_once, after_read, "a save at once holds the write");
 }
 
+/// **The main thread has no blocking save**: the call there answers
+/// `Unavailable` at once and asks nothing, and the polled save answers.
+fn the_main_thread_saves_by_polling() {
+    let _lock = PROBE_LOCK.lock();
+    let _env = ProbeEnv::new().params(4);
+    let (_client, handle) = load();
+    assert!(matches!(
+        handle.save_state(tutti_plugin_types::StateUse::Project),
+        Err(tutti_plugin_types::StateError::Unavailable)
+    ));
+    assert!(!saved(&handle).is_empty());
+}
+
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
 /// and a fork tell the plugin at once only there.
 fn main() {
@@ -344,5 +357,6 @@ fn main() {
         a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it,
         an_export_renders_an_edit_made_in_the_plugin_as_live_does,
         a_save_after_a_write_holds_the_write,
+        the_main_thread_saves_by_polling,
     ]);
 }

@@ -193,12 +193,15 @@ where
             let control = instance
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
-            if let Some(edits) = &self.edits
-                && edits.settle(main, control, edits.mark()).is_pending()
-            {
-                // A node is draining the writes now: a fork taken without them
-                // would not hold them, so none is made, and a retry may be.
-                return Err(PluginForkError::SaveState(StateError::Busy));
+            if let Some(edits) = &self.edits {
+                // The claim on the writes' reader is held only by a node's
+                // drain, which is bounded and runs on the audio thread, so
+                // this wait ends. `Node::fork` is synchronous: there is no
+                // tick to ask again on.
+                let mark = edits.mark();
+                while edits.settle(main, control, mark).is_pending() {
+                    std::thread::yield_now();
+                }
             }
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
