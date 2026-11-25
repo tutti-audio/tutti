@@ -619,7 +619,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// thread, not the audio thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         match MainThreadMarker::new() {
-            Some(main) => self.inner.lock().set_render_mode(Some(main), mode, None),
+            Some(main) => self.inner.lock().set_render_mode(main, mode, None),
             None => false,
         }
     }
@@ -680,17 +680,20 @@ impl<L: Loaded> LiveView<L> {
         Some(self.0.upgrade()?.lock().render_mode())
     }
 
-    /// Asks for the plugin to run in `mode`, as the instance does
-    /// ([`InProcessClient::set_render_mode`]), from any thread: the want is
-    /// written here, and the main thread's next pump tells the plugin. `false`
-    /// once the plugin is gone, lost, or has no mode to take.
-    pub fn announce_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
+    /// Records that the plugin is to run in `mode` and tells it with `tell`
+    /// (the control side's own tell, which needs no main thread), from any
+    /// thread: the lifecycle then waits for the answer to that tell, and the
+    /// want is not undone by the answer. `false` once the plugin is gone or
+    /// lost, or when `tell` queues nothing.
+    pub fn announce_render_mode(
+        &self,
+        mode: tutti_plugin_types::RenderMode,
+        tell: impl FnOnce(tutti_plugin_types::RenderMode) -> bool,
+    ) -> bool {
         let Some(instance) = self.0.upgrade() else {
             return false;
         };
-        instance
-            .lock()
-            .set_render_mode(MainThreadMarker::new(), mode, None)
+        instance.lock().announce_mode(mode, tell)
     }
 }
 

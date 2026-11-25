@@ -673,11 +673,12 @@ impl<S> PluginClient<S> {
         .midi_map(self.midi_map.clone())
         .render_mode_route({
             let live = self.live.clone();
-            let has_mode = self
-                .loaded
-                .features
-                .contains(tutti_plugin_types::Features::RENDER_MODE);
-            move |mode| has_mode && live.announce_render_mode(mode)
+            let served = self.served.clone();
+            move |mode| {
+                live.announce_render_mode(mode, |mode| {
+                    tutti_plugin_types::AnyThread::set_render_mode(&served, mode)
+                })
+            }
         });
         match pid {
             Some(pid) => handle.with_server_pid(pid),

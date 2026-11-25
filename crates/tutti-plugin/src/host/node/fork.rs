@@ -628,15 +628,20 @@ mod tests {
     #[test]
     fn a_served_live_fork_keeps_the_live_render_mode() {
         let (source, client, _threads) = source_over(rig());
+        let rig_bridge = source.bridge.upgrade().expect("the bridge lives");
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");
         let offline = source.capture(RenderMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
         let rebinder = client.rebinder(tempo(4.0));
-        // The want reaches the plugin at a pump, and its answer after it.
+        // What the server answers reaches the lifecycle at a pump.
         let told = |mode| {
-            assert!(client.live_view().announce_render_mode(mode));
+            assert!(
+                client
+                    .live_view()
+                    .announce_render_mode(mode, |mode| rig_bridge.audio().set_render_mode(mode))
+            );
             tutti_fixtures::wait_until(
                 "the server's answer to reach the lifecycle",
                 Duration::from_secs(60),

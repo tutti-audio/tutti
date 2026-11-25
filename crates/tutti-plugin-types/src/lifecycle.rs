@@ -820,6 +820,13 @@ impl State {
         self.retuning = self.wanted().map(|w| w.live());
     }
 
+    /// Records that the plugin was told the wanted render mode outside a plan:
+    /// it is in flight until the plugin answers ([`Event::Answered`]), and not
+    /// behind meanwhile.
+    pub fn mode_asked(&mut self, mode: RenderMode) {
+        self.asking = Some(mode);
+    }
+
     /// How far the plugin is from what the host wants, and the cheapest step
     /// that closes it.
     ///

@@ -663,6 +663,25 @@ impl<L: Loaded> Instance<L> {
         self.wanted().mode()
     }
 
+    /// Wants the plugin in `mode` and tells it with `tell`, which needs no main
+    /// thread; the lifecycle records the tell, so its answer settles it. `false`
+    /// when the plugin is lost or `tell` queues nothing, with the want as it was.
+    pub(super) fn announce_mode(
+        &mut self,
+        mode: RenderMode,
+        tell: impl FnOnce(RenderMode) -> bool,
+    ) -> bool {
+        if self.lifecycle.is_poisoned() {
+            return false;
+        }
+        if !tell(mode) {
+            return false;
+        }
+        self.want(|w| w.with_mode(mode));
+        self.state.mode_asked(mode);
+        true
+    }
+
     /// Asks for the plugin to run in `mode`. Main thread.
     ///
     /// What happens is the plugin's
@@ -684,7 +703,7 @@ impl<L: Loaded> Instance<L> {
     /// [`pump`](Self::pump) finishes it.
     pub(super) fn set_render_mode(
         &mut self,
-        main: Option<MainThreadMarker>,
+        main: MainThreadMarker,
         mode: RenderMode,
         rt: Option<&mut Rt<L::Processor>>,
     ) -> bool {
@@ -692,9 +711,9 @@ impl<L: Loaded> Instance<L> {
             return false;
         }
         self.want(|w| w.with_mode(mode));
-        let reconciled = self.reconcile(main, rt).is_ok();
+        let reconciled = self.reconcile(Some(main), rt).is_ok();
         reconciled
-            && self.mode_support(main) != Some(RenderModeSupport::Unsupported)
+            && self.mode_support(Some(main)) != Some(RenderModeSupport::Unsupported)
             && self.render_mode() == mode
     }
 
@@ -717,7 +736,7 @@ impl<L: Loaded> Instance<L> {
                 self.note_mode_not_applied(mode);
                 return;
             };
-            self.set_render_mode(Some(main), mode, rt);
+            self.set_render_mode(main, mode, rt);
         }
         self.graph_mode = mode;
     }
@@ -1302,7 +1321,7 @@ mod tests {
     #[test]
     fn a_mode_read_at_activation_cycles_the_plugin() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
-        assert!(instance.set_render_mode(Some(main_thread()), RenderMode::Offline, Some(&mut rt)));
+        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
         assert!(cycled(&fake), "{:?}", fake.calls());
         assert_eq!(instance.render_mode(), RenderMode::Offline);
         assert!(instance.renders());
@@ -1314,7 +1333,7 @@ mod tests {
     #[test]
     fn a_plugin_without_a_render_mode_is_not_cycled() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::Unsupported);
-        assert!(!instance.set_render_mode(Some(main_thread()), RenderMode::Offline, Some(&mut rt)));
+        assert!(!instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
         assert_eq!(fake.told_render_mode(), None);
         assert!(!cycled(&fake), "{:?}", fake.calls());
         assert_eq!(instance.render_mode(), RenderMode::Offline, "kept");
@@ -1326,7 +1345,7 @@ mod tests {
     #[test]
     fn a_live_plugin_is_told_and_not_cycled() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::Live);
-        assert!(instance.set_render_mode(Some(main_thread()), RenderMode::Offline, Some(&mut rt)));
+        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
         assert_eq!(fake.told_render_mode(), Some(RenderMode::Offline));
         assert!(!cycled(&fake), "{:?}", fake.calls());
     }
@@ -1420,7 +1439,7 @@ mod tests {
             "the nodes stay silent: the graph runs at another rate"
         );
 
-        assert!(instance.set_render_mode(Some(main_thread()), RenderMode::Offline, Some(&mut rt)));
+        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
         assert!(
             instance.pump(main_thread()).reports.is_empty(),
             "an activation at the rolled-back rate takes no rate"

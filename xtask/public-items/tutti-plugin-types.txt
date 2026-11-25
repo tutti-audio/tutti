@@ -329,6 +329,7 @@ fn lifecycle::State::is_parked
 fn lifecycle::State::is_quiet
 fn lifecycle::State::latency
 fn lifecycle::State::layout
+fn lifecycle::State::mode_asked
 fn lifecycle::State::new
 fn lifecycle::State::renders
 fn lifecycle::State::retune_asked
