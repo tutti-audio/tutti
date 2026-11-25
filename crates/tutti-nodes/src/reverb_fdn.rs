@@ -150,7 +150,7 @@ struct Running<F: FftFloat + Lerp, L: FdnKind> {
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
 /// the ramps its design is set through, of the kind `L`: [`FdnLayout`] for the plain network
-/// ([`FdnSet`]) or [`ShimmerLayout`] for the shimmer
+/// ([`FdnSet`]) or [`ShimmerLayout`](tutti_dsp::ShimmerLayout) for the shimmer
 /// ([`ShimmerSet`](crate::ShimmerSet)).
 ///
 /// The bank's state is `F`, the float of the graph.
@@ -178,23 +178,21 @@ mod sealed {
     use crate::ControlSet;
 
     /// A network kind the nodes run: its layout and the control set its node declares.
-    pub trait FdnNodeKind: FdnKind {
+    pub trait Sealed: FdnKind {
         /// The rows of the kind's node.
         type Set: ControlSet<Controls = FdnNodeControls<Self>>;
     }
 
-    impl FdnNodeKind for FdnLayout {
+    impl Sealed for FdnLayout {
         type Set = super::FdnSet;
     }
 
-    impl FdnNodeKind for ShimmerLayout {
+    impl Sealed for ShimmerLayout {
         type Set = crate::ShimmerSet;
     }
 }
 
-use sealed::FdnNodeKind;
-
-impl<F: FftFloat + Lerp, L: FdnNodeKind> Kernel for FdnKernel<F, L> {
+impl<F: FftFloat + Lerp, L: sealed::Sealed> Kernel for FdnKernel<F, L> {
     type Float = F;
     type Set = L::Set;
 
