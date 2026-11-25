@@ -262,7 +262,7 @@ impl Rig {
     /// Replace the source with a new unit (a new generation).
     fn replace_source(&mut self) {
         self.ed
-            .replace_or_swap(
+            .replace(
                 NodeKey(1),
                 Unforkable(Src {
                     mail: self.mail.clone(),
@@ -771,7 +771,7 @@ fn fan_in_closes_the_cut_sources_keys_only() {
     );
 }
 
-/// A crossfade over a source (`Editor::replace_or_swap` with a fade): the sink is
+/// A crossfade over a source (`Editor::replace` with a fade): the sink is
 /// closed for the old unit's notes at the commit.
 #[test]
 fn a_crossfaded_source_closes_its_sinks() {
@@ -782,7 +782,7 @@ fn a_crossfaded_source_closes_its_sinks() {
     r.block();
     {
         let ed = &mut r.ed;
-        ed.replace_or_swap(
+        ed.replace(
             NodeKey(1),
             Unforkable(Src {
                 mail: mail2.clone(),
@@ -891,7 +891,7 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         let fade = Fade::new(Samples::new(MAX * 3));
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = &mut r.ed;
-            ed.replace_or_swap(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
+            ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
                 .expect("replaces");
             ed.commit().unwrap();
             r.exec.apply_pending();
@@ -945,7 +945,7 @@ fn a_third_fade_supersedes_the_waiting_one() {
         let fade = Fade::new(Samples::new(MAX * 3));
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = &mut r.ed;
-            ed.replace_or_swap(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
+            ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
                 .expect("replaces");
             ed.commit().unwrap();
             r.exec.apply_pending();
@@ -976,7 +976,7 @@ fn a_third_fade_supersedes_the_waiting_one() {
 
 fn swap_with_fade(r: &mut Rig, mail: &Mail, frames: usize) {
     let ed = &mut r.ed;
-    ed.replace_or_swap(
+    ed.replace(
         NodeKey(1),
         Unforkable(Src { mail: mail.clone() }),
         Fade::new(Samples::new(frames)),
@@ -1124,7 +1124,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
     let (m2, m3): (Mail, Mail) = Default::default();
     {
         let ed = &mut r.ed;
-        ed.replace_or_swap(
+        ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m2.clone() }),
             Fade::new(Samples::new(MAX * 6)),
@@ -1138,7 +1138,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
     r.block();
     {
         let ed = &mut r.ed;
-        ed.replace_or_swap(
+        ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m3.clone() }),
             Fade::new(Samples::new(0)),
@@ -1218,7 +1218,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
         &[2],
         |r| {
             let ed = &mut r.ed;
-            ed.replace_or_swap(
+            ed.replace(
                 NodeKey(1),
                 Unforkable(Src {
                     mail: Mail::default(),
@@ -1408,7 +1408,7 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
     r.send(on60());
     r.block();
     let (ed, exec) = (&mut r.ed, &mut r.exec);
-    ed.replace_or_swap(
+    ed.replace(
         NodeKey(1),
         Unforkable(Src {
             mail: Mail::default(),
@@ -1436,7 +1436,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
     {
         let log = r.log.clone();
         let ed = &mut r.ed;
-        ed.replace_or_swap(
+        ed.replace(
             NodeKey(2),
             Unforkable(Sink {
                 id: 22,

@@ -738,7 +738,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
 /// running before it). See rule 8 in the module docs.
 ///
 /// Written against the two plans' units directly — not through
-/// `Editor::replace_or_swap`'s check — so a delta built by hand (through
+/// `Editor::replace`'s check — so a delta built by hand (through
 /// `Editor::package`) gets the same scrutiny as one the editor built.
 pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(), VerifyError> {
     // A cut names a unit both plans hold at one generation and index: a

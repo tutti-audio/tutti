@@ -232,7 +232,7 @@ fn a_recall_reaches_the_node_that_holds_the_processor_while_its_successor_is_sta
     }
     let fade = Fade::new(Samples::new(0));
     editor
-        .replace_or_swap(rig.key, Unforkable(successor), fade)
+        .replace(rig.key, Unforkable(successor), fade)
         .expect("staged");
     assert!(matches!(
         editor.commit(),
