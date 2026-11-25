@@ -273,7 +273,8 @@ struct Settings {
 /// after it (a greater sequence) wait for it. A kind requested again replaces
 /// the one waiting: the latest value stands, **and so does its stamp** (the
 /// blocks between the two requests are held for the later value too). Render
-/// modes queue, each with its own stamp.
+/// modes queue, each with its own stamp. The mode queue is unbounded: it holds
+/// only the app's mode calls the server has not yet answered.
 #[derive(Default)]
 struct Requests {
     rate: Option<(tutti_units::SampleRate, u64)>,
