@@ -135,6 +135,8 @@ mod midi_port;
 #[path = "midi_port_none.rs"]
 mod midi_port;
 #[cfg(feature = "midi")]
+mod midi_record;
+#[cfg(feature = "midi")]
 mod midi_sink;
 mod modulation;
 mod params;
