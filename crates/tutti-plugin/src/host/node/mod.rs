@@ -236,9 +236,6 @@ struct EventRoute {
     invalidate: InvalidateSink,
     transport: TransportSink,
     chunks: Arc<tutti_plugin_types::ChunkCounters>,
-    /// The plugin's last answer to a rate was a refusal: the next one it takes
-    /// is announced as restored.
-    rate_refused: std::sync::atomic::AtomicBool,
 }
 
 impl EventRoute {
@@ -288,18 +285,9 @@ impl EventRoute {
     /// What the plugin answered to a rate or a render mode, as the handle's
     /// subscribers hear it: a refusal, a rate taken after one, a mode not taken.
     fn tell(&self, told: Told) {
-        use std::sync::atomic::Ordering;
         match told {
-            Told::RateRefused(refusal) => {
-                self.rate_refused.store(true, Ordering::Relaxed);
-                self.invalidate
-                    .fire(PluginInvalidation::RateRefused(refusal));
-            }
-            Told::RateTook(_) => {
-                if self.rate_refused.swap(false, Ordering::Relaxed) {
-                    self.invalidate.fire(PluginInvalidation::RateRestored);
-                }
-            }
+            // A rate's answer is the lifecycle's: the node's pump reports it.
+            Told::RateRefused(_) | Told::RateTook(_) => {}
             Told::ModeRefused(mode) => {
                 self.invalidate
                     .fire(PluginInvalidation::RenderModeNotApplied { mode });
@@ -466,7 +454,6 @@ impl PluginClient<Unbound> {
             invalidate: invalidate_sink.clone(),
             transport: transport_sink.clone(),
             chunks: Arc::clone(ipc.chunk_counters()),
-            rate_refused: std::sync::atomic::AtomicBool::new(false),
         };
         ipc.forward_events(Some(Arc::new(move |ev| route.hear(ev))));
 
@@ -493,7 +480,7 @@ impl PluginClient<Unbound> {
         let (processor, controller) = ipc
             .activate_anywhere(prepare)
             .map_err(|refused| IpcError::from(refused.reason))?;
-        let client = client_over::<Ipc, f32>(
+        let mut client = client_over::<Ipc, f32>(
             processor,
             controller,
             prepare,
@@ -504,6 +491,10 @@ impl PluginClient<Unbound> {
             Some(controls.clone()),
         )
         .map_err(tutti_plugin_host::ClientOverError::into_bridge)?;
+        // What the lifecycle finds of a rate (its refusal and restoring) is the
+        // handle's through the node's pump, as in process; the bridge's
+        // listener does not report it.
+        client.report_rates_to(invalidate_sink.clone());
         Ok(Self {
             bridge,
             descriptor,
@@ -868,7 +859,6 @@ mod event_route_tests {
             invalidate: InvalidateSink::new(),
             transport: TransportSink::new(),
             chunks: Arc::clone(&chunks),
-            rate_refused: std::sync::atomic::AtomicBool::new(false),
         };
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 2,

@@ -78,6 +78,9 @@ pub(crate) struct ControlBackend<L: InProcess> {
 pub(crate) struct Reporting {
     pub(crate) invalidate: crate::InvalidateSink,
     pub(crate) transport: crate::TransportSink,
+    /// Deliver only what the instance reports of a rate (a refusal, its
+    /// restoring): an out-of-process plugin's own listener reports the rest.
+    pub(crate) rates_only: bool,
 }
 
 impl Reporting {
@@ -95,7 +98,18 @@ impl Reporting {
             reports,
         } = changes;
         for report in reports {
-            self.invalidate.fire(report);
+            if !self.rates_only
+                || matches!(
+                    report,
+                    tutti_plugin_types::PluginInvalidation::RateRefused(_)
+                        | tutti_plugin_types::PluginInvalidation::RateRestored
+                )
+            {
+                self.invalidate.fire(report);
+            }
+        }
+        if self.rates_only {
+            return;
         }
         if let Some(samples) = latency {
             self.invalidate
