@@ -10,8 +10,8 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Edge, FeedbackFrom, InputPort, NodeKey, NodeSpec, OutputPort,
-    PortSource, Topology, delays, graph_tail, latency_plan,
+    Edge, FeedbackFrom, InputPort, NodeKey, NodeSpec, OutputPort, PortSource, Topology, delays,
+    graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 

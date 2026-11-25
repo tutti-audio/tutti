@@ -14,9 +14,7 @@ use tutti_graph::{
     AudioDelayKey, CompileError, CycleEdge, EventEdge, EventInputPort, EventOutputPort,
     GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
 };
-use tutti_graph::{
-    Edge, FeedbackFrom, InputPort, Invalid, NodeSpec, OutputPort, PortSource,
-};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, Invalid, NodeSpec, OutputPort, PortSource};
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 
