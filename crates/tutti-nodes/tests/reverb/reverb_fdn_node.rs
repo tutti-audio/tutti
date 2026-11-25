@@ -441,6 +441,120 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
     );
 }
 
+/// What a source sends: `Decay[0]` held at `value` from block `at`'s first frame (`None`: it
+/// never sends an event).
+struct Speaks {
+    at: Option<usize>,
+    value: f64,
+    block: usize,
+}
+
+impl Speaks {
+    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
+impl Node for Speaks {
+    fn shape(&self) -> tutti_graph::Shape {
+        Self::SHAPE
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &tutti_graph::Cx<'_>, mut io: tutti_graph::Io<'_>) -> Status {
+        if self.at == Some(self.block) {
+            let start = io.offset(0).expect("a block has a frame");
+            let hold = tutti_graph::ParamSegment::unit(
+                UnitAddr::new(UnitParam::Decay, 0),
+                self.value,
+                self.value,
+                Samples::new(1),
+            );
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(tutti_graph::ParamEvent::segment(start, hold));
+        }
+        self.block += 1;
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A source with nothing to say does not drive the decay: wired before the node's first block
+/// (so no declick runs), a source that never sends leaves the graph's reported tail the
+/// unwired node's on every block, and one that speaks leaves it so until its first event,
+/// from which the port is driven and the node owes the ring at the decay's longest.
+#[test]
+fn a_source_that_has_not_spoken_leaves_the_decay_tail_as_unwired() {
+    const BLOCKS: usize = 24;
+    const SPEAKS: usize = 12;
+    let reported = |source: Option<Option<usize>>| -> Vec<Option<Samples>> {
+        let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
+        let (n, _) = g.add_with_controls(live(plain(), FdnControls::DEFAULT));
+        g.connect_input(0, n, 0).connect_output(n, 0, 0);
+        g.connect_output(n, 1, 1);
+        let mut r = g
+            .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
+            .expect("the graph builds");
+        if let Some(at) = source {
+            let key = tutti_graph::NodeKey(9_000);
+            let editor = r.editor_mut();
+            let src = Speaks {
+                at,
+                value: MaxDecay::CAP.get(),
+                block: 0,
+            };
+            editor.insert(key, "source", tutti_graph::Unforkable(src));
+            let to = ParamIn {
+                node: n,
+                param: UnitAddr::new(UnitParam::Decay, 0),
+            };
+            editor
+                .connect_param(to, tutti_graph::EventOutputPort::new(key, 0))
+                .unwrap();
+            editor.commit().expect("the source commits");
+        }
+        (0..BLOCKS)
+            .map(|b| {
+                let x = if b == 0 { impulse() } else { vec![0.0; BLOCK] };
+                let _ = r.render_input(Planes::new(&[&x]).unwrap());
+                r.executor()
+                    .reported_tail(&r.editor().spec().topology)
+                    .samples()
+            })
+            .collect()
+    };
+    let unwired = reported(None);
+    assert_eq!(
+        reported(Some(None)),
+        unwired,
+        "never written: the unwired figure"
+    );
+    let spoken = reported(Some(Some(SPEAKS)));
+    assert_eq!(
+        spoken[..SPEAKS],
+        unwired[..SPEAKS],
+        "before its first event the same"
+    );
+    let driven = Samples::new(tail_of(
+        &plain(),
+        &FdnControls {
+            decay: [
+                Seconds::new(MaxDecay::CAP.get()),
+                FdnControls::DEFAULT.decay[1],
+                FdnControls::DEFAULT.decay[2],
+            ],
+            ..FdnControls::DEFAULT
+        },
+    ));
+    assert!(
+        spoken[SPEAKS..].iter().all(|&t| t == Some(driven)),
+        "from its first event on: the tail at the longest decay, {driven:?}, not {:?}",
+        &spoken[SPEAKS..]
+    );
+}
+
 /// A fork starts from the values set, shares no cell and rings nothing: the harness's fork
 /// checks over every cell.
 #[test]
