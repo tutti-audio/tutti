@@ -16,7 +16,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
+    Behind, Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
     PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
     RateRefusalCause, Recovery, RenderMode, RenderModeSupport, SampleRate, Samples, State,
     Successor, Widths, standing,
@@ -461,6 +461,9 @@ impl<L: Loaded> Instance<L> {
                             reason: reason.to_string(),
                         });
                     }
+                    Notice::ModeRefused { mode } => {
+                        reports.push(PluginInvalidation::RenderModeNotApplied { mode });
+                    }
                     Notice::Lost { reason } => {
                         trouble = Some(Trouble::Lost {
                             reason: Arc::new(reason),
@@ -649,22 +652,28 @@ impl<L: Loaded> Instance<L> {
             .push(PluginInvalidation::RenderModeNotApplied { mode });
     }
 
+    /// The plugin's bridge was told `mode` directly: wanted, and in flight.
+    pub(super) fn told_mode(&mut self, mode: RenderMode) {
+        self.state.told_mode(mode);
+    }
+
     /// The render mode the plugin runs in, or is being changed to.
     pub(super) fn render_mode(&self) -> RenderMode {
         self.wanted().mode()
     }
 
-    /// Tells the plugin its render mode. Main thread.
+    /// Asks for the plugin to run in `mode`. Main thread.
     ///
     /// What happens is the plugin's
-    /// [`render_mode_support`](tutti_plugin_types::Control::render_mode_support):
-    /// a `Live` plugin is told, and the mode is kept for a rate change's
-    /// activation when it took it; an `OnActivation` one is reconfigured
-    /// through the lifecycle, the activation carrying the mode and the
-    /// Processor changing at the pump, as a rate change's does, and a refused
-    /// activation is rolled back to the mode it accepted; an `Unsupported`
-    /// one is left running, the mode kept for its next activation. Returns
-    /// whether the plugin now runs in `mode` (or is on its way to it).
+    /// [`render_mode_support`](tutti_plugin_types::Control::render_mode_support)
+    /// ([`reconcile`](Self::reconcile)): a `Live` plugin is told and answers in
+    /// the call, a `Served` one is told and answers later (`pump`), an
+    /// `OnActivation` one is reconfigured through the lifecycle, the
+    /// activation carrying the mode and the Processor changing at the pump, as
+    /// a rate change's does, and a refused activation is rolled back to the
+    /// mode it accepted; an `Unsupported` one is left running, the mode kept
+    /// for its next activation. Returns whether the plugin runs in `mode` or
+    /// is on its way to it.
     ///
     /// With `rt`, the node's own realtime end out of any executor (a fork
     /// being built), a reconfiguration runs here to the end, as
@@ -678,27 +687,14 @@ impl<L: Loaded> Instance<L> {
         mode: RenderMode,
         rt: Option<&mut Rt<L::Processor>>,
     ) -> bool {
-        if let Some(control) = self.lifecycle.control() {
-            match control.render_mode_support(main) {
-                RenderModeSupport::Live => {
-                    let took = control.set_render_mode(main, mode);
-                    if took {
-                        self.state.set_mode(mode);
-                    }
-                    return took;
-                }
-                RenderModeSupport::Unsupported => {
-                    self.state.set_mode(mode);
-                    return false;
-                }
-                RenderModeSupport::OnActivation => {}
-            }
-        }
         if self.lifecycle.is_poisoned() {
             return false;
         }
         self.want(|w| w.with_mode(mode));
-        self.reconfigure(main, rt).is_ok()
+        let reconciled = self.reconcile(Some(main), rt).is_ok();
+        reconciled
+            && self.mode_support(Some(main)) != Some(RenderModeSupport::Unsupported)
+            && self.render_mode() == mode
     }
 
     /// The render mode a prepare of the graph carries, told to the plugin when
@@ -739,22 +735,31 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// Whether the plugin runs at less than the host wants
-    /// ([`State::behind`]); the callback size counts for a Processor that
-    /// retunes live.
-    fn behind(&self) -> bool {
-        self.state
-            .behind(<L::Processor as Processor>::RETUNE.is_some())
+    /// How the plugin takes a render mode, when the main thread can ask.
+    fn mode_support(&mut self, main: Option<MainThreadMarker>) -> Option<RenderModeSupport> {
+        let main = main?;
+        self.lifecycle.control().map(|c| c.render_mode_support(main))
     }
 
-    /// Activates the plugin again at what the host wants, when it runs at less
-    /// ([`behind`](Self::behind)) and nothing is under way; otherwise a refusal
-    /// the graph has left is settled. Without the main thread nothing can be
-    /// activated. The nodes render silence only when the rate differs (the
-    /// output would be at the wrong pitch) until a pump on the main thread
-    /// activates the plugin (the instance's tick, the node's `prepare`); a
-    /// larger block ceiling or another callback size alone leaves the plugin
-    /// audible, its blocks split to the ceiling it was told.
+    /// How far the plugin is from what the host wants ([`State::behind`]); the
+    /// render mode counts only where the main thread can tell a plugin it.
+    fn behind(&mut self, main: Option<MainThreadMarker>) -> Behind {
+        let support = self
+            .mode_support(main)
+            .unwrap_or(RenderModeSupport::Unsupported);
+        self.state
+            .behind(<L::Processor as Processor>::RETUNE.is_some(), support)
+    }
+
+    /// Brings the plugin to what the host wants, by the cheapest step
+    /// ([`behind`](Self::behind)): a mode a plugin takes live is told it, and
+    /// anything an activation takes activates it again, when nothing is under
+    /// way; otherwise a refusal the graph has left is settled. Without the
+    /// main thread nothing can be told or activated. The nodes render silence
+    /// only when the rate differs (the output would be at the wrong pitch)
+    /// until a pump on the main thread activates the plugin (the instance's
+    /// tick, the node's `prepare`); a larger block ceiling alone leaves the
+    /// plugin audible, its blocks split to the ceiling it was told.
     ///
     /// With `rt`, the node's own realtime end out of any executor (its
     /// `prepare`), the exchange runs to the end here; without, the recall waits
@@ -772,19 +777,32 @@ impl<L: Loaded> Instance<L> {
         if self.lifecycle.is_poisoned() || self.state.is_busy() {
             return Ok(());
         }
-        if !self.behind() {
-            self.settle();
-            return Ok(());
-        }
-        let Some(main) = main else {
-            let wrong_rate =
-                self.state.wanted().map(|w| w.rate()) != self.state.applied().map(|a| a.rate());
-            if wrong_rate && self.silence.is_none() {
-                self.silence(Silence::Unprepared);
+        match self.behind(main) {
+            Behind::No => {
+                self.settle();
+                Ok(())
             }
-            return Ok(());
-        };
-        self.reconfigure(main, rt)
+            Behind::Mode(mode) => {
+                // `behind` answers a mode only with the main thread in hand.
+                if let Some(main) = main
+                    && let Some(trouble) = self.drive(main, Event::Op(HostOp::SetMode(mode)))
+                {
+                    self.note(trouble);
+                }
+                Ok(())
+            }
+            Behind::Restart => {
+                let Some(main) = main else {
+                    let wrong_rate = self.state.wanted().map(|w| w.rate())
+                        != self.state.applied().map(|a| a.rate());
+                    if wrong_rate && self.silence.is_none() {
+                        self.silence(Silence::Unprepared);
+                    }
+                    return Ok(());
+                };
+                self.reconfigure(main, rt)
+            }
+        }
     }
 
     /// A recall, a rejoin and an activation at the wanted [`Prepare`], which is
@@ -947,8 +965,15 @@ impl<L: Loaded> Instance<L> {
     pub(super) fn pump(&mut self, main: MainThreadMarker) -> Changes {
         self.midi_map.reclaim();
         let mut asked = Vec::new();
+        let mut told = Vec::new();
         if let Some(control) = self.lifecycle.control() {
             control.take_requests(main, &mut asked);
+            control.take_answers(main, &mut told);
+        }
+        for answer in told {
+            if let Some(trouble) = self.drive(main, Event::Answered(answer)) {
+                self.note(trouble);
+            }
         }
         // The plugin's own signal, reported as it was raised: its pin counts or
         // latency may have moved, and the handle's `Io` says so even when the
@@ -1017,14 +1042,6 @@ impl<L: Loaded> Instance<L> {
     /// again.
     pub(super) fn origin(&self) -> Option<&PluginRef> {
         self.origin.as_ref()
-    }
-
-    /// The rate a Processor that follows the graph (`Processor::RETUNE`) took
-    /// live: the activation a later reconfiguration starts from is at it, and
-    /// a refusal of the rate before it is over.
-    pub(super) fn retuned(&mut self) {
-        self.state.retuned();
-        self.restored();
     }
 }
 

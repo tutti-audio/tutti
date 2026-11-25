@@ -783,6 +783,14 @@ impl State {
         self.wanted = Some(wanted);
     }
 
+    /// Records that the plugin was told `mode` outside the lifecycle (its
+    /// server, by the bridge): wanted, and in flight until the plugin answers
+    /// ([`Event::Answered`]).
+    pub fn told_mode(&mut self, mode: RenderMode) {
+        self.wanted = self.wanted().map(|w| w.with_mode(mode));
+        self.asking = Some(mode);
+    }
+
     /// How far the plugin is from what the host wants, and the cheapest step
     /// that closes it.
     ///

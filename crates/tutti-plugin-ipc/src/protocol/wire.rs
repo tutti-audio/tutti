@@ -308,7 +308,7 @@ mod tests {
     }
 
     /// **The editor messages are written in the widths the spec's rules give.** A
-    /// variant tag is a varint over declaration order (`OpenEditor` is 18 of the
+    /// variant tag is a varint over declaration order (`OpenEditor` is 17 of the
     /// control requests, `EditorOpened` 15 of the replies); a size is a unit tag then two varints (physical) or two `f64`
     /// (logical), a scale an `f64`, a parent an `Option<u64>`.
     #[test]
@@ -332,7 +332,7 @@ mod tests {
         };
         assert_eq!(
             postcard::to_allocvec(&open).unwrap(),
-            [18, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [17, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         let embedded = ControlRequest::OpenEditor {
             parent: Some(300),
@@ -340,13 +340,13 @@ mod tests {
         };
         assert_eq!(
             postcard::to_allocvec(&embedded).unwrap(),
-            [18, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [17, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         assert_eq!(
             postcard::to_allocvec(&ControlRequest::CloseEditor).unwrap(),
-            [19]
+            [18]
         );
-        let mut resize = vec![20];
+        let mut resize = vec![19];
         resize.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap(),
@@ -396,7 +396,7 @@ mod tests {
         );
         assert_eq!(postcard::to_allocvec(&News::EditorClosed).unwrap(), [8]);
         // The scale is a checked value on the wire: a NaN is refused.
-        let mut nan = vec![18, 0];
+        let mut nan = vec![17, 0];
         nan.extend(f64::NAN.to_le_bytes());
         assert!(postcard::from_bytes::<ControlRequest>(&nan).is_err());
     }

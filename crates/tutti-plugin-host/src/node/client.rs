@@ -624,6 +624,20 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         }
     }
 
+    /// What a fork reads of this plugin's lifecycle, keeping nothing alive.
+    #[must_use]
+    pub fn live_view(&self) -> LiveView<L> {
+        LiveView(Arc::downgrade(&self.inner))
+    }
+
+    /// Records that the plugin's bridge was told `mode` directly: a fork's
+    /// build, off the main thread, tells its server before the first block.
+    /// The lifecycle wants `mode` and waits for the answer instead of telling
+    /// the plugin again.
+    pub fn told_render_mode(&self, mode: tutti_plugin_types::RenderMode) {
+        self.inner.lock().told_mode(mode);
+    }
+
     /// The control side of this node's controller map: what the plugin declares
     /// and the app entered, shared by every node over the instance and by the
     /// handle ([`PluginHandle::midi_map`](crate::PluginHandle::midi_map)).
@@ -646,6 +660,32 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// (`tutti-plugin`) does it through this.
     pub fn go_offline(&mut self) {
         self.transport.go_offline();
+    }
+}
+
+/// A view of a plugin's lifecycle that holds no strong reference
+/// ([`InProcessClient::live_view`]): once every node and handle on the plugin is
+/// gone, it reads nothing.
+pub struct LiveView<L: Loaded>(std::sync::Weak<Mutex<Instance<L>>>);
+
+impl<L: Loaded> Clone for LiveView<L> {
+    fn clone(&self) -> Self {
+        Self(std::sync::Weak::clone(&self.0))
+    }
+}
+
+impl<L: Loaded> std::fmt::Debug for LiveView<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveView").finish_non_exhaustive()
+    }
+}
+
+impl<L: Loaded> LiveView<L> {
+    /// The render mode the plugin runs in, or is being changed to; `None` once
+    /// the plugin is gone.
+    #[must_use]
+    pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
+        Some(self.0.upgrade()?.lock().render_mode())
     }
 }
 
@@ -719,7 +759,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             controls.set_pipeline(self.pipeline);
             controls.restamp(rate);
         }
-        self.inner.lock().retuned();
         true
     }
 

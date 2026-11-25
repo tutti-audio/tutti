@@ -224,6 +224,9 @@ pub(crate) struct ServedFork {
     tempo: tutti_timeline::TempoReader,
     /// The live node's controller map, whose app entries the fork carries.
     midi_map: tutti_plugin_host::MidiMapSlot,
+    /// The live plugin's lifecycle, which the render mode it runs in is read
+    /// from.
+    live: tutti_plugin_host::LiveView<tutti_plugin_ipc::Ipc>,
 }
 
 impl ServedFork {
@@ -240,6 +243,7 @@ impl ServedFork {
             features: client.loaded.features,
             controls: client.controls.clone(),
             midi_map: client.midi_map.clone(),
+            live: client.live.clone(),
         }
     }
 
@@ -274,7 +278,8 @@ impl ServedFork {
             .audio()
             .save_state(StateUse::Duplicate)
             .map_err(PluginForkError::SaveState)?;
-        let snapshot = ForkState::new(preset, state, live.audio().render_mode());
+        let live_mode = self.live.render_mode().ok_or(PluginForkError::LiveGone)?;
+        let snapshot = ForkState::new(preset, state, live_mode);
         drop(live);
         Ok(Capture {
             snapshot,
@@ -377,6 +382,7 @@ impl Capture {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
             let _ = fork.bridge.audio().set_render_mode(RenderMode::Offline);
+            fork.state.client.told_render_mode(RenderMode::Offline);
             // Not pinned end to end here: the out-of-process reference
             // plugin is CLAP, which has no system-time field. The in-process
             // VST2 fork drops its clock the same way, and

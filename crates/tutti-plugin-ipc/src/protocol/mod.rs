@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 67;
+pub const PROTOCOL_VERSION: u32 = 68;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -83,9 +83,9 @@ pub use envelope::{
     ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, GetCurrentPreset,
     GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
     GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
-    LoadState, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized, ParameterPlain,
+    LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized, ParameterPlain,
     ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn,
-    PresetList, PresetLoaded, ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap,
+    PresetList, PresetLoaded, ReqId, Request, RenderModeSet, SampleRateSet, SaveState, SetAppMidiMap,
     SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
     SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState, StateLoaded,
     StateReady, StateStaged, Wiring, Working, serve,
@@ -357,16 +357,10 @@ mod tests {
             11
         );
         assert_eq!(
-            news(News::RenderModeNotApplied {
-                mode: RenderMode::Realtime
-            }),
-            12
-        );
-        assert_eq!(
             news(News::PluginWouldNotStop {
                 reason: String::new()
             }),
-            13
+            12
         );
         assert_eq!(
             news(News::ServerLosses {
@@ -374,7 +368,7 @@ mod tests {
                 edits_refused: 0,
                 refused_off_thread_calls: tutti_units::Calls::ZERO
             }),
-            14
+            13
         );
         assert_eq!(news(News::ProcessRequested), 9);
 
@@ -470,12 +464,6 @@ mod tests {
                 },
             ),
             ("Shutdown", ControlRequest::Shutdown),
-            (
-                "SetRenderMode",
-                ControlRequest::SetRenderMode {
-                    mode: RenderMode::Realtime,
-                },
-            ),
             ("GetPresetList", ControlRequest::GetPresetList),
             (
                 "LoadPreset",
@@ -549,6 +537,12 @@ mod tests {
                 ControlRequest::ArmPluginMidiLearn { armed: true },
             ),
             ("GetWiring", ControlRequest::GetWiring),
+            (
+                "SetRenderMode",
+                ControlRequest::SetRenderMode {
+                    mode: RenderMode::Realtime,
+                },
+            ),
         ]
     }
 
@@ -642,6 +636,13 @@ mod tests {
                 "GetWiring",
                 ControlReply::Wiring {
                     wiring: PluginWiring::default(),
+                },
+            ),
+            (
+                "SetRenderMode",
+                ControlReply::RenderModeSet {
+                    mode: RenderMode::Realtime,
+                    outcome: ModeOutcome::Took,
                 },
             ),
             (

@@ -58,7 +58,7 @@ pub use listeners::{
 pub use liveness::{Liveness, LivenessVerdict};
 pub use midi_map::MidiMapSlot;
 pub use node::{
-    ClientOverError, InProcessClient, LoadClientError, Pending, PluginNode, RebindError, Rebinder,
+    ClientOverError, InProcessClient, LiveView, LoadClientError, Pending, PluginNode, RebindError, Rebinder,
     Settlement, WidthError, client_over, load_client, load_client_restoring,
 };
 pub use node_losses::BlockLosses;

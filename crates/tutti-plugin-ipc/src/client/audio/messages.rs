@@ -14,7 +14,7 @@ use tutti_plugin_types::{
     NoteExpressionTextChanges, ParamEdit, ParameterChanges, PluginTail, Samples, ScaleChanges,
     TransportChanges, TransportInfo,
 };
-use tutti_plugin_types::{RateRefusal, RateRefusalCause};
+use tutti_plugin_types::{RateRefusalCause, Told};
 use tutti_units::SampleRate;
 
 /// Audio-thread bulk payload for one `Process` command. Heap-boxed and
@@ -354,12 +354,6 @@ pub enum IpcEvent {
         /// Why the state was not restored.
         reason: String,
     },
-    /// The plugin did not take the render mode it was asked for: it runs in the
-    /// mode it had.
-    RenderModeNotApplied {
-        /// The mode that was asked for.
-        mode: tutti_plugin_types::RenderMode,
-    },
     /// A restart the host asked for did not happen: the plugin would not stop
     /// and runs as it was.
     WouldNotStop {
@@ -368,9 +362,9 @@ pub enum IpcEvent {
     },
     /// What the server's own work lost, cumulative.
     ServerLosses(ServerLosses),
-    /// The plugin refused the rate it was asked to run at (`Some`: the rate in
-    /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
-    RateRefusal(Option<RateRefusal>),
+    /// What the plugin answered to the rate or the render mode the host told
+    /// it: taken, or refused and what it was left as.
+    Told(tutti_plugin_types::Told),
     /// The bridge died: the subprocess never connected, failed the handshake,
     /// or its stream dropped mid-session.
     ///
@@ -469,14 +463,14 @@ pub(super) struct Unsolicited {
     params: std::collections::VecDeque<ParamEdit>,
     latency: Option<Samples>,
     tail: Option<PluginTail>,
-    rate: Option<Option<RateRefusal>>,
+    rate: Option<Told>,
+    /// What the plugin last answered to a render mode.
+    mode: Option<Told>,
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
     /// Why the last rebuild's state was not restored.
     state_not_restored: Latest<String>,
-    /// The mode the plugin last did not take.
-    render_mode_not_applied: Latest<tutti_plugin_types::RenderMode>,
     /// Why the plugin last would not stop.
     would_not_stop: Latest<String>,
     /// The server's latest cumulative losses, until drained.
@@ -503,10 +497,10 @@ impl Unsolicited {
             latency: None,
             tail: None,
             rate: None,
+            mode: None,
             lifecycle: None,
             reloaded: false,
             state_not_restored: Latest::new(),
-            render_mode_not_applied: Latest::new(),
             would_not_stop: Latest::new(),
             server_losses: None,
             io: false,
@@ -584,9 +578,13 @@ impl Unsolicited {
         self.transport.push_back(request);
     }
 
-    /// A rate refusal, or its clearing, replacing one already held.
-    pub(super) fn rate_refusal(&mut self, refusal: Option<RateRefusal>) {
-        self.rate = Some(refusal);
+    /// What the plugin answered to a setting it was told, replacing an answer
+    /// of the same setting not yet drained.
+    pub(super) fn told(&mut self, told: Told) {
+        match told {
+            Told::RateTook(_) | Told::RateRefused(_) => self.rate = Some(told),
+            Told::ModeTook(_) | Told::ModeRefused(_) => self.mode = Some(told),
+        }
     }
 
     /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
@@ -605,12 +603,6 @@ impl Unsolicited {
     /// replaced and counted with the dropped events.
     pub(super) fn state_not_restored(&mut self, reason: String) {
         self.dropped += u64::from(self.state_not_restored.put(reason));
-    }
-
-    /// A render mode the plugin did not take. One already held is replaced and
-    /// counted with the dropped events.
-    pub(super) fn render_mode_not_applied(&mut self, mode: tutti_plugin_types::RenderMode) {
-        self.dropped += u64::from(self.render_mode_not_applied.put(mode));
     }
 
     /// A restart the plugin would not make. One already held is replaced and
@@ -667,7 +659,8 @@ impl Unsolicited {
             .transport
             .drain(..)
             .map(|request| IpcEvent::Transport { request });
-        let rate = self.rate.take().map(IpcEvent::RateRefusal);
+        let rate = self.rate.take().map(IpcEvent::Told);
+        let mode = self.mode.take().map(IpcEvent::Told);
         let process =
             std::mem::take(&mut self.process_requested).then_some(IpcEvent::ProcessRequested);
         let midi_map = std::mem::take(&mut self.midi_map).then_some(IpcEvent::MidiMapChanged);
@@ -675,10 +668,6 @@ impl Unsolicited {
             .state_not_restored
             .take()
             .map(|reason| IpcEvent::StateNotRestored { reason });
-        let mode_refused = self
-            .render_mode_not_applied
-            .take()
-            .map(|mode| IpcEvent::RenderModeNotApplied { mode });
         let stuck = self
             .would_not_stop
             .take()
@@ -688,7 +677,6 @@ impl Unsolicited {
             .into_iter()
             .chain(structural.into_iter().flatten())
             .chain(unrestored)
-            .chain(mode_refused)
             .chain(stuck)
             .chain(losses)
             .chain(params)
@@ -696,6 +684,7 @@ impl Unsolicited {
             .chain(tail)
             .chain(transport)
             .chain(rate)
+            .chain(mode)
             .chain(refresh.into_iter().flatten())
             .chain(midi_map)
             .chain(process)

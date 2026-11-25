@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     MainThreadMarker, MidiAssignment, MidiMapApplied, OwnBypass, ParameterInfo, PipelineCounts,
     PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult,
     PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request,
-    StateError, StateUse, TerminationReason, TrackInfo, UnknownParam, WindowHandle, bypass_value,
+    StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -343,6 +343,12 @@ macro_rules! served_control {
                 out.append(&mut asked);
             }
 
+            /// What the server answered to the rate and render mode the host
+            /// told it since the last call.
+            fn take_answers(&mut self, _main: MainThreadMarker, out: &mut Vec<Told>) {
+                out.append(&mut self.link.events.told.lock());
+            }
+
             /// Sent to the server, whose format answers the plugin's reads
             /// from it: queued ([`Yes`](Delivered::Yes)), refused because the
             /// queue is full ([`Dropped`](Delivered::Dropped)) or because the
@@ -375,12 +381,12 @@ macro_rules! served_control {
                 let _ = self.link.events.wake.set(wake);
             }
 
-            /// `Live` from here wherever the plugin has a mode: the server
-            /// tells it or activates it again itself, so the host never
-            /// reactivates a served plugin for its mode.
+            /// `Served` from here wherever the plugin has a mode: the server
+            /// tells it or activates it again itself and answers, so the host
+            /// never reactivates a served plugin for its mode.
             fn render_mode_support(&self, _main: MainThreadMarker) -> RenderModeSupport {
                 if self.link.loaded.features.contains(Features::RENDER_MODE) {
-                    RenderModeSupport::Live
+                    RenderModeSupport::Served
                 } else {
                     RenderModeSupport::Unsupported
                 }
