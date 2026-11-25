@@ -1576,7 +1576,8 @@ impl State {
                 // The refused ask, still the current one, gives up its live
                 // fields and keeps the rest (the mode); a different ask made
                 // since is the host's later one: it stays, and the plugin is
-                // behind in it again.
+                // behind in it again. `applied` is set here: a retune is told
+                // only to a Processor an activation made, and nothing unsets it.
                 if let (Some(wanted), Some(applied)) = (self.wanted, self.applied)
                     && wanted.live() == told
                 {
