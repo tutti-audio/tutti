@@ -65,16 +65,6 @@ pub struct TransportSettings {
     /// t.settings().segment_generation.store(0, std::sync::atomic::Ordering::Release);
     /// ```
     pub(crate) segment_generation: Arc<AtomicU64>,
-    /// Whether the transport is armed and capturing. Read by the metronome's
-    /// `RecordingOnly` mode and by hosted plugins' transport snapshot.
-    pub(crate) recording: Arc<AtomicBool>,
-    /// Whether a count-in is running. Read independently of `recording` — the
-    /// metronome's `RecordingOnly` mode plays only when recording *and not* in
-    /// preroll, while `PrerollOnly` plays on exactly the opposite condition.
-    ///
-    /// No engine-side writer sets it; a host drives it around its own
-    /// count-in.
-    pub(crate) in_preroll: Arc<AtomicBool>,
     /// Derived from motion by the engine's motion machine — the clock
     /// reads it to decide whether to advance. Crate-private: nothing outside
     /// can set it.
@@ -105,7 +95,7 @@ pub struct TransportSettings {
 }
 
 impl TransportSettings {
-    /// Fresh settings: 120 BPM, beat 0, paused, not recording.
+    /// Fresh settings: 120 BPM, beat 0, paused.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -113,8 +103,6 @@ impl TransportSettings {
             map_generation: Arc::new(AtomicU64::new(0)),
             beat: Arc::new(AtomicF64::new(0.0)),
             segment_generation: Arc::new(AtomicU64::new(0)),
-            recording: Arc::new(AtomicBool::new(false)),
-            in_preroll: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(true)),
             steady_time: Arc::new(AtomicI64::new(0)),
             current_tempo: Arc::new(AtomicBpm::new(Bpm::default())),
@@ -213,28 +201,6 @@ impl TransportSettings {
     #[cfg(test)]
     pub(crate) fn set_beat(&self, beat: impl Into<Beat>) {
         self.beat.store(beat.into().get(), Ordering::Release);
-    }
-
-    /// Whether the transport is armed and capturing.
-    #[must_use]
-    pub fn is_recording(&self) -> bool {
-        self.recording.load(Ordering::Acquire)
-    }
-
-    /// Arm or disarm recording.
-    pub fn set_recording(&self, recording: bool) {
-        self.recording.store(recording, Ordering::Release);
-    }
-
-    /// Whether a count-in is running.
-    #[must_use]
-    pub fn in_preroll(&self) -> bool {
-        self.in_preroll.load(Ordering::Acquire)
-    }
-
-    /// Mark the count-in as running or finished.
-    pub fn set_in_preroll(&self, in_preroll: bool) {
-        self.in_preroll.store(in_preroll, Ordering::Release);
     }
 
     /// Whether the clock is holding position.

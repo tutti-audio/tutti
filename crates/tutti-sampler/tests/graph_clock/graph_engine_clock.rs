@@ -242,7 +242,7 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
         let mut spare = Some(spare);
         play(&engine, &t, 512, blocks, |i| {
             if fade && i == 20 {
-                ed.replace_or_swap(
+                ed.replace(
                     NodeKey(1),
                     spare.take().expect("once"),
                     Fade::new(Samples::new(4096)),

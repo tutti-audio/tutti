@@ -515,7 +515,7 @@ fn a_replace_on_a_removed_node_is_refused_naming_it() {
 /// units back. The call returns the key; the update that lands it sends
 /// `Replaced`.
 ///
-/// `Editor::replace_or_swap` refuses while re-preparing and consumes its unit, so
+/// `Editor::replace` refuses while re-preparing and consumes its unit, so
 /// without the wait the new unit would be lost.
 #[test]
 fn a_replace_during_a_re_prepare_lands_on_a_later_update() {

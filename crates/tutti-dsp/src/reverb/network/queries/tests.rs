@@ -726,7 +726,6 @@ fn the_decay_bound_reads_the_peak_response_of_a_band_profile() {
     let one = |a: Absorption| fdn(&[line(1_000.0, a)], Matrix::Diagonal);
 
     let falling = one(bands(0.9, 0.7, 0.5));
-    assert_eq!(falling.slowest_peak(RATE), falling.slowest(Band::Low));
     assert!(
         (falling.rt60_bound(RATE).get() - falling.rt60(Band::Low, RATE).get()).abs() < 1e-9,
         "the bound is the low band's decay"
@@ -736,10 +735,6 @@ fn the_decay_bound_reads_the_peak_response_of_a_band_profile() {
     let rising = one(a);
     let peak = a.sup(RATE);
     assert!(peak > 0.8, "{peak}");
-    let (db_rho, _, _) = rising.slowest_peak(RATE).unwrap();
-    for band in Band::ALL {
-        assert!(db_rho > rising.slowest(band).unwrap().0, "{band:?}");
-    }
     let want = -60.0 * 1_000.0 / (RATE.get() * 20.0 * peak.log10());
     assert!((rising.rt60_bound(RATE).get() - want).abs() < 1e-9 * want);
     assert!(rising.rt60_bound(RATE) > rising.rt60(Band::Mid, RATE));

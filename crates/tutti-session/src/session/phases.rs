@@ -196,6 +196,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // First of the landings, so what a take reported is in this update's
                 // events.
                 self.inputs.land_takes(out);
+                // A take's stop the transport's queue refused, sent now that
+                // the renders since have freed room.
+                #[cfg(feature = "capture")]
+                self.transport.handle.send_owed_stops();
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its

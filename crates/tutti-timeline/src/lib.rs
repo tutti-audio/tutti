@@ -2,8 +2,9 @@
 //! Musical time: where the playhead is, how fast it moves, and what moves it.
 //!
 //! Split by *who decides*. [`TransportSettings`] holds the plain values (tempo,
-//! loop region, recording) that anyone may store into; [`MotionFsm`] holds the
-//! state machine that may reject or defer a play/stop/locate. [`Transport`] is
+//! meter) that anyone may store into; [`MotionFsm`] holds the
+//! state machine that may reject or defer a play/stop/locate, and the loop
+//! region and takes recording that the engine owns. [`Transport`] is
 //! the two halves as one handle, and [`TransportAudio`] holds the engine's
 //! playhead, which the graph reads from each block's `Env`.
 //!
@@ -40,14 +41,17 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 pub use audio::{Applied, AudioTaken, TransportAudio};
 pub use handle::Transport;
 pub use loop_region::{LoopEdit, LoopRegion};
-pub use motion::{AfterLocate, FadeOut, MotionCommand, MotionFsm, MotionState};
+pub use motion::{AfterLocate, FadeOut, MotionCommand, MotionFsm, MotionState, Roll};
 pub use offline::{OfflineTimeline, OfflineTimelineConfig};
 pub use project_meter::{
     ProjectMeter, TimeSignatureCell, TimeSignatureSlot, TimeSignatureSlotReader,
 };
 pub use settings::TransportSettings;
 pub use tempo_reader::TempoReader;
-pub use timed::{IMMEDIATE_RESERVE, SCHEDULE_CAPACITY, Scheduled, TimedError, TransportCommand};
+pub use timed::{
+    IMMEDIATE_RESERVE, RECORDING_CAPACITY, Recording, SCHEDULE_CAPACITY, Scheduled, TakeId,
+    TimedError, TransportCommand,
+};
 
 pub use timeline::{OfflineClock, OfflineTransport, Timeline};
 pub use walk::UpcomingTempo;

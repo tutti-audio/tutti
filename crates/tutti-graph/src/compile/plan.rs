@@ -1778,7 +1778,7 @@ pub struct Delta {
     /// Replaces that crossfade rather than swap: each names a key in
     /// `replace`, at most once. `compile` never fills this — a fade is an
     /// edit, not part of the graph value — the editor attaches it (see
-    /// [`Editor::replace_or_swap`](crate::Editor::replace_or_swap)), and
+    /// [`Editor::replace`](crate::Editor::replace)), and
     /// [`Plan::verify_fades`] checks it.
     pub fades: Vec<(NodeKey, Fade)>,
     /// Kept units whose crossfade, running or waiting, is **cut**: every
