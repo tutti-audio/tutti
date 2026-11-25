@@ -188,6 +188,7 @@ impl<'a> Emitter<'a> {
             block: prepare.max_block().get(),
             program: Program {
                 ops: Table::default(),
+                node_op: Table::default(),
                 audio_list: Vec::new(),
                 event_list: Vec::new(),
                 param_ports: Vec::new(),
@@ -257,6 +258,11 @@ impl<'a> Emitter<'a> {
                 .collect::<Table<OpId, Vec<OpId>>>(),
         );
         self.program.sizing.feedback = feedback;
+        self.program.node_op = self
+            .node_ops
+            .into_iter()
+            .map(|op| op.expect("the order holds every unit"))
+            .collect();
         self.program
     }
 
