@@ -112,8 +112,15 @@ impl Shared {
         self.active.load(Ordering::Acquire)
     }
 
-    /// Records the activation. Under the claim (`live` proves it).
-    pub(crate) fn set_active(&self, _live: &ClaimGuard<'_, Live>, active: bool) {
+    /// Records an activation and the bus layout read with it, under the claim
+    /// (`live` proves it).
+    pub(crate) fn record_activation(
+        &self,
+        live: &mut ClaimGuard<'_, Live>,
+        active: bool,
+        buses: Option<Arrangement>,
+    ) {
+        live.state.buses = buses;
         self.active.store(active, Ordering::Release);
     }
 
@@ -462,7 +469,7 @@ mod tests {
         let shared = Arc::new(Shared::new(&ptr));
         {
             let mut live = shared.claim().expect("live");
-            shared.set_active(&live, true);
+            shared.record_activation(&mut live, true, None);
             live.state.setup = Some(Setup {
                 symbolic_size: width.symbolic_size(),
                 max_block,
@@ -512,8 +519,9 @@ mod tests {
         }
 
         fn set_active(&self, active: bool) {
-            let live = self.shared.claim().expect("live");
-            self.shared.set_active(&live, active);
+            let mut live = self.shared.claim().expect("live");
+            let buses = live.state.buses.take();
+            self.shared.record_activation(&mut live, active, buses);
         }
 
         fn processed(&self) -> usize {

@@ -219,14 +219,14 @@ impl Parts {
         // Deactivating is recorded whatever the plugin answers: there is no
         // third state to recover to, and teardown must not retry it.
         if result.is_ok() || !active {
-            self.shared.set_active(&live, active);
             // The layout `process` holds the bound buses to is read now, from
             // the plugin as it stands once active (it may settle its buses
             // only then), and forgotten on deactivation.
-            live.state.buses = (active && result.is_ok()).then(|| Arrangement {
+            let buses = (active && result.is_ok()).then(|| Arrangement {
                 inputs: self.audio_bus_channels(main, BusDirection::Input).into(),
                 outputs: self.audio_bus_channels(main, BusDirection::Output).into(),
             });
+            self.shared.record_activation(&mut live, active, buses);
         }
         result
     }
