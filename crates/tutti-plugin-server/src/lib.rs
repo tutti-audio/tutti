@@ -506,6 +506,14 @@ pub(crate) mod test_utils {
         clap_switch_until_drop(ClapSwitch::TailExtension, 0, 1)
     }
 
+    /// Make the reference plugin withhold `clap.render` until the returned
+    /// guard drops, which restores it. Call before loading: the host asks for
+    /// the plugin's extensions once, at load.
+    #[cfg(feature = "clap")]
+    pub(crate) fn clap_probe_without_render() -> Restore {
+        clap_switch_until_drop(ClapSwitch::RenderExtension, 0, 1)
+    }
+
     /// Absolute path to `tutti-clap-test-plugin`, the reference CLAP cdylib the
     /// loader tests drive.
     ///
