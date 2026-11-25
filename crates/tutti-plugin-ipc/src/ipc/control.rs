@@ -344,6 +344,11 @@ macro_rules! served_control {
                 out.append(&mut asked);
             }
 
+            /// The server answers the render mode it is told, later.
+            fn answers_later(&self) -> bool {
+                true
+            }
+
             /// What the server answered to the rate and render mode the host
             /// told it since the last call.
             fn take_answers(&mut self, _main: MainThreadMarker, out: &mut Vec<Told>) {
@@ -382,12 +387,12 @@ macro_rules! served_control {
                 let _ = self.link.events.wake.set(wake);
             }
 
-            /// `Served` from here wherever the plugin has a mode: the server
+            /// `Live` from here wherever the plugin has a mode: the server
             /// tells it or activates it again itself and answers, so the host
             /// never reactivates a served plugin for its mode.
             fn render_mode_support(&self, _main: MainThreadMarker) -> RenderModeSupport {
                 if self.link.loaded.features.contains(Features::RENDER_MODE) {
-                    RenderModeSupport::Served
+                    RenderModeSupport::Live
                 } else {
                     RenderModeSupport::Unsupported
                 }

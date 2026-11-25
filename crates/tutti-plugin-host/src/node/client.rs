@@ -745,6 +745,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             p.quantum().map(tutti_buffers::MaxBlock::samples),
         );
         self.pipeline = processor.latency();
+        self.inner.lock().retune_asked();
         if let Some(controls) = &self.controls {
             // What a host holding the controls reads as the declared latency
             // and stamps a source with.

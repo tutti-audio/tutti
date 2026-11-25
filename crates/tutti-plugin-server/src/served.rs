@@ -841,7 +841,7 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             return ModeOutcome::Refused;
         };
         match control.render_mode_support(main) {
-            RenderModeSupport::Live | RenderModeSupport::Served => {
+            RenderModeSupport::Live => {
                 let _ = self.drive(main, Event::Op(HostOp::SetMode(mode)));
                 if self
                     .state

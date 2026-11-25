@@ -24,6 +24,7 @@ enum Fx {
     Recall,
     Lend,
     SetMode(RenderMode),
+    Retune(SampleRate),
     Latency,
     Tail,
     Layout,
@@ -56,6 +57,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::Recall => Fx::Recall,
         Effect::Lend => Fx::Lend,
         Effect::SetMode(mode) => Fx::SetMode(*mode),
+        Effect::Retune(p) => Fx::Retune(p.rate()),
         Effect::ReadLatency => Fx::Latency,
         Effect::ReadTail => Fx::Tail,
         Effect::ReadLayout => Fx::Layout,
@@ -184,6 +186,7 @@ enum Kind {
     DeactivateOp,
     RelendOp,
     SetModeOp,
+    RetuneOp,
     Answered,
     Request,
     Tick,
@@ -201,6 +204,7 @@ fn kind(event: &Event) -> Kind {
         Event::Op(HostOp::Deactivate) => Kind::DeactivateOp,
         Event::Op(HostOp::Relend) => Kind::RelendOp,
         Event::Op(HostOp::SetMode(_)) => Kind::SetModeOp,
+        Event::Op(HostOp::Retune) => Kind::RetuneOp,
         Event::Answered(_) => Kind::Answered,
         Event::Request(_) => Kind::Request,
         Event::Tick => Kind::Tick,
@@ -1016,7 +1020,7 @@ fn rule_3_a_plugin_lost_during_a_rollback_tells_the_refusal_as_inactive() {
 
 /// **A retuning Processor is told its rate, not restarted, and its answer is
 /// what the plugin has**: the rate, block ceiling and callback size are not
-/// behind for a Processor that takes them live, a taken rate applies what the
+/// restarts for a Processor that takes them live, a taken rate applies what the
 /// retune takes, and a difference in the width still needs an activation.
 #[test]
 fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field_remains() {
@@ -1030,7 +1034,10 @@ fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field
         s.behind(false, RenderModeSupport::Unsupported),
         Behind::Restart
     );
-    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Retune
+    );
     let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_96K)));
     assert_eq!(s.applied(), Some(live));
 
@@ -1051,6 +1058,56 @@ fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field
         s.behind(true, RenderModeSupport::Unsupported),
         Behind::Restart,
         "the width still needs an activation"
+    );
+}
+
+/// **A retune is never dropped**: a Processor that retunes live and was not in
+/// hand when the host wanted another rate is brought back, told, lent again, and
+/// the rate is in flight, not asked again, until the plugin answers.
+#[test]
+fn rule_3_a_wanted_rate_the_processor_has_not_been_told_is_told_by_a_plan() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Retune
+    );
+    let (s, fx) = go(s, Event::Op(HostOp::Retune));
+    assert_eq!(fx, [Fx::Recall]);
+    let (s, fx) = reply(s, Reply::Lent);
+    assert!(fx.is_empty());
+    let (s, fx) = go(s, Event::Returned);
+    assert_eq!(fx, [Fx::Retune(SampleRate::SR_96K), Fx::Lend]);
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::No,
+        "told, and not told again while the answer is out"
+    );
+    let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_96K)));
+    assert_eq!(s.applied().map(|a| a.rate()), Some(SampleRate::SR_96K));
+    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
+}
+
+/// **A callback size alone restarts nothing, and no other field escapes**: a
+/// plugin whose Processor does not retune is behind in a rate, a block ceiling
+/// or a width, and not in a quantum or a smaller block ceiling.
+#[test]
+fn rule_3_only_the_callback_size_is_not_an_activation() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_quantum(MaxBlock::of(Samples::new(32))));
+    assert_eq!(s.behind(false, RenderModeSupport::Unsupported), Behind::No);
+    s.want(p.with_max_block(MaxBlock::of(Samples::new(32))));
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Unsupported),
+        Behind::No,
+        "a block ceiling at or below the one it was told restarts nothing"
+    );
+    s.want(p.with_max_block(MaxBlock::of(Samples::new(512))));
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Unsupported),
+        Behind::Restart
     );
 }
 
@@ -1721,7 +1778,7 @@ proptest! {
                     HostOp::Reconfigure(p) => want = Some(p),
                     HostOp::Deactivate => want = None,
                     HostOp::Activate(p) => want = want.or(Some(p)),
-                    HostOp::Relend | HostOp::SetMode(_) => {}
+                    HostOp::Relend | HostOp::SetMode(_) | HostOp::Retune => {}
                 }
             }
             match want {
@@ -1891,13 +1948,13 @@ fn a_live_mode_is_told_once_and_a_taken_answer_applies_it_without_a_restart() {
     let mut s = active(RESTARTS, p);
     s.want(offline);
     assert_eq!(
-        s.behind(false, RenderModeSupport::Served),
+        s.behind(false, RenderModeSupport::Live),
         Behind::Mode(RenderMode::Offline)
     );
     let (s, fx) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
     assert_eq!(fx, [Fx::SetMode(RenderMode::Offline)]);
     assert_eq!(
-        s.behind(false, RenderModeSupport::Served),
+        s.behind(false, RenderModeSupport::Live),
         Behind::No,
         "told, and not asked again while the answer is out"
     );

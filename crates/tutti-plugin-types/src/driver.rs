@@ -16,8 +16,8 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
-    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
-    PluginError, PluginWiring, Prepare, Rebuilt, Refused, RenderModeSupport, Reply, SampleRate,
+    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, MaxBlock, Notice,
+    PluginError, PluginWiring, Prepare, Processor, Rebuilt, Refused, Reply, SampleRate, Samples,
     State, Stuck, Told, step,
 };
 
@@ -259,6 +259,7 @@ impl<L: Loaded> Lifecycle<L> {
                     | Effect::Rebuild
                     | Effect::Recall
                     | Effect::SetMode(_)
+                    | Effect::Retune(_)
                     | Effect::ReadParams(_)
                     | Effect::RebuildMidiMapping
                     | Effect::RunMainThread
@@ -365,14 +366,28 @@ impl<L: Loaded> Lifecycle<L> {
             | Effect::Recall => {
                 unreachable!("transitions and moves are applied by `apply`")
             }
+            Effect::Retune(prepare) => {
+                if let Some(retune) = <L::Processor as Processor>::RETUNE
+                    && let Some(processor) = self.processor()
+                {
+                    retune(
+                        processor,
+                        prepare.rate(),
+                        Samples::new(prepare.max_block().get()),
+                        prepare.quantum().map(MaxBlock::samples),
+                    );
+                }
+                Reply::Done
+            }
             Effect::SetMode(mode) => match self.control() {
                 Some(control) => {
                     let told = control.set_render_mode(main, mode);
-                    match control.render_mode_support(main) {
-                        // The server answers later, as an event.
-                        RenderModeSupport::Served => Reply::Done,
-                        _ if told => Reply::Answered(Told::ModeTook(mode)),
-                        _ => Reply::Answered(Told::ModeRefused(mode)),
+                    if control.answers_later() {
+                        Reply::Asked
+                    } else if told {
+                        Reply::Answered(Told::ModeTook(mode))
+                    } else {
+                        Reply::Answered(Told::ModeRefused(mode))
                     }
                 }
                 None => Reply::NotActive,

@@ -380,9 +380,16 @@ pub trait Control: EditorWindow {
     /// read at its next activation, or not at all.
     fn render_mode_support(&self, main: MainThreadMarker) -> RenderModeSupport;
 
+    /// Whether the plugin answers the render mode it is told
+    /// ([`set_render_mode`](Self::set_render_mode)) later, through
+    /// [`take_answers`](Self::take_answers), and not in the call.
+    fn answers_later(&self) -> bool {
+        false
+    }
+
     /// Appends what the plugin answered, since the last call, to a setting it
-    /// was told without waiting (a served plugin's rate and render mode), oldest
-    /// first, to `out`. A plugin whose settings answer in the call has none.
+    /// was told without waiting (a rate its Processor retunes to, a render mode
+    /// it answers later), oldest first, to `out`.
     fn take_answers(&mut self, main: MainThreadMarker, out: &mut Vec<Told>) {
         let _ = (main, out);
     }
@@ -953,6 +960,10 @@ impl<W: Wraps> Control for W {
 
     fn take_requests(&mut self, main: MainThreadMarker, out: &mut Vec<Request>) {
         self.plugin_mut().take_requests(main, out);
+    }
+
+    fn answers_later(&self) -> bool {
+        self.plugin().answers_later()
     }
 
     fn take_answers(&mut self, main: MainThreadMarker, out: &mut Vec<Told>) {
