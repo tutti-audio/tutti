@@ -56,6 +56,18 @@ impl Stamp {
 /// same value.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
+#[cfg_attr(
+    not(any(
+        feature = "sampler",
+        feature = "midi",
+        feature = "soundfont",
+        feature = "plugin"
+    )),
+    expect(
+        unreachable_pub,
+        reason = "exported with the features whose loads report it"
+    )
+)]
 pub enum LoadError {
     /// A file could not be decoded.
     #[error(transparent)]

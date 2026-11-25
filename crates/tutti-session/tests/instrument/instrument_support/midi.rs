@@ -12,7 +12,7 @@ fn voice(channel: u8, voice: Voice1) -> Ump {
     ))
 }
 
-pub fn note_on(channel: u8, k: u8, velocity: u8) -> Ump {
+pub(crate) fn note_on(channel: u8, k: u8, velocity: u8) -> Ump {
     voice(
         channel,
         Voice1::NoteOn {
@@ -22,7 +22,7 @@ pub fn note_on(channel: u8, k: u8, velocity: u8) -> Ump {
     )
 }
 
-pub fn note_off(channel: u8, k: u8) -> Ump {
+pub(crate) fn note_off(channel: u8, k: u8) -> Ump {
     voice(
         channel,
         Voice1::NoteOff {
@@ -32,7 +32,7 @@ pub fn note_off(channel: u8, k: u8) -> Ump {
     )
 }
 
-pub fn cc(channel: u8, controller: u8, value: u8) -> Ump {
+pub(crate) fn cc(channel: u8, controller: u8, value: u8) -> Ump {
     voice(
         channel,
         Voice1::ControlChange {

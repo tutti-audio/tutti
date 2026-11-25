@@ -12,7 +12,7 @@ const BLOCK: usize = 8;
 ///
 /// A completed message is never longer than its assembler's limit, and a SysEx7
 /// one reads back as a framed message from the assembler's buffer.
-pub fn sysex_assemble(data: &[u8]) {
+pub(crate) fn sysex_assemble(data: &[u8]) {
     let [limit, lanes, rest @ ..] = data else {
         return;
     };

@@ -192,7 +192,7 @@ impl<'a> Batch<'a> {
 
 /// The sealed halves of the argument traits, named `Sealed` as a sealed trait is.
 mod seal {
-    pub mod stage {
+    pub(super) mod stage {
         use super::super::{Batch, Failure};
 
         /// An item or a collection of items a batch stages.
@@ -201,7 +201,7 @@ mod seal {
         }
     }
 
-    pub mod read {
+    pub(super) mod read {
         use super::super::{Batch, Failure};
 
         /// An item or a collection of reads a batch answers.
@@ -213,8 +213,8 @@ mod seal {
         }
     }
 }
-pub use seal::read::Sealed as Readable;
-pub use seal::stage::Sealed as Stageable;
+pub(super) use seal::read::Sealed as Readable;
+pub(super) use seal::stage::Sealed as Stageable;
 
 /// What [`Session::set`](crate::Session::set) takes: an
 /// [`Assign`], a [`Modify`] or an [`AnyAssign`], or tuples of up to 12 of them (nested

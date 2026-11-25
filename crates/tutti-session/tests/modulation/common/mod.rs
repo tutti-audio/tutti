@@ -6,11 +6,11 @@ use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_session::Session;
 use tutti_units::Samples;
 
-pub mod bands;
-pub mod probe;
+pub(crate) mod bands;
+pub(crate) mod probe;
 
 /// A stereo offline session with 256-frame blocks.
-pub fn session() -> Session {
+pub(crate) fn session() -> Session {
     Session::builder()
         .outputs(ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples::new(256)))
@@ -19,7 +19,7 @@ pub fn session() -> Session {
 }
 
 /// Output channel 0 (the left of the stereo main output) for `blocks` blocks of `block` frames.
-pub fn render(s: &mut Session, blocks: usize, block: usize) -> Vec<f32> {
+pub(crate) fn render(s: &mut Session, blocks: usize, block: usize) -> Vec<f32> {
     let mut all = Vec::new();
     let mut buf = vec![0.0f32; block * 2];
     for _ in 0..blocks {

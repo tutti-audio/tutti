@@ -8,11 +8,11 @@ mod crossover;
 mod cut;
 mod envelope;
 mod eq;
-pub mod eq_band;
+pub(crate) mod eq_band;
 mod graphic_eq;
-pub mod ladder;
+pub(crate) mod ladder;
 mod ramped;
-pub mod svf;
+pub(crate) mod svf;
 mod tilt;
 
 pub use bell::{BellFilterConfig, BellFilterKernel, BellFilterNode, BellFilterSet};
@@ -47,21 +47,21 @@ pub(super) mod test_utils {
     use tutti_graph::Node;
     use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
-    pub use signal::rms;
+    pub(crate) use signal::rms;
 
     /// The frequency of bin `m` of the 8192-frame window the levels are read over: a sine
     /// there has whole cycles in it, so its RMS is exact.
-    pub fn bin(m: u32) -> f64 {
+    pub(crate) fn bin(m: u32) -> f64 {
         crate::test_support::RATE.get() * f64::from(m) / 8192.0
     }
 
     /// The amplitude of a sine whose samples are `x`.
-    pub fn level(x: &[f32]) -> f64 {
+    pub(crate) fn level(x: &[f32]) -> f64 {
         rms(x) * 2f64.sqrt()
     }
 
     /// `input` through `node` in blocks of 1024.
-    pub fn render(node: &mut dyn Node, input: &[f32]) -> Vec<f32> {
+    pub(crate) fn render(node: &mut dyn Node, input: &[f32]) -> Vec<f32> {
         input
             .chunks(1024)
             .flat_map(|c| crate::test_support::drive_block(node, &[c]).remove(0))
@@ -70,7 +70,7 @@ pub(super) mod test_utils {
 
     /// The first frame from which the tail sum of the `f64` impulse response of `section`
     /// (transposed direct form II, never the kernel's realization) is at most the floor.
-    pub fn ring_at(section: &tutti_dsp::Biquad) -> usize {
+    pub(crate) fn ring_at(section: &tutti_dsp::Biquad) -> usize {
         let b = section;
         let mut z = [0.0f64; 2];
         let h: Vec<f64> = (0..1 << 21)
@@ -94,14 +94,14 @@ pub(super) mod test_utils {
     }
 
     /// The gain of the settled half of a unit sine at `f` through `node`, prepared.
-    pub fn gain<N: Node>(node: N, f: f64) -> f64 {
+    pub(crate) fn gain<N: Node>(node: N, f: f64) -> f64 {
         let mut node = crate::test_support::prepared(node);
         let out = render(&mut node, &generate_sine(f, 48_000.0, 16_384));
         level(&out[8_192..])
     }
 
     /// `signal::sine` at unit amplitude, for a test that holds bare numbers.
-    pub fn generate_sine(freq: f64, sample_rate: f32, num_samples: usize) -> Vec<f32> {
+    pub(crate) fn generate_sine(freq: f64, sample_rate: f32, num_samples: usize) -> Vec<f32> {
         signal::sine(
             Hz::new(freq),
             Amplitude::new(1.0),

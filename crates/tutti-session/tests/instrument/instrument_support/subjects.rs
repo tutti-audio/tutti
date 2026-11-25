@@ -11,7 +11,7 @@ use super::cases::{Chunks, Gap, Subject};
 use super::rig::{RATE, Rig, offline_session};
 
 /// `PolySynth`: a saw, a 1 ms attack and a 50 ms release.
-pub struct Poly;
+pub(crate) struct Poly;
 
 impl Subject for Poly {
     const NAME: &'static str = "PolySynth";
@@ -43,7 +43,7 @@ impl Subject for Poly {
 }
 
 /// The SoundFont unit over the repository's test font, the first preset.
-pub struct Soundfont;
+pub(crate) struct Soundfont;
 
 impl Subject for Soundfont {
     const NAME: &'static str = "SoundFontUnit";
@@ -73,11 +73,11 @@ impl Subject for Soundfont {
 /// that outputs `key + 1000 * channel` while a note is held. The mode is a word
 /// in the state it is loaded with, as the plugin contract requires: no
 /// environment variable, symbol or process global. In a real `plugin-server`.
-pub struct Plugin;
+pub(crate) struct Plugin;
 
 impl Plugin {
     /// A session and the plugin it loaded, in the graph.
-    pub fn load(
+    pub(crate) fn load(
         path: std::path::PathBuf,
         state: Option<Vec<u8>>,
     ) -> (
@@ -100,14 +100,14 @@ impl Plugin {
 
     /// The state that puts the shared plugin in `Notes` mode: its mode
     /// parameter set, saved (`core.rs`, "State").
-    pub fn notes_state() -> Vec<u8> {
+    pub(crate) fn notes_state() -> Vec<u8> {
         let core = tutti_shared_plugin::core::Core::new();
         core.set_param(tutti_shared_plugin::core::MODE, 3.0 / 4.0);
         core.save()
     }
 
     /// The shared plugin, state in `Notes` mode.
-    pub fn notes() -> (
+    pub(crate) fn notes() -> (
         tutti_session::Session,
         tutti_session::Key<tutti_session::AnyPlugin>,
     ) {
@@ -119,7 +119,7 @@ impl Plugin {
     }
 
     /// The reference probe, which declares itself an effect.
-    pub fn effect() -> (
+    pub(crate) fn effect() -> (
         tutti_session::Session,
         tutti_session::Key<tutti_session::AnyPlugin>,
     ) {

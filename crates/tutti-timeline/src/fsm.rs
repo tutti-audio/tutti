@@ -192,7 +192,7 @@ impl From<Settled> for TransportFsm {
 
 impl TransportFsm {
     /// The published projection of the machine.
-    pub fn motion(&self) -> MotionState {
+    pub(crate) fn motion(&self) -> MotionState {
         match *self {
             Self::Stopped => MotionState::Stopped,
             Self::Rolling => MotionState::Rolling,
@@ -211,7 +211,7 @@ impl TransportFsm {
     /// The fade reached zero: rest where it was heading, and return its
     /// outcome. `None` when no fade is in flight, so a second call after the
     /// same fade changes nothing.
-    pub fn complete_declick(&mut self) -> Option<DeclickOutcome> {
+    pub(crate) fn complete_declick(&mut self) -> Option<DeclickOutcome> {
         let Self::Fading { into } = *self else {
             return None;
         };
@@ -244,7 +244,7 @@ impl TransportFsm {
 
     /// Applies `command`, returning what changed or `None` if the machine
     /// refused it.
-    pub fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
+    pub(crate) fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
         match command {
             MotionCommand::Play => match self {
                 Self::Rolling => None,

@@ -4,7 +4,7 @@ use tutti_midi_file::{ClipFile, MidiFile, StandardMidiFile, Timebase};
 ///
 /// A file that reads writes, and what it writes reads back equal to it (the
 /// crate's lossless promise); its events, timeline and tempo maps answer without a panic.
-pub fn midi_file_read(data: &[u8]) {
+pub(crate) fn midi_file_read(data: &[u8]) {
     let Ok(file) = MidiFile::from_bytes(data) else {
         return;
     };

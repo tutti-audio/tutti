@@ -62,7 +62,7 @@ pub(crate) struct Seg {
 impl Seg {
     /// The segment from `beat0`, spanning `dbeats` to a next tempo of `r1`
     /// (`INFINITY` beats for the last segment).
-    pub fn new(
+    pub(crate) fn new(
         beat0: Beat,
         sec0: Seconds,
         bpm0: Bpm,
@@ -101,14 +101,14 @@ impl Seg {
     /// Whether the closed forms agree with themselves over the whole segment:
     /// the duration is finite and positive and the forward and inverse maps
     /// meet at the far end. An overflowing square or quotient fails it.
-    pub fn is_sound(&self, dbeats: BeatDuration) -> bool {
+    pub(crate) fn is_sound(&self, dbeats: BeatDuration) -> bool {
         let back = self.sec_in(dbeats).get();
         let dsec = self.dsec.get();
         dsec.is_finite() && dsec > 0.0 && self.law.is_finite() && (back - dsec).abs() <= 1e-9 * dsec
     }
 
     /// Time into the segment at `db` beats in.
-    pub fn sec_in(&self, db: BeatDuration) -> Seconds {
+    pub(crate) fn sec_in(&self, db: BeatDuration) -> Seconds {
         Seconds::new(self.raw_sec_in(db.get()))
     }
 
@@ -124,7 +124,7 @@ impl Seg {
     }
 
     /// Beats into the segment at `ds` in.
-    pub fn beat_in(&self, ds: Seconds) -> BeatDuration {
+    pub(crate) fn beat_in(&self, ds: Seconds) -> BeatDuration {
         BeatDuration::new(self.raw_beat_in(ds.get()))
     }
 
@@ -148,7 +148,7 @@ impl Seg {
 
     /// Tempo `ds` in. Written as the given tempo plus a change, so offset 0 is
     /// that tempo to the bit.
-    pub fn bpm_at_sec(&self, ds: Seconds) -> Bpm {
+    pub(crate) fn bpm_at_sec(&self, ds: Seconds) -> Bpm {
         let ds = ds.get();
         if ds < 0.0 {
             return self.bpm0;
@@ -164,7 +164,7 @@ impl Seg {
     /// Tempo in BPM `db` beats in. As [`bpm_at_sec`](Self::bpm_at_sec); the
     /// time ramp's `sqrt(r0^2 + 2 a db) - r0` is `2 a db / (sqrt(..) + r0)`,
     /// which does not cancel.
-    pub fn bpm_at_beat(&self, db: BeatDuration) -> Bpm {
+    pub(crate) fn bpm_at_beat(&self, db: BeatDuration) -> Bpm {
         let db = db.get();
         if db < 0.0 {
             return self.bpm0;

@@ -238,7 +238,6 @@ tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::new
 
 # tutti-timeline
 tutti-timeline  setter  crates/tutti-timeline/src/audio.rs::TransportAudio::set_playhead
-tutti-timeline  setter  crates/tutti-timeline/src/clock.rs::TransportClock::set_sample_rate
 tutti-timeline  setter  crates/tutti-timeline/src/handle.rs::Transport::set_sample_rate
 tutti-timeline  setter  crates/tutti-timeline/src/project_meter.rs::ProjectMeter::set_meter
 tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_in_preroll

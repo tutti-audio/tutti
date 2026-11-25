@@ -283,8 +283,6 @@ fn graph::Graph::set_sources
 fn graph::Graph::sources
 fn graph::Graph::taps
 fn graph::Graph::widen_outputs
-fn graph::RenderWorkerStart::call
-fn graph::RenderWorkerStart::new
 fn graph::Replacement::fade
 fn graph::Replacement::new
 fn graph::observe::Graph::take_reopened
@@ -848,8 +846,6 @@ fn watch::Follow::not_started
 fn watch::Follow::running
 fn watch::Follow::step
 fn watch::Follow::want
-mod value::batch::seal::read
-mod value::batch::seal::stage
 struct analyze::Analyze
 struct analyze::feed::Chunk
 struct analyze::live::Analyzer
@@ -985,7 +981,6 @@ struct plugin::op::InProcessOp
 struct plugin::op::OutOfProcessOp
 struct plugin::opened::PluginInfo
 struct plugin::opened::PluginPorts
-struct plugin::opened::Shared
 struct plugin::preset::LoadPresetOp
 struct plugin::preset::LoadedPreset
 struct plugin::state::RestoreStateOp
@@ -1044,10 +1039,7 @@ struct value::saved::SavedValues
 struct value::slot::ClickTargets
 struct value::slot::SettingTarget
 struct value::slot::SettingWord
-struct value::state::Held
 struct value::state::Params
-struct value::state::ValueState
-struct value::state::ValueTable
 struct value::state::Values
 struct value::target::AnyAssign
 struct value::target::AnyTarget
@@ -1111,10 +1103,8 @@ trait value::batch::seal::stage::Sealed
 trait value::plugin::PluginUnit
 trait value::plugin::unit_sealed::Sealed
 trait value::slot::Slot
-trait value::target::Erased
 trait value::target::Modulatable
 trait value::target::ScalarTarget
-trait value::target::Staged
 trait value::target::Target
 trait value::target::sealed::Lane
 trait value::target::sealed::Sealed
@@ -1142,4 +1132,3 @@ type plugin::state::SaveState
 type plugin::state::SaveStateInProcess
 type plugin::state::SaveStateOutOfProcess
 type sampler::OpeningStream
-type value::slot::SlotCell

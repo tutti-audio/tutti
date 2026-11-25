@@ -7,7 +7,7 @@ use tutti_ump::MidiGroup;
 /// A decoded message re-encodes to a payload that decodes to the same message
 /// and encodes to the same bytes (reserved bits and trailing bytes are not
 /// kept); a payload that is CI but unreadable has a NAK or none.
-pub fn ci_decode(data: &[u8]) {
+pub(crate) fn ci_decode(data: &[u8]) {
     match CiMessage::decode(data) {
         Decoded::Message(message) => {
             let _ = (message.header(), message.destination(), message.sub_id2());
