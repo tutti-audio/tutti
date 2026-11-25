@@ -1,15 +1,15 @@
 //! Dither, measured end to end through a real encoder.
 //!
-//! The unit tests in `process/dither.rs` check the *shape* of the stage — that
-//! `Float32` is skipped, that the LSB matches the depth, that noise stays within
-//! one LSB. What none of them ask is whether the two modes actually differ, or
-//! whether each has the distribution its name claims. `Rectangular` and
-//! `Triangular` are distinguishable only by their statistics, so a mode that
-//! silently fell through to the other would pass every existing test.
+//! The quantizer's own tests (`tutti-dsp`) check the *shape* of the stage — that the LSB
+//! matches the depth and that noise stays within one LSB. What none of them ask is
+//! whether the two modes actually differ through a real file, or whether each has the
+//! distribution its name claims. `Rectangular` and `Triangular` are distinguishable only by
+//! their statistics, so a mode that silently fell through to the other would pass every
+//! other test.
 //!
 //! # Why this is deterministic
 //!
-//! The RNG is a fixed-seed `SplitMix64` (`0x12345678`, `tutti-dsp`'s `DitherNoise::new`) advanced
+//! The RNG is a `SplitMix64` seeded from the output's index (`SplitMix64::mix(0)` for a lone file) advanced
 //! continuously across blocks and channels. Same config in, same file out — so
 //! these assertions are exact and reproducible, not sampled with a flaky margin.
 //! That also means the seed is load-bearing: reseeding per block would correlate
@@ -28,6 +28,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{RenderGraph, Setup};
@@ -85,7 +86,7 @@ fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
 fn render_i16(dither: Option<DitherShape>, level: f32, path: &std::path::Path) -> Vec<i32> {
     render_to_file(
         dc_graph(level),
-        &config(dither, Pcm::Int16),
+        &config(dither, Pcm::Int(IntPcm::new(IntDepth::Int16))),
         &FrozenClock,
         path,
     )
@@ -299,45 +300,6 @@ fn triangular_noise_carries_more_variance_than_rectangular() {
     );
 }
 
-/// Float output is never dithered, at any mode.
-///
-/// Dither decorrelates *quantization* error and a float export does not
-/// quantize. Pinned end to end because the unit test covers the state object,
-/// not the file: a stage added later that dithered before the float write would
-/// leave that test green.
-#[test]
-fn float32_output_is_never_dithered_at_any_mode() {
-    let d = tempfile::tempdir().unwrap();
-    let level = 0.25f32;
-
-    for mode in [
-        None,
-        Some(DitherShape::Rectangular),
-        Some(DitherShape::Triangular),
-    ] {
-        let path = d.path().join(format!("f32_{mode:?}.wav"));
-        render_to_file(
-            dc_graph(level),
-            &config(mode, Pcm::Float32),
-            &FrozenClock,
-            &path,
-        )
-        .unwrap();
-
-        let samples: Vec<f32> = hound::WavReader::open(&path)
-            .unwrap()
-            .into_samples::<f32>()
-            .map(|s| s.unwrap())
-            .collect();
-
-        assert!(
-            samples.iter().all(|&s| s == level),
-            "{mode:?}: float output must be bit-exact, found {} != {level}",
-            samples.iter().find(|&&s| s != level).unwrap()
-        );
-    }
-}
-
 /// The noise stays inside one LSB of the depth actually being written.
 ///
 /// At 24-bit the LSB is 256x smaller than at 16-bit, so a dither that computed
@@ -351,7 +313,10 @@ fn noise_scales_with_the_target_bit_depth() {
 
     render_to_file(
         dc_graph(level),
-        &config(Some(DitherShape::Triangular), Pcm::Int24),
+        &config(
+            Some(DitherShape::Triangular),
+            Pcm::Int(IntPcm::new(IntDepth::Int24)),
+        ),
         &FrozenClock,
         &path,
     )

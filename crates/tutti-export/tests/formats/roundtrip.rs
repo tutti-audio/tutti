@@ -29,6 +29,8 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
@@ -63,7 +65,7 @@ fn dc_graph(level: f32) -> RenderGraph {
 /// FLAC at an integer `pcm` width.
 fn flac(pcm: Pcm) -> Format {
     Format::Flac {
-        depth: pcm.int_depth().expect("FLAC holds integer widths only"),
+        pcm: pcm.int_pcm().expect("FLAC holds integer widths only"),
         level: FlacLevel::default(),
     }
 }
@@ -94,12 +96,14 @@ fn config(format: Format) -> ExportConfig {
 /// through; anything tighter would fail on correct code.
 fn lsb(bit_depth: Pcm) -> f32 {
     match bit_depth {
-        Pcm::Int16 => 1.0 / 32_768.0,
-        Pcm::Int24 => 1.0 / 8_388_608.0,
+        Pcm::Int(pcm) => match pcm.depth() {
+            IntDepth::Int16 => 1.0 / 32_768.0,
+            IntDepth::Int24 => 1.0 / 8_388_608.0,
+        },
         // Exact in practice; kept for the table.
-        Pcm::Float32 | Pcm::Float64 => 1.0 / 8_388_608.0,
+        Pcm::Float(FloatWidth::F32 | FloatWidth::F64) => 1.0 / 8_388_608.0,
         // No `_` arm: `Pcm` is deliberately not `#[non_exhaustive]`, so a
-        // fourth depth must fail to compile here rather than pick up a silent
+        // new type must fail to compile here rather than pick up a silent
         // default. See the enum's docs.
     }
 }
@@ -140,7 +144,11 @@ fn read_wav(path: &std::path::Path) -> (hound::WavSpec, Vec<f32>) {
 fn a_wav_round_trips_its_samples_at_every_depth() {
     let d = tempfile::tempdir().unwrap();
 
-    for bit_depth in [Pcm::Int16, Pcm::Int24, Pcm::Float32] {
+    for bit_depth in [
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+        Pcm::Int(IntPcm::new(IntDepth::Int24)),
+        Pcm::Float(FloatWidth::F32),
+    ] {
         // Deliberately not a round binary fraction: 0.5 is exactly representable
         // at every depth and would hide a rounding-versus-truncation difference,
         // which is precisely one of the bugs this file is meant to catch.
@@ -182,7 +190,10 @@ fn a_wav_round_trips_its_samples_at_every_depth() {
 fn full_scale_does_not_wrap() {
     let d = tempfile::tempdir().unwrap();
 
-    for bit_depth in [Pcm::Int16, Pcm::Int24] {
+    for bit_depth in [
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+        Pcm::Int(IntPcm::new(IntDepth::Int24)),
+    ] {
         for level in [1.0f32, -1.0] {
             let path = d.path().join(format!("fs_{bit_depth:?}_{level}.wav"));
             let cfg = config(Format::Wav(bit_depth));
@@ -210,13 +221,13 @@ fn out_of_range_input_clamps_to_the_rail() {
 
     for (level, expect) in [(1.8f32, 1.0f32), (-1.8, -1.0)] {
         let path = d.path().join(format!("clamp_{level}.wav"));
-        let cfg = config(Format::Wav(Pcm::Int16));
+        let cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
         render_to_file(dc_graph(level), &cfg, &FrozenClock, &path).unwrap();
 
         let (_, samples) = read_wav(&path);
         for (i, &s) in samples.iter().enumerate() {
             assert!(
-                (s - expect).abs() <= lsb(Pcm::Int16),
+                (s - expect).abs() <= lsb(Pcm::Int(IntPcm::new(IntDepth::Int16))),
                 "{level} should clamp to {expect}, sample {i} came back as {s}"
             );
         }
@@ -242,7 +253,7 @@ fn wav_and_flac_quantize_a_sample_identically() {
     let wav_path = d.path().join("q.wav");
     render_to_file(
         dc_graph(level),
-        &config(Format::Wav(Pcm::Int16)),
+        &config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
         &FrozenClock,
         &wav_path,
     )
@@ -252,7 +263,7 @@ fn wav_and_flac_quantize_a_sample_identically() {
     let flac_path = d.path().join("q.flac");
     render_to_file(
         dc_graph(level),
-        &config(flac(Pcm::Int16)),
+        &config(flac(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
         &FrozenClock,
         &flac_path,
     )
@@ -294,14 +305,14 @@ fn a_mono_graph_upmixed_to_quad_puts_signal_only_in_the_front_pair() {
     let id = g.add(Const::mono(0.5));
     g.pipe_output(id);
 
-    let mut cfg = config(Format::Wav(Pcm::Int24));
+    let mut cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))));
     cfg.encode.channels = ChannelLayout::QUAD;
     render_to_file(built(g), &cfg, &FrozenClock, &path).unwrap();
 
     let (spec, samples) = read_wav(&path);
     assert_eq!(spec.channels, 4);
 
-    let tol = lsb(Pcm::Int24);
+    let tol = lsb(Pcm::Int(IntPcm::new(IntDepth::Int24)));
     for (i, frame) in samples.as_chunks::<4>().0.iter().enumerate() {
         for (c, &s) in frame.iter().enumerate().take(2) {
             assert!(
@@ -331,7 +342,7 @@ fn a_resampled_export_preserves_the_signal_not_just_the_frame_count() {
 
     for target in [48_000.0f64, 22_050.0] {
         let path = d.path().join(format!("rs_{target}.wav"));
-        let mut cfg = config(Format::Wav(Pcm::Int24));
+        let mut cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))));
         cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
             target,
         )));
@@ -374,7 +385,7 @@ fn written_frames_is_what_the_file_holds() {
 
     for target in [None, Some(48_000.0f64), Some(22_050.0)] {
         let path = d.path().join(format!("frames_{target:?}.wav"));
-        let mut cfg = config(Format::Wav(Pcm::Int16));
+        let mut cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
         cfg.render.duration_seconds = Seconds::new(0.25);
         if let Some(rate) = target {
             cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(

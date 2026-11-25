@@ -53,6 +53,9 @@ use tutti_units::Seconds;
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{RenderGraph, Setup};
@@ -243,7 +246,7 @@ fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f64, cents: f6
     let path = dir.join(format!("{name}.wav"));
     render_to_file(
         graph,
-        &config(Format::Wav(Pcm::Float32)),
+        &config(Format::Wav(Pcm::Float(FloatWidth::F32))),
         clock.as_ref(),
         &path,
     )
@@ -380,7 +383,7 @@ fn a_sampler_render_survives_integer_quantization() {
     let (graph, clock) = voice_graph(1.0, 1200.0);
     let path = d.path().join("int16.wav");
 
-    let mut cfg = config(Format::Wav(Pcm::Int16));
+    let mut cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
     cfg.dither = Some(DitherShape::Triangular); // the default a real export uses
 
     render_to_file(graph, &cfg, clock.as_ref(), &path).unwrap();

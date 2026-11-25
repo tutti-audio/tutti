@@ -6,8 +6,10 @@
 //! and the figure.
 
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
-use tutti_dsp::DitherShape;
 use tutti_export::{EventLossPolicy, FileTarget, Rendered, Resample, write_buffers};
 use tutti_units::SampleRate;
 
@@ -18,22 +20,16 @@ const HEADER: usize = 68;
 fn write<F: tutti_dsp::FftFloat>(
     planes: Vec<Vec<F>>,
     format: Format,
-    dither: Option<DitherShape>,
 ) -> (Vec<u8>, tutti_export::Written) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.wav");
     let rendered = Rendered::new(planes, RATE, 0).unwrap();
     let target = FileTarget::new(&path, format, ChannelLayout::STEREO);
-    let target = match dither {
-        Some(shape) => target.dither(shape),
-        None => target.no_dither(),
-    };
     let written = write_buffers(&rendered, &target, EventLossPolicy::Fail).unwrap();
     (std::fs::read(&path).unwrap(), written)
 }
 
-/// A float file takes the float input bit for bit, whatever dither was asked
-/// for: values past full scale, a subnormal and a negative zero included.
+/// A float file takes the float input bit for bit: values past full scale, a subnormal and a negative zero included.
 #[test]
 fn an_f32_file_gets_the_f32_input_bit_for_bit() {
     let left = vec![
@@ -45,30 +41,23 @@ fn an_f32_file_gets_the_f32_input_bit_for_bit() {
         0.333_333_34,
     ];
     let right = vec![0.25f32, 1.0, -1.0, -3.0, 1.0e-30, 0.999_999_9];
-    for dither in [
-        None,
-        Some(DitherShape::Rectangular),
-        Some(DitherShape::Triangular),
-    ] {
-        let (bytes, written) = write(
-            vec![left.clone(), right.clone()],
-            Format::Wav(Pcm::Float32),
-            dither,
-        );
-        assert_eq!(written.clipped_samples, 0, "a float file clips nothing");
-        let got: Vec<u32> = bytes[HEADER..]
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| u32::from_le_bytes(*b))
-            .collect();
-        let want: Vec<u32> = left
-            .iter()
-            .zip(&right)
-            .flat_map(|(l, r)| [l.to_bits(), r.to_bits()])
-            .collect();
-        assert_eq!(got, want, "{dither:?}");
-    }
+    let (bytes, written) = write(
+        vec![left.clone(), right.clone()],
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+    );
+    assert_eq!(written.clipped_samples, 0, "a float file clips nothing");
+    let got: Vec<u32> = bytes[HEADER..]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| u32::from_le_bytes(*b))
+        .collect();
+    let want: Vec<u32> = left
+        .iter()
+        .zip(&right)
+        .flat_map(|(l, r)| [l.to_bits(), r.to_bits()])
+        .collect();
+    assert_eq!(got, want);
 }
 
 /// An f64 render written to an f64 WAV comes back exactly: the header says 64
@@ -79,8 +68,7 @@ fn an_f64_render_to_an_f64_wav_round_trips_exactly() {
     let right = vec![f64::MIN_POSITIVE, -0.0, 0.5 - f64::EPSILON, -7.0, 1.0 / 7.0];
     let (bytes, written) = write(
         vec![left.clone(), right.clone()],
-        Format::Wav(Pcm::Float64),
-        Some(DitherShape::Triangular),
+        Format::Wav(Pcm::Float(FloatWidth::F64)),
     );
     assert_eq!(written.clipped_samples, 0);
     assert_eq!(&bytes[..4], b"RIFF");
@@ -117,8 +105,7 @@ fn a_full_scale_square_to_i16_is_max_or_min_and_counts_its_peaks() {
     let positive = square.iter().filter(|&&s| s >= 1.0).count() as u64;
     let (bytes, written) = write(
         vec![square.clone(), square.clone()],
-        Format::Wav(Pcm::Int16),
-        None,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
     );
     // Two channels hold the same square.
     assert_eq!(written.clipped_samples, 2 * positive);
@@ -142,8 +129,7 @@ fn an_f64_render_converts_to_integers_by_the_rule() {
     let plane = vec![0.5f64, -0.5, 0.25, -1.0];
     let (bytes, written) = write(
         vec![plane.clone(), plane.clone()],
-        Format::Wav(Pcm::Int16),
-        None,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
     );
     assert_eq!(written.clipped_samples, 0);
     let got: Vec<i16> = bytes[44..]
@@ -157,7 +143,10 @@ fn an_f64_render_converts_to_integers_by_the_rule() {
         [16384, 16384, -16384, -16384, 8192, 8192, -32768, -32768]
     );
 
-    let (bytes, _) = write(vec![plane.clone(), plane], Format::Wav(Pcm::Int24), None);
+    let (bytes, _) = write(
+        vec![plane.clone(), plane],
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
+    );
     let sample = |at: usize| {
         let b = &bytes[HEADER + 3 * at..HEADER + 3 * at + 3];
         i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8
@@ -185,8 +174,12 @@ fn an_f64_resample_holds_f64_precision_against_the_analytic_sine() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.wav");
     let rendered = Rendered::new(vec![plane.clone(), plane], RATE, 0).unwrap();
-    let target = FileTarget::new(&path, Format::Wav(Pcm::Float64), ChannelLayout::STEREO)
-        .resample(Resample::to(OUT));
+    let target = FileTarget::new(
+        &path,
+        Format::Wav(Pcm::Float(FloatWidth::F64)),
+        ChannelLayout::STEREO,
+    )
+    .resample(Resample::to(OUT));
     write_buffers(&rendered, &target, EventLossPolicy::Fail).unwrap();
 
     let bytes = std::fs::read(&path).unwrap();

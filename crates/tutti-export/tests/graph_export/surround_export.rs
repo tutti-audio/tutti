@@ -15,6 +15,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use tutti_buffers::Bed;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_units::Azimuth;
@@ -38,7 +39,7 @@ fn export(g: GraphBuilder, layout: ChannelLayout, secs: f64, path: &std::path::P
                 ..Default::default()
             },
             encode: EncodeConfig {
-                format: tutti_codec::Format::Wav(tutti_codec::Pcm::Float32),
+                format: tutti_codec::Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)),
                 channels: layout,
                 ..Default::default()
             },

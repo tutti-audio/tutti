@@ -5,6 +5,9 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::{render_normalized_to_file, render_to_file};
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Normalize, RenderGraph, Setup};
@@ -65,22 +68,40 @@ fn the_samples_the_quantizer_clamps_are_counted() {
     let path = dir.path().join("clip.wav");
     let frames = 4_800u64;
 
-    let over = render_to_file(dc(1.2), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
+    let over = render_to_file(
+        dc(1.2),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+        &FrozenClock,
+        &path,
+    )
+    .unwrap();
     assert_eq!(over.clipped_samples, 2 * frames);
 
-    let at = render_to_file(dc(1.0), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
+    let at = render_to_file(
+        dc(1.0),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+        &FrozenClock,
+        &path,
+    )
+    .unwrap();
     assert_eq!(at.clipped_samples, 2 * frames, "+1.0 is past the top step");
 
     let top = render_to_file(
         dc(32_767.0 / 32_768.0),
-        &config(Pcm::Int16, None),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
         &FrozenClock,
         &path,
     )
     .unwrap();
     assert_eq!(top.clipped_samples, 0, "the top step is not clipping");
 
-    let float = render_to_file(dc(1.2), &config(Pcm::Float32, None), &FrozenClock, &path).unwrap();
+    let float = render_to_file(
+        dc(1.2),
+        &config(Pcm::Float(FloatWidth::F32), None),
+        &FrozenClock,
+        &path,
+    )
+    .unwrap();
     assert_eq!(float.clipped_samples, 0, "a float file stores 1.2 as it is");
 }
 
@@ -104,7 +125,10 @@ fn max_code(path: &std::path::Path) -> i64 {
 fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("zero.wav");
-    for (pcm, bits) in [(Pcm::Int16, 16u32), (Pcm::Int24, 24)] {
+    for (pcm, bits) in [
+        (Pcm::Int(IntPcm::new(IntDepth::Int16)), 16u32),
+        (Pcm::Int(IntPcm::new(IntDepth::Int24)), 24),
+    ] {
         for (dither, lsbs) in [
             (None, 1.0f64),
             (Some(DitherShape::Rectangular), 1.5),
@@ -152,8 +176,13 @@ fn an_infinity_is_a_clip_and_a_nan_is_not() {
         (f32::INFINITY, 2 * 4_800),
         (f32::NEG_INFINITY, 2 * 4_800),
     ] {
-        let written =
-            render_to_file(dc(value), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
+        let written = render_to_file(
+            dc(value),
+            &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+            &FrozenClock,
+            &path,
+        )
+        .unwrap();
         assert_eq!(written.clipped_samples, counted, "{value}");
     }
 }
@@ -167,7 +196,10 @@ fn a_shaped_zero_dbtp_export_leaves_the_feedback_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("shaped.wav");
     let gain = tutti_dsp::NoiseShaping::new(RATE).feedback_gain().get();
-    for (pcm, bits) in [(Pcm::Int16, 16u32), (Pcm::Int24, 24)] {
+    for (pcm, bits) in [
+        (Pcm::Int(IntPcm::new(IntDepth::Int16)), 16u32),
+        (Pcm::Int(IntPcm::new(IntDepth::Int24)), 24),
+    ] {
         for (dither, peak) in [
             (None, 0.0),
             (Some(DitherShape::Rectangular), 0.5),

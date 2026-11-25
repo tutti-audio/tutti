@@ -12,6 +12,7 @@
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Produced,
@@ -77,7 +78,7 @@ fn main() -> tutti_export::Result<()> {
     )
     .expect("a two-second render");
     let flac = Format::Flac {
-        depth: IntDepth::Int24,
+        pcm: IntPcm::new(IntDepth::Int24),
         level: FlacLevel::default(),
     };
 
@@ -104,8 +105,8 @@ fn main() -> tutti_export::Result<()> {
     // output has its own format, resample, dither and normalize. Every format
     // is written block by block through `tutti-codec`'s encoder.
     let outputs: Vec<Output> = [
-        (Format::Wav(Pcm::Int24), "wav"),
-        (Format::Aiff(Pcm::Int24), "aiff"),
+        (Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))), "wav"),
+        (Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24))), "aiff"),
     ]
     .into_iter()
     .map(|(format, ext)| {

@@ -29,6 +29,9 @@ use tutti_units::Seconds;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::ChannelLayout;
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph,
@@ -78,7 +81,6 @@ struct Case {
     format: Format,
     channels: ChannelLayout,
     resample: Option<Resample>,
-    dither: Option<tutti_dsp::DitherShape>,
 }
 
 impl Case {
@@ -95,10 +97,6 @@ impl Case {
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,
-        };
-        let target = match self.dither {
-            Some(shape) => target.dither(shape),
-            None => target.no_dither(),
         };
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
@@ -124,7 +122,6 @@ fn config(seconds: f64, rate: f64, channels: ChannelLayout, format: Format) -> C
         format,
         channels,
         resample: None,
-        dither: None,
     }
 }
 
@@ -172,7 +169,7 @@ fn bench_render(c: &mut Criterion) {
             seconds,
             SR,
             ChannelLayout::STEREO,
-            Format::Wav(Pcm::Float32),
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
         );
         let frames = (seconds * SR) as u64;
         group.throughput(Throughput::Elements(frames));
@@ -190,7 +187,7 @@ fn bench_render(c: &mut Criterion) {
         ("quad", ChannelLayout::from(4u16)),
         ("5.1", ChannelLayout::from(6u16)),
     ] {
-        let cfg = config(0.25, SR, layout, Format::Wav(Pcm::Float32));
+        let cfg = config(0.25, SR, layout, Format::Wav(Pcm::Float(FloatWidth::F32)));
         group.throughput(Throughput::Elements((0.25 * SR) as u64));
         group.bench_with_input(BenchmarkId::new("width", name), &cfg, |b, cfg| {
             b.iter(|| black_box(to_buffers(dc_graph(SR), cfg)))
@@ -199,7 +196,12 @@ fn bench_render(c: &mut Criterion) {
 
     // Rate: twice the samples for the same wall-clock duration.
     for rate in [48_000.0f64, 96_000.0] {
-        let cfg = config(0.25, rate, ChannelLayout::STEREO, Format::Wav(Pcm::Float32));
+        let cfg = config(
+            0.25,
+            rate,
+            ChannelLayout::STEREO,
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+        );
         group.throughput(Throughput::Elements((0.25 * rate) as u64));
         group.bench_with_input(BenchmarkId::new("rate", rate as u64), &cfg, |b, cfg| {
             b.iter(|| black_box(to_buffers(tone_graph(rate), cfg)))
@@ -216,11 +218,14 @@ fn bench_encode(c: &mut Criterion) {
     group.throughput(Throughput::Elements((0.25 * SR) as u64));
 
     let formats: [(&str, Format); 2] = [
-        ("wav", Format::Wav(Pcm::Int24)),
+        (
+            "wav",
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
+        ),
         (
             "flac",
             Format::Flac {
-                depth: tutti_codec::IntDepth::Int24,
+                pcm: IntPcm::new(IntDepth::Int24).no_dither(),
                 level: tutti_codec::FlacLevel::default(),
             },
         ),
@@ -255,7 +260,7 @@ fn bench_resample(c: &mut Criterion) {
             seconds,
             from,
             ChannelLayout::STEREO,
-            Format::Wav(Pcm::Float32),
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
         );
         cfg.resample = Some(Resample::to(SampleRate::of(SR)));
         let path = dir.path().join("resampled.wav");

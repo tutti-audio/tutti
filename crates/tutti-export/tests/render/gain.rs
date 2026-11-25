@@ -7,6 +7,9 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use crate::support::{render_normalized_to_file, render_to_file};
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
+use tutti_codec::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Normalize, RenderGraph, Setup};
@@ -54,7 +57,11 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
     for target in [-6.0f64, -3.0] {
         let written = render_normalized_to_file(
             sine(Hz::new(RATE.get() / 4.0)),
-            &config(Pcm::Int16, Some(DitherShape::Triangular), 0.1),
+            &config(
+                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+                Some(DitherShape::Triangular),
+                0.1,
+            ),
             &FrozenClock,
             Normalize::peak(Db::new(target)),
             &path,
@@ -68,7 +75,7 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
 
     let plain = render_to_file(
         sine(Hz::new(1_000.0)),
-        &config(Pcm::Int16, None, 0.1),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None, 0.1),
         &FrozenClock,
         &path,
     )
@@ -88,7 +95,7 @@ fn a_loudness_normalized_export_reports_the_gain_to_its_target() {
     let path = dir.path().join("lufs.wav");
     let written = render_normalized_to_file(
         sine(Hz::new(1_000.0)),
-        &config(Pcm::Float32, None, 3.0),
+        &config(Pcm::Float(FloatWidth::F32), None, 3.0),
         &FrozenClock,
         Normalize::lufs(Db::new(-23.0)),
         &path,

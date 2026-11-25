@@ -17,6 +17,7 @@ use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
@@ -91,6 +92,31 @@ impl Default for ExportConfig {
 }
 
 impl ExportConfig {
+    /// The format with this config's dither and noise shaping on its integer type (a float type
+    /// has neither).
+    pub(crate) fn quantized(&self) -> Format {
+        let int = |pcm: IntPcm| {
+            let pcm = match self.dither {
+                Some(shape) => pcm.dither(shape),
+                None => pcm.no_dither(),
+            };
+            if self.noise_shaping {
+                pcm.noise_shaping()
+            } else {
+                pcm
+            }
+        };
+        match self.encode.format {
+            Format::Wav(Pcm::Int(pcm)) => Format::Wav(Pcm::Int(int(pcm))),
+            Format::Aiff(Pcm::Int(pcm)) => Format::Aiff(Pcm::Int(int(pcm))),
+            Format::Flac { pcm, level } => Format::Flac {
+                pcm: int(pcm),
+                level,
+            },
+            float => float,
+        }
+    }
+
     /// The job this config describes: the duration rounded to the nearest
     /// frame, and a render of no audible span (a tail alone) the tail's length.
     pub(crate) fn job(&self) -> Result<Job> {
@@ -115,7 +141,7 @@ impl ExportConfig {
         path: impl Into<PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        let target = FileTarget::new(path, self.encode.format, self.encode.channels);
+        let target = FileTarget::new(path, self.quantized(), self.encode.channels);
         let target = match &self.encode.topology {
             Some(topology) => target.topology(*topology),
             None => target,
@@ -123,15 +149,6 @@ impl ExportConfig {
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,
-        };
-        let target = match self.dither {
-            Some(shape) => target.dither(shape),
-            None => target.no_dither(),
-        };
-        let target = if self.noise_shaping {
-            target.noise_shaping()
-        } else {
-            target
         };
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),

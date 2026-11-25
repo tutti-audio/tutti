@@ -11,7 +11,7 @@
 //!
 //! - An `Output` is a `Feed` (the graph's outputs, or a plan tap, `Feed::Tap`, read
 //!   after every block and placed by a `Placement`) and a `Target`: a file
-//!   (`FileTarget`: path, format, width, speaker order, resample, dither,
+//!   (`FileTarget`: path, format, width, speaker order, resample,
 //!   normalize) or planes in memory (`BufferTarget`, returned as a `Rendered`).
 //!   `render` returns one `Produced` per output, in order; `render_one` is the
 //!   helper for a render of one.
@@ -134,12 +134,12 @@
 //!     vec![
 //!         Output::main_output(FileTarget::new(
 //!             dir.path().join("main_output.flac"),
-//!             Format::Flac { depth: IntDepth::Int24, level: FlacLevel::Standard },
+//!             Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard },
 //!             ChannelLayout::STEREO,
 //!         )),
 //!         Output::main_output(FileTarget::new(
 //!             dir.path().join("main_output.wav"),
-//!             Format::Wav(Pcm::Int16),
+//!             Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
 //!             ChannelLayout::STEREO,
 //!         )),
 //!     ],
@@ -174,14 +174,13 @@
 //! crate), and a `Format` variant exists only with its feature.
 //!
 //! Resampling (`tutti_dsp::StreamingResampler`, an FFT resampler on
-//! `tutti_dsp::RealFft`) and the dither noise (`tutti_dsp::DitherNoise`) are
-//! algorithms in `tutti-dsp`; this crate calls them. Resampling is
+//! `tutti_dsp::RealFft`) is an algorithm in `tutti-dsp`; this crate calls it. Resampling is
 //! unconditional: it is not a codec, so it is not gated.
 //!
 //! A render is written from any `tutti_dsp::FftFloat` (`Rendered<F>`, `f32` by default). A float
-//! file takes it as it is; an integer file goes through one stage that adds the
-//! dither noise, converts by the rule in `tutti_buffers::Sample` and counts the
-//! values that clipped (`Written::clipped_samples`).
+//! file takes it as it is; an integer file is quantized by the encoder, which adds the
+//! dither noise its `tutti_codec::IntPcm` names, converts by the rule in
+//! `tutti_buffers::Sample` and counts the values that clipped (`Written::clipped_samples`).
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -251,8 +250,8 @@ pub struct Written {
     /// resample and dither): those whose rounded value lies past the integer
     /// format's `MAX` or `MIN`, held there by the rule in
     /// [`Sample`](tutti_buffers::Sample); an infinity is counted. A NaN is
-    /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float32`,
-    /// `Pcm::Float64`). A
+    /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float(FloatWidth::F32)`,
+    /// `Pcm::Float(FloatWidth::F64)`). A
     /// normalizing export keeps its target and ceiling one LSB plus the dither
     /// amplitude below full scale for an integer format, so this stays `0`
     /// unless the programme itself was past full scale.

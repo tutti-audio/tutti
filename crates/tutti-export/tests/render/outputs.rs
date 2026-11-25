@@ -16,6 +16,8 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Bed, ChannelTopology};
+use tutti_codec::FloatWidth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement, Produced,
@@ -107,20 +109,24 @@ fn job(frames: usize) -> Job {
     .expect("a render")
 }
 
+/// A WAV target of `pcm`, rounded without dither so a render's values are exact.
 fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
-    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).no_dither()
+    let pcm = match pcm {
+        Pcm::Int(int) => Pcm::Int(int.no_dither()),
+        float => float,
+    };
+    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO)
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
     FileTarget::new(
         path,
         Format::Flac {
-            depth,
+            pcm: IntPcm::new(depth).no_dither(),
             level: FlacLevel::default(),
         },
         ChannelLayout::STEREO,
     )
-    .no_dither()
 }
 
 fn planes(produced: Produced) -> Vec<Vec<f32>> {
@@ -239,7 +245,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
         &job(frames),
         &timeline,
         vec![
-            Output::main_output(wav(&a, Pcm::Int24)),
+            Output::main_output(wav(&a, Pcm::Int(IntPcm::new(IntDepth::Int24)))),
             Output::main_output(flac(&b, IntDepth::Int16)),
             Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
         ],
@@ -280,6 +286,41 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
         "the graph was stepped once, not once per output"
     );
     assert_eq!(names(dir.path()), ["a.wav", "b.flac"], "no temporary left");
+}
+
+/// Two outputs of one render in one dithered format get different noise: a bounce's stems and
+/// its master are summed later, and one noise sequence would add coherently. Silence into a
+/// dithered 16-bit file is the dither alone, so equal files would be equal noise.
+#[test]
+fn two_dithered_outputs_of_one_render_do_not_share_noise() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.wav"));
+    let dithered = |path: &std::path::Path| {
+        FileTarget::new(
+            path,
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+            ChannelLayout::STEREO,
+        )
+    };
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
+    let silence = g.add(Const::frame(&[0.0, 0.0]));
+    g.pipe_output(silence);
+    render(
+        &mut finish(g),
+        &job(4_096),
+        &FrozenClock,
+        vec![
+            Output::main_output(dithered(&a)),
+            Output::main_output(dithered(&b)),
+        ],
+        &mut Control::none(),
+    )
+    .expect("renders")
+    .into_finished()
+    .expect("not cancelled");
+    let (a, b) = (decode(&a), decode(&b));
+    assert!(a[0].iter().any(|&s| s != 0.0), "the file holds dither");
+    assert_ne!(a, b, "two outputs shared one noise sequence");
 }
 
 /// Stereo `0.5` through a `0.5` gain, on the main output, with a tap on each of the
@@ -416,7 +457,10 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
         vec![Output::tap(
             wide,
             Placement::new(tutti_buffers::Bed::Mono.topology()),
-            wav(&dir.path().join("a.wav"), Pcm::Int16),
+            wav(
+                &dir.path().join("a.wav"),
+                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+            ),
         )],
         &mut Control::none(),
     )
@@ -439,11 +483,17 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
         &job(1_000),
         &FrozenClock,
         vec![
-            Output::main_output(wav(&dir.path().join("m.wav"), Pcm::Int16)),
+            Output::main_output(wav(
+                &dir.path().join("m.wav"),
+                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+            )),
             Output::tap(
                 narrow,
                 Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap()),
-                wav(&dir.path().join("b.wav"), Pcm::Int16),
+                wav(
+                    &dir.path().join("b.wav"),
+                    Pcm::Int(IntPcm::new(IntDepth::Int16)),
+                ),
             ),
         ],
         &mut Control::none(),
@@ -473,7 +523,10 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
         &job(1_000),
         &FrozenClock,
         vec![
-            Output::main_output(wav(&dir.path().join("m.wav"), Pcm::Int16)),
+            Output::main_output(wav(
+                &dir.path().join("m.wav"),
+                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+            )),
             Output::tap(
                 reader,
                 // Two unassigned feeds onto a mono file: unassigned channels are
@@ -481,7 +534,7 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
                 Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
                 FileTarget::new(
                     dir.path().join("t.wav"),
-                    Format::Wav(Pcm::Int16),
+                    Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
                     ChannelLayout::MONO,
                 ),
             ),
@@ -527,7 +580,12 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .map(|n| dir.path().join(n))
         .collect();
     let float = |path: &std::path::Path, spec| {
-        FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::STEREO).normalize(spec)
+        FileTarget::new(
+            path,
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        )
+        .normalize(spec)
     };
     let mut produced = render(
         &mut graph,
@@ -615,8 +673,8 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &job(2_000),
         &FrozenClock,
         vec![
-            Output::main_output(wav(&first, Pcm::Int16)),
-            Output::main_output(wav(&second, Pcm::Int16)),
+            Output::main_output(wav(&first, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+            Output::main_output(wav(&second, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
         ],
         &mut Control::none(),
     )
@@ -659,8 +717,11 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &job(2_000),
         &FrozenClock,
         vec![
-            Output::main_output(wav(&first, Pcm::Int16)),
-            Output::main_output(wav(&dir.path().join("third.wav"), Pcm::Int16)),
+            Output::main_output(wav(&first, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+            Output::main_output(wav(
+                &dir.path().join("third.wav"),
+                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+            )),
         ],
         &mut Control::none(),
     )
@@ -686,7 +747,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     let dir = tempfile::tempdir().unwrap();
     let mode = Normalize::peak(Db::new(-6.0));
     let file = |n: &str, spec: Option<NormalizeSpec>| {
-        let target = wav(&dir.path().join(n), Pcm::Int16);
+        let target = wav(&dir.path().join(n), Pcm::Int(IntPcm::new(IntDepth::Int16)));
         Output::main_output(match spec {
             Some(spec) => target.normalize(spec),
             None => target,
@@ -768,7 +829,7 @@ fn an_unmeasurable_output_names_its_index() {
             Output::main_output(
                 FileTarget::new(
                     dir.path().join("m.wav"),
-                    Format::Wav(Pcm::Float32),
+                    Format::Wav(Pcm::Float(FloatWidth::F32)),
                     ChannelLayout::STEREO,
                 )
                 .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
@@ -778,7 +839,7 @@ fn an_unmeasurable_output_names_its_index() {
                 stereo_placement(),
                 FileTarget::new(
                     dir.path().join("s.wav"),
-                    Format::Wav(Pcm::Float32),
+                    Format::Wav(Pcm::Float(FloatWidth::F32)),
                     ChannelLayout::STEREO,
                 )
                 .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
@@ -812,7 +873,11 @@ fn wide(width: u16) -> RenderGraph {
 }
 
 fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
-    FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::from(width))
+    FileTarget::new(
+        path,
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::from(width),
+    )
 }
 
 /// A file whose topology is not stated is taken to be the engine's order for

@@ -20,20 +20,17 @@
 use crate::control::{Control, Outcome, Stage};
 use crate::error::Result;
 use crate::output::FileTarget;
-use crate::process::dither_shape;
 use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
 use crate::{RenderError, Written};
 use std::path::Path;
 use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{
-    Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
-};
-use tutti_codec::{FileEncoder, FinalizedFile, IntDepth, Spec};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, SinkFailed, convert};
+use tutti_codec::{FileEncoder, FinalizedFile, Spec};
 use tutti_dsp::{
-    DitherSink, FftFloat, NoiseShaping, StreamingResampler, StreamingResamplerConfig,
-    needs_resampling, resampled_frames,
+    FftFloat, StreamingResampler, StreamingResamplerConfig, needs_resampling, resampled_frames,
 };
 use tutti_platform::Staged;
+use tutti_rt::SplitMix64;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The rate the file is written at: the resample target, else the rate it is
@@ -51,7 +48,11 @@ fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
 
 /// The file of `target`, begun: written to a temporary beside its path (which
 /// the encoder removes unless it is finished and committed), through the
-/// converter and the dither of the target.
+/// converter and the encoder's own dither, whose noise is the sequence of `seed`.
+///
+/// Outputs of one render are summed later (a bounce's stems and its master), so each takes the
+/// seed [`SplitMix64::mix`] of its index, never one seed: two files with one noise sequence would
+/// add it coherently.
 ///
 /// Refuses a render the format cannot hold before the temporary exists: the
 /// encoder judges the frames the file will hold, which are the plan's kept
@@ -61,6 +62,7 @@ pub(crate) fn open_file<F: FftFloat>(
     target: &FileTarget,
     plan: &RenderPlan,
     source_rate: SampleRate,
+    seed: u64,
 ) -> Result<Chain<F>> {
     let spec = spec(target, source_rate);
     let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
@@ -70,7 +72,7 @@ pub(crate) fn open_file<F: FftFloat>(
     } else {
         staged
     };
-    let encoder = FileEncoder::create_planned(&spec, staged, planned)?;
+    let encoder = FileEncoder::create_planned(&spec, staged, planned)?.dither_seed(seed);
     Chain::new(target, source_rate, encoder)
 }
 
@@ -137,11 +139,10 @@ pub(crate) fn written(
     }
 }
 
-/// The encoder as the [`Sink`] the quantize stage wraps, taking blocks in the
-/// format `S` the file's width is reached from.
+/// The encoder, taking blocks in the format `S` the file's type is reached from: it
+/// quantizes an integer file itself.
 ///
-/// `Sink::write` answers only a marker, so the first codec error is kept here
-/// for [`Chain`] to return with its detail.
+/// The first codec error is kept here for [`Chain`] to return with its detail.
 struct EncoderSink<S> {
     encoder: FileEncoder,
     layout: ChannelLayout,
@@ -160,15 +161,6 @@ impl<S: Sample> EncoderSink<S> {
             error: None,
             format: std::marker::PhantomData,
         }
-    }
-}
-
-impl<S: Sample> Sink for EncoderSink<S> {
-    type Sample = S;
-    type Error = std::io::Error;
-
-    fn layout(&self) -> ChannelLayout {
-        self.layout
     }
 
     fn write(&mut self, block: Interleaved<'_, S>) -> std::result::Result<(), SinkFailed> {
@@ -190,91 +182,10 @@ impl<S: Sample> Sink for EncoderSink<S> {
         Ok(())
     }
 
-    /// Export finishes the encoder itself ([`Chain::into_encoder`]), to keep
-    /// the codec's error whole; this is the trait's form of the same step.
-    fn finalize(self) -> std::result::Result<(), Self::Error> {
-        self.encoder
-            .finish()
-            .map(drop)
-            .map_err(std::io::Error::other)
-    }
-}
-
-/// What a block of floats `F` reaches the encoder as: itself for a float
-/// format, which has nothing to quantize, and through the [`DitherSink`] at the
-/// integer format of the file's depth otherwise.
-enum Quantized<F> {
-    Float(EncoderSink<F>),
-    Int16(DitherSink<EncoderSink<i16>, F>),
-    Int24(DitherSink<EncoderSink<I24>, F>),
-}
-
-impl<F: Float> Quantized<F> {
-    /// The quantizer for blocks at `rate`, the file's rate: the shaping filter
-    /// is designed for the rate of the blocks it is fed.
-    fn new(
-        encoder: FileEncoder,
-        layout: ChannelLayout,
-        target: &FileTarget,
-        rate: SampleRate,
-    ) -> Self {
-        let shape = dither_shape(target);
-        let shaping = target.noise_shaping.then(|| NoiseShaping::new(rate));
-        fn quantizer<K: Sink, F: Float>(
-            sink: DitherSink<K, F>,
-            shaping: Option<&NoiseShaping>,
-        ) -> DitherSink<K, F> {
-            match shaping {
-                Some(shaping) => sink.shaped(shaping),
-                None => sink,
-            }
-        }
-        match target.format().int_depth() {
-            None => Self::Float(EncoderSink::new(encoder, layout)),
-            Some(IntDepth::Int16) => Self::Int16(quantizer(
-                DitherSink::new(EncoderSink::new(encoder, layout), shape),
-                shaping.as_ref(),
-            )),
-            Some(IntDepth::Int24) => Self::Int24(quantizer(
-                DitherSink::new(EncoderSink::new(encoder, layout), shape),
-                shaping.as_ref(),
-            )),
-        }
-    }
-
-    fn write(&mut self, block: Interleaved<'_, F>) -> std::result::Result<(), SinkFailed> {
-        match self {
-            Self::Float(sink) => sink.write(block),
-            Self::Int16(sink) => sink.write(block),
-            Self::Int24(sink) => sink.write(block),
-        }
-    }
-
-    /// The error the encoder stashed when it refused a write.
-    fn take_error(&mut self) -> Option<RenderError> {
-        match self {
-            Self::Float(sink) => sink.error.take(),
-            Self::Int16(sink) => sink.get_mut().error.take(),
-            Self::Int24(sink) => sink.get_mut().error.take(),
-        }
-    }
-
-    /// The encoder, the values the conversion clipped and the frames the
-    /// encoder was given.
+    /// The encoder, the values its quantize stage clipped and the frames it was given.
     fn into_parts(self) -> (FileEncoder, u64, Samples) {
-        match self {
-            Self::Float(sink) => (sink.encoder, 0, sink.frames),
-            Self::Int16(sink) => {
-                let clipped = sink.clipped();
-                let sink = sink.into_inner();
-                (sink.encoder, clipped, sink.frames)
-            }
-            Self::Int24(sink) => {
-                let clipped = sink.clipped();
-                let sink = sink.into_inner();
-                (sink.encoder, clipped, sink.frames)
-            }
-        }
+        let clipped = self.encoder.clipped();
+        (self.encoder, clipped, self.frames)
     }
 }
 
@@ -316,19 +227,19 @@ pub(crate) fn resampler_for<F: FftFloat>(
 /// time.
 ///
 /// Every export goes through this. That is the point: this is where the
-/// resample and the dither live (the gate is `drive`'s), so a file is never
-/// written un-resampled under a resampled header.
+/// resample lives (the gate is `drive`'s), so a file is never written
+/// un-resampled under a resampled header.
 ///
 /// Order matters: resample first, quantize second. Dither's noise is scaled to
 /// one LSB at the *output* depth, so dithering before a rate conversion would
 /// filter that noise along with the signal and land it somewhere other than one
-/// LSB. The quantize stage is the [`DitherSink`] over the encoder; a float
-/// format skips it and the encoder takes the block as it is.
+/// LSB. The quantize stage is the encoder's own: an integer file is dithered as its
+/// `tutti_codec::IntPcm` says, and a float file takes the block as it is.
 ///
 /// `F` is the format the blocks arrive in and the converter runs in.
 pub(crate) struct Chain<F: FftFloat> {
     layout: ChannelLayout,
-    sink: Quantized<F>,
+    sink: EncoderSink<F>,
     /// Interleaved, so it is a flat sample buffer with `ch` samples per frame.
     staging: Vec<F>,
     /// A gain applied after the converter and before the quantize: the
@@ -351,7 +262,7 @@ impl<F: FftFloat> Chain<F> {
         let resampler = resampler_for(target, source_rate, layout)?;
         Ok(Self {
             layout,
-            sink: Quantized::new(encoder, layout, target, output_rate(target, source_rate)),
+            sink: EncoderSink::new(encoder, layout),
             staging: Vec::new(),
             gain: None,
             resampler,
@@ -413,8 +324,9 @@ impl<F: FftFloat> Chain<F> {
     }
 }
 
-fn failure_of<F: Float>(sink: &mut Quantized<F>) -> RenderError {
-    sink.take_error()
+fn failure_of<F: Float>(sink: &mut EncoderSink<F>) -> RenderError {
+    sink.error
+        .take()
         .unwrap_or_else(|| RenderError::from(std::io::Error::other("the encoder refused a write")))
 }
 
@@ -423,7 +335,7 @@ fn failure_of<F: Float>(sink: &mut Quantized<F>) -> RenderError {
 fn emit_planes<F: Float>(
     out: &mut [Vec<F>],
     staging: &mut Vec<F>,
-    sink: &mut Quantized<F>,
+    sink: &mut EncoderSink<F>,
     layout: ChannelLayout,
     gain: Option<Amplitude>,
 ) -> Result<()> {
@@ -509,7 +421,7 @@ pub(crate) fn write_planes<F: FftFloat>(
     let plan = RenderPlan::of_frames(frames);
     // The frames' OWN rate: these planes may have been rendered under a
     // different config entirely.
-    let mut chain = open_file(target, &plan, rendered.sample_rate())?;
+    let mut chain = open_file(target, &plan, rendered.sample_rate(), SplitMix64::mix(0))?;
     let mut src = PlaneSource::new(rendered.planes(), fold);
     control.begin(Stage::Writing, Some(frames));
     let written = replay_through(
