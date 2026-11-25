@@ -82,7 +82,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Whether a unit of shape `incoming` could fade in at `key`: whether it
-    /// fits the running unit's, the question [`replace_or_swap`](Self::replace_or_swap)
+    /// fits the running unit's, the question [`replace`](Self::replace)
     /// answers with [`CommitError::FadeShape`]. `Some(false)` for a node with
     /// no running unit yet, and `None` for a `key` not in the spec.
     #[must_use]
@@ -171,7 +171,7 @@ impl<F: Float> Editor<F> {
     /// `fade` over a running unit whose shape `node`'s does not fit; nothing
     /// changes and `node` is dropped. Not an error: a non-zero `fade` at a key
     /// that is not running yet places the node with no fade.
-    pub fn replace_or_swap<N: IntoNode<F>>(
+    pub fn replace<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
         node: N,
@@ -220,7 +220,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Write a prepared unit at `key` with a fresh generation — the common
-    /// half of [`insert`](Self::insert) and [`replace_or_swap`](Self::replace_or_swap) — and
+    /// half of [`insert`](Self::insert) and [`replace`](Self::replace) — and
     /// unwire what its shape lacks.
     fn place(
         &mut self,
@@ -275,7 +275,7 @@ impl<F: Float> Editor<F> {
     /// op and one PDC, so a latency change is a hard edit for it: the next
     /// commit retires every unit at the key but the newest (a waiting one,
     /// if any) — reported by [`collect`](Self::collect) like any retiree —
-    /// and a [`replace_or_swap`](Self::replace_or_swap) not yet committed lands as a plain
+    /// and a [`replace`](Self::replace) not yet committed lands as a plain
     /// swap.
     ///
     /// Refused with [`CommitError::NoSuchNode`] for a key with no node,
@@ -340,7 +340,7 @@ impl<F: Float> Editor<F> {
     /// authority: it writes the spec's [`NodeSpec`] tail and the editor's
     /// shape entry, which is all the compiler reads. A re-prepare asks the
     /// unit's [`shape`](Node::shape) again and its answer replaces this one;
-    /// so does a [`replace_or_swap`](Self::replace_or_swap).
+    /// so does a [`replace`](Self::replace).
     ///
     /// **A crossfade at `key` is not cut.** A tail ceiling feeds neither PDC
     /// nor the fade's two units' alignment (the latency does), so the fade

@@ -566,7 +566,7 @@
 //!
 //! # Editing a running graph
 //!
-//! - [`Editor::replace_or_swap`] swaps a node's unit with a crossfade ([`Fade`],
+//! - [`Editor::replace`] swaps a node's unit with a crossfade ([`Fade`],
 //!   along a [`FadeLaw`]); the outgoing unit retires on the control
 //!   thread.
 //! - [`Editor::set_latency`] changes a node's declared latency (a hosted

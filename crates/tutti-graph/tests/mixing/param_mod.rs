@@ -803,13 +803,13 @@ fn a_fade_keeps_the_params_it_declares() {
     let fade = tutti_graph::Fade::new(Samples::new(128));
     assert!(
         matches!(
-            ed.replace_or_swap(NodeKey(PROBE), Unforkable(CutoffOnly), fade),
+            ed.replace(NodeKey(PROBE), Unforkable(CutoffOnly), fade),
             Err(tutti_graph::CommitError::FadeShape { .. })
         ),
         "a unit declaring other params cannot fade in"
     );
     let (c2, q2) = (Cell::new(0.0), Cell::new(0.0));
-    ed.replace_or_swap(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
+    ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
         .expect("the same params fade");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 256, 64);
@@ -1940,7 +1940,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
 
     let fade = tutti_graph::Fade::new(Samples::new(128));
     let (c2, q2) = (Cell::new(0.0), Cell::new(0.0));
-    ed.replace_or_swap(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
+    ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
         .expect("the same params fade");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 256, 64);
@@ -2679,7 +2679,7 @@ fn a_driven_unit_replaced_by_an_undriven_one_reads_the_base() {
     ] {
         let (mut ed, mut exec, cell, _) = driven_probe(1.0);
         let (c2, q2) = (Cell::new(0.5), Cell::new(0.5));
-        ed.replace_or_swap(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
+        ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
             .expect("replaces");
         assert!(ed.disconnect_param(param(PROBE, UnitParam::Cutoff), ev(1)));
         ed.commit().expect("commits");
@@ -2698,7 +2698,7 @@ fn a_driven_unit_replaced_by_a_driven_one_reads_the_lane() {
     ] {
         let (mut ed, mut exec, cell, _) = driven_probe(1.0);
         let (c2, q2) = (Cell::new(0.5), Cell::new(0.5));
-        ed.replace_or_swap(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
+        ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
             .expect("replaces");
         ed.commit().expect("commits");
         let _ = render(&mut exec, &mut ed, 1024, 64);

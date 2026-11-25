@@ -293,7 +293,7 @@ impl<F: Float> Editor<F> {
     /// opened. A port that narrows **later** reads no events, the commit
     /// succeeds, the reader is not told and nothing counts as lost (the writer
     /// is kept, so the stream resumes if a node with that port returns under
-    /// the same key by [`replace_or_swap`](Self::replace_or_swap)). A node that is **removed**
+    /// the same key by [`replace`](Self::replace)). A node that is **removed**
     /// ends the tap: its key is not read again, and once the plan without the
     /// tap runs the reader reads [`EventTapReader::source_gone`]. A tap sees
     /// the port before the engine's declick, as an audio tap does.

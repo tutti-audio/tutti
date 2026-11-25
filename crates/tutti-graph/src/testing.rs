@@ -843,7 +843,7 @@ impl<F: Float> Harness<F> {
     }
 
     /// `switch`, with the regenerated keys in `fades` crossfading
-    /// (`Editor::replace_or_swap`'s contract). The executor gets the fades for the
+    /// (`Editor::replace`'s contract). The executor gets the fades for the
     /// keys its delta replaces, as `Editor::commit` attaches them.
     ///
     /// A node's **declared latency is the spec's**, as after

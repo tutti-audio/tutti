@@ -217,7 +217,7 @@ impl<F: Float> Editor<F> {
         )
         .map_err(CommitError::Compile)?;
         plan.main_output_id = self.spec.main_output_id;
-        // The crossfades `replace_or_swap` asked for, for the keys this delta
+        // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
             .replace
@@ -243,7 +243,7 @@ impl<F: Float> Editor<F> {
         debug_assert_eq!(
             plan.verify_fades(self.base().map(|p| &**p), &delta),
             Ok(()),
-            "`replace_or_swap` checked every fade it attached"
+            "`replace` checked every fade it attached"
         );
         let needed: Vec<NodeKey> = delta
             .insert
