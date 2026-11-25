@@ -968,9 +968,7 @@ impl MidiState {
         // A peer that joined hears what the output has said, and it alone: the
         // peers already listening heard it as it was sent.
         for joined in self.networks.take_joined() {
-            if let Some(record) = self.sinks.record(joined.sink()) {
-                joined.send(&record.catch_up());
-            }
+            self.sinks.catch_up(&joined);
         }
         edited
     }

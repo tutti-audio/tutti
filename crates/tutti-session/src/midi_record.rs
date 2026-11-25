@@ -44,8 +44,11 @@
 //! controllers and bend already in place.
 //!
 //! A Control Change 120 or 123 (All Sound Off, All Notes Off) ends the
-//! channel's keys, and a 121 (Reset All Controllers) forgets its controllers,
-//! bend and pressure: a catch-up never sounds what the stream ended.
+//! channel's keys, and a 121 (Reset All Controllers) forgets exactly what
+//! RP-015 resets: modulation (CC 1), expression (CC 11), the pedals (CC 64 to
+//! 67), pitch bend, channel pressure and the parameter select. Every other
+//! controller, the program and the parameter values stay: a catch-up never
+//! sounds what the stream ended, and never drops what it left set.
 //!
 //! [`observe`]: Record::observe
 //! [`catch_up`]: Record::catch_up
@@ -358,12 +361,26 @@ impl Record {
     }
 
     /// All Sound Off, Reset All Controllers or All Notes Off.
+    ///
+    /// Reset All Controllers (RP-015, Response to Reset All Controllers) resets
+    /// Modulation (CC 1), Expression (CC 11), the pedals (CC 64 to 67), the
+    /// RPN/NRPN select, pitch bend, channel pressure and poly pressure, and not
+    /// the program, the bank select, volume, pan, the effects and sound
+    /// controllers or the parameters' values. The record forgets those it holds
+    /// of that list (poly pressure is not kept) and the lane's select, so a data
+    /// entry after it is stored under no parameter. MIDI 1.0 and MIDI 2.0 take
+    /// this branch alike.
     fn mode(&mut self, lane: u16, at: Address, protocol: Protocol, controller: CCNumber) {
         if controller == CCNumber::RESET_ALL {
             self.state.retain(|slot, _| {
                 slot.lane != lane
-                    || !matches!(slot.part, Part::Controller | Part::Bend | Part::Pressure)
+                    || match slot.part {
+                        Part::Controller => !matches!(slot.sub, 1 | 11 | 64..=67),
+                        Part::Bend | Part::Pressure => false,
+                        Part::Program | Part::Parameter => true,
+                    }
             });
+            self.select.remove(&lane);
             return;
         }
         for n in 0..=127 {
@@ -628,17 +645,40 @@ mod tests {
         assert_eq!(record.catch_up(), []);
     }
 
-    /// Reset All Controllers forgets controllers, bend and pressure, and keeps
-    /// the program.
+    /// RP-015: Reset All Controllers resets modulation, expression, the pedals,
+    /// bend, pressure and the parameter select, and leaves the program, volume,
+    /// pan and the other controllers as they were.
     #[test]
-    fn reset_all_controllers_forgets_what_it_resets() {
+    fn reset_all_controllers_forgets_exactly_what_rp015_resets() {
         let program = Ump::from(Message::midi1(at(), Voice1::ProgramChange(U7::of(5))));
         let bend = Ump::from(Message::midi1(
             at(),
             Voice1::PitchBend(tutti_ump::U14::of(0x3000)),
         ));
-        let record = observed(&[program, cc1(7, 90), bend, cc1(121, 0)]);
-        assert_eq!(record.catch_up(), [program]);
+        let pressure = Ump::from(Message::midi1(at(), Voice1::ChannelPressure(U7::of(9))));
+        let record = observed(&[
+            program,
+            cc1(7, 90),
+            cc1(10, 30),
+            cc1(1, 64),
+            cc1(11, 40),
+            cc1(64, 127),
+            bend,
+            pressure,
+            cc1(121, 0),
+        ]);
+        assert_eq!(record.catch_up(), [program, cc1(7, 90), cc1(10, 30)]);
+        let record = observed(&[cc2(7, 5), cc2(1, 9), cc2(121, 0)]);
+        assert_eq!(record.catch_up(), [cc2(7, 5)], "MIDI 2.0 alike");
+    }
+
+    /// After a reset the parameter select is null: a data entry with no new
+    /// select is stored under no parameter, and a parameter value before it
+    /// stays.
+    #[test]
+    fn a_data_entry_after_a_reset_has_no_select() {
+        let record = observed(&[cc1(101, 0), cc1(100, 0), cc1(6, 2), cc1(121, 0), cc1(6, 9)]);
+        assert_eq!(record.catch_up(), [cc1(101, 0), cc1(100, 0), cc1(6, 2)]);
     }
 
     /// The order: SysEx, then per channel the bank and program, controllers, bend

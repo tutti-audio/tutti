@@ -32,7 +32,7 @@ impl Joined {
     }
 
     /// Sends `packets` to the peer alone.
-    pub(crate) fn send(&self, _: &[tutti_ump::Ump]) {
+    pub(crate) fn send(&self, _: &[tutti_ump::Ump]) -> bool {
         match *self {}
     }
 }

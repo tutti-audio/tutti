@@ -25,6 +25,7 @@ use crate::midi::{
     Claim, Departure, Held, HostSink, LossReaders, LossWriters, OutputTiming, Retiring, Stamping,
     Sweepable, UmpOut, drain_events, loss_cells, settle, sweep_dropped,
 };
+use crate::midi_network::Joined;
 use crate::midi_record::Record;
 
 // --- The shared record ---
@@ -165,13 +166,23 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
 }
 
 impl Sinks {
-    /// What the sink at `node` has been sent, while it is held or retiring.
-    pub(crate) fn record(&self, node: NodeKey) -> Option<&Record> {
-        self.ports
-            .iter()
-            .chain(self.retiring.iter().map(|going| &going.going))
-            .find(|port| port.node == node)
-            .map(|port| &port.record)
+    /// Sends the peer that `joined` what the sink it listens to has been sent
+    /// ([`Record::catch_up`]), and counts in the sink's `refused` the events the
+    /// link did not take.
+    pub(crate) fn catch_up(&mut self, joined: &Joined) {
+        let retiring = self.retiring.iter_mut().map(|going| &mut going.going);
+        let Some(port) = self
+            .ports
+            .iter_mut()
+            .chain(retiring)
+            .find(|port| port.node == joined.sink())
+        else {
+            return;
+        };
+        let setup = port.record.catch_up();
+        if !joined.send(&setup) {
+            port.losses.refused(setup.len() as u64);
+        }
     }
 
     /// Each sink's tap on one scale of frames, the rate it was opened at: where

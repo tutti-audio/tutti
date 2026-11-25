@@ -504,11 +504,10 @@ impl Joined {
     }
 
     /// Sends `packets` to this peer alone: the peers already listening heard
-    /// them as they were sent.
-    pub(crate) fn send(&self, packets: &[Ump]) {
-        if !packets.is_empty() {
-            self.shared.link.send(&[self.peer], packets);
-        }
+    /// them as they were sent. Whether the link took them (nothing to send is
+    /// taken).
+    pub(crate) fn send(&self, packets: &[Ump]) -> bool {
+        packets.is_empty() || self.shared.link.send(&[self.peer], packets)
     }
 }
 
