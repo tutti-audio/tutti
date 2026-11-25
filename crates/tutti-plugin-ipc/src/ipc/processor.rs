@@ -142,9 +142,14 @@ impl Processor for IpcProcessor {
         Samples::new(self.batcher.chunk())
     }
 
+    const RETUNE: Option<fn(&mut Self, SampleRate, Samples, Option<Samples>)> =
+        Some(Self::retune_live);
+}
+
+impl IpcProcessor {
     /// The rate by a queued command, the chunk from the block and quantum,
     /// the bridge's parameter buffers for it. Starts the pipeline over.
-    fn retune(&mut self, rate: SampleRate, max_block: Samples, quantum: Option<Samples>) -> bool {
+    fn retune_live(&mut self, rate: SampleRate, max_block: Samples, quantum: Option<Samples>) {
         self.batcher.prepare(max_block, quantum);
         let chunk = self.batcher.chunk();
         self.link.reserve(chunk);
@@ -168,7 +173,6 @@ impl Processor for IpcProcessor {
                 self.link.latency().get() + self.batcher.chunk(),
             ));
         }
-        true
     }
 }
 

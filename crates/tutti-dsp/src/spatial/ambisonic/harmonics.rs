@@ -205,11 +205,9 @@ impl AmbisonicEncoder {
             .retarget(Harmonics::new(order, self.normalization, direction));
     }
 
-    /// Lands on `direction` at once.
-    pub fn jump_to(&mut self, direction: Direction) {
-        let order = self.gains.target().order();
-        self.gains = Ramp::new(Harmonics::new(order, self.normalization, direction))
-            .steps(COEFF_INTERVAL as u32);
+    /// Lands on the direction it glides to at once.
+    pub fn jump_to_target(&mut self) {
+        self.gains.jump_to_target();
     }
 
     /// Plays `input` into `output`, its first `(order + 1)^2` channels: channel `c` is the

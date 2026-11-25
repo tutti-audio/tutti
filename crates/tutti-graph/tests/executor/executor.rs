@@ -846,6 +846,28 @@ fn applying_refuses_a_plan_for_another_prepare() {
     exec.apply_pending();
 }
 
+/// A delta is applied over the plan it was compiled against: one compiled
+/// against another plan is refused with nothing sent, and one compiled against
+/// the plan sent last goes.
+#[test]
+fn package_refuses_a_delta_compiled_against_another_plan() {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    ed.insert(SRC, "c", Unforkable(const_node(1.0)));
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let valid = ed.spec().validate().unwrap();
+    let (plan, delta) = tutti_graph::compile(&valid, ed.shapes(), &prepare(64), None).unwrap();
+    assert_eq!(
+        ed.package(plan, delta, std::collections::BTreeMap::new()),
+        Err(tutti_graph::CommitError::StaleDelta)
+    );
+    let base = ed.base().map(|p| &**p);
+    let (plan, delta) = tutti_graph::compile(&valid, ed.shapes(), &prepare(64), base).unwrap();
+    ed.package(plan, delta, std::collections::BTreeMap::new())
+        .expect("room");
+}
+
 /// A merge never drops past one slot's capacity. The probe: capacity 32, two sources each sending 30 note-offs
 /// on one frame into one port — 60 must arrive, none dropped.
 #[test]

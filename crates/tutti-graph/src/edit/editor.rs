@@ -89,7 +89,6 @@ mod taps;
 mod unwired;
 mod wiring;
 use cells::LiveCells;
-pub use commit::Rewired;
 pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::Link;
@@ -343,25 +342,14 @@ impl MainOutputState {
         })
     }
 
-    /// A plan carrying `bank` (a main output of generation `main_output`) was
-    /// sent as commit `seq`. A plan that carries the crossfade the last one
-    /// carried continues it: the executor keeps its progress, and it ends
-    /// under the seq that began it.
-    fn sent(
-        &mut self,
-        bank: Option<crate::MainOutputBank>,
-        main_output: crate::MainOutputId,
-        seq: u64,
-    ) {
+    /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
+    /// the crossfade the last one carried keeps it: the executor keeps its
+    /// progress, and it ends under the seq that began it.
+    fn sent(&mut self, bank: Option<crate::MainOutputBank>, seq: u64) {
         self.bank = bank.map(|bank| {
             self.bank
-                .filter(|b| !b.ended && b.old == bank.old && b.main_output == main_output)
-                .unwrap_or(SentBank {
-                    seq,
-                    old: bank.old,
-                    main_output,
-                    ended: false,
-                })
+                .filter(|_| bank.continues)
+                .unwrap_or(SentBank { seq, ended: false })
         });
         if self.bank.is_none() {
             self.fading = None;
@@ -393,10 +381,6 @@ struct SentBank {
     /// Its `seq`, or that of the commit that began the crossfade it
     /// continues.
     seq: u64,
-    /// The main output that fades out.
-    old: crate::MainOutputId,
-    /// The main output that fades in.
-    main_output: crate::MainOutputId,
     /// Whether the executor has rendered its crossfade through.
     ended: bool,
 }
@@ -583,18 +567,6 @@ impl<F: Float> Editor<F> {
     /// ring (256 entries) had no room for. Control thread.
     pub fn take_unreported_event_losses(&mut self) -> u64 {
         self.link.take_unreported()
-    }
-
-    /// Owned items the executor's apply had no room to hand back, since the
-    /// editor was built: each was leaked rather than freed on the audio
-    /// thread. Control thread; cumulative, read when [`collect`](Self::collect)
-    /// has taken back what the executor returned.
-    ///
-    /// A nonzero count is a tutti bug worth reporting: the lists an apply
-    /// fills are sized with the commit, so none should ever be too small.
-    #[must_use]
-    pub fn leaked_items(&self) -> u64 {
-        self.link.leaked()
     }
 
     /// The graph value.
@@ -917,5 +889,5 @@ type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 /// Each is built into the commit and comes back once on the fade-return
 /// ring (`Commit::build`).
 fn starting(delta: &Delta) -> usize {
-    delta.fades.iter().filter(|(_, f)| !f.is_cut()).count()
+    delta.fades().iter().filter(|(_, f)| !f.is_cut()).count()
 }

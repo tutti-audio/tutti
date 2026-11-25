@@ -17,7 +17,7 @@
 //! no per-sample entry point, so the sample-accurate gates drive one-frame
 //! blocks.
 //!
-//! `DiskSource` is not covered here: it needs a crate-private ring, so its
+//! `DiskVoice` is not covered here: it needs a crate-private ring, so its
 //! non-allocation (steady state, a jump's scratch copy and fade) is guarded
 //! in-crate, in `voice::disk_voice`'s tests.
 

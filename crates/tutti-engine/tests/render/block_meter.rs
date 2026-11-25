@@ -1,14 +1,13 @@
-//! The block's transport carries the meter and the count-in.
+//! The block's transport carries the meter and the recording state.
 //!
 //! What is pinned here:
 //!
-//! - the count-in flag of the transport's settings reaches the block;
 //! - the project's meter, lent once per block, reaches `ClickNode` through
 //!   `Cx::meter`: it accents the downbeat of the bar a meter change begins, on
 //!   the change's frame, live and in an offline render, and it keeps counting
 //!   the right bars through a loop whose range holds a meter change, on every
 //!   pass;
-//! - the click sounds under the count-in.
+//! - the click sounds while a take records.
 //!
 //! The oracles are arithmetic on the map: at 120 BPM and 48 kHz a beat is
 //! 24 000 frames, and a click is heard a frame after its beat (its first
@@ -17,17 +16,17 @@
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_engine::Engine;
-use tutti_fixtures::Record;
 use tutti_graph::{Editor, Executor, NodeKey, OutputPort, PortSource, Prepare};
 use tutti_music::LoopRange;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
+    LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Recording, Transport,
+    render_graph,
 };
-use tutti_units::{Amplitude, At, Beat, SampleRate, Samples};
+use tutti_units::{Amplitude, At, Beat, Frame, SampleRate, Samples};
 
-use super::env_beat::{SR, env_graph, onsets, render};
+use super::env_beat::{SR, onsets, render};
 use crate::support::step_map;
 
 /// 4/4 from beat 0, then `signature` from `at`.
@@ -36,33 +35,6 @@ fn four_four_then(at: f64, signature: TimeSignature) -> MeterMap {
         MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
         MeterChange::new(Beat::new(at), signature),
     ])
-}
-
-/// The engine of an `EnvLog` under `transport`, and the log.
-fn logging(transport: &Transport) -> (Engine, Record<tutti_graph::Env>) {
-    let log = Record::new();
-    let (mut ed, exec) = env_graph(512, &log);
-    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
-    (engine, log)
-}
-
-/// **The count-in flag of the transport's settings is the block's.** Off, then
-/// on between two blocks: the first block's transport is not counting in, the
-/// second's is.
-#[test]
-fn the_count_in_of_the_settings_reaches_the_block() {
-    let transport = Transport::new(SampleRate::of(SR));
-    let (engine, log) = logging(&transport);
-    render(&engine, ChannelLayout::MONO, 256);
-    transport.settings().set_in_preroll(true);
-    render(&engine, ChannelLayout::MONO, 256);
-    let counted: Vec<bool> = log
-        .lock()
-        .expect("log")
-        .iter()
-        .map(|env| env.transport.count_in())
-        .collect();
-    assert_eq!(counted, [false, true]);
 }
 
 // ---- the metronome -----------------------------------------------------------
@@ -145,25 +117,43 @@ fn the_click_accents_the_bar_a_meter_change_begins_on_its_frame() {
     );
 }
 
-/// **The click sounds under the transport's count-in.** In `PrerollOnly` it
-/// is silent while the flag is off, and sounds on the first frames after the
-/// flag is set.
+/// **A `RecordingOnly` click sounds from a take's start to its stop, and a
+/// `PrerollOnly` one never does.** At 120 BPM and 48 kHz a beat is 24 000
+/// frames. A take starts at frame 20 000 and stops at frame 50 000: the click
+/// sounds the beat the start lands on, on its frame (a frame after it, as a
+/// click's first sample is `sin(0)`), then beats 1 (frame 24 000) and 2 (frame
+/// 48 000), and neither beat 0 nor beat 3. With no count-in, `PrerollOnly` is
+/// silent through the same take.
 #[test]
-fn the_click_sounds_while_the_transport_counts_in() {
-    let transport = Transport::new(SampleRate::of(SR));
-    let engine = click_engine(&transport, MetronomeMode::PrerollOnly);
-    transport
-        .motion()
-        .send(MotionCommand::play_from(Beat::new(0.0)))
-        .expect("room");
-    let before = render(&engine, ChannelLayout::STEREO, 2_048);
-    assert!(before.iter().all(|&s| s == 0.0), "silent off the count-in");
-    transport.settings().set_in_preroll(true);
-    let during = render(&engine, ChannelLayout::STEREO, 2_048);
-    assert!(
-        during[..200].iter().any(|&s| s != 0.0),
-        "sounding within the first frames of the count-in"
+fn a_recording_only_click_sounds_from_a_takes_start_to_its_stop() {
+    let clicks = |mode| {
+        let transport = Transport::new(SampleRate::of(SR));
+        let engine = click_engine(&transport, mode);
+        let take = transport.motion().next_take_id();
+        for (frame, recording) in [
+            (20_000, Recording::Start(take)),
+            (50_000, Recording::Stop(take)),
+        ] {
+            transport
+                .motion()
+                .schedule(At::Frame(Frame::new(frame)), recording)
+                .expect("room");
+        }
+        transport
+            .motion()
+            .send(MotionCommand::play_from(Beat::new(0.0)))
+            .expect("room");
+        let mut out = Vec::new();
+        for _ in 0..160 {
+            out.extend(render(&engine, ChannelLayout::STEREO, 512));
+        }
+        onsets(&out)
+    };
+    assert_eq!(
+        clicks(MetronomeMode::RecordingOnly),
+        [20_001, 24_001, 48_001]
     );
+    assert_eq!(clicks(MetronomeMode::PrerollOnly), Vec::<usize>::new());
 }
 
 /// **An offline render lends the timeline's meter, and the click accents the

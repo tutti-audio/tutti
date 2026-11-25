@@ -114,8 +114,8 @@ pub enum CommitError {
     },
     /// [`Editor::replace`](crate::Editor::replace) was handed a unit whose shape differs from the
     /// running one's in more than its tail — ports, latency, in-place
-    /// acceptance, event resolution or event capacity. Nothing changed; swap it with
-    /// [`Editor::insert`](crate::Editor::insert) instead.
+    /// acceptance, event resolution or event capacity — with a fade of non-zero
+    /// length. Nothing changed; a zero-length fade swaps it instead.
     #[error("node {} cannot crossfade to a unit of another shape", .node.0)]
     FadeShape {
         /// The node.
@@ -125,13 +125,12 @@ pub enum CommitError {
         /// The incoming unit's shape.
         incoming: Box<crate::Shape>,
     },
-    /// [`Editor::replace`](crate::Editor::replace) names a node with no running unit to fade from:
-    /// not in the plan sent last, or removed since.
-    #[error("node {} has no running unit to fade from", .node.0)]
-    NotRunning {
-        /// The node.
-        node: NodeKey,
-    },
+    /// A delta handed to [`Editor::package`](crate::Editor::package) was
+    /// compiled against another plan than the one sent last: what it says
+    /// carries over from the plan before it is not what the executor holds.
+    /// Nothing was sent.
+    #[error("the delta was compiled against another plan than the one sent last")]
+    StaleDelta,
     /// A delta handed to [`Editor::package`](crate::Editor::package) carries a crossfade the
     /// verifier refuses ([`Plan::verify_fades`](crate::Plan::verify_fades)). Nothing was
     /// sent.
@@ -164,7 +163,8 @@ pub enum CommitError {
         /// The lanes its cells hold.
         capacity: usize,
     },
-    /// No node at this key ([`Editor::set_latency`](crate::Editor::set_latency)).
+    /// No node at this key ([`Editor::replace`](crate::Editor::replace),
+    /// [`Editor::set_latency`](crate::Editor::set_latency)).
     #[error("no node {}", .node.0)]
     NoSuchNode {
         /// The key.

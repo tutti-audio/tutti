@@ -56,9 +56,10 @@
 //!    instance ran in when it was forked (offline if a host had set the live
 //!    one offline).
 //!
-//! The fork's `prepare` tells the plugin its rate itself, under the lock
-//! ([`RateDelivery::InPrepare`]): nothing pumps a fork's editor, so a pending
-//! rate would never reach it.
+//! The fork's `prepare` tells the plugin its rate itself, under the lock:
+//! nothing pumps a fork's instance, so a `prepare` off the main thread leaves
+//! its node silent ([`Silence::Unprepared`](super::instance::Silence)) until
+//! one on it.
 //!
 //! # Threads
 //!
@@ -67,7 +68,7 @@
 //! assume all of that is on its host's main thread. Through the graph's split
 //! fork (`Editor::fork_gather`, then `PendingFork::build` on a worker) the
 //! source declares itself **pinned** (`ForkBuild::pinned`): the whole of the
-//! above, and the fork's `prepare` (its rate, `RateDelivery::InPrepare`),
+//! above, and the fork's `prepare` (its rate),
 //! runs in the gather, which a host calls from its main thread; the worker's
 //! build only places the prepared unit. Drop
 //! the fork on the main thread too: dropping it closes its instance, which
@@ -106,7 +107,7 @@ use tutti_graph::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, PluginRef, RenderMode, StateUse};
 use tutti_rt::Mutex;
 
-use super::client::{PluginNode, RateDelivery, TransportFeed};
+use super::client::{PluginNode, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
 use crate::{DeliveryCounters, ForkState, MidiMapSlot};
@@ -269,7 +270,6 @@ where
 
         fork.params.seed(&delivered);
         fork.transport = self.transport.forked(offline);
-        fork.rate_delivery = RateDelivery::InPrepare;
         Ok(fork.bind(self.tempo.clone()))
     }
 }
@@ -292,8 +292,7 @@ where
 
     /// **Pinned**, said here rather than left to the default: the second
     /// instance is loaded and handed the state at the gather, and its
-    /// `prepare` (which tells the plugin the fork's rate,
-    /// `RateDelivery::InPrepare`) runs there too, on the main thread the
+    /// `prepare` (which tells the plugin the fork's rate) runs there too, on the main thread the
     /// gather is called on. Only rendering it leaves that thread.
     fn gather(&self, mode: RenderMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)

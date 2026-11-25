@@ -776,8 +776,8 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 self.dropped.charge_merge(bound, lost);
             }
             Op::Node { unit, .. } => {
-                let rec = &fx.plan.nodes.recs[unit];
-                let mut u = self.store.one(rec.store.0 as usize);
+                let pu = &fx.plan.units[unit];
+                let mut u = self.store.one(pu.idx.0 as usize);
                 let u = u
                     .as_mut()
                     .expect("the delta placed every unit the plan runs");
@@ -787,7 +787,9 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 let (mut a, flags) = self.audio.parts();
                 let mut e = self.events.slots();
                 let head = Head {
-                    rec,
+                    unit,
+                    pu,
+                    ports: &fx.plan.ports[unit],
                     plan: fx.plan,
                     frames,
                     max: fx.max,

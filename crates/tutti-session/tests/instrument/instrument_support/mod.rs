@@ -12,13 +12,13 @@
 //! subject, and no case compares a render with another render.
 #![allow(dead_code, unused_imports, unused_macros)]
 
-pub mod cases;
-pub mod midi;
-pub mod rig;
-pub mod subjects;
+pub(crate) mod cases;
+pub(crate) mod midi;
+pub(crate) mod rig;
+pub(crate) mod subjects;
 
-pub use cases::{Gap, Subject};
-pub use rig::{BLOCK, RATE, Rig};
+pub(crate) use cases::{Gap, Subject};
+pub(crate) use rig::{BLOCK, RATE, Rig};
 
 /// Declares one `#[test]` per case for the subject `$subject`, and the
 /// ratchet on its number of gaps.

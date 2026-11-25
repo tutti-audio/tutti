@@ -82,8 +82,6 @@ fn output::Produced::file
 fn output::Produced::into_buffers
 fn output::Produced::into_file
 fn render
-fn render::plan::RenderPlan::of
-fn render::sink::BlockCursor::window
 fn render_one
 fn rendered::Rendered::apply_gain
 fn rendered::Rendered::channels

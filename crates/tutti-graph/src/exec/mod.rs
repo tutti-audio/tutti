@@ -63,11 +63,11 @@
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
 //! block** and its sorted events.
 //!
-//! **A node op is one record.** The compiler lowers each `Op::Node` into a
-//! `NodeRec` (`plan.rs`): store index, generation, arrival, latency plus
-//! tail, the port slots, the buffer borrow requests **already sorted**, and
-//! a `Form` that picks the borrow. A
-//! call does one indexed load and never sorts. The commonest shapes — at most one audio input and one
+//! **A node op is one row.** The compiler lowers each `Op::Node` into a
+//! `NodePorts` row of `Plan::ports` (`plan.rs`): the port slots, the buffer
+//! borrow requests **already sorted**, and a `Form` that picks the borrow;
+//! the unit's place, shape and arrival are its `PlanUnit`. A
+//! call does two indexed loads and never sorts. The commonest shapes — at most one audio input and one
 //! audio output, or the stereo shapes 0→2, 1→2, 2→1 and 2→2, all with no
 //! event ports — borrow their slots directly, and their whole call path is
 //! specialised so the per-port loops fold away. An
@@ -205,7 +205,7 @@ use tutti_units::PlayReading;
 use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
-use crate::compile::plan::Plan;
+use crate::compile::plan::{Plan, UnitIdx};
 use crate::compile::tail::{GraphTail, Owed, TailGraph, graph_tail_of};
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
@@ -345,7 +345,7 @@ pub struct Executor<F: Float = f32> {
     suspension: Suspension,
     /// The held-key tables of the units a re-prepare checked out, for the
     /// resume commit to hand back.
-    parked: CappedVec<(NodeKey, Keys)>,
+    parked: CappedVec<(UnitIdx, Keys)>,
     /// Where a replaced node writes its state for its successor
     /// (`Node::chase`), sized when a plan is built from what its nodes
     /// declare (`Shape::chase`), so the swap never allocates it.
@@ -435,20 +435,15 @@ impl MainOutputFades {
         Self { run: None, ended }
     }
 
-    /// The fade after commit `seq` installs `plan` over `old`. A main output
+    /// The fade after commit `seq` installs `plan`. A main output
     /// crossfade starts with the plan that carries it, and a plan that
-    /// carries none ends one running. A plan that carries the old main output
-    /// the running plan carries, under the same new main output, continues
-    /// the crossfade from the frames it has rendered.
-    fn install(&mut self, plan: &Plan, old: Option<&Plan>, seq: u64) {
-        let continues = |old: &Plan, bank: crate::MainOutputBank| {
-            old.main_output_id() == plan.main_output_id()
-                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
-        };
-        self.run = match (plan.main_output_bank(), old, self.run) {
-            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
-            (Some(_), ..) => Some(MainOutputFadeRun { seq, done: 0 }),
-            (None, ..) => None,
+    /// carries none ends one running. A plan whose bank continues the one
+    /// running keeps the frames it has rendered.
+    fn install(&mut self, plan: &Plan, seq: u64) {
+        self.run = match (plan.main_output_bank(), self.run) {
+            (Some(bank), Some(run)) if bank.continues => Some(run),
+            (Some(_), _) => Some(MainOutputFadeRun { seq, done: 0 }),
+            (None, _) => None,
         };
     }
 
@@ -530,7 +525,7 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
-/// latency then its tail (`NodeRec::park_after`).
+/// latency then its tail (`Shape::park_after`).
 fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
@@ -719,12 +714,11 @@ impl<F: Float> Executor<F> {
     /// [`graph_tail`]: crate::graph_tail
     pub fn reported_tail<G: TailGraph<Node = NodeKey>>(&self, topology: &G) -> GraphTail {
         let owed: HashMap<NodeKey, Owed> = self.plan.as_ref().map_or_else(HashMap::new, |plan| {
-            plan.nodes
-                .recs
-                .iter()
-                .filter_map(|rec| {
-                    let u = self.store[rec.store.0 as usize].as_ref()?;
-                    Some((plan.units[rec.unit].key, u.owed(rec)))
+            plan.units
+                .iter_enumerated()
+                .filter_map(|(unit, pu)| {
+                    let u = self.store[pu.idx.0 as usize].as_ref()?;
+                    Some((pu.key, u.owed(&plan.ports[unit], &pu.shape)))
                 })
                 .collect()
         });
@@ -1002,6 +996,7 @@ mod tests {
             1,
             Arc::clone(&plan),
             delta,
+            false,
             units,
             |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
@@ -1016,8 +1011,6 @@ mod tests {
             &mut commit,
             StageIn {
                 old: None,
-                carry: true,
-                resumed: false,
                 mix_lane: &|_| None,
             },
         );

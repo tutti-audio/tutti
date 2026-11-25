@@ -57,7 +57,7 @@ pub(crate) struct TempoWalk {
 
 impl TempoWalk {
     /// Seek `clock` to the exact `beat` and take the map's tempo there.
-    pub fn seek(&mut self, map: &TempoMap, clock: &mut FrameClock, beat: Beat) {
+    pub(crate) fn seek(&mut self, map: &TempoMap, clock: &mut FrameClock, beat: Beat) {
         clock.seat(beat);
         self.sync_tempo(map, clock);
     }
@@ -65,7 +65,7 @@ impl TempoWalk {
     /// Find `clock`'s current beat on `map`'s timeline and take the tempo in
     /// force there, leaving the clock's beat as it is: after a seek, a loop
     /// wrap, a rate change or a map swap. `true` when the tempo moved.
-    pub fn sync_tempo(&mut self, map: &TempoMap, clock: &mut FrameClock) -> bool {
+    pub(crate) fn sync_tempo(&mut self, map: &TempoMap, clock: &mut FrameClock) -> bool {
         let rate = clock.sample_rate();
         let beat = clock.beat();
         let mut view = map.view(rate);
@@ -113,7 +113,7 @@ impl TempoWalk {
     /// map's tempo cell by cell. With `stop`, return right after the first
     /// frame the tempo changed on (the clock standing on it); otherwise advance
     /// all `frames`. Returns the frames advanced and whether the tempo changed.
-    pub fn advance(
+    pub(crate) fn advance(
         &mut self,
         map: &TempoMap,
         clock: &mut FrameClock,
@@ -153,7 +153,7 @@ impl TempoWalk {
     /// `cap` of them. `transport` builds the transport from the clock after a
     /// change. Walks a copy, with the code [`advance`](Self::advance) runs for real, so
     /// a render that rolls to a change's offset finds the same change there.
-    pub fn ahead(
+    pub(crate) fn ahead(
         &self,
         map: &TempoMap,
         clock: &FrameClock,

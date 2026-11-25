@@ -324,13 +324,14 @@ pub mod nodes {
         OscillatorNode, OscillatorWave, PanLaw, PhaserConfig, PhaserNode, PitchShifterConfig,
         PitchShifterNode, PlateReverbConfig, PlateReverbNode, PolarityConfig, PolarityError,
         PolarityNode, RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY, SecondOrderShape,
-        ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts, SpringLayout,
-        SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError, Stages, StagesError,
-        Stagger, StaggerError, StereoWidthConfig, StereoWidthNode, SvfFilterConfig, SvfFilterNode,
-        SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
-        TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
-        TubeStageConfig, TubeStageNode, VbapError, VbapPannerConfig, VbapPannerNode,
-        WaveguideStringConfig, WaveguideStringNode, Waveshape, WavetableConfig, WavetableNode,
+        ShapeKind, ShimmerConfig, ShimmerLayout, ShimmerNode, SourceNode, SourcePorts,
+        SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError,
+        Stages, StagesError, Stagger, StaggerError, StereoWidthConfig, StereoWidthNode,
+        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
+        SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
+        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
+        VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode, Waveshape,
+        WavetableConfig, WavetableNode,
     };
 
     /// Writing a node over the kernels (`tutti-nodes`): the `Kernel` and `KernelNode`
@@ -352,22 +353,22 @@ pub mod nodes {
             DirectionSet, DistanceKernel, DistanceSet, DistortionKernel, DistortionSet,
             DynamicEqControls, DynamicEqKernel, DynamicEqSet, EarlyReflectionsKernel,
             EnvelopeFilterControls, EnvelopeFilterKernel, EnvelopeFilterSet, EqControls, EqKernel,
-            FdnControls, FdnKernel, FdnSet, Feed, FmKernel, FmSet, FreeverbControls,
-            FreeverbKernel, FreeverbSet, FrequencyShifterKernel, FrequencyShifterSet, GateControls,
-            GateKernel, GateSet, GraphicEqControls, GraphicEqKernel, GraphicEqSet, HasControl,
-            HysteresisControls, HysteresisKernel, HysteresisSet, KarplusStrongKernel,
-            KarplusStrongSet, Kernel, KernelConfig, KernelNode, LadderControls, LadderKernel,
-            LadderSet, LevellerControls, LevellerKernel, LevellerSet, LimiterControls,
-            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet, ModHost,
-            ModalBankKernel, ModalBankSet, MultibandControls, NoControls, PhaserControls,
-            PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet, PlateControls,
-            PlateKernel, PlateSet, ReconcileError, Ring, RingModControls, RingModKernel,
-            RingModSet, ShimmerKernel, ShimmerSet, SpringControls, SpringReverbKernel,
-            SpringReverbSet, StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet,
-            TiltFilterControls, TiltFilterKernel, TiltFilterSet, TransientControls,
-            TransientShaperKernel, TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet,
-            TubeStageControls, TubeStageKernel, TubeStageSet, WaveguideStringKernel,
-            WaveguideStringSet, WidthControls,
+            FdnControls, FdnKernel, FdnKind, FdnNodeControls, FdnSet, Feed, FmKernel, FmSet,
+            FreeverbControls, FreeverbKernel, FreeverbSet, FreezeControls, FrequencyShifterKernel,
+            FrequencyShifterSet, GateControls, GateKernel, GateSet, GraphicEqControls,
+            GraphicEqKernel, GraphicEqSet, HasControl, HysteresisControls, HysteresisKernel,
+            HysteresisSet, KarplusStrongKernel, KarplusStrongSet, Kernel, KernelConfig, KernelNode,
+            LadderControls, LadderKernel, LadderSet, LevellerControls, LevellerKernel, LevellerSet,
+            LimiterControls, LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel,
+            ModDelaySet, ModHost, ModalBankKernel, ModalBankSet, MultibandControls, NoControls,
+            PhaserControls, PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet,
+            PlateControls, PlateKernel, PlateSet, ReconcileError, Ring, RingModControls,
+            RingModKernel, RingModSet, ShimmerControls, ShimmerSet, SpringControls,
+            SpringReverbKernel, SpringReverbSet, StereoWidthKernel, StereoWidthSet, SvfControls,
+            SvfKernel, SvfSet, TiltFilterControls, TiltFilterKernel, TiltFilterSet,
+            TransientControls, TransientShaperKernel, TransientShaperSet, TremoloControls,
+            TremoloKernel, TremoloSet, TubeStageControls, TubeStageKernel, TubeStageSet,
+            WaveguideStringKernel, WaveguideStringSet, WidthControls,
         };
     }
 }
@@ -588,8 +589,8 @@ pub mod session {
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
-        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakeId,
-        TakePlacement, Window,
+        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakePlacement,
+        Window,
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};
@@ -601,6 +602,8 @@ pub mod session {
         feature = "export"
     ))]
     pub use tutti_session::{Unanswered, Unblocked};
+    #[cfg(feature = "capture")]
+    pub use tutti_timeline::TakeId;
     // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;

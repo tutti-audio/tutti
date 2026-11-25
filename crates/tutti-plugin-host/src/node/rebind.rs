@@ -23,11 +23,9 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
-use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
 use tutti_timeline::TempoReader;
 use tutti_units::ParamId;
-use tutti_units::SampleRate;
 use tutti_units::Samples;
 
 use super::client::{Declared, InProcessClient, PluginNode, Reload};
@@ -68,7 +66,6 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_units::SampleRate,
-    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where a tick delivers what its pump finds: the handle's listeners.
     /// `None` for an out-of-process plugin, whose own listener reports it.
     reporting: Option<Reporting>,
@@ -101,7 +98,6 @@ impl<L: Loaded, F: Float> Clone for Rebinder<L, F> {
             reload: self.reload.clone(),
             features: self.features,
             sample_rate: self.sample_rate,
-            pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
             edits: self.edits.clone(),
             delivery: Arc::clone(&self.delivery),
@@ -178,7 +174,6 @@ where
             declared,
             self.features,
             self.sample_rate,
-            Arc::clone(&self.pending_sample_rate),
             Some(Arc::clone(&counters)),
             self.parameters.iter().copied(),
             self.spares,
@@ -328,7 +323,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             reload: self.reload.clone(),
             features: self.features,
             sample_rate: self.sample_rate,
-            pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
             edits: self.edits.clone(),
             delivery: Arc::new(Mutex::new(self.params.counters())),
@@ -427,7 +421,7 @@ mod tests {
             ));
         }
         let descriptor = loaded.info().clone();
-        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
+        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(4096)).expect("a block"));
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");
         };
@@ -845,9 +839,12 @@ mod tests {
         block(&mut old, 0);
         fake.refuse_rate(Some(SampleRate::SR_44K1));
         let main = main_thread();
-        let _ = inner
-            .lock()
-            .set_sample_rate(main, SampleRate::SR_44K1, None);
+        {
+            let mut instance = inner.lock();
+            instance.want(|w| w.with_rate(SampleRate::SR_44K1));
+            instance.rate_asked();
+            let _ = instance.reconcile(Some(main), None);
+        }
         let mut frame = BLOCK as u64;
         while inner.lock().ready_to_rehand() == Err(RebindError::Restarting) {
             block(&mut old, frame);

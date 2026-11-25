@@ -37,12 +37,12 @@ pub(crate) trait Id: Copy + Eq + Ord + std::fmt::Debug {
 }
 
 macro_rules! ids {
-    ($($(#[$meta:meta])* $name:ident;)*) => {$(
+    ($($(#[$meta:meta])* $vis:vis struct $name:ident;)*) => {$(
         $(#[$meta])*
         #[derive(
             Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
         )]
-        pub struct $name(u32);
+        $vis struct $name(u32);
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -54,13 +54,13 @@ macro_rules! ids {
             /// The raw value.
             #[must_use]
             #[allow(dead_code, reason = "the ids only the compiler names read no raw value")]
-            pub const fn get(self) -> u32 {
+            $vis const fn get(self) -> u32 {
                 self.0
             }
 
             /// The position this id names in its table.
             #[must_use]
-            pub const fn index(self) -> usize {
+            $vis const fn index(self) -> usize {
                 self.0 as usize
             }
         }
@@ -79,38 +79,38 @@ macro_rules! ids {
 
 ids! {
     /// An op of a plan: a position in [`Plan::ops`](crate::Plan::ops).
-    OpId;
+    pub struct OpId;
     /// An audio value under construction: a position in the audio values.
-    AudioValueId;
+    pub(crate) struct AudioValueId;
     /// An event value under construction: a position in the event values.
-    EventValueId;
+    pub(crate) struct EventValueId;
     /// An audio slot: a position in the audio arena.
-    AudioSlotId;
+    pub struct AudioSlotId;
     /// An event slot: a position in the event arena.
-    EventSlotId;
+    pub struct EventSlotId;
     /// A unit of a plan: a position in [`Plan::units`](crate::Plan::units),
     /// which is not its place in the unit store ([`UnitIdx`](crate::UnitIdx)).
-    PlanUnitId;
+    pub struct PlanUnitId;
     /// A task: a position in the plan's coarsened task list.
-    TaskId;
+    pub struct TaskId;
     /// A PDC delay of audio: a position in
     /// [`Plan::audio_delays`](crate::Plan::audio_delays).
-    AudioDelayId;
+    pub struct AudioDelayId;
     /// A PDC delay of events: a position in
     /// [`Plan::event_delays`](crate::Plan::event_delays).
-    EventDelayId;
+    pub struct EventDelayId;
     /// An audio feedback: a position in
     /// [`Plan::audio_feedback`](crate::Plan::audio_feedback).
-    AudioFeedbackId;
+    pub struct AudioFeedbackId;
     /// An event feedback: a position in
     /// [`Plan::event_feedback`](crate::Plan::event_feedback).
-    EventFeedbackId;
+    pub struct EventFeedbackId;
     /// A tap of a plan: a position in its tap table.
-    PlanTapId;
+    pub struct PlanTapId;
     /// An event tap of a plan: a position in its event tap table.
-    PlanEventTapId;
+    pub struct PlanEventTapId;
     /// A meter of a plan: a position in its meter table.
-    PlanMeterId;
+    pub struct PlanMeterId;
 }
 
 /// A `Vec<T>` that only an `I` indexes; its rows are read and written through

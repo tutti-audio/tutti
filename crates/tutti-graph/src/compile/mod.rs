@@ -44,9 +44,11 @@
 //!    schedule, with in-place aliasing where legal, and the lowering of the
 //!    program from values to slots.
 //! 8. **Place** (`place`) units: `NodeKey` → dense [`UnitIdx`](plan::UnitIdx), diffed against `prev`
-//!    into a [`Delta`]; the plan is then built once from the program, and
+//!    into a [`Delta`], which also names, by id, the old ring, FIFO, writer and lane each of
+//!    the plan's continues (`carry`); the plan is then built once from the program, and
 //!    **verified** ([`verify`]) in debug builds.
 
+pub(crate) mod carry;
 mod coarsen;
 mod colour;
 mod emit;
@@ -301,16 +303,8 @@ pub fn compile(
     let program = emit::emit(graph, &checked, &order, &timing, prepare);
     let tasks = coarsen::group(&program, &checked, prepare.max_block().samples());
     let program = colour::colour(program, &checked);
-    let Placed { delta, units } = place::place(graph, &checked, &timing, prev);
-    let plan = Plan::new(
-        prepare,
-        program,
-        tasks,
-        units,
-        delta.store_len,
-        graph,
-        timing,
-    );
+    let Placed { delta, units } = place::place(graph, &checked, &timing, &program, prepare, prev);
+    let plan = Plan::new(prepare, program, tasks, units, graph, timing);
 
     #[cfg(debug_assertions)]
     if let Err(e) = verify::verify(&plan) {

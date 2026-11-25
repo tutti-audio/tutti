@@ -826,8 +826,8 @@ impl<F: Float> MixTrack<F> {
 /// onto the output channels (`folded`) as [`pass`](Pass) says. Built on the
 /// control side, never grown.
 pub(crate) struct Alignment<F: Float> {
-    /// The declared latency, in frames.
-    latency: usize,
+    /// The declared latency.
+    latency: Samples,
     /// Which input channel feeds which output channel when the node is not
     /// called ([`Pass`]).
     pass: Pass<F>,
@@ -847,7 +847,7 @@ impl<F: Float> Alignment<F> {
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
         Self {
-            latency: shape.latency.samples().get(),
+            latency: shape.latency.samples(),
             pass,
             line: BypassLine::for_shape(shape),
             scratch: (main > 0).then(|| Arena::new(main, max_block)),
@@ -865,7 +865,7 @@ impl<F: Float> Alignment<F> {
     /// side.
     pub(crate) fn relined(
         &mut self,
-        latency: usize,
+        latency: Samples,
         line: Option<BypassLine<F>>,
     ) -> Option<BypassLine<F>> {
         self.latency = latency;
@@ -1058,7 +1058,7 @@ impl<F: Float> ModeState<F> {
         if reset {
             self.stale = false;
             if want == NodeMode::Active {
-                warm = self.aligned.latency;
+                warm = self.aligned.latency.get();
             }
         }
         self.fade.retarget(want, self.mix.to, warm, declick);

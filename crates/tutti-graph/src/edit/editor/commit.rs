@@ -4,58 +4,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
-use crate::compile::plan::{Delta, Placement, Plan};
+use crate::compile::plan::{Delta, Plan, Rewired};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
 use crate::model::gain::{EdgeFade, EdgeGain};
 use crate::model::spec::{GraphSpec, ValidGraph};
+use crate::node::Node;
 use crate::node::param::ParamState;
-use crate::node::{Node, Wired};
 use crate::{Edge, EdgeId, PortSink, PortSource};
 use crate::{Fade, MainOutputBank, NodeKey};
 use tutti_units::Gain;
-
-/// A node whose audio wiring changed in a commit: a port gained its first
-/// source or consumer, or lost its last.
-///
-/// From the plans, not the spec: the old and the new plan's
-/// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
-/// the commit placed with no wiring, a node it removed and a rewire that
-/// leaves each port's answer as it was are not listed. A re-insert at the
-/// same key with a different shape but the same masks reports nothing: bus
-/// layout changes reach a plugin through its own re-activation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rewired {
-    /// The node.
-    pub node: NodeKey,
-    /// Its wired ports in the plan sent before (none for a node new to it).
-    pub was: Wired,
-    /// Its wired ports in the plan this commit sent.
-    pub now: Wired,
-}
-
-impl Rewired {
-    /// The nodes of `new` whose wired ports differ from `old`'s, in key
-    /// order.
-    fn between(old: Option<&Plan>, new: &Plan) -> Vec<Self> {
-        new.units()
-            .iter()
-            .filter_map(|u| {
-                let was = old
-                    .and_then(|p| p.unit(u.key))
-                    .map_or_else(Wired::default, |o| o.wired);
-                (was != u.wired).then_some(Self {
-                    node: u.key,
-                    was,
-                    now: u.wired,
-                })
-            })
-            .collect()
-    }
-}
 
 impl<F: Float> Editor<F> {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
@@ -76,6 +36,10 @@ impl<F: Float> Editor<F> {
     ///
     /// When the box coming back is a [`reprepare`](Self::reprepare)'s first
     /// half, this re-prepares the units it carries and sends the second.
+    ///
+    /// Items an executor apply had no room to hand back, leaked rather than
+    /// freed on the audio thread, are logged with `tracing::error!` once per
+    /// increase: such a count is a tutti bug.
     pub fn collect(&mut self) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         while let Some(done) = self.link.pop_returned() {
@@ -95,6 +59,14 @@ impl<F: Float> Editor<F> {
             drop(x);
         }
         self.stager.observe(self.link.acked());
+        // Control thread: the audio thread only counts what its lists refused.
+        let leaked = self.link.take_leaked();
+        if leaked > 0 {
+            tracing::error!(
+                leaked,
+                "an executor apply had no room to hand back {leaked} owned items and leaked them; this is a tutti bug"
+            );
+        }
         keys
     }
 
@@ -207,37 +179,34 @@ impl<F: Float> Editor<F> {
         plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
-        delta.fades = delta
-            .replace
+        let fades = delta
+            .replace()
             .iter()
             .filter_map(|&(_, new)| self.placements.fade(new.key).map(|f| (new.key, f)))
             .collect();
         // The keys `set_latency` changed that this delta keeps: their
         // crossfades are cut (see `Delta::cuts`).
         let base = self.life.plan().map(|p| &**p);
-        delta.cuts = self
+        let cuts = self
             .placements
             .latency_cuts()
             .filter_map(|key| {
                 let now = plan.unit(key)?;
                 let was = base?.unit(key)?;
-                (was.generation == now.generation && was.idx == now.idx).then_some(Placement {
-                    key,
-                    generation: now.generation,
-                    idx: now.idx,
-                })
+                (was.generation == now.generation && was.idx == now.idx).then(|| now.placement())
             })
             .collect();
+        delta.attach(fades, cuts);
         debug_assert_eq!(
             plan.verify_fades(self.base().map(|p| &**p), &delta),
             Ok(()),
             "`replace` checked every fade it attached"
         );
         let needed: Vec<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, new)| new.key))
+            .chain(delta.replace().iter().map(|(_, new)| new.key))
             .collect();
         // Check before taking anything, so a failed commit leaves every
         // pending unit where it was.
@@ -250,8 +219,8 @@ impl<F: Float> Editor<F> {
             .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
             .collect();
         self.placements.clear_fades_and_cuts();
-        let rewired = Rewired::between(self.base().map(|p| &**p), &plan);
-        self.send(plan, delta, units, &weights, None);
+        let rewired = delta.take_rewired();
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = fading;
         self.sync_ranges();
         self.life
@@ -411,6 +380,7 @@ impl<F: Float> Editor<F> {
             old: was.spec.main_output_id,
             base,
             fade,
+            continues: continuing.is_some(),
         };
         let fading = Fading {
             was: was.clone(),
@@ -435,8 +405,10 @@ impl<F: Float> Editor<F> {
     ///
     /// Nothing is sent on [`CommitError::Poisoned`],
     /// [`CommitError::Repreparing`], [`CommitError::Backpressure`],
-    /// [`CommitError::TooManyOutputs`], or [`CommitError::Fade`] when the
-    /// delta's crossfades fail [`Plan::verify_fades`].
+    /// [`CommitError::TooManyOutputs`], [`CommitError::StaleDelta`] when the
+    /// delta was compiled against another plan than [`base`](Self::base), or
+    /// [`CommitError::Fade`] when the delta's crossfades fail
+    /// [`Plan::verify_fades`].
     pub fn package(
         &mut self,
         plan: Plan,
@@ -450,6 +422,9 @@ impl<F: Float> Editor<F> {
         }
         self.link.check_room()?;
         self.limits.outputs(plan.main_outputs())?;
+        if delta.carry.prev != self.base().map(|p| p.id.0) {
+            return Err(CommitError::StaleDelta);
+        }
         self.fade_room(&delta)?;
         plan.verify_fades(self.base().map(|p| &**p), &delta)
             .map_err(CommitError::Fade)?;
@@ -457,29 +432,26 @@ impl<F: Float> Editor<F> {
         // The plan was compiled elsewhere, from the spec as it stands (as a
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
-        self.send(plan, delta, units, &weights, None);
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = None;
         Ok(())
     }
 
     /// Builds the commit of `plan` and sends it: the caller checked the
     /// link's room (`check_room`, `fade_room`), so the send cannot fail.
-    /// `resume` is a re-prepare's second half.
+    /// `resumed` is a re-prepare's second half.
     pub(super) fn send(
         &mut self,
         plan: Plan,
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         bus_weights: &BusLanes,
-        resume: Option<Resume>,
+        resumed: bool,
     ) {
         self.touch();
         let fades = starting(&delta);
-        self.main_output.sent(
-            plan.main_output_bank(),
-            plan.main_output_id(),
-            self.link.next_seq(),
-        );
+        self.main_output
+            .sent(plan.main_output_bank(), self.link.next_seq());
         let plan = Arc::new(plan);
         let spec = &self.spec;
         let values = &self.values;
@@ -501,6 +473,7 @@ impl<F: Float> Editor<F> {
             self.link.next_seq(),
             Arc::clone(&plan),
             delta,
+            resumed,
             units,
             params,
             modes,
@@ -521,8 +494,6 @@ impl<F: Float> Editor<F> {
             &mut commit,
             StageIn {
                 old: old.as_deref(),
-                carry: resume.is_none_or(|r| r.carry),
-                resumed: resume.is_some(),
                 mix_lane: &|key| {
                     mode_cells
                         .get(key)

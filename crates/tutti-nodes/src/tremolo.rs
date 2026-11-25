@@ -130,6 +130,8 @@ impl<F: Float> Kernel for TremoloKernel<F> {
         self.tremolo.retarget(controls);
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

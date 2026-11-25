@@ -112,6 +112,8 @@ const reverb::fdn::bank::FdnBank::CHUNK
 const reverb::fdn::design::FdnControls::DEFAULT
 const reverb::fdn::design::MAX_PRE_DELAY
 const reverb::fdn::design::MIN_DECAY
+const reverb::fdn::kind::FreezeControls::DEFAULT
+const reverb::fdn::kind::ShimmerControls::DEFAULT
 const reverb::freeverb::bank::FreeverbBank::CHUNK
 const reverb::freeverb::bank::FreeverbBank::FIXED_GAIN
 const reverb::freeverb::design::FreeverbControls::GENERAL_MIDI
@@ -514,15 +516,6 @@ fn fft::scratch::FftScratch::forward
 fn fft::scratch::FftScratch::forward_unwindowed
 fn fft::scratch::FftScratch::inverse
 fn fft::scratch::FftScratch::new
-fn fft::staged::StagedRealFft::bins
-fn fft::staged::StagedRealFft::forward_step
-fn fft::staged::StagedRealFft::forward_steps
-fn fft::staged::StagedRealFft::inverse_step
-fn fft::staged::StagedRealFft::inverse_steps
-fn fft::staged::StagedRealFft::new
-fn fft::staged::StagedRealFft::new_scratch
-fn fft::staged::StagedRealFft::scratch_len
-fn fft::staged::StagedRealFft::size
 fn filter::biquad::Biquad::poles
 fn filter::biquad::Biquad::response
 fn filter::biquad::Biquad::spectral_radius
@@ -808,8 +801,9 @@ fn reverb::fdn::bank::FdnRamps::jump_to_target
 fn reverb::fdn::design::FdnLayout::design_into
 fn reverb::fdn::design::FdnLayout::lines
 fn reverb::fdn::design::FdnLayout::new
-fn reverb::fdn::design::FdnLayout::shimmering
-fn reverb::fdn::design::FdnLayout::shimmers
+fn reverb::fdn::kind::ShimmerLayout::design_into
+fn reverb::fdn::kind::ShimmerLayout::layout
+fn reverb::fdn::kind::ShimmerLayout::new
 fn reverb::freeverb::bank::FreeverbBank::new
 fn reverb::freeverb::bank::FreeverbBank::process
 fn reverb::freeverb::bank::FreeverbBank::ramps
@@ -943,7 +937,7 @@ fn spatial::ambisonic::decoder::AmbisonicDecoder::order
 fn spatial::ambisonic::decoder::AmbisonicDecoder::process
 fn spatial::ambisonic::decoder::AmbisonicDecoder::sampling
 fn spatial::ambisonic::decoder::AmbisonicDecoder::speakers
-fn spatial::ambisonic::harmonics::AmbisonicEncoder::jump_to
+fn spatial::ambisonic::harmonics::AmbisonicEncoder::jump_to_target
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::new
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::process
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::retarget
@@ -952,7 +946,7 @@ fn spatial::ambisonic::harmonics::Harmonics::get
 fn spatial::ambisonic::harmonics::Harmonics::iter
 fn spatial::ambisonic::harmonics::Harmonics::new
 fn spatial::ambisonic::harmonics::Harmonics::order
-fn spatial::ambisonic::rotation::AmbisonicRotator::jump_to
+fn spatial::ambisonic::rotation::AmbisonicRotator::jump_to_target
 fn spatial::ambisonic::rotation::AmbisonicRotator::new
 fn spatial::ambisonic::rotation::AmbisonicRotator::process
 fn spatial::ambisonic::rotation::AmbisonicRotator::retarget
@@ -976,7 +970,6 @@ fn spatial::vbap::VbapKernel::gains
 fn spatial::vbap::VbapKernel::new
 fn spatial::vbap::layout::SpeakerLayout::directions
 fn spatial::vbap::layout::SpeakerLayout::gains_into
-fn spatial::vbap::layout::Tuple::speakers
 fn spectral::spectral_bandwidth
 fn spectral::spectral_centroid
 fn spectral::spectral_crest
@@ -1179,7 +1172,6 @@ struct filter::crossover::bank::CrossoverBank
 struct filter::crossover::blend::CrossoverBlend
 struct filter::crossover::controls::CrossoverControls
 struct filter::crossover::model::CrossoverModel
-struct filter::crossover::state::CrossoverState
 struct filter::envelope::EnvelopeFilterBank
 struct filter::envelope::EnvelopeFilterControls
 struct filter::ladder::bank::LadderBank
@@ -1255,6 +1247,11 @@ struct reverb::fdn::bank::FdnBank
 struct reverb::fdn::bank::FdnRamps
 struct reverb::fdn::design::FdnControls
 struct reverb::fdn::design::FdnLayout
+struct reverb::fdn::kind::FreezeControls
+struct reverb::fdn::kind::ShimmerControls
+struct reverb::fdn::kind::ShimmerLayout
+struct reverb::fdn::kind::sealed::ShimmerRamps
+struct reverb::fdn::shimmer::Shimmer
 struct reverb::freeverb::bank::FreeverbBank
 struct reverb::freeverb::bank::FreeverbRamps
 struct reverb::freeverb::design::FreeverbControls
@@ -1343,6 +1340,10 @@ trait filter::simd_lanes::sealed::Sealed
 trait model::lti::Lti
 trait model::system::System
 trait ramp::Lerp
+trait reverb::fdn::kind::FdnKind
+trait reverb::fdn::kind::sealed::Sealed
+trait reverb::fdn::kind::sealed::ShiftRamps
+trait reverb::fdn::kind::sealed::Shifter
 trait stft::window::Window
 trait viterbi::Transition
 type reverb::network::Gains

@@ -106,6 +106,16 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ),
     (
         "tutti_timeline",
+        "Recording",
+        "a take's start or stop of the transport's recording; only a take sends it, so an app never names it",
+    ),
+    (
+        "tutti_timeline",
+        "Roll",
+        "what a motion command does to the roll; the session's transport handle reads it, an app never needs it",
+    ),
+    (
+        "tutti_timeline",
         "OfflineClock",
         "the export render's clock; `ExportClock` wraps it",
     ),

@@ -149,17 +149,12 @@ struct Running<F: Float> {
 pub struct PlateKernel<F: Float> {
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + Lerp> PlateKernel<F> {
     /// A plate with no lines until `prepare` gives it a rate.
     fn new() -> Self {
-        Self {
-            running: None,
-            applied: false,
-        }
+        Self { running: None }
     }
 }
 
@@ -185,23 +180,23 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
         let bank = PlateBank::new(rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.applied = false;
     }
 
-    /// Silence, and the next design lands at once, as a fresh node's first does.
+    /// Back to silence.
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.jump_to_target();
         }
     }
 
     fn retarget(&mut self, controls: &PlateControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(r) = &mut self.running {
             r.ramps.jump_to_target();
-            self.applied = true;
         }
     }
 
