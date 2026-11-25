@@ -1292,11 +1292,10 @@ fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
     let (wait, _switch) = ipc.watch();
     let (mut processor, mut controller) = activate(ipc, 32);
     assert!(AnyThread::set_render_mode(&controller, RenderMode::Offline));
-    assert!(Control::set_render_mode(
-        &mut controller,
-        main_thread(),
-        RenderMode::Offline
-    ));
+    assert_eq!(
+        Control::set_render_mode(&mut controller, main_thread(), RenderMode::Offline),
+        tutti_plugin_types::ModeTold::Asked
+    );
     assert!(!wait.armed(), "a render mode is not the wait");
     for _ in 0..3 {
         render_silence_as(&mut processor, 32, true);

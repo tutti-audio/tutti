@@ -6,9 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, ModifierConvention, NoteName, ParamAccess, ParamEdit, ParamWriteError, ParameterInfo,
-    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginPreset, PluginResult,
-    PluginWiring, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths, WindowHandle,
+    KeyUse, ModeTold, ModifierConvention, NoteName, ParamAccess, ParamEdit, ParamWriteError,
+    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
+    PluginPreset, PluginResult, PluginWiring, PresetId, RenderMode, RenderModeSupport, Request,
+    StateUse, Widths, WindowHandle,
 };
 use tutti_ump::NoteNumber;
 use tutti_units::Normalized;
@@ -337,9 +338,9 @@ impl Control for Vst2Loaded {
     /// why a render-mode change needs no restart here, and the answer is always
     /// `true`. The store is atomic: the plugin may ask from its audio thread
     /// while the control thread sets it.
-    fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> bool {
+    fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> ModeTold {
         self.set_offline_render(mode.is_offline());
-        true
+        ModeTold::Took
     }
 
     /// Stores the mode the plugin is told: `audioMasterGetAutomationState` answers it from

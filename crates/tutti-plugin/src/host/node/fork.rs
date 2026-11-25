@@ -224,6 +224,9 @@ pub(crate) struct ServedFork {
     tempo: tutti_timeline::TempoReader,
     /// The live node's controller map, whose app entries the fork carries.
     midi_map: tutti_plugin_host::MidiMapSlot,
+    /// The live plugin's lifecycle, which the render mode it runs in is read
+    /// from.
+    live: tutti_plugin_host::LiveView<tutti_plugin_ipc::Ipc>,
 }
 
 impl ServedFork {
@@ -240,6 +243,7 @@ impl ServedFork {
             features: client.loaded.features,
             controls: client.controls.clone(),
             midi_map: client.midi_map.clone(),
+            live: client.live.clone(),
         }
     }
 
@@ -274,7 +278,8 @@ impl ServedFork {
             .audio()
             .save_state(StateUse::Duplicate)
             .map_err(PluginForkError::SaveState)?;
-        let snapshot = ForkState::new(preset, state, live.audio().render_mode());
+        let live_mode = self.live.render_mode().ok_or(PluginForkError::LiveGone)?;
+        let snapshot = ForkState::new(preset, state, live_mode);
         drop(live);
         Ok(Capture {
             snapshot,
@@ -376,7 +381,10 @@ impl Capture {
         if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
-            let _ = fork.bridge.audio().set_render_mode(RenderMode::Offline);
+            let served = fork.served.clone();
+            let _ = fork.live.announce_render_mode(RenderMode::Offline, |mode| {
+                tutti_plugin_types::AnyThread::set_render_mode(&served, mode)
+            });
             // Not pinned end to end here: the out-of-process reference
             // plugin is CLAP, which has no system-time field. The in-process
             // VST2 fork drops its clock the same way, and
@@ -520,8 +528,16 @@ mod tests {
         }
     }
 
-    /// A source over a live mock-served plugin, which lists presets.
-    fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
+    /// A source over a live mock-served plugin, which lists presets, under the
+    /// lifecycle a node holds; the client and the server's threads live as long
+    /// as the source is used.
+    fn source_over(
+        rig: super::super::mock_server::Rig,
+    ) -> (
+        ServedFork,
+        tutti_plugin_host::InProcessClient<tutti_plugin_ipc::Ipc>,
+        super::super::mock_server::Threads,
+    ) {
         let origin = LaunchSpec {
             config: IpcConfig::new(),
             origin: PluginRef::file("test.vst3"),
@@ -531,14 +547,40 @@ mod tests {
         };
         let (controls, _) =
             PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-        ServedFork {
-            bridge: Arc::downgrade(&rig.bridge),
+        let (ipc, _record, threads) = super::super::mock_server::served(rig);
+        let (bridge, descriptor, loaded) = (
+            Arc::clone(ipc.bridge()),
+            ipc.descriptor().clone(),
+            ipc.loaded().clone(),
+        );
+        let prepare = tutti_plugin_types::Prepare::new(
+            SampleRate::SR_48K,
+            tutti_plugin_types::MaxBlock::of(Samples::new(ipc.ceiling())),
+        );
+        let (processor, controller) = ipc
+            .activate_anywhere(prepare)
+            .unwrap_or_else(|_| panic!("the mock activates"));
+        let client = tutti_plugin_host::client_over::<tutti_plugin_ipc::Ipc, f32>(
+            processor,
+            controller,
+            prepare,
+            descriptor,
+            &loaded,
+            [],
+            0,
+            None,
+        )
+        .expect("a client over the activated mock");
+        let source = ServedFork {
+            bridge: Arc::downgrade(&bridge),
             origin,
             features: Features::PRESET_LOAD,
             controls,
             tempo: tempo(4.0),
             midi_map: tutti_plugin_host::MidiMapSlot::new(&Default::default()),
-        }
+            live: client.live_view(),
+        };
+        (source, client, threads)
     }
 
     /// What a capture restores a fresh plugin with: its preset id (when it
@@ -566,10 +608,8 @@ mod tests {
     /// saved state: the preset is read from the live plugin at the gather.
     #[test]
     fn a_served_forks_capture_carries_the_live_preset() {
-        let rig = rig();
-        let capture = source_over(&rig)
-            .capture(RenderMode::Realtime)
-            .expect("captures");
+        let (source, _client, _threads) = source_over(rig());
+        let capture = source.capture(RenderMode::Realtime).expect("captures");
         let (preset, state) = restored_with(&capture);
         assert_eq!(preset, Some(PresetId::Number(PRESET)));
         assert_eq!(state, STATE);
@@ -579,8 +619,7 @@ mod tests {
     /// reports as current.
     #[test]
     fn a_plugin_without_preset_loading_forks_without_a_preset() {
-        let rig = rig();
-        let mut source = source_over(&rig);
+        let (mut source, _client, _threads) = source_over(rig());
         source.features = Features::empty();
         let capture = source.capture(RenderMode::Realtime).expect("captures");
         assert_eq!(restored_with(&capture).0, None);
@@ -591,18 +630,35 @@ mod tests {
     /// and an offline fork is offline either way.
     #[test]
     fn a_served_live_fork_keeps_the_live_render_mode() {
-        let rig = rig();
-        let source = source_over(&rig);
+        let (source, client, _threads) = source_over(rig());
+        let rig_bridge = source.bridge.upgrade().expect("the bridge lives");
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");
         let offline = source.capture(RenderMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
-        assert!(rig.bridge.audio().set_render_mode(RenderMode::Offline));
+        let rebinder = client.rebinder(tempo(4.0));
+        // What the server answers reaches the lifecycle at a pump.
+        let told = |mode| {
+            assert!(
+                client
+                    .live_view()
+                    .announce_render_mode(mode, |mode| rig_bridge.audio().set_render_mode(mode))
+            );
+            tutti_fixtures::wait_until(
+                "the server's answer to reach the lifecycle",
+                Duration::from_secs(60),
+                || {
+                    rebinder.tick(tutti_fixtures::main_thread());
+                    source.live.render_mode() == Some(mode)
+                },
+            );
+        };
+        told(RenderMode::Offline);
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(live.snapshot.offline(live.mode), "told offline: offline");
 
-        assert!(rig.bridge.audio().set_render_mode(RenderMode::Realtime));
+        told(RenderMode::Realtime);
         let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }

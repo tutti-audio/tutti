@@ -863,13 +863,17 @@ macro_rules! fake_control {
 
             /// Takes the mode where the fake is [`RenderModeSupport::Live`],
             /// recording it for [`FakePlugin::told_render_mode`].
-            fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
+            fn set_render_mode(
+                &mut self,
+                main: MainThreadMarker,
+                mode: RenderMode,
+            ) -> $crate::ModeTold {
                 if self.render_mode_support(main) != RenderModeSupport::Live {
-                    return false;
+                    return $crate::ModeTold::Unsupported;
                 }
                 let code = if mode.is_offline() { 2 } else { 1 };
                 self.shared.told_mode.store(code, Ordering::Relaxed);
-                true
+                $crate::ModeTold::Took
             }
 
             /// The fake reports no edits outside a block.

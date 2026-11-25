@@ -28,7 +28,8 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc_ffi::FdId;
 
 use crate::{
-    Layout, MaxBlock, PluginError, PluginTail, RenderMode, SampleRate, Samples, TransportRequest,
+    IpcError, Layout, MaxBlock, PluginError, PluginTail, RateRefusal, RateRefusalCause, RenderMode,
+    RenderModeSupport, SampleRate, Samples, TransportRequest,
 };
 
 /// How many effects one [`step`] can emit.
@@ -175,7 +176,7 @@ impl Prepare {
 /// The fields of a [`Prepare`] a live retune takes ([`Processor::RETUNE`](crate::Processor::RETUNE)):
 /// the one place they are named, for what a retune applies and for what still
 /// needs an activation.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Live {
     rate: SampleRate,
     max_block: MaxBlock,
@@ -183,6 +184,25 @@ struct Live {
 }
 
 impl Prepare {
+    /// What an activation takes and nothing else: the render mode, which a
+    /// plugin may take live, is set aside, and so is the callback size unless
+    /// `retunes` (only a Processor that retunes takes it, and one out of hand
+    /// is activated for it); a block ceiling at or below the one `told` is the
+    /// one it was told (its blocks are split to it).
+    fn restart_key(self, told: Self, retunes: bool) -> Self {
+        let max_block = if self.max_block.get() > told.max_block.get() {
+            self.max_block
+        } else {
+            told.max_block
+        };
+        Self {
+            quantum: if retunes { self.quantum } else { None },
+            mode: RenderMode::default(),
+            max_block,
+            ..self
+        }
+    }
+
     fn live(&self) -> Live {
         Live {
             rate: self.rate,
@@ -264,8 +284,50 @@ pub enum Event {
     /// The Processor is back from the realtime thread after a
     /// [`Effect::Recall`] that answered [`Reply::Lent`].
     Returned,
+    /// The plugin answered a setting the host told it without waiting
+    /// ([`Processor::RETUNE`](crate::Processor::RETUNE), or a render mode it
+    /// [answers later](crate::ModeTold::Asked)).
+    Answered(Told),
     /// The process hosting the plugin is gone.
     Died,
+}
+
+/// What a plugin answered to a setting the host told it live: the rate its
+/// Processor retunes to, or the render mode it was told.
+///
+/// An answer names the setting it answers, and [`step`] applies it only while
+/// the state is still waiting for exactly that: a rate that is not the one the
+/// Processor was last told, a mode that is not the one last asked, and any
+/// answer after an activation began change nothing. What a taken rate applies
+/// is what the Processor was told with it, not what the host wants since.
+///
+/// Exhaustive: [`step`] and every shell match every variant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Told {
+    /// The plugin runs at the rate.
+    RateTook(SampleRate),
+    /// The plugin did not take the rate, and what it was left as.
+    RateRefused(RateRefusal),
+    /// The plugin runs in the mode.
+    ModeTook(RenderMode),
+    /// The plugin did not take the mode: it runs in the mode it had.
+    ModeRefused(RenderMode),
+}
+
+/// How far a plugin is from what the host wants, and the cheapest step that
+/// closes it ([`State::behind`]).
+///
+/// Exhaustive: every shell matches every variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Behind {
+    /// The plugin runs as the host wants, or what differs is told and not yet
+    /// answered.
+    No,
+    /// Only the render mode differs, and the plugin takes it live
+    /// ([`HostOp::SetMode`]).
+    Mode(RenderMode),
+    /// Something an activation takes differs ([`HostOp::Reconfigure`]).
+    Restart,
 }
 
 /// What the host asks for.
@@ -278,6 +340,11 @@ pub enum HostOp {
     /// A new rate, block size, format or mode: deactivate and activate again.
     /// On a plugin that is not active this is [`Activate`](Self::Activate).
     Reconfigure(Prepare),
+    /// Tell an active plugin its render mode, with no deactivation: for a
+    /// plugin that takes it live ([`RenderModeSupport::Live`]). On a plugin
+    /// that is not active the mode waits in the wanted [`Prepare`] for the next
+    /// activation.
+    SetMode(RenderMode),
     /// Rejoin the halves and stop rendering.
     Deactivate,
     /// Bring the Processor back to the main thread and lend it again, with
@@ -358,6 +425,9 @@ pub enum Effect {
     Recall,
     /// Give the Processor to the realtime thread.
     Lend,
+    /// Tell the plugin its render mode. Answered by [`Reply::Answered`], or
+    /// by [`Reply::Asked`] when the plugin answers later ([`Event::Answered`]).
+    SetMode(RenderMode),
     /// Read the latency from the plugin.
     ReadLatency,
     /// Read the tail from the plugin.
@@ -410,6 +480,10 @@ pub enum Reply {
     Lent,
     /// `CallDeactivate`: the plugin would not stop. Both halves are intact.
     Stuck(PluginError),
+    /// `SetMode`: what the plugin answered.
+    Answered(Told),
+    /// `SetMode`: the plugin was told, and answers later ([`Event::Answered`]).
+    Asked,
     /// Any other effect, performed.
     Done,
 }
@@ -460,6 +534,11 @@ pub enum Notice {
     Stuck {
         /// Why.
         reason: PluginError,
+    },
+    /// The plugin did not take `mode`: it runs in the mode it had.
+    ModeRefused {
+        /// The mode that was asked for.
+        mode: RenderMode,
     },
     /// A call into the plugin panicked outside an activation, a deactivation or
     /// a rebuild (those tell the host through [`Refused`](Self::Refused)). The
@@ -614,6 +693,72 @@ impl Pending {
     }
 }
 
+/// The render modes a plugin was told and has not answered, counted.
+///
+/// Relies on one FIFO command lane per instance and one answer per tell. The
+/// client's control lane sends each `SetRenderMode` and waits for its reply
+/// before the next (`handle_setting`'s `Setting::RenderMode` arm in
+/// `tutti-plugin-ipc`'s `client/audio/dispatch.rs`), and the settings it takes
+/// queue without replacing one another (`Settings::modes` and
+/// `Requests::modes` in `channels.rs`); the server answers every request on
+/// that connection in order (`Handle<SetRenderMode>` in
+/// `tutti-plugin-server`'s `session/handlers.rs`); the answers reach the
+/// lifecycle in that order through `Unsolicited::modes` and
+/// `Control::take_answers`. A plugin in this process answers each tell at
+/// once, through `Reply::Answered`, so its count goes 0, 1, 0. A lost bridge
+/// answers nothing and poisons the state, which clears the count.
+#[derive(Debug, Clone, Copy, Default)]
+struct ModeTells {
+    /// Tells not yet answered.
+    out: u32,
+    /// How many of the oldest answers belong to tells an activation settled.
+    stale: u32,
+    /// The mode of the latest tell, while any is out.
+    last: Option<RenderMode>,
+}
+
+impl ModeTells {
+    /// The plugin was told `mode`.
+    fn told(&mut self, mode: RenderMode) {
+        self.out += 1;
+        self.last = Some(mode);
+    }
+
+    /// Every tell out is settled by an activation: its answer only counts.
+    fn superseded(&mut self) {
+        self.stale = self.out;
+        self.last = None;
+    }
+
+    /// An answer arrived; whether it is to a tell still waited for.
+    fn answered(&mut self) -> bool {
+        if self.stale > 0 {
+            self.stale -= 1;
+            self.out = self.out.saturating_sub(1);
+            if self.out == 0 {
+                self.last = None;
+            }
+            return false;
+        }
+        self.out = self.out.saturating_sub(1);
+        if self.out == 0 {
+            self.last = None;
+        }
+        true
+    }
+
+    /// Whether the answer about to be counted is to the latest tell, of `mode`.
+    fn is_latest(&self, mode: RenderMode) -> bool {
+        self.out == 1 && self.stale == 0 && self.last == Some(mode)
+    }
+
+    /// The mode the plugin will run in once its tells are answered, if any is
+    /// out and still waited for.
+    fn pending(&self) -> Option<RenderMode> {
+        self.last
+    }
+}
+
 /// The lifecycle decisions of one plugin: where it is, what it last reported
 /// and what it still has to do.
 ///
@@ -631,6 +776,10 @@ pub struct State {
     wanted: Option<Prepare>,
     /// The refusal the rollback in flight answers.
     refusal: Option<Refusal>,
+    /// The render modes the plugin was told and has not answered.
+    tells: ModeTells,
+    /// The live fields the Processor was told and the plugin has not answered.
+    retuning: Option<Live>,
     latency: Option<Samples>,
     tail: Option<PluginTail>,
     layout: Option<Layout>,
@@ -660,6 +809,8 @@ impl State {
             trying: None,
             wanted: None,
             refusal: None,
+            tells: ModeTells::default(),
+            retuning: None,
             latency: None,
             tail: None,
             layout: None,
@@ -728,56 +879,62 @@ impl State {
         self.wanted = Some(wanted);
     }
 
-    /// Records `mode` in the `Prepare` every later activation uses, without
-    /// restarting anything. For a format that applies the render mode live
-    /// (CLAP's `render.set`): the host sets it on the plugin itself, and this
-    /// keeps a later restart or rate change from putting the old mode back.
-    /// An activation already planned or in flight takes the new mode too.
-    pub fn set_mode(&mut self, mode: RenderMode) {
-        for prepare in self
-            .applied
-            .iter_mut()
-            .chain(self.trying.iter_mut())
-            .chain(self.wanted.iter_mut())
-        {
-            prepare.mode = mode;
+    /// Records that the Processor in hand was told the wanted rate, block
+    /// ceiling and callback size outside a plan: they are in flight until the
+    /// plugin answers ([`Event::Answered`]), and not behind meanwhile.
+    pub fn retune_asked(&mut self) {
+        self.retuning = self.wanted().map(|w| w.live());
+    }
+
+    /// Records that the plugin was told the wanted render mode outside a plan:
+    /// it is in flight until the plugin answers ([`Event::Answered`]), and not
+    /// behind meanwhile.
+    pub fn mode_asked(&mut self, mode: RenderMode) {
+        self.tells.told(mode);
+    }
+
+    /// How far the plugin is from what the host wants, and the cheapest step
+    /// that closes it.
+    ///
+    /// `retunes` is whether its Processor takes the rate, block ceiling and
+    /// callback size live ([`RETUNE`](crate::Processor::RETUNE)): the node
+    /// tells it, and a difference in them is [`Behind::Restart`] only while the
+    /// Processor has not been told ([`retune_asked`](Self::retune_asked)); an
+    /// answer makes it what the plugin has. A Processor that does not retune
+    /// takes no callback size, so a difference in it is not a restart there.
+    /// A difference in any other field but the render mode needs an
+    /// activation, which no field added to a [`Prepare`] escapes. `support` is how the plugin
+    /// takes a render mode: a plugin that takes it live is told
+    /// ([`Behind::Mode`]) until it answers, one that reads it at activation
+    /// restarts, and one with no mode is never behind in it.
+    #[must_use]
+    pub fn behind(&self, retunes: bool, support: RenderModeSupport) -> Behind {
+        let (Some(wanted), Some(applied)) = (self.wanted(), self.applied) else {
+            return Behind::No;
+        };
+        let (w, a) = (
+            wanted.restart_key(applied, retunes),
+            applied.restart_key(applied, retunes),
+        );
+        let told = retunes && self.retuning == Some(wanted.live());
+        let compared = if told { w.with_live(a.live()) } else { w };
+        if compared != a {
+            return Behind::Restart;
         }
-        for task in &mut self.plan.tasks {
-            if let Task::Activate(prepare) = task {
-                prepare.mode = mode;
+        if wanted.mode == applied.mode {
+            return Behind::No;
+        }
+        match support {
+            RenderModeSupport::Unsupported => Behind::No,
+            RenderModeSupport::OnActivation => Behind::Restart,
+            RenderModeSupport::Live => {
+                if self.tells.pending() == Some(wanted.mode) {
+                    Behind::No
+                } else {
+                    Behind::Mode(wanted.mode)
+                }
             }
         }
-    }
-
-    /// Records that the Processor took live what a retune takes of what the
-    /// host wants (rate, block ceiling, callback size): a later restart
-    /// activates at it. Every other field of `applied` stays as it was, so a
-    /// difference in one remains ([`behind`](Self::behind)).
-    pub fn retuned(&mut self) {
-        if let (Some(applied), Some(wanted)) = (self.applied, self.wanted()) {
-            self.applied = Some(applied.with_live(wanted.live()));
-        }
-    }
-
-    /// Whether what the plugin has differs from what the host wants in
-    /// something that matters to its Processor: another rate, a block ceiling
-    /// above the one it was told, another width, or, for a Processor that
-    /// retunes live (`follows_quantum`: its [`RETUNE`](crate::Processor::RETUNE)
-    /// is set), another callback size. A node that holds such a Processor
-    /// retunes it first and records it ([`retuned`](Self::retuned)); what this
-    /// still answers `true` for is given by an activation. The render mode is
-    /// not compared: a mode is asked for by its own call, and a plugin without
-    /// one keeps it only as a record.
-    #[must_use]
-    pub fn behind(&self, follows_quantum: bool) -> bool {
-        let (Some(wanted), Some(applied)) = (self.wanted(), self.applied) else {
-            return false;
-        };
-        let (w, a) = (wanted.live(), applied.live());
-        w.rate != a.rate
-            || w.max_block.get() > a.max_block.get()
-            || (follows_quantum && w.quantum != a.quantum)
-            || wanted.format != applied.format
     }
 
     /// The latency last reported.
@@ -871,6 +1028,7 @@ impl State {
             Event::Request(request) => self.on_request(request),
             Event::Tick => self.tick(out, true),
             Event::Replied(reply) => self.on_reply(reply, out),
+            Event::Answered(answer) => self.on_answer(answer, out),
             Event::Returned => {
                 if self.plan.wait == Wait::Parked {
                     self.advance(out);
@@ -883,6 +1041,8 @@ impl State {
         self.stage = Stage::Poisoned;
         self.trying = None;
         self.refusal = None;
+        self.tells = ModeTells::default();
+        self.retuning = None;
         self.plan = Plan::default();
         self.pending = Pending::default();
         self.after_main = false;
@@ -892,8 +1052,12 @@ impl State {
     }
 
     fn on_op(&mut self, op: HostOp, out: &mut Effects) {
-        if let HostOp::Activate(p) | HostOp::Reconfigure(p) = op {
-            self.wanted = Some(p);
+        match op {
+            // An activate leaves an active plugin as it is: it wants nothing.
+            HostOp::Activate(p) if !self.leads_active() => self.wanted = Some(p),
+            HostOp::Reconfigure(p) => self.wanted = Some(p),
+            HostOp::SetMode(mode) => self.wanted = self.wanted().map(|w| w.with_mode(mode)),
+            HostOp::Activate(_) | HostOp::Deactivate | HostOp::Relend => {}
         }
         // A relend asks for nothing an activation in flight does not do: it
         // lends at its end.
@@ -925,6 +1089,17 @@ impl State {
                 (Wait::Idle, _) => self.begin(&[Task::Activate(p)], out),
                 _ => self.plan.set_activate(p),
             },
+            HostOp::SetMode(mode) => {
+                // Against what the plugin will run in once the ask out is
+                // answered, so a newer want while one is out is told.
+                let behind = self
+                    .applied
+                    .is_some_and(|applied| self.tells.pending().unwrap_or(applied.mode) != mode);
+                if behind && matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
+                    self.tells.told(mode);
+                    emit(out, Effect::SetMode(mode));
+                }
+            }
             HostOp::Relend => {
                 if matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
                     self.begin(&[Task::Lend], out);
@@ -992,7 +1167,10 @@ impl State {
                     return;
                 }
                 Task::Activate(p) => {
-                    self.activate(p, Wait::Activate, out);
+                    // What the host wants when the activation starts, not
+                    // when it was planned.
+                    let wanted = self.wanted().unwrap_or(p);
+                    self.activate(wanted, Wait::Activate, out);
                     return;
                 }
                 Task::RebuildMidiMapping => {
@@ -1019,6 +1197,10 @@ impl State {
             self.revived = true;
             self.stage = Stage::Loaded;
         }
+        // An answer to a setting told before this activation names a setting
+        // the activation takes at `p`.
+        self.tells.superseded();
+        self.retuning = None;
         self.trying = Some(p);
         emit(out, Effect::CallActivate(p));
         self.plan.wait = wait;
@@ -1085,6 +1267,12 @@ fn merge_later(kept: Option<HostOp>, op: HostOp) -> HostOp {
     match (op, kept) {
         (HostOp::Activate(p), Some(HostOp::Deactivate)) => HostOp::Reconfigure(p),
         (HostOp::Activate(_), Some(kept)) => kept,
+        // A mode asked for beside an activation to come is part of it.
+        (HostOp::SetMode(mode), Some(HostOp::Activate(p))) => HostOp::Activate(p.with_mode(mode)),
+        (HostOp::SetMode(mode), Some(HostOp::Reconfigure(p))) => {
+            HostOp::Reconfigure(p.with_mode(mode))
+        }
+        (HostOp::SetMode(_), Some(HostOp::Deactivate)) => HostOp::Deactivate,
         (op, _) => op,
     }
 }
@@ -1272,6 +1460,8 @@ impl State {
             Reply::Activated if matches!(wait, Wait::Activate | Wait::Rollback) => {
                 self.stage = Stage::Active;
                 self.applied = self.trying.take();
+                self.tells.superseded();
+                self.retuning = None;
                 emit(out, Effect::ReadLatency);
                 emit(out, Effect::ReadTail);
                 emit(out, Effect::ReadLayout);
@@ -1320,6 +1510,7 @@ impl State {
                 }
                 self.advance(out);
             }
+            Reply::Answered(answer) => self.on_answer(answer, out),
             Reply::Returned if wait == Wait::Recall => self.advance(out),
             Reply::Lent if wait == Wait::Recall => self.plan.wait = Wait::Parked,
             Reply::Latency(now) => {
@@ -1355,6 +1546,78 @@ impl State {
 }
 
 impl State {
+    /// What the plugin answered to a setting it was told live. A taken setting
+    /// is what the plugin has ([`applied`](Self::applied)); a refused one is
+    /// given up, as a refused activation's is, and the plugin runs as it did.
+    /// An answer to a setting that is not the one last told applies nothing:
+    /// the plugin is still behind in what the host wants, and
+    /// [`behind`](Self::behind) says how.
+    fn on_answer(&mut self, answer: Told, out: &mut Effects) {
+        match answer {
+            Told::RateTook(rate) => {
+                let Some(told) = self.retuning.filter(|told| told.rate == rate) else {
+                    return;
+                };
+                self.retuning = None;
+                if let Some(applied) = self.applied {
+                    self.applied = Some(applied.with_live(told));
+                }
+            }
+            Told::RateRefused(refusal) => {
+                if self.retuning.is_none_or(|told| told.rate != refusal.rate) {
+                    return;
+                }
+                let recovery = match (&refusal.cause, self.applied) {
+                    (RateRefusalCause::RolledBack { .. }, Some(running)) => {
+                        Recovery::RolledBack { running }
+                    }
+                    _ => Recovery::Inactive,
+                };
+                self.wanted = self.applied;
+                self.retuning = None;
+                let rate = refusal.rate;
+                let reason = Arc::new(PluginError::Bridge(Box::new(IpcError::RateRefused(
+                    refusal,
+                ))));
+                emit(
+                    out,
+                    Effect::Notify(Notice::Refused {
+                        rate,
+                        reason,
+                        recovery,
+                    }),
+                );
+            }
+            // Each answer is the oldest tell not yet answered. One an
+            // activation since settled is stale and only counts: applying it
+            // would put back the mode the activation replaced. What the host
+            // wants stays its own.
+            Told::ModeTook(mode) => {
+                if !self.tells.answered() {
+                    return;
+                }
+                if let Some(applied) = &mut self.applied {
+                    applied.mode = mode;
+                }
+            }
+            // A refusal of the latest tell gives the want up; one of an
+            // earlier tell leaves it, for the later tell's answer to settle.
+            Told::ModeRefused(mode) => {
+                let latest = self.tells.is_latest(mode);
+                if !self.tells.answered() || !latest {
+                    return;
+                }
+                let running = self.applied.map(|applied| applied.mode);
+                if let (Some(wanted), Some(running)) = (&mut self.wanted, running)
+                    && wanted.mode == mode
+                {
+                    wanted.mode = running;
+                    emit(out, Effect::Notify(Notice::ModeRefused { mode }));
+                }
+            }
+        }
+    }
+
     /// The plugin refused the activation or rebuild `wait` was on. A refused
     /// activation with another accepted setting to go back to is followed by
     /// an activation at it; the host is told once the plugin's standing is

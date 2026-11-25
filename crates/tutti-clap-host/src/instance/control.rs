@@ -10,11 +10,11 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, OwnBypass, ParamAccess,
-    ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
-    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PluginWiring, PresetId,
-    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
-    TrackInfo, WindowHandle, Wraps, bypass_parameter,
+    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, ModeTold, OwnBypass,
+    ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
+    PluginWiring, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope,
+    Samples, StateUse, TimerId, TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -517,10 +517,16 @@ impl Control for ClapLoaded {
     }
 
     /// Switches between real-time and offline rendering per `CLAP_EXT_RENDER`.
-    /// `true` when the plugin accepted, `false` when it has no `clap.render` or
-    /// refused.
-    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
-        self.plugin.set_render_offline(main, mode.is_offline())
+    /// [`Unsupported`](ModeTold::Unsupported) when the plugin has no
+    /// `clap.render`, [`Refused`](ModeTold::Refused) when it refused.
+    fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> ModeTold {
+        if !self.plugin.supports_render() {
+            ModeTold::Unsupported
+        } else if self.plugin.set_render_offline(main, mode.is_offline()) {
+            ModeTold::Took
+        } else {
+            ModeTold::Refused
+        }
     }
 
     /// Nothing: CLAP reports the edits a plugin's own editor makes in the
