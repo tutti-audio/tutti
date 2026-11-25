@@ -227,6 +227,8 @@ impl<F: Float> Kernel for LimiterKernel<F> {
         }
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

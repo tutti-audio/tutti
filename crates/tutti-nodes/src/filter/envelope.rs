@@ -124,8 +124,6 @@ pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<EnvelopeFilterBank<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
@@ -134,7 +132,6 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
             input,
             ty,
             bank: None,
-            applied: false,
         }
     }
 }
@@ -151,7 +148,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(EnvelopeFilterBank::new(self.input.width(), self.ty, rate));
-        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -163,9 +159,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     fn retarget(&mut self, controls: &EnvelopeFilterControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(bank) = &mut self.bank {
             bank.jump_to_target();
-            self.applied = true;
         }
     }
 

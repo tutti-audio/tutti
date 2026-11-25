@@ -111,7 +111,7 @@ pub struct TubeStageKernel<F: Float> {
     /// be designed.
     rate: SampleRate,
     stage: TubeStage<F>,
-    applied: bool,
+
     oversampled: Option<Oversampled<F>>,
 }
 
@@ -122,7 +122,6 @@ impl<F: Float + Lerp> TubeStageKernel<F> {
             factor: config.factor,
             rate: SampleRate::SR_48K,
             stage: TubeStage::<F>::new(config.width, SampleRate::SR_48K),
-            applied: false,
             oversampled: None,
         }
     }
@@ -159,12 +158,10 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.stage = TubeStage::<F>::new(self.input.width(), self.rate);
-        self.applied = false;
     }
 
     fn reset(&mut self) {
         self.stage.reset();
-        self.applied = false;
         for state in self.oversampled.iter_mut().flat_map(|o| &mut o.channels) {
             state.reset();
         }
@@ -172,10 +169,10 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
 
     fn retarget(&mut self, controls: &TubeStageControls) {
         self.stage.retarget(controls);
-        if !self.applied {
-            self.stage.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.stage.jump_to_target();
     }
 
     fn render(
@@ -183,15 +180,12 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let rendered = match &mut self.oversampled {
+        match &mut self.oversampled {
             Some(oversampled) => oversampled.render(None::<Mono<'_, F>>, block, |_, wide| {
                 self.stage.process(wide)
             }),
             None => self.stage.process(block),
-        };
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        }
     }
 
     fn latency(&self) -> Samples {

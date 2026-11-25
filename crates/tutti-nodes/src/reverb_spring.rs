@@ -136,8 +136,6 @@ pub struct SpringReverbKernel<F: Float> {
     layout: SpringLayout,
     rate: SampleRate,
     spring: SpringReverb<F>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float> SpringReverbKernel<F> {
@@ -149,7 +147,6 @@ impl<F: Float> SpringReverbKernel<F> {
             layout,
             rate,
             spring: SpringReverb::new(width, rate, layout),
-            applied: false,
         }
     }
 }
@@ -171,20 +168,19 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.spring = SpringReverb::new(self.width, rate, self.layout);
-        self.applied = false;
     }
 
     fn reset(&mut self) {
         self.spring.reset();
     }
 
-    /// The first design after `prepare` lands at once; a later one glides in over 20 ms.
+    /// A design glides in over 20 ms.
     fn retarget(&mut self, controls: &SpringControls) {
         self.spring.retarget(controls);
-        if !self.applied {
-            self.spring.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.spring.jump_to_target();
     }
 
     fn render(

@@ -84,8 +84,6 @@ control_set! {
 #[derive(Clone, Debug)]
 pub struct StereoWidthKernel<F: Float> {
     bank: WidthBank<F>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + Lerp> StereoWidthKernel<F> {
@@ -93,7 +91,6 @@ impl<F: Float + Lerp> StereoWidthKernel<F> {
     fn new() -> Self {
         Self {
             bank: WidthBank::<F>::new(SampleRate::SR_48K),
-            applied: false,
         }
     }
 }
@@ -110,21 +107,17 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = WidthBank::<F>::new(rate);
-        self.applied = false;
     }
 
-    /// Silence, and the next design lands at once, as a fresh node's first does.
-    fn reset(&mut self) {
-        self.bank.jump_to_target();
-        self.applied = false;
-    }
+    /// Back to silence: the bank holds only ramps, so nothing is left to clear.
+    fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &WidthControls) {
         self.bank.retarget(controls);
-        if !self.applied {
-            self.bank.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.bank.jump_to_target();
     }
 
     fn render(
@@ -132,10 +125,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let rendered = self.bank.process(block);
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        self.bank.process(block)
     }
 
     fn tail(&self) -> Tail {

@@ -136,8 +136,6 @@ pub struct FdnKernel<F: FftFloat> {
     layout: FdnLayout,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: FftFloat + Lerp> FdnKernel<F> {
@@ -146,7 +144,6 @@ impl<F: FftFloat + Lerp> FdnKernel<F> {
         Self {
             layout,
             running: None,
-            applied: false,
         }
     }
 }
@@ -172,22 +169,22 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         let bank = FdnBank::new(&self.layout, rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.applied = false;
     }
 
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.jump_to_target();
         }
     }
 
     fn retarget(&mut self, controls: &FdnControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(r) = &mut self.running {
             r.ramps.jump_to_target();
-            self.applied = true;
         }
     }
 

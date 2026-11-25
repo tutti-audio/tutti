@@ -943,7 +943,7 @@ fn spatial::ambisonic::decoder::AmbisonicDecoder::order
 fn spatial::ambisonic::decoder::AmbisonicDecoder::process
 fn spatial::ambisonic::decoder::AmbisonicDecoder::sampling
 fn spatial::ambisonic::decoder::AmbisonicDecoder::speakers
-fn spatial::ambisonic::harmonics::AmbisonicEncoder::jump_to
+fn spatial::ambisonic::harmonics::AmbisonicEncoder::jump_to_target
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::new
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::process
 fn spatial::ambisonic::harmonics::AmbisonicEncoder::retarget
@@ -952,7 +952,7 @@ fn spatial::ambisonic::harmonics::Harmonics::get
 fn spatial::ambisonic::harmonics::Harmonics::iter
 fn spatial::ambisonic::harmonics::Harmonics::new
 fn spatial::ambisonic::harmonics::Harmonics::order
-fn spatial::ambisonic::rotation::AmbisonicRotator::jump_to
+fn spatial::ambisonic::rotation::AmbisonicRotator::jump_to_target
 fn spatial::ambisonic::rotation::AmbisonicRotator::new
 fn spatial::ambisonic::rotation::AmbisonicRotator::process
 fn spatial::ambisonic::rotation::AmbisonicRotator::retarget

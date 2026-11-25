@@ -166,6 +166,10 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
         self.sos.retarget(design);
     }
 
+    fn jump_to_target(&mut self) {
+        self.sos.jump_to_target();
+    }
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

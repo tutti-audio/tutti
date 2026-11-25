@@ -98,6 +98,8 @@ impl<F: Float> Kernel for EarlyReflectionsKernel<F> {
 
     fn retarget(&mut self, (): &()) {}
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,
