@@ -23,8 +23,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
     ForkByClone, ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind,
-    ParamSegment, Prepare, RenderMode, ScheduleError, Shape, Status, TransportChanges,
-    TransportPosition,
+    ParamSegment, Prepare, RenderMode, Shape, Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -888,19 +887,17 @@ fn a_route_dropped_and_readded_without_a_commit_resyncs() {
     }
 }
 
-/// **A follower has no event input, so a resync cannot reach it**: the
-/// editor refuses one scheduled there by port, and the reconciler owes
-/// none for a follower (it sends on every grid point while not silent).
+/// **A follower takes a resync on its event input**: the editor accepts
+/// one scheduled there, and a route added to the follower owes none (it
+/// sends on every grid point while not silent).
 #[test]
-fn a_follower_takes_no_resync() {
+fn a_follower_takes_a_resync_and_owes_none_for_a_new_route() {
     let mut r = rig(128);
     assert_eq!(r.m.resyncs_owed(), 0, "the rig's follower owes none");
     let node = r.m.source(SourceKey(2)).expect("a follower");
     let to = EventInputPort::new(node, 0);
-    assert_eq!(
-        r.ed.schedule(At::NextBlock, to, EventKind::Resync),
-        Err(ScheduleError::NoSuchPort { to })
-    );
+    r.ed.schedule(At::NextBlock, to, EventKind::Resync)
+        .expect("a follower has an event input");
     r.decl.route(4, SourceKey(2), cutoff_of(1), 0.1);
     r.host
         .apply(&mut r.m, &r.decl.get(), &mut r.ed)

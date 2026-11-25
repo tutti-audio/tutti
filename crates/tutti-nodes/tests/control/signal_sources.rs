@@ -214,6 +214,35 @@ impl Node for Midi {
     fn reset(&mut self) {}
 }
 
+/// `EventKind::Resync` on its planned executor frames.
+#[derive(Clone)]
+struct Resyncer {
+    at: Vec<u64>,
+}
+
+impl Resyncer {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
+impl Node for Resyncer {
+    fn shape(&self) -> Shape {
+        Self::SHAPE
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        for &at in &self.at {
+            if let Some(o) = cx.env.offset_of(Frame::new(at)) {
+                io.event_out(Self::OUT)
+                    .push(Event::resync(o))
+                    .expect("room");
+            }
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
 /// A source's segments as a lane takes them: output 0 is the value per
 /// frame (`ParamSegment::raw_value_after` from the latest segment's
 /// frame, 0 before any), and on each segment's frame output 1 is 1, output
@@ -1134,6 +1163,85 @@ fn a_refused_segment_is_resent_resumed() {
     for f in 512..4_096 {
         assert_eq!(big[0][f].to_bits(), one[0][f].to_bits(), "frame {f}");
     }
+}
+
+/// **A resync on a follower, which hears no MIDI, re-sends where it
+/// stands on the event's frame.** A mono 1.0 from frame 0 into a follower
+/// of attack 2 ms, in blocks of 128. A `Resync` on its event input at
+/// frame 133 (frame 5 of the second block) sends one segment there, the
+/// leg in flight (the grid piece sent at 128, `env(96) -> env(128)` with
+/// `env(g) = 1 - c^g`) resumed 5 frames in: its ends are the leg's and
+/// the value it reads at 133 is the leg's linear 5/32 along. Every other
+/// segment is a grid piece: none at the block's first frame beyond the
+/// grid's own.
+#[test]
+fn a_resync_re_sends_a_follower_where_it_stands_on_its_frame() {
+    let (mut ed, mut exec) = editor(128);
+    ed.insert(
+        NodeKey(1),
+        "pulse",
+        ForkByClone(Pulse {
+            width: ChannelLayout::MONO,
+            on: vec![(0, u64::MAX, 1.0)],
+        }),
+    );
+    ed.insert(
+        NodeKey(2),
+        "follower",
+        ForkByClone(follower(5, 0.002, 0.05, ChannelLayout::MONO)),
+    );
+    ed.insert(
+        NodeKey(4),
+        "resync",
+        ForkByClone(Resyncer { at: vec![133] }),
+    );
+    wire_audio(&mut ed, 1, 2, 1);
+    wire_events(&mut ed, 4, 2);
+    tap(&mut ed, 2, 3);
+    ed.commit().expect("commits");
+    let got = render_stopped(&mut ed, &mut exec, &[128], 256);
+    let mut expected: Vec<usize> = (STEP..256).step_by(STEP).collect();
+    expected.push(133);
+    expected.sort_unstable();
+    assert_eq!(marks(&got), expected, "the grid's pieces and the resync");
+    let env = |g: usize| 1.0 - pole(0.002).powi(g as i32);
+    let (from, to) = piece(&got, 133);
+    assert!((f64::from(from) - env(96)).abs() < 1e-6, "from {from}");
+    assert!((f64::from(to) - env(128)).abs() < 1e-6, "to {to}");
+    let at = env(96) + (env(128) - env(96)) * 5.0 / 32.0;
+    assert!(
+        (f64::from(got[0][133]) - at).abs() < 1e-6,
+        "reads {} at 133, the leg's {at}",
+        got[0][133]
+    );
+}
+
+/// **A resync on a note envelope re-sends where it stands on the event's
+/// frame.** Note 60 on at frame 10 into an envelope of attack 20 ms (960
+/// frames, 0 to 1 linear), blocks of 128. A `Resync` at frame 261 (frame 5
+/// of the third block) sends the attack's leg resumed 251 frames in: its
+/// ends are 0 and 1 and it reads `251 / 960` there. The note-on's segment
+/// at 10 is the only other one.
+#[test]
+fn a_resync_re_sends_a_note_envelope_where_it_stands_on_its_frame() {
+    let (mut ed, mut exec) =
+        envelope_rig(128, vec![(10, note_on(60))], adsr(0.02, 0.02, 0.5, 0.05));
+    ed.insert(
+        NodeKey(4),
+        "resync",
+        ForkByClone(Resyncer { at: vec![261] }),
+    );
+    wire_events(&mut ed, 4, 2);
+    ed.commit().expect("commits");
+    let got = render_stopped(&mut ed, &mut exec, &[128], 384);
+    assert_eq!(marks(&got), [10, 261], "the note-on and the resync");
+    assert_eq!(piece(&got, 261), (0.0, 1.0), "the attack's ends");
+    let at = 251.0 / 960.0;
+    assert!(
+        (f64::from(got[0][261]) - at).abs() < 1e-6,
+        "reads {} at 261, the attack's {at}",
+        got[0][261]
+    );
 }
 
 /// **A long time constant decays at its own rate.** Full scale for 4800

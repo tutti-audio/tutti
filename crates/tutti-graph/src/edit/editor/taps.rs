@@ -5,7 +5,7 @@ use tutti_buffers::Float;
 use tutti_units::Samples;
 
 use super::outlets::Closed;
-use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
+use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource};
 use crate::PortSource;
 use crate::edges::event_tap::EventTapReader;
 use crate::edges::meter::MeterReader;
@@ -73,11 +73,8 @@ impl<F: Float> Editor<F> {
         self.end_replaced_tap(id);
         let bell = self.new_bell();
         let (reader, writer) = TapReader::named(id, sources.len(), capacity, bell);
-        let opened = TapOpened {
-            width: reader.width(),
-            end: reader.end_latch(),
-        };
-        self.taps.open(id, writer, opened, reader.watch());
+        self.taps
+            .open(id, writer, reader.end_latch(), reader.watch());
         self.spec_mut()
             .topology
             .taps
@@ -143,11 +140,8 @@ impl<F: Float> Editor<F> {
         self.end_replaced_tap(id);
         let bell = self.new_bell();
         let (reader, writer) = TapReader::named(id, width, capacity, bell);
-        let opened = TapOpened {
-            width: reader.width(),
-            end: reader.end_latch(),
-        };
-        self.taps.open(id, writer, opened, reader.watch());
+        self.taps
+            .open(id, writer, reader.end_latch(), reader.watch());
         self.spec_mut()
             .topology
             .taps
@@ -163,9 +157,9 @@ impl<F: Float> Editor<F> {
     fn end_replaced_tap(&mut self, id: TapId) {
         if let Some(Closed { meta, unsent }) = self.taps.close(id) {
             if unsent {
-                meta.end.raise();
+                meta.raise();
             } else {
-                self.link.end_tap(meta.end);
+                self.link.end_tap(meta);
             }
         }
     }
@@ -217,24 +211,6 @@ impl<F: Float> Editor<F> {
         }
         self.end_replaced_tap(id);
         self.spec_mut().topology.taps.remove(&id);
-        Ok(())
-    }
-
-    /// Refuses a spec whose tap lanes disagree with the width the tap was
-    /// opened with: the writer the executor holds has that many rings.
-    pub(super) fn check_tap_widths(&self) -> Result<(), CommitError> {
-        for (&tap, spec) in &self.spec.topology.taps {
-            match self.taps.meta(tap) {
-                Some(opened) if opened.width != spec.lanes() => {
-                    return Err(CommitError::TapWidth {
-                        tap,
-                        sources: spec.lanes(),
-                        opened: opened.width,
-                    });
-                }
-                _ => {}
-            }
-        }
         Ok(())
     }
 
