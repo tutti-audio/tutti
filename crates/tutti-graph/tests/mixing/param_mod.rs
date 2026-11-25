@@ -107,6 +107,8 @@ struct Probe {
     /// A third readout: its params' corners ([`ParamInput::corners`]), 1 on
     /// each of port 0's corner frames plus 2 on each of port 1's.
     corners: bool,
+    /// How often the executor asked each port's base (`param_base`).
+    asked: [Arc<AtomicU32>; 2],
 }
 
 impl Probe {
@@ -116,6 +118,7 @@ impl Probe {
             answers: true,
             declared: [UnitParam::Cutoff, UnitParam::Q],
             corners: false,
+            asked: Default::default(),
         }
     }
 
@@ -133,6 +136,7 @@ impl Probe {
             answers: true,
             declared: [UnitParam::Q, UnitParam::Cutoff],
             corners: false,
+            asked: Default::default(),
         }
     }
 }
@@ -189,6 +193,9 @@ impl Node for Probe {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
+        if let Some(asked) = self.asked.get(port) {
+            asked.fetch_add(1, Ordering::Relaxed);
+        }
         (self.answers && port < 2).then(|| f64::from(self.bases[port].get()))
     }
 }
@@ -626,6 +633,49 @@ fn connecting_and_disconnecting_at_runtime_does_not_click() {
             i + 1
         );
     }
+}
+
+/// A port first driven after the unit has run undriven for many blocks is
+/// still a connection, not a first block: the first driven block fades from
+/// the base. The unit's one first block is the earliest block it ran, whatever
+/// the plan then drove, so a port that spent it undriven is not fresh when a
+/// lane arrives. The step asks the node the base of every port in that first
+/// block, and after it of the driven port alone: a port at rest is not asked.
+#[test]
+fn a_port_first_driven_blocks_after_the_units_first_fades_from_its_base() {
+    const BLOCK: usize = 64;
+    let (cutoff, q) = (Cell::new(0.25), Cell::new(0.5));
+    let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
+    let probe = Probe::new(&cutoff, &q);
+    let asked = probe.asked.clone();
+    let asks = || asked.each_ref().map(|a| a.load(Ordering::Relaxed));
+    ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
+    ed.wire_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))))
+        .unwrap();
+    ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
+    ed.commit().expect("commits");
+    let undriven = render(&mut exec, &mut ed, 5 * BLOCK, BLOCK);
+    assert!(undriven[0].iter().all(|&x| x == 0.25), "the base");
+    assert_eq!(asks(), [1, 1], "the first block asked both, no other did");
+
+    ed.connect_param(param(PROBE, UnitParam::Cutoff), ev(1))
+        .unwrap();
+    ed.commit().expect("connects");
+    let d = declick();
+    let out = render(&mut exec, &mut ed, BLOCK, BLOCK);
+    // Frame `j` of the fade is `base · (1 - s) + 1 · s`, `s` the smootherstep
+    // at `(j + 1) / (d + 1)`: it starts at the base, not at the source.
+    for (j, &v) in out[0].iter().enumerate() {
+        let s = smootherstep(j, d);
+        let want = 0.25 * (1.0 - s) + s;
+        assert!(
+            (f64::from(v) - want).abs() < 1e-5,
+            "frame {j}: {v}, want {want}"
+        );
+    }
+    assert!(out[0][0] < 0.26, "frame 0 is the base, not the source");
+    assert!(out[1].iter().all(|&x| x == 0.5), "Q was never driven");
+    assert_eq!(asks(), [2, 1], "only the driven port was asked");
 }
 
 /// A step lands on its frame: a zero-length `ParamRamp` at frame `k`

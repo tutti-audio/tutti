@@ -63,11 +63,11 @@
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
 //! block** and its sorted events.
 //!
-//! **A node op is one record.** The compiler lowers each `Op::Node` into a
-//! `NodeRec` (`plan.rs`): store index, generation, arrival, latency plus
-//! tail, the port slots, the buffer borrow requests **already sorted**, and
-//! a `Form` that picks the borrow. A
-//! call does one indexed load and never sorts. The commonest shapes — at most one audio input and one
+//! **A node op is one row.** The compiler lowers each `Op::Node` into a
+//! `NodePorts` row of `Plan::ports` (`plan.rs`): the port slots, the buffer
+//! borrow requests **already sorted**, and a `Form` that picks the borrow;
+//! the unit's place, shape and arrival are its `PlanUnit`. A
+//! call does two indexed loads and never sorts. The commonest shapes — at most one audio input and one
 //! audio output, or the stereo shapes 0→2, 1→2, 2→1 and 2→2, all with no
 //! event ports — borrow their slots directly, and their whole call path is
 //! specialised so the per-port loops fold away. An
@@ -530,7 +530,7 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
-/// latency then its tail (`NodeRec::park_after`).
+/// latency then its tail (`Shape::park_after`).
 fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
@@ -719,12 +719,11 @@ impl<F: Float> Executor<F> {
     /// [`graph_tail`]: crate::graph_tail
     pub fn reported_tail<G: TailGraph<Node = NodeKey>>(&self, topology: &G) -> GraphTail {
         let owed: HashMap<NodeKey, Owed> = self.plan.as_ref().map_or_else(HashMap::new, |plan| {
-            plan.nodes
-                .recs
-                .iter()
-                .filter_map(|rec| {
-                    let u = self.store[rec.store.0 as usize].as_ref()?;
-                    Some((plan.units[rec.unit].key, u.owed(rec)))
+            plan.units
+                .iter_enumerated()
+                .filter_map(|(unit, pu)| {
+                    let u = self.store[pu.idx.0 as usize].as_ref()?;
+                    Some((pu.key, u.owed(&plan.ports[unit], &pu.shape)))
                 })
                 .collect()
         });

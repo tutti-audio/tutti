@@ -36,7 +36,8 @@ use super::state::{Gone, Inject, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
 use crate::compile::plan::{
-    AudioDelay, AudioDelayKey, EventDelayKey, EventFeedbackKey, Op, ParamPortOp, Plan, UnitIdx,
+    AudioDelay, AudioDelayKey, EventDelayKey, EventFeedbackKey, Op, ParamPortOp, Plan, PlanUnit,
+    UnitIdx,
 };
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
@@ -1036,7 +1037,7 @@ fn view_rooms(plan: &Plan, inject: &[Inject], widest: usize) -> Table<EventSlotI
         let Op::Node { unit, .. } = *op else {
             continue;
         };
-        let ports = plan.nodes.recs[unit].ports(&plan.nodes);
+        let ports = plan.ports[unit].slots(&plan.nodes);
         for (port, &view) in ports.ein.iter().enumerate() {
             let flushed = inject
                 .binary_search_by_key(&(unit, port as u16), |i| (i.unit, i.port))
@@ -1187,35 +1188,30 @@ fn drives<F: Float>(
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
 ) -> Vec<(UnitIdx, ParamState<F>)> {
-    let driven_of = |p: &Plan, rec: &crate::compile::plan::NodeRec| {
-        p.program.param_ports[rec.params.range()]
-            .last()
-            .is_some_and(ParamPortOp::is_mix)
-    };
     let old_driven: BTreeSet<UnitIdx> = cx
         .old
-        .map(|p| {
-            p.nodes
-                .recs
-                .iter()
-                .filter(|r| driven_of(p, r))
-                .map(|r| r.store)
-                .collect()
-        })
+        .map(|p| mix_driven(p).map(|pu| pu.idx).collect())
         .unwrap_or_default();
     let placed: BTreeSet<NodeKey> = c.incoming.iter().map(|i| i.key).collect();
-    cx.plan
-        .nodes
-        .recs
-        .iter()
-        .filter(|r| driven_of(cx.plan, r))
-        .filter_map(|r| {
-            let key = cx.plan.units[r.unit].key;
-            (placed.contains(&key) || !old_driven.contains(&r.store))
-                .then(|| mix_lane(key).map(|lane| (r.store, lane)))
+    mix_driven(cx.plan)
+        .filter_map(|pu| {
+            (placed.contains(&pu.key) || !old_driven.contains(&pu.idx))
+                .then(|| mix_lane(pu.key).map(|lane| (pu.idx, lane)))
                 .flatten()
         })
         .collect()
+}
+
+/// The units of `plan` whose last driven param is the mix.
+fn mix_driven(plan: &Plan) -> impl Iterator<Item = &PlanUnit> {
+    plan.ports
+        .iter_enumerated()
+        .filter(|&(_, np)| {
+            plan.program.param_ports[np.params.range()]
+                .last()
+                .is_some_and(ParamPortOp::is_mix)
+        })
+        .map(|(unit, _)| &plan.units[unit])
 }
 
 /// Per event slot, whether it can hold param events: a slot a param-writing
@@ -1234,8 +1230,7 @@ fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
             Op::Node {
                 unit, event_src, ..
             } => {
-                let rec = &plan.nodes.recs[unit];
-                let ports = rec.ports(&plan.nodes);
+                let ports = plan.ports[unit].slots(&plan.nodes);
                 let takes = plan.units[unit].shape.param_events;
                 // A view carries the param events of its source, and those
                 // of the commands scheduled to a node that takes them.
@@ -1293,7 +1288,7 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventS
             Op::Node {
                 unit, event_src, ..
             } => {
-                let ports = plan.nodes.recs[unit].ports(&plan.nodes);
+                let ports = plan.ports[unit].slots(&plan.nodes);
                 for (&view, &src) in ports.ein.iter().zip(plan.event_slots(event_src)) {
                     let from = extra[src];
                     let e = &mut extra[view];
