@@ -229,7 +229,7 @@ impl ModRouteId {
 
 impl PolarityTarget {
     /// The polarity of the scale of `route`
-    /// ([`Mods::set_scale`](crate::Mods::set_scale)).
+    /// ([`Mods::scale`](crate::Mods::scale)).
     #[must_use]
     pub const fn scale_of(route: ModRouteId) -> Self {
         Self::new(ShapeKey::Scale(route))
@@ -238,7 +238,7 @@ impl PolarityTarget {
 
 impl CurveTarget {
     /// The law of the scale of `route`
-    /// ([`Mods::set_scale`](crate::Mods::set_scale)).
+    /// ([`Mods::scale`](crate::Mods::scale)).
     #[must_use]
     pub const fn scale_of(route: ModRouteId) -> Self {
         Self::new(ShapeKey::Scale(route))

@@ -1152,7 +1152,7 @@ fn scaled_scene() -> (
     let scaled = m
         .route(RouteSpec::new(full, cutoff, Bipolar::of(0.2)))
         .unwrap();
-    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
         .unwrap();
     settle(&mut s);
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
@@ -1221,9 +1221,9 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
         .unwrap();
     m.route(RouteSpec::new(half, cutoff, Bipolar::of(0.1)))
         .unwrap();
-    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(0.3))))
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(0.3))))
         .unwrap();
-    m.set_scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
+    m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
         .expect("a scale is replaced");
     settle(&mut s);
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
@@ -1239,7 +1239,7 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
 }
 
 /// **Clearing a scale restores the unscaled figure, and so does removing the
-/// scaling source.** From the scene's 600, `set_scale(route, None)` reads
+/// scaling source.** From the scene's 600, `scale(route, None)` reads
 /// `1000 * 0.2 * 1` = 200 over the knob, so 700; a scale set again reads 600,
 /// and removing its source reads 700 with the route's `scale` empty. A scale
 /// goes with its route, and one asked of a route or by a source that is gone
@@ -1249,12 +1249,12 @@ fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
     let (mut s, mut side, _, full, half) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     assert_eq!(s.mods().route(scaled).unwrap().scale, Some(half));
-    s.mods_mut().set_scale(scaled, None).unwrap();
+    s.mods_mut().scale(scaled, None).unwrap();
     let _ = s.update();
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
     assert_eq!(s.mods().route(scaled).unwrap().scale, None);
     let scale = Some(Scale::new(half, Bipolar::of(1.0)));
-    s.mods_mut().set_scale(scaled, scale).unwrap();
+    s.mods_mut().scale(scaled, scale).unwrap();
     let _ = s.update();
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
     s.mods_mut().remove_source(half).unwrap();
@@ -1262,12 +1262,12 @@ fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
     assert_eq!(s.mods().route(scaled).unwrap().scale, None);
     assert_eq!(
-        s.mods_mut().set_scale(scaled, scale),
+        s.mods_mut().scale(scaled, scale),
         Err(ScaleError::NoSuchSource(NoSuchModSource(half)))
     );
     s.mods_mut().remove_route(scaled).unwrap();
     assert_eq!(
-        s.mods_mut().set_scale(scaled, None),
+        s.mods_mut().scale(scaled, None),
         Err(ScaleError::NoSuchRoute(NoSuchModRoute(scaled)))
     );
 }
@@ -1307,14 +1307,14 @@ fn a_scale_by_or_of_a_signal_source_is_refused() {
         .route(RouteSpec::new(mac, cutoff, Bipolar::of(0.2)))
         .unwrap();
     assert_eq!(
-        m.set_scale(by_time, Some(Scale::new(follower, Bipolar::of(1.0)))),
+        m.scale(by_time, Some(Scale::new(follower, Bipolar::of(1.0)))),
         Err(ScaleError::SignalSource { route: by_time })
     );
     let by_signal = m
         .route(RouteSpec::new(follower, cutoff, Bipolar::of(0.2)))
         .unwrap();
     assert_eq!(
-        m.set_scale(by_signal, Some(Scale::new(mac, Bipolar::of(1.0)))),
+        m.scale(by_signal, Some(Scale::new(mac, Bipolar::of(1.0)))),
         Err(ScaleError::SignalSource { route: by_signal })
     );
     assert_eq!(m.view().route(by_time).unwrap().scale, None);

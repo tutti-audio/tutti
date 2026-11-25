@@ -56,7 +56,7 @@ impl DepthTarget {
         Self::new(DepthKey::Into(source, target.into()))
     }
 
-    /// The depth of the scale of `route` ([`Mods::set_scale`](crate::Mods::set_scale)).
+    /// The depth of the scale of `route` ([`Mods::scale`](crate::Mods::scale)).
     #[must_use]
     pub fn scale_of(route: ModRouteId) -> Self {
         Self::new(DepthKey::Scale(route))

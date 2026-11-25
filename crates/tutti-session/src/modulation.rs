@@ -381,7 +381,7 @@ pub enum RouteError {
     },
 }
 
-/// Why [`Mods::set_scale`] refused a scale.
+/// Why [`Mods::scale`] refused a scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ScaleError {
@@ -402,7 +402,7 @@ pub enum ScaleError {
 }
 
 /// What scales a route's depth: `source`'s value, through `depth`
-/// ([`Mods::set_scale`]). Bipolar and linear.
+/// ([`Mods::scale`]). Bipolar and linear.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scale {
     source: ModSourceId,
@@ -907,7 +907,7 @@ struct OwnSource {
 /// their values as declared, and [`decl`](Self::decl) the ones in force. Its
 /// depth is `decl.depth`, the cell the route's lane reads
 /// ([`DepthTarget`](crate::DepthTarget)); its scale, if any, is
-/// `decl.scale` ([`Mods::set_scale`]).
+/// `decl.scale` ([`Mods::scale`]).
 #[derive(Debug)]
 struct OwnRoute {
     decl: RouteDecl,
@@ -1434,7 +1434,7 @@ pub struct RouteInfo {
     pub source: ModSourceId,
     /// What it drives.
     pub target: ModTarget,
-    /// The source that scales its depth ([`Mods::set_scale`]), if any.
+    /// The source that scales its depth ([`Mods::scale`]), if any.
     pub scale: Option<ModSourceId>,
     /// Its depth, a fraction of the target's range.
     pub depth: Bipolar,
@@ -1754,7 +1754,7 @@ impl Mods<'_> {
     /// [`ScaleError::NoSuchRoute`] or [`ScaleError::NoSuchSource`] when the
     /// route or the scale's source was removed; [`ScaleError::SignalSource`]
     /// when either source is a follower or a note envelope. Nothing changes.
-    pub fn set_scale(&mut self, route: ModRouteId, scale: Option<Scale>) -> Result<(), ScaleError> {
+    pub fn scale(&mut self, route: ModRouteId, scale: Option<Scale>) -> Result<(), ScaleError> {
         let key = RouteKey(route.get());
         let Some(declared) = self.own.routes.get(&key) else {
             return Err(ScaleError::NoSuchRoute(NoSuchModRoute(route)));
