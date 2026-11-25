@@ -255,12 +255,14 @@ impl BatchOutcome {
 }
 
 /// The settings written and not yet taken, each with the reply that tells the
-/// audio lane it was applied. A kind written again replaces the one waiting (the
-/// replaced reply drops, which ends its waiter): the latest value stands.
+/// audio lane it was applied. A rate written again replaces the one waiting (the
+/// replaced reply drops, which ends its waiter): the latest value stands. Render
+/// modes queue, each sent and each answered, since the lifecycle counts the
+/// answers against its tells.
 #[derive(Default)]
 struct Settings {
     rate: Option<(tutti_units::SampleRate, Reply<()>)>,
-    mode: Option<(tutti_plugin_types::RenderMode, Reply<()>)>,
+    modes: std::collections::VecDeque<(tutti_plugin_types::RenderMode, Reply<()>)>,
     fence: Option<Reply<()>>,
     /// The control lane has ended: a setting put now is dropped at once.
     closed: bool,
@@ -270,11 +272,12 @@ struct Settings {
 /// with the newest block sequence submitted when it was requested: the blocks
 /// after it (a greater sequence) wait for it. A kind requested again replaces
 /// the one waiting: the latest value stands, **and so does its stamp** (the
-/// blocks between the two requests are held for the later value too).
+/// blocks between the two requests are held for the later value too). Render
+/// modes queue, each with its own stamp.
 #[derive(Default)]
 struct Requests {
     rate: Option<(tutti_units::SampleRate, u64)>,
-    mode: Option<(tutti_plugin_types::RenderMode, u64)>,
+    modes: std::collections::VecDeque<(tutti_plugin_types::RenderMode, u64)>,
 }
 
 /// The waits of the two lane threads, each moved to the thread that waits.
@@ -424,7 +427,7 @@ impl Channels {
             let mut slots = self.requests.lock();
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, after)),
-                Setting::RenderMode(mode) => slots.mode = Some((mode, after)),
+                Setting::RenderMode(mode) => slots.modes.push_back((mode, after)),
                 // A fence rides the audio queue (`AudioCommand::Settle`), never
                 // a request.
                 Setting::Fence => {}
@@ -436,7 +439,7 @@ impl Channels {
     /// Whether a requested setting waits for the audio lane.
     fn requested(&self) -> bool {
         let slots = self.requests.lock();
-        slots.rate.is_some() || slots.mode.is_some()
+        slots.rate.is_some() || !slots.modes.is_empty()
     }
 
     /// The requested setting the block `before` must wait for (one requested
@@ -451,10 +454,10 @@ impl Channels {
             slots.rate = None;
             return Some(Setting::SampleRate(rate));
         }
-        if let Some((mode, after)) = slots.mode
+        if let Some(&(mode, after)) = slots.modes.front()
             && due(after)
         {
-            slots.mode = None;
+            slots.modes.pop_front();
             return Some(Setting::RenderMode(mode));
         }
         None
@@ -742,7 +745,7 @@ impl Channels {
     /// counts, since the audio lane holds its blocks for it as for a rate.
     pub(super) fn setting_waiting(&self) -> bool {
         let slots = self.settings.lock();
-        slots.rate.is_some() || slots.mode.is_some() || slots.fence.is_some()
+        slots.rate.is_some() || !slots.modes.is_empty() || slots.fence.is_some()
     }
 
     /// Writes `setting` into its slot and rings the control lane's bell: no
@@ -763,7 +766,7 @@ impl Channels {
             }
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, applied)),
-                Setting::RenderMode(mode) => slots.mode = Some((mode, applied)),
+                Setting::RenderMode(mode) => slots.modes.push_back((mode, applied)),
                 Setting::Fence => slots.fence = Some(applied),
             }
         }
@@ -781,7 +784,11 @@ impl Channels {
         let dropped = {
             let mut slots = self.settings.lock();
             slots.closed = true;
-            (slots.rate.take(), slots.mode.take(), slots.fence.take())
+            (
+                slots.rate.take(),
+                std::mem::take(&mut slots.modes),
+                slots.fence.take(),
+            )
         };
         drop(dropped);
     }
@@ -793,7 +800,7 @@ impl Channels {
         if let Some((rate, applied)) = slots.rate.take() {
             return Some((Setting::SampleRate(rate), applied));
         }
-        if let Some((mode, applied)) = slots.mode.take() {
+        if let Some((mode, applied)) = slots.modes.pop_front() {
             return Some((Setting::RenderMode(mode), applied));
         }
         slots.fence.take().map(|applied| (Setting::Fence, applied))
@@ -1102,6 +1109,26 @@ mod tests {
             assert!(c.take_setting().is_some(), "{setting:?} is taken");
             assert!(!c.setting_waiting(), "{setting:?} was taken");
         }
+    }
+
+    /// **Every render mode put is taken, in order**: the lifecycle counts the
+    /// server's answers against its tells, so a mode put while another waits
+    /// does not replace it.
+    #[test]
+    fn two_render_modes_put_together_are_both_taken_in_order() {
+        use tutti_plugin_types::RenderMode;
+        let (c, _) = channels();
+        for mode in [RenderMode::Offline, RenderMode::Realtime] {
+            let (_waiter, reply) = super::super::ask::ask::<()>();
+            c.put_setting(Setting::RenderMode(mode), reply);
+        }
+        let taken = |c: &Channels| match c.take_setting() {
+            Some((Setting::RenderMode(mode), _)) => Some(mode),
+            _ => None,
+        };
+        assert_eq!(taken(&c), Some(RenderMode::Offline));
+        assert_eq!(taken(&c), Some(RenderMode::Realtime));
+        assert_eq!(taken(&c), None);
     }
 
     /// **Closing the settings' slots disconnects the waiters' replies**: a

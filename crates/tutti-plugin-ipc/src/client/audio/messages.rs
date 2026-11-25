@@ -464,8 +464,9 @@ pub(super) struct Unsolicited {
     latency: Option<Samples>,
     tail: Option<PluginTail>,
     rate: Option<Told>,
-    /// What the plugin last answered to a render mode.
-    mode: Option<Told>,
+    /// What the plugin answered to each render mode it was told, oldest first:
+    /// the lifecycle counts the answers against its tells.
+    modes: std::collections::VecDeque<Told>,
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
@@ -497,7 +498,7 @@ impl Unsolicited {
             latency: None,
             tail: None,
             rate: None,
-            mode: None,
+            modes: std::collections::VecDeque::new(),
             lifecycle: None,
             reloaded: false,
             state_not_restored: Latest::new(),
@@ -578,15 +579,18 @@ impl Unsolicited {
         self.transport.push_back(request);
     }
 
-    /// What the plugin answered to a setting it was told. One of the same
-    /// setting not yet drained is replaced and counted with the dropped
-    /// events: the state applies the answer that is still the one it waits for.
+    /// What the plugin answered to a setting it was told. A rate's answer
+    /// not yet drained is replaced and counted with the dropped events: the
+    /// state applies the answer that is still the one it waits for. A render
+    /// mode's answers all queue, in order: the state counts them against its
+    /// tells.
     pub(super) fn told(&mut self, told: Told) {
-        let slot = match told {
-            Told::RateTook(_) | Told::RateRefused(_) => &mut self.rate,
-            Told::ModeTook(_) | Told::ModeRefused(_) => &mut self.mode,
-        };
-        self.dropped += u64::from(slot.replace(told).is_some());
+        match told {
+            Told::RateTook(_) | Told::RateRefused(_) => {
+                self.dropped += u64::from(self.rate.replace(told).is_some());
+            }
+            Told::ModeTook(_) | Told::ModeRefused(_) => self.modes.push_back(told),
+        }
     }
 
     /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
@@ -662,7 +666,9 @@ impl Unsolicited {
             .drain(..)
             .map(|request| IpcEvent::Transport { request });
         let rate = self.rate.take().map(IpcEvent::Told);
-        let mode = self.mode.take().map(IpcEvent::Told);
+        let modes = std::mem::take(&mut self.modes)
+            .into_iter()
+            .map(IpcEvent::Told);
         let process =
             std::mem::take(&mut self.process_requested).then_some(IpcEvent::ProcessRequested);
         let midi_map = std::mem::take(&mut self.midi_map).then_some(IpcEvent::MidiMapChanged);
@@ -686,7 +692,7 @@ impl Unsolicited {
             .chain(tail)
             .chain(transport)
             .chain(rate)
-            .chain(mode)
+            .chain(modes)
             .chain(refresh.into_iter().flatten())
             .chain(midi_map)
             .chain(process)
@@ -719,17 +725,18 @@ mod tests {
         );
     }
 
-    /// **An answer replaced before it was drained is counted**, per setting: a
-    /// rate's answer and a mode's do not replace each other, and the latest of
-    /// a setting is the one delivered.
+    /// **A rate's answer replaced before it was drained is counted, and every
+    /// render mode's answer is delivered in order**: the lifecycle counts the
+    /// mode answers against its tells.
     #[test]
-    fn a_replaced_answer_is_counted_and_the_latest_is_delivered() {
+    fn a_replaced_rate_answer_is_counted_and_every_mode_answer_is_delivered() {
         use tutti_plugin_types::RenderMode;
         let mut inbox = Unsolicited::new();
         inbox.told(Told::ModeTook(RenderMode::Offline));
         inbox.told(Told::RateTook(tutti_units::SampleRate::SR_96K));
-        assert_eq!(inbox.take_dropped(), 0, "two settings, nothing replaced");
         inbox.told(Told::ModeRefused(RenderMode::Realtime));
+        assert_eq!(inbox.take_dropped(), 0, "nothing replaced");
+        inbox.told(Told::RateTook(tutti_units::SampleRate::SR_48K));
         assert_eq!(inbox.take_dropped(), 1);
         let heard: Vec<_> = inbox.drain().collect();
         assert!(
@@ -737,6 +744,7 @@ mod tests {
                 heard.as_slice(),
                 [
                     IpcEvent::Told(Told::RateTook(_)),
+                    IpcEvent::Told(Told::ModeTook(RenderMode::Offline)),
                     IpcEvent::Told(Told::ModeRefused(RenderMode::Realtime))
                 ]
             ),

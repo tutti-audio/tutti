@@ -1998,11 +1998,7 @@ fn two_mode_asks_before_one_answer_end_running_the_second() {
         "the mode it will run in is not the one asked for"
     );
     let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
-    assert_eq!(
-        s.applied().map(|p| p.mode()),
-        Some(RenderMode::Realtime),
-        "the answer to the first ask is not the one waited for"
-    );
+    assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
     let (s, _) = go(s, Event::Answered(Told::ModeTook(RenderMode::Realtime)));
     assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Realtime));
     assert_eq!(s.wanted().map(|p| p.mode()), Some(RenderMode::Realtime));
@@ -2130,6 +2126,28 @@ fn an_answer_arriving_after_a_restart_began_changes_nothing() {
     let (s, fx) = go(s, Event::Answered(Told::RateRefused(refusal)));
     assert!(fx.is_empty(), "the activation settled the retune");
     assert_eq!(s.applied(), Some(q));
+}
+
+/// **An answer taken after a newer tell was refused leaves the plugin where it
+/// is, and the lifecycle knows**: told Offline and then Realtime, the plugin
+/// takes Offline and refuses Realtime. It runs Offline; the want, given up with
+/// the refusal, is Offline, the plugin is not behind, and the refusal is
+/// announced.
+#[test]
+fn a_taken_tell_then_a_refused_newer_one_ends_running_the_taken() {
+    let p = prep(1);
+    let s = active(RESTARTS, p);
+    let (s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    let (mut s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Realtime)));
+    s.want(p.with_mode(RenderMode::Realtime));
+    let (s, fx) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
+    assert!(fx.is_empty());
+    assert_eq!(s.applied().map(|a| a.mode()), Some(RenderMode::Offline));
+    let (s, fx) = go(s, Event::Answered(Told::ModeRefused(RenderMode::Realtime)));
+    assert_eq!(fx, [Fx::ModeRefusedNotice]);
+    assert_eq!(s.applied().map(|a| a.mode()), Some(RenderMode::Offline));
+    assert_eq!(s.wanted().map(|w| w.mode()), Some(RenderMode::Offline));
+    assert_eq!(s.behind(false, RenderModeSupport::Live), Behind::No);
 }
 
 /// **A taken mode told before a restart is stale once the restart ran**: the

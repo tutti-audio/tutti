@@ -693,6 +693,72 @@ impl Pending {
     }
 }
 
+/// The render modes a plugin was told and has not answered, counted.
+///
+/// Relies on one FIFO command lane per instance and one answer per tell. The
+/// client's control lane sends each `SetRenderMode` and waits for its reply
+/// before the next (`handle_setting`'s `Setting::RenderMode` arm in
+/// `tutti-plugin-ipc`'s `client/audio/dispatch.rs`), and the settings it takes
+/// queue without replacing one another (`Settings::modes` and
+/// `Requests::modes` in `channels.rs`); the server answers every request on
+/// that connection in order (`Handle<SetRenderMode>` in
+/// `tutti-plugin-server`'s `session/handlers.rs`); the answers reach the
+/// lifecycle in that order through `Unsolicited::modes` and
+/// `Control::take_answers`. A plugin in this process answers each tell at
+/// once, through `Reply::Answered`, so its count goes 0, 1, 0. A lost bridge
+/// answers nothing and poisons the state, which clears the count.
+#[derive(Debug, Clone, Copy, Default)]
+struct ModeTells {
+    /// Tells not yet answered.
+    out: u32,
+    /// How many of the oldest answers belong to tells an activation settled.
+    stale: u32,
+    /// The mode of the latest tell, while any is out.
+    last: Option<RenderMode>,
+}
+
+impl ModeTells {
+    /// The plugin was told `mode`.
+    fn told(&mut self, mode: RenderMode) {
+        self.out += 1;
+        self.last = Some(mode);
+    }
+
+    /// Every tell out is settled by an activation: its answer only counts.
+    fn superseded(&mut self) {
+        self.stale = self.out;
+        self.last = None;
+    }
+
+    /// An answer arrived; whether it is to a tell still waited for.
+    fn answered(&mut self) -> bool {
+        if self.stale > 0 {
+            self.stale -= 1;
+            self.out = self.out.saturating_sub(1);
+            if self.out == 0 {
+                self.last = None;
+            }
+            return false;
+        }
+        self.out = self.out.saturating_sub(1);
+        if self.out == 0 {
+            self.last = None;
+        }
+        true
+    }
+
+    /// Whether the answer about to be counted is to the latest tell, of `mode`.
+    fn is_latest(&self, mode: RenderMode) -> bool {
+        self.out == 1 && self.stale == 0 && self.last == Some(mode)
+    }
+
+    /// The mode the plugin will run in once its tells are answered, if any is
+    /// out and still waited for.
+    fn pending(&self) -> Option<RenderMode> {
+        self.last
+    }
+}
+
 /// The lifecycle decisions of one plugin: where it is, what it last reported
 /// and what it still has to do.
 ///
@@ -710,8 +776,8 @@ pub struct State {
     wanted: Option<Prepare>,
     /// The refusal the rollback in flight answers.
     refusal: Option<Refusal>,
-    /// The render mode the plugin was told and has not answered.
-    asking: Option<RenderMode>,
+    /// The render modes the plugin was told and has not answered.
+    tells: ModeTells,
     /// The live fields the Processor was told and the plugin has not answered.
     retuning: Option<Live>,
     latency: Option<Samples>,
@@ -743,7 +809,7 @@ impl State {
             trying: None,
             wanted: None,
             refusal: None,
-            asking: None,
+            tells: ModeTells::default(),
             retuning: None,
             latency: None,
             tail: None,
@@ -824,7 +890,7 @@ impl State {
     /// it is in flight until the plugin answers ([`Event::Answered`]), and not
     /// behind meanwhile.
     pub fn mode_asked(&mut self, mode: RenderMode) {
-        self.asking = Some(mode);
+        self.tells.told(mode);
     }
 
     /// How far the plugin is from what the host wants, and the cheapest step
@@ -862,7 +928,7 @@ impl State {
             RenderModeSupport::Unsupported => Behind::No,
             RenderModeSupport::OnActivation => Behind::Restart,
             RenderModeSupport::Live => {
-                if self.asking == Some(wanted.mode) {
+                if self.tells.pending() == Some(wanted.mode) {
                     Behind::No
                 } else {
                     Behind::Mode(wanted.mode)
@@ -975,7 +1041,7 @@ impl State {
         self.stage = Stage::Poisoned;
         self.trying = None;
         self.refusal = None;
-        self.asking = None;
+        self.tells = ModeTells::default();
         self.retuning = None;
         self.plan = Plan::default();
         self.pending = Pending::default();
@@ -1028,9 +1094,9 @@ impl State {
                 // answered, so a newer want while one is out is told.
                 let behind = self
                     .applied
-                    .is_some_and(|applied| self.asking.unwrap_or(applied.mode) != mode);
+                    .is_some_and(|applied| self.tells.pending().unwrap_or(applied.mode) != mode);
                 if behind && matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
-                    self.asking = Some(mode);
+                    self.tells.told(mode);
                     emit(out, Effect::SetMode(mode));
                 }
             }
@@ -1133,7 +1199,7 @@ impl State {
         }
         // An answer to a setting told before this activation names a setting
         // the activation takes at `p`.
-        self.asking = None;
+        self.tells.superseded();
         self.retuning = None;
         self.trying = Some(p);
         emit(out, Effect::CallActivate(p));
@@ -1394,7 +1460,7 @@ impl State {
             Reply::Activated if matches!(wait, Wait::Activate | Wait::Rollback) => {
                 self.stage = Stage::Active;
                 self.applied = self.trying.take();
-                self.asking = None;
+                self.tells.superseded();
                 self.retuning = None;
                 emit(out, Effect::ReadLatency);
                 emit(out, Effect::ReadTail);
@@ -1522,24 +1588,25 @@ impl State {
                     }),
                 );
             }
-            // What the plugin has is the mode the last tell named, and what the
-            // host wants stays its own. An answer to a tell no longer waited
-            // for (one an activation since settled) is stale: applying it
-            // would put back the mode the activation replaced.
+            // Each answer is the oldest tell not yet answered. One an
+            // activation since settled is stale and only counts: applying it
+            // would put back the mode the activation replaced. What the host
+            // wants stays its own.
             Told::ModeTook(mode) => {
-                if self.asking != Some(mode) {
+                if !self.tells.answered() {
                     return;
                 }
-                self.asking = None;
                 if let Some(applied) = &mut self.applied {
                     applied.mode = mode;
                 }
             }
+            // A refusal of the latest tell gives the want up; one of an
+            // earlier tell leaves it, for the later tell's answer to settle.
             Told::ModeRefused(mode) => {
-                if self.asking != Some(mode) {
+                let latest = self.tells.is_latest(mode);
+                if !self.tells.answered() || !latest {
                     return;
                 }
-                self.asking = None;
                 let running = self.applied.map(|applied| applied.mode);
                 if let (Some(wanted), Some(running)) = (&mut self.wanted, running)
                     && wanted.mode == mode
