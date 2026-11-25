@@ -47,6 +47,7 @@
 
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
 use crate::{EdgeId, InputPort, OutputPort, PortSource};
@@ -1311,7 +1312,8 @@ pub struct Plan {
     pub(crate) task_succ: Csr<TaskId>,
     pub(crate) task_activation: Table<TaskId, u32>,
     pub(crate) units: Table<PlanUnitId, PlanUnit>,
-    pub(crate) store_len: u32,
+    /// Which plan this is: a [`Delta`] is compiled against one.
+    pub(crate) id: Identity,
     pub(crate) main_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
     /// The main output generation the spec carried when this plan was committed.
@@ -1349,7 +1351,6 @@ impl Plan {
         program: Program<BySlot>,
         tasks: Tasks,
         units: Table<PlanUnitId, PlanUnit>,
-        store_len: u32,
         graph: &ValidGraph,
         timing: Timing,
     ) -> Self {
@@ -1369,7 +1370,7 @@ impl Plan {
             task_succ: tasks.succ,
             task_activation: tasks.activation,
             units,
-            store_len,
+            id: Identity(PlanId::mint()),
             main_inputs: graph.topology().inputs.count(),
             compensation: timing.compensation,
             main_output_id: crate::MainOutputId::GENESIS,
@@ -1676,6 +1677,48 @@ impl Plan {
     }
 }
 
+/// Which plan a [`Delta`] was compiled against: minted once for each plan, from
+/// one counter, so two plans never share one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlanId(u64);
+
+impl PlanId {
+    fn mint() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// A plan's [`PlanId`], which is not part of what the plan says: two plans
+/// compiled alike are equal, whichever of them was compiled first.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Identity(pub(crate) PlanId);
+
+impl PartialEq for Identity {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// A node whose audio wiring changed in a commit: a port gained its first
+/// source or consumer, or lost its last.
+///
+/// From the plans, not the spec: the old and the new plan's
+/// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
+/// the commit placed with no wiring, a node it removed and a rewire that
+/// leaves each port's answer as it was are not listed. A re-insert at the
+/// same key with a different shape but the same masks reports nothing: bus
+/// layout changes reach a plugin through its own re-activation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rewired {
+    /// The node.
+    pub node: NodeKey,
+    /// Its wired ports in the plan sent before (none for a node new to it).
+    pub was: Wired,
+    /// Its wired ports in the plan this commit sent.
+    pub now: Wired,
+}
+
 /// Where one unit goes in the store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Placement {
@@ -1700,6 +1743,8 @@ pub struct Delta {
     fades: Vec<(NodeKey, Fade)>,
     cuts: Vec<Placement>,
     store_len: u32,
+    /// The nodes whose wiring moved, in key order.
+    rewired: Vec<Rewired>,
     /// What the plan takes over from the one it replaces.
     pub(crate) carry: Carry,
 }
@@ -1711,6 +1756,7 @@ impl Delta {
         retire: Vec<Placement>,
         replace: Vec<(Placement, Placement)>,
         store_len: u32,
+        rewired: Vec<Rewired>,
         carry: Carry,
     ) -> Self {
         Self {
@@ -1720,8 +1766,14 @@ impl Delta {
             fades: Vec::new(),
             cuts: Vec::new(),
             store_len,
+            rewired,
             carry,
         }
+    }
+
+    /// The nodes whose wiring moved, in key order: the commit's report.
+    pub(crate) fn take_rewired(&mut self) -> Vec<Rewired> {
+        std::mem::take(&mut self.rewired)
     }
 
     /// New keys.

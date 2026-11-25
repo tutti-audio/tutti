@@ -45,13 +45,43 @@ use crate::exec::held::{Held, Keys};
 use crate::exec::rings::{AudioRing, EventFifo};
 use crate::exec::slots::EventSlot;
 use crate::model::gain::SumLane;
-use crate::model::spec::{EventInputPort, EventOutputPort};
+use crate::model::spec::EventInputPort;
 use crate::node::param::ParamState;
+
+/// An input port of one of the new plan's units.
+#[derive(Clone, Copy)]
+pub(super) struct Sink {
+    pub(super) unit: PlanUnitId,
+    pub(super) port: u16,
+}
+
+/// Where a flush into a [`Sink`] reads from.
+#[derive(Clone, Copy)]
+pub(super) enum Origin {
+    /// The old state's injection buffer, by position.
+    Injection(usize),
+    /// An old event delay's FIFO that has no successor.
+    Delay(EventDelayId),
+    /// An old event feedback FIFO that has no successor.
+    Feedback(EventFeedbackId),
+}
+
+/// What disappears and flushes into a sink that survives.
+pub(super) struct Delivery {
+    pub(super) from: Origin,
+    pub(super) to: Sink,
+}
 
 /// An old event edge whose source's held keys are closed at its sink.
 pub(super) struct Closer {
-    pub(super) from: EventOutputPort,
-    pub(super) at: EventInputPort,
+    /// The old source's unit, by store index, and the port the edge leaves.
+    pub(super) from: UnitIdx,
+    pub(super) port: u16,
+    /// The new plan keeps the source's unit (at the same index).
+    pub(super) kept: bool,
+    /// The new plan keeps the edge.
+    pub(super) edge_kept: bool,
+    pub(super) to: Sink,
     pub(super) route: Route,
 }
 
@@ -89,6 +119,13 @@ pub(super) struct Staged<F: Float = f32> {
     /// Units (plan indices) that may hold a crossfade queued behind a
     /// running one.
     pub(super) queued: Vec<PlanUnitId>,
+    /// What flushes into the new plan's sinks after what the replaced nodes
+    /// wrote for their successors: undelivered injections, then the vanished
+    /// event delays and feedback, in key order.
+    pub(super) deliveries: Vec<Delivery>,
+    /// Whether the old plan's unit at a store index gets its held-key tables
+    /// back from a re-prepare. The stager sized no tables for one that does.
+    pub(super) parked_back: Vec<bool>,
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
     pub(super) drives: Vec<(UnitIdx, ParamState<F>)>,
@@ -163,21 +200,29 @@ struct Cx<'a> {
 }
 
 impl Cx<'_> {
-    /// The plan unit index of the input `at`, when the plan has it.
-    fn sink_of(&self, at: EventInputPort) -> Option<PlanUnitId> {
-        let u = self.plan.unit_id(at.node)?;
-        (at.port < self.plan.units[u].shape.event_in).then_some(u)
+    /// The input `at`, when the plan has it.
+    fn sink_of(&self, at: EventInputPort) -> Option<Sink> {
+        let unit = self.plan.unit_id(at.node)?;
+        (at.port < self.plan.units[unit].shape.event_in).then_some(Sink {
+            unit,
+            port: at.port,
+        })
     }
 
-    /// Whether a unit of the old plan comes back after a re-prepare: it is
-    /// in the new plan, at the same generation.
-    fn parked_back(&self, key: NodeKey) -> bool {
-        self.resumed
-            && self
-                .old
-                .and_then(|o| o.unit(key))
-                .zip(self.plan.unit(key))
-                .is_some_and(|(a, b)| a.generation == b.generation)
+    /// Whether the old plan's unit at each store index gets its held-key
+    /// tables back after a re-prepare: it is in the new plan, at the same
+    /// generation (and so at the same index).
+    fn parked_back(&self) -> Vec<bool> {
+        let mut back = Vec::new();
+        for o in self.old.iter().flat_map(|p| p.units.iter()) {
+            let at = o.idx.0 as usize;
+            back.resize(back.len().max(at + 1), false);
+            back[at] = self
+                .plan
+                .unit(o.key)
+                .is_some_and(|n| n.generation == o.generation);
+        }
+        back
     }
 }
 
@@ -400,6 +445,12 @@ impl Stager {
             cap: self.event_cap,
         };
         self.track(c, &cx);
+        let parked_back = if cx.resumed {
+            cx.parked_back()
+        } else {
+            Vec::new()
+        };
+        Self::prepare_incoming(c, &cx, &parked_back);
         let closers = self.closers(c, &cx);
         let to_close: BTreeSet<EventDelayKey> = closers
             .iter()
@@ -462,7 +513,6 @@ impl Stager {
         };
         // The store grows by moving into one built here.
         let store = self.store.grow(store_len);
-        self.prepare_incoming(c, &cx);
         let tables = flush
             .rooms
             .values()
@@ -483,6 +533,8 @@ impl Stager {
             feedback_rates: feedback.fifo.rate,
             closers: std::mem::take(&mut flush.closers),
             queued: std::mem::take(&mut flush.queued),
+            deliveries: std::mem::take(&mut flush.deliveries),
+            parked_back,
             spare_drives: CappedVec::with_capacity(spare_drives),
             drives,
             spare_audio: CappedVec::with_capacity(delays.audio_moved),
@@ -585,13 +637,10 @@ impl Stager {
     }
 
     /// What the executor's FIFO `o` of the last plan is, as of the last commit.
-    /// Every carried FIFO was in that commit's plan, so it has an entry; a
-    /// missing one counts as nothing, and what the new FIFO cannot take is
-    /// counted lost (`EventFifo::transfer_from`).
+    /// A carried FIFO was in that plan, whose table the memo is; one with no
+    /// entry counts as nothing.
     fn fifo_memo(&self, o: EventDelayId) -> FifoMemo {
-        let memo = self.fifos.get(o).copied();
-        debug_assert!(memo.is_some(), "a carried FIFO was in the last plan");
-        memo.unwrap_or_default()
+        self.fifos.get(o).copied().unwrap_or_default()
     }
 
     /// Feedback delays, by key: exactly the edge's delay long.
@@ -612,9 +661,7 @@ impl Stager {
         for (n, f) in plan.program.event_feedback.iter_enumerated() {
             let carried = cx.carry.event_fb[n];
             let before = carried.map_or_else(FifoMemo::default, |o| {
-                let memo = self.feedback.get(o).copied();
-                debug_assert!(memo.is_some(), "a carried FIFO was in the last plan");
-                memo.unwrap_or_default()
+                self.feedback.get(o).copied().unwrap_or_default()
             });
             let src = f.key.from;
             let rate =
@@ -646,52 +693,61 @@ impl Stager {
 
     /// What disappears flushes to sinks that survive, and held keys of an
     /// edge that ended are closed at the sink that lost it: each sink gets a
-    /// buffer for everything that can flow into it.
+    /// buffer for everything that can flow into it, and each flush its sink.
     fn flush<F: Float>(&self, c: &Commit<F>, cx: &Cx<'_>, closers: Vec<Closer>) -> Flush {
         let plan = cx.plan;
         let mut rooms: BTreeMap<(PlanUnitId, u16), Room> = BTreeMap::new();
+        let mut deliveries = Vec::new();
         // What replaced nodes wrote for their successors.
-        for (old_p, new_p) in c.delta.replace() {
-            let chase = cx
-                .old
-                .and_then(|o| o.unit(old_p.key))
-                .and_then(|u| u.shape.chase);
-            let sink = cx.sink_of(EventInputPort::new(new_p.key, 0));
-            if let (Some(n), Some(u)) = (chase, sink) {
-                rooms.entry((u, 0)).or_default().flush += n.get() as usize;
+        for i in &c.install {
+            let sink = cx.sink_of(EventInputPort::new(i.at.key, 0));
+            if let (Some(n), Some(to)) = (i.chase, sink) {
+                rooms.entry((to.unit, 0)).or_default().flush += n.get() as usize;
             }
         }
         // Injections not yet delivered: each buffer counts once, with what
-        // flushed into it before, and its room for a fade's end.
-        for s in &self.shells.list {
-            let at = EventInputPort::new(s.key, s.port);
-            if let Some(u) = cx.sink_of(at) {
-                let r = rooms.entry((u, s.port)).or_default();
+        // flushed into it before, and its room for a fade's end. The list
+        // is the executor's injection buffers, in their order.
+        for (n, s) in self.shells.list.iter().enumerate() {
+            if let Some(to) = cx.sink_of(EventInputPort::new(s.key, s.port)) {
+                let r = rooms.entry((to.unit, to.port)).or_default();
                 r.flush += s.flush;
                 r.room = r.room.max(s.room);
                 r.carried += s.owed;
+                deliveries.push(Delivery {
+                    from: Origin::Injection(n),
+                    to,
+                });
             }
         }
         // Event delays and feedback that no longer exist: what their queues
         // hold flushes to the sink.
         for g in &cx.carry.vanished_delays {
-            if let Some(u) = cx.sink_of(g.at) {
+            if let Some(to) = cx.sink_of(g.at) {
                 let memo = self.fifo_memo(g.from);
-                let r = rooms.entry((u, g.at.port)).or_default();
+                let r = rooms.entry((to.unit, to.port)).or_default();
                 r.flush += memo.cap;
                 // What the FIFO still owes moves to the sink.
                 r.carried += usize::from(memo.owing);
+                deliveries.push(Delivery {
+                    from: Origin::Delay(g.from),
+                    to,
+                });
             }
         }
         for g in &cx.carry.vanished_feedback {
-            if let Some(u) = cx.sink_of(g.at) {
+            if let Some(to) = cx.sink_of(g.at) {
                 let have = self.feedback.get(g.from).copied().unwrap_or_default();
-                rooms.entry((u, g.at.port)).or_default().flush += have.cap;
+                rooms.entry((to.unit, to.port)).or_default().flush += have.cap;
+                deliveries.push(Delivery {
+                    from: Origin::Feedback(g.from),
+                    to,
+                });
             }
         }
         for k in &closers {
-            if let (Route::Sink(_), Some(u)) = (&k.route, cx.sink_of(k.at)) {
-                rooms.entry((u, k.at.port)).or_default().closers += 1;
+            if matches!(k.route, Route::Sink(_)) {
+                rooms.entry((k.to.unit, k.to.port)).or_default().closers += 1;
             }
         }
         // A crossfade queued behind a running one holds what its predecessor
@@ -715,6 +771,7 @@ impl Stager {
             rooms,
             closers,
             queued,
+            deliveries,
         }
     }
 
@@ -748,10 +805,10 @@ impl Stager {
             if (in_plan && !maybe_gone.contains(&from.node)) || replaced.contains(&at.node) {
                 continue;
             }
-            if cx.sink_of(at).is_none() || !old.unit(from.node).is_some_and(|f| f.shape.note_events)
-            {
+            let source = old.unit(from.node).filter(|f| f.shape.note_events);
+            let (Some(to), Some(source)) = (cx.sink_of(at), source) else {
                 continue;
-            }
+            };
             let delay = plan
                 .program
                 .event_delays
@@ -762,7 +819,14 @@ impl Stager {
                 Some(i) if in_plan => Route::Delay(i),
                 _ => Route::Sink(Held::new()),
             };
-            closers.push(Closer { from, at, route });
+            closers.push(Closer {
+                from: source.idx,
+                port: from.port,
+                kept: plan.unit(from.node).is_some(),
+                edge_kept: in_plan,
+                to,
+                route,
+            });
         }
         closers
     }
@@ -800,26 +864,28 @@ impl Stager {
     }
 
     /// What the units that arrive hold: held-key tables, and room for a
-    /// crossfade's chase.
-    fn prepare_incoming<F: Float>(&self, c: &mut Commit<F>, cx: &Cx<'_>) {
-        for inc in &mut c.incoming {
-            let Some(shape) = cx.plan.unit(inc.key).map(|u| u.shape) else {
+    /// crossfade's chase. Each replaced unit's chase is read off the old plan
+    /// here, for the flush and the apply.
+    fn prepare_incoming<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>, parked_back: &[bool]) {
+        for inst in &mut c.install {
+            let Some(shape) = cx.plan.unit(inst.at.key).map(|u| u.shape) else {
                 continue;
             };
             let ports = shape.event_out as usize;
-            if ports > 0 && !cx.parked_back(inc.key) {
+            let back = parked_back.get(inst.at.idx.0 as usize) == Some(&true);
+            let inc = &mut inst.incoming;
+            if ports > 0 && !back {
                 inc.keys.size(ports, shape.note_events, false);
             }
             if ports > 0 && inc.fade.is_some() {
                 inc.staging = Keys::staging(ports, shape.note_events);
             }
+            inst.chase = inst
+                .was
+                .and_then(|w| cx.old?.unit(w.key))
+                .and_then(|u| u.shape.chase);
             if let Some(f) = &mut inc.fade {
-                let n = cx
-                    .old
-                    .and_then(|o| o.unit(inc.key))
-                    .and_then(|u| u.shape.chase)
-                    .map_or(0, |n| n.get() as usize);
-                f.chase = CappedVec::with_capacity(n);
+                f.chase = CappedVec::with_capacity(inst.chase.map_or(0, |n| n.get() as usize));
             }
         }
     }
@@ -830,6 +896,7 @@ struct Flush {
     rooms: BTreeMap<(PlanUnitId, u16), Room>,
     closers: Vec<Closer>,
     queued: Vec<PlanUnitId>,
+    deliveries: Vec<Delivery>,
 }
 
 /// The sizes a plan's slots and buffers are built to.
@@ -982,7 +1049,7 @@ fn drives<F: Float>(
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
 ) -> Vec<(UnitIdx, ParamState<F>)> {
-    let placed: BTreeSet<NodeKey> = c.incoming.iter().map(|i| i.key).collect();
+    let placed: BTreeSet<NodeKey> = c.install.iter().map(|i| i.at.key).collect();
     // A kept unit is at one index in both plans: it needs a lane only when
     // the old plan did not drive its mix.
     let driven_before = |key| {
@@ -1113,12 +1180,11 @@ fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
     c.gone = Gone {
         held: CappedVec::with_capacity(held),
         spare: CappedVec::with_capacity(2 * (c.delta.retire().len() + replaces + parked)),
-        replaced: CappedVec::with_capacity(replaces),
         chased: CappedVec::with_capacity(replaces),
         held_refused: CappedVec::with_capacity(replaces),
         chase_events: CappedVec::default(),
     };
-    c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.incoming.len());
+    c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.install.len());
 }
 
 /// Stable sort of `events` by offset, in place and without allocating: the

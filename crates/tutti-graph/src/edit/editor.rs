@@ -89,7 +89,6 @@ mod taps;
 mod unwired;
 mod wiring;
 use cells::LiveCells;
-pub use commit::Rewired;
 pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::Link;
@@ -343,25 +342,14 @@ impl MainOutputState {
         })
     }
 
-    /// A plan carrying `bank` (a main output of generation `main_output`) was
-    /// sent as commit `seq`. A plan that carries the crossfade the last one
-    /// carried continues it: the executor keeps its progress, and it ends
-    /// under the seq that began it.
-    fn sent(
-        &mut self,
-        bank: Option<crate::MainOutputBank>,
-        main_output: crate::MainOutputId,
-        seq: u64,
-    ) {
+    /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
+    /// the crossfade the last one carried keeps it: the executor keeps its
+    /// progress, and it ends under the seq that began it.
+    fn sent(&mut self, bank: Option<crate::MainOutputBank>, seq: u64) {
         self.bank = bank.map(|bank| {
             self.bank
-                .filter(|b| !b.ended && b.old == bank.old && b.main_output == main_output)
-                .unwrap_or(SentBank {
-                    seq,
-                    old: bank.old,
-                    main_output,
-                    ended: false,
-                })
+                .filter(|_| bank.continues)
+                .unwrap_or(SentBank { seq, ended: false })
         });
         if self.bank.is_none() {
             self.fading = None;
@@ -393,10 +381,6 @@ struct SentBank {
     /// Its `seq`, or that of the commit that began the crossfade it
     /// continues.
     seq: u64,
-    /// The main output that fades out.
-    old: crate::MainOutputId,
-    /// The main output that fades in.
-    main_output: crate::MainOutputId,
     /// Whether the executor has rendered its crossfade through.
     ended: bool,
 }

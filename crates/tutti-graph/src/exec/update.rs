@@ -5,19 +5,16 @@ use tutti_buffers::Float;
 use tutti_rt::CappedVec;
 use tutti_units::Samples;
 
-use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
-use super::stage::{Route, Staged, sort_by_offset};
+use super::commit::{Commit, Incoming, Install, Relined, cut_fades, retire_fade, send_back};
+use super::stage::{Origin, Route, Sink, Staged, sort_by_offset};
 use super::state::{Gone, Inject, State, Unit};
 use super::{Executor, Suspension, place, place_all};
-use crate::NodeKey;
 use crate::compile::carry::Carry;
 use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
-use crate::compile::plan::{Placement, Plan};
+use crate::compile::plan::{Placement, Plan, UnitIdx};
 use crate::event::types::Event;
-use crate::exec::held::Held;
 use crate::exec::rings::EventFifo;
 use crate::model::gain::SumLane;
-use crate::model::spec::{EventInputPort, EventOutputPort};
 
 impl<F: Float> Executor<F> {
     /// Applies every queued commit, in the order the editor sent them, and
@@ -76,7 +73,7 @@ impl<F: Float> Executor<F> {
                     place(&mut c.retired, (u.key, unit.node));
                     place(&mut c.spare_params, unit.params);
                     place(&mut c.spare_modes, unit.mode);
-                    place(&mut self.parked, (u.key, unit.keys));
+                    place(&mut self.parked, (u.idx, unit.keys));
                 }
             }
             let mut reset_time = false;
@@ -132,29 +129,22 @@ impl<F: Float> Executor<F> {
         // the replacement waits (`end_fades` closes its keys then).
         let mut departed = std::mem::take(&mut c.gone);
         // A resumed commit finds the store empty: the suspend took every unit
-        // out. What it retires, replaces and cuts departs only held keys and
-        // parked tables (below), so nothing here touches the store: no retire
-        // of an empty slot, no chase, no cut.
-        let (retire, replace, cuts): (&[Placement], &[(Placement, Placement)], &[Placement]) =
-            if c.resumed {
-                (&[], &[], &[])
-            } else {
-                (c.delta.retire(), c.delta.replace(), c.delta.cuts())
-            };
-        let n_retire = retire.len();
-        for (i, p) in retire
-            .iter()
-            .chain(replace.iter().map(|(old, _)| old))
-            .enumerate()
-        {
-            let waits = i >= n_retire
-                && c.fades_in(replace[i - n_retire].1.key)
-                && self
-                    .store
-                    .get(p.idx.0 as usize)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|u| u.fade.is_some());
-            if waits {
+        // out. What it retires and cuts departs only held keys and parked
+        // tables (below), so nothing here touches the store: no retire of an
+        // empty slot, no chase, no cut. Its installs replace nothing.
+        let (retire, cuts): (&[Placement], &[Placement]) = if c.resumed {
+            (&[], &[])
+        } else {
+            (c.delta.retire(), c.delta.cuts())
+        };
+        let mut install = std::mem::take(&mut c.install);
+        for (p, fades) in leaving(retire, &install) {
+            let running = self
+                .store
+                .get(p.idx.0 as usize)
+                .and_then(Option::as_ref)
+                .is_some_and(|u| u.fade.is_some());
+            if fades && running {
                 continue;
             }
             if let Some(u) = self
@@ -163,30 +153,23 @@ impl<F: Float> Executor<F> {
                 .and_then(Option::as_mut)
             {
                 let tables = u.keys.depart(&mut departed.spare);
-                place(&mut departed.held, (p.key, tables));
+                place(&mut departed.held, (p.idx, tables));
             }
-        }
-        for (_, new) in c.delta.replace() {
-            place(&mut departed.replaced, new.key);
         }
         // The state a replaced node hands its successor, written while it is
         // still in the store (see `Node::chase`).
         departed.chase_events = std::mem::take(&mut self.chase);
         departed.chase_events.clear();
-        for (old, new) in replace {
-            let running = c.fades_in(new.key)
+        for inst in &mut install {
+            let Some(old) = inst.was else { continue };
+            let running = inst.incoming.fade.is_some()
                 && self
                     .store
                     .get(old.idx.0 as usize)
                     .and_then(Option::as_ref)
                     .is_some_and(|u| u.fade.is_some());
-            let capacity = self
-                .plan
-                .as_ref()
-                .and_then(|p| p.unit(old.key))
-                .and_then(|u| u.shape.chase);
             let node = self.store.get(old.idx.0 as usize).and_then(Option::as_ref);
-            if let (Some(capacity), Some(u)) = (capacity, node) {
+            if let (Some(capacity), Some(u)) = (inst.chase, node) {
                 let from = departed.chase_events.len();
                 let mut out =
                     crate::node::Chase::new(&mut departed.chase_events, capacity.get() as usize);
@@ -197,12 +180,7 @@ impl<F: Float> Executor<F> {
                     // predecessor, and the successor starts once that fade
                     // ends. What it wrote waits in the queued crossfade
                     // (`end_fades` delivers it).
-                    let fade = c
-                        .incoming
-                        .iter_mut()
-                        .find(|i| i.idx == new.idx)
-                        .and_then(|i| i.fade.as_mut());
-                    if let Some(fade) = fade {
+                    if let Some(fade) = inst.incoming.fade.as_mut() {
                         // The editor sized the buffer for this predecessor
                         // (`prepare_incoming`); a push never grows it, and
                         // what does not fit is refused like the rest.
@@ -211,14 +189,14 @@ impl<F: Float> Executor<F> {
                         let unfit = u32::try_from(wrote.len() - kept).unwrap_or(u32::MAX);
                         place(
                             &mut departed.held_refused,
-                            (new.key, refused.saturating_add(unfit)),
+                            (inst.unit, refused.saturating_add(unfit)),
                         );
                     }
                     departed.chase_events.drain(from..);
                 } else {
                     place(
                         &mut departed.chased,
-                        (new.key, from..departed.chase_events.len(), refused),
+                        (inst.unit, from..departed.chase_events.len(), refused),
                     );
                 }
             }
@@ -226,17 +204,10 @@ impl<F: Float> Executor<F> {
         // A retired key, or one replaced without a fade, goes whole: its
         // unit and any crossfade running or waiting there. A key replaced
         // with a fade stays, for the incoming unit to fade in over it.
-        for i in 0..retire.len() + replace.len() {
-            let p = match i.checked_sub(retire.len()) {
-                None => retire[i],
-                Some(j) => {
-                    let (old, new) = replace[j];
-                    if c.fades_in(new.key) {
-                        continue;
-                    }
-                    old
-                }
-            };
+        for (p, fades) in leaving(retire, &install) {
+            if fades {
+                continue;
+            }
             if let Some(u) = self.store.get_mut(p.idx.0 as usize).and_then(Option::take) {
                 debug_assert_eq!(
                     u.generation,
@@ -264,7 +235,7 @@ impl<F: Float> Executor<F> {
                     "cutting the unit the delta named"
                 );
                 if let Some(stale) = cut_fades(u, &mut self.inbox.fade_back) {
-                    place(&mut departed.held, (p.key, stale));
+                    place(&mut departed.held, (p.idx, stale));
                 }
             }
         }
@@ -280,19 +251,21 @@ impl<F: Float> Executor<F> {
                 .resize_with(c.delta.store_len() as usize, || None);
         }
         // Taken out and put back, so the list's buffer is not freed here.
-        let mut incoming = std::mem::take(&mut c.incoming);
-        for Incoming {
-            key: _,
-            idx,
-            generation,
-            node,
-            fade,
-            params,
-            mode,
-            keys,
-            staging,
-        } in incoming.drain(..)
+        for Install {
+            at,
+            incoming:
+                Incoming {
+                    node,
+                    fade,
+                    params,
+                    mode,
+                    keys,
+                    staging,
+                },
+            ..
+        } in install.drain(..)
         {
+            let (idx, generation) = (at.idx, Generation::new(at.generation));
             let slot = &mut self.store[idx.0 as usize];
             match (fade, slot.as_mut()) {
                 (Some(mut x), Some(u)) => {
@@ -338,7 +311,7 @@ impl<F: Float> Executor<F> {
                 }
             }
         }
-        c.incoming = incoming;
+        c.install = install;
         // A kept unit's bypass line, rebuilt for its new declared latency.
         let mut relined = std::mem::take(&mut c.relined);
         for Relined { idx, latency, line } in relined.drain(..) {
@@ -391,8 +364,7 @@ impl<F: Float> Executor<F> {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
-        self.main_output_fade
-            .install(&plan, old_plan.as_deref(), c.seq);
+        self.main_output_fade.install(&plan, c.seq);
         self.plan = Some(plan);
         c.plan = old_plan;
     }
@@ -512,6 +484,7 @@ impl<F: Float> Executor<F> {
         // A driven state keeps its place across commits that keep the declick
         // length (not the rate: distinct rates can round to one length).
         let same_declick = old_plan.is_none_or(|o| o.prepare.declick() == plan.prepare.declick());
+        debug_assert_eq!(new.lanes.len(), carry.lanes.len());
         for (lane, from) in new.lanes.iter_mut().zip(&carry.lanes) {
             if let Some(carried) = from.and_then(|o| old.lanes.get_mut(o)).map(SumLane::carry) {
                 lane.adopt(carried, max_block, same_declick, &mut st.spare_drives);
@@ -522,74 +495,74 @@ impl<F: Float> Executor<F> {
         // nodes wrote for their successors, injections not yet delivered,
         // then event delays and event feedback in key order.
         let (inject, has_inject) = (&mut new.inject, &mut new.has_inject);
-        for (key, span, refused) in departed.chased.drain(..) {
-            let at = EventInputPort::new(key, 0);
+        for (to, span, refused) in departed.chased.drain(..) {
             let events = &departed.chase_events[span];
-            match flush_target(plan, inject, has_inject, at) {
-                Some((u, shell)) => {
+            match flush_target(plan, inject, has_inject, Sink { unit: to, port: 0 }) {
+                Some(shell) => {
                     let lost = fill(&mut shell.events, events);
-                    self.dropped.at_node(u, refused.saturating_add(lost));
+                    self.dropped.at_node(to, refused.saturating_add(lost));
                 }
                 None => {
-                    if let Some(u) = plan.unit_id(key) {
-                        let lost = u32::try_from(events.len()).unwrap_or(u32::MAX);
-                        self.dropped.at_node(u, lost.saturating_add(refused));
+                    let lost = u32::try_from(events.len()).unwrap_or(u32::MAX);
+                    self.dropped.at_node(to, lost.saturating_add(refused));
+                }
+            }
+        }
+        for d in &st.deliveries {
+            let u = d.to.unit;
+            match d.from {
+                Origin::Injection(i) => {
+                    if let Some(inj) = old.inject.get_mut(i)
+                        && inj.live
+                        && let Some(shell) = flush_target(plan, inject, has_inject, d.to)
+                    {
+                        let mut lost = fill(&mut shell.events, &inj.events);
+                        // What was owed there is still owed: the tables move.
+                        for table in inj.owed.drain(..) {
+                            lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
+                        }
+                        self.dropped.at_node(u, lost);
+                    }
+                }
+                Origin::Delay(from) => {
+                    if let Some(Some(f)) = old.event_delays.get_mut(from.index())
+                        && let Some(shell) = flush_target(plan, inject, has_inject, d.to)
+                    {
+                        let mut lost =
+                            u32::try_from(f.flush_into(&mut shell.events)).unwrap_or(u32::MAX);
+                        // What the FIFO still owed its sink is owed on.
+                        if let Some(table) = f.take_owed() {
+                            lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
+                        }
+                        self.dropped.at_node(u, lost);
+                    }
+                }
+                Origin::Feedback(from) => {
+                    if let Some(Some(f)) = old.event_fb.get(from.index())
+                        && let Some(shell) = flush_target(plan, inject, has_inject, d.to)
+                    {
+                        let lost = f.flush_into(&mut shell.events);
+                        self.dropped
+                            .at_node(u, u32::try_from(lost).unwrap_or(u32::MAX));
                     }
                 }
             }
         }
-        if let Some(op) = old_plan {
-            for inj in old.inject.iter_mut().filter(|i| i.live) {
-                let at = EventInputPort::new(op.units[inj.unit].key, inj.port);
-                if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
-                    let mut lost = fill(&mut shell.events, &inj.events);
-                    // What was owed there is still owed: the tables move.
-                    for table in inj.owed.drain(..) {
-                        lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
-                    }
-                    self.dropped.at_node(u, lost);
-                }
-            }
-            for g in &carry.vanished_delays {
-                if let Some(Some(f)) = old.event_delays.get_mut(g.from.index())
-                    && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
-                {
-                    let mut lost =
-                        u32::try_from(f.flush_into(&mut shell.events)).unwrap_or(u32::MAX);
-                    // What the FIFO still owed its sink is owed on.
-                    if let Some(table) = f.take_owed() {
-                        lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
-                    }
-                    self.dropped.at_node(u, lost);
-                }
-            }
-            for g in &carry.vanished_feedback {
-                if let Some(Some(f)) = old.event_fb.get(g.from.index())
-                    && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
-                {
-                    let lost = f.flush_into(&mut shell.events);
-                    self.dropped
-                        .at_node(u, u32::try_from(lost).unwrap_or(u32::MAX));
-                }
-            }
-        }
-        // A re-prepare's tables go back to the units that come back; the
-        // others are as retired.
+        // A re-prepare's tables go back to the units that come back, as the
+        // stager decided when it sized their own; the others are as retired.
         let mut parked = std::mem::take(&mut self.parked);
-        for (key, mut keys) in parked.drain(..) {
-            let same = |a: Option<&Plan>| a.and_then(|p| p.unit(key)).map(|u| u.generation);
-            let back = (same(old_plan) == same(Some(plan)))
-                .then(|| plan.unit_id(key))
-                .flatten()
-                .and_then(|i| self.store[plan.units[i].idx.0 as usize].as_mut());
-            match back {
-                Some(u) => {
+        for (idx, mut keys) in parked.drain(..) {
+            let back = st.parked_back.get(idx.0 as usize) == Some(&true);
+            match self.store.get_mut(idx.0 as usize).and_then(Option::as_mut) {
+                Some(u) if back => {
+                    // The stager sized no tables for a unit that gets its own.
+                    debug_assert!(u.keys.held().is_empty(), "a unit parked back is unsized");
                     keys.settle();
                     u.keys = keys;
                 }
-                None => {
+                _ => {
                     let tables = keys.depart(&mut departed.spare);
-                    place(&mut departed.held, (key, tables));
+                    place(&mut departed.held, (idx, tables));
                 }
             }
         }
@@ -597,99 +570,88 @@ impl<F: Float> Executor<F> {
         // Keys held on an edge that ended go to the sink that lost it, after
         // everything flushed to that sink (the offs of notes whose ons were in
         // flight). See `held.rs`.
-        if old_plan.is_some() {
-            for i in inject.iter_mut() {
-                i.closed_from = i.events.len();
+        for i in inject.iter_mut() {
+            i.closed_from = i.events.len();
+        }
+        let departed_held = |from: UnitIdx| departed.held.iter().find(|(i, _)| *i == from);
+        for closer in &mut st.closers {
+            let gone = departed_held(closer.from);
+            if closer.edge_kept && gone.is_none() {
+                continue;
             }
-            let source_gone = |n: NodeKey| departed.held.iter().any(|(k, _)| *k == n);
             // What a port holds, and what it owes and has not yet sent.
-            let held_of = |from: EventOutputPort| -> (Option<&Held>, Option<&Held>) {
-                let port = usize::from(from.port);
-                if let Some((_, tables)) = departed.held.iter().find(|(k, _)| *k == from.node) {
-                    return (tables.get(port).and_then(Option::as_ref), None);
+            let (held, owed) = match gone {
+                Some((_, tables)) => (tables.get(usize::from(closer.port)), None),
+                None if closer.kept => {
+                    let keys = self.store[closer.from.0 as usize].as_ref().map(|u| &u.keys);
+                    (
+                        keys.and_then(|k| k.held().get(usize::from(closer.port))),
+                        keys.and_then(|k| k.owed(closer.port)),
+                    )
                 }
-                let unit = plan
-                    .unit_id(from.node)
-                    .and_then(|i| self.store[plan.units[i].idx.0 as usize].as_ref());
-                match unit {
-                    Some(u) => (
-                        u.keys.held().get(port).and_then(Option::as_ref),
-                        u.keys.owed(from.port),
-                    ),
-                    None => (None, None),
-                }
+                None => (None, None),
             };
-            for closer in &mut st.closers {
-                let (from, at) = (closer.from, closer.at);
-                let in_plan = plan.event_edges.binary_search(&(from, at)).is_ok();
-                if (in_plan && !source_gone(from.node)) || departed.replaced.contains(&at.node) {
-                    continue;
-                }
-                let (held, owed) = held_of(from);
-                let owing = [held, owed].into_iter().flatten().filter(|h| !h.is_empty());
-                if owing.clone().next().is_none() {
-                    continue;
-                }
-                match std::mem::replace(&mut closer.route, Route::Placed) {
-                    // A source whose edge (and its delay) goes on: the close
-                    // is owed to the delay's FIFO, which pours it in behind
-                    // what is in flight.
-                    Route::Delay(i) => {
-                        let placed = match new.event_delays[i.index()].as_mut() {
-                            Some(f) => {
-                                let owed = owing.clone().all(|h| f.owe(h));
-                                // What fits goes in now, as the close of a
-                                // cut edge always did; the rest pours as
-                                // room frees.
-                                f.pour();
-                                owed
-                            }
-                            None => false,
-                        };
-                        if !placed {
-                            // The FIFO was built with its table.
-                            debug_assert!(false, "a FIFO that owes closes has a table");
-                            let mut lost = 0u32;
-                            owing.for_each(|h| h.close_each(|_| lost = lost.saturating_add(1)));
-                            if let Some(u) = plan.unit_id(at.node) {
-                                self.dropped.at_node(u, lost);
-                            }
-                        }
-                    }
-                    // The edge ended: the table takes what the source holds
-                    // and owes. What fits goes now, after the flush; the rest
-                    // is owed to the sink.
-                    Route::Sink(mut table) => {
-                        let target = flush_target(plan, inject, has_inject, at);
-                        let Some((u, shell)) = target else {
-                            closer.route = Route::Sink(table);
-                            continue;
-                        };
-                        for h in owing {
-                            table.merge(h);
-                        }
-                        table.drain_into(&mut shell.events);
-                        if table.is_empty() {
-                            closer.route = Route::Sink(table);
-                        } else {
-                            let lost = shell.owe(table, &mut st.spare_tables);
-                            self.dropped.at_node(u, lost);
-                        }
-                    }
-                    Route::Placed => {}
-                }
+            let held = held.and_then(Option::as_ref);
+            let owing = [held, owed].into_iter().flatten().filter(|h| !h.is_empty());
+            if owing.clone().next().is_none() {
+                continue;
             }
-            // The closes land at the end of what was flushed, after it.
-            for shell in inject.iter_mut().filter(|i| i.events.len() > i.closed_from) {
-                let (before, closes) = shell.events.split_at_mut(shell.closed_from);
-                let end = before
-                    .iter()
-                    .map(|e| e.offset)
-                    .max()
-                    .unwrap_or(crate::node::time::Offset::ZERO);
-                for e in closes {
-                    e.offset = end;
+            match std::mem::replace(&mut closer.route, Route::Placed) {
+                // A source whose edge (and its delay) goes on: the close
+                // is owed to the delay's FIFO, which pours it in behind
+                // what is in flight.
+                Route::Delay(i) => {
+                    let placed = match new.event_delays[i.index()].as_mut() {
+                        Some(f) => {
+                            let owed = owing.clone().all(|h| f.owe(h));
+                            // What fits goes in now, as the close of a
+                            // cut edge always did; the rest pours as
+                            // room frees.
+                            f.pour();
+                            owed
+                        }
+                        None => false,
+                    };
+                    if !placed {
+                        // The FIFO was built with its table.
+                        debug_assert!(false, "a FIFO that owes closes has a table");
+                        let mut lost = 0u32;
+                        owing.for_each(|h| h.close_each(|_| lost = lost.saturating_add(1)));
+                        self.dropped.at_node(closer.to.unit, lost);
+                    }
                 }
+                // The edge ended: the table takes what the source holds
+                // and owes. What fits goes now, after the flush; the rest
+                // is owed to the sink.
+                Route::Sink(mut table) => {
+                    let Some(shell) = flush_target(plan, inject, has_inject, closer.to) else {
+                        closer.route = Route::Sink(table);
+                        continue;
+                    };
+                    for h in owing {
+                        table.merge(h);
+                    }
+                    table.drain_into(&mut shell.events);
+                    if table.is_empty() {
+                        closer.route = Route::Sink(table);
+                    } else {
+                        let lost = shell.owe(table, &mut st.spare_tables);
+                        self.dropped.at_node(closer.to.unit, lost);
+                    }
+                }
+                Route::Placed => {}
+            }
+        }
+        // The closes land at the end of what was flushed, after it.
+        for shell in inject.iter_mut().filter(|i| i.events.len() > i.closed_from) {
+            let (before, closes) = shell.events.split_at_mut(shell.closed_from);
+            let end = before
+                .iter()
+                .map(|e| e.offset)
+                .max()
+                .unwrap_or(crate::node::time::Offset::ZERO);
+            for e in closes {
+                e.offset = end;
             }
         }
         // By offset, ties in flush order.
@@ -701,10 +663,8 @@ impl<F: Float> Executor<F> {
         // that waits (`Node::chase`): delivered by `end_fades` into room made
         // with the plan. What its buffer refused is counted now, and what a
         // successor with no event input cannot take is dropped, counted.
-        for (key, refused) in departed.held_refused.drain(..) {
-            if let Some(u) = plan.unit_id(key) {
-                self.dropped.at_node(u, refused);
-            }
+        for (u, refused) in departed.held_refused.drain(..) {
+            self.dropped.at_node(u, refused);
         }
         for &u in &st.queued {
             let unit = &plan.units[u];
@@ -728,24 +688,34 @@ impl<F: Float> Executor<F> {
 }
 
 /// The injection buffer for the sink `at`, marked as holding a flush: `None`
-/// when the plan has no such input.
+/// when the plan's unit has no such input.
 fn flush_target<'a>(
     plan: &Plan,
     inject: &'a mut [Inject],
     has_inject: &mut TableSlice<PlanUnitId, bool>,
-    at: EventInputPort,
-) -> Option<(PlanUnitId, &'a mut Inject)> {
-    let id = plan.unit_id(at.node)?;
-    if at.port >= plan.units[id].shape.event_in {
+    at: Sink,
+) -> Option<&'a mut Inject> {
+    if at.port >= plan.units[at.unit].shape.event_in {
         return None;
     }
-    let u = id;
     let i = inject
-        .binary_search_by_key(&(u, at.port), |i| (i.unit, i.port))
+        .binary_search_by_key(&(at.unit, at.port), |i| (i.unit, i.port))
         .ok()?;
-    has_inject[u] = true;
+    has_inject[at.unit] = true;
     inject[i].live = true;
-    Some((u, &mut inject[i]))
+    Some(&mut inject[i])
+}
+
+/// The units that go, each with whether a crossfade replaces it: the delta's
+/// retires, then its installs that replace one.
+fn leaving<'a, F: Float>(
+    retire: &'a [Placement],
+    install: &'a [Install<F>],
+) -> impl Iterator<Item = (Placement, bool)> + 'a {
+    let replaced = install
+        .iter()
+        .filter_map(|i| Some((i.was?, i.incoming.fade.is_some())));
+    retire.iter().map(|&p| (p, false)).chain(replaced)
 }
 
 /// Appends `events` to `to` as far as its capacity takes. Returns how many

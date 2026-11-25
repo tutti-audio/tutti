@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::compile::carry::Carry;
 use crate::compile::ids::{PlanUnitId, Table};
-use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, UnitIdx};
+use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, Rewired, UnitIdx};
 use crate::compile::program::{BySlot, Program};
 use crate::compile::shapes::Units;
 use crate::compile::timing::Timing;
@@ -102,25 +102,37 @@ pub(super) fn place(
             });
         }
     }
-    let store_len = taken.last().map_or(0, |m| m.0 + 1);
-    let carry = Carry::between(prev, program, prepare, graph.main_output_bank());
-    let delta = Delta::new(insert, retire, replace, store_len, carry);
-
     let consumed = consumed_outputs(topology);
+    let mut rewired = Vec::new();
     let placed = units
         .keys
         .iter_enumerated()
-        .map(|(n, &key)| PlanUnit {
-            key,
-            generation: graph.generation(key),
-            idx: idx[n].expect("every unit is placed"),
-            shape: units.shapes[n],
-            arrival: timing.arrival[n],
-            wired: wired_ports(topology, key, &units.shapes[n], &consumed),
+        .map(|(n, &key)| {
+            let wired = wired_ports(topology, key, &units.shapes[n], &consumed);
+            let was = prev_units
+                .get(&key)
+                .map_or_else(Wired::default, |o| o.wired);
+            if was != wired {
+                rewired.push(Rewired {
+                    node: key,
+                    was,
+                    now: wired,
+                });
+            }
+            PlanUnit {
+                key,
+                generation: graph.generation(key),
+                idx: idx[n].expect("every unit is placed"),
+                shape: units.shapes[n],
+                arrival: timing.arrival[n],
+                wired,
+            }
         })
         .collect();
+    let store_len = taken.last().map_or(0, |m| m.0 + 1);
+    let carry = Carry::between(prev, program, prepare, graph.main_output_bank());
     Placed {
-        delta,
+        delta: Delta::new(insert, retire, replace, store_len, rewired, carry),
         units: placed,
     }
 }

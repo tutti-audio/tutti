@@ -984,6 +984,7 @@ struct compile::plan::ParamPortOp
 struct compile::plan::Placement
 struct compile::plan::Plan
 struct compile::plan::PlanUnit
+struct compile::plan::Rewired
 struct compile::plan::Span
 struct compile::plan::UnitIdx
 struct compile::plan::Value
@@ -1026,7 +1027,6 @@ struct edit::builder::GraphBuilder
 struct edit::builder::Renderer
 struct edit::editor::Editor
 struct edit::editor::Limits
-struct edit::editor::commit::Rewired
 struct edit::editor::unwired::Inserted
 struct edit::editor::unwired::Unwired
 struct event::sorted::SortedEvents
