@@ -446,7 +446,6 @@ struct modulation::phaser::PhaserKernel
 struct modulation::phaser::PhaserSet
 struct noise::NoiseNode
 struct oscillator::OscillatorNode
-struct params::At
 struct params::Control
 struct params::NoControls
 struct params::Params

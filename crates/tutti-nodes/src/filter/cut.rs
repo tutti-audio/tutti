@@ -198,7 +198,7 @@ mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
-    use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
+    use crate::test_support::{RATE, assert_block_free, drive_block, prepared};
     use core::f64::consts::PI;
     use tutti_dsp::{
         ButterworthOrder, Elliptic, EllipticTolerances, PassbandRipple, StopbandAttenuation,
@@ -383,7 +383,7 @@ mod tests {
         let make = || CutFilterNode::from(CutFilterConfig::new(1u16, LP, lr(8)));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let (mut node, out) = {
-            let n = assert_cell_ramps(
+            let n = assert_block_free(
                 make,
                 |n: &CutFilterNode<f32>| assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0)),
                 &[&sine[..2_048]],

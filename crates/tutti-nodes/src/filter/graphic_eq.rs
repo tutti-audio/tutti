@@ -204,7 +204,7 @@ mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, render};
-    use crate::test_support::{RATE, assert_cell_ramps, prepared};
+    use crate::test_support::{RATE, assert_block_free, prepared};
     use tutti_buffers::ChannelLayout;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Hz, UnitAddr, UnitParam};
@@ -370,7 +370,7 @@ mod tests {
     fn a_moved_gain_ramps_independently_of_the_blocks_and_settles_on_the_design() {
         let sine = generate_sine(bin(171), 48_000.0, 8_192);
         let make = || node_with(GraphicBands::Octave, &[]);
-        let mut node = assert_cell_ramps(
+        let mut node = assert_block_free(
             make,
             |n: &GraphicEqNode<f32>| assert!(n.param_set().set(band(5), 12.0)),
             &[&sine[..2_048]],

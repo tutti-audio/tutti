@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_ramps};
+    use crate::test_support::{RATE, assert_block_free};
     use core::f64::consts::PI;
     use tutti_buffers::MaxBlock;
     use tutti_dsp::Tilt;
@@ -150,7 +150,7 @@ mod tests {
     fn a_ramp_of_the_controls_stays_finite_and_settles_on_the_design() {
         let make = || TiltFilterNode::from(config(Hz::new(200.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
-        let mut node = assert_cell_ramps(
+        let mut node = assert_block_free(
             make,
             |n: &TiltFilterNode<f32>| {
                 assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0));

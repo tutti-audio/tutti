@@ -19,7 +19,7 @@ use tutti_graph::{
 };
 use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
-use crate::params::{At, ControlSet, HasControl, HasControls, Params};
+use crate::params::{ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 
 /// The most per-frame control signals a [`ControlSignals`] carries.
@@ -394,7 +394,6 @@ impl<K: Kernel> KernelNode<K> {
                 clock.clear();
             }
         }
-        self.params.land();
     }
 
     /// How many frames of the block may still sound, for a kernel that declares a finite or
@@ -509,7 +508,7 @@ impl<K: Kernel> KernelNode<K> {
     /// frame, and one that moved past the dead-band of the last design designs and
     /// retargets before the frames after it render. Cuts that did not move render
     /// together, in one call.
-    fn render_steps(&mut self, io: &mut Io<'_, K::Float>, position: u64, rate: SampleRate) {
+    fn render_steps(&mut self, io: &mut Io<'_, K::Float>, position: u64) {
         let size = io.frames();
         walk_grid(
             &mut (self, io),
@@ -520,14 +519,7 @@ impl<K: Kernel> KernelNode<K> {
             },
             |(node, io), from| node.params.corner_from(io, from),
             |(node, io), frame, at_grid| {
-                let target = node.params.read(
-                    io,
-                    At {
-                        position,
-                        frame,
-                        rate,
-                    },
-                );
+                let target = node.params.read(io, frame);
                 let applied = node.tuned.as_ref().and_then(|t| t.applied);
                 let moved = applied.is_none_or(|a| node.params.moved(&a, &target));
                 ((K::CUT_ALWAYS && at_grid) || moved).then_some(target)
@@ -544,7 +536,6 @@ impl<K: Kernel> KernelNode<K> {
             self.clear();
         } else if let Some(t) = &mut self.tuned {
             t.position = 0;
-            self.params.land();
         }
     }
 
@@ -751,7 +742,6 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
 
     fn prepare(&mut self, p: &Prepare) {
         self.kernel.prepare(p.sample_rate(), p.max_block());
-        self.params.retune(p.sample_rate(), true);
         let latency = self.kernel.latency().get() as u64;
         self.tuned = Some(Tuned {
             rate: p.sample_rate(),
@@ -772,20 +762,12 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
         if size == 0 {
             return Status::Modified;
         }
-        let (position, rate, applied) = (t.position, t.rate, t.applied);
+        let (position, applied) = (t.position, t.applied);
         t.position += size as u64;
 
         self.kernel.tempo(cx.transport_at(Offset::ZERO).tempo);
 
-        self.params.begin(position);
-        let target = self.params.read(
-            &io,
-            At {
-                position,
-                frame: size - 1,
-                rate,
-            },
-        );
+        let target = self.params.read(&io, size - 1);
         let moved = applied
             .as_ref()
             .is_none_or(|a| self.params.moved(a, &target));
@@ -799,7 +781,7 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
             return Status::Idle;
         }
         if stepped {
-            self.render_steps(&mut io, position, rate);
+            self.render_steps(&mut io, position);
         } else {
             if moved {
                 self.apply(target);
@@ -833,11 +815,9 @@ impl<K: Kernel> Clone for KernelNode<K> {
     fn clone(&self) -> Self {
         let mut kernel = self.kernel.clone();
         kernel.reset();
-        let mut params = self.params.clone();
-        params.land();
         Self {
             kernel,
-            params,
+            params: self.params.clone(),
             out: self.out,
             inputs: self.inputs,
             source: self.source,
