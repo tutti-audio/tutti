@@ -434,6 +434,55 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
     }
 }
 
+/// **Narrowing the target's declared range changes what the plugin hears, at
+/// the analytic figure.** The gain's knob is 0.4 and a macro of 1 is routed at
+/// depth 0.5: over `0..=1` the plugin hears `0.4 + 0.5 * 1` = 0.9; the range
+/// redeclared as `0.2..=0.7` (span 0.5; a plugin parameter's range has no
+/// typed write, so it is cleared and declared again) it hears `0.4 + 0.5 * 0.5` = 0.65.
+#[test]
+fn narrowing_a_plugin_targets_range_changes_what_lands_by_the_new_span() {
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Bipolar::of(0.5)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+    set_gain(&s, node, 0.4);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.9) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the knob plus the route over 0..=1",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+
+    {
+        // A plugin parameter's range is redeclared: cleared, then declared again.
+        let mut m = s.mods_mut();
+        assert!(m.clear_range(gain));
+        m.range_raw(gain, 0.2, 0.7).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.65) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the knob plus the route over the new span",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+}
+
 /// **Once its lane is gone a parameter takes a set as the plugin's own.** The
 /// lane's knob is not written, and the plugin takes the value raw.
 #[test]

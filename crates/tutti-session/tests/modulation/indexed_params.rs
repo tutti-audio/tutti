@@ -84,7 +84,7 @@ fn a_write_reaches_the_index_it_names() {
 /// index 1, not index 0's 100) renders `500 + 300·sin` on output 1, past the
 /// connect's declick, while output 0 reads its own base throughout. The
 /// route's target is `ParamAddr::Indexed`, resolved through the session's
-/// reconciler to the lane's knob and port.
+/// apply to the lane's knob and port.
 #[test]
 fn a_route_to_index_1_does_not_touch_index_0() {
     let mut s = offline_48k();

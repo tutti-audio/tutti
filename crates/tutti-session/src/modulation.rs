@@ -111,7 +111,7 @@ impl ParamRef {
         }
     }
 
-    /// The reconciler's key: the node's key bits and the param. What a
+    /// The compile's key: the node's key bits and the param. What a
     /// refusal of the session's own declarations names.
     #[must_use]
     pub fn key(self) -> TargetKey {
@@ -151,7 +151,7 @@ impl MixRef {
         Self { node: node.into() }
     }
 
-    /// The reconciler's key: the node's key bits. What a refusal of the
+    /// The compile's key: the node's key bits. What a refusal of the
     /// session's own declarations names.
     #[must_use]
     pub fn key(self) -> TargetKey {
@@ -661,20 +661,20 @@ pub(crate) struct OwnMods {
     routes: BTreeMap<RouteKey, OwnRoute>,
     ranges: BTreeMap<TargetKey, Arc<Bounds>>,
     automation: BTreeMap<TargetKey, OwnAutomation>,
-    /// The key the reconciler is given for each edge a target names (an
+    /// The key the compile is given for each edge a target names (an
     /// edge has no node bits to be its key): minted on first use, kept for
     /// the edge's life as a target.
     edge_keys: BTreeMap<ChannelEdge, u64>,
     /// The inverse of `edge_keys`.
     edge_refs: BTreeMap<u64, ChannelEdge>,
-    /// The declarations as the reconciler takes them, built from the maps
+    /// The declarations as the compile takes them, built from the maps
     /// above on the first apply after they may have changed: cleared when
     /// [`Mods`] is handed out (whatever it then edits), when a take closes
     /// and when a node is forgotten.
     built: Option<OwnDeclarations>,
 }
 
-/// The session's own declarations as the reconciler takes them, built
+/// The session's own declarations as the compile takes them, built
 /// from [`OwnMods`] and kept until they may change.
 #[derive(Debug)]
 pub(crate) struct OwnDeclarations {
@@ -824,7 +824,7 @@ impl OwnMods {
         self.minted.mint().get()
     }
 
-    /// `target`'s key for the reconciler: a param's is its node's bits and
+    /// `target`'s key for the compile: a param's is its node's bits and
     /// address, a mix's its node's bits, an edge's a key minted for it.
     fn key_of(&mut self, target: ModTarget) -> TargetKey {
         match target {
@@ -855,7 +855,7 @@ impl OwnMods {
         }
     }
 
-    /// What a reconciler key of this session's own declarations names.
+    /// What a compile key of this session's own declarations names.
     fn target_of(&self, key: TargetKey) -> Option<ModTarget> {
         match key {
             TargetKey::Param { node, param } => Some(ModTarget::Param(ParamRef {
@@ -1597,7 +1597,7 @@ impl Mods<'_> {
             .and_then(|take| take.as_any_mut().downcast_mut())
     }
 
-    /// The key the reconciler holds `target` under: what
+    /// The key the compile holds `target` under: what
     /// [`ModState::lane`] speaks. A param's is
     /// [`ParamRef::key`], a mix's [`MixRef::key`]; an edge's is minted on first
     /// use and kept.

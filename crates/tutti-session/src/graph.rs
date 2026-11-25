@@ -68,7 +68,7 @@ use tutti_graph::{NodeParts, ParamSet};
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
-use tutti_units::{Gain, SampleRate};
+use tutti_units::{Gain, PlayReading, SampleRate};
 use tutti_units::{Samples, Tail};
 
 mod observe;
@@ -2476,6 +2476,7 @@ impl<F: Float> Graph<F> {
         m: &mut crate::modulation::derived::Derived,
         decl: &tutti_modulation::Declarations<'_>,
         own: &crate::modulation::OwnMods,
+        now: PlayReading,
     ) -> Result<crate::modulation::derived::Applied, crate::modulation::lower::Refusal> {
         let values = &self.values;
         // A node the session hosts no plugin at has no mirror: its lane has
@@ -2499,6 +2500,7 @@ impl<F: Float> Graph<F> {
             &mut self.editor,
             &|at| values.cell(at.node, at.param),
             &mirror,
+            now,
         )?;
         if applied.commit {
             self.edited = true;
@@ -3765,9 +3767,9 @@ impl<F: Float> Graph<F> {
 
     /// What a pass that is a function of the editor compares: its revision,
     /// which moves with anything an apply reads of the spec and the shapes, and
-    /// the play clock's epoch, which the audio thread moves.
-    pub(crate) fn modulation_clock(&self) -> (u64, u32) {
-        (self.editor.revision(), self.editor.play_reading().epoch)
+    /// the play clock, whose epoch the audio thread moves.
+    pub(crate) fn modulation_clock(&self) -> (u64, PlayReading) {
+        (self.editor.revision(), self.editor.play_reading())
     }
 
     /// The compensation of the plan sent last: what the session publishes,

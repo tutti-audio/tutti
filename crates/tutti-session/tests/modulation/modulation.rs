@@ -434,7 +434,7 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
 /// replacement**: a route's polarity edited while a borrow on the lane's cell
 /// (a block in progress) is held republishes the lane's program, and once
 /// the borrow goes the next update's `Reclaim` phase frees the old one with
-/// nothing published again. The lanes are inserted by the reconciler, not
+/// nothing published again. The lanes are inserted by the apply, not
 /// through `Graph::add`, so the session sweeps them itself.
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
@@ -464,7 +464,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
 }
 
 /// **The update frees the program a block held across a republish of a lane
-/// the app added with `Graph::add`**: the reconciler sweeps only the lanes it
+/// the app added with `Graph::add`**: the session sweeps only the lanes it
 /// wired, so the node's own reclaimer is what frees this one.
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_hand_added_lanes_republish() {
@@ -488,8 +488,8 @@ fn an_update_frees_a_program_a_block_held_across_a_hand_added_lanes_republish() 
 }
 
 /// **An edit through `Session::mods` after a steady state applies.** The
-/// session keeps its own declarations built between edits, and the
-/// reconciler skips an apply whose inputs are all unchanged; a route edit,
+/// session keeps its own declarations built between edits, and an
+/// update skips an apply whose inputs are all unchanged; a route edit,
 /// a range edit and a new route each reach the graph on the next update.
 #[test]
 fn an_own_edit_after_a_steady_state_applies() {

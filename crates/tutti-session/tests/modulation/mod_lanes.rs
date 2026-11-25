@@ -336,6 +336,103 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     assert_eq!(program.layers().len(), 1, "the LFO's layer");
 }
 
+/// **A removed feed node leaves its source unfed, not every apply refused.**
+/// A follower's feed node is removed through the graph after a steady state:
+/// the follower is reported `Problem::Unfed` and nothing else, its node goes,
+/// the LFO keeps the lane and an unrelated lane keeps its figure (`0.1 + 0.5`
+/// of a macro of 1 over `0..=1`). A note envelope whose MIDI feed node is
+/// removed keeps its node and reports nothing: it is fed nothing.
+#[test]
+fn a_removed_feed_node_leaves_its_source_unfed() {
+    let (mut s, mut side) = rig(2);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    let other = s.graph().add(ProbeUnit::new(0.1));
+    let kick = s.graph().add(ForkByClone(Pulse {
+        from: 0,
+        to: 48_000,
+        level: 0.5,
+    }));
+    main_output(&mut s, &[probe.erase(), other.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let steady = ParamRef::unit(other, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    m.range_raw(steady, 0.0, 1.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
+    let follower = m.follower(Follower::default(), kick);
+    let one = m.macro_(1.0);
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
+        .unwrap();
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(-0.2)))
+        .unwrap();
+    m.route(RouteSpec::new(one, steady, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    render_n(&mut side, 2, 1_024, 128);
+    let node = s.mod_state().source_node(follower).expect("fed and built");
+
+    s.remove(kick).unwrap();
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        events.extend(reported(s.update()));
+        render_n(&mut side, 2, 1_024, 128);
+    }
+    assert_eq!(events, [], "nothing is refused");
+    let unfed = Problem::Unfed {
+        source: SourceName::Own {
+            id: follower,
+            fed_by: Some(kick.erase()),
+        },
+    };
+    assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&unfed]);
+    assert_eq!(
+        s.mod_state().source_node(follower),
+        None,
+        "the follower went"
+    );
+    assert!(!s.graph_ref().contains(node), "its node is gone");
+    assert!(s.mod_state().lane(cutoff.key()).is_some(), "the LFO's lane");
+    let got = render_n(&mut side, 2, 1_024, 128);
+    assert!(
+        (got[1][1_023] - 0.6).abs() < 1e-6,
+        "the other lane runs: {}",
+        got[1][1_023]
+    );
+
+    // A note envelope whose MIDI feed node is removed keeps its node.
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(0.2));
+    let clip = s.graph().add(ForkByClone(Held { on: 10 }));
+    main_output(&mut s, &[probe.erase()]);
+    let c = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(c, 0.0, 1.0).unwrap();
+    let env = m.note_envelope(NoteEnvelope::new(Adsr::default()), clip, 0);
+    m.route(RouteSpec::new(env, c, Bipolar::of(0.5))).unwrap();
+    settle(&mut s);
+    assert!(s.mod_state().source_node(env).is_some(), "precondition");
+    s.remove(clip).unwrap();
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        events.extend(reported(s.update()));
+        render(&mut side, 1_024, 128);
+    }
+    assert_eq!(events, [], "nothing is refused");
+    assert!(
+        !s.graph_ref().contains(clip.erase()),
+        "the feed node is gone"
+    );
+    assert_eq!(
+        s.mod_state().problems().next(),
+        None,
+        "unfed, not a problem"
+    );
+    assert!(
+        s.mod_state().source_node(env).is_some(),
+        "the envelope stays"
+    );
+}
+
 /// **A knob written after a route edit is the knob.** The cutoff's knob is
 /// the node's own cell, written through `Session::set`; a depth edit
 /// writes the lane's depth cell and no knob, so the knob written before it and
@@ -883,6 +980,71 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
     assert_eq!(*out[0].last().unwrap(), 900.0, "a later range edit lands");
 }
 
+/// **A lane on a param with no typed key reaches its port.** The probe
+/// declares `Balance` by `UnitParam` alone (the probe types key only `Cutoff`
+/// and `Drive`): a macro of 1 at depth 0.25 over `-1..=1` renders
+/// `0 + 0.25 * 1 * 2` = 0.5 at the port.
+#[test]
+fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::of(UnitParam::Balance, 0.0));
+    main_output(&mut s, &[probe.erase()]);
+    let balance = ParamRef::unit(probe, UnitParam::Balance);
+    let mut m = s.mods_mut();
+    m.range_raw(balance, -1.0, 1.0).unwrap();
+    let one = m.macro_(1.0);
+    m.route(RouteSpec::new(one, balance, Bipolar::of(0.25)))
+        .unwrap();
+    settle(&mut s);
+    let out = render(&mut side, 1_024, 128);
+    assert_holds(&out[0], 0.5, "balance at the analytic figure");
+}
+
+/// **A replace that drops the targeted param refuses the target and leaves
+/// nothing driving the new node.** A macro lane on a cutoff probe renders
+/// `500 + 250`; the node is replaced, with a zero fade, by a probe that
+/// declares `Q` alone (knob 400). The target is `NoSuchParam`, reported once,
+/// and the new node renders its own knob.
+#[test]
+fn a_replace_that_drops_the_param_is_refused_and_leaves_the_knob() {
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let offset = m.macro_(1.0);
+    m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
+        .unwrap();
+    settle(&mut s);
+    let out = render(&mut side, 1_024, 128);
+    assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
+    assert!(s.mod_state().lane(cutoff.key()).is_some());
+
+    s.graph()
+        .replace(
+            probe,
+            Replacement::new(ProbeUnit::of(UnitParam::Q, 400.0)).fade(Fade::new(Samples::ZERO)),
+        )
+        .expect("the swap is accepted");
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        events.extend(reported(s.update()));
+        render(&mut side, 1_024, 128);
+    }
+    let refusal = Problem::NoSuchParam {
+        target: TargetName::Own(cutoff.into()),
+    };
+    assert_eq!(events, std::slice::from_ref(&refusal), "reported once");
+    assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&refusal]);
+    let out = render(&mut side, 1_024, 128);
+    assert_eq!(
+        *out[0].last().unwrap(),
+        400.0,
+        "the new node plays its own knob: nothing drives it"
+    );
+}
+
 // ------------------------------------------------- a host's commit --
 
 /// **A host's staged edit committed on an update with an unresolved target
@@ -1186,9 +1348,7 @@ fn lfo_scene(
 /// it send nothing more.
 ///
 /// Each edit is checked to have reached the render, so "no plan" is not an
-/// edit that did nothing. (The reconciler's half is `tutti-nodes`'
-/// `range_and_depth_edits_need_no_commit_and_a_follower_route_one`; this is
-/// the session's: its updates stage and commit nothing for a program edit.)
+/// edit that did nothing.
 #[test]
 fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let (mut s, mut side) = rig(1);

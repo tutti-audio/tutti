@@ -10,7 +10,8 @@
 //! | absent before | insert, with its wiring |
 //! | structure equal, program differs | [`LaneControls::publish`], no commit |
 //! | plugin lane, range differs | [`ForeignLaneControls::publish_range`], no commit |
-//! | structure differs | removed, then inserted at a fresh key |
+//! | a lane's structure differs | removed, then inserted at a fresh key |
+//! | a source's declaration or width differs | removed, then inserted at its key |
 //! | gone | removed |
 //!
 //! A refusal ([`Refusal`]) changes nothing: it is found before the first write.
@@ -49,7 +50,7 @@ use tutti_nodes::{
     EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
 };
 use tutti_rt::ParamCell;
-use tutti_units::{At, Normalized, ParamAddr, ParamId};
+use tutti_units::{At, Normalized, ParamAddr, ParamId, PlayReading};
 
 use super::OwnMods;
 use super::lower::{Drive, Feed, LanePlan, Lowered, Refusal, Resolved, SourcePlan, lower};
@@ -117,7 +118,8 @@ struct Signal {
     plan: SourcePlan,
 }
 
-/// What the last apply saw, which a later one compares against.
+/// What the last apply saw, which a later one compares against: the editor's
+/// revision after its writes, and the epoch of the reading it compiled with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Seen {
     revision: u64,
@@ -134,7 +136,8 @@ pub(crate) struct Derived {
     wired: BTreeSet<(SourceKey, TargetKey)>,
     /// The last compile: sources keep their ids and rate edits are dated.
     prev: Option<Compiled>,
-    /// Note envelopes owed a resync at the next commit.
+    /// Sources owed a resync at the next commit: a note envelope newly read
+    /// by a lane, and a source rebuilt.
     owed: BTreeSet<SourceKey>,
     /// Resyncs the editor refused for good and that were dropped.
     resyncs_dropped: u64,
@@ -184,7 +187,7 @@ impl Derived {
             .sum()
     }
 
-    /// Note envelopes owed a resync.
+    /// Sources owed a resync.
     pub(crate) fn resyncs_owed(&self) -> usize {
         self.owed.len()
     }
@@ -200,23 +203,14 @@ impl Derived {
     /// what the last apply left (a node or an edge a target waited for, added;
     /// a node replaced, removed or rebound, a range cell, a sample rate, a play
     /// start).
-    pub(crate) fn stale(&self, declared: bool, awaiting_values: bool, now: (u64, u32)) -> bool {
-        declared
-            || awaiting_values
-            || self.seen
-                != Some(Seen {
-                    revision: now.0,
-                    epoch: now.1,
-                })
-    }
-
-    /// Records what the editor is at, after the writes an apply made: an
-    /// update that finds the same has nothing to apply.
-    pub(crate) fn settle(&mut self, now: (u64, u32)) {
-        self.seen = Some(Seen {
-            revision: now.0,
-            epoch: now.1,
-        });
+    pub(crate) fn stale(
+        &self,
+        declared: bool,
+        awaiting_values: bool,
+        (revision, play): (u64, PlayReading),
+    ) -> bool {
+        let epoch = play.epoch;
+        declared || awaiting_values || self.seen != Some(Seen { revision, epoch })
     }
 
     /// The revision the last apply left, when it is the one the editor is at:
@@ -239,7 +233,10 @@ impl Derived {
     /// alone). A plugin target's lane starts at `mirror(node, id)`: `None`
     /// while it is not read (the target stays unresolved, since a lane built
     /// without a knob could not take one later), `Some(None)` for a parameter
-    /// the node does not list. Control thread; it may allocate.
+    /// the node does not list. `now` is the play reading the compile dates
+    /// its anchors by, and the one [`stale`](Self::stale) compares the next
+    /// update's against: the audio thread moves the editor's own meanwhile.
+    /// Control thread; it may allocate.
     ///
     /// # Errors
     ///
@@ -251,8 +248,25 @@ impl Derived {
         editor: &mut Editor<F>,
         cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
         mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
+        now: PlayReading,
     ) -> Result<Applied, Refusal> {
-        let now = editor.play_reading();
+        let applied = self.resolve_and_diff(decl, own, editor, cell, mirror, now);
+        self.seen = Some(Seen {
+            revision: editor.revision(),
+            epoch: now.epoch,
+        });
+        applied
+    }
+
+    fn resolve_and_diff<F: Float>(
+        &mut self,
+        decl: &Declarations<'_>,
+        own: &OwnMods,
+        editor: &mut Editor<F>,
+        cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
+        mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
+        now: PlayReading,
+    ) -> Result<Applied, Refusal> {
         let compiled = compile(
             decl,
             self.prev.as_ref(),
@@ -397,7 +411,7 @@ impl Derived {
             if let Some(node) = self.sources.get_mut(&source) {
                 if node.plan.feed != plan.feed {
                     unwire_feed(editor, node.key, node.plan.feed, node.plan.width);
-                    wire_feed(editor, node.key, plan.feed);
+                    wire_feed(editor, node.key, plan.feed, plan.width);
                     node.plan.feed = plan.feed;
                     *commit = true;
                 }
@@ -410,14 +424,14 @@ impl Derived {
                 self.owed.insert(source);
             }
             insert_source(editor, key, plan);
-            wire_feed(editor, key, plan.feed);
+            wire_feed(editor, key, plan.feed, plan.width);
             self.sources.insert(source, Signal { key, plan: *plan });
             *commit = true;
         }
 
         for (&target, plan) in &lowered.lanes {
             let program = &plan.program;
-            let range = (plan.range.min().to_bits(), plan.range.max().to_bits());
+            let range = range_bits(plan.range);
             if let Some(lane) = self.lanes.get_mut(&target) {
                 // Sources the new program reads that the published one did
                 // not: the lane frees their slots on adoption, so a note
@@ -435,16 +449,7 @@ impl Derived {
             }
             owe_resyncs(&mut self.owed, compiled, None, program);
             let key = keys.lanes[&target];
-            let controls = build_lane(editor, key, plan);
-            self.lanes.insert(
-                target,
-                Lane {
-                    key,
-                    resolved: plan.resolved.clone(),
-                    controls,
-                    range,
-                },
-            );
+            self.lanes.insert(target, build_lane(editor, key, plan));
             *commit = true;
         }
 
@@ -467,7 +472,7 @@ impl Derived {
     }
 
     /// Schedules the owed resyncs ([`EventKind::Resync`] at
-    /// [`At::NextBlock`] into each note envelope's input). Call it after the
+    /// [`At::NextBlock`] into each owed source's event input). Call it after the
     /// commit an [`apply`](Self::apply) asked for has been sent: a scheduled
     /// command waits for that commit to land.
     ///
@@ -594,8 +599,8 @@ fn resolve_target<F: Float>(
             if !editor.spec().has_edge(id) {
                 return Ok(None);
             }
-            // An edge with no entry has no cells: the diff declares the entry
-            // before it builds the lane.
+            // An edge with no entry has no cells: building the lane declares
+            // the entry, and records the cell it bound.
             resolved.knob = editor.edge_gain_cell(id);
         }
         Drive::Plugin { input, .. } => {
@@ -779,6 +784,11 @@ fn owe_resyncs(
     }
 }
 
+/// A range as a lane records it.
+fn range_bits(range: ParamRange) -> (u64, u64) {
+    (range.min().to_bits(), range.max().to_bits())
+}
+
 /// Stores a range edit: the port's cell for a port lane or an edge's gain (a
 /// store, no commit), the lane's own for a plugin lane.
 fn store_range<F: Float>(
@@ -804,14 +814,17 @@ fn store_range<F: Float>(
     }
 }
 
-/// Inserts the lane of `plan` at `key` and wires it into its drive.
-fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -> Controls {
+/// Inserts the lane of `plan` at `key`, wired into its drive, with the cells
+/// it bound: an edge's gain entry is declared here, so its cell is not the
+/// plan's.
+fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -> Lane {
     let program = plan.program.clone();
     let out = EventOutputPort::new(key, 0);
-    match plan.resolved.drive {
+    let mut resolved = plan.resolved.clone();
+    let controls = match resolved.drive {
         Drive::Plugin { input, id } => {
             let mut config = ForeignLaneConfig::new(id, program, plan.range);
-            if let Some(seed) = plan.resolved.seed {
+            if let Some(seed) = resolved.seed {
                 config = config.knob(seed);
             }
             let (node, controls) = config.build();
@@ -830,6 +843,7 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
                 .edge_gain_cell(id)
                 .zip(editor.edge_gain_range_cell(id))
                 .expect("declared above");
+            resolved.knob = Some(knob.clone());
             let node = ControlLaneNode::from(
                 UnitLaneConfig::new(EdgeGain::ADDR, program)
                     .knob(knob)
@@ -842,8 +856,7 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
             Controls::Lane(controls)
         }
         Drive::Port(_) | Drive::Mix(_) => {
-            let at = plan
-                .resolved
+            let at = resolved
                 .drive
                 .port()
                 .expect("a port or mix drive has its port");
@@ -853,7 +866,7 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
             let cell = editor.param_range_cell(at);
             let mut config = UnitLaneConfig::new(at.param, program)
                 .range(cell.expect("a bound param has its range cell from its staging"));
-            if let Some(knob) = plan.resolved.knob.clone() {
+            if let Some(knob) = resolved.knob.clone() {
                 config = config.knob(knob);
             }
             let controls = editor
@@ -864,6 +877,12 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
                 .expect("checked: the port's node, and the lane's output");
             Controls::Lane(controls)
         }
+    };
+    Lane {
+        key,
+        resolved,
+        controls,
+        range: range_bits(plan.range),
     }
 }
 
@@ -886,15 +905,17 @@ fn insert_source<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &SourcePl
     }
 }
 
-/// Wires `feed` into source node `key`'s input.
-fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>) {
+/// Wires `feed` into source node `key`'s input: a follower's `width`
+/// channels, or an envelope's MIDI.
+fn wire_feed<F: Float>(
+    editor: &mut Editor<F>,
+    key: NodeKey,
+    feed: Option<Feed>,
+    width: ChannelLayout,
+) {
     match feed {
         Some(Feed::Audio(from)) => {
-            let width = editor
-                .shapes()
-                .get(&from)
-                .map_or(0, |s| s.audio_out().count());
-            for port in 0..width {
+            for port in 0..width.count() {
                 editor
                     .connect_edge(EdgeId::into_port(
                         InputPort::new(key, port),
@@ -934,3 +955,6 @@ fn unwire_feed<F: Float>(
         None => {}
     }
 }
+
+#[cfg(test)]
+mod tests;

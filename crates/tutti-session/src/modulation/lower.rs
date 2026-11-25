@@ -152,11 +152,12 @@ pub(crate) fn lower(
         let Some(resolved) = targets.remove(&target) else {
             continue;
         };
-        let (min, max) = decl
+        let (_, t) = decl
             .targets
             .iter()
             .find(|(k, _)| *k == target)
-            .map_or((f64::NEG_INFINITY, f64::INFINITY), |(_, t)| (t.min, t.max));
+            .expect("a compiled target is declared: compile refuses it (UndeclaredTarget)");
+        let (min, max) = (t.min, t.max);
         let range = ParamRange::new(min, max)
             .expect("a compiled target has no NaN bound: compile refuses it (NanRange)");
         lanes.insert(

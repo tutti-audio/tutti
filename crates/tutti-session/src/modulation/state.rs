@@ -61,7 +61,7 @@ impl std::fmt::Display for SourceName {
 /// One reason a modulation is not doing what was declared, as
 /// [`ModState::problems`] lists it and
 /// [`SessionEvent::Modulation`](crate::SessionEvent::Modulation) reports it.
-/// Its `Display` names the node and the param (or the source). The first five
+/// Its `Display` names the node and the param (or the source). The first six
 /// are refusals: nothing new applied, and the graph keeps what the last apply
 /// that succeeded built.
 #[derive(Clone, Debug, PartialEq)]
@@ -204,7 +204,7 @@ impl std::fmt::Display for Problem {
 impl std::error::Error for Problem {}
 
 impl OwnMods {
-    /// The target a reconciler key names, as a [`Problem`] reports it.
+    /// The target a compile key names, as a [`Problem`] reports it.
     fn target_name(&self, key: TargetKey) -> Option<TargetName> {
         self.target_of(key).map(TargetName::Own)
     }
@@ -267,7 +267,7 @@ impl OwnMods {
     }
 }
 
-/// The session's modulation as applied: the reconciler, and what its last
+/// The session's modulation as applied: the derived nodes, and what the last
 /// apply left refused or unresolved. Read it with
 /// [`Session::mod_state`](crate::Session::mod_state); [`problems`](Self::problems)
 /// is where to ask why nothing modulates.
@@ -323,20 +323,17 @@ impl ModState {
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
-        if !self
-            .derived
-            .stale(declared, self.awaiting_values, graph.modulation_clock())
-        {
+        let clock = graph.modulation_clock();
+        if !self.derived.stale(declared, self.awaiting_values, clock) {
             return false;
         }
         let built = own.built.as_ref().expect("built");
-        let applied = graph.modulate(&mut self.derived, &built.borrow(), own);
+        let applied = graph.modulate(&mut self.derived, &built.borrow(), own, clock.1);
         let committed = applied.as_ref().is_ok_and(|a| a.commit);
         self.applied(applied, own, now, out);
-        // What the editor is at after the apply's own writes: the next update
-        // finds nothing to apply unless something else moves it. The commit
-        // that follows adds its own (`before_commit`, `after_commit`).
-        self.derived.settle(graph.modulation_clock());
+        // The apply recorded what it left: the next update finds nothing to
+        // apply unless something else moves the editor. The commit that
+        // follows adds its own (`before_commit`, `after_commit`).
         self.awaiting_commit = committed;
         // Every lane this apply built or dropped is in `derived` now: the
         // plugins' driven parameters follow it in the same update.

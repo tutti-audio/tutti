@@ -2319,7 +2319,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         // bypass the lanes that own those parameters).
         //
         // A modulation lane on a parameter needs no seeding here: the swap
-        // moved the node's generation, so the reconciler rebuilds the lane (a
+        // moved the node's generation, so the apply rebuilds the lane (a
         // new node, its knob starting at this mirror's value) and the old
         // lane, with whatever GUI value its knob held, goes with the old unit.
         // The new lane's first value is the restored one.

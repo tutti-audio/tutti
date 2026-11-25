@@ -74,7 +74,7 @@ pub enum SlotId {
     SourceRate(ModSourceId),
     /// A macro source's value.
     SourceValue(ModSourceId),
-    /// A param's automation curve, by the key the reconciler holds it under.
+    /// A param's automation curve, by the key the compile holds it under.
     Automation(TargetKey),
     /// A node's setting of a kind, the word it reads once per block.
     Setting(NodeKey, SettingKind),
