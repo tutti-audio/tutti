@@ -304,7 +304,8 @@ where
     P: FnOnce(Option<R>) + Send + 'static,
 {
     /// Settles the writes and runs the work; a node draining them now leaves it
-    /// for the next tick, or answers `None` when no main thread ticks.
+    /// for the next tick, or answers `None` when no main thread ticks. The
+    /// re-asks end: the claim's holder is one bounded audio-thread drain.
     fn step(self, main: MainThreadMarker) {
         let settled = {
             let mut instance = self.inner.lock();

@@ -154,9 +154,11 @@ impl EditPost {
 
     /// Applies every write made so far through the plugin's own `Control`,
     /// waiting for a node's drain to let go of the reader. The claim's holder
-    /// is a bounded audio-thread drain, so the wait ends. For a synchronous
-    /// caller on the main thread with no later tick to ask again on (a save, a
-    /// fork); the rest [`settle`](Self::settle) and are asked again.
+    /// is a bounded audio-thread drain, so the wait is at most one drain: the
+    /// mark is fixed when it starts, and later writes do not extend it. For a
+    /// synchronous caller on the main thread with no later tick to ask again
+    /// on (a save, a fork); the rest [`settle`](Self::settle) and are asked
+    /// again.
     pub(super) fn settle_now(&self, main: MainThreadMarker, control: &mut dyn Control) {
         let mark = self.mark();
         while self.settle(main, control, mark).is_pending() {
@@ -176,9 +178,9 @@ impl EditPost {
         let Some(reader) = self.0.reader.try_borrow_mut() else {
             return Poll::Pending;
         };
-        // Under the claim: every later drain takes it after this flag, and
-        // reads the flag under it.
-        self.0.restoring.store(true, Ordering::SeqCst);
+        // Under the claim, whose release publishes the flag to every later
+        // drain: a drain reads it only once it holds the claim.
+        self.0.restoring.store(true, Ordering::Relaxed);
         self.reset();
         drop(reader);
         Poll::Ready(Restoring(Arc::clone(&self.0)))
@@ -270,7 +272,7 @@ impl EditPort {
     /// what they hold for the next block.
     pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) {
         if let Some(mut reader) = self.0.reader.try_borrow_mut()
-            && !self.0.restoring.load(Ordering::SeqCst)
+            && !self.0.restoring.load(Ordering::Acquire)
         {
             reader.drain_in_epoch(apply);
         }
@@ -441,7 +443,7 @@ mod tests {
         let drain = post.0.reader.try_borrow_mut().expect("free");
         assert!(post.restoring().is_pending(), "a drain is in progress");
         assert!(
-            !post.0.restoring.load(Ordering::SeqCst),
+            !post.0.restoring.load(Ordering::Acquire),
             "the load has not begun"
         );
         drop(drain);
