@@ -221,7 +221,7 @@ impl OwnMods {
 
     /// The target of `route`, as a [`Problem`] reports it.
     fn route_target_name(&self, route: RouteKey) -> Option<TargetName> {
-        self.target_name(self.routes.get(&route)?.decl.to)
+        self.target_name(self.routes.get(&route)?.to)
     }
 
     /// `refusal` as the [`Problem`] that names it in the session's terms.

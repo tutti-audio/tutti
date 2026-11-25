@@ -584,22 +584,23 @@ struct OwnSource {
     feed: Option<OwnFeed>,
 }
 
-/// A route the session declared: the reconciler's declaration, and the target
-/// the caller named (the declaration has only its key). Its polarity and
-/// curve are the targets' (`ModRouteId::polarity`, `curve`): `decl` holds
-/// their values as declared, and [`decl`](Self::decl) the ones in force. Its
-/// depth is `decl.depth`, the cell the route's lane reads
-/// ([`DepthTarget`](crate::DepthTarget)); its scale, if any, is
-/// `decl.scale` ([`Mods::scale`]).
+/// A route the session declared: its source, its target in the compile's keys
+/// and as the caller named it, its depth cell, the polarity and curve in force
+/// (the targets of `PolarityTarget::of` and `CurveTarget::of`) and its scale.
+/// [`decl`](Self::decl) is the compile's declaration of it.
 #[derive(Debug)]
 struct OwnRoute {
-    decl: RouteDecl,
+    /// The source it reads.
+    source: SourceKey,
+    /// What it drives, in the compile's keys.
+    to: TargetKey,
+    /// The depth cell the lane reads ([`DepthTarget::of`](crate::DepthTarget::of)).
+    depth: Param<Bipolar>,
     /// What the route modulates.
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
-    /// The route's one scale ([`Mods::scale`]). `decl.scale` is always
-    /// `None`: [`decl`](Self::decl) builds the compiled scale from this.
+    /// The route's one scale ([`Mods::scale`]).
     scale: Option<OwnScale>,
 }
 
@@ -614,9 +615,12 @@ struct OwnScale {
 }
 
 impl OwnRoute {
-    /// The reconciler's declaration, with the polarity and curve in force.
+    /// The compile's declaration, with the polarity and curve in force.
     fn decl(&self) -> RouteDecl {
         RouteDecl {
+            source: self.source,
+            to: self.to,
+            depth: self.depth.clone(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
             scale: self.scale.as_ref().map(|s| tutti_modulation::Scale {
@@ -625,7 +629,6 @@ impl OwnRoute {
                 polarity: s.polarity.get(),
                 curve: s.curve.get(),
             }),
-            ..self.decl.clone()
         }
     }
 }
@@ -718,7 +721,7 @@ impl OwnMods {
         );
         self.table.provide(
             Self::depth_slot(route),
-            Arc::new(DepthSlot(route.decl.depth.handle())) as crate::value::SlotCell<Bipolar>,
+            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
         if let Some(scale) = &route.scale {
             self.provide_scale(id, scale);
@@ -727,7 +730,7 @@ impl OwnMods {
 
     /// The slot of `route`'s depth: named by its source and its target.
     fn depth_slot(route: &OwnRoute) -> SlotId {
-        SlotId::RouteDepth(DepthKey::Into(source_id(route.decl.source), route.target))
+        SlotId::RouteDepth(DepthKey::Into(source_id(route.source), route.target))
     }
 
     /// The slots of the scale of route `id`: its depth, polarity and curve.
@@ -964,7 +967,7 @@ impl OwnMods {
         let lost: Vec<RouteKey> = self
             .routes
             .iter()
-            .filter(|(_, r)| gone(&r.decl.to))
+            .filter(|(_, r)| gone(&r.to))
             .map(|(&k, _)| k)
             .collect();
         let lost = self.take_routes(lost);
@@ -1184,10 +1187,10 @@ impl OwnRoute {
     fn info(&self, key: RouteKey) -> RouteInfo {
         RouteInfo {
             id: route_id(key),
-            source: source_id(self.decl.source),
+            source: source_id(self.source),
             target: self.target,
             scale: self.scale.as_ref().map(|s| source_id(s.source)),
-            depth: self.decl.depth.load(),
+            depth: self.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
         }
@@ -1314,7 +1317,7 @@ impl Mods<'_> {
             .own
             .routes
             .iter()
-            .filter(|(_, r)| r.decl.source == key)
+            .filter(|(_, r)| r.source == key)
             .map(|(&k, _)| k)
             .collect();
         let lost = self.own.take_routes(lost);
@@ -1349,20 +1352,15 @@ impl Mods<'_> {
             .own
             .routes
             .values()
-            .any(|r| r.decl.source == source && r.decl.to == to)
+            .any(|r| r.source == source && r.to == to)
         {
             return Err(RouteError::Duplicate { target });
         }
         let key = RouteKey(self.own.mint());
         let route = OwnRoute {
-            decl: RouteDecl {
-                source,
-                to,
-                depth: Param::new(spec.depth),
-                polarity: spec.polarity,
-                curve: spec.curve,
-                scale: None,
-            },
+            source,
+            to,
+            depth: Param::new(spec.depth),
             target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
@@ -1417,7 +1415,7 @@ impl Mods<'_> {
                 let Some(by) = self.own.sources.get(&source) else {
                     return Err(ScaleError::NoSuchSource(NoSuchModSource(scale.source)));
                 };
-                let scaled = self.own.sources.get(&declared.decl.source);
+                let scaled = self.own.sources.get(&declared.source);
                 if by.source.get().is_signal() || scaled.is_some_and(|s| s.source.get().is_signal())
                 {
                     return Err(ScaleError::SignalSource { route });
