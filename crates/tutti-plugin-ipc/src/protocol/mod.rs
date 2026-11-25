@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn audio_processed_midi_out_has_pinned_bytes() {
         #[rustfmt::skip]
-        const BYTES: [u8; 27] = [
+        const BYTES: [u8; 28] = [
             0, // variant
             42, // latency_us
             7, // seq
