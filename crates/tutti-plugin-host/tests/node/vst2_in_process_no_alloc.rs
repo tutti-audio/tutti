@@ -12,7 +12,6 @@
 //! means the in-process backend (or the `vst2-host` codec) introduced a
 //! per-block alloc.
 
-use crate::param_reads::ParamReads as _;
 use tutti_fixtures::main_thread;
 use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
@@ -205,10 +204,16 @@ fn two_hundred_moving_parameters_do_not_allocate() {
         block(&mut unit, b);
     }
 
+    // One read of the plugin's whole list, not one per parameter.
+    let (mut values, read) = tutti_plugin_host::PluginParamValues::start(&handle);
+    values.land(
+        futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+            .expect("the plugin lists its parameters"),
+    );
     for id in 0..PARAMS {
         assert_eq!(
-            handle.parameter_value(ParamId::new((id as i32) as u32)),
-            Some(tutti_units::Normalized::clamped(value(71, 1, id))),
+            values.get(ParamId::new(id)),
+            Some(Some(tutti_units::Normalized::clamped(value(71, 1, id)))),
             "parameter {id}"
         );
     }

@@ -17,7 +17,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
     Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
-    PluginError, PluginWiring, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
+    PluginError, PluginWiring, Prepare, Processor, Rebuilt, Refused, Reply, SampleRate, State,
+    Stuck, step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.
@@ -51,7 +52,7 @@ impl<P> Hand<P> {
 
     /// The end for a user that renders on a realtime thread, and that
     /// thread's end, which polls between blocks ([`tutti_rt::Rt::poll`], with
-    /// [`Processor::stop`](crate::Processor::stop) as its last step).
+    /// [`Processor::stop`] as its last step).
     #[must_use]
     pub fn threaded() -> (Self, tutti_rt::Rt<P>)
     where
@@ -88,12 +89,10 @@ impl<P> Hand<P> {
     ///   the replaced successor is never lent to and polls nothing, as one whose
     ///   node was dropped does.
     /// - The old [`tutti_rt::Rt`] dropped **before** the swap, while it still
-    ///   holds the Processor, drops the Processor with it, on the thread that
-    ///   drops it. The seat then stays lent: nothing returns the Processor, the
-    ///   restart stays parked and the plugin cannot be activated again until
-    ///   the [`Lifecycle`] is dropped. A user whose end is dropped while a recall
-    ///   is raised returns the Processor first (`tutti-plugin-host`'s node does,
-    ///   in its `Drop`).
+    ///   holds the Processor, returns it as it was
+    ///   ([`Handback::Dropped`](tutti_rt::Handback::Dropped)): the next tick
+    ///   collects it, stops it on the main thread, and the lend that follows
+    ///   goes to the successor.
     ///
     /// A local hand becomes a threaded one at the swap.
     ///
@@ -146,6 +145,16 @@ pub enum Seat<P> {
     Held(P),
     /// On the realtime thread, which returns it only between blocks.
     Lent,
+}
+
+/// What a tick's [`trade`](Lifecycle::trade) found.
+enum Trade {
+    /// Nothing came home, and nothing is owed.
+    Idle,
+    /// The Processor is held on the main thread again.
+    Returned,
+    /// The Processor will not come: the plugin is lost.
+    Lost(&'static str),
 }
 
 /// A plugin in whichever state it is in.
@@ -345,12 +354,17 @@ impl<L: Loaded> Lifecycle<L> {
         match catch_unwind(AssertUnwindSafe(|| f(self))) {
             Ok(result) => Some(result),
             Err(_) => {
-                let lost = std::mem::replace(self, Self::Poisoned);
-                // Destroying a plugin that just panicked may panic too.
-                let _ = catch_unwind(AssertUnwindSafe(|| drop(lost)));
+                self.poison();
                 None
             }
         }
+    }
+
+    /// Destroys the plugin and leaves none.
+    fn poison(&mut self) {
+        let lost = std::mem::replace(self, Self::Poisoned);
+        // Destroying a plugin that just panicked may panic too.
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(lost)));
     }
 
     /// The effects that act on a plugin where it is.
@@ -432,33 +446,54 @@ impl<L: Loaded> Lifecycle<L> {
         }
     }
 
-    /// On a tick: a Processor the realtime thread returned is collected
-    /// (`true`, and the caller steps [`Event::Returned`]), and one a refused
-    /// lend kept held is offered again.
-    fn trade(&mut self, hand: &mut Hand<L::Processor>, state: &State) -> bool {
+    /// On a tick: a Processor the realtime thread returned is collected, and one
+    /// a refused lend kept held is offered again.
+    ///
+    /// A Processor that came back because its node was dropped
+    /// ([`Handback::Dropped`](tutti_rt::Handback::Dropped)) was not stopped by
+    /// that end: it is stopped here, on the main thread, and is not lent
+    /// again unless a [`Successor`] is installed, since the end it came from is
+    /// gone and refuses a lend.
+    fn trade(&mut self, hand: &mut Hand<L::Processor>, state: &State) -> Trade {
         let Self::Active { seat, .. } = self else {
-            return false;
+            return Trade::Idle;
         };
         if matches!(seat, Seat::Held(_)) {
             hand.settle();
         }
         let Some(end) = hand.end.as_mut() else {
-            return false;
+            return Trade::Idle;
         };
         match seat {
-            Seat::Lent => match end.take() {
-                // Held again either way. One that came back because its node
-                // was dropped was not stopped, and is not lent again: the
-                // audio end is gone, so the lend below is refused.
-                Some(
-                    tutti_rt::Handback::Recalled(processor)
-                    | tutti_rt::Handback::Dropped(processor),
-                ) => {
-                    *seat = Seat::Held(processor);
-                    true
+            Seat::Lent => {
+                // Read before the take: an end that is gone has written what it
+                // held, so a take that finds nothing after this saw it all.
+                let gone = end.borrower_gone();
+                match end.take() {
+                    Some(tutti_rt::Handback::Recalled(processor)) => {
+                        *seat = Seat::Held(processor);
+                        Trade::Returned
+                    }
+                    Some(tutti_rt::Handback::Dropped(mut processor)) => {
+                        let stopped = catch_unwind(AssertUnwindSafe(|| processor.stop()));
+                        *seat = Seat::Held(processor);
+                        match stopped {
+                            Ok(()) => Trade::Returned,
+                            Err(_) => Trade::Lost("the Processor panicked in its stop"),
+                        }
+                    }
+                    // An offer the gone end never took is withdrawn, never
+                    // started and so nothing to stop.
+                    None if gone => match end.recall() {
+                        Some(processor) => {
+                            *seat = Seat::Held(processor);
+                            Trade::Returned
+                        }
+                        None => Trade::Lost("the realtime end was dropped without the Processor"),
+                    },
+                    None => Trade::Idle,
                 }
-                None => false,
-            },
+            }
             // Held while active, with no plan parked on it: a lend was
             // refused, so offer it again.
             Seat::Held(_) if !state.is_parked() && state.renders() => {
@@ -468,9 +503,9 @@ impl<L: Loaded> Lifecycle<L> {
                 if let Err(processor) = end.lend(processor) {
                     *seat = Seat::Held(processor);
                 }
-                false
+                Trade::Idle
             }
-            Seat::Held(_) => false,
+            Seat::Held(_) => Trade::Idle,
         }
     }
 
@@ -598,9 +633,21 @@ impl<L: Loaded> Lifecycle<L> {
         main: MainThreadMarker,
         mut notify: impl FnMut(Notice),
     ) -> State {
-        if matches!(event, Event::Tick) && self.trade(hand, &state) {
-            // The realtime thread returned the Processor: a parked plan runs.
-            state = self.run(state, Event::Returned, hand, main, &mut notify);
+        if matches!(event, Event::Tick) {
+            match self.trade(hand, &state) {
+                Trade::Idle => {}
+                // The realtime thread returned the Processor: a parked plan runs.
+                Trade::Returned => {
+                    state = self.run(state, Event::Returned, hand, main, &mut notify);
+                }
+                Trade::Lost(why) => {
+                    self.poison();
+                    notify(Notice::Lost {
+                        reason: PluginError::Other(why.to_string()),
+                    });
+                    return step(state, Event::Died).0;
+                }
+            }
         }
         self.run(state, event, hand, main, &mut notify)
     }

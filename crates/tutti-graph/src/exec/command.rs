@@ -296,9 +296,9 @@ pub(crate) struct CommandRx {
     next_seq: u64,
     pending: CappedVec<Command>,
     /// The events due this block.
-    events: DueLane<Event>,
+    events: DueLane<EventKind, Event>,
     /// The param events due this block.
-    params: DueLane<ParamEvent>,
+    params: DueLane<ParamKind, ParamEvent>,
     done: Arc<AtomicU64>,
     counts: Counts,
     /// What continuous playback has crossed: tells a late beat from one a
@@ -332,8 +332,11 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
             held: CappedVec::with_capacity(CANCEL_CAPACITY),
             next_seq: 0,
             pending: CappedVec::with_capacity(COMMAND_CAPACITY),
-            events: DueLane::with_capacity(COMMAND_CAPACITY),
-            params: DueLane::with_capacity(COMMAND_CAPACITY),
+            events: DueLane::with_capacity(COMMAND_CAPACITY, |offset, kind| Event { offset, kind }),
+            params: DueLane::with_capacity(COMMAND_CAPACITY, |offset, kind| ParamEvent {
+                offset,
+                kind,
+            }),
             done,
             counts: Counts::default(),
             crossings: BeatCrossings::new(),
@@ -614,47 +617,24 @@ struct Counts {
     cancelled: u64,
 }
 
-/// An event type a due command is delivered as: the [`Event`] of an event
-/// input or the [`ParamEvent`] of a param input.
-pub(crate) trait Delivered: Copy {
-    /// The payload a command carries for it.
-    type Kind: Copy;
-
-    /// The delivery of `kind` at `offset`.
-    fn at(offset: Offset, kind: Self::Kind) -> Self;
-}
-
-impl Delivered for Event {
-    type Kind = EventKind;
-
-    fn at(offset: Offset, kind: EventKind) -> Self {
-        Self { offset, kind }
-    }
-}
-
-impl Delivered for ParamEvent {
-    type Kind = ParamKind;
-
-    fn at(offset: Offset, kind: ParamKind) -> Self {
-        Self { offset, kind }
-    }
-}
-
 /// The commands of one kind that fall due this block: the resolved items,
 /// and their events once sorted. Both lists are sized at construction, and
 /// `events[i]` is `due[i]` as an event, so a run of `due` indexes the same
 /// run of `events`.
-struct DueLane<V: Delivered> {
-    due: Vec<DueItem<V::Kind>>,
+struct DueLane<K, V> {
+    due: Vec<DueItem<K>>,
     events: Vec<V>,
+    /// The event a command of kind `K` is delivered as, at its offset.
+    deliver: fn(Offset, K) -> V,
 }
 
-impl<V: Delivered> DueLane<V> {
-    /// Room for `capacity` of each. Allocates.
-    fn with_capacity(capacity: usize) -> Self {
+impl<K: Copy, V: Copy> DueLane<K, V> {
+    /// Room for `capacity` of each, delivering through `deliver`. Allocates.
+    fn with_capacity(capacity: usize, deliver: fn(Offset, K) -> V) -> Self {
         Self {
             due: Vec::with_capacity(capacity),
             events: Vec::with_capacity(capacity),
+            deliver,
         }
     }
 
@@ -663,7 +643,7 @@ impl<V: Delivered> DueLane<V> {
         self.events.clear();
     }
 
-    fn push(&mut self, item: DueItem<V::Kind>) {
+    fn push(&mut self, item: DueItem<K>) {
         self.due.push(item);
     }
 
@@ -671,11 +651,12 @@ impl<V: Delivered> DueLane<V> {
     /// scheduling order) and derive their events.
     fn settle(&mut self) {
         self.due.sort_unstable_by_key(DueItem::order);
+        let deliver = self.deliver;
         self.events
-            .extend(self.due.iter().map(|d| V::at(d.offset, d.kind)));
+            .extend(self.due.iter().map(|d| deliver(d.offset, d.kind)));
     }
 
-    fn view(&self) -> DueView<'_, V> {
+    fn view(&self) -> DueView<'_, K, V> {
         DueView {
             due: &self.due,
             events: &self.events,
@@ -685,20 +666,20 @@ impl<V: Delivered> DueLane<V> {
 
 /// One kind of this block's scheduled deliveries, sorted by unit and port.
 /// Plain slices, so every worker of a parallel block can read them at once.
-pub(crate) struct DueView<'a, V: Delivered> {
-    due: &'a [DueItem<V::Kind>],
+pub(crate) struct DueView<'a, K, V> {
+    due: &'a [DueItem<K>],
     events: &'a [V],
 }
 
-impl<V: Delivered> Clone for DueView<'_, V> {
+impl<K, V> Clone for DueView<'_, K, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<V: Delivered> Copy for DueView<'_, V> {}
+impl<K, V> Copy for DueView<'_, K, V> {}
 
-impl<'a, V: Delivered> DueView<'a, V> {
+impl<'a, K, V> DueView<'a, K, V> {
     /// This block's deliveries to port `port` of plan unit `unit`, sorted by
     /// offset.
     pub(crate) fn port(&self, unit: PlanUnitId, port: u16) -> &'a [V] {
@@ -716,8 +697,8 @@ impl<'a, V: Delivered> DueView<'a, V> {
 /// events of their sources.
 #[derive(Clone, Copy)]
 pub(crate) struct Deliveries<'a> {
-    pub(crate) events: DueView<'a, Event>,
-    pub(crate) params: DueView<'a, ParamEvent>,
+    pub(crate) events: DueView<'a, EventKind, Event>,
+    pub(crate) params: DueView<'a, ParamKind, ParamEvent>,
 }
 
 #[cfg(test)]
