@@ -334,6 +334,32 @@ fn main_output_in_force(r: &Renderer) -> tutti_graph::MainOutputId {
     r.executor().plan().expect("plan").main_output_id()
 }
 
+/// A re-prepare recompiles the plan from the spec, so the plan it resumes with names the
+/// main output id the spec declared, not the genesis one.
+#[test]
+fn a_re_prepare_keeps_the_declared_main_output_id() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    let ed = r.editor_mut();
+    ed.set_main_output_fade(None);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(2)]).unwrap();
+    ed.commit().expect("commits");
+    let declared = r.editor().spec().main_output_id;
+    assert_ne!(declared, tutti_graph::MainOutputId::GENESIS);
+    step(&mut r, BLOCK);
+    assert_eq!(main_output_in_force(&r), declared);
+
+    r.editor_mut()
+        .reprepare(prepare(BLOCK * 2))
+        .expect("reprepares");
+    r.executor_mut().apply_pending(); // checks the units out
+    r.editor_mut().collect(); // re-prepares them, sends them back
+    r.executor_mut().apply_pending(); // installs them
+    assert_eq!(r.executor().prepare().max_block().get(), BLOCK * 2);
+    assert_eq!(main_output_in_force(&r), declared);
+}
+
 /// A declaration made while a fade runs ends it at that block and begins
 /// another, from the main output that was fading in (at full level) to the newest;
 /// the main output that was fading out is dropped, a step of `1 - g`.

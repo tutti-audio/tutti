@@ -169,14 +169,13 @@ impl<F: Float> Editor<F> {
             return Ok(Vec::new());
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
-        let (mut plan, mut delta) = compile(
+        let (plan, mut delta) = compile(
             &valid,
             &self.shapes,
             &self.prepare,
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
-        plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         let fades = delta
