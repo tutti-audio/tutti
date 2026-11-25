@@ -164,7 +164,7 @@ impl Fdn {
 
     /// The slowest line's per-frame figures: `(20 log10 ρ, 20 log10 σ, m)` where
     /// `ρ = max_i g_i^(1/m_i)` is the slowest amplitude factor per frame, `g_i` the line's
-    /// absorption's largest magnitude response over every frequency ([`Absorption::sup`], which
+    /// absorption's largest magnitude response over every frequency ([`Absorption::sup`](super::Absorption::sup), which
     /// never undercuts the peak: the stored bound of a band profile), `σ = max(‖A‖₂, 1)` and
     /// `m` the longest line, or `None` when a line cannot be analysed (a gain that is NaN or
     /// negative, a length that is not positive). A line with a nested all-pass is read at its
