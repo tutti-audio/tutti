@@ -332,8 +332,11 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
             held: CappedVec::with_capacity(CANCEL_CAPACITY),
             next_seq: 0,
             pending: CappedVec::with_capacity(COMMAND_CAPACITY),
-            events: DueLane::with_capacity(COMMAND_CAPACITY),
-            params: DueLane::with_capacity(COMMAND_CAPACITY),
+            events: DueLane::with_capacity(COMMAND_CAPACITY, |offset, kind| Event { offset, kind }),
+            params: DueLane::with_capacity(COMMAND_CAPACITY, |offset, kind| ParamEvent {
+                offset,
+                kind,
+            }),
             done,
             counts: Counts::default(),
             crossings: BeatCrossings::new(),
@@ -614,18 +617,6 @@ struct Counts {
     cancelled: u64,
 }
 
-impl From<(Offset, EventKind)> for Event {
-    fn from((offset, kind): (Offset, EventKind)) -> Self {
-        Self { offset, kind }
-    }
-}
-
-impl From<(Offset, ParamKind)> for ParamEvent {
-    fn from((offset, kind): (Offset, ParamKind)) -> Self {
-        Self { offset, kind }
-    }
-}
-
 /// The commands of one kind that fall due this block: the resolved items,
 /// and their events once sorted. Both lists are sized at construction, and
 /// `events[i]` is `due[i]` as an event, so a run of `due` indexes the same
@@ -633,14 +624,17 @@ impl From<(Offset, ParamKind)> for ParamEvent {
 struct DueLane<K, V> {
     due: Vec<DueItem<K>>,
     events: Vec<V>,
+    /// The event a command of kind `K` is delivered as, at its offset.
+    deliver: fn(Offset, K) -> V,
 }
 
-impl<K: Copy, V: Copy + From<(Offset, K)>> DueLane<K, V> {
-    /// Room for `capacity` of each. Allocates.
-    fn with_capacity(capacity: usize) -> Self {
+impl<K: Copy, V: Copy> DueLane<K, V> {
+    /// Room for `capacity` of each, delivering through `deliver`. Allocates.
+    fn with_capacity(capacity: usize, deliver: fn(Offset, K) -> V) -> Self {
         Self {
             due: Vec::with_capacity(capacity),
             events: Vec::with_capacity(capacity),
+            deliver,
         }
     }
 
@@ -657,8 +651,9 @@ impl<K: Copy, V: Copy + From<(Offset, K)>> DueLane<K, V> {
     /// scheduling order) and derive their events.
     fn settle(&mut self) {
         self.due.sort_unstable_by_key(DueItem::order);
+        let deliver = self.deliver;
         self.events
-            .extend(self.due.iter().map(|d| V::from((d.offset, d.kind))));
+            .extend(self.due.iter().map(|d| deliver(d.offset, d.kind)));
     }
 
     fn view(&self) -> DueView<'_, K, V> {
