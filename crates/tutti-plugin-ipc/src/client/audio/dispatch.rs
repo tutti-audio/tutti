@@ -194,6 +194,10 @@ pub(super) struct AudioState {
     /// last value, on frame 0: sent on the first frame of the next block that
     /// goes. A plain list, cleared (its capacity kept) once merged.
     carried: Vec<(ParamId, ParameterPoint)>,
+    /// Flushes sent and not yet answered, in the window or late: a new flush,
+    /// even an empty one, is sent behind them, so its answer means theirs were
+    /// heard.
+    flushes_owed: u32,
     /// The MIDI of the blocks that go, filtered: once a stale block is
     /// skipped, the rest of every SysEx open in it is not sent, so the
     /// server's reassembler never completes one with a gap.
@@ -213,6 +217,7 @@ impl AudioState {
             last_id: 0,
             partial: PartialFrame::default(),
             carried: Vec::new(),
+            flushes_owed: 0,
             intake: MidiIntake::default(),
             responses,
         }
@@ -263,6 +268,22 @@ impl AudioState {
             Some((_, kept)) => *kept = point,
             None => self.carried.push((id, point)),
         }
+    }
+
+    /// Whether a flush was sent and its answer, in the window or late, has not
+    /// been heard.
+    fn flush_owed(&self) -> bool {
+        self.flushes_owed > 0
+    }
+
+    /// A flush was sent.
+    fn flush_sent(&mut self) {
+        self.flushes_owed += 1;
+    }
+
+    /// A flush's answer was heard.
+    fn flush_heard(&mut self) {
+        self.flushes_owed = self.flushes_owed.saturating_sub(1);
     }
 
     /// The writes a flush sends, one change per parameter on the first frame:
@@ -385,6 +406,7 @@ impl AudioState {
             }
             Heard::Abandoned(AbandonedAudio::Params { edits, swept }) => {
                 if let AudioReply::ParametersApplied { outcome, .. } = reply {
+                    self.flush_heard();
                     answered(channels, outcome, edits, swept);
                 }
                 Ok(None)
@@ -836,8 +858,12 @@ pub(super) fn handle_audio(
             // Taken now, as this lane dequeues it: every block queued before it
             // has taken what was written before that block, and what is taken
             // here is newer than all of it.
+            channels.flush_dequeued();
             let (changes, swept) = state.flush_frame(channels);
-            if changes.is_empty() {
+            // Nothing to send and no flush owed an answer: every write up to
+            // `swept` is delivered. With one owed, this one is sent anyway, and
+            // its answer, heard after the late one, acknowledges both.
+            if changes.is_empty() && !state.flush_owed() {
                 channels.note_acked(swept);
                 done.send(true);
                 return Ok(());
@@ -865,8 +891,10 @@ pub(super) fn handle_audio(
             // Counted and acknowledged where the answer is heard, in the window
             // or late ([`AudioState::hear`]): none in the window does neither,
             // as the flush may not have landed.
+            state.flush_sent();
             let took = match wait_audio(stream, state, channels, key)? {
                 Some(AudioReply::ParametersApplied { outcome, .. }) => {
+                    state.flush_heard();
                     answered(channels, outcome, edits, swept);
                     outcome == ApplyOutcome::Applied
                 }

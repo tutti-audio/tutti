@@ -114,6 +114,9 @@ pub(super) struct Channels {
     /// drain had swept when it sent them ([`note_acked`](Self::note_acked)):
     /// what [`acked`](Self::acked) reads from the control side.
     acked: Arc<AtomicU32>,
+    /// A flush asked for to deliver the host's writes is queued and the lane has
+    /// not dequeued it ([`ask_flush`](Self::ask_flush)).
+    flush_asked: Arc<std::sync::atomic::AtomicBool>,
     /// How many chunks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
     abandoned: TallyWriter<Chunks>,
@@ -331,6 +334,7 @@ impl Channels {
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
             acked: Arc::new(AtomicU32::new(0)),
+            flush_asked: Arc::default(),
             abandoned: abandoned.writer(),
             late: late.writer(),
             commands_refused: commands_refused.writer(),
@@ -404,6 +408,19 @@ impl Channels {
         if swept.has_reached(self.acked()) {
             self.acked.store(swept.get(), Ordering::Release);
         }
+    }
+
+    /// Whether the caller is the one to queue a flush for delivery: `true` when
+    /// none is queued and not yet dequeued, so a settle that polls often asks
+    /// once. Control side.
+    pub(super) fn ask_flush(&self) -> bool {
+        !self.flush_asked.swap(true, Ordering::AcqRel)
+    }
+
+    /// The flush asked for is dequeued, or could not be queued: the next ask
+    /// queues another. Any thread.
+    pub(super) fn flush_dequeued(&self) {
+        self.flush_asked.store(false, Ordering::Release);
     }
 
     /// The writes the server has answered a flush for ([`note_acked`](Self::note_acked)).

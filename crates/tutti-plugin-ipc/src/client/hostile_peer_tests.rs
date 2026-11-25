@@ -2857,9 +2857,10 @@ fn a_refused_flush_ends_the_wait_with_the_loss_counted() {
     assert_eq!(audio.unapplied_edits(), 1);
 }
 
-/// **A flush that timed out leaves the wait open, and its late answer ends
-/// it**: the write may not be in the plugin, so a read after the timeout would
-/// miss it. The lane hears the late answer while it waits for the next flush's.
+/// **A flush that timed out leaves the wait open, however often it is asked
+/// again, and its late answer ends it**: the write may not be in the plugin, so
+/// a read after the timeout would miss it. Each ask sends an empty flush behind
+/// the owed one, and the lane hears the late answer ahead of its own.
 #[test]
 fn a_timed_out_flush_leaves_the_wait_open_until_its_late_answer() {
     let (mock, release) = holding_server(crate::ApplyOutcome::Applied);
@@ -2869,10 +2870,11 @@ fn a_timed_out_flush_leaves_the_wait_open_until_its_late_answer() {
     // The settle runs behind the flush on the audio lane: once it returns, the
     // lane has given the flush up.
     audio.settle();
-    assert!(!audio.edits_delivered(upto), "a timeout is no answer");
+    for _ in 0..2 {
+        assert!(!audio.edits_delivered(upto), "a timeout is no answer");
+        audio.settle();
+    }
     release.send(()).expect("the server waits");
-    let next = write_one(audio);
-    assert!(!audio.edits_delivered(next), "asks for the next flush");
     tutti_fixtures::wait_until("the late answer", NOTICE_TIMEOUT, || {
         audio.edits_delivered(upto)
     });

@@ -579,16 +579,27 @@ impl AudioBridge {
     /// Asks for the delivery of the host's writes up to `upto`
     /// ([`edits_queued`](Self::edits_queued)) and answers whether the server has
     /// answered a flush that carried them: `false` asks the audio lane to flush
-    /// (idempotent: one already asked for is not asked again), and the answer,
-    /// in its window or late, makes a later call `true`. A flush that is never
-    /// answered leaves it `false`. A crashed plugin reads as delivered: the call
-    /// that follows fails on its own. Control side; never waits.
+    /// (idempotent: one already queued is not asked again), and the answer, in
+    /// its window or late, makes a later call `true`. A flush that timed out is
+    /// asked for again, empty if nothing was written since: the lane hears the
+    /// late answer ahead of that one's, so a settle that keeps asking moves on
+    /// by its own poll. A flush that is never answered leaves it `false`, and
+    /// the caller's deadline ends the wait. A crashed plugin reads as
+    /// delivered: the call that follows fails on its own. Control side; never
+    /// waits.
     pub(crate) fn edits_delivered(&self, upto: Generation) -> bool {
         if self.lifecycle.is_crashed() || self.channels.acked().has_reached(upto) {
             return true;
         }
-        // The answer is read from the cell, not from this ask.
-        drop(self.request_flush());
+        // The answer is read from the cell, not from this ask. Writes not yet
+        // flushed are asked for as a read asks; with none, a flush still owed
+        // an answer is waited behind by one that may be empty.
+        if self.request_flush().is_none() && self.channels.ask_flush() {
+            let (_ask, done) = ask::ask::<bool>();
+            if !self.channels.push_block(AudioCommand::Params { done }) {
+                self.channels.flush_dequeued();
+            }
+        }
         false
     }
 
