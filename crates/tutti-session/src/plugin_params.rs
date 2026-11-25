@@ -370,7 +370,8 @@ impl ParamGesture {
     ///
     /// [`PluginParamRefusal::UnknownParam`] once the plugin was removed or replaced, or no
     /// longer declares the parameter, including when the write finds it
-    /// undeclared; [`PluginParamRefusal::Lost`] when the plugin is lost.
+    /// undeclared; [`PluginParamRefusal::Lost`] when the plugin is lost;
+    /// [`PluginParamRefusal::Unanswered`] when it is alive and did not answer.
     pub fn set(&self, value: Normalized) -> Result<(), PluginParamRefusal> {
         if !self.gate.holds(self.id) {
             return Err(PluginParamRefusal::UnknownParam(self.id));
@@ -381,9 +382,8 @@ impl ParamGesture {
                 .map_err(|refused| match refused {
                     ParamWriteError::Undeclared(id) => PluginParamRefusal::UnknownParam(id),
                     ParamWriteError::ReadOnly(id) => PluginParamRefusal::ReadOnly(id),
-                    ParamWriteError::Lost(id) | ParamWriteError::Unanswered(id) => {
-                        PluginParamRefusal::Lost(id)
-                    }
+                    ParamWriteError::Lost(id) => PluginParamRefusal::Lost(id),
+                    ParamWriteError::Unanswered(id) => PluginParamRefusal::Unanswered(id),
                 })?;
         }
         self.reporter.report(self.id, value);
