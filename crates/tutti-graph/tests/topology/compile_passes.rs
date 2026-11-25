@@ -872,7 +872,7 @@ fn the_delta_moves_only_what_changed() {
         None,
     )
     .unwrap();
-    assert_eq!(delta.insert.len(), 3);
+    assert_eq!(delta.insert().len(), 3);
     let idx = |p: &tutti_graph::Plan, k| p.unit(k).unwrap().idx;
 
     let mut g = GraphSpec::new(t);
@@ -890,16 +890,16 @@ fn the_delta_moves_only_what_changed() {
     .unwrap();
 
     assert_eq!(idx(&second, A), idx(&first, A), "A kept its place");
-    assert_eq!(delta.retire.len(), 1);
-    assert_eq!(delta.retire[0].key, B);
-    assert_eq!(delta.replace.len(), 1);
-    assert_eq!(delta.replace[0].0.key, C);
-    assert_eq!(delta.replace[0].1.generation, 1);
+    assert_eq!(delta.retire().len(), 1);
+    assert_eq!(delta.retire()[0].key, B);
+    assert_eq!(delta.replace().len(), 1);
+    assert_eq!(delta.replace()[0].0.key, C);
+    assert_eq!(delta.replace()[0].1.generation, 1);
     assert_eq!(idx(&second, C), idx(&first, C), "replaced in place");
-    assert_eq!(delta.insert.len(), 1);
-    assert_eq!(delta.insert[0].key, D);
+    assert_eq!(delta.insert().len(), 1);
+    assert_eq!(delta.insert()[0].key, D);
     assert_eq!(idx(&second, D), idx(&first, B), "D reuses B's freed index");
-    assert_eq!(delta.store_len, 3);
+    assert_eq!(delta.store_len(), 3);
 }
 
 /// A `PortSource::MainInput` input that merges with a latent path **is** delayed

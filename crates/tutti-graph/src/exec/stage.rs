@@ -4,9 +4,9 @@
 //! needs that is a function of the plan is built here, when the plan is
 //! packaged, and travels in the commit as a [`Staged`]. That is the whole new
 //! [`State`] (a zeroed arena, the event slots, every ring and FIFO the plan
-//! lists, the lanes, the injection buffers and the parallel state) and the
-//! maps that say where each piece of the old state moves to, so the audio
-//! thread looks nothing up and builds nothing.
+//! lists, the lanes, the injection buffers and the parallel state). Where each
+//! piece of the old state moves to is the commit's [`Carry`], matched once by
+//! the compiler, so the audio thread looks nothing up and builds nothing.
 //!
 //! The carried state itself (a ring's samples, a FIFO's queue, a lane's last
 //! weight) lives on the audio thread and is read only there; what the control
@@ -21,9 +21,8 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
-use crate::compile::ids::{
-    AudioDelayId, EventDelayId, EventFeedbackId, EventSlotId, Id, PlanUnitId, Table, TableSlice,
-};
+use crate::compile::carry::Carry;
+use crate::compile::ids::{EventDelayId, EventFeedbackId, EventSlotId, Id, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tutti_buffers::Float;
@@ -35,10 +34,7 @@ use super::par::Par;
 use super::state::{Gone, Inject, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
-use crate::compile::plan::{
-    AudioDelay, AudioDelayKey, EventDelayKey, EventFeedbackKey, Op, ParamPortOp, Plan, PlanUnit,
-    UnitIdx,
-};
+use crate::compile::plan::{EventDelayKey, Op, ParamPortOp, Plan, PlanUnit, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -51,38 +47,6 @@ use crate::exec::slots::EventSlot;
 use crate::model::gain::SumLane;
 use crate::model::spec::{EventInputPort, EventOutputPort};
 use crate::node::param::ParamState;
-
-/// How a PDC ring of the new plan gets its state from the executor's old
-/// state: `from` is the old plan's id of the ring.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum AudioCarry {
-    /// Nothing carries: the ring built for it starts empty.
-    New,
-    /// The old ring moves in whole.
-    Keep { from: AudioDelayId },
-    /// The old ring is copied into the one built for the new length, and goes
-    /// back in the commit.
-    Move { from: AudioDelayId },
-    /// The old ring is copied into the one built for it and stays where it
-    /// is, for the ring that takes it over: an old main output's channel, kept
-    /// sounding while the new main output's channel of the same source goes on
-    /// with the same history.
-    Copy { from: AudioDelayId },
-}
-
-/// How a FIFO of the new plan, a delay's or a feedback's, gets its state from
-/// the executor's old state: `from` is the old plan's id `I` of the FIFO.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum EventCarry<I> {
-    /// Nothing carries: the FIFO built for it starts empty.
-    New,
-    /// The old FIFO moves in whole and is retuned to the new length at `rate`
-    /// (built with room for it, so nothing allocates).
-    Keep { from: I, rate: usize },
-    /// The old FIFO's queue is copied into the one built for the new length,
-    /// and the old one goes back in the commit.
-    Move { from: I },
-}
 
 /// An old event edge whose source's held keys are closed at its sink.
 pub(super) struct Closer {
@@ -108,33 +72,18 @@ pub(super) enum Route {
     Placed,
 }
 
-/// A delay or feedback FIFO that goes away: its queue flushes into `at`.
-pub(super) struct Vanished<I> {
-    pub(super) from: I,
-    pub(super) at: EventInputPort,
-}
-
 /// Everything a commit's apply installs, built on the control side.
 pub(super) struct Staged<F: Float = f32> {
-    /// Whether time-based state carries (no sample-rate change).
-    pub(super) carry: bool,
     /// The new state, shell: every ring and writer that comes from the
-    /// commit is in place, the rest waits for what carries.
+    /// commit is in place, the rest waits for what carries. An item whose
+    /// shell is `None` is the one the commit's [`Carry`] names, and the apply
+    /// moves the old one in; a shell the carry names an old item for takes
+    /// its contents instead.
     pub(super) state: Option<State<F>>,
-    pub(super) audio_delays: Vec<AudioCarry>,
-    pub(super) event_delays: Vec<EventCarry<EventDelayId>>,
-    pub(super) event_fb: Vec<EventCarry<EventFeedbackId>>,
-    /// The old index each audio feedback ring, tap, event tap, meter and
-    /// lane of the new plan takes over, if any.
-    pub(super) audio_fb: Vec<Option<u32>>,
-    pub(super) taps: Vec<Option<u32>>,
-    pub(super) event_taps: Vec<Option<u32>>,
-    pub(super) meters: Vec<Option<u32>>,
-    pub(super) lanes: Vec<Option<u32>>,
-    /// Old event delays and event feedback that no longer exist: their
-    /// queues flush, in key order.
-    pub(super) gone_delays: Vec<Vanished<EventDelayId>>,
-    pub(super) gone_feedback: Vec<Vanished<EventFeedbackId>>,
+    /// The rate each event delay's FIFO is retuned to when it is kept.
+    pub(super) delay_rates: Table<EventDelayId, usize>,
+    /// The same for event feedback.
+    pub(super) feedback_rates: Table<EventFeedbackId, usize>,
     /// Old event edges whose held keys may need closing at the sink.
     pub(super) closers: Vec<Closer>,
     /// Units (plan indices) that may hold a crossfade queued behind a
@@ -197,12 +146,6 @@ struct Shell {
 pub(crate) struct StageIn<'a, F: Float> {
     /// The plan the executor runs before this commit.
     pub(crate) old: Option<&'a Plan>,
-    /// Whether time-based state carries: false for the resume of a re-prepare
-    /// that changed the sample rate.
-    pub(crate) carry: bool,
-    /// This commit is a re-prepare's resume: every unit comes back, and the
-    /// held-key tables of those the plan keeps go back to them.
-    pub(crate) resumed: bool,
     /// The lane state for the mix of the unit at a key.
     pub(crate) mix_lane: &'a dyn Fn(NodeKey) -> Option<ParamState<F>>,
 }
@@ -211,7 +154,9 @@ pub(crate) struct StageIn<'a, F: Float> {
 struct Cx<'a> {
     plan: &'a Plan,
     old: Option<&'a Plan>,
-    carry: bool,
+    /// What the plan takes over from `old`.
+    carry: &'a Carry,
+    /// The commit is a re-prepare's resume.
     resumed: bool,
     max_block: usize,
     cap: usize,
@@ -244,17 +189,13 @@ pub(crate) struct Stager {
     pool: Gauge<Participants>,
     /// Blocks the executor has rendered (`Executor::render_applied`).
     rendered: Gauge<Rendered>,
-    /// The capacity of each event delay's FIFO, by key.
-    fifos: BTreeMap<EventDelayKey, usize>,
+    /// Each event delay's FIFO the executor holds, by the last plan's id.
+    fifos: Table<EventDelayId, FifoMemo>,
     /// The same for event feedback.
-    feedback: BTreeMap<EventFeedbackKey, usize>,
-    /// The event delays whose FIFO holds a table for owed closes.
-    owing: BTreeSet<EventDelayKey>,
-    /// The event delays whose FIFO has room for param events, and the same
-    /// for event feedback.
-    param_fifos: BTreeSet<EventDelayKey>,
-    param_feedback: BTreeSet<EventFeedbackKey>,
-    /// The injection buffers of the last commit.
+    feedback: Table<EventFeedbackId, FifoMemo>,
+    /// The injection buffers of the last commit. Kept by key, not by unit
+    /// index: a buffer is folded into the rooms until `observe` sees its commit
+    /// acked, so it can outlive a commit that gives its `UnitIdx` to another key.
     shells: Shells,
     /// The longest a replaced node's chase can be, by key.
     chase: BTreeMap<NodeKey, usize>,
@@ -262,6 +203,19 @@ pub(crate) struct Stager {
     fading: BTreeMap<NodeKey, u32>,
     /// The executor's store.
     store: StoreBound,
+}
+
+/// What the stager knows of one event FIFO the executor holds: an upper
+/// bound, as of the last commit sent. A FIFO no old one continues starts
+/// empty (`default`).
+#[derive(Clone, Copy, Debug, Default)]
+struct FifoMemo {
+    /// The capacity of its queue.
+    cap: usize,
+    /// It holds a table for owed closes.
+    owing: bool,
+    /// It has room for param events.
+    param_room: bool,
 }
 
 /// The injection buffers of the last commit, with the commit that made them
@@ -335,52 +289,58 @@ impl StoreBound {
     }
 }
 
-/// What [`Stager::delays`] builds: the shells of the PDC rings and FIFOs and
-/// how each takes over the old one, and the bounds the next commit builds from.
+/// What [`Stager::delays`] builds: the shells of the PDC rings and FIFOs, and
+/// the bounds the next commit builds from.
 struct Delays<F: Float> {
+    /// The shell of each ring: `None` when the old ring of the same key
+    /// moves in whole.
     audio: Vec<Option<AudioRing<F>>>,
-    audio_from: Vec<AudioCarry>,
+    /// Rings whose old ring is copied into the shell and goes back.
+    audio_moved: usize,
     event_fifos: Vec<Option<EventFifo>>,
     events: FifoPlan<EventDelayId>,
-    /// The capacity of each event FIFO, by key.
-    caps: BTreeMap<EventDelayKey, usize>,
-    /// The event delays whose FIFO holds a table for owed closes.
-    owing: BTreeSet<EventDelayKey>,
-    /// The event delays whose FIFO has room for param events.
-    with_params: BTreeSet<EventDelayKey>,
 }
 
-/// The ids of the rows of `table` by their keys.
-fn keyed<I: Id, T, K: Ord>(table: &TableSlice<I, T>, key: impl Fn(&T) -> K) -> BTreeMap<K, I> {
-    table.iter_enumerated().map(|(i, t)| (key(t), i)).collect()
-}
-
-/// Whether an event FIFO's old state is moved into its new one.
-fn is_move<I>(carry: &&EventCarry<I>) -> bool {
-    matches!(carry, EventCarry::Move { .. })
+/// What [`Stager::feedback`] builds: the shells of the feedback rings and
+/// FIFOs.
+struct Feedback<F: Float> {
+    audio: Vec<Option<AudioRing<F>>>,
+    event: Vec<Option<EventFifo>>,
+    fifo: FifoPlan<EventFeedbackId>,
 }
 
 /// The FIFO plan of the event delays or the event feedback: `I` is the id of
 /// their table.
 struct FifoPlan<I> {
-    from: Vec<EventCarry<I>>,
     /// The most each FIFO's queue can hold past its new bound.
     extra: Vec<usize>,
+    /// FIFOs whose old queue is copied into the shell and goes back.
+    moved: usize,
+    /// The rate each kept FIFO is retuned to.
+    rate: Table<I, usize>,
+    /// What the executor's FIFOs are once this commit applies.
+    memo: Table<I, FifoMemo>,
 }
 
-/// Which way a FIFO of bound `want` takes over an old one of capacity
-/// `have`, and the capacity it has afterwards.
-fn fit_fifo<I>(
-    from: Option<(I, usize)>,
-    want: usize,
-    rate: usize,
-) -> (EventCarry<I>, usize, usize) {
-    match from {
-        // Room enough: the old FIFO is retuned in place, and keeps its
-        // capacity; what it holds past the new bound is its excess.
-        Some((j, have)) if have >= want => (EventCarry::Keep { from: j, rate }, have, have - want),
-        Some((j, _)) => (EventCarry::Move { from: j }, want, 0),
-        None => (EventCarry::New, want, 0),
+impl<I: Id> FifoPlan<I> {
+    fn new() -> Self {
+        Self {
+            extra: Vec::new(),
+            moved: 0,
+            rate: Table::default(),
+            memo: Table::default(),
+        }
+    }
+}
+
+/// How an event FIFO of bound `want` takes over an old one of capacity
+/// `have`: whether the old one is kept in place (retuned, built with room
+/// enough), the capacity it has afterwards, and the most its queue can hold
+/// past the bound.
+fn fit_fifo(have: Option<usize>, want: usize) -> (bool, usize, usize) {
+    match have {
+        Some(have) if have >= want => (true, have, have - want),
+        _ => (false, want, 0),
     }
 }
 
@@ -394,11 +354,8 @@ impl Stager {
             event_cap,
             pool,
             rendered,
-            fifos: BTreeMap::new(),
-            feedback: BTreeMap::new(),
-            owing: BTreeSet::new(),
-            param_fifos: BTreeSet::new(),
-            param_feedback: BTreeSet::new(),
+            fifos: Table::default(),
+            feedback: Table::default(),
             shells: Shells::new(),
             chase: BTreeMap::new(),
             fading: BTreeMap::new(),
@@ -431,11 +388,14 @@ impl Stager {
                 .as_ref()
                 .expect("a commit carries its plan until applied"),
         );
+        // Taken out for the steps below, which read it beside `c`; put back at
+        // the end, for the apply.
+        let carry = std::mem::take(&mut c.delta.carry);
         let cx = Cx {
             plan: &plan,
             old: input.old,
-            carry: input.carry,
-            resumed: input.resumed,
+            carry: &carry,
+            resumed: c.resumed,
             max_block: plan.prepare.max_block().get(),
             cap: self.event_cap,
         };
@@ -449,12 +409,12 @@ impl Stager {
             })
             .collect();
         let delays = self.delays(&cx, &to_close);
-        let (audio_fb, audio_fb_from, efb, efb_fifo, efb_caps, efb_params) = self.feedback(&cx);
+        let feedback = self.feedback(&cx);
         let outlets = outlets(c, &cx);
-        let (lanes, lanes_from) = lanes(c, &cx);
+        let lanes = lanes(c, &cx);
         let drives = drives(c, &cx, input.mix_lane);
         let mut flush = self.flush(c, &cx, closers);
-        let sizes = Sizes::of(&cx, &delays.events, &efb_fifo);
+        let sizes = Sizes::of(&cx, &delays.events, &feedback.fifo);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
         let views = view_rooms(&plan, &inject, sizes.widest);
         let slot_capacity = |i: EventSlotId| {
@@ -462,7 +422,7 @@ impl Stager {
                 + views[i].1
         };
         let param_slots = param_slots(&plan);
-        let store_len = self.store.length_for(c.delta.store_len as usize);
+        let store_len = self.store.length_for(c.delta.store_len() as usize);
         let participants = self.pool.get().0;
         let par = Par::new(
             &plan,
@@ -489,8 +449,8 @@ impl Stager {
                 .collect(),
             audio_delays: delays.audio,
             event_delays: delays.event_fifos,
-            audio_fb,
-            event_fb: efb,
+            audio_fb: feedback.audio,
+            event_fb: feedback.event,
             taps: outlets.taps,
             event_taps: outlets.event_taps,
             meters: outlets.meters,
@@ -508,14 +468,8 @@ impl Stager {
             .values()
             .map(|r| r.closers + r.carried)
             .sum::<usize>();
-        let spare_drives = lanes_from.iter().flatten().count() + drives.len();
-        let moved_audio = delays
-            .audio_from
-            .iter()
-            .filter(|r| matches!(r, AudioCarry::Move { .. }))
-            .count();
-        let moved_events = delays.events.from.iter().filter(is_move).count()
-            + efb_fifo.from.iter().filter(is_move).count();
+        let spare_drives = carry.lanes.iter().flatten().count() + drives.len();
+        let moved_events = delays.events.moved + feedback.fifo.moved;
         reserve_returns(c, &cx);
         let wanted: usize = plan
             .units
@@ -524,41 +478,30 @@ impl Stager {
             .map(|n| n.get() as usize)
             .sum();
         c.staged = Some(Box::new(Staged {
-            carry: cx.carry,
             state: Some(state),
-            audio_delays: delays.audio_from,
-            event_delays: delays.events.from,
-            event_fb: efb_fifo.from,
-            audio_fb: audio_fb_from,
-            taps: outlets.taps_from,
-            event_taps: outlets.event_taps_from,
-            meters: outlets.meters_from,
-            lanes: lanes_from,
-            gone_delays: std::mem::take(&mut flush.gone_delays),
-            gone_feedback: std::mem::take(&mut flush.gone_feedback),
+            delay_rates: delays.events.rate,
+            feedback_rates: feedback.fifo.rate,
             closers: std::mem::take(&mut flush.closers),
             queued: std::mem::take(&mut flush.queued),
             spare_drives: CappedVec::with_capacity(spare_drives),
             drives,
-            spare_audio: CappedVec::with_capacity(moved_audio),
+            spare_audio: CappedVec::with_capacity(delays.audio_moved),
             spare_events: CappedVec::with_capacity(moved_events),
             spare_tables: CappedVec::with_capacity(tables),
             chase: CappedVec::with_capacity(wanted),
             store,
             store_len,
         }));
+        c.delta.carry = carry;
         // The bounds the next commit builds from.
-        self.fifos = delays.caps;
-        self.owing = delays.owing;
-        self.param_fifos = delays.with_params;
-        self.param_feedback = efb_params;
-        self.feedback = efb_caps;
+        self.fifos = delays.events.memo;
+        self.feedback = feedback.fifo.memo;
         self.shells.replace(shells, c.seq);
     }
 
     /// Crossfades in flight, and how long a chase can be, by key.
     fn track<F: Float>(&mut self, c: &Commit<F>, cx: &Cx<'_>) {
-        for (key, f) in &c.delta.fades {
+        for (key, f) in c.delta.fades() {
             if !f.is_cut() {
                 *self.fading.entry(*key).or_default() += 1;
             }
@@ -574,202 +517,131 @@ impl Stager {
             .retain(|k, _| cx.plan.unit(*k).is_some() || self.fading.contains_key(k));
     }
 
-    /// PDC rings and FIFOs, by key: the shell of each, how it takes over the
-    /// old one, and the capacity of each event FIFO for the next commit.
+    /// PDC rings and FIFOs: the shell of each, built for the ones the commit's
+    /// [`Carry`] does not move in whole, and what the executor's FIFOs are
+    /// once it applies.
     fn delays<F: Float>(&self, cx: &Cx<'_>, to_close: &BTreeSet<EventDelayKey>) -> Delays<F> {
         let plan = cx.plan;
-        let old_audio = cx
-            .old
-            .map(|p| keyed(&p.program.audio_delays, |d| d.key))
-            .unwrap_or_default();
-        let old_events = cx
-            .old
-            .map(|p| keyed(&p.program.event_delays, |d| d.key))
-            .unwrap_or_default();
-        let old_by_source = cx
-            .old
-            .map(|p| ring_by_source(&p.program.audio_delays))
-            .unwrap_or_default();
-        let mut audio = Vec::with_capacity(plan.program.audio_delays.len());
-        let mut audio_from = Vec::with_capacity(plan.program.audio_delays.len());
-        for d in plan.program.audio_delays.iter() {
-            let carried = old_audio.get(&d.key).filter(|_| cx.carry).copied();
-            match carried {
-                // An old main output's channel in a main output crossfade's bank starts
-                // with the history the main output's own channel had.
-                None => match copy_origin(plan, &d.key, &old_audio, &old_by_source)
-                    .filter(|_| cx.carry)
-                {
-                    Some(from) => {
-                        audio.push(Some(AudioRing::new(d.len)));
-                        audio_from.push(AudioCarry::Copy { from });
-                    }
-                    None => {
-                        audio.push(Some(AudioRing::new(d.len)));
-                        audio_from.push(AudioCarry::New);
-                    }
-                },
-                Some(from)
+        let mut audio_moved = 0;
+        let audio = plan
+            .program
+            .audio_delays
+            .iter_enumerated()
+            .map(|(n, d)| match cx.carry.audio_rings[n] {
+                // The old ring has the length: it moves in whole.
+                Some(o)
                     if cx
                         .old
-                        .is_some_and(|p| p.program.audio_delays[from].len == d.len) =>
+                        .is_some_and(|p| p.program.audio_delays[o].len == d.len) =>
                 {
-                    audio.push(None);
-                    audio_from.push(AudioCarry::Keep { from });
+                    None
                 }
-                Some(from) => {
-                    audio.push(Some(AudioRing::new(d.len)));
-                    audio_from.push(AudioCarry::Move { from });
+                carried => {
+                    audio_moved += usize::from(carried.is_some());
+                    Some(AudioRing::new(d.len))
                 }
-            }
-        }
-        let mut caps = BTreeMap::new();
-        let mut owing = BTreeSet::new();
-        let mut with_params = BTreeSet::new();
+            })
+            .collect();
+        let mut events = FifoPlan::new();
         let mut event_fifos = Vec::with_capacity(plan.program.event_delays.len());
-        let mut from = Vec::with_capacity(plan.program.event_delays.len());
-        let mut extra = vec![0; plan.program.event_delays.len()];
-        for (i, d) in plan.program.event_delays.iter().enumerate() {
-            let carried = old_events.get(&d.key).filter(|_| cx.carry).copied();
+        for (n, d) in plan.program.event_delays.iter_enumerated() {
+            let carried = cx.carry.event_rings[n];
+            let before = carried.map_or_else(FifoMemo::default, |o| self.fifo_memo(o));
             let src = d.key.origin();
             let rate = plan.event_tap_rate(src, d.len, cx.max_block, cx.cap);
             let want = EventFifo::bound(d.len.get(), rate, cx.max_block);
-            let have = carried.map(|j| (j, self.fifo_capacity(&d.key)));
-            let (mut how, mut cap, over) = fit_fifo(have, want, rate);
+            let (mut keep, mut cap, over) = fit_fifo(carried.map(|_| before.cap), want);
             // A FIFO that owes closes has a table for them: one that
             // has none yet is built afresh and takes the queue over.
-            let has_table = carried.is_some() && self.owing.contains(&d.key);
-            let table = has_table || to_close.contains(&d.key);
-            if let (EventCarry::Keep { from: j, .. }, true, false) = (how, table, has_table) {
-                how = EventCarry::Move { from: j };
-                cap = cap.max(want);
-            }
+            let table = before.owing || to_close.contains(&d.key);
             // A FIFO for a source that writes param events has room
             // for them: one kept from before the source did is built
             // afresh and takes the queue over.
             let params = plan.event_tap_params(src);
-            let had_params = carried.is_some() && self.param_fifos.contains(&d.key);
-            if let (EventCarry::Keep { from: j, .. }, true, false) = (how, params, had_params) {
-                how = EventCarry::Move { from: j };
+            if keep && (!before.owing && table || !before.param_room && params) {
+                keep = false;
                 cap = cap.max(want);
             }
-            event_fifos.push((!matches!(how, EventCarry::Keep { .. })).then(|| {
+            event_fifos.push((!keep).then(|| {
                 let f = EventFifo::sized_for(d.len, rate, cx.max_block, cap);
                 let f = if params { f.with_params() } else { f };
                 if table { f.with_owed() } else { f }
             }));
-            if table {
-                owing.insert(d.key);
-            }
-            if params {
-                with_params.insert(d.key);
-            }
-            from.push(how);
-            extra[i] = over;
-            caps.insert(d.key, cap);
+            events.moved += usize::from(carried.is_some() && !keep);
+            events.extra.push(over);
+            events.rate.push(rate);
+            events.memo.push(FifoMemo {
+                cap,
+                owing: table,
+                param_room: params,
+            });
         }
         Delays {
             audio,
-            audio_from,
+            audio_moved,
             event_fifos,
-            events: FifoPlan { from, extra },
-            caps,
-            owing,
-            with_params,
+            events,
         }
     }
 
-    /// The capacity the executor's FIFO for `key` has, as of the last commit.
-    /// Every carried key was in that commit's plan, so it has an entry; a
+    /// What the executor's FIFO `o` of the last plan is, as of the last commit.
+    /// Every carried FIFO was in that commit's plan, so it has an entry; a
     /// missing one counts as nothing, and what the new FIFO cannot take is
     /// counted lost (`EventFifo::transfer_from`).
-    fn fifo_capacity(&self, key: &EventDelayKey) -> usize {
-        let have = self.fifos.get(key).copied();
-        debug_assert!(have.is_some(), "a carried FIFO was in the last plan");
-        have.unwrap_or(0)
+    fn fifo_memo(&self, o: EventDelayId) -> FifoMemo {
+        let memo = self.fifos.get(o).copied();
+        debug_assert!(memo.is_some(), "a carried FIFO was in the last plan");
+        memo.unwrap_or_default()
     }
 
     /// Feedback delays, by key: exactly the edge's delay long.
-    #[allow(clippy::type_complexity)]
-    fn feedback<F: Float>(
-        &self,
-        cx: &Cx<'_>,
-    ) -> (
-        Vec<Option<AudioRing<F>>>,
-        Vec<Option<u32>>,
-        Vec<Option<EventFifo>>,
-        FifoPlan<EventFeedbackId>,
-        BTreeMap<EventFeedbackKey, usize>,
-        BTreeSet<EventFeedbackKey>,
-    ) {
+    fn feedback<F: Float>(&self, cx: &Cx<'_>) -> Feedback<F> {
         let plan = cx.plan;
-        let old_afb = cx
-            .old
-            .map(|p| keyed(&p.program.audio_feedback, |f| f.key))
-            .unwrap_or_default();
-        let old_efb = cx
-            .old
-            .map(|p| keyed(&p.program.event_feedback, |f| f.key))
-            .unwrap_or_default();
-        let mut audio_from = Vec::with_capacity(plan.program.audio_feedback.len());
         let audio = plan
             .program
             .audio_feedback
-            .iter()
-            .map(|f| {
-                let from = old_afb.get(&f.key).filter(|_| cx.carry).map(|j| j.get());
-                audio_from.push(from);
-                from.is_none().then(|| AudioRing::new(f.key.delay))
+            .iter_enumerated()
+            .map(|(n, f)| {
+                cx.carry.audio_fb[n]
+                    .is_none()
+                    .then(|| AudioRing::new(f.key.delay))
             })
             .collect();
-        let mut caps = BTreeMap::new();
-        let mut with_params = BTreeSet::new();
-        let mut from = Vec::with_capacity(plan.program.event_feedback.len());
-        let mut extra = vec![0; plan.program.event_feedback.len()];
-        let event = plan
-            .program
-            .event_feedback
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let src = f.key.from;
-                let rate =
-                    plan.event_tap_rate(EventTapPort::Out(src), f.key.delay, cx.max_block, cx.cap);
-                let want = EventFifo::bound(f.key.delay.get(), rate, cx.max_block);
-                let carried = old_efb.get(&f.key).filter(|_| cx.carry).map(|&j| {
-                    let have = self.feedback.get(&f.key).copied();
-                    debug_assert!(have.is_some(), "a carried FIFO was in the last plan");
-                    (j, have.unwrap_or(0))
-                });
-                let (mut how, mut cap, over) = fit_fifo(carried, want, rate);
-                // As a delay's FIFO: one kept from before its source wrote
-                // param events is built afresh.
-                let params = plan.event_tap_params(EventTapPort::Out(src));
-                let had_params = carried.is_some() && self.param_feedback.contains(&f.key);
-                if let (EventCarry::Keep { from: j, .. }, true, false) = (how, params, had_params) {
-                    how = EventCarry::Move { from: j };
-                    cap = cap.max(want);
-                }
-                from.push(how);
-                extra[i] = over;
-                caps.insert(f.key, cap);
-                if params {
-                    with_params.insert(f.key);
-                }
-                (!matches!(how, EventCarry::Keep { .. })).then(|| {
-                    let fifo = EventFifo::sized_for(f.key.delay, rate, cx.max_block, cap);
-                    if params { fifo.with_params() } else { fifo }
-                })
-            })
-            .collect();
-        (
-            audio,
-            audio_from,
-            event,
-            FifoPlan { from, extra },
-            caps,
-            with_params,
-        )
+        let mut fifo = FifoPlan::new();
+        let mut event = Vec::with_capacity(plan.program.event_feedback.len());
+        for (n, f) in plan.program.event_feedback.iter_enumerated() {
+            let carried = cx.carry.event_fb[n];
+            let before = carried.map_or_else(FifoMemo::default, |o| {
+                let memo = self.feedback.get(o).copied();
+                debug_assert!(memo.is_some(), "a carried FIFO was in the last plan");
+                memo.unwrap_or_default()
+            });
+            let src = f.key.from;
+            let rate =
+                plan.event_tap_rate(EventTapPort::Out(src), f.key.delay, cx.max_block, cx.cap);
+            let want = EventFifo::bound(f.key.delay.get(), rate, cx.max_block);
+            let (mut keep, mut cap, over) = fit_fifo(carried.map(|_| before.cap), want);
+            // As a delay's FIFO: one kept from before its source wrote
+            // param events is built afresh.
+            let params = plan.event_tap_params(EventTapPort::Out(src));
+            if keep && !before.param_room && params {
+                keep = false;
+                cap = cap.max(want);
+            }
+            event.push((!keep).then(|| {
+                let fifo = EventFifo::sized_for(f.key.delay, rate, cx.max_block, cap);
+                if params { fifo.with_params() } else { fifo }
+            }));
+            fifo.moved += usize::from(carried.is_some() && !keep);
+            fifo.extra.push(over);
+            fifo.rate.push(rate);
+            fifo.memo.push(FifoMemo {
+                cap,
+                owing: false,
+                param_room: params,
+            });
+        }
+        Feedback { audio, event, fifo }
     }
 
     /// What disappears flushes to sinks that survive, and held keys of an
@@ -779,7 +651,7 @@ impl Stager {
         let plan = cx.plan;
         let mut rooms: BTreeMap<(PlanUnitId, u16), Room> = BTreeMap::new();
         // What replaced nodes wrote for their successors.
-        for (old_p, new_p) in &c.delta.replace {
+        for (old_p, new_p) in c.delta.replace() {
             let chase = cx
                 .old
                 .and_then(|o| o.unit(old_p.key))
@@ -800,46 +672,23 @@ impl Stager {
                 r.carried += s.owed;
             }
         }
-        // Event delays and feedback that no longer exist, in key order.
-        let old_delays = cx
-            .old
-            .map(|p| keyed(&p.program.event_delays, |d| d.key))
-            .unwrap_or_default();
-        let plan_delay_keys: BTreeSet<EventDelayKey> =
-            plan.program.event_delays.iter().map(|d| d.key).collect();
-        let gone_delays = old_delays
-            .iter()
-            .filter(|(k, _)| !(cx.carry && plan_delay_keys.contains(k)))
-            .filter_map(|(k, &j)| match k {
-                EventDelayKey::Edge { at, .. } => {
-                    if let Some(u) = cx.sink_of(*at) {
-                        let r = rooms.entry((u, at.port)).or_default();
-                        r.flush += self.fifos.get(k).copied().unwrap_or(0);
-                        // What the FIFO still owes moves to the sink.
-                        r.carried += usize::from(self.owing.contains(k));
-                    }
-                    Some(Vanished { from: j, at: *at })
-                }
-                _ => None,
-            })
-            .collect();
-        let old_efb = cx
-            .old
-            .map(|p| keyed(&p.program.event_feedback, |f| f.key))
-            .unwrap_or_default();
-        let plan_efb: BTreeSet<EventFeedbackKey> =
-            plan.program.event_feedback.iter().map(|f| f.key).collect();
-        let gone_feedback = old_efb
-            .iter()
-            .filter(|(k, _)| !(cx.carry && plan_efb.contains(k)))
-            .map(|(k, &j)| {
-                if let Some(u) = cx.sink_of(k.at) {
-                    rooms.entry((u, k.at.port)).or_default().flush +=
-                        self.feedback.get(k).copied().unwrap_or(0);
-                }
-                Vanished { from: j, at: k.at }
-            })
-            .collect();
+        // Event delays and feedback that no longer exist: what their queues
+        // hold flushes to the sink.
+        for g in &cx.carry.vanished_delays {
+            if let Some(u) = cx.sink_of(g.at) {
+                let memo = self.fifo_memo(g.from);
+                let r = rooms.entry((u, g.at.port)).or_default();
+                r.flush += memo.cap;
+                // What the FIFO still owes moves to the sink.
+                r.carried += usize::from(memo.owing);
+            }
+        }
+        for g in &cx.carry.vanished_feedback {
+            if let Some(u) = cx.sink_of(g.at) {
+                let have = self.feedback.get(g.from).copied().unwrap_or_default();
+                rooms.entry((u, g.at.port)).or_default().flush += have.cap;
+            }
+        }
         for k in &closers {
             if let (Route::Sink(_), Some(u)) = (&k.route, cx.sink_of(k.at)) {
                 rooms.entry((u, k.at.port)).or_default().closers += 1;
@@ -864,8 +713,6 @@ impl Stager {
         }
         Flush {
             rooms,
-            gone_delays,
-            gone_feedback,
             closers,
             queued,
         }
@@ -883,28 +730,17 @@ impl Stager {
         };
         let plan = cx.plan;
         // The sources that may be gone: every key a commit retires, replaces
-        // or cuts, and, after a re-prepare, every unit that does not come
-        // back.
-        let mut maybe_gone: BTreeSet<NodeKey> = c
+        // or cuts (after a re-prepare, the units that do not come back are
+        // the ones the delta retires or replaces).
+        let maybe_gone: BTreeSet<NodeKey> = c
             .delta
-            .retire
+            .retire()
             .iter()
-            .chain(c.delta.replace.iter().map(|(o, _)| o))
-            .chain(&c.delta.cuts)
+            .chain(c.delta.replace().iter().map(|(o, _)| o))
+            .chain(c.delta.cuts())
             .map(|p| p.key)
             .collect();
-        if cx.resumed {
-            maybe_gone.extend(
-                old.units
-                    .iter()
-                    .filter(|u| {
-                        plan.unit(u.key)
-                            .is_none_or(|n| n.generation != u.generation)
-                    })
-                    .map(|u| u.key),
-            );
-        }
-        let replaced: BTreeSet<NodeKey> = c.delta.replace.iter().map(|(_, n)| n.key).collect();
+        let replaced: BTreeSet<NodeKey> = c.delta.replace().iter().map(|(_, n)| n.key).collect();
         let mut closers = Vec::new();
         for e in &old.event_edges {
             let &(from, at) = e;
@@ -992,8 +828,6 @@ impl Stager {
 /// The sinks a commit can flush to, and what each is flushed from.
 struct Flush {
     rooms: BTreeMap<(PlanUnitId, u16), Room>,
-    gone_delays: Vec<Vanished<EventDelayId>>,
-    gone_feedback: Vec<Vanished<EventFeedbackId>>,
     closers: Vec<Closer>,
     queued: Vec<PlanUnitId>,
 }
@@ -1064,15 +898,12 @@ struct Room {
 }
 
 /// The writers a plan names, taps first: each is the one opened since the
-/// last commit (which wins over a carried one of the same id) or `None`,
-/// with the old index a carried one comes from.
+/// last commit, which wins over a carried one of the same id, or `None`, for
+/// the writer the commit's [`Carry`] moves in.
 struct Outlets<F: Float> {
     taps: Vec<Option<TapWriter<F>>>,
-    taps_from: Vec<Option<u32>>,
     event_taps: Vec<Option<EventTapWriter>>,
-    event_taps_from: Vec<Option<u32>>,
     meters: Vec<Option<MeterWriter>>,
-    meters_from: Vec<Option<u32>>,
 }
 
 /// Taps, event taps and meters, by id. A writer the plan does not name stays
@@ -1083,71 +914,40 @@ fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets<F> {
         let at = opened.iter().position(|(o, _)| o == id)?;
         Some(opened.swap_remove(at).1)
     }
-    fn index<I: Ord + Copy>(ids: impl Iterator<Item = I>) -> BTreeMap<I, usize> {
-        ids.enumerate().map(|(i, k)| (k, i)).collect()
+    Outlets {
+        taps: plan
+            .program
+            .taps
+            .iter()
+            .map(|k| open(&mut c.opened.taps, k))
+            .collect(),
+        event_taps: plan
+            .program
+            .event_taps
+            .iter()
+            .map(|k| open(&mut c.opened.event_taps, k))
+            .collect(),
+        meters: plan
+            .program
+            .meters
+            .iter()
+            .map(|(k, lanes)| {
+                let w = open(&mut c.opened.meters, k);
+                if let Some(w) = &w {
+                    w.set_width(*lanes);
+                }
+                w
+            })
+            .collect(),
     }
-    let old_taps = cx
-        .old
-        .map(|p| index(p.program.taps.iter().copied()))
-        .unwrap_or_default();
-    let old_event_taps = cx
-        .old
-        .map(|p| index(p.program.event_taps.iter().copied()))
-        .unwrap_or_default();
-    let old_meters = cx
-        .old
-        .map(|p| index(p.program.meters.iter().map(|(k, _)| *k)))
-        .unwrap_or_default();
-    let carried =
-        |opened: bool, from: Option<&usize>| (!opened).then(|| from.map(|&i| i as u32)).flatten();
-    let mut out = Outlets {
-        taps: Vec::with_capacity(plan.program.taps.len()),
-        taps_from: Vec::with_capacity(plan.program.taps.len()),
-        event_taps: Vec::with_capacity(plan.program.event_taps.len()),
-        event_taps_from: Vec::with_capacity(plan.program.event_taps.len()),
-        meters: Vec::with_capacity(plan.program.meters.len()),
-        meters_from: Vec::with_capacity(plan.program.meters.len()),
-    };
-    for k in &plan.program.taps {
-        let w = open(&mut c.opened.taps, k);
-        out.taps_from.push(carried(w.is_some(), old_taps.get(k)));
-        out.taps.push(w);
-    }
-    for k in &plan.program.event_taps {
-        let w = open(&mut c.opened.event_taps, k);
-        out.event_taps_from
-            .push(carried(w.is_some(), old_event_taps.get(k)));
-        out.event_taps.push(w);
-    }
-    for (k, lanes) in &plan.program.meters {
-        let w = open(&mut c.opened.meters, k);
-        if let Some(w) = &w {
-            w.set_width(*lanes);
-        }
-        out.meters_from
-            .push(carried(w.is_some(), old_meters.get(k)));
-        out.meters.push(w);
-    }
-    out
 }
 
 /// Weighted lanes, by edge: what a lane holds carries across a commit that
 /// keeps the edge (not a sample-rate change's reset: a weight is not time),
 /// and a new edge starts at its value. A lane a source drives has its state
 /// built here.
-fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane<F>>, Vec<Option<u32>>) {
+fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> Vec<SumLane<F>> {
     let plan = cx.plan;
-    let old_lanes: BTreeMap<crate::EdgeId, usize> = cx
-        .old
-        .map(|p| {
-            p.program
-                .sum_lanes
-                .iter()
-                .enumerate()
-                .filter_map(|(i, id)| Some(((*id)?, i)))
-                .collect()
-        })
-        .unwrap_or_default();
     let mut driven = vec![false; plan.program.sum_lanes.len()];
     for op in &plan.program.ops {
         if let Op::WeightedSum { lanes, gains, .. } = *op {
@@ -1156,29 +956,23 @@ fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane<F>>, Vec<Option<u
             }
         }
     }
-    let mut from = Vec::with_capacity(plan.program.sum_lanes.len());
-    let lanes = plan
-        .program
+    plan.program
         .sum_lanes
         .iter()
         .zip(&driven)
-        .map(|(id, &driven)| {
-            from.push(id.and_then(|id| old_lanes.get(&id)).map(|&i| i as u32));
-            match id {
-                None => SumLane::plain(),
-                Some(id) => SumLane::weighted(
-                    c.opened
-                        .gains
-                        .get(id)
-                        .cloned()
-                        .expect("the editor sends a cell for every weighted lane"),
-                    driven,
-                    cx.max_block,
-                ),
-            }
+        .map(|(id, &driven)| match id {
+            None => SumLane::plain(),
+            Some(id) => SumLane::weighted(
+                c.opened
+                    .gains
+                    .get(id)
+                    .cloned()
+                    .expect("the editor sends a cell for every weighted lane"),
+                driven,
+                cx.max_block,
+            ),
         })
-        .collect();
-    (lanes, from)
+        .collect()
 }
 
 /// The lanes that drive a unit's mix: for a unit placed now, or one no
@@ -1188,30 +982,36 @@ fn drives<F: Float>(
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
 ) -> Vec<(UnitIdx, ParamState<F>)> {
-    let old_driven: BTreeSet<UnitIdx> = cx
-        .old
-        .map(|p| mix_driven(p).map(|pu| pu.idx).collect())
-        .unwrap_or_default();
     let placed: BTreeSet<NodeKey> = c.incoming.iter().map(|i| i.key).collect();
+    // A kept unit is at one index in both plans: it needs a lane only when
+    // the old plan did not drive its mix.
+    let driven_before = |key| {
+        cx.old
+            .and_then(|p| p.unit_id(key).map(|u| drives_mix(p, u)))
+            .unwrap_or(false)
+    };
     mix_driven(cx.plan)
         .filter_map(|pu| {
-            (placed.contains(&pu.key) || !old_driven.contains(&pu.idx))
+            (placed.contains(&pu.key) || !driven_before(pu.key))
                 .then(|| mix_lane(pu.key).map(|lane| (pu.idx, lane)))
                 .flatten()
         })
         .collect()
 }
 
+/// Whether the last driven param of `unit` is the mix.
+fn drives_mix(plan: &Plan, unit: PlanUnitId) -> bool {
+    plan.program.param_ports[plan.ports[unit].params.range()]
+        .last()
+        .is_some_and(ParamPortOp::is_mix)
+}
+
 /// The units of `plan` whose last driven param is the mix.
 fn mix_driven(plan: &Plan) -> impl Iterator<Item = &PlanUnit> {
-    plan.ports
+    plan.units
         .iter_enumerated()
-        .filter(|&(_, np)| {
-            plan.program.param_ports[np.params.range()]
-                .last()
-                .is_some_and(ParamPortOp::is_mix)
-        })
-        .map(|(unit, _)| &plan.units[unit])
+        .filter(|&(unit, _)| drives_mix(plan, unit))
+        .map(|(_, pu)| pu)
 }
 
 /// Per event slot, whether it can hold param events: a slot a param-writing
@@ -1303,16 +1103,16 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventS
 
 /// Room for what applying hands back.
 fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
-    let replaces = c.delta.replace.len();
-    let parked = if cx.resumed {
+    let replaces = c.delta.replace().len();
+    let parked = if c.resumed {
         cx.old.map_or(0, |o| o.units.len())
     } else {
         0
     };
-    let held = c.delta.retire.len() + replaces + c.delta.cuts.len() + parked;
+    let held = c.delta.retire().len() + replaces + c.delta.cuts().len() + parked;
     c.gone = Gone {
         held: CappedVec::with_capacity(held),
-        spare: CappedVec::with_capacity(2 * (c.delta.retire.len() + replaces + parked)),
+        spare: CappedVec::with_capacity(2 * (c.delta.retire().len() + replaces + parked)),
         replaced: CappedVec::with_capacity(replaces),
         chased: CappedVec::with_capacity(replaces),
         held_refused: CappedVec::with_capacity(replaces),
@@ -1328,124 +1128,5 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
         let key = events[i].offset;
         let at = events[..i].partition_point(|e| e.offset <= key);
         events[at..=i].rotate_right(1);
-    }
-}
-
-/// The longest ring that aligns each source to an output, whichever channel it
-/// fed; of equal lengths, the lowest key. The choice is a function of the set
-/// of rings, not of their order in the plan: what a source on a new channel
-/// starts from, with none of its history zero-filled.
-fn ring_by_source(
-    delays: &TableSlice<AudioDelayId, AudioDelay>,
-) -> BTreeMap<crate::PortSource, AudioDelayId> {
-    let mut by_source: BTreeMap<crate::PortSource, AudioDelayId> = BTreeMap::new();
-    for (i, d) in delays.iter_enumerated() {
-        let AudioDelayKey::Output { from, .. } = d.key else {
-            continue;
-        };
-        let better = |j: &AudioDelayId| {
-            let best = &delays[*j];
-            (d.len, std::cmp::Reverse(d.key)) > (best.len, std::cmp::Reverse(best.key))
-        };
-        if by_source.get(&from).is_none_or(better) {
-            by_source.insert(from, i);
-        }
-    }
-    by_source
-}
-
-/// The old ring an output channel's ring of this plan starts from when no old
-/// ring has its own key: the old main output's channel `c` for the bank's channel
-/// `base + c`, and, in a main output change, for a main output channel of a source the old
-/// plan aligned on another channel, that channel's ring (a source's delayed
-/// signal does not depend on the channel it feeds).
-fn copy_origin(
-    plan: &Plan,
-    key: &AudioDelayKey,
-    old: &BTreeMap<AudioDelayKey, AudioDelayId>,
-    by_source: &BTreeMap<crate::PortSource, AudioDelayId>,
-) -> Option<AudioDelayId> {
-    let AudioDelayKey::Output { channel, from } = *key else {
-        return None;
-    };
-    match plan.main_output_bank() {
-        Some(bank) if usize::from(channel) >= bank.base => {
-            let was = channel - u16::try_from(bank.base).ok()?;
-            old.get(&AudioDelayKey::Output { channel: was, from })
-                .copied()
-        }
-        // Only in a main output change: any other recompile keeps a ring by its key.
-        Some(_) if !old.contains_key(key) => by_source.get(&from).copied(),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::compile::ids::{Table, id_at};
-    use crate::{NodeKey, OutputPort, PortSource};
-    use tutti_units::Samples;
-
-    fn ring(channel: u16, from: PortSource, len: usize) -> AudioDelay {
-        AudioDelay {
-            key: AudioDelayKey::Output { channel, from },
-            len: Samples::new(len),
-        }
-    }
-
-    fn source(node: u64) -> PortSource {
-        PortSource::Node(OutputPort::new(NodeKey(node), 0))
-    }
-
-    /// The longest ring of a source is the one a new channel copies, and of
-    /// equal lengths the lowest key, whatever order the plan lists them in:
-    /// two renders of one commit never copy different rings.
-    #[test]
-    fn the_longest_ring_of_a_source_wins_and_the_lowest_key_breaks_a_tie() {
-        let s = source(1);
-        let delays = [
-            ring(3, s, 20),
-            ring(2, s, 30),
-            ring(1, s, 30),
-            ring(0, s, 10),
-            ring(0, source(2), 5),
-        ];
-        let by = ring_by_source(&Table::from(delays.to_vec()));
-        assert_eq!(
-            by[&s],
-            id_at(2),
-            "channel 1: of the two 30-frame rings, the lower key"
-        );
-        assert_eq!(
-            by[&source(2)],
-            id_at(4),
-            "a source of its own has its own ring"
-        );
-        let mut order: Vec<usize> = (0..delays.len()).collect();
-        for _ in 0..delays.len() {
-            order.rotate_left(1);
-            let shuffled: Table<AudioDelayId, AudioDelay> =
-                order.iter().map(|&i| delays[i]).collect();
-            let by = ring_by_source(&shuffled);
-            assert_eq!(
-                shuffled[by[&s]].key, delays[2].key,
-                "the same ring in any listing order"
-            );
-        }
-    }
-
-    /// A ring that is not an output's is no source's origin.
-    #[test]
-    fn only_output_rings_are_origins() {
-        let at = crate::InputPort::new(NodeKey(9), 0);
-        let delays = [AudioDelay {
-            key: AudioDelayKey::Edge {
-                at,
-                from: source(1),
-            },
-            len: Samples::new(40),
-        }];
-        assert!(ring_by_source(&Table::from(delays.to_vec())).is_empty());
     }
 }

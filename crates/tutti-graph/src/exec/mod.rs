@@ -1001,6 +1001,7 @@ mod tests {
             1,
             Arc::clone(&plan),
             delta,
+            false,
             units,
             |_, ports, max| ParamState::new(ports, max, Vec::new(), Vec::new()),
             |key| {
@@ -1015,8 +1016,6 @@ mod tests {
             &mut commit,
             StageIn {
                 old: None,
-                carry: true,
-                resumed: false,
                 mix_lane: &|_| None,
             },
         );

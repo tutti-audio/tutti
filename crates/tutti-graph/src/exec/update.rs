@@ -6,12 +6,13 @@ use tutti_rt::CappedVec;
 use tutti_units::Samples;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
-use super::stage::{AudioCarry, EventCarry, Route, Staged, sort_by_offset};
+use super::stage::{Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, State, Unit};
 use super::{Executor, Suspension, place, place_all};
 use crate::NodeKey;
+use crate::compile::carry::Carry;
 use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
-use crate::compile::plan::Plan;
+use crate::compile::plan::{Placement, Plan};
 use crate::event::types::Event;
 use crate::exec::held::Held;
 use crate::exec::rings::EventFifo;
@@ -130,16 +131,24 @@ impl<F: Float> Executor<F> {
         // replaced with a fade while one runs: its unit keeps writing, and
         // the replacement waits (`end_fades` closes its keys then).
         let mut departed = std::mem::take(&mut c.gone);
-        let n_retire = c.delta.retire.len();
-        for (i, p) in c
-            .delta
-            .retire
+        // A resumed commit finds the store empty: the suspend took every unit
+        // out. What it retires, replaces and cuts departs only held keys and
+        // parked tables (below), so nothing here touches the store: no retire
+        // of an empty slot, no chase, no cut.
+        let (retire, replace, cuts): (&[Placement], &[(Placement, Placement)], &[Placement]) =
+            if c.resumed {
+                (&[], &[], &[])
+            } else {
+                (c.delta.retire(), c.delta.replace(), c.delta.cuts())
+            };
+        let n_retire = retire.len();
+        for (i, p) in retire
             .iter()
-            .chain(c.delta.replace.iter().map(|(old, _)| old))
+            .chain(replace.iter().map(|(old, _)| old))
             .enumerate()
         {
             let waits = i >= n_retire
-                && c.fades_in(c.delta.replace[i - n_retire].1.key)
+                && c.fades_in(replace[i - n_retire].1.key)
                 && self
                     .store
                     .get(p.idx.0 as usize)
@@ -157,14 +166,14 @@ impl<F: Float> Executor<F> {
                 place(&mut departed.held, (p.key, tables));
             }
         }
-        for (_, new) in &c.delta.replace {
+        for (_, new) in c.delta.replace() {
             place(&mut departed.replaced, new.key);
         }
         // The state a replaced node hands its successor, written while it is
         // still in the store (see `Node::chase`).
         departed.chase_events = std::mem::take(&mut self.chase);
         departed.chase_events.clear();
-        for (old, new) in &c.delta.replace {
+        for (old, new) in replace {
             let running = c.fades_in(new.key)
                 && self
                     .store
@@ -217,11 +226,11 @@ impl<F: Float> Executor<F> {
         // A retired key, or one replaced without a fade, goes whole: its
         // unit and any crossfade running or waiting there. A key replaced
         // with a fade stays, for the incoming unit to fade in over it.
-        for i in 0..c.delta.retire.len() + c.delta.replace.len() {
-            let p = match i.checked_sub(c.delta.retire.len()) {
-                None => c.delta.retire[i],
+        for i in 0..retire.len() + replace.len() {
+            let p = match i.checked_sub(retire.len()) {
+                None => retire[i],
                 Some(j) => {
-                    let (old, new) = c.delta.replace[j];
+                    let (old, new) = replace[j];
                     if c.fades_in(new.key) {
                         continue;
                     }
@@ -243,7 +252,7 @@ impl<F: Float> Executor<F> {
             }
         }
         // Cuts: a kept unit's crossfades go, its newest unit stays.
-        for p in &c.delta.cuts {
+        for p in cuts {
             if let Some(u) = self
                 .store
                 .get_mut(p.idx.0 as usize)
@@ -266,8 +275,9 @@ impl<F: Float> Executor<F> {
             std::mem::swap(&mut self.store, &mut store);
             st.store = Some(store);
         }
-        if self.store.len() < c.delta.store_len as usize {
-            self.store.resize_with(c.delta.store_len as usize, || None);
+        if self.store.len() < c.delta.store_len() as usize {
+            self.store
+                .resize_with(c.delta.store_len() as usize, || None);
         }
         // Taken out and put back, so the list's buffer is not freed here.
         let mut incoming = std::mem::take(&mut c.incoming);
@@ -341,11 +351,20 @@ impl<F: Float> Executor<F> {
         c.relined = relined;
 
         let old_plan = self.plan.take();
-        debug_assert_eq!(
-            st.carry, carry,
-            "staged for the rate the executor resumes at"
+        // With no plan before, there is nothing to carry at any rate.
+        debug_assert!(
+            old_plan.as_deref().is_none_or(|o| {
+                (o.prepare.sample_rate() == plan.prepare.sample_rate()) == carry
+            }),
+            "compiled for the rate the executor resumes at"
         );
-        let new_state = self.adopt(&plan, old_plan.as_deref(), &mut st, &mut departed);
+        let new_state = self.adopt(
+            &plan,
+            old_plan.as_deref(),
+            &c.delta.carry,
+            &mut st,
+            &mut departed,
+        );
         // The chase buffer sized for this plan; the old one goes back.
         departed.chase_events.clear();
         self.chase = std::mem::replace(&mut st.chase, std::mem::take(&mut departed.chase_events));
@@ -388,6 +407,7 @@ impl<F: Float> Executor<F> {
         &mut self,
         plan: &Plan,
         old_plan: Option<&Plan>,
+        carry: &Carry,
         st: &mut Staged<F>,
         departed: &mut Gone,
     ) -> State<F> {
@@ -395,128 +415,106 @@ impl<F: Float> Executor<F> {
         let mut new = st.state.take().expect("a staged commit carries its state");
         let old = &mut self.state;
 
-        // PDC rings and FIFOs: one moves in whole when its length stands, and
-        // is copied into the ring built for its new length when it does not.
-        // A ring copied from one that another ring then takes: before it goes.
-        for (delay, from) in plan.program.audio_delays.ids().zip(&st.audio_delays) {
-            if let AudioCarry::Copy { from } = *from
-                && let (Some(n), Some(Some(o))) = (
-                    new.audio_delays[delay.index()].as_mut(),
-                    old.audio_delays.get(from.index()),
-                )
-            {
-                n.transfer_from(o);
+        // What carries moves in from the old state. A shell the stager left
+        // `None` is the one the carry names an old item for, so it is taken
+        // into a `None` and nothing drops here; a shell built for it takes
+        // the old item's contents instead, and the old one goes back in the
+        // commit.
+        //
+        // A ring another ring takes over copies from the old one that
+        // stays, before a later move takes it away.
+        for &(n, o) in &carry.copy {
+            if let (Some(to), Some(Some(from))) = (
+                new.audio_delays[n.index()].as_mut(),
+                old.audio_delays.get(o.index()),
+            ) {
+                to.transfer_from(from);
             }
         }
-        debug_assert_eq!(plan.program.audio_delays.len(), st.audio_delays.len());
-        for (delay, from) in plan.program.audio_delays.ids().zip(&st.audio_delays) {
-            let i = delay.index();
-            match *from {
-                AudioCarry::New | AudioCarry::Copy { .. } => {}
-                AudioCarry::Keep { from } => {
-                    new.audio_delays[i] = old
-                        .audio_delays
-                        .get_mut(from.index())
-                        .and_then(Option::take);
+        for (n, from) in carry.audio_rings.iter_enumerated() {
+            let i = n.index();
+            let Some(o) = *from else { continue };
+            let carried = old.audio_delays.get_mut(o.index()).and_then(Option::take);
+            match (new.audio_delays[i].as_mut(), carried) {
+                (None, carried) => new.audio_delays[i] = carried,
+                (Some(to), Some(from)) => {
+                    to.transfer_from(&from);
+                    place(&mut st.spare_audio, from);
                 }
-                AudioCarry::Move { from } => {
-                    let carried = old
-                        .audio_delays
-                        .get_mut(from.index())
-                        .and_then(Option::take);
-                    match (new.audio_delays[i].as_mut(), carried) {
-                        (Some(n), Some(o)) => {
-                            n.transfer_from(&o);
-                            place(&mut st.spare_audio, o);
-                        }
-                        (None, Some(o)) => {
-                            debug_assert!(false, "a moved ring has a ring built for it");
-                            place(&mut st.spare_audio, o);
-                        }
-                        (_, None) => {}
+                (Some(_), None) => {}
+            }
+        }
+        for (n, from) in carry.event_rings.iter_enumerated() {
+            let i = n.index();
+            let Some(o) = *from else { continue };
+            let carried = old.event_delays.get_mut(o.index()).and_then(Option::take);
+            match new.event_delays[i].as_mut() {
+                None => {
+                    new.event_delays[i] = carried;
+                    if let Some(f) = &mut new.event_delays[i] {
+                        f.retune(plan.program.event_delays[n].len);
+                        f.resize(st.delay_rates[n], max_block);
                     }
                 }
+                target => {
+                    let lost = move_fifo(target, carried, &mut st.spare_events);
+                    self.dropped.charge_delay(plan, n, lost as u64);
+                }
             }
         }
-        debug_assert_eq!(plan.program.event_delays.len(), st.event_delays.len());
-        for (delay, from) in plan.program.event_delays.ids().zip(&st.event_delays) {
-            let i = delay.index();
-            match *from {
-                EventCarry::New => {}
-                EventCarry::Keep { from, rate } => {
-                    let mut fifo = old
-                        .event_delays
-                        .get_mut(from.index())
-                        .and_then(Option::take);
-                    if let Some(f) = &mut fifo {
-                        f.retune(plan.program.event_delays[delay].len);
-                        f.resize(rate, max_block);
+        for (n, from) in carry.audio_fb.iter_enumerated() {
+            if let Some(o) = *from {
+                debug_assert!(
+                    new.audio_fb[n.index()].is_none(),
+                    "a carried ring has no shell"
+                );
+                new.audio_fb[n.index()] = old.audio_fb.get_mut(o.index()).and_then(Option::take);
+            }
+        }
+        for (n, from) in carry.event_fb.iter_enumerated() {
+            let i = n.index();
+            let Some(o) = *from else { continue };
+            let carried = old.event_fb.get_mut(o.index()).and_then(Option::take);
+            match new.event_fb[i].as_mut() {
+                None => {
+                    new.event_fb[i] = carried;
+                    if let Some(f) = &mut new.event_fb[i] {
+                        f.resize(st.feedback_rates[n], max_block);
                     }
-                    new.event_delays[i] = fifo;
                 }
-                EventCarry::Move { from } => {
-                    let carried = old
-                        .event_delays
-                        .get_mut(from.index())
-                        .and_then(Option::take);
-                    let lost =
-                        move_fifo(new.event_delays[i].as_mut(), carried, &mut st.spare_events);
-                    self.dropped.charge_delay(plan, delay, lost as u64);
+                target => {
+                    let lost = move_fifo(target, carried, &mut st.spare_events);
+                    self.dropped.charge_feedback(plan, n, lost as u64);
                 }
             }
         }
-        for (i, from) in st.audio_fb.iter().enumerate() {
-            if let Some(j) = *from {
-                new.audio_fb[i] = old.audio_fb.get_mut(j as usize).and_then(Option::take);
+        // A writer opened since the last commit has its shell and wins.
+        for (n, from) in carry.taps.iter_enumerated() {
+            if let (Some(o), None) = (*from, &new.taps[n.index()]) {
+                new.taps[n.index()] = old.taps.get_mut(o.index()).and_then(Option::take);
             }
         }
-        debug_assert_eq!(plan.program.event_feedback.len(), st.event_fb.len());
-        for (feedback, from) in plan.program.event_feedback.ids().zip(&st.event_fb) {
-            let i = feedback.index();
-            match *from {
-                EventCarry::New => {}
-                EventCarry::Keep { from, rate } => {
-                    let mut fifo = old.event_fb.get_mut(from.index()).and_then(Option::take);
-                    if let Some(f) = &mut fifo {
-                        f.resize(rate, max_block);
-                    }
-                    new.event_fb[i] = fifo;
-                }
-                EventCarry::Move { from } => {
-                    let carried = old.event_fb.get_mut(from.index()).and_then(Option::take);
-                    let lost = move_fifo(new.event_fb[i].as_mut(), carried, &mut st.spare_events);
-                    self.dropped.charge_feedback(plan, feedback, lost as u64);
-                }
+        for (n, from) in carry.event_taps.iter_enumerated() {
+            if let (Some(o), None) = (*from, &new.event_taps[n.index()]) {
+                new.event_taps[n.index()] =
+                    old.event_taps.get_mut(o.index()).and_then(Option::take);
             }
         }
-        for (i, from) in st.taps.iter().enumerate() {
-            if let Some(j) = *from {
-                new.taps[i] = old.taps.get_mut(j as usize).and_then(Option::take);
-            }
-        }
-        for (i, from) in st.event_taps.iter().enumerate() {
-            if let Some(j) = *from {
-                new.event_taps[i] = old.event_taps.get_mut(j as usize).and_then(Option::take);
-            }
-        }
-        for (i, from) in st.meters.iter().enumerate() {
-            if let Some(j) = *from {
-                let writer = old.meters.get_mut(j as usize).and_then(Option::take);
+        for (n, from) in carry.meters.iter_enumerated() {
+            if let (Some(o), None) = (*from, &new.meters[n.index()]) {
+                let writer = old.meters.get_mut(o.index()).and_then(Option::take);
                 if let Some(w) = &writer {
-                    w.set_width(plan.program.meters.as_slice()[i].1);
+                    w.set_width(plan.program.meters[n].1);
                 }
-                new.meters[i] = writer;
+                new.meters[n.index()] = writer;
             }
         }
         // A driven state keeps its place across commits that keep the declick
         // length (not the rate: distinct rates can round to one length).
         let same_declick = old_plan.is_none_or(|o| o.prepare.declick() == plan.prepare.declick());
-        for (i, from) in st.lanes.iter().enumerate() {
-            if let Some(carried) = from
-                .and_then(|j| old.lanes.get_mut(j as usize))
-                .map(SumLane::carry)
-            {
-                new.lanes[i].adopt(carried, max_block, same_declick, &mut st.spare_drives);
+        for (lane, from) in new.lanes.iter_mut().zip(&carry.lanes) {
+            if let Some(carried) = from.and_then(|o| old.lanes.get_mut(o)).map(SumLane::carry) {
+                lane.adopt(carried, max_block, same_declick, &mut st.spare_drives);
             }
         }
 
@@ -552,7 +550,7 @@ impl<F: Float> Executor<F> {
                     self.dropped.at_node(u, lost);
                 }
             }
-            for g in &st.gone_delays {
+            for g in &carry.vanished_delays {
                 if let Some(Some(f)) = old.event_delays.get_mut(g.from.index())
                     && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
                 {
@@ -565,7 +563,7 @@ impl<F: Float> Executor<F> {
                     self.dropped.at_node(u, lost);
                 }
             }
-            for g in &st.gone_feedback {
+            for g in &carry.vanished_feedback {
                 if let Some(Some(f)) = old.event_fb.get(g.from.index())
                     && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
                 {

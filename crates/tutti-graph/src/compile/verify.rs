@@ -783,7 +783,7 @@ pub(crate) fn verify_fades(
 ) -> Result<(), VerifyError> {
     // A cut names a unit both plans hold at one generation and index: a
     // kept unit, not one the delta places or retires.
-    for c in &delta.cuts {
+    for c in delta.cuts() {
         let held = |p: &Plan| {
             p.units
                 .iter()
@@ -796,11 +796,11 @@ pub(crate) fn verify_fades(
             )));
         }
     }
-    for (i, &(key, _)) in delta.fades.iter().enumerate() {
-        if delta.fades[..i].iter().any(|&(k, _)| k == key) {
+    for (i, &(key, _)) in delta.fades().iter().enumerate() {
+        if delta.fades()[..i].iter().any(|&(k, _)| k == key) {
             return Err(VerifyError(format!("node {} fades twice", key.0)));
         }
-        let Some(&(old, new)) = delta.replace.iter().find(|(_, n)| n.key == key) else {
+        let Some(&(old, new)) = delta.replace().iter().find(|(_, n)| n.key == key) else {
             return Err(VerifyError(format!(
                 "node {} fades, but the delta does not replace it",
                 key.0
@@ -1593,7 +1593,7 @@ mod tests {
         let fade = Fade::new(tutti_units::Samples::new(32)).law(FadeLaw::EqualPower);
         let check = |shape_a: Shape, fades: Vec<(NodeKey, Fade)>| {
             let (plan, mut delta) = build(shape_a, 1, Some(&base));
-            delta.fades = fades;
+            delta.attach(fades, Vec::new());
             verify_fades(Some(&base), &plan, &delta)
         };
 
