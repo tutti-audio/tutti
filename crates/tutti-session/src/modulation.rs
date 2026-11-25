@@ -50,8 +50,8 @@ use tutti_buffers::Float;
 
 use crate::graph::Graph;
 use crate::value::{
-    Automation, AutomationCell, AutomationField, Bounds, Declared, DepthSlot, Edited, Field,
-    MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
+    Automation, AutomationCell, AutomationField, Bounds, Declared, DepthKey, DepthSlot, Edited,
+    Field, MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
 };
 
 /// How long a modulation target may stay unresolved before it is logged:
@@ -374,6 +374,13 @@ pub enum RouteError {
     /// The route to scale was removed (or is another session's).
     #[error(transparent)]
     NoSuchRoute(NoSuchModRoute),
+    /// Another source already scales the route's depth: a route's depth has
+    /// one scaler.
+    #[error("the depth of route {route:?} is already scaled by another source")]
+    AlreadyScaled {
+        /// The route a scale was asked of.
+        route: ModRouteId,
+    },
     /// The source already has a route into `target`: a route is named by its
     /// source and target ([`DepthTarget::of`](crate::DepthTarget::of)), so a
     /// second between the two would have no name.
@@ -993,9 +1000,14 @@ impl OwnMods {
         );
     }
 
-    /// The slot of `route`'s depth: named by its source and target.
+    /// The slot of `route`'s depth: named by its source and what it drives,
+    /// a target or another route's depth.
     fn depth_slot(route: &OwnRoute) -> SlotId {
-        SlotId::RouteDepth((source_id(route.decl.source), route.target))
+        let source = source_id(route.decl.source);
+        SlotId::RouteDepth(match route.decl.to {
+            RouteTarget::Param(_) => DepthKey::Into(source, route.target),
+            RouteTarget::Depth(scaled) => DepthKey::Scaling(source, route_id(scaled)),
+        })
     }
 
     /// Registers the target `source` has: an LFO's rate, a macro's value.
@@ -1650,13 +1662,19 @@ impl Mods<'_> {
                 (target, RouteTarget::Param(target_key))
             }
         };
+        // What a route drives is its target, or the depth of the route it scales.
         if self
             .own
             .routes
             .values()
-            .any(|r| r.decl.source == source && r.target == target)
+            .any(|r| r.decl.source == source && r.decl.to == to)
         {
             return Err(RouteError::Duplicate { target });
+        }
+        if let (Aim::Depth(route), RouteTarget::Depth(_)) = (spec.aim, to)
+            && self.own.routes.values().any(|r| r.decl.to == to)
+        {
+            return Err(RouteError::AlreadyScaled { route });
         }
         let key = RouteKey(self.own.mint());
         let route = OwnRoute {

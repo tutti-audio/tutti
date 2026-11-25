@@ -1184,9 +1184,10 @@ fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
 /// 0.5)` = 50 over the knob, so 550.
 #[test]
 fn a_scaling_routes_own_depth_write_is_applied() {
-    let (mut s, mut side, cutoff, _, half) = scaled_scene();
+    let (mut s, mut side, _, full, half) = scaled_scene();
+    let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     let settled = sent(&s);
-    s.set(DepthTarget::of(half, cutoff).to(Bipolar::of(0.5)))
+    s.set(DepthTarget::scaling(half, scaled).to(Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
     assert!(
@@ -1194,6 +1195,54 @@ fn a_scaling_routes_own_depth_write_is_applied() {
         "a depth write sent a plan"
     );
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 550.0);
+}
+
+/// **One source can route into a target and scale another route into it.** A
+/// macro of 0.5 routes into the cutoff (`0..=1000`, knob 500) at depth 0.1 and
+/// scales the depth of a macro of 1's route at depth 0.2, itself at depth 1:
+/// `1000 * 0.2 * 0.5` plus `1000 * 0.1 * 0.5` over the knob, so 650. Each of
+/// the two depths has its own name; writing the scaling depth to 0.5 reads
+/// `1000 * 0.2 * 0.25 + 50` over the knob, 600, and the route into the cutoff
+/// to 0.3 reads `50 + 1000 * 0.3 * 0.5`, 700. A second scale of the same route
+/// from the same source is a duplicate, from another source `AlreadyScaled`.
+#[test]
+fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
+    let (mut s, mut side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let full = m.macro_(1.0);
+    let half = m.macro_(0.5);
+    let scaled = m
+        .route(RouteSpec::new(full, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    m.route(RouteSpec::new(half, cutoff, Bipolar::of(0.1)))
+        .unwrap();
+    m.route(RouteSpec::scaling(half, scaled, Bipolar::of(1.0)))
+        .expect("a route into a depth is not the route into the target");
+    assert_eq!(
+        m.route(RouteSpec::scaling(half, scaled, Bipolar::of(0.3))),
+        Err(RouteError::Duplicate {
+            target: cutoff.into()
+        })
+    );
+    assert_eq!(
+        m.route(RouteSpec::scaling(full, scaled, Bipolar::of(0.3))),
+        Err(RouteError::AlreadyScaled { route: scaled })
+    );
+    settle(&mut s);
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+
+    s.set(DepthTarget::scaling(half, scaled).to(Bipolar::of(0.5)))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    s.set(DepthTarget::of(half, cutoff).to(Bipolar::of(0.3)))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
 }
 
 /// **A scaling route goes with the route it scales**, and one onto a route

@@ -779,6 +779,7 @@ fn value::controls::MixTarget::of
 fn value::controls::ModeTarget::node
 fn value::controls::ModeTarget::of
 fn value::depth::DepthTarget::of
+fn value::depth::DepthTarget::scaling
 fn value::depth::DepthTarget::source
 fn value::depth::DepthTarget::target
 fn value::edit_log::EditLog::cap
