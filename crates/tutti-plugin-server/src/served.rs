@@ -330,7 +330,7 @@ impl<L: ServerSide> Server<L> {
     /// defaults (a plugin at its defaults beats none).
     ///
     /// With a `requested` of 64-bit the plugin is activated at 64-bit when
-    /// [`Loaded::widths`] says it takes it just before the activation, else at
+    /// [`Loaded::widths`](tutti_plugin_types::Loaded::widths) says it takes it just before the activation, else at
     /// 32-bit; a plugin that refuses the width it declared fails the activation.
     /// What it runs at is its wiring's [`Features::F64_AUDIO`], never the request.
     ///
