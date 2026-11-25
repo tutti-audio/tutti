@@ -391,18 +391,10 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
     .expect("the vendored VST3 probe loads");
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 1);
 
-    assert!(
-        !instance.set_render_mode(main_thread(), RenderMode::Offline),
+    assert_eq!(
+        instance.set_render_mode(main_thread(), RenderMode::Offline),
+        ModeOutcome::Refused,
         "the probe refuses offline"
-    );
-    assert!(
-        instance.poll(main_thread()).iter().any(|news| matches!(
-            news,
-            News::RenderModeNotApplied {
-                mode: RenderMode::Offline
-            }
-        )),
-        "the host is told the mode was refused, and which"
     );
     assert!(instance.is_active(), "the refusal was rolled back");
     assert_eq!(
@@ -416,18 +408,12 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
         "the rollback activated the plugin once"
     );
 
-    assert!(
+    assert_eq!(
         instance.set_render_mode(main_thread(), RenderMode::Realtime),
+        ModeOutcome::Took,
         "the mode it already has is taken without a restart"
     );
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 2);
-    assert!(
-        !instance
-            .poll(main_thread())
-            .iter()
-            .any(|news| matches!(news, News::RenderModeNotApplied { .. })),
-        "a mode the plugin took is not reported"
-    );
 }
 
 /// **A restart the plugin would not make is told to the host** as the news

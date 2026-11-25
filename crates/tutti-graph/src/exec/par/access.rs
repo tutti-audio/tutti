@@ -72,38 +72,27 @@ impl<T> Table<T> for &mut [T] {
     }
 }
 
-/// The audio slots and their flags an op borrows.
-pub(super) trait Audio<F: Float> {
-    /// The slots, for one op.
-    type Slots<'g>: AudioSlots<F>
-    where
-        Self: 'g;
-    /// The per-slot flags.
-    type Flags: SlotFlags + ?Sized;
-
-    /// The slots for one op, and the flags.
-    fn parts(&mut self) -> (Self::Slots<'_>, &mut Self::Flags);
-}
-
-/// The event slots an op borrows.
-pub(super) trait Events {
-    /// The slots, for one op.
-    type Slots<'g>: EventSlots
-    where
-        Self: 'g;
-
-    /// The slots for one op.
-    fn slots(&mut self) -> Self::Slots<'_>;
-}
-
 /// How a participant borrows what an op touches.
 pub(super) trait Mode<F: Float> {
     /// A table of `T`.
     type Table<'c, T: 'c>: Table<T>;
-    /// The audio slots and flags.
-    type Audio<'c>: Audio<F>;
-    /// The event slots.
-    type Events<'c>: Events;
+    /// The audio slots and flags a participant holds.
+    type Audio<'c>;
+    /// The event slots a participant holds.
+    type Events<'c>;
+    /// The audio slots, for one op.
+    type AudioSlots<'g>: AudioSlots<F>;
+    /// The per-slot flags.
+    type Flags<'c>: SlotFlags + ?Sized;
+    /// The event slots, for one op.
+    type EventSlots<'g>: EventSlots;
+
+    /// The audio slots for one op, and the flags.
+    fn audio<'g, 'c: 'g>(
+        a: &'g mut Self::Audio<'c>,
+    ) -> (Self::AudioSlots<'g>, &'g mut Self::Flags<'c>);
+    /// The event slots for one op.
+    fn events<'g, 'c: 'g>(e: &'g mut Self::Events<'c>) -> Self::EventSlots<'g>;
 }
 
 /// Borrows through claims: a block spread over a pool.
@@ -113,6 +102,26 @@ impl<F: Float> Mode<F> for Claimed {
     type Table<'c, T: 'c> = &'c SplitMut<'c, T>;
     type Audio<'c> = ClaimedAudio<'c>;
     type Events<'c> = ClaimedEvents<'c>;
+    type AudioSlots<'g> = ArenaView<'g>;
+    type Flags<'c> = SharedFlags<'c>;
+    type EventSlots<'g> = EventsView<'g>;
+
+    #[inline]
+    fn audio<'g, 'c: 'g>(a: &'g mut ClaimedAudio<'c>) -> (ArenaView<'g>, &'g mut SharedFlags<'c>) {
+        (
+            ArenaView {
+                view: a.split.view(a.held),
+            },
+            &mut a.flags,
+        )
+    }
+
+    #[inline]
+    fn events<'g, 'c: 'g>(e: &'g mut ClaimedEvents<'c>) -> EventsView<'g> {
+        EventsView {
+            view: e.split.view(e.held),
+        }
+    }
 }
 
 /// One participant's claimed audio slots, with the flags every participant
@@ -124,43 +133,11 @@ pub(super) struct ClaimedAudio<'c> {
     pub(super) flags: SharedFlags<'c>,
 }
 
-impl<'c, F: Float> Audio<F> for ClaimedAudio<'c> {
-    type Slots<'g>
-        = ArenaView<'g>
-    where
-        Self: 'g;
-    type Flags = SharedFlags<'c>;
-
-    #[inline]
-    fn parts(&mut self) -> (ArenaView<'_>, &mut SharedFlags<'c>) {
-        (
-            ArenaView {
-                view: self.split.view(self.held),
-            },
-            &mut self.flags,
-        )
-    }
-}
-
 /// One participant's claimed event slots.
 pub(super) struct ClaimedEvents<'c> {
     pub(super) split: &'c SplitRw<'c, EventSlot>,
     /// The slots one op's view holds: this participant's.
     pub(super) held: &'c Held,
-}
-
-impl Events for ClaimedEvents<'_> {
-    type Slots<'g>
-        = EventsView<'g>
-    where
-        Self: 'g;
-
-    #[inline]
-    fn slots(&mut self) -> EventsView<'_> {
-        EventsView {
-            view: self.split.view(self.held),
-        }
-    }
 }
 
 /// Borrows through plain `&mut` slices: the calling thread alone.
@@ -170,35 +147,25 @@ impl<F: Float> Mode<F> for Exclusive {
     type Table<'c, T: 'c> = &'c mut [T];
     type Audio<'c> = ExclusiveAudio<'c, F>;
     type Events<'c> = &'c mut [EventSlot];
+    type AudioSlots<'g> = &'g mut Arena<F>;
+    type Flags<'c> = [crate::exec::Flags];
+    type EventSlots<'g> = &'g mut [EventSlot];
+
+    #[inline(always)]
+    fn audio<'g, 'c: 'g>(
+        a: &'g mut ExclusiveAudio<'c, F>,
+    ) -> (&'g mut Arena<F>, &'g mut [crate::exec::Flags]) {
+        (&mut *a.arena, &mut *a.flags)
+    }
+
+    #[inline(always)]
+    fn events<'g, 'c: 'g>(e: &'g mut &'c mut [EventSlot]) -> &'g mut [EventSlot] {
+        e
+    }
 }
 
 /// The executor's own audio slots and flags.
 pub(super) struct ExclusiveAudio<'c, F: Float> {
     pub(super) arena: &'c mut Arena<F>,
     pub(super) flags: &'c mut [crate::exec::Flags],
-}
-
-impl<F: Float> Audio<F> for ExclusiveAudio<'_, F> {
-    type Slots<'g>
-        = &'g mut Arena<F>
-    where
-        Self: 'g;
-    type Flags = [crate::exec::Flags];
-
-    #[inline(always)]
-    fn parts(&mut self) -> (&mut Arena<F>, &mut [crate::exec::Flags]) {
-        (&mut *self.arena, &mut *self.flags)
-    }
-}
-
-impl Events for &mut [EventSlot] {
-    type Slots<'g>
-        = &'g mut [EventSlot]
-    where
-        Self: 'g;
-
-    #[inline(always)]
-    fn slots(&mut self) -> &mut [EventSlot] {
-        self
-    }
 }

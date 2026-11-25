@@ -16,9 +16,9 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
-    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
+    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, ModeTold, Notice,
     PluginError, PluginWiring, Prepare, Processor, Rebuilt, Refused, Reply, SampleRate, State,
-    Stuck, step,
+    Stuck, Told, step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.
@@ -266,6 +266,7 @@ impl<L: Loaded> Lifecycle<L> {
                     | Effect::CallDeactivate
                     | Effect::Rebuild
                     | Effect::Recall
+                    | Effect::SetMode(_)
                     | Effect::ReadParams(_)
                     | Effect::RebuildMidiMapping
                     | Effect::RunMainThread
@@ -377,6 +378,17 @@ impl<L: Loaded> Lifecycle<L> {
             | Effect::Recall => {
                 unreachable!("transitions and moves are applied by `apply`")
             }
+            Effect::SetMode(mode) => match self.control() {
+                Some(control) => match control.set_render_mode(main, mode) {
+                    ModeTold::Took => Reply::Answered(Told::ModeTook(mode)),
+                    ModeTold::Refused => Reply::Answered(Told::ModeRefused(mode)),
+                    // The host asked a mode of a plugin that has none: it did
+                    // not take it, as a served plugin's server says.
+                    ModeTold::Unsupported => Reply::Answered(Told::ModeRefused(mode)),
+                    ModeTold::Asked => Reply::Asked,
+                },
+                None => Reply::NotActive,
+            },
             Effect::ReadLatency => match self {
                 Self::Active { controller, .. } => Reply::Latency(controller.latency(main)),
                 _ => Reply::NotActive,

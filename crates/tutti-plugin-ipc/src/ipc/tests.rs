@@ -193,6 +193,21 @@ fn mock_with(
     format: tutti_plugin_types::PluginFormat,
     load_editor: Option<crate::EditorLoader>,
 ) -> (Ipc, Mock) {
+    mock_featuring(
+        origin,
+        format,
+        load_editor,
+        tutti_plugin_types::Features::RENDER_MODE,
+    )
+}
+
+/// [`mock_with`] whose plugin has `features`.
+fn mock_featuring(
+    origin: tutti_plugin_types::PluginRef,
+    format: tutti_plugin_types::PluginFormat,
+    load_editor: Option<crate::EditorLoader>,
+    features: tutti_plugin_types::Features,
+) -> (Ipc, Mock) {
     use crate::transport::broker_pair;
     use std::io::Read;
     let layout = SlabLayout {
@@ -431,6 +446,7 @@ fn mock_with(
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             latency_samples: Samples::new(5),
+            features,
             ..PluginWiring::default()
         },
         format: FloatWidth::F32,
@@ -1276,11 +1292,10 @@ fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
     let (wait, _switch) = ipc.watch();
     let (mut processor, mut controller) = activate(ipc, 32);
     assert!(AnyThread::set_render_mode(&controller, RenderMode::Offline));
-    assert!(Control::set_render_mode(
-        &mut controller,
-        main_thread(),
-        RenderMode::Offline
-    ));
+    assert_eq!(
+        Control::set_render_mode(&mut controller, main_thread(), RenderMode::Offline),
+        tutti_plugin_types::ModeTold::Asked
+    );
     assert!(!wait.armed(), "a render mode is not the wait");
     for _ in 0..3 {
         render_silence_as(&mut processor, 32, true);
@@ -1294,6 +1309,35 @@ fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
             })
         ))),
         "the plugin was told offline all the same"
+    );
+}
+
+/// **A plugin with no render mode is not told one**: the handle's call answers
+/// `false` and queues nothing, as a plugin loaded in this process answers.
+#[test]
+fn a_plugin_without_a_render_mode_is_not_asked_for_one() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock_featuring(
+        tutti_plugin_types::PluginRef::file("test.vst3"),
+        tutti_plugin_types::PluginFormat::Vst3,
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
+        tutti_plugin_types::Features::empty(),
+    );
+    let (_processor, controller) = activate(ipc, 32);
+    assert!(!AnyThread::set_render_mode(
+        &controller,
+        RenderMode::Offline
+    ));
+    // A round trip after it: the control lane has sent all it was given.
+    assert!(AnyThread::save_state(&controller, tutti_plugin_types::StateUse::Project).is_ok());
+    assert!(
+        !server.received.holds(|log: &[Sent]| log
+            .iter()
+            .any(|m| matches!(m, Sent::Control(ControlRequest::SetRenderMode { .. })))),
+        "nothing was queued"
     );
 }
 

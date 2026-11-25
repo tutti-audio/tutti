@@ -22,6 +22,7 @@ fn host::node::PluginClient::outputs
 fn host::node::PluginClient::plugin
 fn host::node::PluginClient::presets
 fn host::node::PluginClient::rebinder
+fn host::node::PluginClient::render_mode
 fn host::node::fork::PluginClient::fork_health
 fn host::node::fork::PluginClient::fork_instance
 fn host::node::fork::PluginClient::fork_instance

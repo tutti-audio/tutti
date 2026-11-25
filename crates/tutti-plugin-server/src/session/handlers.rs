@@ -9,11 +9,11 @@ use tutti_plugin_ipc::{
     AppMidiMapApplied, ArmPluginMidiLearn, CloseEditor, CurrentPreset, EditorOpened, EditorSized,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
     GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling,
-    LoadPlugin, LoadPreset, LoadState, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
-    ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded,
-    PluginMidiLearn, PresetList, PresetLoaded, SampleRateSet, SaveState, SavedState, SetAppMidiMap,
-    SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
-    SetupSharedMemory, Shutdown, StageState, Stop, Wiring, Working,
+    LoadPlugin, LoadPreset, LoadState, ModeOutcome, OpenEditor, OpenLane, ParameterList,
+    ParameterNormalized, ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText,
+    PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, SampleRateSet,
+    SaveState, SavedState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
+    SetSampleRate, SetTrackInfo, SetupSharedMemory, Shutdown, StageState, Stop, Wiring, Working,
 };
 use tutti_plugin_types::{
     MAX_STATE_BYTES, MidiMapApplied, ParameterQueue, PluginLearnError, PluginRef, ServerError,
@@ -400,17 +400,21 @@ impl Handle<SetSampleRate> for Session {
 }
 
 impl Handle<SetRenderMode> for Session {
-    fn handle(&mut self, cx: &mut Handling<'_>, SetRenderMode { mode }: SetRenderMode) {
-        // A plugin that has the capability (`Features::RENDER_MODE`) and
-        // refuses the mode tells the host as news
-        // (`News::RenderModeNotApplied`), through the plugin's poll; one
-        // without it is left in its mode and says nothing, since the
-        // host has the capability.
-        if let Some(plugin) = self.plugin.as_mut()
-            && !plugin.plugin_mut().set_render_mode(cx.main, mode)
-        {
+    fn handle(
+        &mut self,
+        cx: &mut Handling<'_>,
+        SetRenderMode { mode }: SetRenderMode,
+    ) -> Result<RenderModeSet, ServerError> {
+        // A server with no plugin has nothing to tell the mode to, as a
+        // plugin not yet prepared has not: it did not take it.
+        let outcome = match self.plugin.as_mut() {
+            Some(plugin) => plugin.plugin_mut().set_render_mode(cx.main, mode),
+            None => ModeOutcome::Refused,
+        };
+        if outcome == ModeOutcome::Refused {
             tracing::debug!(?mode, "plugin did not accept the render mode");
         }
+        Ok(RenderModeSet { mode, outcome })
     }
 }
 
