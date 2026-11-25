@@ -225,14 +225,6 @@ impl ParamPorts {
         self.whole >> k & 1 == 1
     }
 
-    /// Whether any port's base is smoothed by the graph: a unit with one
-    /// steps its params every block, to see its base move.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn smooths(&self) -> bool {
-        self.len != 0 && self.whole(u32::MAX).whole != self.whole
-    }
-
     /// The params, in port order.
     #[must_use]
     pub fn as_slice(&self) -> &[UnitAddr] {
@@ -1172,6 +1164,12 @@ enum Shown {
 }
 
 impl PortState {
+    /// Whether the port is undriven with nothing running: no source, no frames
+    /// last block, no declick.
+    fn at_rest(&self) -> bool {
+        self.source.is_none() && !self.modulated && !self.progress.running()
+    }
+
     /// A port that has not run.
     fn new() -> Self {
         Self {
@@ -1259,6 +1257,12 @@ impl Smooth {
         line
     }
 
+    /// Whether the base is seeded, at rest on `base`: this block changes
+    /// nothing.
+    fn holds(&self, base: f64) -> bool {
+        self.seeded && !self.progress.running() && base.to_bits() == self.to.to_bits()
+    }
+
     /// Whether a ramp has frames left to run.
     fn running(&self) -> bool {
         self.progress.running()
@@ -1318,6 +1322,9 @@ pub(crate) struct ParamState<F: Float> {
     /// Where the unit is in its blocks: its first takes every port's source
     /// without a declick (see the module docs), and steps every port.
     run: Run,
+    /// Whether a port the graph smooths has stepped: the unit steps its
+    /// params every block, to see their bases move.
+    smooths: bool,
     /// Each port's live range reader, in port order (see [`ParamRanges`]);
     /// empty for a unit with no declared params and for one whose ports are
     /// unbounded.
@@ -1440,6 +1447,7 @@ impl<F: Float> Default for ParamState<F> {
             delivered: PortFrames::new(0, 0),
             busy: false,
             run: Run::New,
+            smooths: false,
             ranges: Vec::new(),
             lanes: Vec::new(),
         }
@@ -1467,6 +1475,7 @@ impl<F: Float> ParamState<F> {
             // seed each port (see `Run::First`).
             busy: true,
             run: Run::New,
+            smooths: false,
             ranges,
             lanes,
         }
@@ -1478,6 +1487,13 @@ impl<F: Float> ParamState<F> {
     #[inline]
     pub(crate) fn busy(&self) -> bool {
         self.busy
+    }
+
+    /// Whether a port of the unit has its base smoothed by the graph, which
+    /// is read every block ([`node_port`](Self::node_port)).
+    #[inline]
+    pub(crate) fn smooths(&self) -> bool {
+        self.smooths
     }
 
     /// State for **one** port at blocks of up to `max` frames, clamping to
@@ -1539,8 +1555,11 @@ impl<F: Float> ParamState<F> {
     /// says so.
     #[inline]
     pub(crate) fn begin(&mut self) {
-        self.delivered.begin();
-        self.busy = false;
+        // Only a port that delivered last block left anything to clear.
+        if self.busy {
+            self.delivered.begin();
+            self.busy = false;
+        }
         self.run = match self.run {
             Run::New => Run::First,
             Run::First | Run::Later => Run::Later,
@@ -1556,12 +1575,7 @@ impl<F: Float> ParamState<F> {
     /// every block to see it move.
     #[inline]
     pub(crate) fn at_rest(&self, k: usize, whole: bool) -> bool {
-        let st = &self.ports[k];
-        whole
-            && self.run != Run::First
-            && st.source.is_none()
-            && !st.modulated
-            && !st.progress.running()
+        whole && self.run != Run::First && self.ports[k].at_rest()
     }
 
     /// A node that cannot say its base is never driven or smoothed: it reads
@@ -1612,6 +1626,7 @@ impl<F: Float> ParamState<F> {
     /// while it leaves a source: the source's declick alone carries that.
     /// With a source, the ramp is what the port reads before the source's
     /// first event.
+    #[inline]
     pub(crate) fn node_port(
         &mut self,
         k: usize,
@@ -1626,6 +1641,32 @@ impl<F: Float> ParamState<F> {
             self.unsaid(k);
             return;
         };
+        let st = &self.ports[k];
+        // The common block: nothing drives it, nothing runs, the base held.
+        if m.is_none()
+            && self.run != Run::First
+            && st.shown == Shown::Idle
+            && st.at_rest()
+            && st.smooth.holds(b1)
+        {
+            return;
+        }
+        self.step_port(k, param, frames, declick, m, b1, whole);
+    }
+
+    /// [`node_port`](Self::node_port) for a port with something to do.
+    #[inline(never)]
+    fn step_port(
+        &mut self,
+        k: usize,
+        param: UnitAddr,
+        frames: usize,
+        declick: Samples,
+        m: Option<(EventOutputPort, &[ParamEvent])>,
+        b1: f64,
+        whole: bool,
+    ) {
+        self.smooths |= !whole;
         let first = self.run == Run::First;
         let st = &mut self.ports[k];
         let leaving = m.is_none() && (st.source.is_some() || st.progress.running());

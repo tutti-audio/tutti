@@ -440,7 +440,7 @@ pub(super) fn run_params<
     let mut driven = plan.program.param_ports[h.ports.params.range()]
         .iter()
         .peekable();
-    let declared = h.pu.shape.params;
+    let declared = &h.pu.shape.params;
     let declick = h.declick;
     // The state was sized from the unit's shape; a fade's two units declare
     // the same params (checked where it is asked for), so the two agree.
@@ -476,9 +476,7 @@ pub(super) fn run_params<
 /// pays this one branch.
 #[inline]
 pub(super) fn steps_params<F: Float>(u: &Unit<F>, h: &Head<'_, '_>) -> bool {
-    !h.ports.params.is_empty()
-        || u.params.busy()
-        || (h.pu.shape.params.smooths() && u.params.port_count() > 0)
+    !h.ports.params.is_empty() || u.params.busy() || u.params.smooths()
 }
 
 /// [`node_op`], with the unit's params already run this block when
