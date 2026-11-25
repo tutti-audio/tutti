@@ -38,6 +38,11 @@ pub enum Vst3Error {
     /// state cannot change under it.
     #[error("the audio half is out")]
     Busy,
+    /// Not a `tresult`: host code panicked while it held the plugin, which ends
+    /// the instance: no entry runs on it again, and only deactivating it still
+    /// does anything.
+    #[error("host code panicked while holding the plugin, so it is never called again")]
+    Poisoned,
     /// Any other code, passed through unmapped.
     #[error("tresult {0}")]
     Other(i32),

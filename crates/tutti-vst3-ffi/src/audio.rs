@@ -1,14 +1,15 @@
 //! The audio-thread half of a plugin: `IAudioProcessor::process` and
 //! `setProcessing`.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, MutexGuard};
 
-use tutti_rt::Mutex;
+use tutti_rt::{Claim, ClaimGuard};
 use vst3::Steinberg::Vst::{
-    IAudioProcessor, IAudioProcessorTrait, ProcessContext, ProcessData, ProcessSetup,
+    IAudioProcessor, IAudioProcessorTrait, IComponent, IComponentTrait, ProcessContext,
+    ProcessData, ProcessSetup,
 };
-use vst3::{ComPtr, ComRef, ComWrapper};
+use vst3::{ComPtr, ComWrapper};
 
 use crate::bus_buffers::BoundBuses;
 use crate::com::{EventList, ParameterChangesImpl, event_list_ptr, param_changes_ptr};
@@ -29,8 +30,6 @@ pub(crate) struct Setup {
 /// the halves that outlive no call of it.
 #[derive(Debug, Default)]
 pub(crate) struct State {
-    /// `setActive(1)` has run and `setActive(0)` has not.
-    pub(crate) active: bool,
     /// The last successful `setupProcessing`, cleared when the bus
     /// arrangement changes under it or a later setup is refused.
     pub(crate) setup: Option<Setup>,
@@ -59,131 +58,131 @@ impl Arrangement {
 /// The processor entry, its state and its claim, shared by a plugin and its
 /// audio half.
 ///
-/// The audio half holds no owning reference to the plugin: this holds a plain
-/// pointer to the processor, which the plugin keeps alive until it retires the
-/// claim in its `Drop`. So the plugin's destruction, and the unloading of its
-/// module, always happen on the thread that drops the [`Plugin`](crate::Plugin),
-/// never on the audio thread that drops an [`AudioSide`].
-///
-/// The lock is the claim: `process` and `set_processing` run under it, and so
-/// does every control-side state change and the teardown, so none of them
-/// overlaps another. The audio thread only ever `try_lock`s, and refuses the
-/// block when it cannot have it, so it never waits on a control thread.
+/// The claim owns the data ([`Live`]): `process` and `set_processing` run
+/// under it, and so does every control-side state change, so none of them
+/// overlaps another. The audio thread only ever `try_claim`s, and refuses the
+/// block when it cannot have it, so it never waits on a control thread. The
+/// teardown takes the data out for good, so no entry reaches the processor
+/// afterwards. The claim holds a reference to the processor, which the audio
+/// half reaches through its `Arc`; the plugin's drop takes it out
+/// ([`deactivate`](Self::deactivate)) and releases it there, before releasing
+/// its own references. So the audio half never holds the last reference, or a
+/// live one, and the plugin's destruction and the unloading of its module
+/// happen on the thread that drops the [`Plugin`](crate::Plugin), never on the
+/// audio thread that drops an [`AudioSide`].
 pub(crate) struct Shared {
-    /// Set, first, by the plugin's `Drop`: the processor is going away.
-    retired: AtomicBool,
     /// An [`AudioSide`] exists. While it does, control-side state changes are
     /// refused.
     audio_out: AtomicBool,
-    state: Mutex<State>,
-    processor: ProcessorPtr,
+    /// `setActive(1)` has run and `setActive(0)` has not. Written under the
+    /// claim, so it answers right when the claim is dead.
+    active: AtomicBool,
+    live: Claim<Live>,
 }
 
-/// The processor's address, for the audio half to call through.
-struct ProcessorPtr(*mut IAudioProcessor);
+/// What the claim owns: the plugin's state and its processor.
+pub(crate) struct Live {
+    pub(crate) state: State,
+    pub(crate) processor: ComPtr<IAudioProcessor>,
+}
 
-// SAFETY: the pointer is only dereferenced under `Shared`'s lock while it is
-// not retired, and the plugin keeps the object it points at alive until it has
-// retired and taken that lock (see `Shared`), so moving or sharing the address
-// moves no access of its own.
-unsafe impl Send for ProcessorPtr {}
-// SAFETY: as for `Send`.
-unsafe impl Sync for ProcessorPtr {}
+// SAFETY: a VST3 interface pointer has no thread affinity: `addRef` and
+// `release` are atomic in a conforming plugin, and `process` and
+// `setProcessing` are specified for the audio thread. Every call on it here is
+// under the claim, so moving the `Live` to another thread adds no concurrent
+// call. The plugin's drop takes the `Live` out (`Shared::deactivate`) and
+// releases it before the plugin's own references; a `Plugin` that is leaked
+// leaks its `Arc<Shared>` with it, so the audio half never drops the last one.
+unsafe impl Send for Live {}
 
 impl Shared {
     pub(crate) fn new(processor: &ComPtr<IAudioProcessor>) -> Self {
         Self {
-            retired: AtomicBool::new(false),
             audio_out: AtomicBool::new(false),
-            state: Mutex::new(State::default()),
-            processor: ProcessorPtr(processor.as_ptr()),
+            active: AtomicBool::new(false),
+            live: Claim::new(Live {
+                state: State::default(),
+                processor: processor.clone(),
+            }),
         }
     }
 
-    /// The claim for one audio-side entry: `None` once retired, or while a
+    /// The claim, waiting out an entry in flight, with no check of the audio
+    /// half (reads and a call on the plugin's other interfaces): `None` once
+    /// torn down or dead.
+    pub(crate) fn claim(&self) -> Option<ClaimGuard<'_, Live>> {
+        self.live.claim()
+    }
+
+    /// Whether `setActive(1)` has run and `setActive(0)` has not.
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+
+    /// Records an activation, under the claim (`live`, which must be this
+    /// `Shared`'s), and forgets the bus layout of the one before.
+    pub(crate) fn record_activation(&self, live: &mut ClaimGuard<'_, Live>, active: bool) {
+        live.state.buses = None;
+        self.active.store(active, Ordering::Release);
+    }
+
+    /// The claim for one audio-side entry: [`Vst3Error::Poisoned`] when a
+    /// holder panicked, [`Vst3Error::NotInitialized`] once torn down or while a
     /// control thread holds it. Never blocks.
-    pub(crate) fn try_enter(&self) -> Option<MutexGuard<'_, State>> {
-        if self.retired.load(Ordering::Acquire) {
-            return None;
+    fn try_enter(&self) -> Result<ClaimGuard<'_, Live>, Vst3Error> {
+        self.live.try_claim().ok_or_else(|| self.refusal())
+    }
+
+    fn refusal(&self) -> Vst3Error {
+        if self.live.is_dead() {
+            Vst3Error::Poisoned
+        } else {
+            Vst3Error::NotInitialized
         }
-        let guard = self.state.try_lock()?;
-        // The flag is checked again under the lock: `teardown` sets it and then
-        // takes this lock, so a guard obtained after the teardown finished
-        // always sees it set, and never reaches the freed processor.
-        if self.retired.load(Ordering::Acquire) {
-            return None;
-        }
-        Some(guard)
     }
 
     /// The claim, for a control-side change: waits out an entry in flight.
-    /// Refused with [`Vst3Error::Busy`] while an audio half exists.
-    pub(crate) fn lock_for_control(&self) -> Result<MutexGuard<'_, State>, Vst3Error> {
-        let state = self.state.lock();
+    /// Refused with [`Vst3Error::Poisoned`] when a holder panicked,
+    /// [`Vst3Error::NotInitialized`] once torn down, and [`Vst3Error::Busy`]
+    /// while an audio half exists.
+    pub(crate) fn lock_for_control(&self) -> Result<ClaimGuard<'_, Live>, Vst3Error> {
+        let live = self.live.claim().ok_or_else(|| self.refusal())?;
         if self.audio_out.load(Ordering::Acquire) {
             return Err(Vst3Error::Busy);
         }
-        Ok(state)
+        Ok(live)
     }
 
-    /// The claim, with no check of the audio half (teardown and reads).
-    pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock()
-    }
-
-    /// Marks the processor as going away and waits out an entry in flight. The
-    /// guard keeps every later entry out until it drops, and the flag keeps
-    /// them out after.
-    pub(crate) fn retire(&self) -> MutexGuard<'_, State> {
-        self.retired.store(true, Ordering::Release);
-        self.state.lock()
-    }
-
-    /// [`retire`](Self::retire), and returns whether the plugin was active; the
-    /// state is cleared under the lock, so no guard taken later sees an active,
-    /// set-up plugin.
-    pub(crate) fn teardown(&self) -> (MutexGuard<'_, State>, bool) {
-        let mut state = self.retire();
-        let was_active = state.active;
-        *state = State::default();
-        (state, was_active)
-    }
-
-    /// The claim, for a control-side call on the plugin's other interfaces:
-    /// `None` once retired. Serialises with `teardown`.
-    pub(crate) fn lock_live(&self) -> Option<MutexGuard<'_, State>> {
-        let state = self.state.lock();
-        (!self.is_retired()).then_some(state)
-    }
-
-    pub(crate) fn is_retired(&self) -> bool {
-        self.retired.load(Ordering::Acquire)
+    /// Ends the claim, which waits out an entry in flight and refuses every
+    /// later one, and then stops and deactivates a plugin recorded active (one
+    /// dropped while activated, its halves never rejoined, or one whose claim
+    /// died): `terminate` is for an inactive component. A second call finds
+    /// nothing to end and calls nothing, so the plugin is deactivated once,
+    /// whoever reaches it first.
+    pub(crate) fn deactivate(&self, component: &ComPtr<IComponent>) {
+        let live = self.live.take();
+        let was_active = self.active.swap(false, Ordering::AcqRel);
+        if let Some(live) = live.filter(|_| was_active) {
+            // SAFETY: plain calls on live interfaces; the claim is gone, so the
+            // audio half is not inside `process` and never enters again.
+            unsafe {
+                live.processor.setProcessing(0);
+                let _ = component.setActive(0);
+            }
+        }
     }
 
     /// Takes the one audio half, if the plugin is set up and active and none
     /// is out.
     pub(crate) fn take_audio_side(self: &Arc<Self>) -> Option<AudioSide> {
-        let state = self.state.lock();
-        let ready = !self.is_retired() && state.active && state.setup.is_some();
+        let live = self.claim()?;
+        let ready = self.is_active() && live.state.setup.is_some();
         if !ready || self.audio_out.swap(true, Ordering::AcqRel) {
             return None;
         }
         Some(AudioSide {
             shared: self.clone(),
         })
-    }
-
-    /// The processor, for a call made under the claim.
-    ///
-    /// # Safety
-    ///
-    /// A guard from `try_enter` or `lock_live` is alive: it was obtained with
-    /// `retired` still unset, and `teardown` sets `retired` before it takes the
-    /// lock and destroys the plugin only after releasing it, so while the guard
-    /// is held the plugin still owns the object.
-    unsafe fn processor(&self) -> Option<ComRef<'_, IAudioProcessor>> {
-        // SAFETY: the pointer is the processor the plugin keeps alive (caller).
-        unsafe { ComRef::from_raw(self.processor.0) }
     }
 }
 
@@ -248,20 +247,18 @@ impl AudioSide {
     /// [`Vst3Error::NotInitialized`] if the plugin is gone or not active, or the
     /// plugin's refusal.
     pub fn set_processing(&mut self, on: bool) -> Result<(), Vst3Error> {
-        let state = self.shared.try_enter().ok_or(Vst3Error::NotInitialized)?;
-        if !state.active {
+        let live = self.shared.try_enter()?;
+        if !self.shared.is_active() {
             return Err(Vst3Error::NotInitialized);
         }
-        // SAFETY: the claim is held and the plugin is not retired (`try_enter`).
-        let processor = unsafe { self.shared.processor() }.ok_or(Vst3Error::NotInitialized)?;
         // SAFETY: a plain call on the live processor, under the claim.
-        check(unsafe { processor.setProcessing(u8::from(on)) })
+        check(unsafe { live.processor.setProcessing(u8::from(on)) })
     }
 
     /// Renders one block through `IAudioProcessor::process`.
     ///
     /// Allocation-free and wait-free: it takes the instance's claim with a
-    /// `try_lock`, so it never waits on a control thread.
+    /// `try_claim`, so it never waits on a control thread.
     ///
     /// # Errors
     ///
@@ -274,12 +271,13 @@ impl AudioSide {
     ///   `int32`.
     /// - otherwise the plugin's refusal.
     pub fn process(&mut self, mut io: ProcessIo<'_>) -> Result<(), Vst3Error> {
-        let state = self.shared.try_enter().ok_or(Vst3Error::NotInitialized)?;
-        let setup = match (state.active, state.setup) {
+        let live = self.shared.try_enter()?;
+        let setup = match (self.shared.is_active(), live.state.setup) {
             (true, Some(setup)) => setup,
             _ => return Err(Vst3Error::NotInitialized),
         };
-        let arrangement_fits = state
+        let arrangement_fits = live
+            .state
             .buses
             .as_ref()
             .is_none_or(|a| a.matches(io.inputs.bus_channels(), io.outputs.bus_channels()));
@@ -323,15 +321,12 @@ impl AudioSide {
         #[cfg(not(feature = "conformance"))]
         let _ = io.setup;
 
-        // SAFETY: the claim (`state`) is held and the plugin is not retired, so
-        // the processor is alive and not being torn down.
-        let processor = unsafe { self.shared.processor() }.ok_or(Vst3Error::NotInitialized)?;
         // SAFETY: every pointer in `data` outlives the call and is valid for its field:
         // the bus tables point at slices of at least `numSamples` samples (checked
         // above), and the lists and context are `io`'s borrows. Input channels are
         // `*mut` in the ABI but shared slices here; the plugin must not write them.
-        let result = check(unsafe { processor.process(&mut data) });
-        drop(state);
+        let result = check(unsafe { live.processor.process(&mut data) });
+        drop(live);
         result
     }
 }
@@ -361,8 +356,8 @@ impl AudioSide {
     /// [`Vst3Error::NotInitialized`] if the plugin is gone, not active or not set
     /// up, or a control thread holds the claim; otherwise the plugin's refusal.
     pub fn flush(&mut self, io: FlushIo<'_>) -> Result<(), Vst3Error> {
-        let state = self.shared.try_enter().ok_or(Vst3Error::NotInitialized)?;
-        let setup = match (state.active, state.setup) {
+        let live = self.shared.try_enter()?;
+        let setup = match (self.shared.is_active(), live.state.setup) {
             (true, Some(setup)) => setup,
             _ => return Err(Vst3Error::NotInitialized),
         };
@@ -380,12 +375,10 @@ impl AudioSide {
             outputEvents: std::ptr::null_mut(),
             processContext: std::ptr::null_mut(),
         };
-        // SAFETY: the claim is held and the plugin is not retired (`try_enter`).
-        let processor = unsafe { self.shared.processor() }.ok_or(Vst3Error::NotInitialized)?;
         // SAFETY: `data` holds no bus, event list or context, and the two
         // parameter lists are `io`'s borrows, alive for the call.
-        let result = check(unsafe { processor.process(&mut data) });
-        drop(state);
+        let result = check(unsafe { live.processor.process(&mut data) });
+        drop(live);
         result
     }
 }
@@ -416,19 +409,72 @@ mod tests {
     use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PointPool;
     use vst3::Class;
-    use vst3::Steinberg::Vst::{ProcessSetup, SpeakerArrangement};
-    use vst3::Steinberg::{kResultOk, tresult};
+    use vst3::Steinberg::Vst::{
+        BusDirection, BusInfo, IoMode, MediaType, ProcessSetup, RoutingInfo, SpeakerArrangement,
+    };
+    use vst3::Steinberg::{
+        FUnknown, IBStream, IPluginBaseTrait, TBool, TUID, kNotImplemented, kResultOk, tresult,
+    };
 
     const BLOCK: usize = 64;
 
-    /// A processor that counts the calls that reach it.
+    /// A component and processor that counts the calls that reach it.
     struct Stub {
         processed: AtomicUsize,
         processing: AtomicUsize,
+        deactivated: AtomicUsize,
     }
 
     impl Class for Stub {
-        type Interfaces = (IAudioProcessor,);
+        type Interfaces = (IAudioProcessor, IComponent);
+    }
+
+    impl IPluginBaseTrait for Stub {
+        unsafe fn initialize(&self, _: *mut FUnknown) -> tresult {
+            kResultOk
+        }
+        unsafe fn terminate(&self) -> tresult {
+            kResultOk
+        }
+    }
+
+    impl IComponentTrait for Stub {
+        unsafe fn getControllerClassId(&self, _: *mut TUID) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn setIoMode(&self, _: IoMode) -> tresult {
+            kResultOk
+        }
+        unsafe fn getBusCount(&self, _: MediaType, _: BusDirection) -> i32 {
+            0
+        }
+        unsafe fn getBusInfo(
+            &self,
+            _: MediaType,
+            _: BusDirection,
+            _: i32,
+            _: *mut BusInfo,
+        ) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn getRoutingInfo(&self, _: *mut RoutingInfo, _: *mut RoutingInfo) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn activateBus(&self, _: MediaType, _: BusDirection, _: i32, _: TBool) -> tresult {
+            kResultOk
+        }
+        unsafe fn setActive(&self, state: TBool) -> tresult {
+            if state == 0 {
+                self.deactivated.fetch_add(1, Ordering::SeqCst);
+            }
+            kResultOk
+        }
+        unsafe fn setState(&self, _: *mut IBStream) -> tresult {
+            kNotImplemented
+        }
+        unsafe fn getState(&self, _: *mut IBStream) -> tresult {
+            kNotImplemented
+        }
     }
 
     impl IAudioProcessorTrait for Stub {
@@ -484,13 +530,14 @@ mod tests {
         let stub = ComWrapper::new(Stub {
             processed: AtomicUsize::new(0),
             processing: AtomicUsize::new(0),
+            deactivated: AtomicUsize::new(0),
         });
         let ptr = stub.to_com_ptr::<IAudioProcessor>().unwrap();
         let shared = Arc::new(Shared::new(&ptr));
         {
-            let mut state = shared.lock();
-            state.active = true;
-            state.setup = Some(Setup {
+            let mut live = shared.claim().expect("live");
+            shared.record_activation(&mut live, true);
+            live.state.setup = Some(Setup {
                 symbolic_size: width.symbolic_size(),
                 max_block,
             });
@@ -536,6 +583,21 @@ mod tests {
                 setup: &setup,
             };
             self.side.process(io)
+        }
+
+        fn set_active(&self, active: bool) {
+            let mut live = self.shared.claim().expect("live");
+            self.shared.record_activation(&mut live, active);
+        }
+
+        fn deactivate(&self) {
+            let component = self.stub.to_com_ptr::<IComponent>().unwrap();
+            self.shared.deactivate(&component);
+        }
+
+        /// The `setActive(0)` calls that reached the plugin.
+        fn deactivated(&self) -> usize {
+            self.stub.deactivated.load(Ordering::SeqCst)
         }
 
         fn processed(&self) -> usize {
@@ -620,23 +682,27 @@ mod tests {
         assert_eq!(rig.processed(), 0);
     }
 
-    /// Once retired, the half answers `NotInitialized` and nothing reaches the
+    /// Once torn down, the half answers `NotInitialized` and nothing reaches the
     /// plugin; a deactivated plugin answers the same.
     #[test]
-    fn a_retired_or_deactivated_plugin_is_not_called() {
+    fn a_torn_down_or_deactivated_plugin_is_not_called() {
         let mut rig = rig(SampleWidth::F32, BLOCK);
-        rig.shared.lock().active = false;
+        rig.set_active(false);
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
-        rig.shared.lock().active = true;
+        rig.set_active(true);
         assert_eq!(rig.run_f32(8), Ok(()));
-        drop(rig.shared.retire());
+        rig.deactivate();
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
         assert_eq!(
             rig.side.set_processing(true),
             Err(Vst3Error::NotInitialized)
         );
         assert_eq!(rig.processed(), 1);
-        assert_eq!(rig.stub.processing.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            rig.stub.processing.load(Ordering::SeqCst),
+            1,
+            "the deactivation's own setProcessing(0)"
+        );
     }
 
     /// The audio half is handed out once, only for a set-up, active plugin; the
@@ -653,6 +719,7 @@ mod tests {
         let stub = ComWrapper::new(Stub {
             processed: AtomicUsize::new(0),
             processing: AtomicUsize::new(0),
+            deactivated: AtomicUsize::new(0),
         });
         let fresh = Arc::new(Shared::new(&stub.to_com_ptr::<IAudioProcessor>().unwrap()));
         assert!(fresh.take_audio_side().is_none(), "not set up, not active");
@@ -671,23 +738,102 @@ mod tests {
     fn the_audio_half_never_waits_on_a_control_thread() {
         let mut rig = rig(SampleWidth::F32, BLOCK);
         let shared = rig.shared.clone();
-        let held = shared.lock();
+        let held = shared.claim().expect("live");
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
         drop(held);
         assert_eq!(rig.run_f32(8), Ok(()));
     }
 
-    /// Teardown clears the state under the lock, so whoever takes the lock
-    /// afterwards finds the plugin neither active nor set up, and says whether
-    /// it was active.
+    /// Deactivating ends the claim for good, whether or not the plugin was
+    /// active: no control or audio entry runs after it. An active plugin gets
+    /// one `setActive(0)` however often it is asked, an inactive one none.
     #[test]
-    fn teardown_clears_the_state_it_found() {
-        let rig = rig(SampleWidth::F32, BLOCK);
-        let (state, was_active) = rig.shared.teardown();
-        assert!(was_active);
-        assert!(!state.active && state.setup.is_none() && state.buses.is_none());
-        drop(state);
-        assert!(rig.shared.lock_live().is_none(), "retired for good");
+    fn deactivating_ends_the_claim_and_calls_an_active_plugin_once() {
+        for (active, calls) in [(true, 1), (false, 0)] {
+            let mut rig = rig(SampleWidth::F32, BLOCK);
+            rig.set_active(active);
+            for _ in 0..2 {
+                rig.deactivate();
+                assert_eq!(rig.deactivated(), calls);
+                assert!(rig.shared.claim().is_none(), "gone for good");
+                assert!(!rig.shared.is_active());
+                assert_eq!(
+                    rig.shared.lock_for_control().map(drop),
+                    Err(Vst3Error::NotInitialized)
+                );
+                assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
+            }
+        }
+    }
+
+    /// A panic under the claim poisons it: both sides answer `Poisoned` and
+    /// `is_active` still answers. Deactivating still reaches the plugin, once,
+    /// and afterwards the answer is `NotInitialized`.
+    #[test]
+    fn a_dead_claim_answers_poisoned_and_is_deactivated_once() {
+        let mut rig = rig(SampleWidth::F32, BLOCK);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _live = rig.shared.claim().expect("live");
+            panic!("host code panics under the claim");
+        }));
+        assert!(caught.is_err());
+        assert_eq!(rig.run_f32(8), Err(Vst3Error::Poisoned));
+        assert_eq!(rig.side.set_processing(true), Err(Vst3Error::Poisoned));
+        assert_eq!(
+            rig.shared.lock_for_control().map(drop),
+            Err(Vst3Error::Poisoned)
+        );
+        assert!(rig.shared.is_active(), "active reads right on a dead claim");
+        for _ in 0..2 {
+            rig.deactivate();
+            assert_eq!(rig.deactivated(), 1);
+            assert!(!rig.shared.is_active());
+            assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
+            assert_eq!(
+                rig.shared.lock_for_control().map(drop),
+                Err(Vst3Error::NotInitialized)
+            );
+        }
+        assert_eq!(rig.processed(), 0);
+    }
+
+    /// A block racing a teardown either runs whole or is refused: the plugin
+    /// is never called once the teardown returned, and a call that began
+    /// finishes before it does.
+    #[test]
+    fn a_block_racing_a_teardown_runs_whole_or_is_refused() {
+        let mut rig = rig(SampleWidth::F32, BLOCK);
+        let shared = rig.shared.clone();
+        let component = rig.stub.to_com_ptr::<IComponent>().unwrap();
+        let blocks = std::thread::scope(|s| {
+            let audio = s.spawn(|| {
+                let mut ran = 0;
+                loop {
+                    match rig.run_f32(8) {
+                        Ok(()) => ran += 1,
+                        Err(Vst3Error::NotInitialized) => {
+                            if rig.shared.claim().is_none() {
+                                return ran;
+                            }
+                        }
+                        Err(other) => panic!("a block is whole or refused: {other:?}"),
+                    }
+                }
+            });
+            shared.deactivate(&component);
+            audio.join().expect("audio thread")
+        });
+        assert_eq!(
+            rig.processed(),
+            blocks,
+            "every admitted block reached the plugin once"
+        );
+        assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
+        assert_eq!(
+            rig.processed(),
+            blocks,
+            "nothing is called after the teardown"
+        );
     }
 
     /// A binding whose buses are not the plugin's arrangement is refused: a
@@ -696,19 +842,19 @@ mod tests {
     #[test]
     fn buses_that_are_not_the_plugins_arrangement_are_refused() {
         let mut rig = rig(SampleWidth::F32, BLOCK);
-        rig.shared.lock().buses = Some(Arrangement {
+        rig.shared.claim().expect("live").state.buses = Some(Arrangement {
             inputs: vec![3].into(),
             outputs: vec![3].into(),
         });
         assert_eq!(rig.run_f32(8), Err(Vst3Error::InvalidArgument));
         assert_eq!(rig.processed(), 0);
-        rig.shared.lock().buses = Some(Arrangement {
+        rig.shared.claim().expect("live").state.buses = Some(Arrangement {
             inputs: vec![2].into(),
             outputs: vec![2].into(),
         });
         assert_eq!(rig.run_f32(8), Ok(()));
         // A direction in which the plugin has no audio bus accepts any binding.
-        rig.shared.lock().buses = Some(Arrangement {
+        rig.shared.claim().expect("live").state.buses = Some(Arrangement {
             inputs: Box::new([]),
             outputs: vec![2].into(),
         });

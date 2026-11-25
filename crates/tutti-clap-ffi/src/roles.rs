@@ -129,7 +129,7 @@ impl ThreadRoles {
         Self {
             main: std::thread::current().id(),
             audio: AtomicU64::new(NO_AUDIO_THREAD),
-            claim: Claim::new(),
+            claim: Claim::new(()),
         }
     }
 
