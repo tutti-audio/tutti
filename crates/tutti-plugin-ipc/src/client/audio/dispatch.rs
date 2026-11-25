@@ -11,11 +11,11 @@ use super::messages::{
     Unsolicited,
 };
 use super::payload_pool::PayloadPool;
-use crate::ProcessAudioData;
 use crate::conversation::{Conversation, Fault, Heard};
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
+use crate::{ApplyOutcome, ProcessAudioData};
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
     Request, StateReady,
@@ -136,15 +136,24 @@ enum AudioKey {
 pub(super) enum AbandonedAudio {
     /// A block's `AudioProcessed`: its MIDI is forwarded.
     Block,
-    /// The one `ParametersApplied` of an `ApplyParameters`.
-    Params,
+    /// The one `ParametersApplied` of an `ApplyParameters` of `edits`
+    /// parameters: counted when it comes, if the plugin did not take them.
+    Params { edits: u64 },
+}
+
+/// How many of a flush's `edits` the plugin does not have, by its answer.
+fn undelivered(outcome: ApplyOutcome, edits: u64) -> u64 {
+    match outcome {
+        ApplyOutcome::Applied => 0,
+        ApplyOutcome::Refused | ApplyOutcome::Unseated => edits,
+    }
 }
 
 /// The key of the request an audio reply answers.
 fn audio_key(reply: &AudioReply) -> AudioKey {
     match reply {
         AudioReply::AudioProcessed { seq, .. } => AudioKey::Block(*seq),
-        AudioReply::ParametersApplied { id } => AudioKey::Params(*id),
+        AudioReply::ParametersApplied { id, .. } => AudioKey::Params(*id),
     }
 }
 
@@ -351,7 +360,12 @@ impl AudioState {
                 }
                 Ok(None)
             }
-            Heard::Abandoned(AbandonedAudio::Params) => Ok(None),
+            Heard::Abandoned(AbandonedAudio::Params { edits }) => {
+                if let AudioReply::ParametersApplied { outcome, .. } = reply {
+                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -804,14 +818,19 @@ pub(super) fn handle_audio(
                 done.send(true);
                 return Ok(());
             }
+            let edits = changes.queues.len() as u64;
             // On the block connection, behind every block pushed before it, so
             // the server has those blocks' writes before these.
             let id = state.fresh();
             let key = AudioKey::Params(id);
             let window = lifecycle.timeouts().param_wait();
-            state
-                .conv
-                .open(key, AbandonedAudio::Params, Instant::now(), window, window);
+            state.conv.open(
+                key,
+                AbandonedAudio::Params { edits },
+                Instant::now(),
+                window,
+                window,
+            );
             ipc::send(
                 stream,
                 &AudioRequest::ApplyParameters {
@@ -819,11 +838,17 @@ pub(super) fn handle_audio(
                     param_changes: changes,
                 },
             )?;
-            let applied = wait_audio(stream, state, channels, key)?;
-            done.send(matches!(
-                applied,
-                Some(AudioReply::ParametersApplied { .. })
-            ));
+            // Counted where the answer is heard, in the window or late
+            // ([`AudioState::hear`]): none in the window counts nothing, as the
+            // flush may still land.
+            let took = match wait_audio(stream, state, channels, key)? {
+                Some(AudioReply::ParametersApplied { outcome, .. }) => {
+                    channels.note_unapplied_edits(undelivered(outcome, edits));
+                    outcome == ApplyOutcome::Applied
+                }
+                _ => false,
+            };
+            done.send(took);
         }
         AudioCommand::Settle { done } => {
             // Two fences, not one. A fence's reply wakes its waiter before the
@@ -894,6 +919,8 @@ pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
     let taken = channels.take_host_edits();
     let mut changes = ParameterChanges::reserved(taken.len(), 1);
     for (id, value) in &taken {
+        // A slot per parameter and one change per slot, in a set reserved a
+        // queue for each: none is past its room.
         let _ = changes.add_change(*id, Offset::ZERO, *value);
     }
     changes
@@ -925,6 +952,8 @@ pub(super) fn handle_control(
     // The host's writes no block carried are applied first, so what is asked
     // holds them: this lane waits for the audio lane, not the asker.
     if let Some(applied) = flush {
+        // The audio lane counts a flush that did not deliver; this waits for it
+        // to end.
         let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
     }
     let (window, ceiling) = deadline.window(lifecycle.timeouts());
@@ -1292,9 +1321,16 @@ mod tests {
     fn a_late_apply_parameters_acknowledgement_is_dropped() {
         let (mut state, mut replies, channels) = audio_state();
         let id = state.fresh();
-        abandoned(&mut state, AudioKey::Params(id), AbandonedAudio::Params);
+        abandoned(
+            &mut state,
+            AudioKey::Params(id),
+            AbandonedAudio::Params { edits: 2 },
+        );
         let heard = state.hear(
-            AudioReply::ParametersApplied { id },
+            AudioReply::ParametersApplied {
+                id,
+                outcome: ApplyOutcome::Applied,
+            },
             AudioKey::Block(1),
             &channels,
         );
@@ -1317,7 +1353,10 @@ mod tests {
         );
         for reply in [
             processed(9),
-            AudioReply::ParametersApplied { id: ReqId::new(77) },
+            AudioReply::ParametersApplied {
+                id: ReqId::new(77),
+                outcome: ApplyOutcome::Applied,
+            },
         ] {
             assert!(
                 matches!(

@@ -125,6 +125,12 @@ pub(super) struct Channels {
     /// did not apply the change within the fence deadline. The change may still
     /// land; the blocks after it were not held for it.
     unapplied: TallyWriter<u64>,
+    /// Host parameter writes the plugin did not get, ever: every parameter of a
+    /// flush the server answered as not applied (refused, or no Processor). An
+    /// answer past the lane's window is counted when it comes; a flush with no
+    /// answer counts nothing, as it may still land. The audio lane's thread
+    /// counts them ([`Channels::note_unapplied_edits`]).
+    unapplied_edits: TallyWriter<u64>,
     /// Parameter buffers the audio thread leaked rather than free, ever: the
     /// free list had no room for one it returned (a broken sizing bound).
     leaked_buffers: TallyWriter<u64>,
@@ -305,6 +311,7 @@ impl Channels {
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers, unapplied) =
             (tally(), tally(), tally(), tally(), tally());
+        let unapplied_edits = tally();
         let channels = Self {
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
@@ -323,6 +330,7 @@ impl Channels {
             late: late.writer(),
             commands_refused: commands_refused.writer(),
             unapplied: unapplied.writer(),
+            unapplied_edits: unapplied_edits.writer(),
             leaked_buffers: leaked_buffers.writer(),
             replies: Arc::new(AtomicU64::new(0)),
             dropped_param_events: dropped_param_events.writer(),
@@ -811,6 +819,17 @@ impl Channels {
     /// lane's thread only.
     pub(super) fn note_unapplied(&self) {
         self.unapplied.add(1);
+    }
+
+    /// Records `n` host parameter writes the plugin did not get. Audio lane's
+    /// thread only.
+    pub(super) fn note_unapplied_edits(&self, n: u64) {
+        self.unapplied_edits.add(n);
+    }
+
+    /// The cell [`note_unapplied_edits`](Self::note_unapplied_edits) counts into.
+    pub(super) fn unapplied_edits_cell(&self) -> Tally<u64> {
+        self.unapplied_edits.tally()
     }
 
     /// The cell [`note_unapplied`](Self::note_unapplied) counts into.

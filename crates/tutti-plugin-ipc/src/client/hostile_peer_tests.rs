@@ -1440,6 +1440,7 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
             AudioRequest::ProcessAudio(_) => {
                 Action::Audio(Box::new(AudioReply::ParametersApplied {
                     id: ReqId::new(1),
+                    outcome: crate::ApplyOutcome::Applied,
                 }))
             }
             _ => Action::Silent,
@@ -2669,6 +2670,119 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
     tutti_fixtures::wait_until("the render mode to be given up on", NOTICE_TIMEOUT, || {
         mock.bridge.audio().unapplied_settings() == 1
     });
+}
+
+/// A flush of one host write to a served plugin whose server answers
+/// `ApplyParameters` with `answer`, and the writes the bridge counted as not
+/// delivered once the flush ended.
+fn unapplied_after_flush(answer: crate::ApplyOutcome) -> u64 {
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(100);
+        t
+    };
+    let mock = MockServer::start_lanes_under(
+        "flush-outcome",
+        timeouts,
+        move |msg| match msg {
+            AudioRequest::ApplyParameters { id, .. } => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: answer,
+                }))
+            }
+            other => answer_blocks(other),
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    let id = ParamId::new(1);
+    audio.declare_host_edits([id]);
+    audio
+        .write_parameter(id, tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    // The read asks the audio lane to flush first; the control lane then waits
+    // for the lane to end the flush.
+    let _ = audio.parameter(id);
+    tutti_fixtures::wait_until("the flush to end", NOTICE_TIMEOUT, || {
+        answer == crate::ApplyOutcome::Applied || audio.unapplied_edits() > 0
+    });
+    audio.unapplied_edits()
+}
+
+/// **A flush the server did not apply is counted as writes the plugin did not
+/// get**, once per point: refused by its Processor, with no Processor to take
+/// it, or never answered; an applied one counts nothing.
+#[test]
+fn a_flush_the_server_did_not_apply_is_counted() {
+    use crate::ApplyOutcome::{Applied, Refused, Unseated};
+    assert_eq!(unapplied_after_flush(Applied), 0, "applied");
+    assert_eq!(unapplied_after_flush(Refused), 1, "refused");
+    assert_eq!(unapplied_after_flush(Unseated), 1, "no Processor");
+}
+
+/// A flush of one host write whose answer, `outcome`, the server holds back
+/// until the lane's window has passed, then sends; and the writes the bridge
+/// counted as not delivered once a second flush has been answered behind it.
+fn unapplied_after_late_answer(outcome: crate::ApplyOutcome) -> u64 {
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(50);
+        t.rate = Duration::from_millis(10);
+        t
+    };
+    let mock = MockServer::start_lanes_under(
+        "late-flush-outcome",
+        timeouts,
+        move |msg| match msg {
+            AudioRequest::ApplyParameters { id, .. } => {
+                let outcome = if first.swap(false, Ordering::SeqCst) {
+                    let _ = release.recv();
+                    outcome
+                } else {
+                    crate::ApplyOutcome::Applied
+                };
+                Action::Audio(Box::new(AudioReply::ParametersApplied { id, outcome }))
+            }
+            other => answer_blocks(other),
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    let id = ParamId::new(1);
+    audio.declare_host_edits([id]);
+    let write = || {
+        audio
+            .write_parameter(id, tutti_units::Normalized::of(0.5))
+            .expect("declared")
+    };
+    write();
+    let _ = audio.parameter(id);
+    // The settle runs behind the flush on the audio lane: once it returns, the
+    // lane has given the flush up.
+    audio.settle();
+    assert_eq!(
+        audio.unapplied_edits(),
+        0,
+        "nothing is counted at the timeout"
+    );
+    release_tx.send(()).expect("the server waits");
+    // The lane hears the late answer while it waits for the next flush's.
+    write();
+    let _ = audio.parameter(id);
+    audio.unapplied_edits()
+}
+
+/// **A flush's answer that comes after the lane's window counts like one in
+/// it**: refused, it leaves the writes it carried undelivered; applied, it
+/// leaves nothing, so a slow flush that landed is not a loss.
+#[test]
+fn a_late_flush_answer_is_counted_as_one_in_the_window_is() {
+    use crate::ApplyOutcome::{Applied, Refused};
+    assert_eq!(unapplied_after_late_answer(Refused), 1, "late and refused");
+    assert_eq!(unapplied_after_late_answer(Applied), 0, "late and applied");
 }
 
 /// **A shutdown ends a setting's wait through its reply.** The control lane is
