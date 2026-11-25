@@ -46,7 +46,8 @@
 //!   - the pitch bend and the channel pressure;
 //! - the keys down, in a [`Held`] (the one fact of which keys are down), and
 //!   each one's Note On in MIDI 2.0 form (velocity and attribute), a MIDI 1.0
-//!   Note On being kept as `Voice2::from` makes it (M2-104 Appendix D.3). A key
+//!   Note On being kept as `Voice2::from` makes it (M2-104 Appendix D.3, with
+//!   M2-115's min-center-max scaling). A key
 //!   is caught up in the protocol it was started in.
 //!
 //! **Order of a catch-up, and why.** SysEx and Flex setup first: a device
@@ -71,8 +72,8 @@
 //! UMP Group it was sent in (a Group is one cable of a device, M2-104 section
 //! 2.1.2, so it resets the device on that cable): the record forgets that
 //! Group's channel state, parameter selects and held keys, and keeps the
-//! message itself in SysEx order. Manufacturer resets (GS, XG) are not
-//! recognised.
+//! message itself in SysEx order. Manufacturer resets (GS, XG) and a reset
+//! sent as SysEx8 are not recognised.
 //!
 //! **Limits.** A note kept sounding only by a pedal (its Note Off sent) is not
 //! caught up. Polyphonic pressure, the MIDI 2.0 per-note messages and relative
@@ -670,30 +671,37 @@ impl Record {
     }
 
     /// One packet of a SysEx message, taken in at its `status`; a complete
-    /// message is kept. A run that is replaced, cut short or has no start is
-    /// counted lost.
+    /// message is kept. A run that is replaced, cut short, has no start or
+    /// passes [`MAX_SYSEX_PACKETS`] is counted lost, once: a run past the bound
+    /// stays pending empty, so its later packets are discarded uncounted.
     fn sysex_packet(&mut self, key: (usize, Stream), ump: Ump, status: SysexStatus) {
         match status {
             SysexStatus::Complete => {
-                self.lost += u64::from(self.take_pending(key).is_some());
+                self.lost += u64::from(self.take_pending(key).is_some_and(|p| !p.is_empty()));
                 self.keep(vec![ump]);
             }
             SysexStatus::Start => {
-                self.lost += u64::from(self.take_pending(key).is_some());
+                self.lost += u64::from(self.take_pending(key).is_some_and(|p| !p.is_empty()));
                 if self.pending.len() >= MAX_PENDING {
-                    self.pending.remove(0);
-                    self.lost += 1;
+                    let (_, evicted) = self.pending.remove(0);
+                    self.lost += u64::from(!evicted.is_empty());
                 }
                 self.pending.push((key, vec![ump]));
             }
             SysexStatus::Continue => match self.take_pending(key) {
+                Some(packets) if packets.is_empty() => self.pending.push((key, packets)),
                 Some(mut packets) if packets.len() < MAX_SYSEX_PACKETS => {
                     packets.push(ump);
                     self.pending.push((key, packets));
                 }
-                _ => self.lost += 1,
+                Some(_) => {
+                    self.lost += 1;
+                    self.pending.push((key, Vec::new()));
+                }
+                None => self.lost += 1,
             },
             SysexStatus::End => match self.take_pending(key) {
+                Some(packets) if packets.is_empty() => {}
                 Some(mut packets) => {
                     packets.push(ump);
                     self.keep(packets);
@@ -915,7 +923,8 @@ mod tests {
         assert_eq!(record.catch_up(), [cc2(7, 200), cc2(10, 5)]);
     }
 
-    /// M2-115 section 3: a 7-bit velocity reaches 16 bits by min-center-max
+    /// M2-104 Appendix D.3 with M2-115 section 3: a 7-bit velocity reaches 16
+    /// bits by min-center-max
     /// scaling, 64 at the center 0x8000, 127 at the top, and a velocity of 1
     /// at 1 << 9.
     #[test]
@@ -1286,9 +1295,15 @@ mod tests {
         assert_eq!(record.take_lost(), 1, "the oldest went");
 
         let mut run = vec![sysex(SysexStatus::Start, &[1])];
-        run.extend((0..MAX_SYSEX_PACKETS).map(|_| sysex(SysexStatus::Continue, &[1])));
+        run.extend((0..MAX_SYSEX_PACKETS + 10).map(|_| sysex(SysexStatus::Continue, &[1])));
+        run.push(sysex(SysexStatus::End, &[1]));
         let mut record = observed(&run);
-        assert_eq!(record.take_lost(), 1, "a run longer than the bound");
+        assert_eq!(
+            record.take_lost(),
+            1,
+            "a run longer than the bound, counted once"
+        );
+        assert_eq!(record.catch_up(), [], "and not kept");
     }
 
     /// Past the number of runs assembled at once the oldest is dropped, counted.
