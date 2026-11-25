@@ -803,8 +803,15 @@ impl<F: Float> MixTrack<F> {
             return;
         };
         drive.begin();
-        drive.port(0, NodeMix::ADDR, frames, declick, source, Some(self.to));
-        if let Some(f) = drive.frames(0, frames) {
+        drive.port(
+            0,
+            NodeMix::ADDR,
+            frames,
+            declick,
+            source,
+            Some(self.to.into()),
+        );
+        if let Some(f) = drive.narrowed(0, frames) {
             self.lane_on = true;
             self.to = f[frames - 1];
         }
@@ -816,7 +823,7 @@ impl<F: Float> MixTrack<F> {
         self.drive
             .as_ref()
             .filter(|_| self.lane_on)
-            .and_then(|d| d.frames(0, frames))
+            .and_then(|d| d.narrowed(0, frames))
             .unwrap_or(&[])
     }
 }

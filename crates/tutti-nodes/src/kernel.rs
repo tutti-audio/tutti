@@ -14,7 +14,8 @@ use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Pl
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
     BusRole, Cx, ErasedSetting, HasParam, HasParams, HasSetting, InBus, IntoNode, Io, MAX_PORTS,
-    Node, NodeParts, Offset, OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
+    Node, NodeParts, Offset, OutBus, ParamNode, ParamPorts, ParamSet, Prepare, RtLevel, Shape,
+    Status,
 };
 use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
@@ -736,7 +737,10 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
     /// The ports and cells always; latency and tail from the prepared rate. Unprepared, a
     /// node declares no latency and an unknown tail.
     fn shape(&self) -> Shape {
-        let shape = self.kernel.shape().param_addrs(self.params.addrs());
+        let shape = self
+            .kernel
+            .shape()
+            .param_ports(ParamPorts::of(self.params.addrs()).whole(self.params.whole_mask()));
         if self.tuned.is_none() {
             return shape.tail(Tail::Unknown);
         }

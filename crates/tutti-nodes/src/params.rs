@@ -140,7 +140,7 @@ pub struct Control {
 
 /// What a control does to the kernel's ring-out ([`Control::ring`]): whether
 /// [`tail_of`](crate::Kernel::tail_of) reads it and, if so, where it is longest. A control
-/// counts as driven for every block its port delivers frames: through a connect or disconnect
+/// counts as driven for every block its port delivers [driven frames](tutti_graph::ParamInput::is_driven): through a connect or disconnect
 /// declick, and from its source's first event on; a source that has not spoken leaves the port
 /// on its base. A driven port may take any value later, so the node reports the most the
 /// kernel rings over the driven controls' whole range, the others as their cells set them
@@ -534,7 +534,7 @@ impl<S: ControlSet> Params<S> {
     /// [`Ring::Never`]) in the block, a fast one included.
     pub(crate) fn ring_driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
         (0..self.cells.len())
-            .any(|k| self.controls[k].ring != Ring::Never && io.param(k).frames().is_some())
+            .any(|k| self.controls[k].ring != Ring::Never && io.param(k).is_driven())
     }
 
     /// The controls the tail is longest at, given which ports drive a control in the block:
@@ -548,8 +548,8 @@ impl<S: ControlSet> Params<S> {
         for (k, v) in value[..n].iter_mut().enumerate() {
             let control = self.controls[k];
             *v = match control.ring {
-                Ring::LongestAt(raw) if io.param(k).frames().is_some() => raw,
-                Ring::Unstated if io.param(k).frames().is_some() => return None,
+                Ring::LongestAt(raw) if io.param(k).is_driven() => raw,
+                Ring::Unstated if io.param(k).is_driven() => return None,
                 _ => {
                     let x = self.cells[k].load(Relaxed);
                     self.good[k].read_if(x, control.accepts(x))
@@ -576,6 +576,17 @@ impl<S: ControlSet> Params<S> {
             })
     }
 
+    /// The ports the graph does not smooth, as a [`ParamPorts::whole`](tutti_graph::ParamPorts::whole) mask:
+    /// bit `k` for a control that lands [whole](ControlRead::Whole) or is
+    /// [fast](ControlRead::Fast).
+    pub(crate) fn whole_mask(&self) -> u32 {
+        self.controls[..self.cells.len()]
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.read != ControlRead::Ramp)
+            .fold(0, |mask, (k, _)| mask | 1 << k)
+    }
+
     /// The base of the `k`th address ([`Node::param_base`](tutti_graph::Node::param_base)): its cell's value.
     pub(crate) fn base(&self, k: usize) -> Option<f64> {
         self.cells.get(k).map(|c| c.load(Acquire))
@@ -598,7 +609,7 @@ impl<S: ControlSet> Params<S> {
             };
             *v = match (signal, control.read) {
                 (Some(signal), _) => {
-                    let x: f64 = signal[at.frame].into();
+                    let x = signal[at.frame];
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Ramp) => {
@@ -618,7 +629,7 @@ impl<S: ControlSet> Params<S> {
     /// of the block.
     pub(crate) fn driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
         (0..self.cells.len())
-            .any(|k| self.controls[k].read != ControlRead::Fast && io.param(k).frames().is_some())
+            .any(|k| self.controls[k].read != ControlRead::Fast && io.param(k).is_driven())
     }
 
     /// The first corner at or after block offset `from` among the ports that drive a
@@ -643,7 +654,7 @@ impl<S: ControlSet> Params<S> {
     pub(crate) fn signals<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_SIGNALS] {
         let mut signals = [None; MAX_SIGNALS];
         for (signal, &k) in signals.iter_mut().zip(&self.fast[..self.fast_len]) {
-            *signal = io.param(k).frames();
+            *signal = io.param(k).narrowed();
         }
         signals
     }

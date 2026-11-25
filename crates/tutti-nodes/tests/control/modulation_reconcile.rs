@@ -84,7 +84,7 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let param = io.param(0);
-        match param.frames() {
+        match param.narrowed() {
             Some(v) => io.output(0).copy_from_slice(v),
             None => {
                 let k = self.knob.load(std::sync::atomic::Ordering::Acquire);

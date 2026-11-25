@@ -751,7 +751,9 @@ fn node::param::EffectiveCell::current
 fn node::param::EffectiveCell::same_cell
 fn node::param::ParamInput::corners
 fn node::param::ParamInput::frames
+fn node::param::ParamInput::is_driven
 fn node::param::ParamInput::last_frame
+fn node::param::ParamInput::narrowed
 fn node::param::ParamPorts::as_slice
 fn node::param::ParamPorts::index_of
 fn node::param::ParamPorts::is_empty
@@ -760,6 +762,7 @@ fn node::param::ParamPorts::new
 fn node::param::ParamPorts::of
 fn node::param::ParamPorts::try_new
 fn node::param::ParamPorts::try_of
+fn node::param::ParamPorts::whole
 fn node::param::ParamRange::arc
 fn node::param::ParamRange::max
 fn node::param::ParamRange::min
@@ -841,6 +844,7 @@ fn node::shape::Shape::output_handles
 fn node::shape::Shape::own_bypass
 fn node::shape::Shape::param_addrs
 fn node::shape::Shape::param_events
+fn node::shape::Shape::param_ports
 fn node::shape::Shape::params
 fn node::shape::Shape::pass
 fn node::shape::Shape::ports

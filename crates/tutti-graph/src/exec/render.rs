@@ -66,6 +66,7 @@ pub(super) fn end_fades<F: Float>(
             }
             next.chase.clear();
             next.out = Some(std::mem::replace(&mut u.node, incoming));
+            u.params.reseat();
             u.keys.promote();
             u.fade = Some(next);
             u.quiet = Samples::ZERO;

@@ -531,7 +531,7 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
         Shape::through_unassigned(self.rig.shape.width())
             .cost(Cost::Heavy)
             .tail(Tail::Unknown)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -557,7 +557,7 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
         for (i, c) in signals.cutoff.iter_mut().enumerate().take(nb - 1) {
             *c = self
                 .declared_param_at::<{ UnitParam::Cutoff as u16 }, _>(&io, i as u8)
-                .frames();
+                .narrowed();
         }
         for (b, signal) in signals.band[..nb].iter_mut().enumerate() {
             let band = b as u8;
@@ -565,17 +565,17 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
             // generic, which a loop over the array cannot supply.
             *signal = [
                 self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
                 self.declared_param_at::<{ UnitParam::Knee as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
                 self.declared_param_at::<{ UnitParam::Ratio as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
                 self.declared_param_at::<{ UnitParam::Attack as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
                 self.declared_param_at::<{ UnitParam::Release as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
                 self.declared_param_at::<{ UnitParam::GainDb as u16 }, _>(&io, band)
-                    .frames(),
+                    .narrowed(),
             ];
         }
 

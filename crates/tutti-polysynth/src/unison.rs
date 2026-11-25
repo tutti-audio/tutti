@@ -235,16 +235,12 @@ impl UnisonEngine {
     ///
     /// `driven` is the block's detune and spread from the synth's param
     /// ports where a lane drives them; `None` reads the atomic.
-    pub(crate) fn sync_from_atomics<F: Float>(&mut self, [detune, spread]: [Option<F>; 2]) {
+    pub(crate) fn sync_from_atomics(&mut self, [detune, spread]: [Option<f64>; 2]) {
         // A lane's value is any float; the span saturates it (a negative
         // detune is no detune), so the comparison against the stored config
         // never recomputes a block for an out-of-range lane.
-        let detune = detune.map_or_else(
-            || self.detune.load(),
-            |lane| CentsSpan::clamped(lane.into()),
-        );
-        let spread =
-            Spread::new_clamped(spread.map_or_else(|| self.spread.load().get(), Into::into));
+        let detune = detune.map_or_else(|| self.detune.load(), CentsSpan::clamped);
+        let spread = Spread::new_clamped(spread.unwrap_or_else(|| self.spread.load().get()));
         let changed = detune != self.config.detune_cents
             || (spread.get() - self.config.stereo_spread.get()).abs() > f64::EPSILON;
         if changed {

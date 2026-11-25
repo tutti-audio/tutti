@@ -721,6 +721,16 @@ impl Shape {
         self
     }
 
+    /// This shape, letting the graph modulate the ports `params` lists, with
+    /// the ports it marks [whole](ParamPorts::whole): the list a
+    /// [`declare_params!`](crate::declare_params) node builds
+    /// (`declared_ports`).
+    #[must_use]
+    pub const fn param_ports(mut self, params: ParamPorts) -> Self {
+        self.params = params;
+        self
+    }
+
     /// [`params`](Self::params) for a node with several params of
     /// one kind: each [`UnitAddr`] is a kind and an index (a threshold per
     /// band is `UnitAddr::new(UnitParam::Threshold, band)`), in this port

@@ -41,7 +41,7 @@ impl tutti_graph::Node for ParamProbe {
         mut io: tutti_graph::Io<'_>,
     ) -> tutti_graph::Status {
         for i in 0..io.frames() {
-            let v = io.param(0).frames().map_or(0.0, |f| f[i]);
+            let v = io.param(0).narrowed().map_or(0.0, |f| f[i]);
             io.output(0)[i] = v;
         }
         tutti_graph::Status::Modified
@@ -263,7 +263,7 @@ impl tutti_graph::Node for Probe8 {
     ) -> tutti_graph::Status {
         for p in 0..PROBE8.len() {
             for i in 0..io.frames() {
-                let v = io.param(p).frames().map_or(0.0, |f| f[i]);
+                let v = io.param(p).narrowed().map_or(0.0, |f| f[i]);
                 io.output(p)[i] = v;
             }
         }

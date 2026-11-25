@@ -1450,7 +1450,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
             .cost(tutti_graph::Cost::Moderate)
             // Its gain, as a voice's: block-rate, read on the block's last
             // frame.
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     /// The session rate: the conversion from the wave's rate is derived from
@@ -1477,7 +1477,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         self.driven_gain = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
-            .map(|v| Amplitude::new(Into::<f64>::into(v).max(0.0)));
+            .map(|v| Amplitude::new(v.max(0.0)));
         let clock = self.clock.observe_with(cx.env, cx.tempo);
         let frames = io.frames();
         let (_, mut outs) = io.split();

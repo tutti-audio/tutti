@@ -179,11 +179,19 @@ fn drive_block<F: Float>(
     let ins: Vec<&[F]> = inputs.iter().map(|c| c.samples()).collect();
     let mut out = vec![vec![F::ZERO; frames]; usize::from(shape.audio_out().count())];
     let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    // The fed values are in the graph's float; the node reads them widened
+    // (`values`, exact) and as fed (`narrow`).
+    let wide: Vec<Vec<f64>> = params
+        .iter()
+        .map(|p| p.map_or_else(Vec::new, |v| v.iter().map(|x| x.to_f64()).collect()))
+        .collect();
     let params: Vec<ParamInput<'_, F>> = params
         .iter()
-        .map(|p| {
-            p.map_or(ParamInput::Base, |values| ParamInput::Frames {
+        .zip(&wide)
+        .map(|(p, values)| {
+            p.map_or(ParamInput::Base, |narrow| ParamInput::Frames {
                 values,
+                narrow,
                 corners: &[],
             })
         })

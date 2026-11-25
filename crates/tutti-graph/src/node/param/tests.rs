@@ -1,7 +1,7 @@
 use super::*;
 use crate::node::param_event::{ParamEvent, ParamRamp};
 use crate::node::time::Offset;
-use tutti_units::{Hz, ParamKey, Real, Samples};
+use tutti_units::{Hz, ParamKey, Samples};
 
 /// A NaN at either end is no range; an infinite end is a range; `of` is
 /// `new` for bounds that are not NaN.
@@ -88,7 +88,7 @@ fn a_ramp_lands_on_its_last_frame() {
     };
     let events = [ev(4, 100.0, 4), ev(12, -5.0, 0)];
     let mut r = Ramp::default();
-    let mut out = [0.0f32; 16];
+    let mut out = [0.0f64; 16];
     render_ramps(
         &mut r,
         &events,
@@ -129,8 +129,8 @@ fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
         Samples::new(20),
     );
     let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(2));
-    let base = |i: usize| 1.0 + i as f32;
-    let mut after_segment = [0.0f32; 8];
+    let base = |i: usize| 1.0 + i as f64;
+    let mut after_segment = [0.0f64; 8];
     let events = [ParamEvent::segment(at, seg), ParamEvent::ramp(at, ramp)];
     render_ramps(
         &mut Ramp::default(),
@@ -140,7 +140,7 @@ fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
         base,
         &mut Corners::new(&mut [0; 4096]),
     );
-    let mut alone = [0.0f32; 8];
+    let mut alone = [0.0f64; 8];
     let events = [ParamEvent::ramp(at, ramp)];
     render_ramps(
         &mut Ramp::default(),
@@ -154,39 +154,35 @@ fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
     assert_eq!(after_segment, alone, "as the ramp alone");
 }
 
-/// A linear ramp renders what the port rendered before ramps had a
-/// shape, bit for bit: `from + (target - from) · (done / len)`, written
-/// out here, at every frame of ramps of many lengths and spans.
+/// A linear ramp renders `from + (target - from) · (done / len)` bit for
+/// bit, in the unit's own `f64`, at every frame of ramps of many lengths
+/// and spans, and lands on `target`.
 #[test]
-fn a_linear_ramp_renders_the_unshaped_bits() {
+fn a_linear_ramp_renders_the_line_in_f64() {
     for len in [1usize, 2, 3, 7, 10, 64, 97, 1000] {
         for (from, target) in [(0.0f64, 1.0f64), (0.3, -7.9), (440.0, 1234.5)] {
-            // The port renders in `f64` and crosses to `f32` once a frame:
-            // the oracle is the same line, from the base the lane gives it.
-            let from32 = f32::from_unit(Hz::new(from));
-            let start = f64::from(from32);
             let frames = len + 4;
             let events = [ParamEvent::ramp(
                 Offset::of(Samples::new(1), Samples::new(frames)),
                 ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
             )];
             let mut r = Ramp::default();
-            let mut out = vec![0.0f32; frames];
+            let mut out = vec![0.0f64; frames];
             render_ramps(
                 &mut r,
                 &events,
                 UnitParam::Cutoff.into(),
                 &mut out,
-                |_| from32,
+                |_| from,
                 &mut Corners::new(&mut vec![0; frames]),
             );
             for (j, &v) in out[1..].iter().enumerate() {
                 let done = j + 1;
-                let want = f32::from_unit(Hz::new(if done >= len {
+                let want = if done >= len {
                     target
                 } else {
-                    start + (target - start) * (done as f64 / len as f64)
-                }));
+                    from + (target - from) * (done as f64 / len as f64)
+                };
                 assert_eq!(v.to_bits(), want.to_bits(), "len {len}, frame {j}");
             }
         }
@@ -236,7 +232,7 @@ fn corners_are_where_the_trajectory_changes_piece() {
             &mut Ramp::default(),
             events,
             UnitParam::Cutoff.into(),
-            &mut [0.0; 64],
+            &mut [0.0f64; 64],
             |_| 0.0,
             &mut c,
         );

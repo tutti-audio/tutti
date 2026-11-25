@@ -43,7 +43,9 @@ impl Node for Bands {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for (k, knob) in self.knobs.iter().enumerate() {
             match io.param(k) {
-                ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
+                ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+                    io.output(k).copy_from_slice(v);
+                }
                 ParamInput::Base => {
                     let base = knob.load(Ordering::Acquire);
                     io.output(k).fill(base as f32);

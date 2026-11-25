@@ -28,9 +28,9 @@ const RAMP: Seconds = Seconds::new(0.05);
 tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(Copy, PartialEq)] VbapPannerConfig, VbapPannerCells {
     required { output: ChannelTopology }
     params {
-        Azimuth => azimuth: Azimuth = Azimuth::FRONT,
-        Elevation => elevation: Elevation = Elevation::LEVEL,
-        Spread => spread: Spread = Spread::POINT,
+        Azimuth => azimuth: Azimuth { whole } = Azimuth::FRONT,
+        Elevation => elevation: Elevation { whole } = Elevation::LEVEL,
+        Spread => spread: Spread { whole } = Spread::POINT,
         StereoWidth => width: StereoWidth = StereoWidth::NATURAL,
     }
 });
@@ -241,10 +241,10 @@ impl<F: Float> VbapPannerNode<F> {
     fn grid_point(
         &mut self,
         at: usize,
-        driven: &[Option<&[F]>; 4],
+        driven: &[Option<&[f64]>; 4],
         cells: (Azimuth, Elevation, Spread, StereoWidth),
     ) {
-        // A control signal shorter than the block reads as the cell. A control signal is the graph's `F`; the
+        // A control signal shorter than the block reads as the cell. A control signal is the unit's `f64`; the
         // angles are `f64`, so a driven coordinate widens here, once per grid point, and
         // `Spread` and `StereoWidth` hold an `f32`.
         let signal = |k: usize| driven[k].and_then(|signal| signal.get(at)).copied();
@@ -342,7 +342,7 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
         Shape::buses(main_bus(ChannelLayout::STEREO), main_bus(self.layout))
             .ports(ChannelLayout::STEREO, self.layout)
             .tail(Tail::Unknown)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
             // A blended gain pair per output channel and frame, and two
             // solves per grid segment while the source moves.
             .cost(tutti_graph::Cost::Moderate)
