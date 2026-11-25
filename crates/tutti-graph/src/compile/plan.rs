@@ -419,16 +419,15 @@ impl EventSlotCapacity {
                 .unwrap_or(u32::MAX),
                 defaults: 0,
             },
-            // `limit + limit / 4 + 8` with `limit = default × blocks`: at
-            // most `default × (blocks + ⌈blocks / 4⌉) + 8`, whatever the
-            // default turns out to be.
-            None => {
-                let blocks = crate::exec::rings::EventFifo::blocks(len.get(), max_block);
-                Self {
-                    declared: 8,
-                    defaults: u32::try_from(blocks + blocks.div_ceil(4)).unwrap_or(u32::MAX),
-                }
-            }
+            // `default × blocks`, whatever the default turns out to be.
+            None => Self {
+                declared: 0,
+                defaults: u32::try_from(crate::exec::rings::EventFifo::blocks(
+                    len.get(),
+                    max_block,
+                ))
+                .unwrap_or(u32::MAX),
+            },
         }
     }
 

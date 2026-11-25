@@ -626,8 +626,7 @@ impl MidiInput {
     /// output never carries it.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.claim.shared.cells.lost.get()
-            + self.claim.shared.input.losses()
+        self.claim.shared.input.losses()
             + self.claim.shared.cells.inlet.get()
             + self.claim.shared.cells.ci_refused.get()
     }

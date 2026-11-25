@@ -254,9 +254,10 @@ impl InputProducerHandle {
     ///
     /// [`PushError::Disconnected`] once the inlet's node is gone (the port was
     /// removed): nothing is counted. [`PushError::Full`] when the device's inlet is full: the event is
-    /// dropped, not queued, and counted in the input's own `lost` cell
-    /// ([`InputReaders::lost`](tutti_midi_runtime::InputReaders::lost)). A caller
-    /// counts or logs it.
+    /// dropped, not queued, and counted in [`Losses::lost`]
+    /// of the input's inlet
+    /// ([`InputReaders::inlet`](tutti_midi_runtime::InputReaders::inlet)). A
+    /// caller counts or logs it.
     #[inline]
     pub fn push(
         &mut self,

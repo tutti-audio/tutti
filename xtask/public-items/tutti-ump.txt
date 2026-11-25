@@ -479,10 +479,8 @@ fn ump::MessageType::get
 fn ump::NoteKey::address
 fn ump::NoteKey::from_index
 fn ump::NoteKey::index
-fn ump::NoteKey::lane
 fn ump::NoteKey::new
 fn ump::NoteKey::note
-fn ump::NoteKey::protocol
 fn ump::Ump::address
 fn ump::Ump::channel
 fn ump::Ump::from_words
