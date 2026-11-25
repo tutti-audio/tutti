@@ -1741,6 +1741,35 @@ fn a_plugin_with_no_render_extension_answers_unsupported_every_time() {
     assert!(instance.is_active());
 }
 
+/// **A mode the plugin was not told is refused, and the server does not keep
+/// it**: a deactivated plugin cannot be told, so the answer is a refusal and
+/// what the server wants goes back to the mode the plugin runs in, not on to
+/// the activation a restart makes.
+#[test]
+fn a_mode_asked_of_a_deactivated_plugin_is_refused_and_not_kept() {
+    use tutti_plugin_ipc::ModeOutcome;
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
+    instance.quiesce(main_thread());
+    assert!(!instance.is_active());
+
+    assert_eq!(
+        instance.set_render_mode(main_thread(), RenderMode::Offline),
+        ModeOutcome::Refused
+    );
+    assert_eq!(
+        instance.state.wanted().map(|p| p.mode()),
+        Some(RenderMode::Realtime)
+    );
+}
+
 // ── Parameter Get/Set Roundtrip ──
 
 /// **A parameter written to an active plugin also reaches the next block**
@@ -2228,8 +2257,14 @@ fn a_plugin_with_the_render_extension_takes_the_mode_live() {
             .features
             .contains(Features::RENDER_MODE)
     );
-    assert!(loaded.set_render_mode(main_thread(), RenderMode::Offline));
-    assert!(loaded.set_render_mode(main_thread(), RenderMode::Realtime));
+    assert_eq!(
+        loaded.set_render_mode(main_thread(), RenderMode::Offline),
+        tutti_plugin_types::ModeTold::Took
+    );
+    assert_eq!(
+        loaded.set_render_mode(main_thread(), RenderMode::Realtime),
+        tutti_plugin_types::ModeTold::Took
+    );
 }
 
 #[test]

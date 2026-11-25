@@ -387,11 +387,10 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                 IpcEvent::TailChanged { .. }
                 | IpcEvent::Resync(_)
                 | IpcEvent::StateNotRestored { .. }
-                | IpcEvent::RenderModeNotApplied { .. }
                 | IpcEvent::WouldNotStop { .. }
                 | IpcEvent::ServerLosses(_)
                 | IpcEvent::IoLayout(_)
-                | IpcEvent::RateRefusal(_)
+                | IpcEvent::Told(_)
                 | IpcEvent::ProcessRequested
                 | IpcEvent::MidiMapChanged
                 | IpcEvent::Transport { .. }

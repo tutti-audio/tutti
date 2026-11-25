@@ -71,6 +71,7 @@
 //! [`PluginHandle`].
 
 pub(crate) mod fork;
+mod served_handle;
 
 #[cfg(test)]
 mod ipc_node_tests;
@@ -107,7 +108,7 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{
     Features, IpcError, IpcResult, MainWorkHandle, MaxBlock, ParameterChanges, PluginDescriptor,
-    PluginInvalidation, PluginRef, PluginWiring, Prepare, ResyncClass,
+    PluginInvalidation, PluginRef, PluginWiring, Prepare, ResyncClass, Told,
 };
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -208,6 +209,8 @@ pub struct PluginClient<S = Unbound> {
     origin: LaunchSpec,
     /// The plugin this is, with the id it reports.
     plugin: PluginRef,
+    /// The plugin's lifecycle, which a fork reads the live render mode from.
+    live: tutti_plugin_host::LiveView<Ipc>,
     /// On a **fork** only: whether it has failed while rendering
     /// ([`fork_health`](PluginClient::fork_health)).
     fork_watch: Option<Arc<ForkWatch>>,
@@ -233,6 +236,9 @@ struct EventRoute {
     invalidate: InvalidateSink,
     transport: TransportSink,
     chunks: Arc<tutti_plugin_types::ChunkCounters>,
+    /// The plugin's last answer to a rate was a refusal: the next one it takes
+    /// is announced as restored.
+    rate_refused: std::sync::atomic::AtomicBool,
 }
 
 impl EventRoute {
@@ -261,6 +267,7 @@ impl EventRoute {
                 ResyncClass::Invalidate(i) => self.invalidate.fire(i),
             },
             IpcEvent::ServerLosses(losses) => self.chunks.note_server_losses(losses),
+            IpcEvent::Told(told) => self.tell(told),
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             IpcEvent::ProcessRequested => {}
@@ -268,13 +275,36 @@ impl EventRoute {
             IpcEvent::MidiMapChanged => {}
             // Fired above.
             IpcEvent::StateNotRestored { .. }
-            | IpcEvent::RenderModeNotApplied { .. }
             | IpcEvent::WouldNotStop { .. }
-            | IpcEvent::RateRefusal(_)
             | IpcEvent::Crashed { .. } => {}
             // The layout is read from the link when the `Io` resync that follows it lands.
             IpcEvent::IoLayout(_) => {}
             IpcEvent::Transport { request } => self.transport.fire(request),
+        }
+    }
+}
+
+impl EventRoute {
+    /// What the plugin answered to a rate or a render mode, as the handle's
+    /// subscribers hear it: a refusal, a rate taken after one, a mode not taken.
+    fn tell(&self, told: Told) {
+        use std::sync::atomic::Ordering;
+        match told {
+            Told::RateRefused(refusal) => {
+                self.rate_refused.store(true, Ordering::Relaxed);
+                self.invalidate
+                    .fire(PluginInvalidation::RateRefused(refusal));
+            }
+            Told::RateTook(_) => {
+                if self.rate_refused.swap(false, Ordering::Relaxed) {
+                    self.invalidate.fire(PluginInvalidation::RateRestored);
+                }
+            }
+            Told::ModeRefused(mode) => {
+                self.invalidate
+                    .fire(PluginInvalidation::RenderModeNotApplied { mode });
+            }
+            Told::ModeTook(_) => {}
         }
     }
 }
@@ -288,12 +318,7 @@ fn plain_invalidation(ev: IpcEvent) -> Result<PluginInvalidation, IpcEvent> {
         IpcEvent::StateNotRestored { reason } => {
             Ok(PluginInvalidation::StateNotRestored { reason })
         }
-        IpcEvent::RenderModeNotApplied { mode } => {
-            Ok(PluginInvalidation::RenderModeNotApplied { mode })
-        }
         IpcEvent::WouldNotStop { reason } => Ok(PluginInvalidation::Stuck { reason }),
-        IpcEvent::RateRefusal(Some(refusal)) => Ok(PluginInvalidation::RateRefused(refusal)),
-        IpcEvent::RateRefusal(None) => Ok(PluginInvalidation::RateRestored),
         IpcEvent::Crashed { cause } => Ok(PluginInvalidation::Crashed { cause }),
         other => Err(other),
     }
@@ -441,6 +466,7 @@ impl PluginClient<Unbound> {
             invalidate: invalidate_sink.clone(),
             transport: transport_sink.clone(),
             chunks: Arc::clone(ipc.chunk_counters()),
+            rate_refused: std::sync::atomic::AtomicBool::new(false),
         };
         ipc.forward_events(Some(Arc::new(move |ev| route.hear(ev))));
 
@@ -494,6 +520,7 @@ impl PluginClient<Unbound> {
             served,
             origin,
             plugin,
+            live: client.live_view(),
             fork_watch: None,
             state: Unbound {
                 client: Box::new(client),
@@ -534,6 +561,7 @@ impl PluginClient<Unbound> {
             served,
             origin,
             plugin,
+            live,
             fork_watch,
             state: Unbound { client },
         } = self;
@@ -554,6 +582,7 @@ impl PluginClient<Unbound> {
             served,
             origin,
             plugin,
+            live,
             fork_watch,
             state: Bound {
                 node: Box::new((*client).bind(tempo.clone())),
@@ -578,6 +607,14 @@ impl PluginClient<Bound> {
 }
 
 impl<S> PluginClient<S> {
+    /// The render mode the plugin runs in, or is being changed to, as its
+    /// lifecycle holds it; `None` once the plugin is gone. What the plugin
+    /// answers reaches it at the lifecycle's next pump.
+    #[must_use]
+    pub fn render_mode(&self) -> Option<tutti_plugin_types::RenderMode> {
+        self.live.render_mode()
+    }
+
     /// The plugin this client is: its file, its format and the id it reports.
     pub fn plugin(&self) -> &PluginRef {
         &self.plugin
@@ -624,8 +661,12 @@ impl<S> PluginClient<S> {
     pub fn handle(&self) -> PluginHandle {
         let served = Arc::new(self.served.clone());
         let pid = served.server_pid();
+        let backend = Arc::new(served_handle::ServedHandle::new(
+            self.served.clone(),
+            self.live.clone(),
+        ));
         let handle = PluginHandle::from_backend(
-            Arc::clone(&served),
+            backend,
             Some(served),
             self.descriptor().clone(),
             self.loaded().clone(),
@@ -792,23 +833,10 @@ impl PluginAnswers {
 mod event_route_tests {
     use super::*;
 
-    /// **The bridge's notices reach the host as the invalidations the session
-    /// maps**: a refused render mode keeps its mode, and a restart the plugin
-    /// would not make is `Stuck` with its reason.
+    /// **A restart the plugin would not make reaches the host as the
+    /// invalidation the session maps**: `Stuck` with the plugin's reason.
     #[test]
-    fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_map_to_their_invalidations() {
-        let mode = plain_invalidation(IpcEvent::RenderModeNotApplied {
-            mode: tutti_plugin_types::RenderMode::Offline,
-        });
-        assert!(
-            matches!(
-                mode,
-                Ok(PluginInvalidation::RenderModeNotApplied {
-                    mode: tutti_plugin_types::RenderMode::Offline
-                })
-            ),
-            "{mode:?}"
-        );
+    fn a_restart_the_plugin_would_not_make_maps_to_its_invalidation() {
         let stuck = plain_invalidation(IpcEvent::WouldNotStop {
             reason: "inside a block".into(),
         });
@@ -840,6 +868,7 @@ mod event_route_tests {
             invalidate: InvalidateSink::new(),
             transport: TransportSink::new(),
             chunks: Arc::clone(&chunks),
+            rate_refused: std::sync::atomic::AtomicBool::new(false),
         };
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 2,

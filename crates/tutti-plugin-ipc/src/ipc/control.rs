@@ -10,10 +10,11 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, MidiAssignment, MidiMapApplied, OwnBypass, ParameterInfo, PipelineCounts,
-    PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult,
-    PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request,
-    StateError, StateUse, TerminationReason, TrackInfo, UnknownParam, WindowHandle, bypass_value,
+    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParameterInfo,
+    PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset,
+    PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport,
+    Request, StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
+    bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -118,8 +119,9 @@ macro_rules! served_control {
 
             /// Queued on the command bus as the blocks around it are, so the
             /// change lands between two blocks, and never needs a restart.
-            /// `true` when queued. A plugin without `Features::RENDER_MODE` is
-            /// not asked, as one in process is not: it has no mode to take.
+            /// `true` when queued: the plugin's answer reaches the host as
+            /// [`Told`]. A plugin without `Features::RENDER_MODE` is not asked,
+            /// as one in process is not: it has no mode to take.
             fn set_render_mode(&self, mode: RenderMode) -> bool {
                 self.link.loaded.features.contains(Features::RENDER_MODE)
                     && !self.link.bridge.audio().is_crashed()
@@ -344,6 +346,12 @@ macro_rules! served_control {
                 out.append(&mut asked);
             }
 
+            /// What the server answered to the rate and render mode the host
+            /// told it since the last call.
+            fn take_answers(&mut self, _main: MainThreadMarker, out: &mut Vec<Told>) {
+                out.append(&mut self.link.events.told.lock());
+            }
+
             /// Sent to the server, whose format answers the plugin's reads
             /// from it: queued ([`Yes`](Delivered::Yes)), refused because the
             /// queue is full ([`Dropped`](Delivered::Dropped)) or because the
@@ -377,8 +385,8 @@ macro_rules! served_control {
             }
 
             /// `Live` from here wherever the plugin has a mode: the server
-            /// tells it or activates it again itself, so the host never
-            /// reactivates a served plugin for its mode.
+            /// tells it or activates it again itself and answers, so the host
+            /// never reactivates a served plugin for its mode.
             fn render_mode_support(&self, _main: MainThreadMarker) -> RenderModeSupport {
                 if self.link.loaded.features.contains(Features::RENDER_MODE) {
                     RenderModeSupport::Live
@@ -387,8 +395,13 @@ macro_rules! served_control {
                 }
             }
 
-            fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> bool {
-                AnyThread::set_render_mode(self, mode)
+            /// Queued for the server, which answers later.
+            fn set_render_mode(&mut self, _main: MainThreadMarker, mode: RenderMode) -> ModeTold {
+                if AnyThread::set_render_mode(self, mode) {
+                    ModeTold::Asked
+                } else {
+                    ModeTold::Refused
+                }
             }
 
             /// The edits the host lost: counted by the bridge, which forwards

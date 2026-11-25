@@ -40,7 +40,7 @@ use tutti_graph::{
     Editor, ForkError, ForkFaultKind, ForkTarget, IntoNode, Prepare, RenderMode, Renderer,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_plugin::PluginClient;
+use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
 use tutti_plugin_types::PluginForkError;
@@ -642,19 +642,18 @@ fn a_failed_forks_server_is_reaped() {
 }
 
 /// A live graph holding the plugin at key 9 on the main output, to export from.
-fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
+fn bound(client: PluginClient) -> PluginClient<Bound> {
+    client
+        .bind(tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"))
+}
+
+fn live_graph(client: PluginClient<Bound>) -> (Editor, tutti_graph::Executor) {
     let (mut live, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
     ));
     let key = NodeKey(9);
-    let _controls = live.insert(
-        key,
-        "plugin",
-        client.bind(
-            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
-        ),
-    );
+    let _controls = live.insert(key, "plugin", client);
     live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     (live, exec)
@@ -739,7 +738,7 @@ fn an_export_through_a_failing_fork_fails_by_name() {
         .handle()
         .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
-    let (live, _exec) = live_graph(probe.client);
+    let (live, _exec) = live_graph(bound(probe.client));
 
     let healthy = export_through_a_fork(&live).expect("a healthy fork exports");
     assert!(healthy.planes()[0].iter().any(|&s| s != 0.0), "audible");
@@ -778,7 +777,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
     let probe = load_probe(SAMPLE_RATE);
     // 120 BPM at 48 kHz: a beat is 24 000 frames, so beat 0.25 is frame 6000.
     const NOTE_FRAME: usize = 6_000;
-    let (mut live, _exec) = live_graph(probe.client);
+    let (mut live, _exec) = live_graph(bound(probe.client));
     feed_note(&mut live, NodeKey(9), NOTE_FRAME);
 
     // The export's own timeline, rolling from beat 0, and its clock.
@@ -872,7 +871,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
     let _env = ProbeEnv::new().render_mode(render::NOTES);
     let render = |policy: tutti_export::EventLossPolicy| {
         let probe = load_probe(SAMPLE_RATE);
-        let (mut live, _exec) = live_graph(probe.client);
+        let (mut live, _exec) = live_graph(bound(probe.client));
         feed_chord(&mut live, NodeKey(9), 200, 5_200, 5_900);
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
@@ -1325,17 +1324,38 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
         .render_mode(render::LATENCY)
         .offline_extra_latency(OFFLINE_EXTRA.get() as u32);
     let probe = load_probe(SAMPLE_RATE);
+    let client = bound(probe.client);
+    let rebinder = client.rebinder();
     assert!(
-        probe
-            .client
+        client
             .handle()
             .announce_render_mode(tutti_plugin_types::RenderMode::Offline),
-        "the live plugin takes the mode"
+        "the live plugin is told the mode"
     );
+    // The plugin's answer reaches its lifecycle at a pump, as a session's
+    // update runs it.
+    tutti_fixtures::wait_until(
+        "the live plugin to answer the mode",
+        std::time::Duration::from_secs(60),
+        || {
+            rebinder.tick(tutti_fixtures::main_thread());
+            client.render_mode() == Some(tutti_plugin_types::RenderMode::Offline)
+        },
+    );
+    // The want stands: pumps after the answer neither tell the plugin another
+    // mode nor change what the lifecycle holds.
+    for _ in 0..50 {
+        rebinder.tick(tutti_fixtures::main_thread());
+        assert_eq!(
+            client.render_mode(),
+            Some(tutti_plugin_types::RenderMode::Offline),
+            "the announced mode is not reverted"
+        );
+    }
     // Forked through the graph in `RenderMode::Realtime`, prepared in realtime: the
     // graph does not say offline, so only the live plugin's mode can.
     let rate = SampleRate::of(SAMPLE_RATE);
-    let (live, _exec) = live_graph(probe.client);
+    let (live, _exec) = live_graph(client);
     let (editor, executor) = live
         .fork(
             ForkTarget::MainOutput,

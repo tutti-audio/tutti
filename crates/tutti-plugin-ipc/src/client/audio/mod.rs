@@ -643,7 +643,6 @@ impl AudioBridge {
             return false;
         }
         self.channels.request_setting(Setting::RenderMode(mode));
-        self.lifecycle.set_render_mode(mode);
         true
     }
 
@@ -652,13 +651,6 @@ impl AudioBridge {
     /// still land; the blocks after it were not held for it.
     pub fn unapplied_settings(&self) -> u64 {
         self.channels.unapplied_cell().get()
-    }
-
-    /// The render mode the host last queued for the plugin
-    /// ([`set_render_mode`](Self::set_render_mode)): what the host asked
-    /// for, not what the plugin accepted. Realtime until it queues another.
-    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
-        self.lifecycle.render_mode()
     }
 
     /// Makes the bridge thread wait `wait` for each block's reply, in place of

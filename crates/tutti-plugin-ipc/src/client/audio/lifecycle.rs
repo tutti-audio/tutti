@@ -45,8 +45,6 @@ pub(super) struct Lifecycle {
     /// The server said it closed the editor on its own account
     /// (`EditorClosed`), until the remote editor takes the news.
     editor_closed: Arc<AtomicBool>,
-    /// Whether the host's last queued render-mode command said offline.
-    offline: Arc<AtomicBool>,
     /// Whether a lane's thread has told the listener of the crash: one event
     /// for the bridge, whichever of its two threads sees the end first.
     announced: Arc<AtomicBool>,
@@ -63,22 +61,7 @@ impl Lifecycle {
             offered_to: Arc::new(Mutex::new(None)),
             editor_wants: Arc::new(Mutex::new(None)),
             editor_closed: Arc::new(AtomicBool::new(false)),
-            offline: Arc::new(AtomicBool::new(false)),
             announced: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Records the render mode the host has just queued for the plugin.
-    pub(super) fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) {
-        self.offline.store(mode.is_offline(), Ordering::Release);
-    }
-
-    /// The render mode the host last queued: realtime until it says otherwise.
-    pub(super) fn render_mode(&self) -> tutti_plugin_types::RenderMode {
-        if self.offline.load(Ordering::Acquire) {
-            tutti_plugin_types::RenderMode::Offline
-        } else {
-            tutti_plugin_types::RenderMode::Realtime
         }
     }
 

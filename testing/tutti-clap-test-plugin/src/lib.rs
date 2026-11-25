@@ -2193,6 +2193,9 @@ unsafe extern "C" fn render_set(plugin: *const clap_plugin, mode: clap_plugin_re
     if mode != 0 && mode != CLAP_RENDER_OFFLINE {
         return false;
     }
+    if mode == CLAP_RENDER_OFFLINE && refusal::refuse_offline() {
+        return false;
+    }
     let before = current_latency();
     RENDER_MODE_SET.store(mode as u32, Ordering::SeqCst);
     if current_latency() != before {
