@@ -96,7 +96,7 @@ pub enum SlotId {
     #[cfg(feature = "plugin")]
     PluginMidiMap(NodeKey),
     /// The depth of the route from a source into a target.
-    RouteDepth(super::depth::DepthKey),
+    RouteDepth(DepthKey),
 }
 
 impl SlotId {
@@ -1247,4 +1247,14 @@ mod tests {
             "an equal clip, by value, publishes nothing"
         );
     }
+}
+
+/// What names a route's depth: the route from a source into a target, or the
+/// one from a source into another route's depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DepthKey {
+    /// The route from a source into a target.
+    Into(ModSourceId, ModTarget),
+    /// The route from a source into the depth of a route.
+    Scaling(ModSourceId, ModRouteId),
 }

@@ -381,6 +381,13 @@ pub enum RouteError {
         /// The route a scale was asked of.
         route: ModRouteId,
     },
+    /// The route to scale itself scales a route's depth: a scale is one
+    /// deep, so a removed route takes every route that scales it with it.
+    #[error("route {route:?} scales another route's depth, and a scale is one deep")]
+    ScalesAScale {
+        /// The route a scale was asked of.
+        route: ModRouteId,
+    },
     /// The source already has a route into `target`: a route is named by its
     /// source and target ([`DepthTarget::of`](crate::DepthTarget::of)), so a
     /// second between the two would have no name.
@@ -1348,7 +1355,8 @@ impl RouteSpec {
     /// function (an LFO or a macro); the route and its source are too, and a
     /// route has at most one such scale. The scale goes when `route` does.
     /// [`Mods::route`] refuses it with [`RouteError::NoSuchRoute`] when `route`
-    /// is not declared.
+    /// is not declared, and with [`RouteError::ScalesAScale`] when `route`
+    /// itself scales a depth.
     #[must_use]
     pub fn scaling(source: ModSourceId, route: ModRouteId, depth: Bipolar) -> Self {
         Self {
@@ -1639,7 +1647,8 @@ impl Mods<'_> {
     /// [`RouteError::UndeclaredRange`], naming the target, when no range was
     /// declared for it; [`RouteError::NoSuchSource`] when the source was
     /// removed; [`RouteError::NoSuchRoute`] when a [`RouteSpec::scaling`]
-    /// route names one that is not declared. Nothing is added.
+    /// route names one that is not declared; [`RouteError::ScalesAScale`] when
+    /// it names one that scales a depth itself. Nothing is added.
     pub fn route(&mut self, spec: RouteSpec) -> Result<ModRouteId, RouteError> {
         let source = SourceKey(spec.source.get());
         if !self.own.sources.contains_key(&source) {
@@ -1652,6 +1661,9 @@ impl Mods<'_> {
                     .routes
                     .get(&RouteKey(scaled.get()))
                     .ok_or(RouteError::NoSuchRoute(NoSuchModRoute(scaled)))?;
+                if matches!(inner.decl.to, RouteTarget::Depth(_)) {
+                    return Err(RouteError::ScalesAScale { route: scaled });
+                }
                 (inner.target, RouteTarget::Depth(RouteKey(scaled.get())))
             }
             Aim::Target(target) => {

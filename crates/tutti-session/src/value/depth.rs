@@ -4,7 +4,7 @@ use tutti_rt::Param;
 use tutti_units::Bipolar;
 
 use super::error::SetRefusal;
-use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
+use super::slot::{DepthKey, Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders};
 use crate::{ModRouteId, ModSourceId, ModTarget};
@@ -41,16 +41,6 @@ keyed_slot_target!(
     DepthKey,
     RouteDepth
 );
-
-/// What names a route's depth: the route from a source into a target, or the
-/// one from a source into another route's depth.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DepthKey {
-    /// The route from a source into a target.
-    Into(ModSourceId, ModTarget),
-    /// The route from a source into the depth of a route.
-    Scaling(ModSourceId, ModRouteId),
-}
 
 impl Modulatable for DepthTarget {}
 impl ScalarTarget for DepthTarget {

@@ -425,7 +425,7 @@ impl ValueTable {
             .slots
             .extract_if(.., |id, _| match id {
                 SlotId::Range(target)
-                | SlotId::RouteDepth(super::depth::DepthKey::Into(_, target)) => touches(target),
+                | SlotId::RouteDepth(super::slot::DepthKey::Into(_, target)) => touches(target),
                 _ => false,
             })
             .collect();

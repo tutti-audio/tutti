@@ -111,11 +111,11 @@ enum take::TakeEvent
 enum transcribe::LevelVelocity
 enum transcribe::NoteCents
 enum value::controls::GainTargetError
-enum value::depth::DepthKey
 enum value::error::PluginParamRefusal
 enum value::error::SetRefusal
 enum value::error::UnitError
 enum value::error::ValueErrorKind
+enum value::slot::DepthKey
 enum value::slot::SlotId
 enum value::target::TargetId
 enum value::watcher::ChangedBy

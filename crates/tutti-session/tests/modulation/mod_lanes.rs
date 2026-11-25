@@ -1246,13 +1246,20 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
 }
 
 /// **A scaling route goes with the route it scales**, and one onto a route
-/// that is not declared is refused at the call.
+/// that is not declared is refused at the call. A scale is one deep: a route
+/// onto a scaling route is refused, so no scale outlives the route it rests on.
 #[test]
 fn a_scaling_route_goes_with_its_scaled_route() {
     let (mut s, _side, _, full, half) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     let scaling = s.mods().routes().find(|r| r.source == half).unwrap();
     assert_eq!(scaling.scales, Some(scaled));
+    let third = s.mods_mut().macro_(1.0);
+    assert_eq!(
+        s.mods_mut()
+            .route(RouteSpec::scaling(third, scaling.id, Bipolar::of(1.0))),
+        Err(RouteError::ScalesAScale { route: scaling.id })
+    );
     s.mods_mut().remove_route(scaled).unwrap();
     assert_eq!(s.mods().routes().count(), 0, "the scaling route went too");
     assert_eq!(
