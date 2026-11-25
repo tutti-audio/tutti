@@ -65,9 +65,8 @@ pub fn declare_outputs<F: Float>(ed: &mut Editor<F>, width: ChannelLayout) -> bo
 
 /// Wiring for tests that start from a bare editor.
 pub trait WireDeclared {
-    /// Declares the main output as wide as there are `sources` and wires
-    /// channel `c` to the `c`th of them ([`declare_outputs`], then
-    /// [`Editor::wire_outputs`]).
+    /// Makes the main output as wide as there are `sources` and wires
+    /// channel `c` to the `c`th of them, as [`Editor::wire_outputs`] does.
     ///
     /// # Errors
     ///
