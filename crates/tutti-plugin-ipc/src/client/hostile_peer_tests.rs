@@ -1476,6 +1476,7 @@ fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
                 midi_out: Default::default(),
                 status: Default::default(),
                 refused: false,
+                writes: crate::BlockWrites::Handed,
             })),
             _ => Action::Silent,
         },
@@ -2436,6 +2437,7 @@ fn answer_blocks(msg: AudioRequest) -> Action {
             midi_out: Default::default(),
             status: Default::default(),
             refused: false,
+            writes: crate::BlockWrites::Handed,
         })),
         _ => Action::Silent,
     }
@@ -2908,6 +2910,7 @@ fn a_write_a_held_block_took_is_delivered_when_the_block_is_answered() {
                     midi_out: Default::default(),
                     status: Default::default(),
                     refused: false,
+                    writes: crate::BlockWrites::Handed,
                 }))
             }
             AudioRequest::ApplyParameters { id, .. } => {
@@ -2956,6 +2959,7 @@ fn a_write_a_refused_block_carried_is_counted_and_the_wait_ends() {
                     midi_out: Default::default(),
                     status: Default::default(),
                     refused: true,
+                    writes: crate::BlockWrites::Dropped,
                 }))
             }
             AudioRequest::ApplyParameters { id, .. } => {
@@ -2976,6 +2980,38 @@ fn a_write_a_refused_block_carried_is_counted_and_the_wait_ends() {
         audio.edits_delivered(upto)
     });
     assert_eq!(audio.unapplied_edits(), 1);
+}
+
+/// **A block whose audio was refused after the plugin took its changes counts
+/// no write lost**: `refused` is about the audio, `writes` about the changes,
+/// and a plugin that was handed them has them.
+#[test]
+fn a_write_a_handed_block_carried_is_not_counted_when_its_audio_is_refused() {
+    let mock = MockServer::start_lanes(
+        "handed-refused-block",
+        |msg| match msg {
+            AudioRequest::ProcessAudio(data) => {
+                Action::Audio(Box::new(AudioReply::AudioProcessed {
+                    latency_us: 0,
+                    seq: data.seq,
+                    midi_out: Default::default(),
+                    status: Default::default(),
+                    refused: true,
+                    writes: crate::BlockWrites::Handed,
+                }))
+            }
+            _ => Action::Silent,
+        },
+        |_| Action::Silent,
+    );
+    let audio = mock.bridge.audio();
+    audio.declare_host_edits([ParamId::new(1)]);
+    let upto = write_one(audio);
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || {
+        audio.edits_delivered(upto)
+    });
+    assert_eq!(audio.unapplied_edits(), 0);
 }
 
 /// **A crashed plugin reads as delivered**: the read or save that follows fails

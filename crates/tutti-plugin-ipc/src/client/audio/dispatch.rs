@@ -15,7 +15,7 @@ use crate::conversation::{Conversation, Fault, Heard};
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
-use crate::{ApplyOutcome, ProcessAudioData};
+use crate::{ApplyOutcome, BlockWrites, ProcessAudioData};
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
     Request, StateReady,
@@ -363,10 +363,11 @@ impl AudioState {
                     midi_out,
                     status,
                     refused,
+                    writes,
                     ..
                 } = reply
                 {
-                    answered(channels, !refused, edits, swept);
+                    answered(channels, writes == BlockWrites::Handed, edits, swept);
                     channels.note_outcome(
                         seq,
                         if refused {
@@ -804,9 +805,10 @@ pub(super) fn handle_audio(
                             midi_out,
                             status,
                             refused,
+                            writes,
                             ..
                         } => {
-                            answered(channels, !refused, edits, swept);
+                            answered(channels, writes == BlockWrites::Handed, edits, swept);
                             channels.note_outcome(
                                 seq,
                                 if refused {
@@ -1269,6 +1271,7 @@ mod tests {
             midi_out: Default::default(),
             status: Default::default(),
             refused: false,
+            writes: crate::BlockWrites::Handed,
         }
     }
 
