@@ -480,8 +480,35 @@ struct Entry {
 /// One network as the session keeps it.
 struct Net {
     shared: Arc<NetShared>,
+    /// The network's output node: its sink's record is what a peer that joins is
+    /// caught up from.
+    sink: NodeKey,
     claim: Held<NetShared>,
     entries: Vec<Entry>,
+    /// The peers established since the last [`Networks::take_joined`].
+    joined: Vec<Joined>,
+}
+
+/// A peer that joined a network's output: a listener with no graph edit, which
+/// the output's record catches up ([`send`](Self::send)).
+pub(crate) struct Joined {
+    sink: NodeKey,
+    peer: SocketAddr,
+    shared: Arc<NetShared>,
+}
+
+impl Joined {
+    /// The output node the peer listens to.
+    pub(crate) fn sink(&self) -> NodeKey {
+        self.sink
+    }
+
+    /// Sends `packets` to this peer alone: the peers already listening heard
+    /// them as they were sent. Whether the link took them (nothing to send is
+    /// taken).
+    pub(crate) fn send(&self, packets: &[Ump]) -> bool {
+        packets.is_empty() || self.shared.link.send(&[self.peer], packets)
+    }
 }
 
 /// The networks of the session, and the input nodes going.
@@ -589,6 +616,15 @@ impl Networks {
         });
     }
 
+    /// The peers established since the last call, each a new listener of its
+    /// network's output.
+    pub(crate) fn take_joined(&mut self) -> Vec<Joined> {
+        self.nets
+            .iter_mut()
+            .flat_map(|net| std::mem::take(&mut net.joined))
+            .collect()
+    }
+
     /// `Phase::Poll`: ends the networks whose handles were all dropped, takes the
     /// events each link queued (UMP to the peers' inlets, and each Session's life
     /// as a report), and takes out the input nodes that have released what their
@@ -672,6 +708,11 @@ impl Net {
                     });
                     drop(peers);
                     self.entries.push(entry);
+                    self.joined.push(Joined {
+                        sink: self.sink,
+                        peer,
+                        shared: Arc::clone(&shared),
+                    });
                     out.push(NetworkEvent::Connected { identity: remote }.into());
                     edited = true;
                 }
@@ -767,8 +808,10 @@ impl<F: Float> crate::Midi<'_, F> {
         let (claim, held) = Held::new(Arc::clone(&shared), sink.node());
         self.state.networks.nets.push(Net {
             shared,
+            sink: sink.node(),
             claim: held,
             entries: Vec::new(),
+            joined: Vec::new(),
         });
         MidiNetwork {
             claim,

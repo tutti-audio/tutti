@@ -76,6 +76,10 @@ impl<F: Float> Editor<F> {
     ///
     /// When the box coming back is a [`reprepare`](Self::reprepare)'s first
     /// half, this re-prepares the units it carries and sends the second.
+    ///
+    /// Items an executor apply had no room to hand back, leaked rather than
+    /// freed on the audio thread, are logged with `tracing::error!` once per
+    /// increase: such a count is a tutti bug.
     pub fn collect(&mut self) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         while let Some(done) = self.link.pop_returned() {
@@ -95,6 +99,14 @@ impl<F: Float> Editor<F> {
             drop(x);
         }
         self.stager.observe(self.link.acked());
+        // Control thread: the audio thread only counts what its lists refused.
+        let leaked = self.link.take_leaked();
+        if leaked > 0 {
+            tracing::error!(
+                leaked,
+                "an executor apply had no room to hand back {leaked} owned items and leaked them; this is a tutti bug"
+            );
+        }
         keys
     }
 

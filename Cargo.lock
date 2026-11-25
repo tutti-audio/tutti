@@ -2872,6 +2872,7 @@ dependencies = [
  "proptest",
  "serde",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-buffers",
  "tutti-curve",
  "tutti-fixtures",

@@ -2,14 +2,7 @@
 # sorted (`cargo xtask write-public-items` rewrites this file from the tree).
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
-const args::USAGE
-enum args::Flag
-enum args::Usage
-fn args::parse
 fn describe
 fn describe_measured
 fn read_widths
 struct StateFor
-struct args::Args
-struct args::Measure
-struct args::StateFile

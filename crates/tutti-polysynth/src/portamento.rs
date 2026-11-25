@@ -186,7 +186,7 @@ enum Glide {
 }
 
 #[derive(Debug, Clone)]
-pub struct Portamento {
+pub(crate) struct Portamento {
     config: PortamentoConfig,
     glide: Glide,
     sample_rate: SampleRate,

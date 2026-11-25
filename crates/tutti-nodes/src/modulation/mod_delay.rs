@@ -321,6 +321,13 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         }
     }
 
+    /// The depth and the feedback on their targets. The delays stay on their segment: the
+    /// sweep is the LFO's, not a design.
+    fn jump_to_target(&mut self) {
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
+    }
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

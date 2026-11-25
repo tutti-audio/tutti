@@ -156,7 +156,7 @@ thread_local! {
 /// The value lock and the table behind it. Control side: the audio thread
 /// never touches either.
 #[derive(Default)]
-pub struct ValueTable {
+pub(crate) struct ValueTable {
     params: Mutex<Params>,
     /// What the output policy is checked against, which the graph publishes.
     /// A lock of its own: a check reads it under the value lock.
@@ -176,7 +176,7 @@ impl fmt::Debug for ValueTable {
 }
 
 /// The value lock, held; released and forgotten by this thread when dropped.
-pub struct Held<'a> {
+pub(crate) struct Held<'a> {
     guard: MutexGuard<'a, Params>,
     token: usize,
 }
@@ -580,7 +580,7 @@ impl ValueTable {
 /// The session's value state, one `Arc` independent of the clock: a clock
 /// switch moves it and never rebuilds it. [`Values`] hold it weakly, so the
 /// session's owners are the state's owners.
-pub struct ValueState<K> {
+pub(crate) struct ValueState<K> {
     table: Arc<ValueTable>,
     key: PhantomData<fn() -> K>,
 }

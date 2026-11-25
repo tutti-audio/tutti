@@ -40,6 +40,13 @@ use tutti_rt::RingFloat;
 /// the backstop passes), only on whether sleeping is safe, which is why this
 /// carries no duration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    not(any(test, feature = "testing")),
+    expect(
+        unreachable_pub,
+        reason = "exported with the hand-driven cycle, feature `testing`"
+    )
+)]
 pub enum StepOutcome {
     /// No stream is live: none is open, or each is still opening or faulted.
     /// Nothing to refill; sleep.

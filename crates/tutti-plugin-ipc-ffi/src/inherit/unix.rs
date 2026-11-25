@@ -8,7 +8,7 @@ use std::process::Command;
 /// other descriptor the process holds is marked close-on-exec between the fork
 /// and the exec. A std `Command` with a `pre_exec` hook spawns with `fork`, not
 /// `posix_spawn`.
-pub fn inherit_only_stdio(command: &mut Command) {
+pub(crate) fn inherit_only_stdio(command: &mut Command) {
     let bound = descriptor_bound();
     // SAFETY: the hook runs between `fork` and `exec` and calls only
     // `mark_close_on_exec`, which calls `libc::fcntl`, which POSIX lists as

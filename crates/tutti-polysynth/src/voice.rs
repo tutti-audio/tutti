@@ -21,7 +21,7 @@ use tutti_voicing::{
 };
 
 use tutti_ump::ControlValue;
-pub use tutti_voicing::VoiceId;
+pub(crate) use tutti_voicing::VoiceId;
 
 /// How many notes may sound at once, and whether a new note restarts the
 /// envelope.
@@ -169,7 +169,7 @@ impl VoiceSlot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SynthVoicesConfig {
+pub(crate) struct SynthVoicesConfig {
     max_voices: NonZeroUsize,
     steal: Steal,
     mode: VoiceMode,
@@ -181,7 +181,7 @@ impl SynthVoicesConfig {
     /// 16 poly voices, the oldest stolen first, a whole-tone bend and a 48-semitone
     /// Per-Note Pitch Bend.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             max_voices: NonZeroUsize::new(16).unwrap(),
             steal: Steal::By(Order::Oldest),
@@ -193,28 +193,28 @@ impl SynthVoicesConfig {
 
     /// How many notes may sound at once.
     #[must_use]
-    pub const fn max_voices(mut self, voices: NonZeroUsize) -> Self {
+    pub(crate) const fn max_voices(mut self, voices: NonZeroUsize) -> Self {
         self.max_voices = voices;
         self
     }
 
     /// Which voice is taken when all are busy.
     #[must_use]
-    pub const fn steal(mut self, steal: Steal) -> Self {
+    pub(crate) const fn steal(mut self, steal: Steal) -> Self {
         self.steal = steal;
         self
     }
 
     /// Poly, mono or legato.
     #[must_use]
-    pub const fn mode(mut self, mode: VoiceMode) -> Self {
+    pub(crate) const fn mode(mut self, mode: VoiceMode) -> Self {
         self.mode = mode;
         self
     }
 
     /// What a full pitch bend spans on a channel until RPN 0 says otherwise.
     #[must_use]
-    pub const fn bend_range(mut self, range: Semitones) -> Self {
+    pub(crate) const fn bend_range(mut self, range: Semitones) -> Self {
         self.bend_range = range;
         self
     }
@@ -222,7 +222,7 @@ impl SynthVoicesConfig {
     /// What a full Per-Note Pitch Bend spans on a channel until RPN 0/7 says
     /// otherwise.
     #[must_use]
-    pub const fn per_note_bend_range(mut self, range: Semitones) -> Self {
+    pub(crate) const fn per_note_bend_range(mut self, range: Semitones) -> Self {
         self.per_note_bend_range = range;
         self
     }
@@ -247,7 +247,7 @@ impl SynthVoicesConfig {
 /// allocator's tests read.
 #[derive(Debug, Clone)]
 #[cfg_attr(not(test), expect(dead_code, reason = "read by the allocator's tests"))]
-pub enum AllocationResult {
+pub(crate) enum AllocationResult {
     Allocated { slot_index: usize },
     Stolen { slot_index: usize },
     LegatoRetrigger { slot_index: usize },
@@ -257,7 +257,7 @@ pub enum AllocationResult {
 #[cfg_attr(not(test), expect(dead_code, reason = "read by the allocator's tests"))]
 impl AllocationResult {
     /// The slot the note landed in, if it got one.
-    pub fn slot_index(&self) -> Option<usize> {
+    pub(crate) fn slot_index(&self) -> Option<usize> {
         match *self {
             Self::Allocated { slot_index }
             | Self::Stolen { slot_index }
@@ -321,7 +321,7 @@ pub(crate) enum Gate {
 /// `tutti_voicing::VoiceAllocator`'s; this carries out its commands on slots and keeps
 /// what only the synth knows (the per-note identity, the envelope level).
 #[derive(Debug)]
-pub struct SynthVoices {
+pub(crate) struct SynthVoices {
     config: SynthVoicesConfig,
     core: VoiceAllocator,
     slots: Vec<VoiceSlot>,
@@ -339,7 +339,7 @@ impl SynthVoices {
         self.core.chase(group, emit);
     }
 
-    pub fn new(config: SynthVoicesConfig) -> Self {
+    pub(crate) fn new(config: SynthVoicesConfig) -> Self {
         let voice_config = config.voice_config();
         let slots = (0..config.max_voices.get())
             .map(|_| VoiceSlot::default())
@@ -532,7 +532,7 @@ impl SynthVoices {
         self.gates = gates;
     }
 
-    pub fn allocate(
+    pub(crate) fn allocate(
         &mut self,
         id: NoteId,
         note: NoteNumber,
@@ -553,7 +553,7 @@ impl SynthVoices {
     /// Processes a note-off for `id`. Returns the slot whose voice should now be
     /// gated off (the note actually stopped sounding), or `None` when the note
     /// is held by sustain/sostenuto or no live voice matched `id`.
-    pub fn release(&mut self, id: NoteId, channel: MidiChannel) -> Option<usize> {
+    pub(crate) fn release(&mut self, id: NoteId, channel: MidiChannel) -> Option<usize> {
         // Every id a caller holds comes from `from_channel_note`, which names a pair.
         let (_, note) = id
             .channel_note()
@@ -577,7 +577,7 @@ impl SynthVoices {
     }
 
     /// Call when envelope reaches zero to free the slot for reuse.
-    pub fn voice_finished(&mut self, voice_id: VoiceId) {
+    pub(crate) fn voice_finished(&mut self, voice_id: VoiceId) {
         if let Some(i) = self.slot_of_voice(voice_id) {
             let id = self.slots[i].id();
             if self.id_to_slot.get(id).copied() == Some(i) {
@@ -599,28 +599,28 @@ impl SynthVoices {
         self.run(channel, &cc, None);
     }
 
-    pub fn sustain_pedal(&mut self, channel: MidiChannel, on: bool) {
+    pub(crate) fn sustain_pedal(&mut self, channel: MidiChannel, on: bool) {
         self.control(channel, tutti_ump::CCNumber::SUSTAIN, on);
     }
 
-    pub fn sostenuto_pedal(&mut self, channel: MidiChannel, on: bool) {
+    pub(crate) fn sostenuto_pedal(&mut self, channel: MidiChannel, on: bool) {
         self.control(channel, tutti_ump::CCNumber::SOSTENUTO, on);
     }
 
     /// Reset All Controllers: the pedals come up.
-    pub fn reset_controllers(&mut self, channel: MidiChannel) {
+    pub(crate) fn reset_controllers(&mut self, channel: MidiChannel) {
         self.control(channel, tutti_ump::CCNumber::RESET_ALL, false);
     }
 
-    pub fn all_notes_off(&mut self, channel: MidiChannel) {
+    pub(crate) fn all_notes_off(&mut self, channel: MidiChannel) {
         self.control(channel, tutti_ump::CCNumber::ALL_NOTES_OFF, false);
     }
 
-    pub fn all_sound_off(&mut self, channel: MidiChannel) {
+    pub(crate) fn all_sound_off(&mut self, channel: MidiChannel) {
         self.control(channel, tutti_ump::CCNumber::ALL_SOUND_OFF, false);
     }
 
-    pub fn update_envelope_level(&mut self, slot_index: usize, level: Amplitude) {
+    pub(crate) fn update_envelope_level(&mut self, slot_index: usize, level: Amplitude) {
         if slot_index < self.slots.len() {
             self.slots[slot_index].set_envelope_level(level);
         }
@@ -677,12 +677,12 @@ impl SynthVoices {
 
     /// Runs a message that starts and releases no note (a bend, a sensitivity,
     /// a per-note controller) through the core.
-    pub fn message(&mut self, channel: MidiChannel, message: &Voice2) {
+    pub(crate) fn message(&mut self, channel: MidiChannel, message: &Voice2) {
         self.run(channel, message, None);
     }
 
     #[cfg(test)]
-    pub fn active_count(&self) -> usize {
+    pub(crate) fn active_count(&self) -> usize {
         self.slots.iter().filter(|s| !s.is_idle()).count()
     }
 
@@ -690,7 +690,7 @@ impl SynthVoices {
         &self.slots
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         for slot in &mut self.slots {
             *slot = VoiceSlot::default();
         }

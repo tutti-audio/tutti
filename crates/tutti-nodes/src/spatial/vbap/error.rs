@@ -21,4 +21,4 @@ pub enum VbapError {
 }
 
 /// `Result` with [`VbapError`] as the failure type.
-pub type Result<T> = core::result::Result<T, VbapError>;
+pub(super) type Result<T> = core::result::Result<T, VbapError>;

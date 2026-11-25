@@ -8,12 +8,12 @@ use thiserror::Error;
 use tutti_plugin_types::{PluginFormat, PluginId};
 
 /// The usage text.
-pub const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
+pub(crate) const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
                          [--measure [--state <file> [--plugin <id>]] [--budget <seconds>]]";
 
 /// A command line that was read.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Args {
+pub(crate) struct Args {
     /// The plugin file.
     pub path: PathBuf,
     /// Where the outcome is written.
@@ -26,7 +26,7 @@ pub struct Args {
 
 /// What the command line asks of the measuring step.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Measure {
+pub(crate) struct Measure {
     /// `--state`: the state to put one plugin in.
     pub state: Option<StateFile>,
     /// `--budget`: how long the whole run may take.
@@ -35,7 +35,7 @@ pub struct Measure {
 
 /// `--state <file>` and `--plugin <id>`.
 #[derive(Debug, PartialEq, Eq)]
-pub struct StateFile {
+pub(crate) struct StateFile {
     /// The file the plugin's own `save_state` wrote.
     pub file: PathBuf,
     /// `--plugin`: the id of the plugin the state is for; `None` is the file's
@@ -45,7 +45,7 @@ pub struct StateFile {
 
 /// Why a command line was not read.
 #[derive(Debug, PartialEq, Eq, Error)]
-pub enum Usage {
+pub(crate) enum Usage {
     /// The path or the result file is not named, so nothing can say what was wrong.
     #[error("the plugin path and the result file are required")]
     NoResultFile,
@@ -61,7 +61,7 @@ pub enum Usage {
 
 /// What is wrong with a flag.
 #[derive(Debug, PartialEq, Eq, Error)]
-pub enum Flag {
+pub(crate) enum Flag {
     /// An argument that is no flag the probe has.
     #[error("unknown argument {0:?}")]
     Unknown(String),
@@ -89,7 +89,7 @@ pub enum Flag {
 /// [`Usage`]: a missing path or result file, or a [`Flag`] that is unknown,
 /// repeated, valueless or whose value does not read, `--state`, `--plugin` or
 /// `--budget` without `--measure`, or `--plugin` without `--state`.
-pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, Usage> {
+pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, Usage> {
     let mut args = args.into_iter();
     let (Some(path), Some(result)) = (args.next(), args.next()) else {
         return Err(Usage::NoResultFile);

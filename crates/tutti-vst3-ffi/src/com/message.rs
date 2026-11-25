@@ -26,7 +26,7 @@ struct Ids {
     lent: Option<Arc<CStr>>,
 }
 
-pub struct Message {
+pub(super) struct Message {
     message_id: Mutex<Ids>,
     attributes: ComWrapper<AttributeList>,
 }
@@ -36,7 +36,7 @@ impl Class for Message {
 }
 
 impl Message {
-    pub fn new() -> ComWrapper<Self> {
+    pub(super) fn new() -> ComWrapper<Self> {
         ComWrapper::new(Self {
             message_id: Mutex::new(Ids::default()),
             attributes: AttributeList::new(),

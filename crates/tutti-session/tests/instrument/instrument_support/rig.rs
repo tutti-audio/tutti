@@ -10,11 +10,11 @@ use tutti_ump::Ump;
 use tutti_units::Moment;
 use tutti_units::{SampleRate, Samples};
 
-pub const RATE: SampleRate = SampleRate::SR_48K;
+pub(crate) const RATE: SampleRate = SampleRate::SR_48K;
 /// The frames a render call hands over; also the session's largest block.
-pub const BLOCK: usize = 128;
+pub(crate) const BLOCK: usize = 128;
 
-pub struct Rig {
+pub(crate) struct Rig {
     pub session: Session,
     pub node: NodeKey,
     /// The key of the hosted plugin the instrument is, when it is one.
@@ -28,7 +28,7 @@ pub struct Rig {
     pub origin: usize,
 }
 
-pub fn offline_session() -> Session {
+pub(crate) fn offline_session() -> Session {
     Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
@@ -39,14 +39,14 @@ pub fn offline_session() -> Session {
 impl Rig {
     /// Makes `node` (already in `session`) an instrument and wires its strip
     /// to the outputs.
-    pub fn new(mut session: Session, node: NodeKey) -> Result<Self, tutti_session::Error> {
+    pub(crate) fn new(mut session: Session, node: NodeKey) -> Result<Self, tutti_session::Error> {
         let handle = session.instrument(node)?;
         Ok(Self::wired(session, handle))
     }
 
     /// A rig over a handle the session already made, its strip wired to the
     /// outputs here.
-    pub fn wired<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
+    pub(crate) fn wired<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
         session
             .graph()
             .connect(handle.output(), MainOutput)
@@ -56,7 +56,7 @@ impl Rig {
 
     /// A rig over a handle whose strip is wired to the outputs already
     /// (`add_instrument` does it).
-    pub fn played<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
+    pub(crate) fn played<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
         let handle = handle.erase();
         let _ = session.update();
         Self {
@@ -73,12 +73,12 @@ impl Rig {
     /// Frames rendered so far: the position of the next block in this rig's
     /// own count. After a rate change it is not the engine's clock (see
     /// [`Rig::clock_of`]).
-    pub fn frame(&self) -> usize {
+    pub(crate) fn frame(&self) -> usize {
         self.left.len()
     }
 
     /// Renders one block.
-    pub fn block(&mut self) {
+    pub(crate) fn block(&mut self) {
         let mut buf = vec![0.0f32; BLOCK * 2];
         self.session
             .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -105,7 +105,7 @@ impl Rig {
     }
 
     /// Renders until `frame` frames exist.
-    pub fn render_to(&mut self, frame: usize) {
+    pub(crate) fn render_to(&mut self, frame: usize) {
         while self.frame() < frame {
             self.block();
         }
@@ -113,7 +113,7 @@ impl Rig {
 
     /// Renders until a re-prepare has landed, and one block after it so the
     /// instrument's queue has run on the new clock.
-    pub fn settle(&mut self) {
+    pub(crate) fn settle(&mut self) {
         for _ in 0..64 {
             self.block();
             if !self.session.graph_ref().testing().is_repreparing() {
@@ -128,7 +128,7 @@ impl Rig {
     }
 
     /// `at` frames past the origin: where a case stamps.
-    pub fn t(&self, at: usize) -> usize {
+    pub(crate) fn t(&self, at: usize) -> usize {
         self.origin + at
     }
 
@@ -137,7 +137,7 @@ impl Rig {
     /// and a re-prepare at another rate moves it to the same wall-clock time, so
     /// it is not this rig's count: the two differ by what the rescale dropped.
     /// The queue's clock is the origin a frame is measured from.
-    pub fn clock_of(&self, frame: usize) -> Moment {
+    pub(crate) fn clock_of(&self, frame: usize) -> Moment {
         assert!(frame >= self.frame(), "frame {frame} is already rendered");
         self.handle
             .keys()
@@ -148,7 +148,7 @@ impl Rig {
 
     /// Plays `ump` on this rig's frame `frame`, an absolute position on the
     /// engine's clock.
-    pub fn at(&mut self, frame: usize, ump: Ump) {
+    pub(crate) fn at(&mut self, frame: usize, ump: Ump) {
         let moment = self.clock_of(frame);
         self.handle
             .keys_mut()
@@ -158,19 +158,19 @@ impl Rig {
 
     /// First frame at or after `from` whose left or right sample is above
     /// `1e-6`.
-    pub fn onset(&self, from: usize) -> Option<usize> {
+    pub(crate) fn onset(&self, from: usize) -> Option<usize> {
         (from..self.left.len()).find(|&i| self.left[i].abs() > 1e-6 || self.right[i].abs() > 1e-6)
     }
 
     /// Largest absolute sample in `range` of either channel.
-    pub fn peak(&self, range: std::ops::Range<usize>) -> f32 {
+    pub(crate) fn peak(&self, range: std::ops::Range<usize>) -> f32 {
         range
             .map(|i| self.left[i].abs().max(self.right[i].abs()))
             .fold(0.0, f32::max)
     }
 
     /// Last frame whose sample is above `1e-4`, if any.
-    pub fn last_audible(&self) -> Option<usize> {
+    pub(crate) fn last_audible(&self) -> Option<usize> {
         (0..self.left.len())
             .rev()
             .find(|&i| self.left[i].abs() > 1e-4 || self.right[i].abs() > 1e-4)

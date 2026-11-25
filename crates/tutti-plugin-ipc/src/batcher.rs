@@ -267,7 +267,7 @@ impl Wire {
 /// `ParamDelivery`, whose buffer the bridge swaps rather than moves
 /// ([`Chunks::params`]), so nothing is allocated or freed per chunk.
 #[derive(Debug)]
-pub struct BlockPayload {
+pub(crate) struct BlockPayload {
     /// The chunk's MIDI events.
     pub midi: MidiEventVec,
     /// The chunk's note expression changes.
@@ -285,7 +285,7 @@ impl BlockPayload {
     /// A chunk with nothing in it: no MIDI, no harmony, a stopped transport at
     /// `sample_rate` and no changes after it.
     #[must_use]
-    pub fn new(sample_rate: SampleRate) -> Self {
+    pub(crate) fn new(sample_rate: SampleRate) -> Self {
         Self {
             midi: MidiEventVec::new(),
             note_expression: NoteExpressionChanges::default(),
@@ -303,7 +303,7 @@ impl BlockPayload {
 /// span (module docs, "A FIFO, so every chunk is whole"): the node is told
 /// where each chunk **begins** in the call that begins it, and is asked for
 /// its payload when the chunk is **submitted**, possibly a call later.
-pub trait Chunks {
+pub(crate) trait Chunks {
     /// A chunk of `chunk` frames begins at frame `at` of this call (its first
     /// frame is the next input frame the batcher takes).
     fn begin(&mut self, at: usize, chunk: usize);
@@ -407,7 +407,7 @@ impl Batcher {
     /// allocates the FIFO and the ring. The chunk starts at
     /// the ceiling; [`prepare`](Self::prepare) narrows it to the graph's
     /// `MaxBlock`.
-    pub fn new(
+    pub(crate) fn new(
         inputs: usize,
         outputs: usize,
         format: FloatWidth,
@@ -445,7 +445,7 @@ impl Batcher {
     /// render, or a host that does not know its callback), never past the
     /// slab's ceiling (module docs, "One device callback per chunk"). Starts
     /// the pipeline over, as a re-prepare starts the node over.
-    pub fn prepare(&mut self, max_block: Samples, quantum: Option<Samples>) {
+    pub(crate) fn prepare(&mut self, max_block: Samples, quantum: Option<Samples>) {
         let want = quantum.map_or(max_block.get(), Samples::get);
         self.chunk = self.ceiling.min(want).max(1);
         self.reset();
@@ -469,7 +469,7 @@ impl Batcher {
     }
 
     /// The frames every submission carries.
-    pub fn chunk(&self) -> usize {
+    pub(crate) fn chunk(&self) -> usize {
         self.chunk
     }
 
@@ -489,7 +489,7 @@ impl Batcher {
     /// The budget and the latches are the [`OfflineWait`]: the batcher records
     /// a miss or a dead server there, and the fork's health probe reports
     /// them.
-    pub fn set_offline_wait(&mut self, wait: Arc<OfflineWait>) {
+    pub(crate) fn set_offline_wait(&mut self, wait: Arc<OfflineWait>) {
         self.offline_wait = Some(wait);
     }
 
@@ -602,7 +602,7 @@ impl Batcher {
     /// The server's own `Reset` is a no-op for this purpose, so clearing
     /// `expect_seq` here is the *entire* mechanism by which a seek stops old
     /// audio from arriving.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.expect_seq = None;
         self.unanswered = [0; BATCH_OUTCOMES];
         self.counters.in_flight.store(0, Ordering::Release);
@@ -796,7 +796,7 @@ impl Batcher {
     /// [`Sample`](tutti_buffers::Sample) rule, and back. An input port past the
     /// input's planes is taken as silence; an output port past the output's planes
     /// is not written.
-    pub fn process<S: Float>(
+    pub(crate) fn process<S: Float>(
         &mut self,
         bridge: &AudioBridge,
         io: &mut InputOutput<'_, S>,

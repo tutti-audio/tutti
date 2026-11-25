@@ -68,6 +68,9 @@
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
+// The `conformance` feature re-exports items the host crate does not use; without it they
+// are `pub` and reach no one. The build with the feature on holds the lint for the crate.
+#![cfg_attr(not(feature = "conformance"), allow(unreachable_pub))]
 #![cfg_attr(
     test,
     allow(

@@ -16,7 +16,7 @@ use super::rig::{BLOCK, Rig};
 use tutti_ump::{Message, NoteNumber, NoteVelocity, Ump, Voice2};
 
 /// A case a subject cannot pass: it runs, and must fail with `fails_with`.
-pub struct Gap {
+pub(crate) struct Gap {
     pub case: &'static str,
     pub why: &'static str,
     pub fails_with: &'static str,
@@ -24,7 +24,7 @@ pub struct Gap {
 
 /// A hosted plugin's chunk counters (`Diagnostics`), each over its life.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Chunks {
+pub(crate) struct Chunks {
     /// Chunks the node played as silence because the pipeline had not answered.
     pub missed: u64,
     /// Of those, answered after the silence was played.
@@ -48,7 +48,7 @@ impl Chunks {
     }
 }
 
-pub trait Subject {
+pub(crate) trait Subject {
     const NAME: &'static str;
     const GAPS: &'static [Gap];
     /// Whether its pitch follows the note (a gate does not).
@@ -89,7 +89,7 @@ pub trait Subject {
 }
 
 /// Runs `case`, honouring a gap.
-pub fn run<S: Subject>(name: &'static str, case: fn()) {
+pub(crate) fn run<S: Subject>(name: &'static str, case: fn()) {
     match S::GAPS.iter().find(|g| g.case == name) {
         None => case(),
         Some(gap) => match catch_unwind(AssertUnwindSafe(case)) {
@@ -208,7 +208,7 @@ const OFF: usize = 6_011;
 /// **Only an instrument is one**: a node with no event input, and one with
 /// no stereo pair, are refused with the reason. (A hosted plugin that declares
 /// itself an effect is refused in `tests/plugin/plugin.rs`: it needs a plugin.)
-pub fn only_an_instrument_is_one<S: Subject>() {
+pub(crate) fn only_an_instrument_is_one<S: Subject>() {
     let mut rig = S::rig();
     let dc = rig
         .session
@@ -235,7 +235,7 @@ pub fn only_an_instrument_is_one<S: Subject>() {
 /// **A note-on sounds on the frame it is stamped** (plus the node's declared
 /// latency and its lead): the first nonzero sample is in the subject's window.
 /// A stamp is a position in a block, so the case stamps off the block grid.
-pub fn note_on_sounds_at_its_stamp<S: Subject>() {
+pub(crate) fn note_on_sounds_at_its_stamp<S: Subject>() {
     judgeable::<S>("a note-on sounds on the frame it is stamped", || {
         let mut rig = S::rig();
         let before = S::chunks(&rig);
@@ -263,7 +263,7 @@ pub fn note_on_sounds_at_its_stamp<S: Subject>() {
 /// **A frame already past plays at the next block**, not never: a note-on
 /// stamped for a frame the engine has rendered sounds from the next block's
 /// first frame.
-pub fn a_frame_already_past_plays_at_the_next_block<S: Subject>() {
+pub(crate) fn a_frame_already_past_plays_at_the_next_block<S: Subject>() {
     judgeable::<S>("a frame already past plays at the next block", || {
         let mut rig = S::rig();
         rig.render_to(rig.t(3 * BLOCK));
@@ -285,7 +285,7 @@ pub fn a_frame_already_past_plays_at_the_next_block<S: Subject>() {
 
 /// **A note-off releases**: held, then released at `OFF`, the output is
 /// silent by `SETTLE` frames after it.
-pub fn note_off_releases<S: Subject>() {
+pub(crate) fn note_off_releases<S: Subject>() {
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.at(rig.t(OFF), note_off(0, 60));
@@ -300,7 +300,7 @@ pub fn note_off_releases<S: Subject>() {
 }
 
 /// **A note-on at velocity 0 is a note-off.**
-pub fn velocity_zero_is_a_note_off<S: Subject>() {
+pub(crate) fn velocity_zero_is_a_note_off<S: Subject>() {
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.at(rig.t(OFF), note_on(0, 60, 0));
@@ -313,7 +313,7 @@ pub fn velocity_zero_is_a_note_off<S: Subject>() {
 /// **The declared tail covers the ring-out**: what the node rang for after its
 /// note-off is no longer than the tail it declares, so an offline render that
 /// stops at the last note-off plus the tail keeps everything.
-pub fn tail_covers_the_ring_out<S: Subject>() {
+pub(crate) fn tail_covers_the_ring_out<S: Subject>() {
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.at(rig.t(OFF), note_off(0, 60));
@@ -338,7 +338,7 @@ pub fn tail_covers_the_ring_out<S: Subject>() {
 /// plugin decides for itself what CC 120 means) is held to what the host does:
 /// it delivers the message once, as a control change of controller 120 and value
 /// 0, on the frame of its stamp (its offset in its block).
-pub fn all_sound_off_cuts_at_its_stamp<S: Subject>() {
+pub(crate) fn all_sound_off_cuts_at_its_stamp<S: Subject>() {
     const CC: usize = 20_005;
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
@@ -371,7 +371,7 @@ pub fn all_sound_off_cuts_at_its_stamp<S: Subject>() {
 /// **A message on another channel**: a note on channel 5 sounds in the same
 /// window (an instrument is not tied to channel 0), and a pedal down on
 /// channel 2 holds nothing of channel 0's.
-pub fn another_channel_is_heard_and_holds_nothing<S: Subject>() {
+pub(crate) fn another_channel_is_heard_and_holds_nothing<S: Subject>() {
     judgeable::<S>("a note on channel 5 sounds in the window", || {
         let mut rig = S::rig();
         let before = S::chunks(&rig);
@@ -395,7 +395,7 @@ pub fn another_channel_is_heard_and_holds_nothing<S: Subject>() {
 /// **The gain reaches the output**: at zero the output is silent from the
 /// second block on, and a note still sounding is heard again when it is
 /// restored. The gain is the strip's; the instrument has none of its own.
-pub fn gain_reaches_the_output<S: Subject>() {
+pub(crate) fn gain_reaches_the_output<S: Subject>() {
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.render_to(rig.t(STAMP) + 4_000);
@@ -420,7 +420,7 @@ pub fn gain_reaches_the_output<S: Subject>() {
 
 /// **A rate change keeps the note on its frame** (and, for a pitched one, at
 /// its pitch in Hz): the session is re-prepared at 44.1 kHz while running.
-pub fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
+pub(crate) fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
     judgeable::<S>("a rate change keeps the note on its frame", || {
         let mut rig = S::rig();
         rig.render_to(2 * BLOCK);
@@ -456,7 +456,7 @@ pub fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
 /// 12 000 frames ahead at 48 kHz, waiting in the queue when the session is
 /// re-prepared at 44.1 kHz, sounds at the same wall-clock time, which is frame
 /// 11 025 at the new rate, and not at frame 12 000 of it.
-pub fn a_note_queued_before_a_rate_change_keeps_its_instant<S: Subject>() {
+pub(crate) fn a_note_queued_before_a_rate_change_keeps_its_instant<S: Subject>() {
     rate_change_instant::<S>(false);
 }
 
@@ -464,7 +464,7 @@ pub fn a_note_queued_before_a_rate_change_keeps_its_instant<S: Subject>() {
 /// read at 48 kHz, the session is re-prepared at 44.1 kHz, and only then is the
 /// note sent for the reading. It lands on the instant the reading named, not
 /// where the same frame number is at the new rate.
-pub fn a_reading_taken_before_a_rate_change_keeps_its_instant<S: Subject>() {
+pub(crate) fn a_reading_taken_before_a_rate_change_keeps_its_instant<S: Subject>() {
     rate_change_instant::<S>(true);
 }
 
@@ -530,7 +530,7 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
 /// twice is refused, naming why, and the first handle keeps playing; once the
 /// handle is removed (its queue and strip, not the instrument) the node can be
 /// made one again.
-pub fn an_instrument_is_one_handle_at_a_time<S: Subject>() {
+pub(crate) fn an_instrument_is_one_handle_at_a_time<S: Subject>() {
     let mut rig = S::rig();
     let err = rig
         .session
@@ -580,7 +580,7 @@ pub fn an_instrument_is_one_handle_at_a_time<S: Subject>() {
 /// after the activation), because the fork's own prepare activates it again. The
 /// order is pinned by the plugin subject's other cases, six of which fail under
 /// that reordering, and by the server's staging tests.
-pub fn a_fork_starts_silent_and_plays<S: Subject>() {
+pub(crate) fn a_fork_starts_silent_and_plays<S: Subject>() {
     use tutti_fixtures::midi;
     use tutti_midi_runtime::TimedMidiEvent;
     use tutti_ump::{MidiChannel, MidiGroup};
@@ -645,7 +645,7 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
 /// **Sending allocates nothing**, and neither does a block that plays it. The
 /// ring, the queue node and the strip are preallocated; the control thread
 /// pushes into the ring without a lock.
-pub fn sending_allocates_nothing<S: Subject>() {
+pub(crate) fn sending_allocates_nothing<S: Subject>() {
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.render_to(rig.t(STAMP) + 4_000);
@@ -672,7 +672,7 @@ pub fn sending_allocates_nothing<S: Subject>() {
 
 /// The fundamental's period in frames: autocorrelation, an octave error
 /// corrected by checking half the lag.
-pub fn period(x: &[f32]) -> f64 {
+pub(crate) fn period(x: &[f32]) -> f64 {
     let n = 4096.min(x.len() / 2);
     let ac = |lag: usize| -> f64 {
         (0..n)

@@ -13,7 +13,7 @@ mod platform;
 #[path = "inherit/unix.rs"]
 mod platform;
 
-pub use platform::inherit_only_stdio;
+pub(crate) use platform::inherit_only_stdio;
 
 #[cfg(test)]
 mod tests {

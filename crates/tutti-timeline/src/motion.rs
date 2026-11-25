@@ -26,7 +26,7 @@ use std::sync::atomic::Ordering;
 
 use crossbeam_queue::ArrayQueue;
 
-use super::fsm::{DeclickOutcome, TransitionResult, TransportFsm};
+use super::fsm::{DeclickOutcome, Settled, TransitionResult, TransportFsm};
 use super::loop_region::{LoopOwner, LoopReader, LoopRegion};
 use super::settings::TransportSettings;
 use super::state::PendingSeek;
@@ -204,7 +204,7 @@ impl MotionFsm {
         let (owner, loop_region) = LoopOwner::new();
         // A fresh capacity-one queue has room.
         let _ = home.push(Home {
-            fsm: TransportFsm::new(),
+            fsm: TransportFsm::Stopped,
             owner,
         });
         Self {
@@ -439,7 +439,7 @@ impl MotionAudio {
     /// Only for a holder about to drop this, which must return the FSM
     /// before something else it owns is released (the engine, before its
     /// clock's playhead claim). Idempotent.
-    pub fn hand_back(&mut self) {
+    pub(crate) fn hand_back(&mut self) {
         if let (Some(home), Some(owner)) = (self.home.take(), self.owner.take()) {
             // Lock-free, so a drop on the audio thread is safe. Never full:
             // the FSM was popped from it, and only this value puts one back.
@@ -448,14 +448,9 @@ impl MotionAudio {
         }
     }
 
-    /// The FSM's own motion, which the published mirror follows.
-    pub(crate) fn motion(&self) -> MotionState {
-        self.fsm.motion()
-    }
-
     /// Apply one scheduled command now: a motion change goes through the
     /// state machine.
-    pub fn apply(&mut self, command: TransportCommand) {
+    pub(crate) fn apply(&mut self, command: TransportCommand) {
         match command {
             TransportCommand::Motion(event) => self.step(event),
             TransportCommand::Loop(edit) => {
@@ -467,7 +462,7 @@ impl MotionAudio {
     }
 
     /// The loop region the engine renders under.
-    pub fn loop_region(&self) -> LoopRegion {
+    pub(crate) fn loop_region(&self) -> LoopRegion {
         self.owner
             .as_ref()
             .map_or_else(LoopRegion::default, LoopOwner::region)
@@ -475,8 +470,7 @@ impl MotionAudio {
 
     fn step(&mut self, event: MotionCommand) {
         if let Some(result) = self.fsm.transition(event) {
-            let outcome = self.fsm.declick_outcome();
-            self.publish(result, outcome);
+            self.publish(result);
         }
     }
 
@@ -492,37 +486,21 @@ impl MotionAudio {
         self.seek.request(pos);
     }
 
-    /// `outcome` is the FSM's parked fade outcome right after the transition
-    /// that produced `result`.
-    fn publish(&self, result: TransitionResult, outcome: Option<DeclickOutcome>) {
+    fn publish(&self, result: TransitionResult) {
         match result {
-            TransitionResult::MotionChanged(motion) if is_declicking(motion) => {
-                // A fade retargeted in flight. Its ramp is mid-count and must
-                // NOT restart (the gain would step back to full and click),
-                // but its new outcome takes effect on the transport now, as a
-                // fresh fade's does.
-                self.set_mirror(motion);
-                if let Some(outcome) = outcome {
-                    self.apply_outcome(outcome);
-                }
-            }
-            TransitionResult::MotionChanged(motion) => {
-                // A settled state change cancels any fade.
-                self.set_motion(motion);
-            }
-            TransitionResult::DeclickStarted {
-                motion,
-                on_complete,
-            } => {
-                // The transport stops or jumps **now**, on the command's
-                // frame; the fade is an audio-only concern, the engine's. The
-                // motion mirror reads the declick state until the fade completes.
-                self.set_mirror(motion);
-                self.apply_outcome(on_complete);
-            }
-            TransitionResult::Located { pos, motion } => {
+            TransitionResult::Moved(motion) => self.set_motion(motion),
+            TransitionResult::Located { pos, landing } => {
                 self.locate_to(pos);
-                self.set_motion(motion);
+                self.set_motion(landing.into());
+            }
+            // The transport stops or jumps **now**, on the command's frame;
+            // the fade is an audio-only concern, the engine's, and the mirror
+            // reads the fade's state until it completes. A retargeted fade's
+            // ramp keeps counting, and its new outcome takes effect now as a
+            // fresh fade's does.
+            TransitionResult::FadeStarted(outcome) | TransitionResult::Retargeted(outcome) => {
+                self.set_mirror(result.motion());
+                self.apply_outcome(outcome);
             }
         }
     }
@@ -530,50 +508,32 @@ impl MotionAudio {
     /// Put a fade's outcome into effect on the transport: stop the playhead,
     /// or jump it and leave it rolling or stopped as the outcome says.
     fn apply_outcome(&self, outcome: DeclickOutcome) {
-        match outcome {
-            DeclickOutcome::Stop => self.settings.paused.store(true, Ordering::Release),
-            DeclickOutcome::Locate { pos, motion } => {
-                self.locate_to(pos);
-                self.settings
-                    .paused
-                    .store(motion == MotionState::Stopped, Ordering::Release);
-            }
+        if let DeclickOutcome::Locate { pos, .. } = outcome {
+            self.locate_to(pos);
         }
+        self.settings
+            .paused
+            .store(outcome.landing() == Settled::Stopped, Ordering::Release);
     }
 
     /// Publish `motion` to the UI mirror only, leaving the playhead's
-    /// pausedness alone (a declick state is not a playhead state).
+    /// pausedness alone (a fade's state is not a playhead state).
     fn set_mirror(&self, motion: MotionState) {
         self.motion.store(motion.into(), Ordering::Release);
     }
 
-    /// Called by the engine once it has planned a declick's fade: settle the
-    /// motion the fade was heading for.
+    /// Called by the engine once it has planned a fade: settle the motion
+    /// the fade was heading for. Returns whether a fade was in flight.
     ///
     /// The transport itself already stopped or jumped when the command was
-    /// applied (see `publish`); what is left is the mirror and the parked
-    /// outcome.
-    /// Driven by the outcome the FSM parked, not by reading the published
-    /// mirror back: the mirror is a projection, so dispatching on it lets an
-    /// FSM/mirror disagreement pass unnoticed.
-    pub fn complete_declick(&mut self) {
-        let outcome = self.fsm.complete_declick();
-        match outcome {
-            None => {}
-            Some(DeclickOutcome::Stop) => self.set_motion(MotionState::Stopped),
-            Some(DeclickOutcome::Locate { motion, .. }) => self.set_motion(motion),
-        }
+    /// applied (see `publish`); what is left is the mirror.
+    pub(crate) fn complete_declick(&mut self) -> bool {
+        let Some(outcome) = self.fsm.complete_declick() else {
+            return false;
+        };
+        self.set_motion(outcome.landing().into());
+        true
     }
-}
-
-/// Whether `motion` is a fade in progress. A retarget between two declick
-/// states must leave the ramp counting; only a settled state clears it.
-#[inline]
-pub(crate) fn is_declicking(motion: MotionState) -> bool {
-    matches!(
-        motion,
-        MotionState::DeclickToStop | MotionState::DeclickToLocate
-    )
 }
 
 /// The audio half as the engine's walk drives it, for tests of the machine

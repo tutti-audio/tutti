@@ -144,6 +144,17 @@ fn drive_block(unit: &mut PluginNode<Vst2Loaded>) {
     drive_blocks(unit, BLOCK, BLOCK);
 }
 
+/// `unit` prepared as a graph prepares it for blocks of up to `max`.
+fn prepare_for(unit: &mut PluginNode<Vst2Loaded>, max: usize) {
+    tutti_graph::Node::prepare(
+        unit,
+        &tutti_graph::Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(max)),
+        ),
+    );
+}
+
 /// One block of `frames` through `unit` prepared for blocks of up to `max`.
 fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     use tutti_graph::{Node, Prepare};
@@ -553,12 +564,46 @@ fn the_handle_counts_lost_parameter_reports() {
     drop(loaded.handle);
 }
 
-/// **A graph block longer than the plugin was told never reaches it whole.**
-/// The loader announces 4096 (`effSetBlockSize`); the engine renders up to
-/// 8192 (`DEFAULT_BLOCK_CAPACITY`, more with `Engine::with_capacity`). An
-/// 8192-frame block is rendered as two calls of 4096, and the largest call
-/// the plugin saw is the announced maximum.
-fn a_block_past_the_announced_maximum_is_split_before_the_plugin() {
+/// **A block longer than the plugin was told is split before it, and stays
+/// audible, while the reconcile waits; the pump then announces the graph's
+/// ceiling.** The graph is re-prepared for 8192 off the main thread, where the
+/// plugin cannot be activated again: the plugin still has 4096 (`effSetBlockSize`),
+/// so an 8192-frame block is rendered as two calls of 4096; the next pumps
+/// recall the Processor and activate the plugin at 8192.
+fn a_block_longer_than_the_plugins_ceiling_is_split_until_the_pump_announces_it() {
+    let _guard = PROBE_LOCK.lock();
+    let mut loaded = load();
+
+    let mut unit = loaded.unit;
+    let unit = std::thread::spawn(move || {
+        prepare_for(&mut unit, 8_192);
+        unit
+    })
+    .join()
+    .expect("the thread returns");
+    loaded.unit = unit;
+    process_block(&mut loaded.unit, 8_192);
+    let cap = read_capture(&loaded.path);
+    assert_eq!(cap.max_block_size, 4_096, "still the ceiling it was told");
+    assert_eq!(
+        cap.process_calls, 2,
+        "audible: the block was rendered, in two"
+    );
+    assert_eq!(cap.largest_block, 4_096, "split to what it was told");
+
+    loaded.handle.editor_idle(main_thread());
+    process_block(&mut loaded.unit, 64);
+    loaded.handle.editor_idle(main_thread());
+    process_block(&mut loaded.unit, 8_192);
+    let cap = read_capture(&loaded.path);
+    assert_eq!(cap.max_block_size, 8_192, "the pump announced the ceiling");
+    assert_eq!(cap.largest_block, 8_192);
+}
+
+/// **The plugin is told the graph's block ceiling**, not the loader's
+/// 4096: a graph prepared for 8192 frames announces 8192 (`effSetBlockSize`)
+/// and an 8192-frame block reaches the plugin as one call.
+fn the_plugin_is_told_the_graphs_block_ceiling() {
     let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
@@ -566,12 +611,9 @@ fn a_block_past_the_announced_maximum_is_split_before_the_plugin() {
 
     let cap = read_capture(&loaded.path);
     assert!(cap.valid, "the probe observed no render");
-    assert_eq!(cap.max_block_size, 4_096, "the announced maximum");
-    assert_eq!(
-        cap.largest_block, 4_096,
-        "the plugin was entered with more frames than it was told"
-    );
-    assert_eq!(cap.process_calls, 2, "4096 + 4096");
+    assert_eq!(cap.max_block_size, 8_192, "the announced maximum");
+    assert_eq!(cap.largest_block, 8_192);
+    assert_eq!(cap.process_calls, 1, "one block, one call");
 
     drop(loaded.handle);
 }
@@ -712,7 +754,8 @@ fn main() {
         the_output_is_what_the_plugin_wrote,
         a_plugin_wider_than_a_block_is_refused_at_load,
         the_handle_counts_lost_parameter_reports,
-        a_block_past_the_announced_maximum_is_split_before_the_plugin,
+        the_plugin_is_told_the_graphs_block_ceiling,
+        a_block_longer_than_the_plugins_ceiling_is_split_until_the_pump_announces_it,
         an_io_change_reaches_a_subscriber_and_the_shape,
         the_shape_declares_the_plugins_buses,
         a_refused_block_with_no_midi_is_counted,

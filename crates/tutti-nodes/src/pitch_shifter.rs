@@ -183,6 +183,8 @@ impl<F: FftFloat> Kernel for PitchShifterKernel<F> {
         self.vocoder.retarget(controls);
     }
 
+    fn jump_to_target(&mut self) {}
+
     /// Runs the vocoder over the block: `n` frames in give `n` frames out.
     fn render(
         &mut self,

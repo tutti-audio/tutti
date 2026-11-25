@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use hdf5_pure::{AttrValue, FileBuilder};
 use tutti_dsp::HrirSphere;
 
-pub const TAPS: usize = 4;
+pub(crate) const TAPS: usize = 4;
 
 /// The six directions of the octahedron as spherical SOFA rows (azimuth,
 /// elevation, distance): front, left, back, right, up, down.
-pub const OCTAHEDRON: [[f64; 3]; 6] = [
+pub(crate) const OCTAHEDRON: [[f64; 3]; 6] = [
     [0.0, 0.0, 1.0],
     [90.0, 0.0, 1.0],
     [180.0, 0.0, 1.0],
@@ -20,7 +20,7 @@ pub const OCTAHEDRON: [[f64; 3]; 6] = [
 
 /// What a SimpleFreeFieldHRIR file holds, each part replaceable so a test
 /// breaks one.
-pub struct Sofa {
+pub(crate) struct Sofa {
     pub(crate) convention: Option<&'static str>,
     pub(crate) ir_shape: Vec<u64>,
     pub(crate) ir: Vec<f64>,
@@ -35,13 +35,13 @@ pub struct Sofa {
 
 /// Measurement `m`, receiver `r`, tap `n`: a value `f32` holds exactly and
 /// that tells the three apart.
-pub fn tap(m: usize, r: usize, n: usize) -> f64 {
+pub(crate) fn tap(m: usize, r: usize, n: usize) -> f64 {
     (100 * m + 10 * r + n) as f64 + 0.25
 }
 
 impl Sofa {
     /// The octahedron, spherical, 48 kHz, no delay.
-    pub fn octahedron() -> Self {
+    pub(crate) fn octahedron() -> Self {
         let m = OCTAHEDRON.len();
         let ir = (0..m * 2 * TAPS)
             .map(|i| tap(i / (2 * TAPS), i / TAPS % 2, i % TAPS))
@@ -62,7 +62,7 @@ impl Sofa {
 
     /// Writes the file under the test target's scratch directory and returns
     /// its path.
-    pub fn write(&self, name: &str) -> PathBuf {
+    pub(crate) fn write(&self, name: &str) -> PathBuf {
         let mut b = FileBuilder::new();
         if let Some(c) = self.convention {
             b.set_attr("SOFAConventions", AttrValue::String(c.into()));
@@ -103,7 +103,7 @@ impl Sofa {
 /// little-endian `u32` rate, response length, vertex count and index count,
 /// the face indices, then per vertex a position and the left and right
 /// responses.
-pub struct Written {
+pub(crate) struct Written {
     pub(crate) rate: u32,
     pub(crate) len: usize,
     pub(crate) faces: Vec<[u32; 3]>,
@@ -112,7 +112,7 @@ pub struct Written {
     pub(crate) right: Vec<Vec<f32>>,
 }
 
-pub fn read_back(sphere: &HrirSphere) -> Written {
+pub(crate) fn read_back(sphere: &HrirSphere) -> Written {
     let bytes = sphere.to_bytes();
     assert_eq!(&bytes[..4], b"HRIR");
     let words: Vec<[u8; 4]> = bytes[4..].as_chunks::<4>().0.to_vec();
@@ -150,6 +150,6 @@ pub fn read_back(sphere: &HrirSphere) -> Written {
 }
 
 /// `a` and `b` agree within `1e-6` per coordinate.
-pub fn same_point(a: [f32; 3], b: [f32; 3]) -> bool {
+pub(crate) fn same_point(a: [f32; 3], b: [f32; 3]) -> bool {
     a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
 }

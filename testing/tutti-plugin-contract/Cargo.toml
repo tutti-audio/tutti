@@ -23,19 +23,13 @@ tutti-vst2-host = { path = "../../crates/tutti-vst2-host" }
 tutti-vst3-host = { path = "../../crates/tutti-vst3-host" }
 assert_no_alloc = { version = "1", default-features = false }
 tutti-shared-plugin = { path = "../tutti-shared-plugin" }
-
-# `tests/probe.rs` applies a probe's `Delta` to a `PluginDb` to read the descriptor.
-tutti-plugin-host = { path = "../../crates/tutti-plugin-host", optional = true }
-tutti-plugin-db = { path = "../../crates/tutti-plugin-db", optional = true }
-# `tests/server.rs` drives a served plugin through `Ipc`, a `Loaded` of its own.
-tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc", optional = true }
 # `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../../crates/tutti-platform" }
 
 [features]
 # `tests/server.rs`: the same configuration and transcript through a real
 # `plugin-server` process.
-server = ["dep:tutti-plugin-host", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
+server = []
 
 [[test]]
 name = "server"
@@ -59,8 +53,13 @@ tutti-graph = { path = "../../crates/tutti-graph", features = ["contract"] }
 futures-lite.workspace = true
 # `tests/server.rs` collects the bridge's parameter edits under a `tutti_rt::Mutex`.
 tutti-rt = { path = "../../crates/tutti-rt" }
+# `tests/probe.rs` applies a probe's `Delta` to a `PluginDb` to read the descriptor.
+tutti-plugin-host = { path = "../../crates/tutti-plugin-host" }
+tutti-plugin-db = { path = "../../crates/tutti-plugin-db" }
+# `tests/server.rs` drives a served plugin through `Ipc`, a `Loaded` of its own.
+tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc" }
 # `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
-# does not, and an optional dependency cannot be a dev-dependency.
+# does not.
 # Those tests need `cargo build -p tutti-plugin-server --no-default-features
 # --features clap,vst3` and `cargo build -p tutti-plugin-probe` first: the
 # server cannot be a dependency (it depends on `tutti-plugin`), and a

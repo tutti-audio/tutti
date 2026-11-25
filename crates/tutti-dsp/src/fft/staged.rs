@@ -114,7 +114,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     /// If `size` is zero, `ways` is not a power of two, or `ways` is above
     /// one with a `size` that is not a multiple of `2 * ways`.
     #[must_use]
-    pub fn new(size: usize, ways: usize) -> Self {
+    pub(crate) fn new(size: usize, ways: usize) -> Self {
         assert!(size > 0, "BUG: a transform has at least one sample");
         assert!(ways.is_power_of_two(), "BUG: ways is a power of two");
         let split = (ways > 1).then(|| {
@@ -135,17 +135,17 @@ impl<F: FftFloat> StagedRealFft<F> {
     }
 
     /// The frame length in samples.
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.fft.size()
     }
 
     /// The spectrum length, `size / 2 + 1`.
-    pub fn bins(&self) -> usize {
+    pub(crate) fn bins(&self) -> usize {
         self.fft.bins()
     }
 
     /// Steps of a forward transform.
-    pub fn forward_steps(&self) -> usize {
+    pub(crate) fn forward_steps(&self) -> usize {
         match self.split {
             None => 1,
             Some(_) => self.ways + self.ways.trailing_zeros() as usize,
@@ -153,7 +153,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     }
 
     /// Steps of an inverse transform.
-    pub fn inverse_steps(&self) -> usize {
+    pub(crate) fn inverse_steps(&self) -> usize {
         match self.split {
             None => 1,
             Some(_) => 1 + self.ways + self.ways.trailing_zeros() as usize,
@@ -161,7 +161,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     }
 
     /// Complex elements of scratch a step needs.
-    pub fn scratch_len(&self) -> usize {
+    pub(crate) fn scratch_len(&self) -> usize {
         match &self.split {
             None => self.fft.scratch_len(),
             Some(s) => {
@@ -176,7 +176,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     }
 
     /// A zeroed scratch of [`scratch_len`](Self::scratch_len) elements.
-    pub fn new_scratch(&self) -> Vec<Complex<F>> {
+    pub(crate) fn new_scratch(&self) -> Vec<Complex<F>> {
         vec![Complex::new(F::ZERO, F::ZERO); self.scratch_len()]
     }
 
@@ -188,7 +188,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     /// If `step` is not below [`forward_steps`](Self::forward_steps), a slice
     /// length is wrong, or `scratch` is shorter than
     /// [`scratch_len`](Self::scratch_len).
-    pub fn forward_step(
+    pub(crate) fn forward_step(
         &self,
         step: usize,
         real: Mono<'_, F>,
@@ -238,7 +238,7 @@ impl<F: FftFloat> StagedRealFft<F> {
     ///
     /// # Panics
     /// As [`forward_step`](Self::forward_step), for the inverse's steps.
-    pub fn inverse_step(
+    pub(crate) fn inverse_step(
         &self,
         step: usize,
         bins: &mut [Complex<F>],
