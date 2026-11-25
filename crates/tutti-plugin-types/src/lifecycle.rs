@@ -779,7 +779,7 @@ pub struct State {
     /// The render modes the plugin was told and has not answered.
     tells: ModeTells,
     /// The live fields the Processor was told and the plugin has not answered.
-    retuning: Option<Retune>,
+    retuning: Option<Live>,
     latency: Option<Samples>,
     tail: Option<PluginTail>,
     layout: Option<Layout>,
@@ -796,15 +796,6 @@ pub struct State {
     reread_params: bool,
     pending: Pending,
     plan: Plan,
-}
-
-/// The live fields the Processor was told, and whether the host wanted
-/// anything after the tell.
-#[derive(Debug, Clone, Copy)]
-struct Retune {
-    live: Live,
-    /// A [`State::want`] came after the tell: a refusal does not roll it back.
-    asked_again: bool,
 }
 
 impl State {
@@ -886,19 +877,13 @@ impl State {
     /// compares it with [`applied`](Self::applied) and reconfigures.
     pub fn want(&mut self, wanted: Prepare) {
         self.wanted = Some(wanted);
-        if let Some(retune) = &mut self.retuning {
-            retune.asked_again = true;
-        }
     }
 
     /// Records that the Processor in hand was told the wanted rate, block
     /// ceiling and callback size outside a plan: they are in flight until the
     /// plugin answers ([`Event::Answered`]), and not behind meanwhile.
     pub fn retune_asked(&mut self) {
-        self.retuning = self.wanted().map(|w| Retune {
-            live: w.live(),
-            asked_again: false,
-        });
+        self.retuning = self.wanted().map(|w| w.live());
     }
 
     /// Records that the plugin was told the wanted render mode outside a plan:
@@ -931,7 +916,7 @@ impl State {
             wanted.restart_key(applied, retunes),
             applied.restart_key(applied, retunes),
         );
-        let told = retunes && self.retuning.map(|retune| retune.live) == Some(wanted.live());
+        let told = retunes && self.retuning == Some(wanted.live());
         let compared = if told { w.with_live(a.live()) } else { w };
         if compared != a {
             return Behind::Restart;
@@ -1570,11 +1555,7 @@ impl State {
     fn on_answer(&mut self, answer: Told, out: &mut Effects) {
         match answer {
             Told::RateTook(rate) => {
-                let Some(told) = self
-                    .retuning
-                    .map(|retune| retune.live)
-                    .filter(|told| told.rate == rate)
-                else {
+                let Some(told) = self.retuning.filter(|told| told.rate == rate) else {
                     return;
                 };
                 self.retuning = None;
@@ -1583,7 +1564,7 @@ impl State {
                 }
             }
             Told::RateRefused(refusal) => {
-                let Some(retune) = self.retuning.filter(|r| r.live.rate == refusal.rate) else {
+                let Some(told) = self.retuning.filter(|told| told.rate == refusal.rate) else {
                     return;
                 };
                 let recovery = match (&refusal.cause, self.applied) {
@@ -1592,10 +1573,14 @@ impl State {
                     }
                     _ => Recovery::Inactive,
                 };
-                // A want made after the tell is the host's later ask: it stays,
-                // and the plugin is behind in it again.
-                if !retune.asked_again {
-                    self.wanted = self.applied;
+                // The refused ask, still the current one, gives up its live
+                // fields and keeps the rest (the mode); a different ask made
+                // since is the host's later one: it stays, and the plugin is
+                // behind in it again.
+                if let (Some(wanted), Some(applied)) = (self.wanted, self.applied)
+                    && wanted.live() == told
+                {
+                    self.wanted = Some(wanted.with_live(applied.live()));
                 }
                 self.retuning = None;
                 let rate = refusal.rate;

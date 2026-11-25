@@ -1140,27 +1140,43 @@ fn refused_96k(p: Prepare) -> Event {
     )))
 }
 
-/// **A refusal rolls back only the want it answers**: the host asked for the
-/// refused rate again after the tell, so that want stays, the plugin is behind
-/// in it, and the refusal is still announced once.
+/// **A refusal gives up the ask it answers, an identical re-ask included**: the
+/// refused rate is rolled back, the notice is announced once, and the plugin is
+/// not behind.
 #[test]
-fn rule_3_a_want_made_after_the_tell_survives_its_refusal() {
+fn rule_3_an_identical_reask_before_the_refusal_is_rolled_back_with_it() {
     let p = prep(1);
     let mut s = active(REST, p);
     s.want(p.with_rate(SampleRate::SR_96K));
     s.retune_asked();
     s.want(p.with_rate(SampleRate::SR_96K));
     let (s, out) = step(s, refused_96k(p));
-    assert_eq!(s.wanted(), Some(p.with_rate(SampleRate::SR_96K)));
-    assert_eq!(
-        s.behind(true, RenderModeSupport::Unsupported),
-        Behind::Restart
-    );
+    assert_eq!(s.wanted(), Some(p));
+    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
     let notices = out
         .iter()
         .filter(|e| matches!(e, Effect::Notify(Notice::Refused { .. })))
         .count();
     assert_eq!(notices, 1);
+}
+
+/// **A refusal of a rate keeps the render mode wanted with it**: the mode is
+/// wanted again after the tell (the graph's mode follows its rate), and only
+/// the refused live fields are given up.
+#[test]
+fn rule_3_a_refused_rate_keeps_the_wanted_mode() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(
+        p.with_rate(SampleRate::SR_96K)
+            .with_mode(RenderMode::Offline),
+    );
+    s.retune_asked();
+    s.want(s.wanted().expect("wanted").with_mode(RenderMode::Offline));
+    let (s, _) = step(s, refused_96k(p));
+    let wanted = s.wanted().expect("wanted");
+    assert_eq!(wanted.rate(), p.rate());
+    assert_eq!(wanted.mode(), RenderMode::Offline);
 }
 
 /// **A want for another rate made before the refusal arrives is kept and is
