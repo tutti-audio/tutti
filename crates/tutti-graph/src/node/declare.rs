@@ -563,8 +563,8 @@ pub fn input<'a, F: Float>(
 ///   `expr` and gives the config a chained option `.events(value)`. The macro
 ///   writes the node's [`HasPublished`](crate::HasPublished) for the kind, which
 ///   the session's key method for the kind needs, and puts each cell in the
-///   node's [`NodeParts`](crate::NodeParts) with a reclaimer over every
-///   publisher. A published value is no param: it has no address and cannot be
+///   node's [`NodeParts`](crate::NodeParts) as a published entry, which the
+///   session writes and sweeps. A published value is no param: it has no address and cannot be
 ///   modulated.
 ///
 /// - **An option**, `options { seed: u64 = 0 }`, is a plain value of the config
@@ -1064,7 +1064,7 @@ macro_rules! declare_params {
 
             fn into_parts(self) -> $crate::NodeParts<$crate::ParamSet, __LaneF> {
                 // The published cells, shared with the node's: the session
-                // writes them and the reclaimer sweeps them.
+                // writes and sweeps them.
                 #[allow(unused_variables, unused_mut)]
                 let cells = self.cells.clone();
                 #[allow(unused_mut)]
@@ -1079,10 +1079,6 @@ macro_rules! declare_params {
                         $crate::__private::Arc::new(cells.$dn.publisher().clone()),
                     );
                 )*
-                let sweep = $crate::__private::Sweep::new()$(.with(&cells.$pn))*$(.with(&cells.$dn))*;
-                if !sweep.is_empty() {
-                    parts.reclaimer = Some(Box::new(sweep));
-                }
                 parts
             }
         }

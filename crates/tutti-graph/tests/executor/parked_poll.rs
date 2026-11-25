@@ -161,7 +161,11 @@ fn a_recall_is_answered_by_a_parked_node_without_allocating() {
     assert_eq!(count(&r.returned), 0);
     render(&mut r.exec);
     assert_eq!(count(&r.returned), 1, "stopped once on its way back");
-    assert_eq!(r.hand.take(), Some(7), "returned to the control side");
+    assert_eq!(
+        r.hand.take(),
+        Some(tutti_rt::Handback::Recalled(7)),
+        "returned to the control side"
+    );
 }
 
 /// Four holders on four outputs, two of them bypassed, rendered for a while on

@@ -2,45 +2,19 @@
 //! setup (`MidiClipControls::receiver_changed`): the session raises it when the
 //! commit that holds the new edge is sent, and for a sink replaced at its key.
 
-use crate::common::{MF, Seen, blocks, note, offline, play, tap};
+use crate::common::{Seen, blocks, headed_clip, offline, play, program, tap, tick, volume};
 use std::sync::Arc;
-use tutti_buffers::{ChannelLayout, InterleavedMut};
-use tutti_fixtures::midi;
-use tutti_graph::{EventInputPort, Fade, NodeKey, TransportPosition};
-use tutti_midi_runtime::{ClipEvents, MidiClipNode, TimedMidiEvent};
+use tutti_graph::{EventInputPort, Fade, NodeKey};
+use tutti_midi_runtime::MidiClipNode;
 use tutti_music::MeterMap;
 use tutti_session::{Feeder, Key, LoadedTrack, Replacement, Session};
 use tutti_tempo::TempoMap;
 use tutti_timeline::ProjectMeter;
-use tutti_ump::{Address, CCNumber, MidiChannel, MidiGroup, Ump};
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_ump::Ump;
+use tutti_units::{Bpm, SampleRate, Samples};
 
 /// Frames in one block of `blocks`.
 const BLOCK: u64 = 512;
-
-fn program(n: u8) -> Ump {
-    midi::program_change(Address::new(MidiGroup::FIRST, MidiChannel::FIRST), n, None)
-}
-
-fn volume() -> Ump {
-    midi::cc(
-        Address::new(MidiGroup::FIRST, MidiChannel::FIRST),
-        CCNumber::VOLUME,
-        1 << 30,
-    )
-}
-
-/// A clip with the header `[program 1, volume]`, a Program Change 5 at beat 0.001 (24 frames)
-/// beat 0 and a note at beat 1 (24 000 frames at 120 BPM and 48 kHz).
-fn headed_clip() -> ClipEvents {
-    let events =
-        std::iter::once(TimedMidiEvent::new(Beat::new(0.001), program(5)).expect("finite"))
-            .chain(note(60, MF, Beat::new(1.0), BeatDuration::new(0.5)));
-    let events: ClipEvents = events.collect();
-    events.header(
-        [program(1), volume()].map(|u| TimedMidiEvent::new(Beat::new(0.0), u).expect("finite")),
-    )
-}
 
 /// The clip node feeding tap A, and both taps' logs.
 fn rig() -> (Session, Key<MidiClipNode>, (NodeKey, Seen), (NodeKey, Seen)) {
@@ -182,20 +156,6 @@ fn a_sink_replaced_at_its_key_while_the_clip_plays_gets_the_setup() {
         heard(&a.1)[3..],
         [(at, program(1)), (at, volume()), (at, program(5))]
     );
-}
-
-/// One frame of the audio side, the `n`th, on a rolling transport that has
-/// run `n` frames (a beat is 24 000 frames at 120 BPM) from beat 0.01, past the
-/// clip's Program Change 5 at beat 0.001.
-fn tick(side: &mut tutti_session::AudioSide, n: u32) {
-    side.set_transport(TransportPosition::new(
-        true,
-        Bpm::of(120.0),
-        Beat::new(0.01 + f64::from(n) / 24_000.0),
-        None,
-    ));
-    let mut out = [0.0f32; 2];
-    side.tick(InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 }
 
 /// **The clip is told once the executor has applied the commit, not when it

@@ -447,7 +447,13 @@ impl<L: Loaded> Lifecycle<L> {
         };
         match seat {
             Seat::Lent => match end.take() {
-                Some(processor) => {
+                // Held again either way. One that came back because its node
+                // was dropped was not stopped, and is not lent again: the
+                // audio end is gone, so the lend below is refused.
+                Some(
+                    tutti_rt::Handback::Recalled(processor)
+                    | tutti_rt::Handback::Dropped(processor),
+                ) => {
                     *seat = Seat::Held(processor);
                     true
                 }
