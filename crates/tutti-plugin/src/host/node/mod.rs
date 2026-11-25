@@ -71,6 +71,7 @@
 //! [`PluginHandle`].
 
 pub(crate) mod fork;
+mod served_handle;
 
 #[cfg(test)]
 mod ipc_node_tests;
@@ -660,8 +661,12 @@ impl<S> PluginClient<S> {
     pub fn handle(&self) -> PluginHandle {
         let served = Arc::new(self.served.clone());
         let pid = served.server_pid();
+        let backend = Arc::new(served_handle::ServedHandle::new(
+            self.served.clone(),
+            self.live.clone(),
+        ));
         let handle = PluginHandle::from_backend(
-            Arc::clone(&served),
+            backend,
             Some(served),
             self.descriptor().clone(),
             self.loaded().clone(),
@@ -670,16 +675,7 @@ impl<S> PluginClient<S> {
         .refresh_sink(self.refresh_sink().clone())
         .invalidate_sink(self.invalidate_sink().clone())
         .transport_sink(self.transport_sink().clone())
-        .midi_map(self.midi_map.clone())
-        .render_mode_route({
-            let live = self.live.clone();
-            let served = self.served.clone();
-            move |mode| {
-                live.announce_render_mode(mode, |mode| {
-                    tutti_plugin_types::AnyThread::set_render_mode(&served, mode)
-                })
-            }
-        });
+        .midi_map(self.midi_map.clone());
         match pid {
             Some(pid) => handle.with_server_pid(pid),
             None => handle,

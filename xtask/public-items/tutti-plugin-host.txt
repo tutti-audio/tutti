@@ -47,7 +47,6 @@ fn control_handle::PluginHandle::preset_support
 fn control_handle::PluginHandle::presets
 fn control_handle::PluginHandle::refresh_sink
 fn control_handle::PluginHandle::refused_off_thread_calls
-fn control_handle::PluginHandle::render_mode_route
 fn control_handle::PluginHandle::save_state
 fn control_handle::PluginHandle::save_state_on
 fn control_handle::PluginHandle::send_parameter
