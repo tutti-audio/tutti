@@ -89,7 +89,7 @@ tangle tutti_clap_host::instance::ClapLoaded,tutti_clap_host::instance::controll
 tangle tutti_cpal::driver::TuttiDriver,tutti_cpal::output::AudioEngine
 tangle tutti_cpal::host::DeviceHost,tutti_cpal::host::jack::open
 tangle tutti_export::control::Control,tutti_export::control::Weights,tutti_export::encode::output_rate,tutti_export::normalize::Measurer,tutti_export::normalize::Normalize,tutti_export::normalize::headroom_ceiling,tutti_export::output::FileTarget,tutti_export::output::NormalizeSpec,tutti_export::output::Target
-tangle tutti_graph::edit::editor::Editor,tutti_graph::node::fork::ForkRemains,tutti_graph::node::fork::PendingFork
+tangle tutti_graph::edit::editor::Editor,tutti_graph::node::fork::ForkRemains,tutti_graph::node::fork::PendingFork,tutti_graph::testing::declare_outputs
 tangle tutti_graph::exec::history::EMPTY,tutti_graph::exec::history::NONE,tutti_graph::exec::history::Piece,tutti_graph::exec::history::TransportHistory,tutti_graph::exec::history::roll,tutti_graph::node::time::BeatCrossings,tutti_graph::node::time::Env,tutti_graph::node::time::TransportChange,tutti_graph::node::time::TransportChanges,tutti_graph::node::time::TransportPosition
 tangle tutti_graph::model::bus_edge::Lowering,tutti_graph::model::spec::GraphSpec
 tangle tutti_midi_ci::articulation::ArticulationDetails,tutti_midi_ci::articulation::CustomSounds,tutti_midi_ci::articulation::data,tutti_midi_ci::profile::ChannelsDetail,tutti_midi_ci::profile::DetailsData,tutti_midi_ci::profile_details::ProfileDetails
@@ -175,6 +175,7 @@ field-leak tutti_dsp::spatial::vbap::layout::SpeakerLayout::directions
 field-leak tutti_dsp::tremolo::AutoPan::controls
 field-leak tutti_dsp::wavetable::WavetableOscillator::table
 field-leak tutti_engine::engine::Fader::fade
+field-leak tutti_engine::output::MainOutputFolds::by_device
 field-leak tutti_engine::output::OutputControl::cell
 field-leak tutti_engine::output::OutputControl::in_use
 field-leak tutti_engine::output::OutputControl::installed
