@@ -828,15 +828,8 @@ impl<'a> Emitter<'a> {
                         .0,
                 ),
             };
-            let d = if timing.in_bank(channel) {
-                let dep = self.source(source).map_or(Latency::ZERO, |(_, dep)| dep);
-                match source {
-                    PortSource::Zero => Samples::ZERO,
-                    _ => dep.gap_to(timing.bank_total),
-                }
-            } else {
-                timing.compensation[usize::from(channel)]
-            };
+            let dep = self.source(source).map_or(Latency::ZERO, |(_, dep)| dep);
+            let d = dep.gap_to(timing.output_time(channel));
             // Delaying silence is silence: a zero channel reports its
             // compensation (as `latency::plan` does) but gets no ring.
             let key = AudioDelayKey::Output {

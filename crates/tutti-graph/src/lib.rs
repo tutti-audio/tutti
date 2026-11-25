@@ -707,8 +707,8 @@ pub use compile::ids::{
     PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, TaskId,
 };
 pub use compile::latency::{
-    ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
-    OutputDelay, PortFeed, delays, plan as latency_plan,
+    ChannelFeed, Compensation, Delays, Feed, LatencyGraph, MAX_NODE_LATENCY, PortFeed, delays,
+    plan as latency_plan,
 };
 pub use compile::main_output::{
     MainOutputBank, MainOutputError, MainOutputId, fold_to_channels, fold_to_topology,

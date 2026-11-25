@@ -35,18 +35,13 @@ pub(super) struct Timing {
 }
 
 impl Timing {
-    /// Whether `channel` is one of an old main output's, heard at `bank_total`.
-    pub(super) fn in_bank(&self, channel: u16) -> bool {
-        self.bank_base
-            .is_some_and(|base| usize::from(channel) >= base)
-    }
-
-    /// The output time `channel` is aligned to.
+    /// The output time `channel` is aligned to: `bank_total` for one of an
+    /// old main output's channels (see [`ValidGraph::main_output_bank`]),
+    /// `total` for the rest.
     pub(super) fn output_time(&self, channel: u16) -> Latency {
-        if self.in_bank(channel) {
-            self.bank_total
-        } else {
-            self.total
+        match self.bank_base {
+            Some(base) if usize::from(channel) >= base => self.bank_total,
+            _ => self.total,
         }
     }
 }

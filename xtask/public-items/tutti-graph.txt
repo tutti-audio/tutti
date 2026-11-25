@@ -128,8 +128,6 @@ fn compile::latency::Compensation::total
 fn compile::latency::Delays::arrival
 fn compile::latency::Delays::compensation
 fn compile::latency::Delays::departure
-fn compile::latency::Delays::inputs
-fn compile::latency::Delays::outputs
 fn compile::latency::Feed::node
 fn compile::latency::delays
 fn compile::latency::plan
@@ -962,8 +960,6 @@ struct compile::ids::TaskId
 struct compile::latency::ChannelFeed
 struct compile::latency::Compensation
 struct compile::latency::Delays
-struct compile::latency::InputDelay
-struct compile::latency::OutputDelay
 struct compile::latency::PortFeed
 struct compile::main_output::MainOutputBank
 struct compile::main_output::MainOutputId
