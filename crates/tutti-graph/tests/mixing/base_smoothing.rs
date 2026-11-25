@@ -421,3 +421,53 @@ fn smootherstep(j: usize, n: usize) -> f64 {
     let x = (j + 1) as f64 / (n + 1) as f64;
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
+
+/// **A crossfade block steps a key's params once, not twice**: a source
+/// connected in the commit that replaces the knob fades in over the declick
+/// along the smootherstep, `1 + 6·s(j)` at frame `j` of `n`, one block of
+/// progress per block of the fade (both units hear the same frames, and the
+/// equal-amplitude gains sum to one).
+#[test]
+#[allow(clippy::needless_range_loop, reason = "frame index feeds the law")]
+fn a_crossfade_block_steps_its_params_once() {
+    const BLOCK: usize = 64;
+    let n = declick();
+    let mut rig = Rig::<f64>::new(BLOCK, 1.0, 3.0);
+    let _ = rig.run(BLOCK * 2);
+    rig.ed.insert(
+        SRC,
+        "say",
+        ForkByClone(Speak {
+            at: 128,
+            value: 7.0,
+        }),
+    );
+    rig.ed
+        .connect_param(CUTOFF, EventOutputPort::new(SRC, 0))
+        .unwrap();
+    rig.ed
+        .replace(
+            KNOB,
+            Params(Knob {
+                smooth: Param::new(Hz::new(1.0)),
+                whole: Param::new(Hz::new(3.0)),
+            }),
+            tutti_graph::Fade::new(Samples::new(n * 2)),
+        )
+        .expect("replaces");
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    let out = rig.run(BLOCK * 8);
+    for j in 0..n {
+        let want = 1.0 + 6.0 * smootherstep(j, n);
+        assert!(
+            (out[0][j] - want).abs() < 1e-9,
+            "frame {j}: {} vs {want}",
+            out[0][j]
+        );
+    }
+    assert!(
+        out[0][n..].iter().all(|&x| (x - 7.0).abs() < 1e-9),
+        "driven"
+    );
+}
