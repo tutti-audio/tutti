@@ -272,18 +272,6 @@ impl MainOutputKind for BufferMainOutput {
     }
 }
 
-/// The channel placement a bounce gives the graph's outputs.
-#[derive(Debug, Clone, Default)]
-pub(crate) enum MainOutputChoice {
-    /// The session's declared main output topology.
-    #[default]
-    Session,
-    /// The engine's order for the width.
-    Engine,
-    /// The bounce's own topology.
-    Placed(ChannelTopology),
-}
-
 /// A bounce: what to render and where it goes, with every figure it does not
 /// name derived from the session when it starts. Start one with
 /// [`Session::bounce`].
@@ -320,7 +308,7 @@ pub struct Bounce<N = NodeKey, M = NoMainOutput, F: Float = f32> {
     resample: Option<Resample>,
     latency: BounceLatency,
     tail: BounceTail,
-    main_output_topology: MainOutputChoice,
+    main_output_topology: Option<ChannelTopology>,
     channels: Option<ChannelLayout>,
     file_topology: Option<ChannelTopology>,
     serial: bool,
@@ -354,7 +342,7 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
             resample: None,
             latency: BounceLatency::default(),
             tail: BounceTail::default(),
-            main_output_topology: MainOutputChoice::Session,
+            main_output_topology: None,
             channels: None,
             file_topology: None,
             serial: false,
@@ -547,16 +535,11 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     }
 
     /// What the graph's output channels are, in place of the session's declared
-    /// main output topology.
+    /// main output topology. It is as wide as the graph's main output, or the
+    /// render refuses it
+    /// ([`RenderError::TopologyWidth`](tutti_export::RenderError::TopologyWidth)).
     pub fn main_output_topology(mut self, main_output: ChannelTopology) -> Self {
-        self.main_output_topology = MainOutputChoice::Placed(main_output);
-        self
-    }
-
-    /// The graph's output channels are the engine's order for the width,
-    /// whatever main output topology the session declares.
-    pub fn undeclared_main_output(mut self) -> Self {
-        self.main_output_topology = MainOutputChoice::Engine;
+        self.main_output_topology = Some(main_output);
         self
     }
 

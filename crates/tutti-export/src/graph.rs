@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
-use tutti_buffers::{ChannelTopology, MaxBlock};
+use tutti_buffers::{ChannelSet, ChannelTopology, MaxBlock};
 use tutti_graph::GraphTail;
 use tutti_graph::{Editor, Executor, LogFilter, Pool, Prepare, RenderMode, RtLogReaders, RtRecord};
 use tutti_units::Samples;
@@ -29,8 +29,8 @@ pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
 /// How a [`RenderGraph`] is assembled beyond its pair: the pool the render
 /// spreads its blocks over, and what the graph's output channels are.
 ///
-/// `Setup::default()` is the render's own thread and the engine's order for
-/// the width, which is what a graph built in a test or a simple host wants.
+/// `Setup::default()` is the render's own thread and the main output the graph
+/// declares, which is what a graph built in a test or a simple host wants.
 #[derive(Debug, Clone, Default)]
 pub struct Setup {
     pool: Option<Arc<dyn Pool>>,
@@ -60,8 +60,8 @@ pub trait RtLogSink: Send + Sync + std::fmt::Debug {
 }
 
 impl Setup {
-    /// A render on its own thread, the output channels in the engine's order
-    /// for the width.
+    /// A render on its own thread, the output channels as the graph declares
+    /// them.
     pub fn new() -> Self {
         Self::default()
     }
@@ -78,15 +78,14 @@ impl Setup {
         self
     }
 
-    /// States what the graph's output channels are, for the fold to the file:
-    /// [`ChannelTopology::unassigned`] for independent buses, a named topology
-    /// for speaker feeds. Left uncalled, the channels are in the engine's
-    /// order for the width, as for a live graph that declared nothing.
+    /// Places the file from `main_output` in place of the graph's declared
+    /// main output: [`ChannelTopology::unassigned`] for independent buses, a
+    /// named topology for speaker feeds. Left uncalled, the file is placed
+    /// from the main output the graph declares.
     ///
-    /// The render refuses a declaration that is not as wide as the graph's
-    /// outputs, or that the file cannot take
-    /// ([`ConfigError::Placement`]). Give it for a fork of a live graph that
-    /// declared its main output, so the file is placed as the device was.
+    /// The render refuses a topology that is not as wide as the graph's
+    /// outputs ([`RenderError::TopologyWidth`](crate::RenderError::TopologyWidth)),
+    /// or that the file cannot take ([`ConfigError::Placement`]).
     #[must_use]
     pub fn main_output(mut self, main_output: ChannelTopology) -> Self {
         self.main_output = Some(main_output);
@@ -181,8 +180,8 @@ pub struct RenderGraph<F: Float = f32> {
     /// The executor the render drives. Never handed out: the render is the
     /// only thing that runs it.
     executor: Executor<F>,
-    /// What the graph's output channels are, when the live graph declared it
-    /// ([`Setup::main_output`]); `None` is the engine's order for the width.
+    /// The topology the file is placed from in place of the graph's declared
+    /// main output ([`Setup::main_output`]).
     main_output: Option<ChannelTopology>,
     /// The executor's `(dropped, recovered)` event counts where the last
     /// render ended, or where the pair was wrapped: the next render counts its
@@ -261,9 +260,11 @@ impl<F: Float> RenderGraph<F> {
         self.rt_log.clone()
     }
 
-    /// The declared output topology ([`Setup::main_output`]).
-    pub(crate) fn main_output_topology(&self) -> Option<&ChannelTopology> {
-        self.main_output.as_ref()
+    /// What the file is placed from: [`Setup::main_output`], else the main
+    /// output the graph declares.
+    pub(crate) fn main_output(&self) -> ChannelSet {
+        self.main_output
+            .map_or(self.editor.spec().main_output, ChannelSet::from)
     }
 
     /// Both halves, for the render. Crate-private: outside the crate the

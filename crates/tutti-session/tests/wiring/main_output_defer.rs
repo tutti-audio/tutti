@@ -113,7 +113,7 @@ fn start_fade(s: &mut Session) -> tutti_graph::TapReader {
         .open_main_output(Samples::new(8192))
         .expect("opens");
     assert_eq!(tap.width(), 2);
-    s.declare_main_output_topology(Some(mono())).expect("mono");
+    s.declare_main_output_topology(mono()).expect("mono");
     let (events, frames) = block(s);
     let mut opened = reopened(&events);
     assert_eq!(opened.len(), 1, "the mono main output reopens the tap");
@@ -136,12 +136,12 @@ fn start_fade(s: &mut Session) -> tutti_graph::TapReader {
 fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_main_output() {
     let mut s = session();
     let mut mono_tap = start_fade(&mut s);
-    s.declare_main_output_topology(Some(main_output(4)))
+    s.declare_main_output_topology(main_output(4))
         .expect("quad");
-    assert_eq!(s.requested_main_output_topology(), Some(&main_output(4)));
+    assert_eq!(s.requested_main_output_topology(), &main_output(4));
     assert_eq!(
         s.main_output_topology(),
-        Some(&mono()),
+        &mono(),
         "the main output in force"
     );
     let mut played = BLOCK;
@@ -154,7 +154,7 @@ fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_
             "no announcement before the end"
         );
         assert_eq!(s.graph_ref().outputs(), 1, "the plan's width is the mono's");
-        assert_eq!(s.main_output_topology(), Some(&mono()));
+        assert_eq!(s.main_output_topology(), &mono());
         for (i, f) in frames.iter().enumerate() {
             let k = played + i;
             assert!((f[1] - mono_fade_right(k)).abs() < 1e-6, "frame {k}");
@@ -180,7 +180,7 @@ fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_
         4,
         "the width changed in that update"
     );
-    assert_eq!(s.main_output_topology(), Some(&main_output(4)));
+    assert_eq!(s.main_output_topology(), &main_output(4));
     let mut quad_tap = claim_tap(&mut s, id);
     assert_eq!(quad_tap.width(), 4);
     // The quad fade renders from this block: frame k of it.
@@ -223,12 +223,11 @@ fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_
 fn two_redeclares_mid_fade_apply_the_newest_once() {
     let mut s = session();
     let _tap = start_fade(&mut s);
-    s.declare_main_output_topology(Some(main_output(4)))
+    s.declare_main_output_topology(main_output(4))
         .expect("quad");
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(main_output(6)))
-        .expect("5.1");
-    assert_eq!(s.requested_main_output_topology(), Some(&main_output(6)));
+    s.declare_main_output_topology(main_output(6)).expect("5.1");
+    assert_eq!(s.requested_main_output_topology(), &main_output(6));
     let mut announced = Vec::new();
     let mut applied = Vec::new();
     for _ in 0..8 {
@@ -263,13 +262,13 @@ fn a_waiting_declaration_is_pending_until_it_applies() {
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Applied
     );
-    s.declare_main_output_topology(Some(main_output(4)))
+    s.declare_main_output_topology(main_output(4))
         .expect("quad");
     assert_eq!(
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Pending
     );
-    assert_eq!(s.requested_main_output_topology(), Some(&main_output(4)));
+    assert_eq!(s.requested_main_output_topology(), &main_output(4));
     let _ = block(&mut s);
     assert_eq!(
         s.main_output_topology_status(),
@@ -282,7 +281,7 @@ fn a_waiting_declaration_is_pending_until_it_applies() {
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Applied
     );
-    assert_eq!(s.main_output_topology(), Some(&main_output(4)));
+    assert_eq!(s.main_output_topology(), &main_output(4));
 }
 
 /// **A declaration refused at its call drops nothing**: the one waiting still
@@ -292,11 +291,11 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
     use tutti_session::MainOutputTopologyStatus;
     let mut s = session();
     let _tap = start_fade(&mut s);
-    s.declare_main_output_topology(Some(main_output(4)))
+    s.declare_main_output_topology(main_output(4))
         .expect("quad");
     let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4)).unwrap();
     assert!(
-        s.declare_main_output_topology(Some(buses)).is_err(),
+        s.declare_main_output_topology(buses).is_err(),
         "four buses have no place on a stereo device"
     );
     assert!(matches!(
@@ -308,11 +307,11 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
     }
     assert_eq!(
         s.main_output_topology(),
-        Some(&main_output(4)),
+        &main_output(4),
         "the waiting one applied"
     );
     assert_eq!(s.graph_ref().outputs(), 4);
-    assert_eq!(s.requested_main_output_topology(), Some(&buses));
+    assert_eq!(s.requested_main_output_topology(), &buses);
 }
 
 /// **A `.unfaded()` declaration mid-fade applies at once** and drops a waiting
@@ -322,14 +321,13 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
 fn a_hard_redeclare_mid_fade_applies_at_once_and_drops_the_waiting_one() {
     let mut s = session();
     let _tap = start_fade(&mut s);
-    s.declare_main_output_topology(Some(main_output(6)))
-        .expect("5.1");
-    s.declare_main_output_topology(Some(main_output(4)))
+    s.declare_main_output_topology(main_output(6)).expect("5.1");
+    s.declare_main_output_topology(main_output(4))
         .expect("quad")
         .unfaded();
     assert_eq!(
         s.main_output_topology(),
-        Some(&main_output(4)),
+        &main_output(4),
         "in force at once"
     );
     let (events, frames) = block(&mut s);
@@ -402,13 +400,10 @@ fn a_bus_fed_main_output_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends(
         .expect("folds by index")
         .unfaded();
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(
-        ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap(),
-    ))
-    .expect("buses");
+    s.declare_main_output_topology(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap())
+        .expect("buses");
     let mut first = block(&mut s).1;
-    s.declare_main_output_topology(Some(swapped()))
-        .expect("swapped");
+    s.declare_main_output_topology(swapped()).expect("swapped");
     for _ in 0..3 {
         first.extend(block(&mut s).1);
     }

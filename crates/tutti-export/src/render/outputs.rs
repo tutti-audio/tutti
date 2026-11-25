@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
@@ -234,7 +234,7 @@ fn open_lanes<F: FftFloat>(
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
-    main_output: Option<&ChannelTopology>,
+    main_output: &ChannelSet,
     max_block: usize,
 ) -> Result<Vec<Lane<F>>> {
     let mut lanes = Vec::with_capacity(outputs.len());
@@ -250,8 +250,11 @@ fn open_lanes<F: FftFloat>(
             crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
                 let width = lanes.layout();
+                let placed = lanes
+                    .topology()
+                    .map_or_else(|| ChannelSet::default_for(width), |t| ChannelSet::from(*t));
                 let fold = channels
-                    .fold_from(usize::from(width.count()), lanes.topology())
+                    .fold_from(usize::from(width.count()), &placed)
                     .map_err(|e| match e {
                         RenderError::InvalidConfig(ConfigError::Placement(why)) => {
                             RenderError::Target {

@@ -7,7 +7,7 @@
 //! | `Graph` | the editor |
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept |
-//! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written through the editor's `connect_edge` and `disconnect_edge` (a port holds a set of sources, which the graph sums) |
+//! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms | written through the editor's `connect_edge` and `disconnect_edge` (a port holds a set of sources, which the graph sums) |
 //! | `replace` | `Editor::replace` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
@@ -492,10 +492,6 @@ pub struct Graph<F: Float = f32> {
     /// `gained` as the commit sent carried it, until the executor has applied
     /// that commit ([`Graph::take_applied_receivers`]).
     unapplied: Vec<NodeKey>,
-    /// What the main output's channels are, when a host declared it
-    /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology));
-    /// `None` is the engine's order for the main output's width.
-    main_output: Option<tutti_buffers::ChannelTopology>,
     /// The engine's output folds and the device it renders into, once an
     /// engine was built over this graph: a declaration is published through
     /// it, and a commit must fold into the device. One value, so a graph has
@@ -505,17 +501,14 @@ pub struct Graph<F: Float = f32> {
     /// What the nodes logged on the audio thread, once an engine renders the
     /// graph: drained by the session's reclaim sweep ([`Graph::drain_rt_log`]).
     rt_log: Option<tutti_graph::RtLogReaders>,
-    /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
-    widen_refusal: Option<tutti_graph::MainOutputError>,
     /// Why the declaration that waited for a main output crossfade, or a hard one
     /// made through [`harden_main_output`](Self::harden_main_output), could not be applied;
     /// the session takes it as its declaration refusal
-    /// ([`take_apply_refusal`](Self::take_apply_refusal)). A slot of its own,
-    /// so a widening neither hides nor erases it.
+    /// ([`take_apply_refusal`](Self::take_apply_refusal)).
     apply_refusal: Option<tutti_graph::MainOutputError>,
     /// A main output declared while a main output crossfade ran, applied when it ends:
-    /// the newest declaration (`Some(None)` takes the declaration back).
-    pending_main_output: Option<Option<tutti_buffers::ChannelTopology>>,
+    /// the newest declaration.
+    pending_main_output: Option<tutti_buffers::ChannelTopology>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -644,28 +637,22 @@ fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
 }
 
 impl<F: Float> Graph<F> {
-    /// An empty graph with no main input and `outputs` main
-    /// outputs, prepared for `rate`, `max_block` and the device's callback
-    /// `quantum` (when known), its executor local.
+    /// An empty graph with no main input and the main output `main_output`,
+    /// prepared for `rate`, `max_block` and the device's callback `quantum`
+    /// (when known), its executor local.
     pub(crate) fn new(
-        outputs: usize,
+        main_output: tutti_buffers::ChannelTopology,
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
         #[cfg(feature = "plugin")] tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
-        // `outputs` is a `ChannelLayout`'s count where the session is built. The
-        // engine, built over this editor later, publishes this declaration first.
+        // The engine, built over this editor later, publishes this declaration
+        // first.
         let id = editor.spec().main_output_id.next();
         editor
-            .declare_main_output(
-                tutti_buffers::ChannelSet::default_for(
-                    ChannelLayout::try_from(outputs)
-                        .expect("a channel count: it was a ChannelLayout's"),
-                ),
-                id,
-            )
+            .declare_main_output(tutti_buffers::ChannelSet::from(main_output), id)
             .expect("a new id declares anything");
         // Declared and on from the start: a host reads the main output level
         // without asking for it.
@@ -705,10 +692,8 @@ impl<F: Float> Graph<F> {
             unwired: Vec::new(),
             rewired: Vec::new(),
             removed: Vec::new(),
-            main_output: None,
             output: None,
             rt_log: None,
-            widen_refusal: None,
             apply_refusal: None,
             pending_main_output: None,
             #[cfg(feature = "plugin")]
@@ -1436,9 +1421,9 @@ impl<F: Float> Graph<F> {
     /// `RenderMode`). [`PendingExport::build`] makes the rest on a
     /// worker.
     ///
-    /// The fork renders on the session's render pool unless `serial`, and
-    /// places the main output's channels by `main_output`: the session's declared main output, the
-    /// engine's order for the width, or the bounce's own topology.
+    /// The fork renders on the session's render pool unless `serial`. It
+    /// carries the live main output, and the file is placed from
+    /// `main_output` instead where there is one: the bounce's own topology.
     ///
     /// # Errors
     ///
@@ -1449,13 +1434,8 @@ impl<F: Float> Graph<F> {
         &self,
         rate: SampleRate,
         serial: bool,
-        main_output: crate::bounce::MainOutputChoice,
+        main_output: Option<tutti_buffers::ChannelTopology>,
     ) -> tutti_export::Result<PendingExport<F>> {
-        let main_output = match main_output {
-            crate::bounce::MainOutputChoice::Session => self.main_output,
-            crate::bounce::MainOutputChoice::Engine => None,
-            crate::bounce::MainOutputChoice::Placed(topology) => Some(topology),
-        };
         // Its own pool, not the live engine's: the live callback would find a
         // shared one busy with the bounce's job and render alone. No start
         // hook: a bounce's threads are not the callback's, and promoting
@@ -3131,10 +3111,9 @@ impl<F: Float> Graph<F> {
                         .map(|c| (OutputPort::new(from, out_first + c), MainOutput::channel(c)))
                         .collect());
                 }
-                // A narrower bus is placed on the main output by speaker: the main output's
-                // declared topology, else the engine's order for its width. A
-                // bus that names no speaker is read in the engine's order for
-                // its width.
+                // A narrower bus is placed on the main output by speaker: the main
+                // output's declared topology. A bus that names no speaker is
+                // read in the engine's order for its width.
                 let source = out_topology;
                 let placed = if source.is_unassigned() {
                     tutti_buffers::ChannelTopology::default_for(source.width())
@@ -3142,17 +3121,9 @@ impl<F: Float> Graph<F> {
                 } else {
                     source
                 };
-                let fold = match self.main_output_topology() {
-                    Some(main_output) => tutti_buffers::Fold::<f32>::between(&placed, main_output),
-                    None => tutti_graph::fold_to_width(
-                        &placed,
-                        // The main output's width is a `ChannelLayout`'s: every call
-                        // that sizes it takes one.
-                        ChannelLayout::try_from(main_output_width)
-                            .expect("a main output width fits a layout"),
-                    ),
-                }
-                .map_err(|cause| ConnectError::MainOutputFold { from, cause })?;
+                let fold =
+                    tutti_buffers::Fold::<f32>::between(&placed, self.main_output_topology())
+                        .map_err(|cause| ConnectError::MainOutputFold { from, cause })?;
                 let mut wires = Vec::new();
                 for c in 0..main_output_width {
                     for (k, weight) in fold.contributions(c) {
@@ -3542,71 +3513,6 @@ impl<F: Float> Graph<F> {
         self.shape_of(node.into()).map(|s| s.tail)
     }
 
-    /// Widen the main outputs to `channels`. New channels read silence.
-    /// Never narrows.
-    ///
-    /// Two requests are refused, and the refusal is returned and kept
-    /// ([`Session::main_output_topology_status`](crate::Session::main_output_topology_status)):
-    ///
-    /// - on a main output whose topology was declared
-    ///   ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
-    ///   anything wider than the declaration: the main output is not widened under
-    ///   it ([`MainOutputError::Width`](tutti_graph::MainOutputError::Width));
-    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the main output keeps
-    ///   its width
-    ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
-    ///   channel with no place).
-    ///
-    /// A refused request changes nothing.
-    ///
-    /// A request for as many or fewer channels than the main output has is a no-op.
-    ///
-    /// # Errors
-    ///
-    /// As above.
-    pub fn widen_outputs(&mut self, channels: usize) -> Result<(), tutti_graph::MainOutputError> {
-        let refused = if let Some(main_output) = self
-            .main_output
-            .as_ref()
-            .filter(|r| channels > usize::from(r.width().count()))
-        {
-            Some(tutti_graph::MainOutputError::Width {
-                declared: main_output.width(),
-                // Only the report names the request; one past `u16::MAX` is
-                // refused either way (it is past `MAX_CHANNELS`), so the
-                // saturated figure loses nothing.
-                requested: ChannelLayout::clamped(channels),
-            })
-        } else if channels > tutti_buffers::MAX_CHANNELS {
-            Some(tutti_graph::MainOutputError::Fold(
-                tutti_buffers::FoldError::Unplaced {
-                    channel: tutti_buffers::MAX_CHANNELS,
-                    speaker: tutti_buffers::Speaker::Unassigned,
-                },
-            ))
-        } else {
-            None
-        };
-        self.widen_refusal = refused;
-        // A widening is a declaration of the width's order, as a restart makes
-        // it: the new channels are silent, and no fade is taken.
-        let refused = match refused {
-            None if self.editor.spec().topology.outputs.len() < channels => self
-                .apply_main_output(None, true, channels)
-                .err()
-                .inspect(|e| self.widen_refusal = Some(*e)),
-            refused => refused,
-        };
-        self.publish_output_facts();
-        refused.map_or(Ok(()), Err)
-    }
-
-    /// The last widening [`widen_outputs`](Self::widen_outputs) refused, until
-    /// a request is not or a declaration is made.
-    pub(crate) fn widen_refusal(&self) -> Option<tutti_graph::MainOutputError> {
-        self.widen_refusal
-    }
-
     /// The generation of the main output the next commit carries
     /// ([`MainOutputId`](tutti_graph::MainOutputId)); a restart names it.
     #[cfg(feature = "device")]
@@ -3614,26 +3520,20 @@ impl<F: Float> Graph<F> {
         self.editor.spec().main_output_id
     }
 
-    /// The topology the main output was declared with, if one was.
-    pub fn main_output_topology(&self) -> Option<&tutti_buffers::ChannelTopology> {
-        self.main_output.as_ref()
+    /// The topology the main output was declared with: the one in force, which
+    /// a declaration that waits for a crossfade has not yet replaced.
+    ///
+    /// # Panics
+    ///
+    /// Never: the graph declares topologies only, at most `MAX_CHANNELS` wide.
+    pub fn main_output_topology(&self) -> &tutti_buffers::ChannelTopology {
+        self.editor
+            .spec()
+            .main_output
+            .topology()
+            .expect("the session declares topologies, at most MAX_CHANNELS wide")
     }
 
-    /// Declares what the main output's channels are, and sizes the main output to it: the
-    /// main output becomes exactly as wide as `main_output` (widened, or narrowed, its
-    /// channels past the new width dropped), since a declaration states the
-    /// main output and the device is no floor under it. `None` takes it back and leaves
-    /// the main output at its width.
-    ///
-    /// `device` is the width the engine renders into, when there is one: a
-    /// declaration it cannot place is refused before anything changes. The
-    /// engine's folds are republished from the declaration, so the next block
-    /// is placed by it.
-    ///
-    /// # Errors
-    ///
-    /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty or cannot be
-    /// placed on `device`. Nothing is changed.
     /// Whether `main_output` can be a main output, and be placed on `device` when there is
     /// one: not empty (a topology is never wider than the engine renders), and every
     /// channel has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
@@ -3680,13 +3580,13 @@ impl<F: Float> Graph<F> {
 
     /// Publishes the device and the main output the output policy is checked
     /// against ([`placed_device`](Self::placed_device),
-    /// [`main_output_in_force`](Self::main_output_in_force)), after any of them changed.
+    /// [`main_output_topology`](Self::main_output_topology)), after any of them changed.
     fn publish_output_facts(&self) {
         let facts = self
             .placed_device()
             .map(|device| crate::policy::OutputFacts {
                 device,
-                main_output: self.main_output_in_force(),
+                main_output: *self.main_output_topology(),
             });
         *self.values.output_facts().lock() = facts;
     }
@@ -3694,15 +3594,6 @@ impl<F: Float> Graph<F> {
     /// The control side of the engine's output folds; `None` with no engine.
     pub(crate) fn output_control(&self) -> Option<&tutti_engine::OutputControl<F>> {
         self.output.as_ref().map(|placed| &placed.control)
-    }
-
-    /// The main output the next commit renders: what was declared, else the engine's
-    /// order for the width the graph has.
-    pub(crate) fn main_output_in_force(&self) -> tutti_buffers::ChannelTopology {
-        self.main_output.unwrap_or_else(|| {
-            tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
-                .expect("a graph's outputs are at most MAX_CHANNELS wide")
-        })
     }
 
     /// Moves the engine to a new output `device`, folding every main output
@@ -3767,10 +3658,10 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    fn apply_declared(&mut self, main_output: Option<tutti_buffers::ChannelTopology>, hard: bool) {
+    fn apply_declared(&mut self, main_output: tutti_buffers::ChannelTopology, hard: bool) {
         let applied = self
             .check_declaration(&main_output)
-            .and_then(|width| self.apply_main_output(main_output, hard, width));
+            .and_then(|()| self.apply_main_output(main_output, hard));
         if let Err(e) = applied {
             self.apply_refusal = Some(e);
         }
@@ -3791,10 +3682,10 @@ impl<F: Float> Graph<F> {
     /// to be checked against the device it finds when it is applied.
     pub(crate) fn declare_main_output(
         &mut self,
-        main_output: Option<tutti_buffers::ChannelTopology>,
+        main_output: tutti_buffers::ChannelTopology,
         hard: bool,
     ) -> Result<(), tutti_graph::MainOutputError> {
-        let width = self.check_declaration(&main_output)?;
+        self.check_declaration(&main_output)?;
         if !hard && self.editor.main_output_fade_running() {
             self.pending_main_output = Some(main_output);
             self.apply_refusal = None;
@@ -3802,54 +3693,31 @@ impl<F: Float> Graph<F> {
         }
         self.pending_main_output = None;
         self.apply_refusal = None;
-        self.apply_main_output(main_output, hard, width)
+        self.apply_main_output(main_output, hard)
     }
 
-    /// The width of the main output `main_output` declares, if it can be placed on the
-    /// device: [`declare_main_output`](Self::declare_main_output)'s checks.
+    /// Whether `main_output` can be placed on the device:
+    /// [`declare_main_output`](Self::declare_main_output)'s checks.
     fn check_declaration(
         &self,
-        main_output: &Option<tutti_buffers::ChannelTopology>,
-    ) -> Result<usize, tutti_graph::MainOutputError> {
-        let placed = self.placed_device();
-        Ok(match main_output {
-            Some(main_output) => {
-                Self::check_main_output(main_output, placed.as_ref())?;
-                usize::from(main_output.width().count())
-            }
-            None => {
-                if let Some(device) = &placed {
-                    let outputs = self.outputs();
-                    let width = ChannelLayout::try_from(outputs).map_err(|e| {
-                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
-                    })?;
-                    tutti_graph::fold_to_channels::<f32>(
-                        &tutti_buffers::ChannelTopology::default_for(width)
-                            .expect("a graph's outputs are at most MAX_CHANNELS wide"),
-                        device,
-                        tutti_buffers::FoldLevels::default(),
-                    )?;
-                }
-                self.outputs()
-            }
-        })
+        main_output: &tutti_buffers::ChannelTopology,
+    ) -> Result<(), tutti_graph::MainOutputError> {
+        Ok(Self::check_main_output(
+            main_output,
+            self.placed_device().as_ref(),
+        )?)
     }
 
     fn apply_main_output(
         &mut self,
-        main_output: Option<tutti_buffers::ChannelTopology>,
+        main_output: tutti_buffers::ChannelTopology,
         hard: bool,
-        width: usize,
     ) -> Result<(), tutti_graph::MainOutputError> {
         // A changed declaration is the next main output: its folds are published
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
         // was.
-        // `None` is the engine's order for the width.
-        let set = main_output.map_or_else(
-            || tutti_buffers::ChannelSet::default_for(ChannelLayout::clamped(width)),
-            tutti_buffers::ChannelSet::from,
-        );
+        let set = tutti_buffers::ChannelSet::from(main_output);
         let next = if set == self.editor.spec().main_output {
             None
         } else {
@@ -3875,8 +3743,6 @@ impl<F: Float> Graph<F> {
         self.editor
             .declare_main_output(set, id)
             .expect("the id is new, or the declaration is the one it holds");
-        self.main_output = main_output;
-        self.widen_refusal = None;
         let resized = self.editor.spec().topology.outputs.len() != before;
         if resized {
             // The channels cut took their gain entries with them.
@@ -4166,7 +4032,13 @@ mod tail_tests {
     }
 
     fn graph_at(rate: SampleRate) -> Graph {
-        Graph::new(2, rate, MaxBlock::of(Samples::new(64)), None, test_tempo())
+        Graph::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            rate,
+            MaxBlock::of(Samples::new(64)),
+            None,
+            test_tempo(),
+        )
     }
 
     /// **The tail and latency limits are the graph's rate's**: sixty and ten
@@ -4298,7 +4170,7 @@ mod main_output_fade_tests {
 
     fn graph() -> (Graph, NodeKey) {
         let mut g = Graph::new(
-            2,
+            tutti_buffers::ChannelTopology::STEREO,
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
             None,
@@ -4323,7 +4195,7 @@ mod main_output_fade_tests {
     fn a_main_output_declaration_crossfades_for_the_declick_unless_hard() {
         let (mut g, _) = graph();
         let first = g.editor.spec().main_output_id;
-        g.declare_main_output(Some(Bed::Surround51.topology()), false)
+        g.declare_main_output(Bed::Surround51.topology(), false)
             .expect("declares");
         assert!(matches!(g.commit(), Committed::Sent));
         let plan = g.editor.base().expect("a plan");
@@ -4343,7 +4215,7 @@ mod main_output_fade_tests {
             (Samples::new(240), FadeLaw::EqualAmplitude)
         );
 
-        g.declare_main_output(Some(Bed::Stereo.topology()), true)
+        g.declare_main_output(Bed::Stereo.topology(), true)
             .expect("declares");
         assert!(matches!(g.commit(), Committed::Sent));
         let plan = g.editor.base().expect("a plan");

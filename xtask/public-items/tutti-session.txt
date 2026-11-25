@@ -151,7 +151,6 @@ fn bounce::Bounce::serial
 fn bounce::Bounce::stem
 fn bounce::Bounce::stem_with
 fn bounce::Bounce::tail
-fn bounce::Bounce::undeclared_main_output
 fn bounce::BounceHandle::cancel
 fn bounce::BounceHandle::progress
 fn bounce::BounceJob::handle
@@ -282,7 +281,6 @@ fn graph::Graph::set_sample_rate
 fn graph::Graph::set_sources
 fn graph::Graph::sources
 fn graph::Graph::taps
-fn graph::Graph::widen_outputs
 fn graph::Replacement::fade
 fn graph::Replacement::new
 fn graph::observe::Graph::take_reopened

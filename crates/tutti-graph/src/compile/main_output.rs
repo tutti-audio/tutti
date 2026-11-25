@@ -79,19 +79,10 @@ pub struct MainOutputBank {
     pub(crate) continues: bool,
 }
 
-/// Why the graph's main output cannot be widened or placed.
+/// Why the graph's main output cannot be placed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum MainOutputError {
-    /// A graph's main output's channels were declared at one width and the main output is, or
-    /// was asked to be, another: the declaration owns the main output's width.
-    #[error("the graph's main output is declared {declared:?} wide and cannot be {requested:?}")]
-    Width {
-        /// The width the main output was declared with.
-        declared: ChannelLayout,
-        /// The width the main output has, or was asked to widen to.
-        requested: ChannelLayout,
-    },
     /// The main output's channels cannot be placed.
     #[error(transparent)]
     Fold(#[from] FoldError),
