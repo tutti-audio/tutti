@@ -5,10 +5,10 @@
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
-    KeyEvent, KeyUse, Loaded, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
+    KeyEvent, KeyUse, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
     ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginPreset,
     PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
-    Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
+    Samples, StateUse, Vst3SubCategories, Widths, WindowHandle, bypass_parameter,
 };
 use tutti_plugin_types::{Delivered, MainThreadMarker, PluginLearnError, TrackInfo};
 use tutti_units::Normalized;
@@ -91,7 +91,7 @@ impl Vst3Loaded {
     /// it has an editor measured from the plugin itself.
     pub(super) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
         PluginDescriptor {
-            widths: Some(Loaded::widths(self)),
+            widths: Some(Widths::new(self.info.supports_f64)),
             ..descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
         }
     }
@@ -254,7 +254,7 @@ impl Control for Vst3Loaded {
 
     fn info(&self) -> &PluginDescriptor {
         self.descriptor.get_or_init(|| PluginDescriptor {
-            widths: Some(Loaded::widths(self)),
+            widths: Some(Widths::new(self.info.supports_f64)),
             ..descriptor_of(&self.info, EditorPresence::Unknown)
         })
     }

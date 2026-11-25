@@ -2,9 +2,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::{
-    Address, CCNumber, GroupChannelIndex, MidiChannel, MidiGroup, NoteNumber, Protocol, Reserved,
-};
+use crate::{Address, CCNumber, MidiChannel, MidiGroup, NoteNumber, Protocol, Reserved};
 
 /// A UMP message type, the top nibble of a packet's first word (M2-104 Table
 /// 4).
@@ -212,16 +210,17 @@ impl Ump {
     }
 
     /// Whether this is a channel-mode panic: a Control Change (a MIDI 1.0 or
-    /// MIDI 2.0 channel-voice packet, types `0x2` and `0x4`) of All Sound Off
-    /// (controller 120) or All Notes Off (controller 123).
+    /// MIDI 2.0 channel-voice packet, types `0x2` and `0x4`) of a controller
+    /// that ends every sounding note.
     ///
     /// With a note-off ([`is_note_off`](Self::is_note_off)) these are the
     /// packets whose loss leaves a sound hanging: a queue that must drop an
-    /// event keeps them in preference to any other. The other channel-mode
-    /// controllers (121, 122, 124 to 127) end nothing and are not panics.
-    /// Controller numbers and their meanings: MIDI 1.0 Detailed Specification,
-    /// Channel Mode Messages (CC 120 All Sound Off, CC 123 All Notes Off);
-    /// the MIDI 2.0 Control Change (M2-104, MIDI 2.0 Control Change
+    /// event keeps them in preference to any other. The channel-mode
+    /// controllers that end every sounding note are panics: All Sound Off
+    /// (120), All Notes Off (123), Omni Off (124), Omni On (125), Mono Mode On
+    /// (126) and Poly Mode On (127) (M2-121 section 5.1.4). Reset All
+    /// Controllers (121) and Local Control (122) end no note and are not
+    /// panics. The MIDI 2.0 Control Change (M2-104, MIDI 2.0 Control Change
     /// Message) keeps the index in the same bits of the first word.
     #[inline]
     #[must_use]
@@ -233,15 +232,15 @@ impl Ump {
                 let controller = ((w >> 8) & 0x7f) as u8;
                 status == 0xb
                     && (controller == CCNumber::ALL_SOUND_OFF.get()
-                        || controller == CCNumber::ALL_NOTES_OFF.get())
+                        || controller >= CCNumber::ALL_NOTES_OFF.get())
             }
             _ => false,
         }
     }
 
     /// The held-key fact of this packet, for an observer that must close what
-    /// a stream opened: a note on or off by its `(protocol, group, channel,
-    /// note)` key, or the sustain pedal (CC 64) of a channel going down or up.
+    /// a stream opened: a note on or off by its `(group, channel, note)` key,
+    /// whichever protocol the packet is in, or the sustain pedal (CC 64) of a channel going down or up.
     /// A MIDI 1.0 Note On at velocity 0 is an off, a MIDI 2.0 one an on, as in
     /// [`is_note_off`](Self::is_note_off).
     #[inline]
@@ -255,7 +254,7 @@ impl Ump {
             None => return None,
         };
         let note = NoteNumber::masked((w >> 8) as u8);
-        let key = NoteKey::pack(m2, address, note);
+        let key = NoteKey::new(address, note);
         match status {
             0x8 => Some(NoteKeyEvent::Off(key)),
             0x9 => {
@@ -272,7 +271,7 @@ impl Ump {
                     w & 0x7f >= 64
                 };
                 Some(NoteKeyEvent::Sustain {
-                    protocol: key.protocol(),
+                    protocol: if m2 { Protocol::Midi2 } else { Protocol::Midi1 },
                     address,
                     down,
                 })
@@ -281,8 +280,8 @@ impl Ump {
         }
     }
 
-    /// The note-off that closes `key`, velocity 0 (M1: status 8, M2: status 8
-    /// with a zero 16-bit velocity).
+    /// The note-off that closes `key`: a MIDI 2.0 Note Off at velocity 0, whatever
+    /// protocol the note was started in (the key names none).
     #[must_use]
     pub const fn note_off(key: NoteKey) -> Ump {
         let address = key.address();
@@ -290,11 +289,7 @@ impl Ump {
             | (0x8 << 20)
             | ((address.channel.get() as u32) << 16)
             | ((key.note().get() as u32) << 8);
-        if key.is_midi2() {
-            Ump([0x4000_0000 | head, 0, 0, 0])
-        } else {
-            Ump([0x2000_0000 | head, 0, 0, 0])
-        }
+        Ump([0x4000_0000 | head, 0, 0, 0])
     }
 
     /// Sustain pedal up (CC 64 = 0) on `address`, in `protocol`'s channel
@@ -380,64 +375,36 @@ impl core::fmt::UpperHex for Ump {
     }
 }
 
-/// A held-note key: protocol, group, channel and note (M2-104 identifies a
-/// note by the last three), packed in 16 bits.
+/// A held-note key: group, channel and note, packed in 15 bits. M2-104
+/// identifies a note by these three whichever protocol carries it (Appendix
+/// D.3 translates the two field for field), so a MIDI 1.0 note and a MIDI 2.0
+/// note on one group, channel and note are one key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteKey(u16);
 
 impl NoteKey {
-    /// The key of `note` on `address` in `protocol`, or `None` for a protocol
-    /// that has no channel voice message ([`Protocol::Reserved`]).
+    /// The key of `note` on `address`.
     #[must_use]
-    pub const fn new(protocol: Protocol, address: Address, note: NoteNumber) -> Option<Self> {
-        match protocol {
-            Protocol::Midi1 => Some(Self::pack(false, address, note)),
-            Protocol::Midi2 => Some(Self::pack(true, address, note)),
-            Protocol::Reserved(_) => None,
-        }
+    pub const fn new(address: Address, note: NoteNumber) -> Self {
+        NoteKey(((address.index() as u16) << 7) | note.get() as u16)
     }
 
-    const fn pack(m2: bool, address: Address, note: NoteNumber) -> Self {
-        NoteKey(((m2 as u16) << 15) | ((address.index() as u16) << 7) | note.get() as u16)
-    }
-
-    /// Packed form, `0..=65535`.
+    /// Packed form, `0..=32767`.
     #[must_use]
     pub const fn index(self) -> u16 {
         self.0
     }
 
-    /// From the packed form.
+    /// From the packed form; the high bit is ignored.
     #[must_use]
     pub const fn from_index(i: u16) -> Self {
-        NoteKey(i)
-    }
-
-    /// The protocol of the packet that opened the key: [`Protocol::Midi1`] or
-    /// [`Protocol::Midi2`].
-    #[must_use]
-    pub const fn protocol(self) -> Protocol {
-        if self.is_midi2() {
-            Protocol::Midi2
-        } else {
-            Protocol::Midi1
-        }
-    }
-
-    const fn is_midi2(self) -> bool {
-        self.0 >> 15 != 0
-    }
-
-    /// The channel in its protocol.
-    #[must_use]
-    pub const fn lane(self) -> GroupChannelIndex {
-        GroupChannelIndex::from_packed(self.0 >> 7)
+        NoteKey(i & 0x7fff)
     }
 
     /// The Group and Channel.
     #[must_use]
     pub const fn address(self) -> Address {
-        Address::from_lane(((self.0 >> 7) & 0xff) as u8)
+        Address::from_lane((self.0 >> 7) as u8)
     }
 
     /// The note number.
@@ -566,19 +533,26 @@ mod tests {
         assert!(!Ump([0; 4]).is_note_off());
     }
 
-    /// Controllers 120 and 123 of a Control Change, in either protocol, on any
-    /// channel and group, are panics; no other controller, no other message
-    /// type, and no other status with the same data byte is.
+    /// The channel-mode controllers that end every sounding note (120, 123 and
+    /// the mode switches 124 to 127) of a Control Change, in either protocol,
+    /// on any channel and group, are panics; Reset All Controllers (121) and
+    /// Local Control (122) and every other controller are not, nor any other
+    /// message type, nor any other status with the same data byte.
+    /// Spec: m2-121/5.1.4.1#1, m2-121/5.1.4.3#1, m2-121/5.1.4.4#1, m2-121/5.1.4.5#1, m2-121/5.1.4.6#1, m2-121/5.1.4.7#1
     #[test]
     fn panic_controllers_are_recognised() {
         let m1 = |status: u32, cc: u32| Ump([0x2000_0000 | (status << 16) | (cc << 8), 0, 0, 0]);
         assert!(m1(0xb0, 120).is_panic_controller());
         assert!(m1(0xb0, 123).is_panic_controller());
         assert!(m1(0xbf, 123).is_panic_controller());
+        for cc in 124..=127 {
+            assert!(m1(0xb0, cc).is_panic_controller(), "CC {cc}");
+            assert!(Ump([0x40b2_0000 | (cc << 8), 0, 0, 0]).is_panic_controller());
+        }
         assert!(Ump([0x2000_0000 | (0xb3 << 16) | (120 << 8) | 5, 0, 0, 0]).is_panic_controller());
         assert!(Ump([0x40b5_7800, 0, 0, 0]).is_panic_controller());
         assert!(Ump([0x40bf_7b00, 0, 0, 0]).is_panic_controller());
-        for cc in [0u32, 64, 119, 121, 122, 124, 127] {
+        for cc in [0u32, 64, 119, 121, 122] {
             assert!(!m1(0xb0, cc).is_panic_controller(), "CC {cc}");
         }
         assert!(!m1(0x90, 120).is_panic_controller(), "a note-on, key 120");

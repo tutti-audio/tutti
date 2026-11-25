@@ -71,6 +71,12 @@ fn off(key: u32) -> Ump {
     midi::m1_note_off(MidiChannel::FIRST, key as u8, U7::of(0))
 }
 
+/// The close of a held key: a MIDI 2.0 Note Off at velocity 0, whichever
+/// protocol began the note.
+fn close(key: u32) -> Ump {
+    midi::note_off(MidiChannel::FIRST, key as u8, 0)
+}
+
 /// What a port of the script node carries: the script's packet with word 1
 /// set to the port, so a reader can tell the ports apart.
 fn on_port(ump: Ump, port: u16) -> Ump {
@@ -1209,7 +1215,7 @@ fn the_closes_of_a_cut_edge_reach_every_input_tap_on_any_number_of_workers() {
         at(7, bend(0)),
         at(64, pedal(0)),
         at(64, bend(0x2000)),
-        at(64, off(60)),
+        at(64, close(60)),
     ];
     let later: Vec<TapEvent> = expect
         .iter()
@@ -1315,7 +1321,7 @@ fn a_bypassed_nodes_input_tap_carries_its_closes() {
         commit(&mut r);
         render(&mut r, &[64], 192);
         let by = if align == TapAlign::Raw { 0 } else { 40 };
-        let node = vec![at(3, on_port(on(60), 0)), at(64, off(60))];
+        let node = vec![at(3, on_port(on(60), 0)), at(64, close(60))];
         assert_eq!(heard.lock().unwrap().to_vec(), node, "{align:?}");
         let tapped: Vec<TapEvent> = node.iter().map(|e| at(e.frame.get() + by, e.ump)).collect();
         assert_eq!(drain(&mut tap), tapped, "{align:?}");
@@ -1594,7 +1600,7 @@ fn a_parked_nodes_input_tap_carries_nothing() {
         let mut node: Vec<TapEvent> = (0..120u32)
             .map(|k| at(64 * u64::from(k) + 3, on_port(on(k), 0)))
             .collect();
-        node.extend((0..120u32).map(|k| at(64 * (120 + u64::from(k)), off(k))));
+        node.extend((0..120u32).map(|k| at(64 * (120 + u64::from(k)), close(k))));
         assert_eq!(heard.lock().unwrap().to_vec(), node, "{align:?}");
         let tapped: Vec<TapEvent> = node.iter().map(|e| at(e.frame.get() + by, e.ump)).collect();
         assert_eq!(

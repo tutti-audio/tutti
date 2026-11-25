@@ -251,26 +251,27 @@ fn a_full_inlet_refuses_and_counts() {
     assert_eq!(counts.losses().lost, 2);
 }
 
-/// **An input's lost count is its own cell and carries across a reopened
-/// input**: a push the ring refuses raises it, the count survives the device
-/// dropping, and the next connection on the same cell keeps adding.
+/// **A full ring counts each refused push once, in the shared tally, and the
+/// tally carries across a reopened input**: a push the ring refuses raises
+/// `lost` by one, the count survives the device dropping, and the next
+/// connection on the same tally keeps adding.
 #[test]
 fn the_lost_count_carries_across_a_reopened_input() {
     let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
     let (writers, readers) = InputWriters::new();
     let (mut device, _node) = inlets.open_with(writers.split().0);
-    assert_eq!(readers.lost.get(), Losses::NONE);
+    assert_eq!(readers.inlet.get(), Losses::NONE);
     for i in 0..4 {
         let _ = device.push(note(60 + i), Instant::now());
     }
     assert_eq!(
-        readers.lost.get(),
+        readers.inlet.get(),
         Losses::lost(2),
         "the two pushes the ring refused"
     );
     drop(device);
     assert_eq!(
-        readers.lost.get(),
+        readers.inlet.get(),
         Losses::lost(2),
         "the count outlives the input"
     );
@@ -280,15 +281,15 @@ fn the_lost_count_carries_across_a_reopened_input() {
         let _ = device.push(note(60 + i), Instant::now());
     }
     assert_eq!(
-        readers.lost.get(),
+        readers.inlet.get(),
         Losses::lost(4),
         "the reopened input keeps counting"
     );
 }
 
 /// **A push into an inlet whose node is gone is not a loss**: it is refused as
-/// `Disconnected` and the input's `lost` cell stays at zero, where a full ring
-/// raises it.
+/// `Disconnected` and the shared tally stays at zero, where a full ring raises
+/// `lost`.
 #[test]
 fn a_push_after_the_node_is_gone_is_disconnected_and_not_lost() {
     let inlets = inlets(Duration::ZERO);
@@ -299,7 +300,7 @@ fn a_push_after_the_node_is_gone_is_disconnected_and_not_lost() {
         device.push(note(60), Instant::now()),
         Err(tutti_rt::PushError::Disconnected)
     );
-    assert_eq!(readers.lost.get(), Losses::NONE);
+    assert_eq!(readers.inlet.get(), Losses::NONE);
 }
 
 /// A device whose clock the test writes, built on the reading "frame 1000 at

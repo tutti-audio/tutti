@@ -269,6 +269,44 @@ fn a_plugin_that_drops_its_64_bit_flags_after_open_loads_as_32_bit() {
     assert!(!instance.loaded().features.contains(Features::F64_AUDIO));
 }
 
+/// **A plugin that declares 64-bit audio and refuses the activation fails it:
+/// the activation is asked once.** The width is chosen before the activation,
+/// and a refusal is not retried at 32-bit.
+#[test]
+fn a_plugin_that_declares_64_bit_and_refuses_the_activation_fails_it_once() {
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+    let path = Path::new(clap_plugin());
+    let both =
+        tutti_clap_test_plugin::PORTS_64BIT_INPUTS | tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS;
+    let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
+    let opened = ClapInstance::open(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        &PluginRef::file(path),
+    )
+    .expect("open");
+    crate::test_utils::clap_probe_reset_activation_count();
+    let _refused = crate::test_utils::clap_probe_refuse_rate(44100.0);
+    let refusal = ClapInstance::activate(
+        main_thread(),
+        opened,
+        SampleRate::SR_44K1,
+        512,
+        FloatWidth::F64,
+        None,
+        &mut || {},
+        Hand::local(),
+        crate::ties::ties().expect("bells").0,
+    );
+    assert!(refusal.is_err(), "the refused activation is a failed load");
+    assert_eq!(
+        crate::test_utils::clap_probe_refusal_count(),
+        1,
+        "the refusal is not retried at 32-bit"
+    );
+    assert_eq!(crate::test_utils::clap_probe_activation_count(), 0);
+}
+
 /// **A rate change that changes the plugin's bus layout tells the host
 /// and refreshes the metadata.** Only VST3 raised `IoChanged`; a CLAP
 /// plugin that re-declared its ports across a re-activation left the host

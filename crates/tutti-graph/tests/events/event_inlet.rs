@@ -18,7 +18,7 @@ use common::{Kind, TestNode};
 
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::{cycle_blocks, midi};
-use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
+use tutti_graph::contract::Direct;
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
@@ -352,29 +352,6 @@ fn a_note_on_never_displaces_a_waiting_note_off() {
         keys(&d),
         (20..28).collect::<Vec<u32>>(),
         "every note-off went out"
-    );
-}
-
-/// A port narrower than the burst: the node's list holds 1500 events, the port
-/// (the harness's, 1024) takes 1024, and the other 476 are counted as
-/// refused by the port, and nowhere else.
-#[test]
-fn a_port_narrower_than_the_burst_counts_refused() {
-    let burst = HAND_EVENT_CAPACITY + 476;
-    let (mut d, mut tx) = rig(u32::try_from(burst).unwrap());
-    for k in 0..burst {
-        tx.push(Stamp::NextBlock, note((k % 100) as u32)).unwrap();
-    }
-    d.block();
-    assert_eq!(sent(&d).len(), HAND_EVENT_CAPACITY);
-    assert_eq!(tx.counts().losses().refused, 476);
-    assert_eq!(
-        (
-            tx.counts().losses().lost,
-            tx.counts().losses().evicted,
-            tx.counts().losses().late
-        ),
-        (0, 0, 0)
     );
 }
 

@@ -102,7 +102,7 @@ fn widths_of<L: InProcess>(main: MainThreadMarker, path: &Path, id: &PluginId) -
     let (_collector, work) = tutti_plugin_types::MainWork::new();
     L::load_in_process(main, &work, &PluginRef::new(path, id.clone()))
         .ok()
-        .map(|loaded| loaded.widths())
+        .map(|mut loaded| loaded.widths(main))
 }
 
 /// Reads the widths of each plugin of `plugins` as `L`, one load each.

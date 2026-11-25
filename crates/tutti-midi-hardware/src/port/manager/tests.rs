@@ -134,12 +134,9 @@ fn an_arrival_past_its_block_is_emitted_late_and_counted() {
         vec![(0, 256, note(60))],
         "the next block's first frame"
     );
+    let losses = readers.inlet.get();
     assert_eq!(
-        (
-            readers.inlet.get().late,
-            readers.lost.get().lost,
-            readers.inlet.get().evicted
-        ),
+        (losses.late, losses.lost, losses.evicted),
         (1, 0, 0),
         "late, not lost"
     );
@@ -283,7 +280,7 @@ fn a_stale_id_cannot_reach_the_port_opened_after_it() {
     assert_eq!((info.name.as_str(), info.active), ("B", true));
 }
 
-/// **A full inlet counts what it drops** in the input's `lost` cell, which the
+/// **A full inlet counts what it drops** in the input's shared tally, which the
 /// removed port leaves as it was.
 #[test]
 fn a_full_inlet_counts_what_it_drops() {
@@ -298,10 +295,10 @@ fn a_full_inlet_counts_what_it_drops() {
         })
         .count();
     assert_eq!(taken, 4);
-    assert_eq!(readers.lost.get(), Losses::lost(6));
+    assert_eq!(readers.inlet.get(), Losses::lost(6));
     assert!(manager.remove_input_port(id));
     assert_eq!(
-        readers.lost.get(),
+        readers.inlet.get(),
         Losses::lost(6),
         "a removed port's drops stay"
     );

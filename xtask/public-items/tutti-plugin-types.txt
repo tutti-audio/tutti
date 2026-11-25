@@ -272,6 +272,7 @@ fn fake::FakePlugin::panic_in_activate
 fn fake::FakePlugin::panic_in_deactivate
 fn fake::FakePlugin::panic_in_latency
 fn fake::FakePlugin::panic_in_rebuild
+fn fake::FakePlugin::refuse_64_bit
 fn fake::FakePlugin::refuse_off_thread_calls
 fn fake::FakePlugin::refuse_rate
 fn fake::FakePlugin::request_editor_size

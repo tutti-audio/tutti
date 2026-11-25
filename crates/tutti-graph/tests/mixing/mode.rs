@@ -1099,7 +1099,8 @@ fn un_bypass_resets_once_and_old_state_is_never_heard() {
 
 const ON60: [u32; 4] = [0x2090_3C64, 0, 0, 0];
 const ON62: [u32; 4] = [0x2090_3E64, 0, 0, 0];
-const OFF60: [u32; 4] = [0x2080_3C00, 0, 0, 0];
+/// What closes a held `ON60`: a MIDI 2.0 Note Off at velocity 0.
+const CLOSE60: [u32; 4] = [0x4080_3C00, 0, 0, 0];
 
 /// A note source: sends what its mailbox holds, as one block's events.
 struct Src {
@@ -1170,7 +1171,7 @@ fn a_held_input_note_is_closed_on_bypass() {
     let seen: Vec<[u32; 4]> = p.events.lock().unwrap().iter().map(|e| e.1).collect();
     assert_eq!(
         seen,
-        vec![ON60, OFF60],
+        vec![ON60, CLOSE60],
         "the off, and not the later note-on"
     );
     // Called for the 2 blocks, and the 4 of the fade; the off was delivered
@@ -1214,7 +1215,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
     s.mode(3, NodeMode::Bypassed);
     s.run(8, BLOCK, &|_| 0.0);
     let seen: Vec<[u32; 4]> = p.events.lock().unwrap().iter().map(|e| e.1).collect();
-    assert_eq!(seen, vec![ON60, OFF60]);
+    assert_eq!(seen, vec![ON60, CLOSE60]);
 }
 
 /// **A bypassed source closes what it holds downstream**: a note source
@@ -1257,7 +1258,7 @@ fn a_bypassed_source_closes_its_notes() {
     let seen: Vec<(u64, [u32; 4])> = sink.events.lock().unwrap().to_vec();
     assert_eq!(
         seen.iter().map(|e| e.1).collect::<Vec<_>>(),
-        vec![ON60, OFF60]
+        vec![ON60, CLOSE60]
     );
     assert_eq!(seen[1].0, 6 * BLOCK as u64, "in the first parked block");
     mail.lock().unwrap().push(ON62);

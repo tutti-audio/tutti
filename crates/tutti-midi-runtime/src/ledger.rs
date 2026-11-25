@@ -37,9 +37,7 @@
 //! note already started always has its row, so a full table never strands one.
 
 use tutti_graph::{Event, EventWriter, Offset};
-use tutti_ump::{
-    HeldControllers, Message, NoteKey, NoteKeyEvent, NoteVelocity, Protocol, Ump, Voice2,
-};
+use tutti_ump::{HeldControllers, Message, NoteKey, NoteKeyEvent, NoteVelocity, Ump, Voice2};
 
 /// The off a ledger owes `key`: a MIDI 2.0 Note Off at velocity 0 on its Group,
 /// Channel and Note Number.
@@ -58,16 +56,12 @@ pub(crate) enum Class {
 
 impl Class {
     pub(crate) fn of(ump: Ump) -> Self {
-        let (Some(address), Some(event)) = (ump.address(), ump.note_key_event()) else {
-            return Self::Other;
-        };
         // A note is one key whichever protocol carried it: a MIDI 1.0 On is
         // ended by a MIDI 2.0 Off of the same Group, Channel and Note Number.
-        let key = |key: NoteKey| NoteKey::new(Protocol::Midi2, address, key.note());
-        match event {
-            NoteKeyEvent::On(k) => key(k).map_or(Self::Other, Self::On),
-            NoteKeyEvent::Off(k) => key(k).map_or(Self::Other, Self::Off),
-            NoteKeyEvent::Sustain { .. } => Self::Other,
+        match ump.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => Self::On(key),
+            Some(NoteKeyEvent::Off(key)) => Self::Off(key),
+            Some(NoteKeyEvent::Sustain { .. }) | None => Self::Other,
         }
     }
 }

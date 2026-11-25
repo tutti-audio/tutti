@@ -17,7 +17,7 @@ const SUSTAIN: u8 = 64;
 fn expected(message: Message) -> Option<NoteKeyEvent> {
     match message {
         Message::Midi1(a, v) => {
-            let key = |note: NoteNumber| NoteKey::new(Protocol::Midi1, a, note).unwrap();
+            let key = |note: NoteNumber| NoteKey::new(a, note);
             match v {
                 Voice1::NoteOn { note, velocity } if velocity.get() == 0 => {
                     Some(NoteKeyEvent::Off(key(note)))
@@ -35,7 +35,7 @@ fn expected(message: Message) -> Option<NoteKeyEvent> {
             }
         }
         Message::Midi2(a, v) => {
-            let key = |note: NoteNumber| NoteKey::new(Protocol::Midi2, a, note).unwrap();
+            let key = |note: NoteNumber| NoteKey::new(a, note);
             match v {
                 Voice2::NoteOn { note, .. } => Some(NoteKeyEvent::On(key(note))),
                 Voice2::NoteOff { note, .. } => Some(NoteKeyEvent::Off(key(note))),
@@ -98,7 +98,7 @@ proptest! {
         prop_assert_eq!(ump.note_key_event(), want);
     }
 
-    /// The close of every key is an off of that key, in its own protocol, and
+    /// The close of every key is an off of that key, and
     /// the pedal-up is a pedal event, up.
     #[test]
     fn a_close_decodes_to_the_off_of_its_key(index in any::<u16>(), m2 in any::<bool>(), lane_ in any::<u8>()) {
@@ -120,10 +120,7 @@ proptest! {
     fn the_closing_writers_equal_the_encoded_messages(index in any::<u16>(), m2 in any::<bool>(), lane_ in any::<u8>()) {
         let key = NoteKey::from_index(index);
         let (address, note) = (key.address(), key.note());
-        let want = match key.protocol() {
-            Protocol::Midi2 => Message::Midi2(address, Voice2::note_off(note, NoteVelocity::MIN)),
-            _ => Message::Midi1(address, Voice1::note_off(note, U7::of(0))),
-        };
+        let want = Message::Midi2(address, Voice2::note_off(note, NoteVelocity::MIN));
         prop_assert_eq!(Ump::note_off(key), Ump::from(want));
         prop_assert_eq!(Ump::note_off(key).decode(), Ok(want));
 
@@ -143,18 +140,14 @@ proptest! {
 #[test]
 fn a_key_carries_its_fields() {
     let address = Address::new(MidiGroup::of(1), MidiChannel::of(0xf));
-    let key = NoteKey::new(Protocol::Midi2, address, NoteNumber::of(0x45)).unwrap();
-    assert_eq!(
-        (key.protocol(), key.address(), key.note()),
-        (Protocol::Midi2, address, NoteNumber::of(0x45))
-    );
+    let key = NoteKey::new(address, NoteNumber::of(0x45));
+    assert_eq!((key.address(), key.note()), (address, NoteNumber::of(0x45)));
     assert_eq!(NoteKey::from_index(key.index()), key);
 }
 
-/// A reserved protocol has no channel voice message, so it opens no key and
-/// closes no pedal; nothing is packed under a wrong protocol.
+/// A reserved protocol has no channel voice message, so it closes no pedal.
 #[test]
-fn a_reserved_protocol_has_no_key_and_no_pedal() {
+fn a_reserved_protocol_has_no_pedal() {
     let a = Address::first(MidiChannel::FIRST);
     let Ok(Message::Stream(Stream::StreamConfigurationRequest(config))) =
         Ump([0xF005_0300, 0, 0, 0]).decode()
@@ -163,7 +156,6 @@ fn a_reserved_protocol_has_no_key_and_no_pedal() {
     };
     let reserved = config.protocol;
     assert!(matches!(reserved, Protocol::Reserved(_)));
-    assert_eq!(NoteKey::new(reserved, a, NoteNumber::of(1)), None);
     assert_eq!(Ump::sustain_up(reserved, a), None);
 }
 

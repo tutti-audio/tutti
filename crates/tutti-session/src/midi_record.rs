@@ -113,15 +113,14 @@ pub(crate) const MAX_PENDING: usize = 64;
 /// counted.
 pub(crate) const MAX_STATE_ENTRIES: usize = 8192;
 
-/// A table of Note Ons covers one lane (a protocol, a Group, a Channel is
-/// sixteen of them per Group): 128 keys.
+/// A table of Note Ons covers one Group: sixteen Channels of 128 keys.
 const KEYS_PER_CHANNEL: usize = 128;
 
-/// The channels of a Group: a note table covers those of one protocol's Group.
+/// The channels of a Group: a note table covers them.
 const CHANNELS: usize = tutti_ump::MidiChannel::COUNT as usize;
 
-/// Two protocols of sixteen Groups.
-const NOTE_TABLES: usize = 32;
+/// One table of Note Ons per Group.
+const NOTE_TABLES: usize = tutti_ump::MidiGroup::COUNT as usize;
 
 /// The Universal Non-Real Time sub-id 1 of General MIDI (MIDI 1.0 Detailed
 /// Specification, General MIDI System Messages) and its sub-id 2: System On
@@ -266,8 +265,8 @@ type NoteOn = (NoteVelocity, Attribute);
 pub(crate) struct Record {
     /// The keys down; the note-ons are in `notes`, and "down" is only here.
     held: Held,
-    /// A protocol's Group's Note Ons by channel and key, allocated at the first
-    /// Note On there and never grown.
+    /// A Group's Note Ons by channel and key, in MIDI 2.0, allocated at the
+    /// first Note On there and never grown.
     notes: [Option<Box<[Option<NoteOn>]>>; NOTE_TABLES],
     state: BTreeMap<Slot, Entry>,
     /// Flex setup by Group, address and kind.
@@ -347,7 +346,7 @@ impl Record {
                     ..
                 } = Voice2::from(voice)
                 {
-                    self.note_on(lane, note, (velocity, attribute));
+                    self.note_on(at, note, (velocity, attribute));
                 }
             }
             Voice1::NoteOn { .. } | Voice1::NoteOff { .. } => self.held.observe(ump),
@@ -396,7 +395,7 @@ impl Record {
                 attribute,
             } => {
                 self.held.observe(ump);
-                self.note_on(lane, note, (velocity, attribute));
+                self.note_on(at, note, (velocity, attribute));
             }
             Voice2::NoteOff { .. } => self.held.observe(ump),
             Voice2::ControlChange { controller, .. } => {
@@ -586,11 +585,9 @@ impl Record {
 
     /// Ends the keys of `lane`'s channel.
     fn end_keys(&mut self, lane: GroupChannelIndex) {
-        let (protocol, at) = (lane.protocol(), lane.address());
+        let at = lane.address();
         for note in (0..=NoteNumber::MAX.get()).filter_map(NoteNumber::new) {
-            if let Some(key) = NoteKey::new(protocol, at, note) {
-                self.held.keys_mut().remove(key);
-            }
+            self.held.keys_mut().remove(NoteKey::new(at, note));
         }
     }
 
@@ -622,8 +619,8 @@ impl Record {
         self.state.insert(slot, entry);
     }
 
-    fn note_on(&mut self, lane: GroupChannelIndex, note: NoteNumber, on: NoteOn) {
-        let table = &mut self.notes[lane.index() / CHANNELS];
+    fn note_on(&mut self, at: Address, note: NoteNumber, on: NoteOn) {
+        let table = &mut self.notes[at.group.index()];
         if table.is_none() {
             let mut cells = Vec::new();
             if cells
@@ -637,7 +634,7 @@ impl Record {
             *table = Some(cells.into_boxed_slice());
         }
         if let Some(table) = table {
-            table[cell(lane, note)] = Some(on);
+            table[cell(at, note)] = Some(on);
         }
     }
 
@@ -752,23 +749,18 @@ impl Record {
         out
     }
 
-    /// `key`'s Note On, in the protocol the key was started in.
+    /// `key`'s Note On, in MIDI 2.0: a key is one note whichever protocol
+    /// started it.
     fn note_on_of(&self, key: NoteKey) -> Option<Ump> {
         let at = key.address();
-        let table = self.notes[key.lane().index() / CHANNELS].as_deref()?;
-        let (velocity, attribute) = table[cell(key.lane(), key.note())]?;
+        let table = self.notes[at.group.index()].as_deref()?;
+        let (velocity, attribute) = table[cell(at, key.note())]?;
         let voice = Voice2::NoteOn {
             note: key.note(),
             velocity,
             attribute,
         };
-        match key.protocol() {
-            Protocol::Midi2 => Some(Ump::from(Message::midi2(at, voice))),
-            Protocol::Midi1 => Voice1::try_from(voice)
-                .ok()
-                .map(|voice| Ump::from(Message::midi1(at, voice))),
-            _ => None,
-        }
+        Some(Ump::from(Message::midi2(at, voice)))
     }
 }
 
@@ -780,9 +772,9 @@ fn selection(lane: GroupChannelIndex) -> Slot {
     }
 }
 
-/// The cell of `note` of `lane` in its table.
-fn cell(lane: GroupChannelIndex, note: NoteNumber) -> usize {
-    (lane.index() % CHANNELS) * KEYS_PER_CHANNEL + usize::from(note.get())
+/// The cell of `note` of `at`'s channel in its Group's table.
+fn cell(at: Address, note: NoteNumber) -> usize {
+    at.channel.index() * KEYS_PER_CHANNEL + usize::from(note.get())
 }
 
 /// Where a Flex setup message goes, or `None` for a reserved address.
@@ -878,6 +870,13 @@ mod tests {
         ))
     }
 
+    fn off2(note: u8) -> Ump {
+        Ump::from(Message::midi2(
+            at(),
+            Voice2::note_off(NoteNumber::of(note), NoteVelocity::MIN),
+        ))
+    }
+
     fn off1(note: u8) -> Ump {
         Ump::from(Message::midi1(
             at(),
@@ -923,29 +922,23 @@ mod tests {
         assert_eq!(record.catch_up(), [cc2(7, 200), cc2(10, 5)]);
     }
 
-    /// M2-104 Appendix D.3 with M2-115 section 3: a 7-bit velocity reaches 16
-    /// bits by min-center-max
-    /// scaling, 64 at the center 0x8000, 127 at the top, and a velocity of 1
-    /// at 1 << 9.
+    /// **A key that began as a MIDI 1.0 Note On replays at its MIDI 2.0
+    /// velocity** (M2-104 Appendix D.3 with M2-115 section 3): a 7-bit velocity
+    /// reaches 16 bits by min-center-max scaling, 64 at the center 0x8000, 127
+    /// at the top, and a velocity of 1 at 1 << 9.
+    /// Spec: m2-104/d.1.1#1, m2-115/2.3#1, m2-115/3.1#1
     #[test]
-    fn a_midi1_note_on_is_kept_at_its_midi2_velocity() {
-        let mut record = Record::default();
-        let lane = GroupChannelIndex::at(Protocol::Midi1, at()).unwrap();
+    fn a_midi1_note_on_replays_at_its_midi2_velocity() {
         for (v, want) in [(64u8, 0x8000u16), (127, 0xFFFF), (1, 0x0200)] {
-            record.observe(on1(60, v));
-            let table = record.notes[lane.index() / CHANNELS].as_deref().unwrap();
-            assert_eq!(
-                table[cell(lane, NoteNumber::of(60))],
-                Some((NoteVelocity::new(want), Attribute::None)),
-                "7-bit {v}"
-            );
+            let record = observed(&[on1(60, v)]);
+            assert_eq!(record.catch_up(), [on2(60, want)], "7-bit {v}");
         }
     }
 
-    /// A key sent in MIDI 1.0 is caught up in MIDI 1.0 (velocity 64 is 64 again),
-    /// one sent in MIDI 2.0 keeps its 16-bit velocity and attribute.
+    /// A key replays as a MIDI 2.0 Note On, and one sent in MIDI 2.0 keeps its
+    /// 16-bit velocity and attribute.
     #[test]
-    fn a_held_key_is_caught_up_in_the_protocol_it_started_in() {
+    fn a_held_key_is_caught_up_as_a_midi2_note_on() {
         let on = Ump::from(Message::midi2(
             Address::first(MidiChannel::of(1)),
             Voice2::NoteOn {
@@ -955,22 +948,27 @@ mod tests {
             },
         ));
         let record = observed(&[on1(60, 64), on]);
-        assert_eq!(record.catch_up(), [on1(60, 64), on]);
+        assert_eq!(record.catch_up(), [on2(60, 0x8000), on]);
     }
 
-    /// A MIDI 1.0 key and a MIDI 2.0 key on one channel and note are two keys,
-    /// each with its own note-on.
+    /// **An off in either protocol ends a note the other began.** A note is one
+    /// key per Group, Channel and note number whichever protocol carried it
+    /// (M2-104 Appendix D.3 translates the two field for field, and
+    /// `tutti_ump::Held` keeps one key for them), so the key is not caught up,
+    /// and a later Note On of the key replays as itself.
     #[test]
-    fn the_two_protocols_keep_their_keys_apart() {
-        let record = observed(&[on1(60, 64), on2(60, 0x1234)]);
-        assert_eq!(record.catch_up(), [on1(60, 64), on2(60, 0x1234)]);
+    fn an_m2_off_ends_an_m1_on_and_the_other_way_round() {
+        assert_eq!(observed(&[on1(60, 64), off2(60)]).catch_up(), []);
+        assert_eq!(observed(&[on2(61, 0x1234), off1(61)]).catch_up(), []);
+        let record = observed(&[on1(62, 64), on2(62, 0x1234)]);
+        assert_eq!(record.catch_up(), [on2(62, 0x1234)]);
     }
 
     /// A key that ended is not caught up, a Note On at velocity 0 included.
     #[test]
     fn a_key_that_ended_is_not_caught_up() {
-        let record = observed(&[on1(60, 90), off1(60), on1(61, 90), on1(62, 90), on1(63, 0)]);
-        assert_eq!(record.catch_up(), [on1(61, 90), on1(62, 90)]);
+        let record = observed(&[on1(60, 64), off1(60), on1(61, 64), on1(62, 64), on1(63, 0)]);
+        assert_eq!(record.catch_up(), [on2(61, 0x8000), on2(62, 0x8000)]);
     }
 
     /// All Sound Off, All Notes Off and the channel modes (Omni Off, Omni On,
@@ -1041,7 +1039,7 @@ mod tests {
     fn a_catch_up_sends_setup_then_channel_state_then_keys() {
         let volume_change = sysex(SysexStatus::Complete, &[0x7F, 0x7F, 0x04, 0x01, 0, 0x7F]);
         let record = observed(&[
-            on1(60, 90),
+            on1(60, 64),
             pressure1(9),
             bend1(0x3000),
             cc1(32, 2),
@@ -1060,7 +1058,7 @@ mod tests {
                 cc1(7, 90),
                 bend1(0x3000),
                 pressure1(9),
-                on1(60, 90),
+                on2(60, 0x8000),
             ]
         );
     }

@@ -36,12 +36,18 @@ type Threads = tutti_fixtures::Shared<HashSet<ThreadId>>;
 
 /// A mono sine with its own phase, a few harmonics deep so a block costs
 /// enough for a helper to take it, and a record of the threads that ran it.
+///
+/// With `spread`, a branch holds its thread until a second thread has run a
+/// branch, so a parallel export runs on more than one thread whatever the
+/// scheduler does: the caller waits inside its first branch while the pool's
+/// workers take the others.
 #[derive(Clone)]
 struct Branch {
     hz: f32,
     phase: f32,
     dt: f32,
     threads: Threads,
+    spread: bool,
 }
 
 impl Node for Branch {
@@ -56,6 +62,13 @@ impl Node for Branch {
             .lock()
             .unwrap()
             .insert(std::thread::current().id());
+        if self.spread {
+            tutti_fixtures::wait_until(
+                "a second thread to take a branch",
+                tutti_fixtures::HANG_GUARD,
+                || self.threads.lock().unwrap().len() >= 2,
+            );
+        }
         for s in io.output(0).iter_mut() {
             let mut v = 0.0f32;
             for k in 1..=8 {
@@ -123,6 +136,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
             phase: 0.0,
             dt: 0.0,
             threads: threads.clone(),
+            spread: workers != Workers::SERIAL,
         }));
         session
             .graph()
