@@ -76,6 +76,11 @@ pub(super) struct Fake {
     /// Writes the host made while `held`, which the plugin has not taken yet.
     held: std::sync::atomic::AtomicBool,
     pending: Mutex<Vec<(ParamId, Normalized)>>,
+    /// The plugin is lost: a write is refused at the call.
+    lost: std::sync::atomic::AtomicBool,
+    /// The plugin is alive and did not answer in time: a write is refused at
+    /// the call.
+    unanswered: std::sync::atomic::AtomicBool,
 }
 
 impl Fake {
@@ -137,9 +142,15 @@ impl AnyThread for Fake {
         &self,
         id: ParamId,
         value: Normalized,
-    ) -> Result<(), tutti_plugin_types::UnknownParam> {
+    ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+        if self.lost.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(tutti_plugin_types::ParamWriteError::Lost(id));
+        }
+        if self.unanswered.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(tutti_plugin_types::ParamWriteError::Unanswered(id));
+        }
         if !self.infos.lock().iter().any(|i| i.id() == id) {
-            return Err(tutti_plugin_types::UnknownParam(id));
+            return Err(tutti_plugin_types::ParamWriteError::Undeclared(id));
         }
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
             self.pending.lock().push((id, value));
@@ -204,6 +215,10 @@ impl Health for Fake {
     fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
         tutti_plugin_types::PipelineCounts::default()
     }
+    fn refused_edits(&self) -> u64 {
+        0
+    }
+
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
 }
 
@@ -741,6 +756,59 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
         gesture.set(Normalized::of(0.5)),
         Err(PluginParamRefusal::UnknownParam(CUTOFF))
     );
+}
+
+/// **A value write to a lost plugin is counted as a refused write** in the
+/// plugin's losses, once: the recovery that follows replaces the mirror with
+/// the replacement's read, so the write is not kept anywhere.
+#[test]
+fn a_value_write_to_a_lost_plugin_is_counted_refused() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
+    fake.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+    s.set(cutoff.to(Hz::new(5_015.0))).unwrap();
+    assert_eq!(
+        s.plugin_view(key.erase()).expect("hosted").losses(),
+        tutti_units::Losses::refused(1)
+    );
+}
+
+/// Whether `events` carry a change of `CUTOFF`'s value.
+fn reports_cutoff(events: Vec<PluginEvent>) -> bool {
+    changes(events)
+        .iter()
+        .any(|c| matches!(c, PluginChange::ParamChanged { id, .. } if *id == CUTOFF))
+}
+
+/// **A gesture's write to a lost plugin is refused as `Lost`**, naming the
+/// parameter, and is not reported as a change.
+#[test]
+fn a_gesture_on_a_lost_plugin_is_refused_as_lost() {
+    let (mut s, node, fake, _refresh) = ready();
+    let gesture = cutoff(&s, node).edit().unwrap();
+    fake.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        gesture.set(Normalized::of(0.5)),
+        Err(PluginParamRefusal::Lost(CUTOFF))
+    );
+    assert!(!reports_cutoff(update(&mut s)));
+}
+
+/// **A gesture's write to a live plugin that did not answer in time is refused
+/// as `Unanswered`**, not `Lost`: a retry can succeed. Nothing is reported as a
+/// change.
+#[test]
+fn a_gesture_on_a_plugin_that_did_not_answer_is_refused_as_unanswered() {
+    let (mut s, node, fake, _refresh) = ready();
+    let gesture = cutoff(&s, node).edit().unwrap();
+    fake.unanswered
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        gesture.set(Normalized::of(0.5)),
+        Err(PluginParamRefusal::Unanswered(CUTOFF))
+    );
+    assert!(!reports_cutoff(update(&mut s)));
 }
 
 /// Whether `result` failed as `NoSuchTarget`, naming the target.

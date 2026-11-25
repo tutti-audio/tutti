@@ -10,8 +10,11 @@
 //! [`LoadedPreset`], which [`Session::apply`] takes back.
 
 use std::path::PathBuf;
+use std::task::Poll;
+use std::time::Duration;
 
 use tutti_plugin::{Answer, PluginAnswers};
+use tutti_plugin_host::PendingWrites;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
@@ -38,7 +41,7 @@ pub enum PresetStartError {
 /// A preset to load into a plugin ([`Session::load_preset`],
 /// [`Session::load_preset_file`]), by where the plugin runs: a
 /// [`LoadPresetInProcess`] the app runs on the main thread, or a
-/// [`LoadPresetOutOfProcess`] it awaits on any thread. This enum has no `run`.
+/// [`LoadPresetOutOfProcess`] it awaits on any thread. This enum has no `poll`.
 ///
 /// ```compile_fail
 /// fn send<T: Send>() {}
@@ -54,7 +57,7 @@ pub enum PresetStartError {
 pub type LoadPreset = Op<LoadPresetOp>;
 
 /// The value [`Session::load_preset`] and [`Session::load_preset_file`] return for
-/// a plugin in this process: `!Send`, run on the main thread. Its [`run`](InProcessOp::run) asks the plugin to load the preset
+/// a plugin in this process: `!Send`, run on the main thread. Its [`poll`](InProcessOp::poll) asks the plugin to load the preset
 /// and yields the [`LoadedPreset`], which [`Session::apply`] takes back and which
 /// has the session read the plugin's parameters again. It ends in
 /// [`PresetError::Lost`] when the node was removed or the plugin replaced since
@@ -125,7 +128,16 @@ impl PluginOp for LoadPresetOp {
         }
     }
 
-    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Result<(), PresetError> {
+    fn stalled(after: Duration) -> PresetError {
+        PresetError::Stalled { after }
+    }
+
+    fn run(
+        &self,
+        handle: &PluginHandle,
+        main: MainThreadMarker,
+        _pending: &mut PendingWrites,
+    ) -> Poll<Result<(), PresetError>> {
         handle.load_preset(main, &self.id)
     }
 
@@ -138,7 +150,7 @@ impl PluginOp for LoadPresetOp {
     }
 }
 
-/// A preset the plugin took ([`LoadPresetInProcess::run`] or [`LoadPresetOutOfProcess`]), which [`Session::apply`]
+/// A preset the plugin took ([`LoadPresetInProcess::poll`] or [`LoadPresetOutOfProcess`]), which [`Session::apply`]
 /// takes back.
 ///
 /// It names the node and the plugin instance it was cut from.
@@ -169,7 +181,7 @@ impl<F: SessionFloat> Sealed<F> for LoadedPreset {
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The listed `preset`, to load into the plugin hosted at `node`: run it
-    /// on the main thread with [`LoadPresetInProcess::run`] or await it
+    /// on the main thread with [`LoadPresetInProcess::poll`] or await it
     /// ([`LoadPresetOutOfProcess`]), then hand its output to
     /// [`apply`](Self::apply). The preset must be one the node's own plugin
     /// listed: the check compares the plugin instance that listed it with the

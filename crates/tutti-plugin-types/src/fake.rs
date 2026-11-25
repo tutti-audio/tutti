@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use tutti_rt::Mutex;
+use tutti_rt::{Generation, Mutex};
 
 use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
@@ -694,6 +694,8 @@ pub struct FakeProcessor {
     shell: Arc<ActivationShell>,
     shared: Arc<Shared>,
     drain: EditReader,
+    /// Tells the Controller what the drain took.
+    publisher: tutti_rt::GenerationPublisher,
     /// Frames of the voice still to sound (`FakePlugin::ring_out`).
     sounding: usize,
 }
@@ -705,6 +707,8 @@ pub struct FakeController {
     shared: Arc<Shared>,
     descriptor: PluginDescriptor,
     sink: EditWriter,
+    /// What the Processor has taken of `sink`.
+    delivered: tutti_rt::GenerationWatch,
     values: Vec<(ParamId, Normalized)>,
 }
 
@@ -721,8 +725,18 @@ fn set_value(values: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normal
 }
 
 macro_rules! fake_control {
-    ($ty:ty, $set:expr, $flush:expr) => {
+    ($ty:ty, $set:expr, $flush:expr, $queued:expr, $delivered:expr) => {
         impl Control for $ty {
+            fn queued(&self) -> Option<Generation> {
+                let queued: fn(&Self) -> Option<Generation> = $queued;
+                queued(self)
+            }
+
+            fn delivered(&self, upto: Generation) -> bool {
+                let delivered: fn(&Self, Generation) -> bool = $delivered;
+                delivered(self, upto)
+            }
+
             fn info(&self) -> &PluginDescriptor {
                 &self.descriptor
             }
@@ -986,7 +1000,7 @@ macro_rules! fake_control {
     };
 }
 
-fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {});
+fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {}, |_| None, |_, _| true);
 fake_control!(
     FakeController,
     |this, id, value| {
@@ -994,7 +1008,9 @@ fake_control!(
         // write policy refused an undeclared id before this call.
         let _ = this.sink.write(id, value);
     },
-    |_, _| {}
+    |_, _| {},
+    |this| Some(this.sink.written()),
+    |this, upto| this.delivered.get().has_reached(upto)
 );
 
 impl Loaded for FakeLoaded {
@@ -1046,11 +1062,13 @@ impl Loaded for FakeLoaded {
         }
         let shell = Arc::new(ActivationShell);
         let (sink, drain) = edit_slots(shared.declared().into_iter().map(|(id, _)| id));
+        let (publisher, delivered) = tutti_rt::generation_watch();
         Ok((
             FakeProcessor {
                 shell: shell.clone(),
                 shared: shared.clone(),
                 drain,
+                publisher,
                 sounding: 0,
             },
             FakeController {
@@ -1058,6 +1076,7 @@ impl Loaded for FakeLoaded {
                 shared,
                 descriptor: self.descriptor,
                 sink,
+                delivered,
                 values: self.values,
             },
         ))
@@ -1149,6 +1168,7 @@ impl Processor for FakeProcessor {
         .fetch_add(1, Ordering::Relaxed);
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
+        self.publisher.publish(self.drain.swept());
         if self.shared.process_fails.load(Ordering::Relaxed) {
             return Err(PluginError::Block("the fake fails its blocks"));
         }
@@ -1205,6 +1225,7 @@ impl Processor for FakeProcessor {
         let log = &self.shared.log;
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
+        self.publisher.publish(self.drain.swept());
         log.push(Call::FlushParameters(changes.queues.len()));
         Ok(())
     }

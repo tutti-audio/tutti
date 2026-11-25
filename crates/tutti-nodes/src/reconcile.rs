@@ -330,8 +330,10 @@ struct SourcePlan {
 /// lane already reads the program the apply published (the publish
 /// happens before the schedule). Nothing crosses outside the ports, so the
 /// envelope stays `ForkByClone`: a fork's executor has its own command
-/// ring and starts idle. A follower needs none: it sends on every grid
-/// point while it is not silent.
+/// ring and starts idle. A follower's new route needs none: it sends on
+/// every grid point while it is not silent. A source (either kind) the
+/// apply rebuilds owes one too: a lane holds the old node's last value
+/// until the new node sends.
 ///
 /// **Rebinds.** A native target resolves against the node the editor holds
 /// at its key, staged or committed: the unit declares its param ranges when
@@ -450,7 +452,7 @@ pub struct Modulation {
     sources: BTreeMap<SourceKey, SignalNode>,
     /// Event edges as wired: source → target.
     edges: BTreeSet<(SourceKey, TargetKey)>,
-    /// Note envelopes owed a resync at the next commit.
+    /// Sources owed a resync at the next commit.
     resync: BTreeSet<SourceKey>,
     /// Resyncs the editor refused for good (no such port, a resolution
     /// too coarse, a poisoned executor) and that were dropped.
@@ -612,7 +614,7 @@ impl Modulation {
         self.sources.get(&source).map(|s| s.key)
     }
 
-    /// Note envelopes owed a resync: the next [`commit`](Self::commit) (or
+    /// Sources owed a resync: the next [`commit`](Self::commit) (or
     /// [`send_resyncs`](Self::send_resyncs)) schedules them.
     pub fn resyncs_owed(&self) -> usize {
         self.resync.len()
@@ -922,27 +924,23 @@ impl Modulation {
                 }
                 continue;
             }
-            // A rebuilt source sends where it stands (0) on its first frame: a
-            // lane holds the old node's last value until it does.
-            let replacing = rebuilt.contains(&source);
+            // A rebuilt source is owed a resync: a lane holds the old node's
+            // last value until the new one sends.
+            if rebuilt.contains(&source) {
+                self.resync.insert(source);
+            }
             match plan.decl.kind {
                 SignalKind::Follower { .. } => {
-                    let mut node = EnvelopeFollowerNode::from(
+                    let node = EnvelopeFollowerNode::from(
                         EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
                             .expect("a follower's declaration"),
                     );
-                    if replacing {
-                        node = node.replacing();
-                    }
                     editor.insert(plan.key, "envelope-follower", ForkByClone(node));
                 }
                 SignalKind::NoteEnvelope { .. } => {
-                    let mut node = NoteEnvelopeNode::from(
+                    let node = NoteEnvelopeNode::from(
                         NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
                     );
-                    if replacing {
-                        node = node.replacing();
-                    }
                     editor.insert(plan.key, "note-envelope", ForkByClone(node));
                 }
             }
@@ -1067,11 +1065,7 @@ impl Modulation {
         // A resync owed to a source with no node (unresolved, or gone) is
         // owed to nothing.
         let sources = &self.sources;
-        self.resync.retain(|s| {
-            sources
-                .get(s)
-                .is_some_and(|n| matches!(n.decl.kind, SignalKind::NoteEnvelope { .. }))
-        });
+        self.resync.retain(|s| sources.contains_key(s));
         self.prev = Some(compiled);
         applied.resync = !self.resync.is_empty();
         if applied.unresolved_targets.is_empty() && applied.unresolved_sources.is_empty() {

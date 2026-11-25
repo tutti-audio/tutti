@@ -197,6 +197,47 @@ impl std::fmt::Debug for EpochWatch {
     }
 }
 
+/// The generation a reader tells other threads its values have been processed
+/// at: a [`GenerationPublisher`] and the [`GenerationWatch`] that reads it.
+///
+/// [`SeqSlotsReader::swept`] says the values were handed to a drain's callback;
+/// a plugin takes them inside the call that follows, which can still be running.
+/// The holder of the reader publishes `swept` once that call has returned, so a
+/// watch that has reached a write shows the value processed.
+#[must_use]
+pub fn generation_watch() -> (GenerationPublisher, GenerationWatch) {
+    let word = Arc::new(AtomicU32::new(0));
+    (
+        GenerationPublisher(Arc::clone(&word)),
+        GenerationWatch(word),
+    )
+}
+
+/// The one end of a [`generation_watch`] that publishes.
+#[derive(Debug)]
+pub struct GenerationPublisher(Arc<AtomicU32>);
+
+impl GenerationPublisher {
+    /// Publishes `generation`: everything the publisher did before this call
+    /// is visible to a watch that reads it. Wait-free.
+    pub fn publish(&self, generation: Generation) {
+        self.0.store(generation.0, Ordering::Release);
+    }
+}
+
+/// The reading end of a [`generation_watch`], from any thread.
+#[derive(Clone, Debug)]
+pub struct GenerationWatch(Arc<AtomicU32>);
+
+impl GenerationWatch {
+    /// The last generation published; what its publisher did before publishing
+    /// it is visible after this read. Wait-free.
+    #[must_use]
+    pub fn get(&self) -> Generation {
+        Generation(self.0.load(Ordering::Acquire))
+    }
+}
+
 /// The one reader of an array of sequence slots.
 pub struct SeqSlotsReader<T: Pod> {
     cells: Vec<SeqReader<Stamped<T>>>,

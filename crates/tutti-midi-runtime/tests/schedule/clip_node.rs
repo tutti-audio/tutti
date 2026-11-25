@@ -1340,6 +1340,45 @@ fn a_header_sysex_run_without_an_end_is_one_message() {
     assert_eq!(refused, 2);
 }
 
+/// **A clip's System Exclusive goes out whole or not at all**: 254
+/// controllers on frame 0 leave room for 2 of the 256 events of a 64-frame
+/// block, so a Start, Continue, End run on frame 0 does not fit. None of its
+/// packets reaches the port, so no Start is left without its End, and the 3
+/// are counted lost; the controller on frame 1, which fits, is sent: a clip's
+/// event that does not fit costs only itself, unlike a header's.
+#[test]
+fn a_clip_sysex_that_does_not_fit_is_dropped_whole() {
+    use tutti_ump::SysexStatus::{Continue, End, Start};
+    let mut events: Vec<TimedMidiEvent> = (0..254u32).map(|n| at(0, volume(n << 20))).collect();
+    events.extend([sysex7(Start), sysex7(Continue), sysex7(End)].map(|u| at(0, u)));
+    events.push(at(1, volume(0x7000_0000)));
+    let (mut ed, mut exec, _c, seen) = rig(MidiClipNode::new(events.clone()), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    let got: Vec<Ump> = heard(&seen).iter().map(|&(_, u)| u).collect();
+    let want: Vec<Ump> = events[..254]
+        .iter()
+        .chain(&events[257..])
+        .map(|e| e.event())
+        .collect();
+    assert_eq!(got, want);
+    let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
+    assert_eq!(refused, 3);
+}
+
+/// **A clip's System Exclusive run is one event, sent whole at its Start**:
+/// a Start on frame 10, a Continue on frame 20 and an End on frame 30 reach
+/// the port in order, all on frame 10, and the clip counts them as one event.
+#[test]
+fn a_clip_sysex_run_is_one_event_sent_at_its_start() {
+    use tutti_ump::SysexStatus::{Continue, End, Start};
+    let run = [sysex7(Start), sysex7(Continue), sysex7(End)];
+    let events = [at(10, run[0]), at(20, run[1]), at(30, run[2])];
+    assert_eq!(events.into_iter().collect::<ClipEvents>().len(), 1);
+    let (_ed, mut exec, _c, seen) = rig(MidiClipNode::new(events), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    assert_eq!(heard(&seen), run.map(|u| (10, u)));
+}
+
 /// **A changed receiver does not end the notes the clip holds**: the resend is
 /// the header and the chase, with no note-off at the port.
 #[test]

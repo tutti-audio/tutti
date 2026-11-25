@@ -547,9 +547,8 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
-        InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn, PrerollTable,
+        InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn,
     };
-    pub use tutti_session::Apply;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
     #[cfg(any(
@@ -559,6 +558,7 @@ pub mod session {
         feature = "midi"
     ))]
     pub use tutti_session::LoadError;
+    pub use tutti_session::{Apply, PrerollTable};
     pub use tutti_session::{
         BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,

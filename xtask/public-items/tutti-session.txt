@@ -592,7 +592,8 @@ fn plugin::load::PluginInstance::ports
 fn plugin::load::Session::load_plugin
 fn plugin::load::Session::load_plugin_as
 fn plugin::load::Session::swap_plugin
-fn plugin::op::InProcessOp::run
+fn plugin::op::InProcessOp::deadline
+fn plugin::op::InProcessOp::poll
 fn plugin::opened::PluginInfo::descriptor
 fn plugin::opened::PluginInfo::hosting
 fn plugin::opened::PluginInfo::id
@@ -657,6 +658,9 @@ fn plugin_presets::PluginPresets::len
 fn plugin_presets::PluginPresets::support
 fn policy::OutputPolicy::routing
 fn policy::Session::policy
+fn preroll::PrerollTable::preroll
+fn preroll::PrerollTable::to_vec
+fn preroll::PrerollTable::with
 fn recorder::PumpLoop::failed
 fn recorder::PumpLoop::finalize
 fn recorder::PumpLoop::lost
@@ -996,6 +1000,7 @@ struct plugin_params::PluginParams
 struct plugin_presets::ListedPreset
 struct plugin_presets::PluginPresets
 struct policy::OutputPolicy
+struct preroll::PrerollTable
 struct recorder::PumpLoop
 struct recovery::GiveUp
 struct recovery::PortCounts

@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use tutti_graph::{NodeKey, PrerollTable};
+use tutti_graph::NodeKey;
 use tutti_platform::monotonic_ns;
 use tutti_timeline::{FadeOut, MotionCommand, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
-use crate::{AppKey, Clock, Playhead, Session};
+use crate::{AppKey, Clock, Playhead, PrerollTable, Session};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// The rate the graph is prepared at; it follows the device's.

@@ -188,11 +188,6 @@ fn compile::plan::Plan::verify_fades
 fn compile::plan::Span::is_empty
 fn compile::plan::Span::len
 fn compile::plan::Span::range
-fn compile::preroll::PrerollTable::new
-fn compile::preroll::PrerollTable::preroll
-fn compile::preroll::PrerollTable::set
-fn compile::preroll::PrerollTable::to_vec
-fn compile::preroll::PrerollTable::with
 fn compile::tail::GraphTail::is_unbounded
 fn compile::tail::GraphTail::known
 fn compile::tail::GraphTail::resolve
@@ -990,7 +985,6 @@ struct compile::plan::Rewired
 struct compile::plan::Span
 struct compile::plan::UnitIdx
 struct compile::plan::Value
-struct compile::preroll::PrerollTable
 struct compile::tail::GraphTail
 struct compile::verify::VerifyError
 struct contract::drive::Driven

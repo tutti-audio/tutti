@@ -4,8 +4,8 @@ use tutti_plugin_host::LiveView;
 use tutti_plugin_ipc::{Ipc, IpcController};
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, Health, OwnBypass,
-    ParameterInfo, PipelineCounts, PluginFailure, RateRefusal, RenderMode, StateError, StateUse,
-    TerminationReason, UnknownParam,
+    ParamWriteError, ParameterInfo, PipelineCounts, PluginFailure, RateRefusal, RenderMode,
+    StateError, StateUse, TerminationReason,
 };
 use tutti_units::{Normalized, ParamId};
 
@@ -33,7 +33,7 @@ impl AnyThread for ServedHandle {
         self.served.parameter_value(id)
     }
 
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError> {
         self.served.set_parameter_value(id, value)
     }
 
@@ -90,6 +90,10 @@ impl Health for ServedHandle {
 
     fn block_counts(&self) -> PipelineCounts {
         self.served.block_counts()
+    }
+
+    fn refused_edits(&self) -> u64 {
+        self.served.refused_edits()
     }
 
     fn terminate(&self, reason: TerminationReason) {

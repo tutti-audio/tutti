@@ -10,11 +10,11 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParameterInfo,
-    PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset,
-    PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport,
-    Request, StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
-    bypass_value,
+    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParamWriteError,
+    ParameterInfo, PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError,
+    PluginPreset, PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode,
+    RenderModeSupport, Request, StateError, StateUse, TerminationReason, Told, TrackInfo,
+    WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -73,7 +73,7 @@ macro_rules! served_control {
                 &self,
                 id: ParamId,
                 value: Normalized,
-            ) -> Result<(), UnknownParam> {
+            ) -> Result<(), ParamWriteError> {
                 self.link.bridge.set_parameter_value(id, value)
             }
 
@@ -89,7 +89,8 @@ macro_rules! served_control {
                     OwnBypass::Parameter(id) => {
                         match self.set_parameter_value(id, bypass_value(bypassed)) {
                             Ok(()) => BypassWrite::Sent,
-                            Err(UnknownParam(_)) => BypassWrite::Refused,
+                            Err(ParamWriteError::Lost(_)) => BypassWrite::Lost,
+                            Err(_) => BypassWrite::Refused,
                         }
                     }
                     OwnBypass::Property => BypassWrite::Lost,
@@ -242,7 +243,6 @@ macro_rules! served_control {
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value)
-                    .map_err(|UnknownParam(id)| tutti_plugin_types::ParamWriteError::Undeclared(id))
             }
 
             /// From the declared parameters the client keeps, not a round trip
@@ -439,6 +439,10 @@ impl Health for IpcController {
 
     fn block_counts(&self) -> PipelineCounts {
         self.link.bridge.audio().block_counts()
+    }
+
+    fn refused_edits(&self) -> u64 {
+        self.link.counters.server_losses().edits_refused
     }
 
     fn terminate(&self, reason: TerminationReason) {

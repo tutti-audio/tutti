@@ -305,6 +305,63 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     drop(handle);
 }
 
+/// The state `handle` saves now, asked again while a node drains the writes.
+fn saved(handle: &PluginHandle) -> Vec<u8> {
+    let mut pending = handle.writes();
+    loop {
+        if let std::task::Poll::Ready(state) = handle.save_state_on(
+            main_thread(),
+            tutti_plugin_types::StateUse::Project,
+            &mut pending,
+        ) {
+            return state.expect("saved");
+        }
+    }
+}
+
+/// **A save made after a write holds the write**, with no block between them.
+/// The probe has no chunks, so its saved state is the parameter snapshot the
+/// host takes; the save made at once equals the one made after a parameter read
+/// has applied every pending write.
+fn a_save_after_a_write_holds_the_write() {
+    let _lock = PROBE_LOCK.lock();
+    let _env = ProbeEnv::new().params(4).state_dc();
+    let (_client, handle) = load();
+    let before = saved(&handle);
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.5))
+        .expect("a declared parameter");
+    let at_once = saved(&handle);
+    assert_eq!(read(&handle, 0), Some(0.5), "the read applies the write");
+    let after_read = saved(&handle);
+    assert_ne!(after_read, before, "the write changes the state");
+    assert_eq!(at_once, after_read, "a save at once holds the write");
+}
+
+/// **A main-thread save right after a write holds the write.**
+fn a_main_thread_save_right_after_a_write_holds_it() {
+    let _lock = PROBE_LOCK.lock();
+    let _env = ProbeEnv::new().params(4).state_dc();
+    let (_client, handle) = load();
+    let before = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saved");
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.5))
+        .expect("a declared parameter");
+    let after = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saved");
+    assert_ne!(after, before, "the write is in the state");
+    assert_eq!(read(&handle, 0), Some(0.5));
+    assert_eq!(
+        handle
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .expect("saved"),
+        after
+    );
+}
+
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
 /// and a fork tell the plugin at once only there.
 fn main() {
@@ -312,5 +369,7 @@ fn main() {
         a_moving_parameter_reaches_the_plugin,
         a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it,
         an_export_renders_an_edit_made_in_the_plugin_as_live_does,
+        a_save_after_a_write_holds_the_write,
+        a_main_thread_save_right_after_a_write_holds_it,
     ]);
 }

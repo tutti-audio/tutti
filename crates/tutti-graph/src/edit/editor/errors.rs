@@ -136,19 +136,14 @@ pub enum CommitError {
     /// sent.
     #[error("{0}")]
     Fade(VerifyError),
-    /// A tap's lanes in the spec no longer match the width it was opened
-    /// with ([`Editor::open_tap`](crate::Editor::open_tap) fixed the reader's and the writer's width
-    /// there): the spec's `TapSpec::Ports` sources were edited. Nothing was sent.
-    /// Close the tap and open another to change its width.
-    #[error("tap {} names {sources} lanes but was opened with {opened}", .tap)]
-    TapWidth {
-        /// The tap.
-        tap: TapId,
-        /// The lanes the spec names now.
-        sources: usize,
-        /// The lanes it was opened with.
-        opened: usize,
-    },
+    /// A plan handed to [`Editor::package`](crate::Editor::package) carries an old main
+    /// output's channels beside the main output's own: the editor cannot continue a
+    /// crossfade it did not begin. Nothing was sent.
+    ///
+    /// **Recovery:** change the main output with [`Editor::commit`](crate::Editor::commit),
+    /// which begins the crossfade.
+    #[error("a packaged plan carries a main output crossfade the editor did not begin")]
+    PackagedCrossfade,
     /// A meter's lanes in the spec do not fit the cells it was opened with
     /// ([`Editor::open_meter`](crate::Editor::open_meter) fixed them there): the spec's
     /// `MeterSpec::Ports` was edited, or the outputs a main output meter follows

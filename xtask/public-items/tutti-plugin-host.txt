@@ -46,6 +46,7 @@ fn control_handle::PluginHandle::poll_editor_resize_request
 fn control_handle::PluginHandle::preset_support
 fn control_handle::PluginHandle::presets
 fn control_handle::PluginHandle::refresh_sink
+fn control_handle::PluginHandle::refused_edits
 fn control_handle::PluginHandle::refused_off_thread_calls
 fn control_handle::PluginHandle::save_state
 fn control_handle::PluginHandle::save_state_on
@@ -63,6 +64,7 @@ fn control_handle::PluginHandle::terminate
 fn control_handle::PluginHandle::transport_sink
 fn control_handle::PluginHandle::wiring
 fn control_handle::PluginHandle::with_server_pid
+fn control_handle::PluginHandle::writes
 fn control_handle::PluginStatus::cause
 fn control_handle::PluginStatus::is_alive
 fn control_handle::PluginStatus::is_dead
@@ -185,6 +187,7 @@ fn time_signature::PluginTimeSignature::retired_len
 fn time_signature::PluginTimeSignature::set_meter
 fn wakeups::service_now
 struct control_handle::InstanceId
+struct control_handle::PendingWrites
 struct control_handle::PluginHandle
 struct controls::ForkedSources
 struct controls::NodeControls

@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::{BusLanes, CommitError, Editor, panic_text, write};
+use super::commit::Sending;
+use super::{BusLanes, CommitError, Committed, Editor, panic_text, write};
 use crate::NodeKey;
 use crate::compile::plan::{Delta, Plan};
 use crate::compile::{CompileError, Shapes, compile};
@@ -17,17 +18,6 @@ use crate::node::{Node, Prepare};
 /// against the plan before the re-prepare, every unit, and the weights of the
 /// bus lanes the plan has.
 pub(super) type Resumed<F> = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node<F>>>, BusLanes);
-
-/// The spec and shapes a commit compiled the running plan from, shared with
-/// the editor until it writes them, and the editor's
-/// [`structure`](Editor::structure) at that commit. An editor whose structure
-/// is this one has the spec and shapes this holds.
-#[derive(Clone)]
-pub(super) struct Committed {
-    pub(super) structure: u64,
-    pub(super) spec: Arc<GraphSpec>,
-    pub(super) shapes: Arc<Shapes>,
-}
 
 /// The editor's compile lifecycle. A plan is sent by a commit, and a
 /// re-prepare suspends the executor between two commits; a failed second half
@@ -87,13 +77,6 @@ impl<F: Float> Lifecycle<F> {
         }
     }
 
-    /// Records the spec and shapes the running plan was compiled from.
-    pub(super) fn set_committed(&mut self, committed: Committed) {
-        if let Self::Running(sent) = self {
-            sent.committed = Some(committed);
-        }
-    }
-
     /// Forgets what the running plan was compiled from.
     pub(super) fn clear_committed(&mut self) {
         if let Self::Running(sent) = self {
@@ -101,10 +84,9 @@ impl<F: Float> Lifecycle<F> {
         }
     }
 
-    /// `plan` was sent: the state is `Running` it. What the plan before it
-    /// was compiled from stays until the caller records or clears it.
-    pub(super) fn sent(&mut self, plan: Arc<Plan>) {
-        let committed = self.take().into_sent().and_then(|s| s.committed);
+    /// `plan` was sent, compiled from `committed` when a commit sent it: the
+    /// state is `Running` it.
+    pub(super) fn sent(&mut self, plan: Arc<Plan>, committed: Option<Committed>) {
         *self = Self::Running(Sent { plan, committed });
     }
 
@@ -219,17 +201,11 @@ impl<F: Float> Editor<F> {
     /// and [`CommitError::MissingUnit`]. A panic in an uncommitted unit's
     /// `prepare` returns [`CommitError::Poisoned`].
     pub fn reprepare(&mut self, prepare: Prepare) -> Result<(), CommitError> {
-        self.collect();
-        self.check_poisoned()?;
-        if self.is_repreparing() {
-            return Err(CommitError::Repreparing);
-        }
-        self.link.check_room()?;
+        self.ready()?;
         // A re-prepare recompiles the spec as it stands, so it is a commit
         // of that spec too.
         self.limits.block(prepare.max_block().get())?;
         self.limits.outputs(self.spec.topology.outputs.len())?;
-        self.check_tap_widths()?;
         self.check_meter_widths()?;
         let (valid, _) = Self::lower_and_validate(&self.spec, &self.shapes)?;
         let (_, delta) = compile(&valid, &self.shapes, &prepare, self.base().map(|p| &**p))
@@ -277,7 +253,7 @@ impl<F: Float> Editor<F> {
             return Err(CommitError::Poisoned { cause });
         }
         let units = self.life.plan().map_or(0, |p| p.units().len());
-        let suspend = Commit::suspend(self.link.next_seq(), prepare, units);
+        let suspend = Commit::suspend(self.link.next_seq().0, prepare, units);
         self.link.send_suspend(suspend);
         self.prepare = prepare;
         self.life = Lifecycle::Repreparing {
@@ -315,7 +291,7 @@ impl<F: Float> Editor<F> {
         }));
         match outcome {
             Ok(Ok((plan, delta, units, weights))) => {
-                self.send(plan, delta, units, &weights, true);
+                self.send(plan, delta, units, &weights, Sending::Resume);
             }
             Ok(Err(e)) => {
                 self.life = Lifecycle::Poisoned {

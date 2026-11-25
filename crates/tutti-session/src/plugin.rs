@@ -994,8 +994,9 @@ pub(crate) struct HostedPlugin {
     /// The lane knobs of the parameters a modulation lane drives: where a set
     /// of one goes.
     pub(crate) driven: crate::plugin_params::Driven,
-    /// The writes to a parameter the plugin dropped after the session read its
-    /// declaration, which the value table counts and
+    /// The writes the plugin did not take after the session read its
+    /// declaration (a dropped parameter, a lost plugin, one that did not
+    /// answer), which the value table counts and
     /// [`Plugin::losses`] reports as refused.
     refused_writes: Arc<std::sync::atomic::AtomicU64>,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
@@ -3406,7 +3407,7 @@ mod tests {
             &self,
             _id: ParamId,
             _value: Normalized,
-        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             Ok(())
         }
         fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
@@ -3462,6 +3463,10 @@ mod tests {
         fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
             tutti_plugin_types::PipelineCounts::default()
         }
+        fn refused_edits(&self) -> u64 {
+            0
+        }
+
         fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
     }
 

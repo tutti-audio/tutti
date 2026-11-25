@@ -536,7 +536,7 @@ mod tests {
             &self,
             _id: ParamId,
             _value: Normalized,
-        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             Ok(())
         }
         fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
@@ -575,6 +575,10 @@ mod tests {
         fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
             tutti_plugin_types::PipelineCounts::default()
         }
+        fn refused_edits(&self) -> u64 {
+            0
+        }
+
         fn terminate(&self, _reason: TerminationReason) {}
     }
 
