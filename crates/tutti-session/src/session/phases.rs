@@ -52,8 +52,8 @@ pub enum Phase {
     /// The output policy staged since the last update, applied
     /// ([`Session::policy`]); then the commit, iff the graph was edited since
     /// the last one, and the compensation of the plan it sent (or of a
-    /// re-prepare's resumed plan) published, then the note-envelope resyncs
-    /// the modulation apply owes. The update's one plan carries what the
+    /// re-prepare's resumed plan) published, then the source resyncs the
+    /// modulation apply owes. The update's one plan carries what the
     /// apply staged, a lane with its target.
     Commit,
     /// Every output's event tap drained to its device or sink (feature `midi`:

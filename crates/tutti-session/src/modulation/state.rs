@@ -397,12 +397,13 @@ impl ModState {
         self.derived.source(SourceKey(source.get()))
     }
 
-    /// Note-envelope resyncs owed to the next commit.
+    /// Source resyncs owed to the next commit.
     pub fn pending_resyncs(&self) -> usize {
         self.derived.resyncs_owed()
     }
 
-    /// Resyncs refused for good (a full queue), counted.
+    /// Resyncs refused for good (a source node gone from the plan, a poisoned
+    /// editor), counted. A full queue is not one: that resync stays owed.
     pub fn resyncs_dropped(&self) -> u64 {
         self.derived.resyncs_dropped()
     }

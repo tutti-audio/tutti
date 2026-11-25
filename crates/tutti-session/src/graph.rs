@@ -2521,7 +2521,7 @@ impl<F: Float> Graph<F> {
 }
 
 impl<F: Float> Graph<F> {
-    /// Schedules the note-envelope resyncs `m` owes, after the commit that
+    /// Schedules the source resyncs `m` owes, after the commit that
     /// sent their nodes (`Derived::send_resyncs`).
     pub(crate) fn send_mod_resyncs(&mut self, m: &mut crate::modulation::derived::Derived) {
         // A resync refused for now stays owed (the next update retries); one

@@ -12,9 +12,9 @@
 //!    a new lane, a signal node or a moved edge is staged for the commit. A
 //!    target is bound to the cells its node declared when it was staged, so a
 //!    lane resolves in the update its node is added in.
-//! 2. **Commit** (`Commit`): one plan carries the lane and its target. A note
-//!    envelope's resync follows the plan it was owed for: a scheduled
-//!    command waits for the plan sent before it.
+//! 2. **Commit** (`Commit`): one plan carries the lane and its target. A
+//!    source's resync follows the plan it was owed for: a scheduled command
+//!    waits for the plan sent before it.
 //!
 //! **Why is nothing modulating** has one answer, [`ModState::problems`]: a
 //! [`Problem`] each for a refusal (which changes nothing in the graph), a
