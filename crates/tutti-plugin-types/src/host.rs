@@ -43,6 +43,7 @@ use crate::{
     RestartRules, StateUse, TimerId, Told, TrackInfo, Wakeups, Widths,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
+use tutti_rt::Generation;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -162,6 +163,25 @@ pub trait Control: EditorWindow {
         id: ParamId,
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
+
+    /// How many values [`set_parameter`](Self::set_parameter) has queued for
+    /// the Processor to take at the head of its next block (a CLAP
+    /// Controller's), as a [`Generation`]; `None` for a format that writes the
+    /// plugin at the call. A caller that wants every value queued so far to be
+    /// the plugin's takes this once and asks [`delivered`](Self::delivered)
+    /// with it until it is `true`.
+    fn queued(&self) -> Option<Generation> {
+        None
+    }
+
+    /// Whether the plugin has processed every value queued up to `upto`
+    /// ([`queued`](Self::queued)): the Processor's `process` call that took
+    /// them has returned, so a read or a save made now sees them. Later writes
+    /// do not move it.
+    fn delivered(&self, upto: Generation) -> bool {
+        let _ = upto;
+        true
+    }
 
     /// Tells the plugin's edit controller of a value the host wrote and the
     /// Processor was handed another way (in the block's parameter changes), so
@@ -696,6 +716,18 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
+    /// What [`Control::queued`] answers: the writes
+    /// [`queue_write`](Self::queue_write) handed the Processor.
+    fn queued(&self) -> Option<Generation> {
+        None
+    }
+
+    /// What [`Control::delivered`] answers.
+    fn delivered(&self, upto: Generation) -> bool {
+        let _ = upto;
+        true
+    }
+
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
     fn queue_write(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
@@ -828,6 +860,14 @@ impl<W: Wraps> Control for W {
 
     fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         Wraps::inform_controller(self, main, id, value);
+    }
+
+    fn queued(&self) -> Option<Generation> {
+        Wraps::queued(self)
+    }
+
+    fn delivered(&self, upto: Generation) -> bool {
+        Wraps::delivered(self, upto)
     }
 
     fn set_parameter(
