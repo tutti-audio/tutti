@@ -1152,7 +1152,9 @@ fn setup_sent(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
 /// state the port said, once, when it returns.** The device lost its program and
 /// controllers with its power; the port's record has the last program and the
 /// volume (the header's program 1 was replaced by the clip's program 5), and the
-/// returned device hears them, program first, at the return.
+/// returned device hears them at the return: program first, then the
+/// controller, the record's catch-up order (the channel's bank and program, then
+/// its controllers).
 #[test]
 fn a_returned_output_device_is_caught_up_to_the_ports_state_once() {
     let (mut s, fake, out) = clip_into_synth();
@@ -1184,7 +1186,9 @@ fn a_returned_output_device_is_caught_up_to_the_ports_state_once() {
 }
 
 /// **What a live source sent through the port comes back with the device**: a
-/// program, a controller and a key held down, whichever node sent them.
+/// program, a controller and a key held down, whichever node sent them, in the
+/// record's catch-up order: the program, the controller, then the key (held notes
+/// last, so each sounds on its channel's patch).
 #[test]
 fn a_returned_output_device_hears_what_a_live_source_sent_through_the_port() {
     let (mut s, fake) = session();

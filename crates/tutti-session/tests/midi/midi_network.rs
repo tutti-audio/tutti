@@ -316,7 +316,7 @@ fn a_graph_event_reaches_the_peer() {
 /// **A peer that joins an output that has been playing is caught up, and it
 /// alone**: the setup the output sent (SysEx, then the channel's program, then
 /// its controllers), whatever order it was sent in; the peer already listening
-/// hears nothing more.
+/// hears nothing more. The order is the record's documented catch-up order.
 #[test]
 fn a_peer_that_joins_is_caught_up_to_what_the_output_said_and_the_others_hear_nothing() {
     let (mut s, net, port) = hosting(Admission::Open);
@@ -348,7 +348,7 @@ fn a_peer_that_joins_is_caught_up_to_what_the_output_said_and_the_others_hear_no
     .into();
     let reset: Ump = Message::Sysex7(
         MidiGroup::FIRST,
-        Sysex7Packet::new(SysexStatus::Complete, &[0x7E, 0x7F, 0x09, 0x01]).unwrap(),
+        Sysex7Packet::new(SysexStatus::Complete, &[0x7F, 0x7F, 0x04, 0x01, 0x00, 0x7F]).unwrap(),
     )
     .into();
     for ump in [volume, program, reset] {
