@@ -454,10 +454,10 @@ impl<F: Float> Pages<F> {
         let mut frames = [[F::ZERO; MAX_WAVE_CHANNELS]; 4];
         for (frame, tap) in frames.iter_mut().zip(taps.iter()) {
             frame[..ch].copy_from_slice(&self.frame(tap.frame)[..ch]);
-            if let Some((lead, t)) = tap.fade {
+            if let Some((lead, out, inn)) = tap.fade {
                 let lead = self.frame(lead);
                 for (s, &l) in frame[..ch].iter_mut().zip(lead.iter()) {
-                    *s = tutti_dsp::lerp(*s, l, t);
+                    *s = *s * out + l * inn;
                 }
             }
         }

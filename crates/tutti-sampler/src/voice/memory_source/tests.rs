@@ -415,8 +415,9 @@ fn a_rate_change_lands_on_the_next_block() {
 /// (value = frame + 1) at unit speed from frame 0, round the loop twice:
 ///
 /// - `[10, 30)`, a 4-frame fade with room before the start: frame `26 + k`
-///   blends toward `6 + k`, weighing it `(k + 1) / 5`, and the wrap lands
-///   on 10.
+///   blends toward `6 + k` at the equal-power gains of position
+///   `x = (k + 1) / 5` (smootherstep `s = x³(6x² − 15x + 10)`, `cos(πs/2)`
+///   out and `sin(πs/2)` in), and the wrap lands on 10.
 /// - `[2, 30)`, the same fade with only 2 frames before the start: frame
 ///   `26 + k` blends toward the loop's head `2 + k`, and the wrap lands on
 ///   6, after the head.
@@ -433,8 +434,10 @@ fn a_crossfaded_loop_plays_the_hand_computed_frames() {
         for (n, (p, &g)) in frames.zip(got.iter()).enumerate() {
             let want = if p >= 26 {
                 let k = p - 26;
-                let t = (k + 1) as f32 / 5.0;
-                (p + 1) as f32 * (1.0 - t) + (lead + k + 1) as f32 * t
+                let x = (k + 1) as f64 / 5.0;
+                let s = x.powi(3) * (6.0 * x * x - 15.0 * x + 10.0);
+                let a = s * std::f64::consts::FRAC_PI_2;
+                ((p + 1) as f64 * a.cos() + (lead + k + 1) as f64 * a.sin()) as f32
             } else {
                 (p + 1) as f32
             };
