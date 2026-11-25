@@ -271,7 +271,13 @@ fn mock_featuring(
                 // The parameters sent between blocks are answered, as the
                 // server's render thread answers them.
                 if let Some(id) = applied {
-                    reply(&audio, &AudioReply::ParametersApplied { id });
+                    reply(
+                        &audio,
+                        &AudioReply::ParametersApplied {
+                            id,
+                            outcome: crate::ApplyOutcome::Applied,
+                        },
+                    );
                 }
             }
         }

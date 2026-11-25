@@ -410,6 +410,14 @@ impl AudioBridge {
         self.channels.commands_refused_cell()
     }
 
+    /// The host parameter writes the plugin did not get, ever: what a flush the
+    /// server refused, had no Processor for, or did not answer in time left
+    /// undelivered, and the points a frame had no room for. A write refused at
+    /// the call is not here ([`ParamWriteError`]).
+    pub(crate) fn unapplied_edits(&self) -> u64 {
+        self.channels.unapplied_edits_cell().get()
+    }
+
     /// The count of parameter buffers the audio thread leaked rather than
     /// free, shared. See `commands_refused_cell`.
     pub(crate) fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
@@ -562,6 +570,8 @@ impl AudioBridge {
     /// answer. Control side.
     fn flush_host_edits(&self) {
         if let Some(applied) = self.request_flush() {
+            // The audio lane counts a flush that did not deliver
+            // ([`Channels::note_unapplied_edits`]); this waits for it to end.
             let _ = await_reply(applied, self.lifecycle.timeouts().param_wait());
         }
     }

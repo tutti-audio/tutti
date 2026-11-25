@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 68;
+pub const PROTOCOL_VERSION: u32 = 69;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -79,16 +79,16 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::IpcResult<
 
 pub(crate) use envelope::default_format;
 pub use envelope::{
-    AppMidiMapApplied, ArmPluginMidiLearn, AudioReply, AudioRequest, CloseEditor, ControlFrame,
-    ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, GetCurrentPreset,
-    GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
-    GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
-    LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
-    ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded,
-    PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, ReqId, Request, SampleRateSet,
-    SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate,
-    SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState,
-    StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
+    AppMidiMapApplied, ApplyOutcome, ArmPluginMidiLearn, AudioReply, AudioRequest, CloseEditor,
+    ControlFrame, ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized,
+    GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
+    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened,
+    LoadPlugin, LoadPreset, LoadState, ModeOutcome, News, OpenEditor, OpenLane, ParameterList,
+    ParameterNormalized, ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText,
+    PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, ReqId, Request,
+    SampleRateSet, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
+    SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, StageState,
+    StagedState, StateLoaded, StateReady, StateStaged, Wiring, Working, serve,
 };
 pub use frame::Framed;
 pub use message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
@@ -338,10 +338,11 @@ mod tests {
             0
         );
         assert_eq!(
-            tag(
-                postcard::to_allocvec(&AudioReply::ParametersApplied { id: ReqId::new(1) })
-                    .unwrap()
-            ),
+            tag(postcard::to_allocvec(&AudioReply::ParametersApplied {
+                id: ReqId::new(1),
+                outcome: ApplyOutcome::Applied
+            })
+            .unwrap()),
             1
         );
 

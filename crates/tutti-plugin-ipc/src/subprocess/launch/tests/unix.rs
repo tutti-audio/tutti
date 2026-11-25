@@ -51,7 +51,10 @@ fn an_opened_lane_is_a_live_duplex_stream_to_the_server() {
         assert!(matches!(got, crate::AudioRequest::Reset));
         ipc::send(
             &mut lane,
-            &crate::AudioReply::ParametersApplied { id: ReqId::new(5) },
+            &crate::AudioReply::ParametersApplied {
+                id: ReqId::new(5),
+                outcome: crate::ApplyOutcome::Applied,
+            },
         )
         .expect("a reply");
         lane
@@ -62,7 +65,7 @@ fn an_opened_lane_is_a_live_duplex_stream_to_the_server() {
         ipc::recv_within(&mut audio, Duration::from_secs(60)).expect("the server's reply");
     assert!(matches!(
         reply,
-        crate::AudioReply::ParametersApplied { id } if id == ReqId::new(5)
+        crate::AudioReply::ParametersApplied { id, .. } if id == ReqId::new(5)
     ));
     let _lane = mock.join().expect("the mock server ends");
 }

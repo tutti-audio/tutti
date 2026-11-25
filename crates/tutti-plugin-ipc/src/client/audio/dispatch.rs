@@ -11,11 +11,11 @@ use super::messages::{
     Unsolicited,
 };
 use super::payload_pool::PayloadPool;
-use crate::ProcessAudioData;
 use crate::conversation::{Conversation, Fault, Heard};
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
+use crate::{ApplyOutcome, ProcessAudioData};
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
     Request, StateReady,
@@ -144,7 +144,7 @@ pub(super) enum AbandonedAudio {
 fn audio_key(reply: &AudioReply) -> AudioKey {
     match reply {
         AudioReply::AudioProcessed { seq, .. } => AudioKey::Block(*seq),
-        AudioReply::ParametersApplied { id } => AudioKey::Params(*id),
+        AudioReply::ParametersApplied { id, .. } => AudioKey::Params(*id),
     }
 }
 
@@ -804,6 +804,7 @@ pub(super) fn handle_audio(
                 done.send(true);
                 return Ok(());
             }
+            let changes_len = changes.queues.len() as u64;
             // On the block connection, behind every block pushed before it, so
             // the server has those blocks' writes before these.
             let id = state.fresh();
@@ -819,11 +820,22 @@ pub(super) fn handle_audio(
                     param_changes: changes,
                 },
             )?;
+            let points = changes_len;
             let applied = wait_audio(stream, state, channels, key)?;
-            done.send(matches!(
+            // The one place a flush's failure is counted: an answer that is not
+            // `Applied`, or none within the window, leaves every point of the
+            // frame without the plugin.
+            let took = matches!(
                 applied,
-                Some(AudioReply::ParametersApplied { .. })
-            ));
+                Some(AudioReply::ParametersApplied {
+                    outcome: ApplyOutcome::Applied,
+                    ..
+                })
+            );
+            if !took {
+                channels.note_unapplied_edits(points);
+            }
+            done.send(took);
         }
         AudioCommand::Settle { done } => {
             // Two fences, not one. A fence's reply wakes its waiter before the
@@ -893,9 +905,13 @@ fn fence(
 pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
     let taken = channels.take_host_edits();
     let mut changes = ParameterChanges::reserved(taken.len(), 1);
+    let mut refused = 0;
     for (id, value) in &taken {
-        let _ = changes.add_change(*id, Offset::ZERO, *value);
+        if !changes.add_change(*id, Offset::ZERO, *value) {
+            refused += 1;
+        }
     }
+    channels.note_unapplied_edits(refused);
     changes
 }
 
@@ -925,6 +941,8 @@ pub(super) fn handle_control(
     // The host's writes no block carried are applied first, so what is asked
     // holds them: this lane waits for the audio lane, not the asker.
     if let Some(applied) = flush {
+        // The audio lane counts a flush that did not deliver; this waits for it
+        // to end.
         let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
     }
     let (window, ceiling) = deadline.window(lifecycle.timeouts());
@@ -1294,7 +1312,10 @@ mod tests {
         let id = state.fresh();
         abandoned(&mut state, AudioKey::Params(id), AbandonedAudio::Params);
         let heard = state.hear(
-            AudioReply::ParametersApplied { id },
+            AudioReply::ParametersApplied {
+                id,
+                outcome: ApplyOutcome::Applied,
+            },
             AudioKey::Block(1),
             &channels,
         );
@@ -1317,7 +1338,10 @@ mod tests {
         );
         for reply in [
             processed(9),
-            AudioReply::ParametersApplied { id: ReqId::new(77) },
+            AudioReply::ParametersApplied {
+                id: ReqId::new(77),
+                outcome: ApplyOutcome::Applied,
+            },
         ] {
             assert!(
                 matches!(
