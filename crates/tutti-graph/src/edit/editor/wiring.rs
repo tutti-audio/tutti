@@ -362,10 +362,10 @@ impl<F: Float> Editor<F> {
         id: MainOutputId,
     ) -> Result<bool, WireError> {
         if self.spec.main_output_id == id {
-            return match self.spec.main_output == main_output {
-                true => Ok(false),
-                false => Err(WireError::MainOutputChanged { id }),
-            };
+            if self.spec.main_output != main_output {
+                return Err(WireError::MainOutputChanged { id });
+            }
+            return Ok(false);
         }
         let width = usize::from(main_output.width().count());
         self.spec.topology.outputs.resize(width, Vec::new());

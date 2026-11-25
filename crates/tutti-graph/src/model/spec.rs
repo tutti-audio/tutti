@@ -205,7 +205,8 @@ pub struct GraphSpec {
     /// `topology.outputs`, which [`validate`](Self::validate) checks and
     /// [`Editor::declare_main_output`](crate::Editor::declare_main_output) keeps. A
     /// width past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) has no topology: a bus
-    /// edge reads it by index. Empty until declared.
+    /// edge reads it by index. [`GraphSpec::new`] declares the topology's outputs at
+    /// their width; `Default` is empty.
     pub main_output: ChannelSet,
     /// The main output's generation: a commit that changes the main output's declaration
     /// carries the next one ([`MainOutputId`](crate::MainOutputId)), and the plan it compiles to reports
