@@ -1012,7 +1012,6 @@ struct take::Record
 struct take::Recorded
 struct take::Take
 struct take::TakeFile
-struct take::TakeId
 struct take::TakePlacement
 struct take::TakeTarget
 struct take::Window

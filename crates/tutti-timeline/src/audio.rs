@@ -13,7 +13,7 @@ use super::handle::Transport;
 use super::motion::MotionAudio;
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;
-use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
+use super::timed::{CommandQueueAudio, Recording, Scheduled, TransportCommand};
 use super::walk::UpcomingTempo;
 use std::sync::atomic::Ordering;
 use tutti_music::MeterMap;
@@ -132,7 +132,7 @@ impl TransportAudio {
         };
         Ok(Self {
             clock,
-            control: Control::read(&settings, loop_region, tempo),
+            control: Control::read(&settings, loop_region, motion.recording(), tempo),
             tempo_map,
             seen,
             meter: settings.project_meter().reader(),
@@ -189,7 +189,12 @@ impl TransportAudio {
         map: &TempoMap,
     ) -> tutti_graph::TransportPosition {
         let tempo = self.tempo_for_block(generation, map);
-        self.control = Control::read(&self.settings, self.motion.loop_region(), tempo);
+        self.control = Control::read(
+            &self.settings,
+            self.motion.loop_region(),
+            self.motion.recording(),
+            tempo,
+        );
         self.begin(true, map)
     }
 
@@ -297,8 +302,12 @@ impl TransportAudio {
     ) -> (Applied, tutti_graph::TransportPosition) {
         let cmd = self.schedule.take(i, late).command();
         self.motion.apply(cmd);
+        if let TransportCommand::Recording(Recording::Stop(id)) = cmd {
+            self.schedule.drop_starts(id);
+        }
         let applied = self.settle();
-        self.control.apply(&cmd, &self.settings);
+        self.control
+            .apply(&cmd, &self.settings, self.motion.recording());
         // Only a motion command can have requested a seek.
         let seeks = matches!(cmd, TransportCommand::Motion(_));
         (applied, self.begin(seeks, map))
@@ -377,7 +386,7 @@ impl TransportAudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MotionCommand, Timeline};
+    use crate::{MotionCommand, Recording, TakeId, Timeline};
     use tutti_units::{At, Frame};
 
     use tutti_graph::TransportPosition;
@@ -527,6 +536,111 @@ mod tests {
         assert!(at_cut.playing, "the command's effect");
         assert_eq!(at_cut.tempo, Bpm::of(120.0), "not the stored tempo");
         assert_eq!(a.lend_begin_block().tempo, Bpm::of(200.0), "the next block");
+    }
+
+    fn take(n: u64) -> TakeId {
+        TakeId::of(n)
+    }
+
+    /// Sends `recording` at `at`.
+    fn send(t: &Transport, at: At, recording: Recording) {
+        t.motion.schedule(at, recording).expect("room");
+    }
+
+    /// Applies the pending `recording` command at its frame, and reports the
+    /// transport from there.
+    fn fire(a: &mut TransportAudio, recording: Recording) -> TransportPosition {
+        a.drain_commands();
+        let i = a
+            .pending()
+            .iter()
+            .position(|c| c.command() == TransportCommand::Recording(recording))
+            .expect("the command is pending");
+        a.lend_apply_command(i, false).1
+    }
+
+    /// **A take's start is the transport recording from its frame, and the
+    /// transport records while any take does.** Takes 1 and 2 overlap: the
+    /// block reads not recording before the first start's frame and
+    /// recording from it, through the first stop, until the second's. A stop
+    /// of a take that never started changes nothing, before or during.
+    #[test]
+    fn the_transport_records_from_a_starts_frame_until_the_last_stop() {
+        let t = Transport::new(SampleRate::SR_48K);
+        let mut a = t.audio(SampleRate::SR_48K).expect("first");
+        for (frame, recording) in [
+            (100, Recording::Start(take(1))),
+            (200, Recording::Start(take(2))),
+            (300, Recording::Stop(take(1))),
+            (400, Recording::Stop(take(2))),
+            (50, Recording::Stop(take(9))),
+        ] {
+            send(&t, At::Frame(Frame::new(frame)), recording);
+        }
+        assert!(!a.lend_begin_block().recording(), "before the first start");
+        assert!(!fire(&mut a, Recording::Stop(take(9))).recording());
+        assert!(fire(&mut a, Recording::Start(take(1))).recording());
+        assert!(fire(&mut a, Recording::Start(take(2))).recording());
+        assert!(
+            fire(&mut a, Recording::Stop(take(1))).recording(),
+            "take 2 still records"
+        );
+        assert!(!fire(&mut a, Recording::Stop(take(2))).recording());
+        assert_eq!(t.motion.scheduled_outstanding(), 0);
+    }
+
+    /// An engine rebuilt over the same transport keeps the takes recording.
+    #[test]
+    fn the_takes_recording_outlive_the_audio_side() {
+        let t = Transport::new(SampleRate::SR_48K);
+        let mut first = t.audio(SampleRate::SR_48K).expect("first");
+        send(&t, At::NextBlock, Recording::Start(take(1)));
+        assert!(fire(&mut first, Recording::Start(take(1))).recording());
+        drop(first);
+        let mut next = t.audio(SampleRate::SR_48K).expect("handed back on drop");
+        assert!(next.lend_begin_block().recording());
+        send(&t, At::NextBlock, Recording::Stop(take(1)));
+        assert!(!fire(&mut next, Recording::Stop(take(1))).recording());
+    }
+
+    /// A stop drops the start of its take that still waits for a far frame:
+    /// the credit comes back, nothing counts late, and the take never records.
+    #[test]
+    fn a_stop_drops_its_takes_waiting_start() {
+        let t = Transport::new(SampleRate::SR_48K);
+        let mut a = t.audio(SampleRate::SR_48K).expect("first");
+        send(
+            &t,
+            At::Frame(Frame::new(1_000_000)),
+            Recording::Start(take(1)),
+        );
+        send(
+            &t,
+            At::Frame(Frame::new(1_000_000)),
+            Recording::Start(take(2)),
+        );
+        send(&t, At::NextBlock, Recording::Stop(take(1)));
+        assert!(!fire(&mut a, Recording::Stop(take(1))).recording());
+        assert_eq!(a.pending().len(), 1, "take 2's start waits on");
+        assert_eq!(a.pending()[0].command(), Recording::Start(take(2)).into());
+        assert_eq!(t.motion.scheduled_outstanding(), 1, "the credit came back");
+        assert_eq!(t.motion.late_command_count(), 0);
+    }
+
+    /// A cancel takes back what waits for a time but spares a take's start,
+    /// as it spares a next-block command.
+    #[test]
+    fn a_cancel_spares_a_takes_start() {
+        let t = Transport::new(SampleRate::SR_48K);
+        let mut a = t.audio(SampleRate::SR_48K).expect("first");
+        send(&t, At::Frame(Frame::new(500)), Recording::Start(take(1)));
+        t.motion
+            .schedule(At::Frame(Frame::new(500)), MotionCommand::Play)
+            .expect("room");
+        t.motion.cancel_scheduled();
+        a.drain_commands();
+        assert_eq!(a.pending().len(), 1, "the play was taken back");
+        assert!(fire(&mut a, Recording::Start(take(1))).recording());
     }
 
     /// A rolling transport over `points` (steps), at `rate`.

@@ -3,6 +3,7 @@
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
 const timed::IMMEDIATE_RESERVE
+const timed::RECORDING_CAPACITY
 const timed::SCHEDULE_CAPACITY
 const walk::UpcomingTempo::NONE
 enum audio::Applied
@@ -10,6 +11,8 @@ enum fsm::MotionState
 enum motion::AfterLocate
 enum motion::FadeOut
 enum motion::MotionCommand
+enum motion::Roll
+enum timed::Recording
 enum timed::TimedError
 enum timed::TransportCommand
 fn audio::Applied::declicked
@@ -44,6 +47,7 @@ fn loop_region::LoopRegion::new
 fn loop_region::LoopRegion::with
 fn motion::MotionCommand::locate
 fn motion::MotionCommand::play_from
+fn motion::MotionCommand::roll
 fn motion::MotionCommand::stop
 fn motion::MotionCommand::stop_then_locate
 fn motion::MotionCommand::stop_unfaded
@@ -51,6 +55,7 @@ fn motion::MotionFsm::cancel_scheduled
 fn motion::MotionFsm::late_command_count
 fn motion::MotionFsm::loop_region
 fn motion::MotionFsm::new
+fn motion::MotionFsm::next_take_id
 fn motion::MotionFsm::schedule
 fn motion::MotionFsm::scheduled_outstanding
 fn motion::MotionFsm::send
@@ -79,15 +84,11 @@ fn project_meter::TimeSignatureSlot::unfollow
 fn project_meter::TimeSignatureSlotReader::lend
 fn render_graph
 fn settings::TransportSettings::current_tempo
-fn settings::TransportSettings::in_preroll
 fn settings::TransportSettings::is_paused
-fn settings::TransportSettings::is_recording
 fn settings::TransportSettings::new
 fn settings::TransportSettings::project_meter
 fn settings::TransportSettings::reclaim_tempo
 fn settings::TransportSettings::segment_generation
-fn settings::TransportSettings::set_in_preroll
-fn settings::TransportSettings::set_recording
 fn settings::TransportSettings::set_tempo
 fn settings::TransportSettings::set_tempo_map
 fn settings::TransportSettings::steady_time
@@ -118,6 +119,7 @@ struct project_meter::TimeSignatureSlotReader
 struct settings::TransportSettings
 struct tempo_reader::TempoReader
 struct timed::Scheduled
+struct timed::TakeId
 struct timeline::OfflineTransport
 struct walk::UpcomingTempo
 trait RenderClock
