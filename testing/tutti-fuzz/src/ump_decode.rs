@@ -6,7 +6,7 @@ use tutti_ump::{Ump, split_stream};
 /// A decoded message re-encodes to a packet that decodes to the same message
 /// (reserved bits are dropped, reserved values are kept), and that packet is
 /// then a fixed point of decode and encode.
-pub fn ump_decode(data: &[u8]) {
+pub(crate) fn ump_decode(data: &[u8]) {
     let words = crate::words(data);
     for ump in split_stream(&words) {
         check(ump);

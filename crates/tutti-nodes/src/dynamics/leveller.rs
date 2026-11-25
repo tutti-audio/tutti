@@ -187,6 +187,8 @@ impl<F: Float + SimdLanes> Kernel for LevellerKernel<F> {
         }
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

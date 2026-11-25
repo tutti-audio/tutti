@@ -16,6 +16,7 @@ use crate::graph::Graph;
     not(feature = "midi-network"),
     expect(
         dead_code,
+        unreachable_pub,
         reason = "named by `MidiEvent::Network`, a feature `midi-network` variant"
     )
 )]

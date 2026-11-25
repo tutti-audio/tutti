@@ -176,6 +176,8 @@ impl<F: FftFloat + Lerp> Kernel for ShimmerKernel<F> {
         self.fdn.retarget(controls);
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

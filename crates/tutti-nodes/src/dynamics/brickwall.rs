@@ -140,6 +140,8 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
         self.bank.retarget(controls);
     }
 
+    fn jump_to_target(&mut self) {}
+
     fn render(
         &mut self,
         block: &mut InputOutput<'_, F>,

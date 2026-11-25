@@ -5,7 +5,7 @@ use crate::generator::Rng;
 /// A transport, played: it rolls at `tempo`, and `block` sometimes seeks,
 /// stops or starts, changes the tempo inside a block (a linear ramp, or a
 /// step at a random offset), or toggles a short loop.
-pub struct Script {
+pub(crate) struct Script {
     pub beat: f64,
     pub playing: bool,
     pub tempo: f64,
@@ -15,7 +15,7 @@ pub struct Script {
 impl Script {
     /// The transport for the next block of `n` frames at 48 kHz, then
     /// advance past it.
-    pub fn block(&mut self, n: usize, rng: &mut Rng) -> tutti_graph::TransportPosition {
+    pub(crate) fn block(&mut self, n: usize, rng: &mut Rng) -> tutti_graph::TransportPosition {
         // A tempo change is ramped linearly across this block, as a host
         // automating tempo reports it: the block says its starting tempo,
         // and the position advances by the average.

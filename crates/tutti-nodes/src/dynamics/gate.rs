@@ -205,8 +205,6 @@ pub struct GateKernel<F: Float + SimdLanes> {
     key: KeySource,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<GateBank<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
@@ -216,7 +214,6 @@ impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
             input,
             key,
             bank: None,
-            applied: false,
         }
     }
 }
@@ -236,7 +233,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(GateBank::new(self.input.width(), rate));
-        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -248,9 +244,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     fn retarget(&mut self, controls: &GateControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(bank) = &mut self.bank {
             bank.jump_to_target();
-            self.applied = true;
         }
     }
 

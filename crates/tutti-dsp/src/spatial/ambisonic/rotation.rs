@@ -228,9 +228,9 @@ impl AmbisonicRotator {
         self.rotation.retarget(rotation);
     }
 
-    /// Lands on `rotation` at once.
-    pub fn jump_to(&mut self, rotation: Rotation) {
-        self.rotation = Ramp::new(rotation).steps(COEFF_INTERVAL as u32);
+    /// Lands on the rotation it glides to at once.
+    pub fn jump_to_target(&mut self) {
+        self.rotation.jump_to_target();
     }
 
     /// Rotates `input` into `output`, both the channels of the order and as many frames:

@@ -19,8 +19,6 @@ pub(super) struct RampedSos<F: Float + SimdLanes> {
     coefficients: Ramp<SosCoefficients<F>>,
     /// The design in progress, its room for [`MAX_SECTIONS`] sections held.
     scratch: Sos,
-    /// Whether the first design after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes> RampedSos<F> {
@@ -31,7 +29,6 @@ impl<F: Float + SimdLanes> RampedSos<F> {
             bank: SosBank::new(input.width()),
             coefficients: Ramp::new(SosCoefficients::THROUGH),
             scratch: Sos::new(Vec::with_capacity(MAX_SECTIONS), SampleRate::SR_48K),
-            applied: false,
         }
     }
 
@@ -57,25 +54,24 @@ impl<F: Float + SimdLanes> RampedSos<F> {
         self.scratch = Sos::new(Vec::with_capacity(MAX_SECTIONS), rate);
     }
 
-    /// Back to the first design: `first` lands at once, later ones ramp.
+    /// Back to `first` at rest, with later designs ramping over [`RAMP_STEPS`].
     pub(super) fn restart(&mut self, first: SosCoefficients<F>) {
         self.coefficients = Ramp::new(first).steps(RAMP_STEPS);
-        self.applied = false;
     }
 
-    /// Back to silence at the design in force.
+    /// Back to silence.
     pub(super) fn reset(&mut self) {
-        self.coefficients.jump_to_target();
         self.bank.reset();
     }
 
-    /// Ramps to `design`; the first one after `prepare` lands at once.
+    /// Ramps to `design`.
     pub(super) fn retarget(&mut self, design: SosCoefficients<F>) {
         self.coefficients.retarget(design);
-        if !self.applied {
-            self.coefficients.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    /// The coefficients on the design at once.
+    pub(super) fn jump_to_target(&mut self) {
+        self.coefficients.jump_to_target();
     }
 
     /// Runs the block's input into its output.

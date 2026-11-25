@@ -540,7 +540,7 @@ impl MotionAudio {
     /// Only for a holder about to drop this, which must return the FSM
     /// before something else it owns is released (the engine, before its
     /// clock's playhead claim). Idempotent.
-    pub fn hand_back(&mut self) {
+    pub(crate) fn hand_back(&mut self) {
         if let (Some(home), Some(owner)) = (self.home.take(), self.owner.take()) {
             // Lock-free, so a drop on the audio thread is safe. Never full:
             // the FSM was popped from it, and only this value puts one back.
@@ -557,7 +557,7 @@ impl MotionAudio {
     /// Apply one scheduled command now: a motion change goes through the
     /// state machine, a loop edit to the region, a take's start or stop to
     /// the set of takes recording.
-    pub fn apply(&mut self, command: TransportCommand) {
+    pub(crate) fn apply(&mut self, command: TransportCommand) {
         match command {
             TransportCommand::Motion(event) => self.step(event),
             TransportCommand::Loop(edit) => {
@@ -579,7 +579,7 @@ impl MotionAudio {
     }
 
     /// The loop region the engine renders under.
-    pub fn loop_region(&self) -> LoopRegion {
+    pub(crate) fn loop_region(&self) -> LoopRegion {
         self.owner
             .as_ref()
             .map_or_else(LoopRegion::default, LoopOwner::region)
@@ -644,7 +644,7 @@ impl MotionAudio {
     ///
     /// The transport itself already stopped or jumped when the command was
     /// applied (see `publish`); what is left is the mirror.
-    pub fn complete_declick(&mut self) -> bool {
+    pub(crate) fn complete_declick(&mut self) -> bool {
         let Some(outcome) = self.fsm.complete_declick() else {
             return false;
         };

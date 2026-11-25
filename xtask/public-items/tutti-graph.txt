@@ -193,8 +193,6 @@ fn compile::tail::GraphTail::resolve
 fn compile::tail::GraphTail::samples
 fn compile::tail::GraphTail::unknown_nodes
 fn compile::tail::graph_tail
-fn compile::verify::verify
-fn compile::verify::verify_fades
 fn contract::drive::assert_declared_tail
 fn contract::drive::assert_param_fork
 fn contract::drive::drive
@@ -949,6 +947,18 @@ macro node::declare::declare_params
 mod __private
 mod contract
 mod testing
+struct compile::ids::AudioDelayId
+struct compile::ids::AudioFeedbackId
+struct compile::ids::AudioSlotId
+struct compile::ids::EventDelayId
+struct compile::ids::EventFeedbackId
+struct compile::ids::EventSlotId
+struct compile::ids::OpId
+struct compile::ids::PlanEventTapId
+struct compile::ids::PlanMeterId
+struct compile::ids::PlanTapId
+struct compile::ids::PlanUnitId
+struct compile::ids::TaskId
 struct compile::latency::ChannelFeed
 struct compile::latency::Compensation
 struct compile::latency::Delays

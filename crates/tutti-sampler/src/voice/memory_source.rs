@@ -665,7 +665,7 @@ impl<F: Float> MemorySource<F> {
         }
 
         // 4-tap cubic Hermite via the shared kernel (idx-1, idx, idx+1, idx+2,
-        // bound-clamped), unifying this path with `DiskSource`.
+        // bound-clamped), unifying this path with the disk tier.
         super::interp::read_frame(&self.wave, &self.channel_place, position, out);
     }
 
