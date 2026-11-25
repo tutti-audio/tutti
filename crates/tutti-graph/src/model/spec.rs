@@ -591,6 +591,36 @@ impl GraphSpec {
         self.validate_banked(0)
     }
 
+    /// The edges of a cycle no feedback edge breaks, or `None`: the one search
+    /// [`compile`](fn@crate::compile) runs, over every dependency it orders
+    /// (audio, event, param and gain edges; a feedback edge is cut), on the
+    /// spec's own nodes, so a wiring that would not compile can be found
+    /// before it is written. A bus edge not yet lowered is read at node level:
+    /// a feed from a node's bus is a dependency of the sink bus's node, and one
+    /// from the main input is none. An edge with an end that is not a node of
+    /// the spec is not read. The edges are in key order.
+    #[must_use]
+    pub fn cycle(&self) -> Option<Vec<crate::CycleEdge>> {
+        let index: BTreeMap<NodeKey, usize> = self
+            .topology
+            .nodes
+            .keys()
+            .enumerate()
+            .map(|(i, &k)| (k, i))
+            .collect();
+        let wiring = crate::compile::schedule::Wiring {
+            edges: &self.topology.edges,
+            events: &self.events,
+            params: &self.params,
+            gains: &self.gains,
+            buses: &self.bus_edges,
+        };
+        let (_, cycle) = crate::compile::schedule::dependencies(&wiring, index.len(), |k| {
+            index.get(&k).copied()
+        });
+        (!cycle.is_empty()).then_some(cycle)
+    }
+
     /// [`validate`](Self::validate) of a lowered spec that carries `bank` output
     /// channels after the main output's: the lists differ by exactly those.
     pub(crate) fn validate_banked(&self, bank: usize) -> Result<ValidGraph, Vec<GraphInvalid>> {
