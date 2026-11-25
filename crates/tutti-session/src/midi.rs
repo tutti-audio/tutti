@@ -1811,6 +1811,40 @@ impl<F: Float> Midi<'_, F> {
             .map_err(MidiError::Tap)
     }
 
+    // --- Holding what is played ---
+
+    /// Opens a [`HeldReader`](crate::HeldReader) on `instrument`'s main event input
+    /// ([`Key::event_input`](crate::Key::event_input) 0): the keys and
+    /// controllers held there, of everything it hears with every source
+    /// merged. It rides an event tap of `capacity` events
+    /// ([`EventCapacity`](tutti_graph::EventCapacity), as for
+    /// [`tap`](Self::tap)); what the tap loses is counted in each
+    /// [`update`](crate::HeldReader::update).
+    ///
+    /// The tap is closed when the reader is dropped (the next
+    /// [`Reclaim`](crate::Phase::Reclaim) phase) or with
+    /// `Graph::taps().close_event`; a re-prepare at another rate leaves the
+    /// fold as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`MidiError::Tap`] when `instrument` is not in the graph or has no
+    /// event input; nothing is opened.
+    pub fn held<N: ?Sized>(
+        &mut self,
+        instrument: Key<N>,
+        capacity: tutti_graph::EventCapacity,
+    ) -> Result<crate::HeldReader> {
+        self.graph
+            .taps()
+            .open_event(
+                instrument.event_input(0),
+                EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
+            )
+            .map(crate::HeldReader::new)
+            .map_err(MidiError::Tap)
+    }
+
     // --- Following an outside tempo ---
 
     /// A tap on the channelless port of `group` of the input port `input`, for a
