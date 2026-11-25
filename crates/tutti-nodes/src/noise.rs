@@ -84,7 +84,7 @@ impl<F: Float> Node<F> for NoiseNode<F> {
         Shape::source_unassigned(ChannelLayout::MONO)
             .cost(tutti_graph::Cost::Light)
             .tail(Tail::None)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -93,7 +93,7 @@ impl<F: Float> Node<F> for NoiseNode<F> {
         let size = io.frames();
         let level = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let cell = self.cells.level.load().get();
         let out = &mut io.output(0)[..size];
         self.noise.process(MonoMut::new(out));

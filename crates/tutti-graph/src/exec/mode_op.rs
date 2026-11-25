@@ -5,6 +5,7 @@
 //! spread over a pool run the same code; it touches only the op's own slots and
 //! its own unit.
 
+use super::node_op::steps_params;
 use super::*;
 use crate::compile::ids::AudioSlotId;
 use crate::compile::plan::PortSlots;
@@ -136,7 +137,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
-    if !head.ports.params.is_empty() || u.params.busy() {
+    if steps_params(u, head) {
         run_params(u, head, st);
     }
     if !u.mode.is_stale() {

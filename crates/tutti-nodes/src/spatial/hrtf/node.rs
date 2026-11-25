@@ -26,8 +26,8 @@ use crate::spatial::target::AngleSmoother;
 tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, HrtfBinauralConfig, HrtfBinauralCells {
     required { sphere: Arc<HrirSphere> }
     params {
-        Azimuth => azimuth: Azimuth = Azimuth::FRONT,
-        Elevation => elevation: Elevation = Elevation::LEVEL,
+        Azimuth => azimuth: Azimuth { whole } = Azimuth::FRONT,
+        Elevation => elevation: Elevation { whole } = Elevation::LEVEL,
         Wet => blend: Mix = Mix::WET,
     }
 });
@@ -119,9 +119,7 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
     /// elevation where a control signal drives them): a non-finite coordinate held at
     /// the last finite one, the bearing wrapped and the height clamped.
     #[inline]
-    fn placement(&mut self, [azimuth, elevation]: [Option<F>; 2]) -> Direction {
-        // A driven value is the graph's `F` control signal; the angles are `f64`, so
-        // it widens here, once per block.
+    fn placement(&mut self, [azimuth, elevation]: [Option<f64>; 2]) -> Direction {
         let azimuth = self
             .good
             .azimuth
@@ -156,7 +154,7 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
 impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
     fn shape(&self) -> Shape {
         Shape::through(ChannelTopology::STEREO)
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
             .latency(Latency::new(Samples::new(HRTF_LATENCY)))
             .tail(match self.panner.as_ref().map(HrtfBinaural::ring_out) {
                 // The response length follows the graph's rate, known at `prepare`.

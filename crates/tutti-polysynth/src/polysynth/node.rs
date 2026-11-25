@@ -28,7 +28,7 @@ use crate::lane::SynthFloat;
 // block-rate in the synth (read once per block), so a driven port is read the
 // same way: its value on the block's last frame.
 tutti_graph::declare_params!([F: SynthFloat] PolySynth<F>, n {
-    Volume => Amplitude = &n.master_volume,
+    Volume => Amplitude { whole } = &n.master_volume,
     Detune => CentsSpan = n.unison.as_ref().map(|u| u.detune()),
     StereoSpread => Spread = n.unison.as_ref().map(|u| u.spread()),
 });
@@ -77,7 +77,7 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
         Self::PORTS
             .tail(self.release_tail())
             .cost(self.cost())
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
             // The channel state it hands the synth that replaces it (`chase`).
             .chase(VoiceAllocator::CHASE_MESSAGES as u32)
     }
@@ -114,7 +114,7 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
                     }
                     self.last_volume
                 },
-                |lane| Amplitude::new(lane.into()),
+                Amplitude::new,
             );
         let volume = Self::clamp_volume(volume);
         let (_, mut outputs) = io.split();

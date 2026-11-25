@@ -45,7 +45,9 @@ impl Node for Probe {
         for k in 0..2 {
             match io.param(k) {
                 ParamInput::Base => io.output(k).fill(0.0),
-                ParamInput::Frames { values, .. } => io.output(k).copy_from_slice(values),
+                ParamInput::Frames { narrow, .. } | ParamInput::Smoothing { narrow, .. } => {
+                    io.output(k).copy_from_slice(narrow);
+                }
             }
         }
         Status::Modified

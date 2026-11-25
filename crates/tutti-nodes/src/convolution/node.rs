@@ -750,7 +750,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
 
 // The params a [`ConvolverNode`] lets the graph modulate: the wet gain.
 tutti_graph::declare_params!([F: FftFloat + Lerp] ConvolverNode<F>, n {
-    Volume => Amplitude = &n.gain,
+    Volume => Amplitude { whole } = &n.gain,
 });
 
 impl<F: FftFloat + Lerp> ConvolverNode<F> {
@@ -806,7 +806,7 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
         Shape::buses(Buses::main(self.inputs), Buses::main(self.outputs))
             .latency(Latency::new(self.latency_samples))
             .tail(ring_after(self.engine.ir_length(), self.declared_delay))
-            .param_addrs(self.declared_ports().as_slice())
+            .param_ports(self.declared_ports())
     }
 
     fn param_base(&self, k: usize) -> Option<f64> {
@@ -850,7 +850,7 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
         }
         let driven = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
-            .frames();
+            .narrowed();
         let (inputs, mut outputs) = io.split();
         // Walk the block's silent runs: cut the output where a run stops sounding and restart
         // the engine where input resumes after one that long (see the type's docs).

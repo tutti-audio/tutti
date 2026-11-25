@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 
-use tutti_units::{Latency, Tail, UnitAddr, UnitParam};
+use tutti_units::{Latency, Tail, UnitParam};
 
 use crate::node::Resolution;
 use crate::node::bus::{Buses, InEvents, OutEvents, PortSpan};
@@ -721,19 +721,14 @@ impl Shape {
         self
     }
 
-    /// [`params`](Self::params) for a node with several params of
-    /// one kind: each [`UnitAddr`] is a kind and an index (a threshold per
-    /// band is `UnitAddr::new(UnitParam::Threshold, band)`), in this port
-    /// order.
-    ///
-    /// # Panics
-    ///
-    /// If `params` holds more than [`MAX_PARAM_PORTS`](crate::MAX_PARAM_PORTS),
-    /// or one address (kind and index) twice (in a `const` context, at
-    /// compile time).
+    /// This shape, letting the graph modulate the ports `params` lists, with
+    /// the ports it marks [whole](ParamPorts::whole): the list a
+    /// [`declare_params!`](crate::declare_params) node builds
+    /// (`declared_ports`), or [`ParamPorts::of`] for a node with several params
+    /// of one kind (a threshold per band).
     #[must_use]
-    pub const fn param_addrs(mut self, params: &[UnitAddr]) -> Self {
-        self.params = ParamPorts::of(params);
+    pub const fn param_ports(mut self, params: ParamPorts) -> Self {
+        self.params = params;
         self
     }
 }

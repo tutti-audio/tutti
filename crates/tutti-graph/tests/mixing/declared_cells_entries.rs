@@ -47,14 +47,15 @@ impl From<SparseConfig> for Sparse {
 fn show(out: &mut [f32], input: ParamInput<'_>, base: f64) {
     match input {
         ParamInput::Base => out.fill(base as f32),
-        ParamInput::Frames { values: v, .. } => out.copy_from_slice(v),
+        ParamInput::Frames { narrow: v, .. } | ParamInput::Smoothing { narrow: v, .. } => {
+            out.copy_from_slice(v);
+        }
     }
 }
 
 impl Node for Sparse {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(3))
-            .param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::from_count(3)).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -259,7 +260,7 @@ impl From<SwitchedConfig> for Switched {
 
 impl Node for Switched {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -372,7 +373,7 @@ impl From<MixedConfig> for Mixed {
 
 impl Node for Mixed {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -446,7 +447,7 @@ impl From<LonelyConfig> for Lonely {
 
 impl Node for Lonely {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout).param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(self.layout).param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

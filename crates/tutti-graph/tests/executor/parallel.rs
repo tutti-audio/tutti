@@ -74,8 +74,8 @@ impl Node for ParamSink {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for i in 0..io.frames() {
-            let a = io.param(0).frames().map_or(1.0, |v| v[i]);
-            let b = io.param(1).frames().map_or(2.0, |v| v[i]);
+            let a = io.param(0).narrowed().map_or(1.0, |v| v[i]);
+            let b = io.param(1).narrowed().map_or(2.0, |v| v[i]);
             let x = io.input(0)[i];
             io.output(0)[i] = (a + b) * x;
         }

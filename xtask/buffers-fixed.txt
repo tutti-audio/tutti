@@ -20,3 +20,6 @@ crates/tutti-nodes/src/params.rs::ControlSet::flatten  not-audio: control cells 
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's design coefficients, a design figure in f64 crossed once per grid
 crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's design coefficients, a design figure in f64 crossed once per grid
 crates/tutti-measure/src/analyses/xcorr.rs::CrossCorrelation::values  not-audio: a correlation sequence over lags, a reading
+crates/tutti-graph/src/node/param.rs::ParamInput.Frames  not-audio: a param's value at each frame in the unit's own f64, a control, not audio
+crates/tutti-graph/src/node/param.rs::ParamInput.Smoothing  not-audio: a param's value at each frame in the unit's own f64, a control, not audio
+crates/tutti-graph/src/node/param.rs::ParamInput::frames  not-audio: a param's value at each frame in the unit's own f64, a control, not audio
