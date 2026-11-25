@@ -20,7 +20,7 @@
 //!   through the plugin's own `Control`; a claim a node holds is
 //!   [`Pending`](std::task::Poll::Pending), and the caller asks again. The
 //!   write is the plugin's once the reader's sweep has reached the
-//!   [`mark`](EditPost::mark) the caller took, so what it observes holds every
+//!   [`PendingWrites`](crate::PendingWrites) the caller took, so what it observes holds every
 //!   write made before it. A format's Processor applies what its own slots
 //!   hold ahead of a block's parameter changes, so a write made after a settle
 //!   wins over it.
