@@ -156,7 +156,23 @@ impl tutti_plugin_types::Health for Inert {
     fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
         tutti_plugin_types::PipelineCounts::default()
     }
+    fn refused_edits(&self) -> u64 {
+        0
+    }
+
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
+}
+
+/// The in-process work `op`, polled once: no node drains the host's writes in a
+/// test that renders no block, so it is never `Pending`.
+fn ready<O: crate::PluginOp>(
+    mut op: crate::InProcessOp<O>,
+    main: tutti_plugin_types::MainThreadMarker,
+) -> Result<O::Output, O::Error> {
+    match op.poll(main, tutti_platform::Instant::now()) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => panic!("no node drains the host's writes in this test"),
+    }
 }
 
 /// The work values of a plugin hosted in process, run on the main thread: the
@@ -177,7 +193,7 @@ impl Run for crate::SaveState {
 
     fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(save) => save.run(main),
+            Self::InProcess(save) => ready(save, main),
             Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
         }
     }
@@ -188,7 +204,7 @@ impl Run for crate::RestoreState {
 
     fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(restore) => restore.run(main),
+            Self::InProcess(restore) => ready(restore, main),
             Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
         }
     }

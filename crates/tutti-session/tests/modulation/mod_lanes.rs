@@ -484,6 +484,33 @@ fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
     }
 }
 
+/// **A rebuilt source resyncs.** The envelope's declaration is edited, so its
+/// node is rebuilt, a fresh node that has sent nothing: its lane would hold the
+/// old node's `0.4` until the new one sent. The update's commit schedules a
+/// resync for it, the rebuilt envelope sends where it stands (0), and probe 1
+/// reads its knob from the first grid piece.
+#[test]
+fn a_rebuilt_source_resyncs_so_its_lane_does_not_hold_the_old_value() {
+    let (mut s, mut side, _, _, env) = held_envelope_scene();
+    let adsr = Adsr {
+        attack: Seconds::new(0.004),
+        decay: Seconds::new(0.003),
+        sustain: Amplitude::new(0.4),
+        release: Seconds::new(0.2),
+    };
+    let before = s.mod_state().source_node(env).expect("a node");
+    s.mods_mut()
+        .set_source(env, NoteEnvelope::new(adsr))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(s.mod_state().pending_resyncs(), 0, "sent with the commit");
+    assert_eq!(s.mod_state().source_node(env), Some(before), "at its key");
+    let got = render_n(&mut side, 2, 512, 128);
+    for (f, &v) in got[0].iter().enumerate().skip(STEP) {
+        assert!((v - 0.2).abs() < 1e-6, "frame {f}: {v}");
+    }
+}
+
 /// **A follower is owed no resync**: it sends on every grid point while it is
 /// not silent, so a route from one leaves nothing pending.
 #[test]

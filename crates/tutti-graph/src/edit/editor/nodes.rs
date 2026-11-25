@@ -579,8 +579,7 @@ impl<F: Float> Editor<F> {
             // does, and its reader is told once the plan without it runs.
             for id in over {
                 t.taps.remove(&id);
-                if let Some(Closed { meta, unsent }) = self.taps.close(id) {
-                    let end = meta.end;
+                if let Some(Closed { meta: end, unsent }) = self.taps.close(id) {
                     if unsent {
                         // The executor never held its writer: nothing more
                         // will be written.

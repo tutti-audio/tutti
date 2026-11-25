@@ -600,6 +600,11 @@ where
     /// slept makes (CLAP's `request_process`) so that it runs on the next block
     /// though the executor parked the node. Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
+        // A host parameter write raises it too: the executor parks a node with
+        // nothing at its ports, and a write is not at one.
+        if let Some(edits) = &self.client.edits {
+            edits.bind_wake(wake.clone());
+        }
         *self.client.wake.lock() = Some(wake);
     }
 }

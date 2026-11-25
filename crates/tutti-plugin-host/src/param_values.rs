@@ -575,6 +575,10 @@ mod tests {
         fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
             tutti_plugin_types::PipelineCounts::default()
         }
+        fn refused_edits(&self) -> u64 {
+            0
+        }
+
         fn terminate(&self, _reason: TerminationReason) {}
     }
 

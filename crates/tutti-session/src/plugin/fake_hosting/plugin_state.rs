@@ -18,14 +18,17 @@ use crate::{AnyPlugin, DetachedSession, Key, PeerState, Session};
 fn handle() -> (PluginHandle, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
-    let handle = PluginHandle::from_backend(
+    (handle_over(control), fake)
+}
+
+fn handle_over(control: Arc<dyn tutti_plugin_host::MainThreadControl>) -> PluginHandle {
+    PluginHandle::from_backend(
         Arc::new(Inert::default()),
         Some(control),
         tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
-    );
-    (handle, fake)
+    )
 }
 
 fn session() -> DetachedSession {
@@ -211,4 +214,94 @@ fn a_restore_of_another_session_is_stale() {
         .unwrap();
     assert_eq!(other.apply(restored).unwrap_err(), PluginApplyError::Stale);
     assert_eq!(refreshes(&other, other_node), 0);
+}
+
+/// A control whose host writes a node is draining until `release`.
+struct Draining {
+    plugin: tutti_plugin_types::fake::FakeLoaded,
+    draining: std::sync::atomic::AtomicBool,
+}
+
+impl tutti_plugin_host::MainThreadControl for Draining {
+    fn lend(&self, f: &mut dyn FnMut(&mut dyn tutti_plugin_types::Control)) {
+        f(&mut self.plugin.clone());
+    }
+
+    fn settle(
+        &self,
+        _main: tutti_plugin_types::MainThreadMarker,
+        _mark: tutti_rt::Generation,
+    ) -> std::task::Poll<()> {
+        if self.draining.load(std::sync::atomic::Ordering::Acquire) {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    }
+
+    fn editor_idle(&self, _main: tutti_plugin_types::MainThreadMarker) {}
+}
+
+/// **A save is not asked of the plugin while a node drains the writes before
+/// it, resolves once the drain ends, and stalls at its deadline when it does
+/// not.** Nothing is waited for: each poll answers at the instant it is given.
+#[test]
+fn a_save_is_pending_while_a_node_drains_and_stalls_at_its_deadline() {
+    use std::sync::atomic::Ordering;
+    use std::task::Poll;
+
+    let main = tutti_fixtures::main_thread();
+    let saves = |fake: &FakePlugin| {
+        fake.calls()
+            .iter()
+            .filter(|call| matches!(call, Call::SaveState))
+            .count()
+    };
+    let (fake, loaded) = FakePlugin::new();
+    let control = Arc::new(Draining {
+        plugin: loaded,
+        draining: true.into(),
+    });
+    let mut s = session();
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let key = host(&mut s, node, handle_over(control.clone()), plugin());
+    s.commit();
+
+    let now = tutti_platform::Instant::now();
+    let crate::SaveState::InProcess(mut save) = s.save_state(&key, StateUse::Project).unwrap()
+    else {
+        panic!("a fake plugin runs in process");
+    };
+    assert_eq!(
+        save.deadline(),
+        None,
+        "nothing is due before the first poll"
+    );
+    assert!(save.poll(main, now).is_pending());
+    assert_eq!(
+        saves(&fake),
+        0,
+        "the plugin is not asked while writes drain"
+    );
+    control.draining.store(false, Ordering::Release);
+    assert!(matches!(save.poll(main, now), Poll::Ready(Ok(_))));
+    assert_eq!(saves(&fake), 1);
+
+    control.draining.store(true, Ordering::Release);
+    let crate::SaveState::InProcess(mut stuck) = s.save_state(&key, StateUse::Project).unwrap()
+    else {
+        panic!("a fake plugin runs in process");
+    };
+    assert!(stuck.poll(main, now).is_pending());
+    let due = stuck.deadline().expect("polled once");
+    assert!(
+        stuck
+            .poll(main, due - std::time::Duration::from_millis(1))
+            .is_pending()
+    );
+    assert!(matches!(
+        stuck.poll(main, due),
+        Poll::Ready(Err(StateError::Stalled { .. }))
+    ));
+    assert_eq!(saves(&fake), 1, "a stalled save asked nothing");
 }

@@ -155,9 +155,12 @@ fn handle_state_roundtrip() {
     let mut modified = original.clone();
     modified.extend_from_slice(b"tutti-roundtrip-marker");
 
-    handle
-        .load_state(main_thread(), &modified)
-        .expect("the probe accepts a chunk it just produced");
+    assert!(
+        handle
+            .load_state(main_thread(), &modified)
+            .map(|loaded| loaded.expect("the probe accepts a chunk it just produced"))
+            .is_ready()
+    );
     let after = handle
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("state must still be readable after a load");
@@ -184,9 +187,12 @@ fn an_accepted_chunk_reports_success() {
     let blob = handle
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("probe declares state");
-    handle
-        .load_state(main_thread(), &blob)
-        .expect("a chunk the plugin just produced must be accepted");
+    assert!(
+        handle
+            .load_state(main_thread(), &blob)
+            .map(|loaded| loaded.expect("a chunk the plugin just produced must be accepted"))
+            .is_ready()
+    );
 }
 
 #[test]

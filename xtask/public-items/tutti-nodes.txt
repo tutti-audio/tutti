@@ -254,7 +254,6 @@ fn signal::follower::EnvelopeFollowerConfig::from_decl
 fn signal::follower::EnvelopeFollowerConfig::new
 fn signal::note_envelope::NoteEnvelopeConfig::from_decl
 fn signal::note_envelope::NoteEnvelopeConfig::new
-fn signal::sender::SourceNode::replacing
 fn signal::sender::SourceNode::source
 fn spatial::ambisonic::AmbisonicDecoderConfig::decoding
 fn spatial::ambisonic::AmbisonicDecoderConfig::input

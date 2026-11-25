@@ -18,16 +18,17 @@
 //! **Resync.** A lane whose program newly reads a note envelope (a new lane,
 //! or a route to the envelope added on an existing lane) would read it as 0
 //! until the envelope next moves, since a source sends only when it moves and
-//! a lane frees an input slot its program stopped reading. So the envelope is
-//! owed an [`EventKind::Resync`], which [`Derived::send_resyncs`] schedules
-//! after the commit that placed it: a scheduled command waits for the commit
-//! sent before it. A rebuilt source is told to send where it stands on its
-//! first frame. A follower needs neither: it sends on every grid point while
-//! it is not silent.
+//! a lane frees an input slot its program stopped reading. A source the apply
+//! rebuilds, of either kind, is in the same case: a lane holds the old node's
+//! last value until the new one sends. So each is owed an
+//! [`EventKind::Resync`], which [`Derived::send_resyncs`] schedules after the
+//! commit that placed it: a scheduled command waits for the commit sent before
+//! it. A new follower route owes none: a follower sends on every grid point
+//! while it is not silent.
 //!
 //! **When it runs.** [`Derived::stale`]: the declarations were rebuilt, the
-//! editor's revision or the play epoch moved since the last apply, or a
-//! target or source is still unresolved.
+//! editor's revision or the play epoch moved since the last apply, or a plugin
+//! target waits for its value.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -351,9 +352,7 @@ impl Derived {
             editor.remove(lane.key);
             *commit = true;
         }
-        // Signal nodes that went, or whose declaration or width changed: a
-        // rebuilt one sends where it stands on its first frame, since the
-        // lanes that read one hold the old node's last value until it does.
+        // Signal nodes that went, or whose declaration or width changed.
         let mut rebuilt = BTreeSet::new();
         let gone: Vec<SourceKey> = self
             .sources
@@ -406,7 +405,12 @@ impl Derived {
                 continue;
             }
             let key = keys.sources[&source];
-            insert_source(editor, key, plan, rebuilt.contains(&source));
+            // A rebuilt source is owed a resync: a lane holds the old node's
+            // last value until the new one sends.
+            if rebuilt.contains(&source) {
+                self.owed.insert(source);
+            }
+            insert_source(editor, key, plan);
             wire_feed(editor, key, plan.feed);
             self.sources.insert(source, Signal { key, plan: *plan });
             *commit = true;
@@ -460,11 +464,7 @@ impl Derived {
         // A resync owed to a source with no node (unresolved, or gone) is
         // owed to nothing.
         let sources = &self.sources;
-        self.owed.retain(|s| {
-            sources
-                .get(s)
-                .is_some_and(|n| matches!(n.plan.decl.kind, SignalKind::NoteEnvelope { .. }))
-        });
+        self.owed.retain(|s| sources.contains_key(s));
     }
 
     /// Schedules the owed resyncs ([`EventKind::Resync`] at
@@ -870,32 +870,20 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
     }
 }
 
-/// Inserts the node of `plan` at `key`; a rebuilt one sends where it stands
-/// on its first frame.
-fn insert_source<F: Float>(
-    editor: &mut Editor<F>,
-    key: NodeKey,
-    plan: &SourcePlan,
-    replacing: bool,
-) {
+/// Inserts the node of `plan` at `key`.
+fn insert_source<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &SourcePlan) {
     match plan.decl.kind {
         SignalKind::Follower { .. } => {
-            let mut node = EnvelopeFollowerNode::from(
+            let node = EnvelopeFollowerNode::from(
                 EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
                     .expect("a follower's declaration"),
             );
-            if replacing {
-                node = node.replacing();
-            }
             editor.insert(key, "envelope-follower", ForkByClone(node));
         }
         SignalKind::NoteEnvelope { .. } => {
-            let mut node = NoteEnvelopeNode::from(
+            let node = NoteEnvelopeNode::from(
                 NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
             );
-            if replacing {
-                node = node.replacing();
-            }
             editor.insert(key, "note-envelope", ForkByClone(node));
         }
     }

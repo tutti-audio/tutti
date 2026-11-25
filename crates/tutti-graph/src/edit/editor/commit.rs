@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::lifecycle::Committed;
-use super::{BusLanes, CommitError, Editor, Fading, starting};
+use super::main_output::Fading;
+use super::{BusLanes, CommitError, Committed, Editor, starting};
 use crate::compile::plan::{Delta, Plan, Rewired};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
@@ -88,11 +88,22 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// The cheap checks, before the spec is lowered: what [`commit`](Self::commit) asks even when nothing changed.
+    /// What every send asks first: the boxes the executor returned collected,
+    /// the editor open to a send, and room on the queue.
+    pub(super) fn ready(&mut self) -> Result<(), CommitError> {
+        self.collect();
+        self.check_poisoned()?;
+        if self.is_repreparing() {
+            return Err(CommitError::Repreparing);
+        }
+        self.link.check_room()
+    }
+
+    /// The cheap checks, before the spec is lowered: what [`commit`](Self::commit)
+    /// and [`package`](Self::package) ask even when nothing changed.
     fn check_spec(&self) -> Result<(), CommitError> {
         self.limits.outputs(self.spec.topology.outputs.len())?;
         self.check_main_output_published()?;
-        self.check_tap_widths()?;
         self.check_meter_widths()?;
         self.check_passes()
     }
@@ -142,12 +153,7 @@ impl<F: Float> Editor<F> {
         reason = "every pending unit the delta needs was checked present just before it is taken"
     )]
     pub fn commit(&mut self) -> Result<Vec<Rewired>, CommitError> {
-        self.collect();
-        self.check_poisoned()?;
-        if self.is_repreparing() {
-            return Err(CommitError::Repreparing);
-        }
-        self.link.check_room()?;
+        self.ready()?;
         self.check_spec()?;
         if let Some(c) = self.life.committed()
             && !self.entries.is_staged()
@@ -225,15 +231,20 @@ impl<F: Float> Editor<F> {
             .collect();
         self.entries.clear_fades_and_cuts();
         let rewired = delta.take_rewired();
-        self.send(plan, delta, units, &weights, false);
-        self.main_output.fading = fading;
-        self.entries.sync(&self.values);
-        self.gains.sync(&self.spec, &self.values);
-        self.life.set_committed(Committed {
+        let committed = Committed {
             structure: self.structure,
             spec: Arc::clone(&self.spec),
             shapes: Arc::clone(&self.shapes),
-        });
+        };
+        self.send(
+            plan,
+            delta,
+            units,
+            &weights,
+            Sending::Commit { committed, fading },
+        );
+        self.entries.sync(&self.values);
+        self.gains.sync(&self.spec, &self.values);
         // A lane the spec no longer has takes its base and range with it.
         let spec = &self.spec;
         self.values.retain_edges(|id| spec.gains.contains_key(&id));
@@ -265,7 +276,7 @@ impl<F: Float> Editor<F> {
     /// While a crossfade runs the editor shares the committed spec and
     /// shapes, the old main output's wiring, until it ends.
     pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
-        self.main_output.fade = fade.filter(|f| !f.is_cut());
+        self.main_output.fade_with(fade);
     }
 
     /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
@@ -285,14 +296,13 @@ impl<F: Float> Editor<F> {
             self.spec.main_output_id,
             committed.map(|c| c.spec.main_output_id),
         );
-        let (fade, was, published) = match (continuing, self.main_output.fade, committed) {
-            (Some(f), _, _) => {
+        let beginning = self.main_output.begins(self.spec.main_output_id, committed);
+        let (fade, was, published) = match (continuing, beginning) {
+            (Some(f), _) => {
                 debug_assert_eq!(f.bank.base, self.spec.topology.outputs.len());
                 (f.bank.fade, &f.was, true)
             }
-            (None, Some(fade), Some(c)) if c.spec.main_output_id != self.spec.main_output_id => {
-                (fade, c, false)
-            }
+            (None, Some((fade, was))) => (fade, was, false),
             _ => return plain(),
         };
         // The bases the old main output's lanes had when the crossfade began:
@@ -424,43 +434,44 @@ impl<F: Float> Editor<F> {
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
     ) -> Result<(), CommitError> {
-        self.collect();
-        self.check_poisoned()?;
-        if self.is_repreparing() {
-            return Err(CommitError::Repreparing);
-        }
-        self.link.check_room()?;
+        self.ready()?;
+        self.check_spec()?;
         self.limits.outputs(plan.main_outputs())?;
+        if plan.main_output_bank().is_some() {
+            return Err(CommitError::PackagedCrossfade);
+        }
         if delta.carry.prev != self.base().map(|p| p.id.0) {
             return Err(CommitError::StaleDelta);
         }
         self.fade_room(&delta)?;
         plan.verify_fades(self.base().map(|p| &**p), &delta)
             .map_err(CommitError::Fade)?;
-        self.life.clear_committed();
         // The plan was compiled elsewhere, from the spec as it stands (as a
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
-        self.send(plan, delta, units, &weights, false);
-        self.main_output.fading = None;
+        self.send(plan, delta, units, &weights, Sending::Package);
         Ok(())
     }
 
     /// Builds the commit of `plan` and sends it: the caller checked the
     /// link's room (`check_room`, `fade_room`), so the send cannot fail.
-    /// `resumed` is a re-prepare's second half.
+    /// `sending` says which path sent it, and so what the editor records of it.
     pub(super) fn send(
         &mut self,
         plan: Plan,
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         bus_weights: &BusLanes,
-        resumed: bool,
+        sending: Sending,
     ) {
+        let (resumed, committed, fading) = match sending {
+            Sending::Commit { committed, fading } => (false, Some(committed), fading),
+            Sending::Package => (false, None, None),
+            Sending::Resume => (true, None, None),
+        };
         self.touch();
         let fades = starting(&delta);
-        self.main_output
-            .sent(plan.main_output_bank(), self.link.next_seq());
+        self.main_output.sent(fading, self.link.next_seq());
         let plan = Arc::new(plan);
         for &key in units.keys() {
             let declared = plan.unit(key).map_or(ParamPorts::NONE, |u| u.shape.params);
@@ -479,7 +490,7 @@ impl<F: Float> Editor<F> {
         let event_taps = self.event_taps.take_pending();
         let meters = self.meters.take_pending();
         let mut commit = Commit::build(
-            self.link.next_seq(),
+            self.link.next_seq().0,
             Arc::clone(&plan),
             delta,
             resumed,
@@ -511,8 +522,21 @@ impl<F: Float> Editor<F> {
         );
         self.entries.keep_placed(&plan, &self.values);
         self.link.send(commit, fades);
-        // `commit` syncs the cells against the spec it last sent, then
-        // records this one.
-        self.life.sent(plan);
+        self.life.sent(plan, committed);
     }
+}
+
+/// The path that sent a plan, and what it leaves the editor with.
+pub(super) enum Sending {
+    /// [`commit`](Editor::commit): the spec and shapes the plan was compiled
+    /// from, and the old main output it crossfades, if any.
+    Commit {
+        committed: Committed,
+        fading: Option<Fading>,
+    },
+    /// [`package`](Editor::package): a plan compiled elsewhere, which records
+    /// nothing of the spec.
+    Package,
+    /// A re-prepare's second half.
+    Resume,
 }

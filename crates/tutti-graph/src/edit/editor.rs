@@ -57,7 +57,6 @@ use crate::SampleRates;
 use tutti_units::{At, SampleRate};
 
 use crate::EdgeId;
-use crate::Fade;
 use crate::compile::plan::{Delta, Plan};
 use crate::compile::{CompileError, Shapes};
 use crate::edges::event_tap::EventTapWriter;
@@ -83,6 +82,7 @@ mod entries;
 mod errors;
 mod lifecycle;
 pub(crate) mod link;
+mod main_output;
 mod nodes;
 mod outlets;
 #[cfg(test)]
@@ -95,6 +95,7 @@ use entries::Entries;
 pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::{EditLink, link};
+use main_output::MainOutput;
 use outlets::Outlets;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Gain;
@@ -235,7 +236,7 @@ pub struct Editor<F: Float = f32> {
     /// Moves on every write of the spec or the shapes (placing a unit,
     /// staging a crossfade or a latency cut, opening an outlet and leaving
     /// each make one in the same call): what
-    /// [`Committed::structure`](lifecycle::Committed::structure) is compared
+    /// [`Committed::structure`](Committed::structure) is compared
     /// with, so a commit that finds the two equal has nothing to compile.
     /// Never moves on a value control. [`revision`](Self::revision) is
     /// another fact: anything changed, values included.
@@ -243,7 +244,7 @@ pub struct Editor<F: Float = f32> {
     /// Each key ever placed: its record ([`Entry`](entries)).
     entries: Entries<F>,
     /// The open taps: each reader's width and end latch.
-    taps: Outlets<TapId, TapWriter<F>, TapOpened>,
+    taps: Outlets<TapId, TapWriter<F>, Arc<crate::edges::tap::TapEnd>>,
     /// The open event taps.
     event_taps: Outlets<EventTapId, EventTapWriter, Arc<crate::edges::tap::TapEnd>>,
     /// The open meters: each one's lane capacity.
@@ -275,125 +276,21 @@ pub struct Editor<F: Float = f32> {
     /// bounds each commit's state is built from.
     stager: Stager,
     /// How a change of the main output's generation is folded and faded.
-    main_output: MainOutputState,
+    main_output: MainOutput,
     /// Where each tap this editor opens takes its bell
     /// ([`notify_with`](Self::notify_with)); `None` opens taps without one.
     bells: Option<tutti_rt::BellsHandle>,
 }
 
-/// What the editor holds of the main output's generation: the host that folds
-/// it, the fade a change takes, and the crossfade the plans sent last carry.
-/// `fading` is `Some` only while `bank` is.
-struct MainOutputState {
-    /// The host that folds the main output into a device, once one is attached: a
-    /// commit whose main output it has no folds for is refused.
-    gate: Option<std::sync::Arc<dyn MainOutputGate>>,
-    /// How a commit that changes the main output's generation trades the old main output
-    /// for the new ([`set_main_output_fade`](Editor::set_main_output_fade)); `None` cuts.
-    fade: Option<Fade>,
-    /// The commit sent last that carries an old main output's channels, until a
-    /// commit without them follows.
-    bank: Option<SentBank>,
-    /// The old main output a crossfading plan renders, kept for the commits that
-    /// continue the crossfade.
-    fading: Option<Fading>,
-}
-
-impl MainOutputState {
-    fn new() -> Self {
-        Self {
-            gate: None,
-            fade: None,
-            bank: None,
-            fading: None,
-        }
-    }
-
-    /// Whether the host has folds for main output `id` (always, when no host
-    /// is attached).
-    fn publishes(&self, id: crate::MainOutputId) -> bool {
-        self.gate.as_ref().is_none_or(|g| g.published(id))
-    }
-
-    /// Whether the plan sent last carries an old main output whose crossfade
-    /// the executor has not been reported through.
-    fn fade_running(&self) -> bool {
-        self.bank.is_some_and(|b| !b.ended)
-    }
-
-    /// Whether the crossfade the plan sent last carries has been rendered
-    /// through: the next commit compiles the old main output away.
-    fn fade_ended(&self) -> bool {
-        self.bank.is_some_and(|b| b.ended)
-    }
-
-    /// The executor has rendered the crossfade of commit `ended` and before
-    /// through: returns whether that ended the one the plan sent last carries.
-    fn finish(&mut self, ended: u64) -> bool {
-        match self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
-            Some(bank) => {
-                bank.ended = true;
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The crossfade running, when a commit leaves its main output alone
-    /// (`now` is the spec's main output generation, `current` the committed
-    /// spec's). The same generation is the same declaration, so the width its
-    /// bank sits past stands.
-    fn continuing(
-        &self,
-        now: crate::MainOutputId,
-        current: Option<crate::MainOutputId>,
-    ) -> Option<&Fading> {
-        self.fading
-            .as_ref()
-            .filter(|f| f.main_output == now && current == Some(now) && !self.fade_ended())
-    }
-
-    /// A plan carrying `bank` was sent as commit `seq`. A bank that continues
-    /// the crossfade the last one carried keeps it: the executor keeps its
-    /// progress, and it ends under the seq that began it.
-    fn sent(&mut self, bank: Option<crate::MainOutputBank>, seq: u64) {
-        self.bank = bank.map(|bank| {
-            self.bank
-                .filter(|_| bank.continues)
-                .unwrap_or(SentBank { seq, ended: false })
-        });
-        if self.bank.is_none() {
-            self.fading = None;
-        }
-    }
-}
-
-/// The old main output of a crossfade in progress, as the commit that began it
-/// found it: what each commit while the crossfade runs compiles the bank from.
-/// It shares the committed spec and shapes until the crossfade ends.
+/// The spec and shapes a commit compiled the running plan from, shared with
+/// the editor until it writes them, and the editor's
+/// [`structure`](Editor::structure) at that commit. An editor whose structure
+/// is this one has the spec and shapes this holds.
 #[derive(Clone)]
-struct Fading {
-    /// The old main output's spec and shapes.
-    was: lifecycle::Committed,
-    /// The base of each gain lane of `was`'s spec when the crossfade began.
-    bases: BTreeMap<EdgeId, Gain>,
-    /// The fade of each gain lane of `was`'s spec that ran one when the
-    /// crossfade began.
-    fades: BTreeMap<EdgeId, EdgeFade>,
-    /// The main output generation that fades in.
-    main_output: crate::MainOutputId,
-    /// The bank the plans carry.
-    bank: crate::MainOutputBank,
-}
-
-/// A commit sent with an old main output's channels beside the main output's own.
-#[derive(Clone, Copy, Debug)]
-struct SentBank {
-    /// Its `seq`, or that of the commit that began the crossfade it
-    /// continues.
-    seq: u64,
-    /// Whether the executor has rendered its crossfade through.
-    ended: bool,
+struct Committed {
+    structure: u64,
+    spec: Arc<GraphSpec>,
+    shapes: Arc<Shapes>,
 }
 
 impl<F: Float> std::fmt::Debug for Editor<F> {
@@ -410,14 +307,6 @@ impl<F: Float> std::fmt::Debug for Editor<F> {
             .field("revision", &self.revision)
             .finish_non_exhaustive()
     }
-}
-
-/// What an open tap's reader was opened with.
-struct TapOpened {
-    /// Its lanes: the writer the executor holds has as many rings.
-    width: usize,
-    /// Raised when every node it read was removed.
-    end: Arc<crate::edges::tap::TapEnd>,
 }
 
 /// A panic payload as text.
@@ -474,7 +363,7 @@ impl<F: Float> Editor<F> {
             values: GraphValues::default(),
             revision: 0,
             stager,
-            main_output: MainOutputState::new(),
+            main_output: MainOutput::new(),
             bells: None,
         };
         (editor, Executor::new(prepare, cap, exec_link))
@@ -530,7 +419,7 @@ impl<F: Float> Editor<F> {
     /// of cannot reach the executor and render silence. The gate stays; a
     /// second call replaces it.
     pub fn set_main_output_gate(&mut self, gate: std::sync::Arc<dyn MainOutputGate>) {
-        self.main_output.gate = Some(gate);
+        self.main_output.attach(gate);
     }
 
     /// What this editor was bounded to with [`set_limits`](Self::set_limits).
@@ -894,7 +783,7 @@ impl<F: Float> Editor<F> {
 }
 
 /// The one `&mut` path to the spec or the shapes: moves `structure`, and
-/// copies the value first when a [`Committed`](lifecycle::Committed) or a
+/// copies the value first when a [`Committed`] or a
 /// crossfade still shares it, so what they hold never changes.
 fn write<'a, T: Clone>(slot: &'a mut Arc<T>, structure: &mut u64) -> &'a mut T {
     *structure += 1;
