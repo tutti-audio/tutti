@@ -1364,6 +1364,20 @@ fn rule_9_a_plan_parks_behind_a_lent_processor_and_runs_once() {
 }
 
 #[test]
+fn rule_9_a_deactivate_replaces_a_parked_plan() {
+    let s = active(RESTARTS, prep(1));
+    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(prep(2))));
+    let (s, _) = reply(s, Reply::Lent);
+    let (s, fx) = go(s, Event::Op(HostOp::Deactivate));
+    assert!(fx.is_empty());
+    let (s, fx) = go(s, Event::Returned);
+    assert_eq!(fx, [Fx::Deactivate]);
+    let (s, fx) = reply(s, Reply::Deactivated);
+    assert!(fx.is_empty());
+    assert_eq!(s.stage(), Stage::Loaded);
+}
+
+#[test]
 fn rule_10_a_plugin_that_will_not_stop_stays_active_and_is_lent_again() {
     let s = active(RESTARTS, prep(1));
     let (s, _) = go(s, Event::Op(HostOp::Reconfigure(prep(2))));
