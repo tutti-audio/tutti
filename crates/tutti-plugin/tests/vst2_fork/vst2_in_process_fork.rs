@@ -204,9 +204,12 @@ fn a_chunk_plugin_forks_with_the_live_chunk_and_renders_offline() {
     reset_probe();
     let _env = ProbeEnv::new(true);
     let (client, handle) = load();
-    handle
-        .load_state(main_thread(), &chunk_state(&[7, 1, 2]))
-        .expect("the probe takes a chunk");
+    assert!(
+        handle
+            .load_state(main_thread(), &chunk_state(&[7, 1, 2]))
+            .map(|loaded| loaded.expect("the probe takes a chunk"))
+            .is_ready()
+    );
 
     let key = NodeKey(1);
     let editor = live_graph(key, client);
@@ -246,7 +249,10 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
         .map(|p| p.id)
         .find(|id| *id == PresetId::Number(1))
         .expect("the probe declares two programs");
-    assert_eq!(handle.load_preset(main_thread(), &program_1), Ok(()));
+    assert_eq!(
+        handle.load_preset(main_thread(), &program_1),
+        std::task::Poll::Ready(Ok(()))
+    );
     handle
         .send_parameter(ParamId::new(0), Normalized::of(0.75))
         .expect("a declared parameter");
@@ -360,9 +366,12 @@ fn a_plugin_handed_back_by_into_client_forks() {
     )
     .expect("the probe opens");
     let handle = plugin.handle().clone();
-    handle
-        .load_state(main_thread(), &chunk_state(&[5]))
-        .expect("the probe takes a chunk");
+    assert!(
+        handle
+            .load_state(main_thread(), &chunk_state(&[5]))
+            .map(|loaded| loaded.expect("the probe takes a chunk"))
+            .is_ready()
+    );
     let Err(plugin) = plugin.into_client() else {
         panic!("an in-process VST2 plugin is not a PluginClient");
     };
@@ -522,7 +531,7 @@ fn a_live_program_out_of_the_second_instances_range_is_a_named_error() {
     let (client, handle) = load();
     assert_eq!(
         handle.load_preset(main_thread(), &PresetId::Number(1)),
-        Ok(())
+        std::task::Poll::Ready(Ok(()))
     );
     env.set("TUTTI_VST2_PROBE_PROGRAMS", "1");
     let err = client

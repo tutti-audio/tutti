@@ -30,6 +30,7 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
+use std::task::Poll;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
@@ -148,16 +149,15 @@ where
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
     ) -> Option<R> {
         if let Some(main) = MainThreadMarker::new() {
-            return Some(self.flushed(main, work));
+            return Some(work(main, &mut self.inner.lock()));
         }
         if !self.work.is_pumped() {
             return None;
         }
         let (answer, wait) = sync_channel(1);
         let inner = Arc::clone(&self.inner);
-        let post = self.edits.clone();
         self.work.defer(move |main| {
-            let _ = answer.send(flushed(&post, main, &mut inner.lock(), work));
+            let _ = answer.send(work(main, &mut inner.lock()));
         });
         await_answer(
             &wait,
@@ -178,18 +178,44 @@ where
         let (tx, answer) = Answer::channel();
         if let Some(main) = MainThreadMarker::new() {
             // The receiver is held here: the send cannot fail.
-            drop(tx.send(self.flushed(main, work)));
+            drop(tx.send(work(main, &mut self.inner.lock())));
         } else if self.work.is_pumped() {
             let inner = Arc::clone(&self.inner);
-            let post = self.edits.clone();
             self.work.defer(move |main| {
                 // A dropped receiver has no one to tell.
-                drop(tx.send(flushed(&post, main, &mut inner.lock(), work)));
+                drop(tx.send(work(main, &mut inner.lock())));
             });
         } else {
             drop(tx.send(None));
         }
         answer
+    }
+
+    /// `work` on the plugin on the main thread once the host's writes made
+    /// before this call are the plugin's, and `reply` told what it gave, or
+    /// `None` when it cannot be answered: the collector has never run (no main
+    /// thread to hop to). A write a node is draining is asked again on the main
+    /// thread's next tick; a job dropped unrun cancels the reply.
+    fn after_writes<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
+        reply: impl FnOnce(Option<R>) + Send + 'static,
+    ) {
+        let job = AfterWrites {
+            inner: Arc::clone(&self.inner),
+            post: self.edits.clone(),
+            mark: self.edits.mark(),
+            collector: self.work.clone(),
+            work,
+            reply,
+        };
+        if let Some(main) = MainThreadMarker::new() {
+            job.step(main);
+        } else if self.work.is_pumped() {
+            job.defer();
+        } else {
+            (job.reply)(None);
+        }
     }
 
     /// Queues the main-thread job that tells the plugin's edit controller of
@@ -223,22 +249,12 @@ where
         );
     }
 
-    /// `work` on the plugin under the instance's lock, after the host's
-    /// pending parameter writes are applied.
-    fn flushed<R>(
-        &self,
-        main: MainThreadMarker,
-        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
-    ) -> R {
-        flushed(&self.edits, main, &mut self.inner.lock(), work)
-    }
-
     /// `work` on the plugin now, when this is the main thread and the instance is
     /// not locked; `None` otherwise. Never waits.
     fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R) -> Option<R> {
         let main = MainThreadMarker::new()?;
         let mut instance = self.inner.try_lock()?;
-        Some(flushed(&self.edits, main, &mut instance, work))
+        Some(work(main, &mut instance))
     }
 }
 
@@ -268,19 +284,51 @@ pub(super) fn queue_inform(
     });
 }
 
-/// `work` on `instance`, after the writes no block has taken are applied to the
-/// plugin: a read or a save made through the backend sees every write made
-/// before it.
-fn flushed<L: InProcess, R>(
-    post: &super::host_edits::EditPost,
-    main: MainThreadMarker,
-    instance: &mut Instance<L>,
-    work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
-) -> R {
-    if let Some(control) = instance.control() {
-        post.flush(main, control);
+/// A call waiting for the host's writes to be the plugin's: `work` runs on the
+/// main thread under the instance lock once the sweep has reached `mark`.
+struct AfterWrites<L: InProcess, W, P> {
+    inner: Arc<Mutex<Instance<L>>>,
+    post: super::host_edits::EditPost,
+    mark: tutti_rt::Generation,
+    collector: MainWorkHandle,
+    work: W,
+    reply: P,
+}
+
+impl<L, R, W, P> AfterWrites<L, W, P>
+where
+    L: InProcess + 'static,
+    L::Processor: 'static,
+    R: Send + 'static,
+    W: FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
+    P: FnOnce(Option<R>) + Send + 'static,
+{
+    /// Settles the writes and runs the work; a node draining them now leaves it
+    /// for the next tick, or answers `None` when no main thread ticks. The
+    /// re-asks end: the claim's holder is one bounded audio-thread drain.
+    fn step(self, main: MainThreadMarker) {
+        let settled = {
+            let mut instance = self.inner.lock();
+            match instance.control() {
+                Some(control) => self.post.settle(main, control, self.mark),
+                None => Poll::Ready(()),
+            }
+        };
+        match settled {
+            Poll::Ready(()) => {
+                let answer = (self.work)(main, &mut self.inner.lock());
+                (self.reply)(Some(answer));
+            }
+            Poll::Pending if self.collector.is_pumped() => self.defer(),
+            Poll::Pending => (self.reply)(None),
+        }
     }
-    work(main, instance)
+
+    /// Runs [`step`](Self::step) on the main thread's next tick.
+    fn defer(self) {
+        let collector = self.collector.clone();
+        collector.defer(move |main| self.step(main));
+    }
 }
 
 impl<L> AnyThread for ControlBackend<L>
@@ -291,7 +339,15 @@ where
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
-        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
+        let (tx, answer) = Answer::channel();
+        self.after_writes(
+            move |main, instance| instance.control()?.parameter(main, id),
+            // A dropped receiver has no one to tell.
+            move |read| {
+                let _ = tx.send(read.flatten());
+            },
+        );
+        answer
     }
 
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
@@ -313,6 +369,12 @@ where
     /// the plugin. A read-only parameter is written like any other: the
     /// session checks that policy before it hands a write over.
     fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+        if self.lost.is_lost() {
+            // No node drains a lost plugin's slots: the write is counted, as
+            // `Health::refused_edits` reads it, and not stored.
+            self.edits.refuse(1);
+            return Ok(());
+        }
         self.edits.write(id, value)?;
         self.inform_controller_later();
         Ok(())
@@ -383,17 +445,42 @@ where
     /// can tell "the plugin has no state" from "asking it failed".
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
-    /// runs this on the session's executor: off the main thread it
-    /// is run by the main thread's next tick (`on_main`), and
+    /// runs this on the session's executor: it is run by the main thread's
+    /// next tick once the host's earlier writes are the plugin's, and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
+    /// On the main thread the writes are settled and the state saved at once.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-        match self.on_main(move |main, instance| {
-            instance.control().map(|control| {
-                control
-                    .save_state(main, state_use)
-                    .map_err(StateError::from)
-            })
-        }) {
+        if let Some(main) = MainThreadMarker::new() {
+            // No later tick to ask again on: settle now, then save.
+            let mut instance = self.inner.lock();
+            let Some(control) = instance.control() else {
+                return Err(StateError::PluginCrashed);
+            };
+            self.edits.settle_now(main, control);
+            return control
+                .save_state(main, state_use)
+                .map_err(StateError::from);
+        }
+        let (reply, wait) = sync_channel(1);
+        self.after_writes(
+            move |main, instance| {
+                instance.control().map(|control| {
+                    control
+                        .save_state(main, state_use)
+                        .map_err(StateError::from)
+                })
+            },
+            move |saved| {
+                let _ = reply.send(saved);
+            },
+        );
+        match await_answer(
+            &wait,
+            OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
+            Instant::now,
+        )
+        .flatten()
+        {
             Some(Some(state)) => state,
             Some(None) => Err(StateError::PluginCrashed),
             None => Err(StateError::Unavailable),
@@ -457,6 +544,10 @@ impl<L: InProcess> Health for ControlBackend<L> {
         tutti_plugin_types::PipelineCounts::default()
     }
 
+    fn refused_edits(&self) -> u64 {
+        self.edits.refused()
+    }
+
     fn terminate(&self, _reason: TerminationReason) {}
 }
 
@@ -472,8 +563,23 @@ where
         }
     }
 
-    fn before_restore(&self) {
-        self.edits.reset();
+    fn writes(&self) -> tutti_rt::Generation {
+        self.edits.mark()
+    }
+
+    fn settle(&self, main: MainThreadMarker, mark: tutti_rt::Generation) -> Poll<()> {
+        match self.inner.lock().control() {
+            Some(control) => self.edits.settle(main, control, mark),
+            None => Poll::Ready(()),
+        }
+    }
+
+    fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) -> Poll<()> {
+        let Poll::Ready(_held) = self.edits.restoring() else {
+            return Poll::Pending;
+        };
+        self.lend(f);
+        Poll::Ready(())
     }
 
     fn editor_idle(&self, main: MainThreadMarker) {
@@ -822,9 +928,9 @@ mod off_main_tests {
         );
     }
 
-    /// **A write made after a flush wins over it**, through the whole path: a
+    /// **A write made after a settle wins over it**, through the whole path: a
     /// write, a read (which flushes it into the plugin), a later write, a block.
-    /// The plugin ends on the later write; a flush that landed after the block
+    /// The plugin ends on the later write; a settle that landed after the block
     /// would leave it on the first.
     #[test]
     fn a_write_after_a_flush_is_the_plugins_last_word() {

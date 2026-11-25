@@ -307,12 +307,24 @@ pub(crate) trait Perform {
     fn perform(self, main: MainThreadMarker) -> Self::Output;
 }
 
+/// The in-process work `op`, polled once: a test that renders no block has no
+/// node draining the host's writes, so it is never `Pending`.
+fn ready<O: tutti_session::PluginOp>(
+    mut op: tutti_session::InProcessOp<O>,
+    main: MainThreadMarker,
+) -> Result<O::Output, O::Error> {
+    match op.poll(main, tutti_platform::Instant::now()) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => panic!("no node drains the host's writes in this test"),
+    }
+}
+
 impl Perform for tutti_session::SaveState {
     type Output = Result<PeerState, tutti_plugin_types::StateError>;
 
     fn perform(self, main: MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(save) => save.run(main),
+            Self::InProcess(save) => ready(save, main),
             Self::OutOfProcess(save) => tutti_fixtures::block_on(save),
         }
     }
@@ -323,7 +335,7 @@ impl Perform for tutti_session::RestoreState {
 
     fn perform(self, main: MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(restore) => restore.run(main),
+            Self::InProcess(restore) => ready(restore, main),
             Self::OutOfProcess(restore) => tutti_fixtures::block_on(restore),
         }
     }
@@ -334,7 +346,7 @@ impl Perform for tutti_session::LoadPreset {
 
     fn perform(self, main: MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(load) => load.run(main),
+            Self::InProcess(load) => ready(load, main),
             Self::OutOfProcess(load) => tutti_fixtures::block_on(load),
         }
     }

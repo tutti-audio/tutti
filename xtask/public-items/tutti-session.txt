@@ -592,7 +592,8 @@ fn plugin::load::PluginInstance::ports
 fn plugin::load::Session::load_plugin
 fn plugin::load::Session::load_plugin_as
 fn plugin::load::Session::swap_plugin
-fn plugin::op::InProcessOp::run
+fn plugin::op::InProcessOp::deadline
+fn plugin::op::InProcessOp::poll
 fn plugin::opened::PluginInfo::descriptor
 fn plugin::opened::PluginInfo::hosting
 fn plugin::opened::PluginInfo::id

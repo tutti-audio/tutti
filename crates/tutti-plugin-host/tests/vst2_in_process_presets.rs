@@ -88,7 +88,7 @@ fn a_listed_preset_loads_the_program_it_names() {
     let wanted = presets[2].id.clone();
     assert_eq!(
         handle.load_preset(main_thread(), &wanted),
-        Ok(()),
+        std::task::Poll::Ready(Ok(())),
         "loading a preset the plugin listed must be accepted"
     );
     assert_eq!(
@@ -121,7 +121,7 @@ fn an_id_from_another_format_is_refused() {
                 index: 1
             }
         ),
-        Err(PresetError::Refused),
+        std::task::Poll::Ready(Err(PresetError::Refused)),
         "a VST3 program id addresses no VST2 program"
     );
     assert_eq!(
@@ -129,7 +129,7 @@ fn an_id_from_another_format_is_refused() {
             main_thread(),
             &PresetId::Location(PathBuf::from("/x.clap-preset"))
         ),
-        Err(PresetError::Refused),
+        std::task::Poll::Ready(Err(PresetError::Refused)),
         "a CLAP preset path addresses no VST2 program"
     );
 
