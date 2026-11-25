@@ -1129,6 +1129,57 @@ fn rule_3_a_refused_retune_rolls_the_wanted_rate_back_and_tells_the_refusal() {
     ));
 }
 
+fn refused_96k(p: Prepare) -> Event {
+    let cause = RateRefusalCause::RolledBack {
+        running: p.rate(),
+        reason: "no".into(),
+    };
+    Event::Answered(Told::RateRefused(RateRefusal::new(
+        SampleRate::SR_96K,
+        cause,
+    )))
+}
+
+/// **A refusal rolls back only the want it answers**: the host asked for the
+/// refused rate again after the tell, so that want stays, the plugin is behind
+/// in it, and the refusal is still announced once.
+#[test]
+fn rule_3_a_want_made_after_the_tell_survives_its_refusal() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    s.retune_asked();
+    s.want(p.with_rate(SampleRate::SR_96K));
+    let (s, out) = step(s, refused_96k(p));
+    assert_eq!(s.wanted(), Some(p.with_rate(SampleRate::SR_96K)));
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Restart
+    );
+    let notices = out
+        .iter()
+        .filter(|e| matches!(e, Effect::Notify(Notice::Refused { .. })))
+        .count();
+    assert_eq!(notices, 1);
+}
+
+/// **A want for another rate made before the refusal arrives is kept and is
+/// the next tell.**
+#[test]
+fn rule_3_a_different_rate_wanted_before_the_refusal_is_the_next_tell() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    s.retune_asked();
+    s.want(p.with_rate(SampleRate::SR_192K));
+    let (s, _) = step(s, refused_96k(p));
+    assert_eq!(s.wanted(), Some(p.with_rate(SampleRate::SR_192K)));
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Restart
+    );
+}
+
 /// **A plugin's own restart after a refused rate activates with the rate it
 /// accepted, not the one it refused.**
 #[test]
