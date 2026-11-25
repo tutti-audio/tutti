@@ -272,9 +272,7 @@ field-leak tutti_midi_hardware::wire::Wire::out
 field-leak tutti_midi_runtime::outbound::clock_master::ClockMaster::refused
 field-leak tutti_midi_runtime::outbound::machine_control_out::MachineControlSender::rate
 field-leak tutti_midi_runtime::outbound::machine_control_out::MachineControlSender::to
-field-leak tutti_midi_runtime::schedule::clip_node::ClipEvents::chase
 field-leak tutti_midi_runtime::schedule::clip_node::ClipEvents::events
-field-leak tutti_midi_runtime::schedule::clip_node::ClipEvents::header
 field-leak tutti_music::meter::BarPosition::signature
 field-leak tutti_music::meter::MeterMap::changes
 field-leak tutti_nodes::convolution::node::ConvolverNode::gain
