@@ -4,7 +4,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::TempoMap;
 use tutti_timeline::TimeSignatureSlot;
-use tutti_units::{Beat, SampleRate};
+use tutti_units::{Beat, SampleRate, Samples};
 
 use crate::Session;
 
@@ -49,6 +49,22 @@ fn an_update_frees_what_a_block_held_across_a_replacement() {
 
     let _ = s.update();
     assert!(gone.upgrade().is_none(), "the meter is freed");
+}
+
+/// **An update with no edit publishes no compensation table**: the table goes
+/// out with a plan, and a clean session sends none, so a sentinel written into
+/// the table after the first commit survives a second update.
+#[test]
+fn an_update_with_no_edit_publishes_no_compensation_table() {
+    let mut s = detached();
+    let _ = s.update();
+    assert!(!s.graph_ref().has_uncommitted_edits());
+    let sentinel = [Samples::new(99)];
+    s.compensation().set(&sentinel);
+
+    let _ = s.update();
+
+    assert_eq!(s.compensation().to_vec(), sentinel, "no table published");
 }
 
 fn detached() -> Session<&'static str, crate::Detached> {
