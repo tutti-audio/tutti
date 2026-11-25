@@ -38,7 +38,7 @@ impl Loaded for AuLoaded {
     const RESTARTS: RestartRules = RestartRules::NONE;
 
     /// An AUv2 unit renders 32-bit audio only.
-    fn widths(&self) -> Widths {
+    fn widths(&mut self, _main: MainThreadMarker) -> Widths {
         WIDTHS
     }
 

@@ -1599,8 +1599,8 @@ pub fn halves_of_two_activations_are_stuck<F: Format>() {
 ///
 /// Panics when an assertion of the case fails.
 pub fn widths_report_the_declared_precision<F: Format>() {
-    let loaded = F::load();
-    let widths = loaded.widths();
+    let mut loaded = F::load();
+    let widths = loaded.widths(main_thread());
     assert!(
         widths.accepts(FloatWidth::F64),
         "the shared plugin declares 64-bit audio: widths {widths:?}"
