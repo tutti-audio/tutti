@@ -506,12 +506,12 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
 // `GainDb`.
 tutti_graph::declare_params!([F: Float + SimdLanes + Lerp] MultibandCompressorNode<F>, n {
     [b in 0..n.rig.bands.len()] {
-        Threshold => Db = &n.rig.bands[b].threshold,
-        Knee => Db = &n.rig.bands[b].knee,
-        Ratio => CompressionRatio = &n.rig.bands[b].ratio,
-        Attack => Seconds = &n.rig.bands[b].attack,
-        Release => Seconds = &n.rig.bands[b].release,
-        GainDb => Db = &n.rig.bands[b].makeup;
+        Threshold => Db { whole } = &n.rig.bands[b].threshold,
+        Knee => Db { whole } = &n.rig.bands[b].knee,
+        Ratio => CompressionRatio { whole } = &n.rig.bands[b].ratio,
+        Attack => Seconds { whole } = &n.rig.bands[b].attack,
+        Release => Seconds { whole } = &n.rig.bands[b].release,
+        GainDb => Db { whole } = &n.rig.bands[b].makeup;
         Bypass => bool = &n.rig.bands[b].bypass,
         Solo => bool = &n.rig.bands[b].solo,
     },
@@ -950,6 +950,19 @@ mod tests {
     /// Two bands split at 1 kHz: DC is all band 0, and 10 kHz is
     /// `x^4 / (1 + x^4)` band 1 with `x` the warped ratio, the rest
     /// (`1e-4`) band 0. Band 0 -3 dB and band 1 +6 dB.
+    /// **A band's detector and make-up rows land whole; the crossovers are
+    /// smoothed**: each band runs a compressor bank that ramps its make-up
+    /// itself and takes its detector settings whole, as `CompressorNode` does,
+    /// so the graph must not ramp them too. Three bands: six ported rows each
+    /// (bypass and solo have no port), then two cutoffs.
+    #[test]
+    fn band_rows_are_whole_and_cutoffs_smoothed() {
+        let (n, _) = node(3);
+        let ports = n.declared_ports();
+        assert_eq!(ports.len(), 3 * 6 + 2);
+        assert_eq!(ports, ports.whole((1 << (3 * 6)) - 1));
+    }
+
     #[test]
     fn makeup_applies_per_band() {
         let (n, c) = node(2);
