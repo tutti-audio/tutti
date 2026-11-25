@@ -377,8 +377,8 @@ pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
     DepthKey, DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead,
     LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, ParamTarget,
-    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
-    TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
+    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, ShapeKey,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 pub use value::{
     Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,

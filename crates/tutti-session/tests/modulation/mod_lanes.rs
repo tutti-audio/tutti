@@ -23,14 +23,14 @@ use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope};
+use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope, Polarity};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRefusal,
     ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef,
-    ParamTarget, Problem, Replacement, RouteSpec, Scale, ScaleError, Session, SessionEvent,
-    TargetName,
+    ParamTarget, PolarityTarget, Problem, Replacement, RouteSpec, Scale, ScaleError, Session,
+    SessionEvent, TargetName,
 };
 use tutti_units::{
     Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -1270,6 +1270,55 @@ fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
         s.mods_mut().set_scale(scaled, None),
         Err(ScaleError::NoSuchRoute(NoSuchModRoute(scaled)))
     );
+}
+
+/// **A scale's polarity is its own target.** From the scene's 600 (scale
+/// `0.5` at depth 1, bipolar), a unipolar scale maps the macro's 0.5 to
+/// `(0.5 + 1) / 2` = 0.75: `1000 * 0.2 * 0.75` = 150 over the knob, so 650.
+/// The route's own polarity is not the scale's: the route's macro at 1 stays
+/// 1 under unipolar, so writing it moves nothing.
+#[test]
+fn a_scales_polarity_shapes_the_scale_not_the_route() {
+    let (mut s, mut side, _, full, _) = scaled_scene();
+    let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
+    s.set(PolarityTarget::scale_of(scaled).to(Polarity::Unipolar))
+        .unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+    s.set(scaled.polarity().to(Polarity::Unipolar)).unwrap();
+    let _ = s.update();
+    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+}
+
+/// **A scale needs a time function on both sides.** A follower as the scale's
+/// source, or as the scaled route's own source, is refused at the call and
+/// nothing changes.
+#[test]
+fn a_scale_by_or_of_a_signal_source_is_refused() {
+    let (mut s, _side) = rig(1);
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    main_output(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let follower = m.follower(Follower::default(), probe);
+    let mac = m.macro_(0.5);
+    let by_time = m
+        .route(RouteSpec::new(mac, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    assert_eq!(
+        m.set_scale(by_time, Some(Scale::new(follower, Bipolar::of(1.0)))),
+        Err(ScaleError::SignalSource { route: by_time })
+    );
+    let by_signal = m
+        .route(RouteSpec::new(follower, cutoff, Bipolar::of(0.2)))
+        .unwrap();
+    assert_eq!(
+        m.set_scale(by_signal, Some(Scale::new(mac, Bipolar::of(1.0)))),
+        Err(ScaleError::SignalSource { route: by_signal })
+    );
+    assert_eq!(m.view().route(by_time).unwrap().scale, None);
+    assert_eq!(m.view().route(by_signal).unwrap().scale, None);
 }
 
 // ------------------------------------------------------------- fork --

@@ -20,7 +20,7 @@ use tutti_units::Bipolar;
 
 use super::error::SetRefusal;
 use super::param::ParamTarget;
-use super::slot::{Held, SlotCell, SlotId, keyed_slot_target};
+use super::slot::{Held, ShapeKey, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
 use crate::{ModRouteId, ModSourceId};
@@ -160,7 +160,8 @@ impl Held for MacroField {
 
 keyed_slot_target!(
     /// How a modulation route maps its source's value onto its span
-    /// ([`Polarity`]), as [`ModRouteId::polarity`] names it.
+    /// ([`Polarity`]), as [`ModRouteId::polarity`] names it; or the route's
+    /// scale does, as [`PolarityTarget::scale_of`] names it.
     ///
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update), which republishes the
@@ -169,17 +170,18 @@ keyed_slot_target!(
     /// update is dropped.
     PolarityTarget,
     Polarity,
-    ModRouteId,
+    ShapeKey,
     RoutePolarity
 );
 
 keyed_slot_target!(
     /// The law that shapes a modulation route's value ([`Law`]), as
-    /// [`ModRouteId::curve`] names it. Staged and published as
+    /// [`ModRouteId::curve`] names it, or [`CurveTarget::scale_of`] for a scale's.
+    /// Staged and published as
     /// [`PolarityTarget`] is.
     CurveTarget,
     Law,
-    ModRouteId,
+    ShapeKey,
     RouteCurve
 );
 
@@ -215,13 +217,31 @@ impl ModRouteId {
     /// The route's polarity.
     #[must_use]
     pub const fn polarity(self) -> PolarityTarget {
-        PolarityTarget::new(self)
+        PolarityTarget::new(ShapeKey::Route(self))
     }
 
     /// The route's law.
     #[must_use]
     pub const fn curve(self) -> CurveTarget {
-        CurveTarget::new(self)
+        CurveTarget::new(ShapeKey::Route(self))
+    }
+}
+
+impl PolarityTarget {
+    /// The polarity of the scale of `route`
+    /// ([`Mods::set_scale`](crate::Mods::set_scale)).
+    #[must_use]
+    pub const fn scale_of(route: ModRouteId) -> Self {
+        Self::new(ShapeKey::Scale(route))
+    }
+}
+
+impl CurveTarget {
+    /// The law of the scale of `route`
+    /// ([`Mods::set_scale`](crate::Mods::set_scale)).
+    #[must_use]
+    pub const fn scale_of(route: ModRouteId) -> Self {
+        Self::new(ShapeKey::Scale(route))
     }
 }
 

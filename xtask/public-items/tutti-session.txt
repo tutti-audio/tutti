@@ -117,6 +117,7 @@ enum value::error::SetRefusal
 enum value::error::UnitError
 enum value::error::ValueErrorKind
 enum value::slot::DepthKey
+enum value::slot::ShapeKey
 enum value::slot::SlotId
 enum value::target::TargetId
 enum value::watcher::ChangedBy
@@ -804,11 +805,13 @@ fn value::plugin::PluginMidiMapTarget::node
 fn value::plugin::PluginParamTarget::id
 fn value::plugin::PluginParamTarget::node
 fn value::plugin::PluginTrackInfoTarget::node
+fn value::program::CurveTarget::scale_of
 fn value::program::ModRouteId::curve
 fn value::program::ModRouteId::polarity
 fn value::program::ModSourceId::rate
 fn value::program::ModSourceId::value
 fn value::program::ParamTarget::automation
+fn value::program::PolarityTarget::scale_of
 fn value::range::ParamTarget::range
 fn value::range::RangeTarget::of
 fn value::saved::SavedValues::is_empty

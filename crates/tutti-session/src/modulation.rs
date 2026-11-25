@@ -51,7 +51,7 @@ use tutti_buffers::Float;
 use crate::graph::Graph;
 use crate::value::{
     Automation, AutomationCell, AutomationField, Bounds, Declared, DepthKey, DepthSlot, Edited,
-    Field, MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
+    Field, MacroField, PublishedSlot, RangeSlot, RateField, ShapeKey, SlotId, ValueTable,
 };
 
 /// How long a modulation target may stay unresolved before it is logged:
@@ -915,6 +915,17 @@ struct OwnRoute {
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
+    /// The polarity and curve of the scale, the targets of
+    /// `PolarityTarget::scale_of` and `CurveTarget::scale_of`; `Some` when
+    /// `decl.scale` is.
+    scale: Option<OwnScale>,
+}
+
+/// The polarity and curve a route's scale is declared with.
+#[derive(Debug)]
+struct OwnScale {
+    polarity: Arc<Declared<Polarity>>,
+    curve: Arc<Declared<Law>>,
 }
 
 impl OwnRoute {
@@ -923,6 +934,16 @@ impl OwnRoute {
         RouteDecl {
             polarity: self.polarity.get(),
             curve: self.curve.get(),
+            scale: self
+                .decl
+                .scale
+                .clone()
+                .zip(self.scale.as_ref())
+                .map(|(scale, shape)| tutti_modulation::Scale {
+                    polarity: shape.polarity.get(),
+                    curve: shape.curve.get(),
+                    ..scale
+                }),
             ..self.decl.clone()
         }
     }
@@ -1007,19 +1028,19 @@ impl OwnMods {
     /// Registers the targets of route `id`.
     fn provide_route(&self, id: ModRouteId, route: &OwnRoute) {
         self.table.provide_staged(
-            SlotId::RoutePolarity(id),
+            SlotId::RoutePolarity(ShapeKey::Route(id)),
             PublishedSlot::new(Field(Arc::clone(&route.polarity))),
         );
         self.table.provide_staged(
-            SlotId::RouteCurve(id),
+            SlotId::RouteCurve(ShapeKey::Route(id)),
             PublishedSlot::new(Field(Arc::clone(&route.curve))),
         );
         self.table.provide(
             Self::depth_slot(route),
             Arc::new(DepthSlot(route.decl.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
-        if let Some(scale) = &route.decl.scale {
-            self.provide_scale(id, scale);
+        if let (Some(scale), Some(shape)) = (&route.decl.scale, &route.scale) {
+            self.provide_scale(id, scale, shape);
         }
     }
 
@@ -1028,16 +1049,28 @@ impl OwnMods {
         SlotId::RouteDepth(DepthKey::Into(source_id(route.decl.source), route.target))
     }
 
-    /// The slot of the depth of the scale of route `id`.
-    fn scale_slot(id: ModRouteId) -> SlotId {
-        SlotId::RouteDepth(DepthKey::Scale(id))
+    /// The slots of the scale of route `id`: its depth, polarity and curve.
+    fn scale_slots(id: ModRouteId) -> [SlotId; 3] {
+        [
+            SlotId::RouteDepth(DepthKey::Scale(id)),
+            SlotId::RoutePolarity(ShapeKey::Scale(id)),
+            SlotId::RouteCurve(ShapeKey::Scale(id)),
+        ]
     }
 
-    fn provide_scale(&self, id: ModRouteId, scale: &tutti_modulation::Scale) {
+    /// Registers the targets of the scale of route `id`.
+    fn provide_scale(&self, id: ModRouteId, scale: &tutti_modulation::Scale, shape: &OwnScale) {
+        let [depth, polarity, curve] = Self::scale_slots(id);
         self.table.provide(
-            Self::scale_slot(id),
+            depth,
             Arc::new(DepthSlot(scale.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
+        self.table.provide_staged(
+            polarity,
+            PublishedSlot::new(Field(Arc::clone(&shape.polarity))),
+        );
+        self.table
+            .provide_staged(curve, PublishedSlot::new(Field(Arc::clone(&shape.curve))));
     }
 
     /// Clears the scale of every route that `source` scales.
@@ -1046,9 +1079,10 @@ impl OwnMods {
             .routes
             .iter_mut()
             .filter(|(_, r)| r.decl.scale.as_ref().is_some_and(|s| s.source == source))
-            .map(|(&key, r)| {
+            .flat_map(|(&key, r)| {
                 r.decl.scale = None;
-                Self::scale_slot(route_id(key))
+                r.scale = None;
+                Self::scale_slots(route_id(key))
             })
             .collect();
         self.table.unprovide(&slots);
@@ -1082,11 +1116,14 @@ impl OwnMods {
             .into_iter()
             .flat_map(|(key, route)| {
                 let id = route_id(key);
+                let [depth, polarity, curve] = Self::scale_slots(id);
                 [
-                    SlotId::RoutePolarity(id),
-                    SlotId::RouteCurve(id),
+                    SlotId::RoutePolarity(ShapeKey::Route(id)),
+                    SlotId::RouteCurve(ShapeKey::Route(id)),
                     Self::depth_slot(&route),
-                    Self::scale_slot(id),
+                    depth,
+                    polarity,
+                    curve,
                 ]
             })
             .collect();
@@ -1680,6 +1717,7 @@ impl Mods<'_> {
             target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
+            scale: None,
         };
         self.own.provide_route(route_id(key), &route);
         self.own.routes.insert(key, route);
@@ -1705,7 +1743,10 @@ impl Mods<'_> {
     /// Sets, replaces (`Some`) or clears (`None`) what scales the depth of
     /// `route`: a route has at most one scale. The scale's depth is
     /// [`DepthTarget::scale_of`](crate::DepthTarget::scale_of), starting at
-    /// the one `scale` gives; a replaced scale's is dropped with it. A scale
+    /// the one `scale` gives; its polarity and curve are
+    /// [`PolarityTarget::scale_of`](crate::PolarityTarget::scale_of) and
+    /// [`CurveTarget::scale_of`](crate::CurveTarget::scale_of), starting
+    /// bipolar and linear; a replaced scale's are dropped with it. A scale
     /// goes with its route, and with its source when that is removed.
     ///
     /// # Errors
@@ -1739,12 +1780,17 @@ impl Mods<'_> {
                 })
             }
         };
-        self.own.table.unprovide(&[OwnMods::scale_slot(route)]);
-        if let Some(scale) = &new {
-            self.own.provide_scale(route, scale);
+        let shape = new.as_ref().map(|_| OwnScale {
+            polarity: Declared::new(Polarity::Bipolar, &self.own.edited),
+            curve: Declared::new(Law::Linear, &self.own.edited),
+        });
+        self.own.table.unprovide(&OwnMods::scale_slots(route));
+        if let (Some(scale), Some(shape)) = (&new, &shape) {
+            self.own.provide_scale(route, scale, shape);
         }
         if let Some(declared) = self.own.routes.get_mut(&key) {
             declared.decl.scale = new;
+            declared.scale = shape;
         }
         Ok(())
     }
