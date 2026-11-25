@@ -14,7 +14,7 @@ use tutti_clap_ffi::{EventSink, EventSource, input_raw_for_test, output_raw_for_
 use tutti_clap_host::{ClapHost, InputEventList, InputStream, OutputEventList, OutputStream};
 
 /// `InputEventList::as_raw`.
-pub trait InputListRaw {
+pub(crate) trait InputListRaw {
     /// The `clap_input_events` over this list.
     fn as_raw(&self) -> *const clap_input_events;
 }
@@ -29,7 +29,7 @@ impl InputListRaw for InputEventList {
 }
 
 /// `OutputEventList::as_raw_mut`.
-pub trait OutputListRaw {
+pub(crate) trait OutputListRaw {
     /// The `clap_output_events` into this list.
     fn as_raw_mut(&mut self) -> *const clap_output_events;
 }
@@ -44,7 +44,7 @@ impl OutputListRaw for OutputEventList {
 }
 
 /// `ClapHost::as_raw`.
-pub trait HostRaw {
+pub(crate) trait HostRaw {
     /// The `clap_host` a plugin is handed.
     fn as_raw(&self) -> *const clap_host;
 }
@@ -56,7 +56,7 @@ impl HostRaw for ClapHost {
 }
 
 /// `OutputStream::as_raw`.
-pub trait OutputStreamRaw {
+pub(crate) trait OutputStreamRaw {
     /// The `clap_ostream` over this stream.
     fn as_raw(&mut self) -> *const clap_ostream;
 }
@@ -69,7 +69,7 @@ impl OutputStreamRaw for OutputStream {
 }
 
 /// `InputStream::as_raw`.
-pub trait InputStreamRaw {
+pub(crate) trait InputStreamRaw {
     /// The `clap_istream` over this stream.
     fn as_raw(&mut self) -> *const clap_istream;
 }

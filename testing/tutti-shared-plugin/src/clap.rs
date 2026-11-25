@@ -50,7 +50,7 @@ use clap_sys::version::CLAP_VERSION;
 use crate::core::{self, Core, Dsp, Ev, MAX_CHANNELS, Sample, Transport};
 
 /// The plugin id.
-pub const ID: &CStr = c"tutti.shared-test-plugin";
+pub(crate) const ID: &CStr = c"tutti.shared-test-plugin";
 
 struct Inst {
     plugin: clap_plugin,
@@ -825,7 +825,7 @@ unsafe extern "C" fn get_factory(id: *const c_char) -> *const c_void {
 
 /// The CLAP entry symbol.
 #[unsafe(no_mangle)]
-pub static clap_entry: clap_plugin_entry = clap_plugin_entry {
+pub(crate) static clap_entry: clap_plugin_entry = clap_plugin_entry {
     clap_version: CLAP_VERSION,
     init: Some(entry_init),
     deinit: Some(entry_deinit),

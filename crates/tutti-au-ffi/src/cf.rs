@@ -19,7 +19,7 @@ use core_foundation_sys::base::{CFRelease, CFTypeRef};
 use crate::error::{Error, Result};
 
 /// Owned CoreFoundation string (Create rule: released on drop).
-pub struct CfString(CfCFString);
+pub(crate) struct CfString(CfCFString);
 
 impl std::fmt::Debug for CfString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,7 +47,7 @@ impl CfString {
     }
 
     /// An owned CFString holding `text`.
-    pub fn new(text: &str) -> Self {
+    pub(crate) fn new(text: &str) -> Self {
         Self(CfCFString::new(text))
     }
 
@@ -65,7 +65,7 @@ impl std::fmt::Display for CfString {
 }
 
 /// Owned CoreFoundation URL (Create rule: released on drop).
-pub struct CfUrl(CFURL);
+pub(crate) struct CfUrl(CFURL);
 
 impl std::fmt::Debug for CfUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,7 +100,7 @@ impl CfUrl {
     /// The URL as a filesystem path, or `None` if it does not name one. A
     /// `file://` URL is the only kind `kAudioUnitProperty_IconLocation` is
     /// documented to return.
-    pub fn to_path_string(&self) -> Option<String> {
+    pub(crate) fn to_path_string(&self) -> Option<String> {
         self.0.to_path().map(|p| p.to_string_lossy().into_owned())
     }
 }
@@ -112,7 +112,7 @@ impl CfUrl {
 /// does **not** hold CoreFoundation objects: its elements are bare `AUPreset`
 /// structs, which `core-foundation`'s typed accessors would mistake for
 /// retainable CF types.
-pub struct CfArray(CFArray<*const std::os::raw::c_void>);
+pub(crate) struct CfArray(CFArray<*const std::os::raw::c_void>);
 
 impl std::fmt::Debug for CfArray {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -138,7 +138,7 @@ impl CfArray {
     }
 
     /// Number of elements in the array.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         // `CFArrayGetCount` returns a signed `CFIndex`; a negative count is not
         // representable for a live array, so clamp rather than propagate a
         // nonsense length into a slice index.
@@ -163,7 +163,7 @@ impl CfArray {
 }
 
 /// Owned CoreFoundation property list (Create rule: released on drop).
-pub struct CfPlist(CFPropertyList);
+pub(crate) struct CfPlist(CFPropertyList);
 
 impl std::fmt::Debug for CfPlist {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -198,7 +198,7 @@ impl CfPlist {
     ///
     /// # Errors
     /// [`Error::Invalid`] when CoreFoundation cannot serialize it.
-    pub fn to_binary(&self) -> Result<Vec<u8>> {
+    pub(crate) fn to_binary(&self) -> Result<Vec<u8>> {
         let data = propertylist::create_data(self.as_raw(), kCFPropertyListBinaryFormat_v1_0)
             .map_err(|_| Error::Invalid("CFPropertyListCreateData failed".into()))?;
         Ok(data.bytes().to_vec())
@@ -208,7 +208,7 @@ impl CfPlist {
     ///
     /// # Errors
     /// [`Error::Invalid`] when the bytes are not a property list.
-    pub fn from_binary(bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn from_binary(bytes: &[u8]) -> Result<Self> {
         let data = CFData::from_buffer(bytes);
         let (plist_ref, _format) =
             propertylist::create_with_data(data, propertylist::kCFPropertyListImmutable)

@@ -191,9 +191,11 @@ impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
             .streamer
             .as_ref()
             .ok_or(OpenStreamError::StreamerGone)?;
-        streamer
+        let (stream, reader) = streamer
             .adopt(opened)
-            .map_err(|error| adopt_refusal(cut, error))
+            .map_err(|error| adopt_refusal(cut, error))?;
+        session.sampler.keep(stream.reclaimer());
+        Ok((stream, reader))
     }
 }
 

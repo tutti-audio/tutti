@@ -10,7 +10,7 @@ use tutti_rt::Mutex;
 
 /// One event: its level, target, message and the `plugin` and `severity` fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Logged {
+pub(crate) struct Logged {
     pub level: Level,
     pub target: String,
     pub message: String,
@@ -66,7 +66,7 @@ impl<S: Subscriber> Layer<S> for Collect {
 
 /// Runs `f` on this thread and returns the events it emitted on target
 /// `tutti::plugin`, in order.
-pub fn plugin_events(f: impl FnOnce()) -> Vec<Logged> {
+pub(crate) fn plugin_events(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::with_default(subscriber, f);

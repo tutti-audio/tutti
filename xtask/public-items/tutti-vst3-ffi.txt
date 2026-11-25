@@ -45,7 +45,6 @@ fn bus_buffers::BusBuffers::max_block
 fn bus_buffers::BusBuffers::new
 fn bus_buffers::BusBuffers::num_buses
 fn bus_buffers::BusBuffers::width
-fn com::attr_list::AttributeList::new
 fn com::component_handler::ComponentHandler::dropped_notifications
 fn com::component_handler::ComponentHandler::new
 fn com::component_handler::ComponentHandler::pending_notifications
@@ -75,7 +74,6 @@ fn com::event_list::Staging::intern
 fn com::event_list::Staging::push
 fn com::event_list::Staging::reassemble
 fn com::event_list::Staging::room
-fn com::message::Message::new
 fn com::param_changes::ParamStaging::prepend
 fn com::param_changes::ParamStaging::refill
 fn com::param_changes::ParamStaging::refill_where
@@ -85,7 +83,6 @@ fn com::param_changes::ParameterChangesImpl::hold_queue_as_plugin
 fn com::param_changes::ParameterChangesImpl::points_dropped
 fn com::param_changes::ParameterChangesImpl::try_begin
 fn com::param_changes::ParameterChangesImpl::with_queues
-fn com::param_queue::ParamValueQueueImpl::with_room
 fn conformance::clear_observer
 fn conformance::set_observer
 fn error::Vst3Error::from_code
@@ -261,18 +258,15 @@ struct audio::ProcessIo
 struct bus_buffers::BoundBuses
 struct bus_buffers::BusBuffers
 struct com::RunLoopActivity
-struct com::attr_list::AttributeList
 struct com::component_handler::ComponentHandler
 struct com::component_handler::ProgressDescription
 struct com::component_handler::RestartFlags
 struct com::event_list::EventList
 struct com::event_list::Staged
 struct com::event_list::Staging
-struct com::message::Message
 struct com::param_changes::Busy
 struct com::param_changes::ParamStaging
 struct com::param_changes::ParameterChangesImpl
-struct com::param_queue::ParamValueQueueImpl
 struct module::ClassInfo
 struct module::FactoryFlags
 struct module::FactoryInfo
@@ -300,5 +294,4 @@ struct types::info::Vst3ParameterInfo
 struct types::info::Vst3ProgramListInfo
 struct types::info::Vst3UnitInfo
 struct types::transport::ProcessContextRequirements
-trait sdk::private::Sealed
 type conformance::Observer

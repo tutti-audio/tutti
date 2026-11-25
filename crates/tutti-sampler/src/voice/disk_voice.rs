@@ -48,7 +48,7 @@ use crate::streamer::{Cells, RingReader, SharedReader, StatusCell, StreamFile, S
 /// The stream's `Cells` stay a separate wiring arg. The transport is not
 /// wiring: a voice reads it from each block's `Env`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiskVoiceConfig {
+pub(crate) struct DiskVoiceConfig {
     /// Span of timeline this voice occupies. Mirrors `MemorySource` — see
     /// [`VoiceWindow`].
     pub window: VoiceWindow,

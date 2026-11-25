@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use tutti_sf2::SoundFont;
 
-pub use tutti_fixtures::sf2::{Inst, Preset, Zone};
+pub(crate) use tutti_fixtures::sf2::{Inst, Preset, Zone};
 
 /// The file, parsed.
-pub fn font(presets: &[Preset], insts: &[Inst]) -> Arc<SoundFont> {
+pub(crate) fn font(presets: &[Preset], insts: &[Inst]) -> Arc<SoundFont> {
     Arc::new(
         SoundFont::open(tutti_fixtures::sf2::bytes(presets, insts))
             .expect("the built SoundFont parses"),
@@ -17,7 +17,7 @@ pub fn font(presets: &[Preset], insts: &[Inst]) -> Arc<SoundFont> {
 }
 
 /// One preset (bank 0, program 0) with one instrument of the given zones.
-pub fn one_preset(zones: Vec<Zone>) -> Arc<SoundFont> {
+pub(crate) fn one_preset(zones: Vec<Zone>) -> Arc<SoundFont> {
     font(
         &[Preset {
             name: "p",
@@ -31,7 +31,7 @@ pub fn one_preset(zones: Vec<Zone>) -> Arc<SoundFont> {
 
 /// One preset (bank 0, program 0) over one instrument of the given zones, with a
 /// sample header (its own sine) for each of `samples`.
-pub fn one_preset_with_samples(
+pub(crate) fn one_preset_with_samples(
     zones: Vec<Zone>,
     samples: &[tutti_fixtures::sf2::SampleSpec],
 ) -> Arc<SoundFont> {

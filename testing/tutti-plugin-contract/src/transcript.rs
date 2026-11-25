@@ -94,7 +94,7 @@ pub fn select<F: Format, C: Control + ?Sized>(c: &mut C, editor: u32, notice: u3
 
 /// Selects the plugin's tail behaviour (the fourth byte of the mode word),
 /// keeping the rest of the word, through the state like [`set_mode`].
-pub fn select_tail<F: Format, C: Control + ?Sized>(c: &mut C, tail: u32) {
+pub(crate) fn select_tail<F: Format, C: Control + ?Sized>(c: &mut C, tail: u32) {
     let state = c
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
         .expect("the plugin saves");

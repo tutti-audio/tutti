@@ -143,3 +143,38 @@ fn a_dropped_session_ends_its_streamer_and_tells_the_stream() {
         "the woken streamer never ended and dropped the stream"
     );
 }
+
+/// **An update frees the loop a kept stream handle replaced while a reader held it.** A
+/// publish that lands while the streamer's cycle holds the loan retires the value
+/// unfreed, and the handle is no node's, so nothing but the session's sweep frees it.
+#[test]
+fn an_update_frees_a_loop_replaced_while_the_streamer_held_it() {
+    use std::sync::Arc;
+    use tutti_sampler::Loop;
+    use tutti_units::Samples;
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let mut s = session();
+    let (stream, _reader) = open(&mut s, &path);
+    let cell = stream.looping_cell();
+    let replaced = cell.current();
+    let mut cycle = cell.reader();
+    {
+        let _held = cycle.lend();
+        let span = Loop::new(Samples::new(100)..Samples::new(2_000)).expect("a loop");
+        cell.publish(Some(span));
+    }
+    assert_eq!(
+        Arc::strong_count(&replaced),
+        2,
+        "the publish retires the value the cycle held"
+    );
+    let _ = s.update();
+    assert_eq!(
+        Arc::strong_count(&replaced),
+        1,
+        "the session's sweep frees it"
+    );
+}

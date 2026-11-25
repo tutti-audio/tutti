@@ -27,7 +27,7 @@ use tutti_vst3_host::{
 /// VST3's activation at the width `T`: `activate_typed`, whose Processor is
 /// typed by it.
 #[derive(Debug)]
-pub struct Typed<T>(PhantomData<fn() -> T>);
+pub(crate) struct Typed<T>(PhantomData<fn() -> T>);
 
 impl<T: Vst3Sample> Activation for Typed<T> {
     type Loaded = Vst3Loaded;
@@ -54,7 +54,7 @@ impl<T: Vst3Sample> Activation for Typed<T> {
 }
 
 /// The two halves of one activation.
-pub type Active<T = f32> = tutti_fixtures::Active<Typed<T>>;
+pub(crate) type Active<T = f32> = tutti_fixtures::Active<Typed<T>>;
 
 fn format_of<T: Vst3Sample>() -> FloatWidth {
     if std::mem::size_of::<T>() == 8 {
@@ -79,7 +79,7 @@ fn prepare_for<T: Vst3Sample>(rate: f64, frames: usize, mode: ProcessMode) -> Pr
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
-pub trait Activate {
+pub(crate) trait Activate {
     /// Activates as `T`; a refusal hands the plugin back with the reason.
     fn activate_at<T: Vst3Sample>(
         self,
@@ -118,7 +118,7 @@ impl Activate for Vst3Loaded {
 
 /// A load or an activation that did not take.
 #[derive(Debug)]
-pub enum LoadError {
+pub(crate) enum LoadError {
     /// The bundle did not load.
     Load(Vst3Error),
     /// The plugin loaded and refused to activate.
@@ -128,7 +128,7 @@ pub enum LoadError {
 /// What a suite calls on an [`Active`] besides the Controller: loading and
 /// activating in one call, a block through the Processor at the width `T`, its
 /// counters, and the loaded plugin.
-pub trait ActiveExt<T: Vst3Sample>: Sized {
+pub(crate) trait ActiveExt<T: Vst3Sample>: Sized {
     /// Loads and activates, in realtime mode.
     fn load(path: &Path, rate: f64, frames: usize) -> Result<Self, LoadError> {
         Self::load_with_mode(path, rate, frames, ProcessMode::Realtime)
@@ -316,7 +316,7 @@ impl<T: Vst3Sample> ActiveExt<T> for Active<T> {
 /// `f64`s: `Control::parameter` and `Control::set_parameter` without the
 /// newtypes. On an [`Active`] they go through the Controller, so a write is
 /// queued to the Processor too.
-pub trait ParamExt {
+pub(crate) trait ParamExt {
     /// The parameter's normalized value; `0.0` when the plugin has none.
     fn get_parameter(&self, id: u32) -> f64;
     /// Writes a normalized value.
@@ -367,7 +367,7 @@ impl<T: Vst3Sample> ParamExt for Active<T> {
 
 /// State in and out as the suites were written against it, with the shared
 /// vocabulary's error: `Control::save_state` and `Control::load_state`.
-pub trait StateExt {
+pub(crate) trait StateExt {
     /// The plugin's state as bytes.
     fn get_state(&mut self) -> Result<Vec<u8>, PluginError>;
     /// Restores state saved by [`get_state`](Self::get_state).

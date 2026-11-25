@@ -27,9 +27,6 @@ thiserror = { workspace = true, features = ["std"] }
 # `Offset`: where an event sits in the block `send_midi` is given; `Ump`: the packet.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-# `midi1`: a channel voice message as the MIDI 1.0 bytes `MusicDeviceMIDIEvent`
-# takes (the narrowing and a banked Program Change's three messages).
-tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The block views a render takes (`InputOutput`, `Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The engine's unit newtypes: `Bpm`/`Beat` on `TransportState` and `Seconds` on
@@ -37,15 +34,18 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # defaults, which the unit vocabulary does not need.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
-# The queue the MIDI-output callback pushes into during a render. `ArrayQueue`
-# is bounded and lock-free, so the render thread never allocates or waits.
-crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
 # Every raw AudioToolbox, CoreAudio and CoreFoundation call; this crate forbids
 # `unsafe`.
 tutti-au-ffi = { version = "0.0.1", path = "../tutti-au-ffi" }
+# `midi1`: a channel voice message as the MIDI 1.0 bytes `MusicDeviceMIDIEvent`
+# takes (the narrowing and a banked Program Change's three messages).
+tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
+# The queue the MIDI-output callback pushes into during a render. `ArrayQueue`
+# is bounded and lock-free, so the render thread never allocates or waits.
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 # A main-thread mapping write the host could not undo is logged, not counted:
 # no counter an app reads carries that fact.
 tracing.workspace = true
@@ -53,7 +53,6 @@ tracing.workspace = true
 [dev-dependencies]
 # The transport tests build meter and loop values.
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-# The tests build SysEx and MIDI 1.0 fixtures with its helpers.
 # The tests that build their own raw calls beside the safe API.
 tutti-au-host = { path = ".", features = ["testing"] }
 # `mapping_contract!`: the laws `ParamBounds` is held to.

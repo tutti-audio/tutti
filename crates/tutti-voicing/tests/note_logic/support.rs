@@ -4,7 +4,7 @@ use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::Amplitude;
 use tutti_voicing::{Patch, VoiceAllocator, VoiceCommand, VoiceSpec};
 
-pub struct One;
+pub(crate) struct One;
 impl Patch for One {
     fn voices(
         &self,
@@ -22,7 +22,7 @@ impl Patch for One {
 }
 
 /// `message` on `channel`, every voice sounding at unit level.
-pub fn step(core: &mut VoiceAllocator, channel: u8, message: Voice2) -> Vec<VoiceCommand> {
+pub(crate) fn step(core: &mut VoiceAllocator, channel: u8, message: Voice2) -> Vec<VoiceCommand> {
     core.step(MidiChannel::of(channel), message, &One, |_| {
         Some(Amplitude::new(1.0))
     })
@@ -30,7 +30,7 @@ pub fn step(core: &mut VoiceAllocator, channel: u8, message: Voice2) -> Vec<Voic
 }
 
 /// A Note On of `key` at velocity `0x8000`.
-pub fn note_on(key: u8) -> Voice2 {
+pub(crate) fn note_on(key: u8) -> Voice2 {
     Voice2::NoteOn {
         note: NoteNumber::of(key),
         velocity: NoteVelocity::CENTER,

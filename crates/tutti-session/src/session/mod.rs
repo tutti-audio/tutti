@@ -380,8 +380,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// publishes to itself: the project meter (and
     /// every slot following it), the transport's tempo map, the modulation lanes (inserted by the
     /// reconciler, not through `add`), the hardware inlets' clock and an
-    /// offline engine's output folds.
-    pub(crate) fn reclaim(&self) -> usize {
+    /// offline engine's output folds, and the loop and direction cells of the streams it opened.
+    pub(crate) fn reclaim(&mut self) -> usize {
         let mut pinned = self.graph.reclaim();
         pinned += self.transport.settings().project_meter().reclaim();
         pinned += self.transport.settings().reclaim_tempo();
@@ -389,6 +389,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         // offline or on a device, through the `OutputControl` it kept.
         pinned += self.mods.state.reclaim();
         pinned += self.midi.reclaim();
+        pinned += self.sampler.reclaim();
         pinned
     }
 

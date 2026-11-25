@@ -10,8 +10,8 @@
 //!
 //! Config is a leaf: it describes, the host layer builds.
 
-pub mod audio;
-pub mod bridge;
+pub(crate) mod audio;
+pub(crate) mod bridge;
 
 pub use audio::AudioConfig;
 pub use bridge::IpcConfig;

@@ -29,7 +29,7 @@ use tutti_units::SampleRate;
 
 /// A plugin-server that has loaded its plugin and opened its audio lane, and
 /// waits for the bridge thread to speak on its connections ([`launch`]).
-pub struct LaunchedServer {
+pub(crate) struct LaunchedServer {
     /// The server process, killed and reaped when this drops, and the watch
     /// on whether it is alive.
     pub server: ProcessGuard,
@@ -118,7 +118,7 @@ impl Restore<'_> {
 ///
 /// The server cannot be found or spawned, it does not connect or answer the
 /// handshake in time, or it fails to load the plugin.
-pub fn launch(
+pub(crate) fn launch(
     config: &IpcConfig,
     request: &LoadRequest<'_>,
     executor: &Executor,

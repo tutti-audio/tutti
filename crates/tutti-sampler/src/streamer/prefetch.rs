@@ -395,7 +395,7 @@ impl<F: RingFloat> RegionOut<F> {
     /// The ring's refusal of a view that is not its own width, which no
     /// caller that built `samples` at the ring's width can meet; the refill
     /// reports it as the stream's decode fault.
-    pub fn push_interleaved(&mut self, samples: &[F]) -> Result<Samples, BufferError> {
+    pub(crate) fn push_interleaved(&mut self, samples: &[F]) -> Result<Samples, BufferError> {
         let layout = self.writer.layout();
         let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
         self.writer
