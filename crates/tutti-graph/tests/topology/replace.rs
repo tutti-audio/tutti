@@ -232,8 +232,7 @@ fn long_fades_do_not_block_commits() {
     exec.process(64, &TransportPosition::default(), &[], &mut []);
     let second = Fade::new(Samples::new(48_000));
     for &k in &keys {
-        ed.replace(k, Unforkable(gain(2.0)), second)
-            .expect("fits");
+        ed.replace(k, Unforkable(gain(2.0)), second).expect("fits");
         ed.commit().expect("a running fade blocks nothing");
         exec.process(64, &TransportPosition::default(), &[], &mut []);
     }
@@ -544,12 +543,10 @@ fn a_hard_edit_cuts_a_fade() {
     let fade = Fade::new(Samples::new(1000));
     for cut in ["remove", "insert"] {
         let (mut ed, mut exec) = gain_graph(1.0);
-        ed.replace(NODE, Unforkable(gain(2.0)), fade)
-            .expect("fits");
+        ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
         ed.commit().expect("commits");
         dc(&mut exec, 64);
-        ed.replace(NODE, Unforkable(gain(4.0)), fade)
-            .expect("fits");
+        ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
         ed.commit().expect("commits");
         dc(&mut exec, 64);
         assert_eq!(ed.fades_in_flight(), 2, "one running, one waiting");
@@ -572,12 +569,10 @@ fn a_hard_edit_cuts_a_fade() {
     }
 
     let (mut ed, mut exec) = gain_graph(1.0);
-    ed.replace(NODE, Unforkable(gain(2.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
-    ed.replace(NODE, Unforkable(gain(4.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
     ed.reprepare(prepare(64)).expect("re-prepares");
@@ -607,12 +602,10 @@ fn a_hard_edit_cuts_a_fade() {
 fn set_latency_cuts_a_fade() {
     let fade = Fade::new(Samples::new(1000));
     let (mut ed, mut exec) = gain_graph(1.0);
-    ed.replace(NODE, Unforkable(gain(2.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
-    ed.replace(NODE, Unforkable(gain(4.0)), fade)
-        .expect("fits");
+    ed.replace(NODE, Unforkable(gain(4.0)), fade).expect("fits");
     ed.commit().expect("commits");
     dc(&mut exec, 64);
     assert!(ed.collect().is_empty());

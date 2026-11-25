@@ -770,8 +770,7 @@ fn a_replace_moves_forking_to_the_new_unit() {
     exec.apply_pending();
     ed.collect();
 
-    ed.replace(key, consts(1, 0.9), fade)
-        .expect("same shape");
+    ed.replace(key, consts(1, 0.9), fade).expect("same shape");
     assert!(matches!(
         ed.replace(key, consts(2, 0.1), fade),
         Err(tutti_graph::CommitError::FadeShape { .. })
