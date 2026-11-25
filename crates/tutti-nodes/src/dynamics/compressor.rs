@@ -197,8 +197,6 @@ pub struct CompressorKernel<F: Float + SimdLanes> {
     key: KeySource,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<CompressorBank<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
@@ -208,7 +206,6 @@ impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
             input,
             key,
             bank: None,
-            applied: false,
         }
     }
 }
@@ -228,7 +225,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(CompressorBank::new(self.input.width(), rate));
-        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -240,9 +236,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     fn retarget(&mut self, controls: &CompressorControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(bank) = &mut self.bank {
             bank.jump_to_target();
-            self.applied = true;
         }
     }
 

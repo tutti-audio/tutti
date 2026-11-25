@@ -218,8 +218,6 @@ pub struct DelayKernel<F: Float> {
     tempo: Option<Bpm>,
     /// The controls the ramps were last aimed at.
     controls: DelayControls,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + Lerp> DelayKernel<F> {
@@ -231,7 +229,6 @@ impl<F: Float + Lerp> DelayKernel<F> {
             ramps: DelayRamps::new(0),
             tempo: None,
             controls: DelayControls::DEFAULT,
-            applied: false,
         }
     }
 }
@@ -256,18 +253,18 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         self.bank = Some(DelayBank::new(&self.layout, rate));
         self.ramps = DelayRamps::new(steps);
         self.tempo = None;
-        self.applied = false;
     }
 
     /// Keeps the block's tempo, and aims the times again when it moved: a synced delay's
-    /// times move through their ramp, and a free one's targets are the same ones. Before the
-    /// first retarget it is only kept, and lands at once with that retarget.
+    /// times move through their ramp, and a free one's targets are the same ones. It reads
+    /// the block's tempo before the block's controls, so the retarget that follows
+    /// overrides what this aims.
     fn tempo(&mut self, tempo: Bpm) {
         if self.tempo == Some(tempo) {
             return;
         }
         self.tempo = Some(tempo);
-        if let (Some(bank), true) = (&self.bank, self.applied) {
+        if let Some(bank) = &self.bank {
             bank.retarget(&mut self.ramps, &self.controls, self.tempo);
         }
     }
@@ -276,18 +273,16 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.ramps.jump_to_target();
-        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DelayControls) {
         let Some(bank) = &self.bank else { return };
         bank.retarget(&mut self.ramps, controls, self.tempo);
         self.controls = *controls;
-        if !self.applied {
-            self.ramps.jump_to_target();
-            self.applied = true;
-        }
+    }
+
+    fn jump_to_target(&mut self) {
+        self.ramps.jump_to_target();
     }
 
     fn render(
@@ -299,13 +294,10 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
             time: signals.get(DelaySet::TIME_SIGNAL),
             feedback: signals.get(DelaySet::FEEDBACK_SIGNAL),
         };
-        let rendered = match &mut self.bank {
+        match &mut self.bank {
             Some(bank) => bank.process(&mut self.ramps, signals, block),
             None => Ok(()),
-        };
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        }
     }
 
     /// The bank's ceiling (the greatest stable feedback through the longest line), or

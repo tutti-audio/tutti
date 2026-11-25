@@ -110,17 +110,12 @@ struct Running<F: Float> {
 pub struct FreeverbKernel<F: Float> {
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has been applied.
-    applied: bool,
 }
 
 impl<F: Float + Lerp> FreeverbKernel<F> {
     /// A reverb with no lines until `prepare` gives it a rate.
     fn new() -> Self {
-        Self {
-            running: None,
-            applied: false,
-        }
+        Self { running: None }
     }
 }
 
@@ -144,24 +139,23 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         let bank = FreeverbBank::new(rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.applied = false;
     }
 
-    /// Silence, and the next design lands at once, as a fresh node's first does.
+    /// Back to silence.
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.jump_to_target();
         }
-        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &FreeverbControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.applied {
+    }
+
+    fn jump_to_target(&mut self) {
+        if let Some(r) = &mut self.running {
             r.ramps.jump_to_target();
-            self.applied = true;
         }
     }
 
@@ -170,13 +164,10 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let rendered = match &mut self.running {
+        match &mut self.running {
             Some(r) => r.bank.process(&mut r.ramps, block),
             None => Ok(()),
-        };
-        // A design after a render is a move, which ramps.
-        self.applied = true;
-        rendered
+        }
     }
 
     /// The bank's ceiling (the room at its largest), or [`Tail::Unbounded`] when that is past what a graph takes as a finite figure

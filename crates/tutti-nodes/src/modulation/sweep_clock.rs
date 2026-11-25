@@ -32,8 +32,10 @@ pub(crate) struct SweepClock {
     pos: usize,
     /// Whether a segment has been solved since the last reset.
     primed: bool,
-    /// Whether the first retarget since a prepare, or since a reset, has been applied or a frame
-    /// has rendered: what separates a fresh effect's first design (it lands at once) from a move.
+    /// Whether the first retarget since a reset, or a frame, has passed: what a kernel needs
+    /// to land the depth and the feedback before it solves its first segment from them, and
+    /// what the swept delay reads to take a first retarget off a corner. Not the node's
+    /// land-whole fact, which [`KernelNode`](crate::KernelNode) owns.
     applied: bool,
 }
 
