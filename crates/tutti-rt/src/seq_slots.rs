@@ -109,7 +109,6 @@ pub fn seq_slots<T: Pod>(len: usize) -> (SeqSlotsWriter<T>, SeqSlotsReader<T>) {
     let readers = cells.iter().map(SeqWriter::reader).collect();
     let epoch = Arc::new(AtomicU32::new(0));
     let dirty = Arc::new(AtomicU32::new(0));
-    let swept = Arc::new(AtomicU32::new(0));
     (
         SeqSlotsWriter {
             cells,
@@ -125,7 +124,6 @@ pub fn seq_slots<T: Pod>(len: usize) -> (SeqSlotsWriter<T>, SeqSlotsReader<T>) {
             epoch,
             generation: 0,
             dirty,
-            swept,
         },
     )
 }
@@ -199,23 +197,44 @@ impl std::fmt::Debug for EpochWatch {
     }
 }
 
-/// Reads [`SeqSlotsReader::swept`] from any thread
-/// ([`SeqSlotsReader::swept_watch`]).
-#[derive(Clone)]
-pub struct SweptWatch(Arc<AtomicU32>);
+/// The generation a reader tells other threads its values have been processed
+/// at: a [`GenerationPublisher`] and the [`GenerationWatch`] that reads it.
+///
+/// [`SeqSlotsReader::swept`] says the values were handed to a drain's callback;
+/// a plugin takes them inside the call that follows, which can still be running.
+/// The holder of the reader publishes `swept` once that call has returned, so a
+/// watch that has reached a write shows the value processed.
+#[must_use]
+pub fn generation_watch() -> (GenerationPublisher, GenerationWatch) {
+    let word = Arc::new(AtomicU32::new(0));
+    (
+        GenerationPublisher(Arc::clone(&word)),
+        GenerationWatch(word),
+    )
+}
 
-impl SweptWatch {
-    /// The generation of the reader's last sweep no write overlapped, as
-    /// [`SeqSlotsReader::swept`] reads it. Wait-free.
-    #[must_use]
-    pub fn get(&self) -> Generation {
-        Generation(self.0.load(Ordering::Acquire))
+/// The one end of a [`generation_watch`] that publishes.
+#[derive(Debug)]
+pub struct GenerationPublisher(Arc<AtomicU32>);
+
+impl GenerationPublisher {
+    /// Publishes `generation`: everything the publisher did before this call
+    /// is visible to a watch that reads it. Wait-free.
+    pub fn publish(&self, generation: Generation) {
+        self.0.store(generation.0, Ordering::Release);
     }
 }
 
-impl std::fmt::Debug for SweptWatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SweptWatch").finish_non_exhaustive()
+/// The reading end of a [`generation_watch`], from any thread.
+#[derive(Clone, Debug)]
+pub struct GenerationWatch(Arc<AtomicU32>);
+
+impl GenerationWatch {
+    /// The last generation published; what its publisher did before publishing
+    /// it is visible after this read. Wait-free.
+    #[must_use]
+    pub fn get(&self) -> Generation {
+        Generation(self.0.load(Ordering::Acquire))
     }
 }
 
@@ -230,8 +249,6 @@ pub struct SeqSlotsReader<T: Pod> {
     /// The generation of the last sweep that no write overlapped.
     generation: u32,
     dirty: Arc<AtomicU32>,
-    /// `generation`, published for [`SweptWatch`].
-    swept: Arc<AtomicU32>,
 }
 
 impl<T: Pod> SeqSlotsReader<T> {
@@ -273,13 +290,6 @@ impl<T: Pod> SeqSlotsReader<T> {
         EpochWatch(Arc::clone(&self.epoch))
     }
 
-    /// A handle that reads [`swept`](Self::swept) without the reader, so a
-    /// thread that does not hold it learns that a sweep covered a write.
-    #[must_use]
-    pub fn swept_watch(&self) -> SweptWatch {
-        SweptWatch(Arc::clone(&self.swept))
-    }
-
     /// Phase one: reads every slot a write has changed into the scratch buffer.
     fn collect(&mut self) {
         // Before the reads, and recorded only when no slot was contended.
@@ -303,7 +313,6 @@ impl<T: Pod> SeqSlotsReader<T> {
         }
         if !contended {
             self.generation = generation;
-            self.swept.store(generation, Ordering::Release);
         }
     }
 

@@ -412,7 +412,7 @@ fn a_pending_settle_wakes_a_parked_node() {
         .expect("a declared parameter");
     assert!(
         rig.post
-            .settle(main_thread(), control, rig.post.mark())
+            .settle(main_thread(), control, &mut rig.post.pending())
             .is_pending()
     );
     drop(instance);

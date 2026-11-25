@@ -402,9 +402,10 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
     assert!((event.value - 350.0).abs() < 1e-9, "100 + 0.25 * 1000");
 }
 
-/// **A write queued to the Controller is delivered once a block took it**:
-/// `writes_delivered` is `false` after the write and `true` after the block
-/// that carries it, and the value is in the plugin by then.
+/// **A write queued to the Controller is delivered once the Processor's block
+/// that took it has run**, and a later write does not move what was asked: the
+/// mark taken after the first write is delivered by the block, though a second
+/// write is queued after it.
 #[test]
 fn a_controller_write_is_delivered_once_a_block_took_it() {
     let probe = Probe::acquire();
@@ -414,19 +415,26 @@ fn a_controller_write_is_delivered_once_a_block_took_it() {
         .expect("activates");
     let id = ParamId::new(probe_params()[0].id);
 
-    assert!(
-        Control::writes_delivered(&controller),
-        "nothing was written"
-    );
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
+    let upto = Control::queued(&controller).expect("a CLAP Controller queues");
     assert!(
-        !Control::writes_delivered(&controller),
+        !Control::delivered(&controller, upto),
         "the Processor has not taken the write"
     );
     render(&mut processor, FloatWidth::F32).expect("block");
-    assert!(Control::writes_delivered(&controller), "a block took it");
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
+    assert!(
+        Control::delivered(&controller, upto),
+        "the block that took the first write delivered it, whatever came after"
+    );
+    assert!(
+        !Control::delivered(&controller, Control::queued(&controller).expect("queue")),
+        "the second write waits for its block"
+    );
 }
 
 /// **A state load makes the writes queued before it stale**: they were written

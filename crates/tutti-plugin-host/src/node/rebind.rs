@@ -505,29 +505,39 @@ mod tests {
         );
     }
 
-    /// **A write the plugin holds only once a block took it is not settled
-    /// before that block.** A CLAP Controller queues a host write to its
-    /// Processor, which applies it at the head of its next block: the settle
-    /// is `Pending` until that block ran, and a read made then sees the write.
+    /// **A settle waits for the block that took the values queued when its sweep
+    /// finished, and later writes do not move that mark.** A CLAP Controller
+    /// queues a host write to its Processor, which applies it at the head of its
+    /// next block: the settle is `Pending` until that block has run, whatever is
+    /// written meanwhile.
     #[test]
-    fn a_settle_waits_for_the_block_that_takes_a_controller_queued_write() {
+    fn a_settle_waits_for_the_block_after_its_sweep_and_for_no_later_write() {
         let (fake, post, mut unit, inner) = edited_node();
         let id = ParamId::new(1);
-        post.write(id, tutti_units::Normalized::of(0.25))
-            .expect("a declared parameter");
-        let mark = post.mark();
-        let settle = |post: &super::super::host_edits::EditPost| {
-            post.settle(main_thread(), inner.lock().control().expect("alive"), mark)
+        let value = |v| tutti_units::Normalized::of(v);
+        post.write(id, value(0.25)).expect("a declared parameter");
+        let mut pending = post.pending();
+        let mut settle = || {
+            post.settle(
+                main_thread(),
+                inner.lock().control().expect("alive"),
+                &mut pending,
+            )
         };
         assert!(
-            settle(&post).is_pending(),
+            settle().is_pending(),
             "the Processor has not taken the write"
         );
         unit.block();
-        assert!(settle(&post).is_ready(), "a block took it");
+        // Another write arrives before the re-poll: it is swept into the
+        // Controller's queue, past the mark the settle fixed.
+        post.write(id, value(0.5)).expect("a declared parameter");
         assert!(
-            fake.calls()
-                .contains(&Call::Edit(id, tutti_units::Normalized::of(0.25))),
+            settle().is_ready(),
+            "the block after the sweep took what was asked, later writes or not"
+        );
+        assert!(
+            fake.calls().contains(&Call::Edit(id, value(0.25))),
             "the Processor applied it at the head of the block"
         );
     }
@@ -542,10 +552,14 @@ mod tests {
         let id = ParamId::new(1);
         post.write(id, tutti_units::Normalized::of(0.25))
             .expect("a declared parameter");
-        let mark = post.mark();
+        let mut pending = post.pending();
         assert!(
-            post.settle(main_thread(), inner.lock().control().expect("alive"), mark)
-                .is_pending(),
+            post.settle(
+                main_thread(),
+                inner.lock().control().expect("alive"),
+                &mut pending
+            )
+            .is_pending(),
             "the Controller's write waits for the Processor's block"
         );
         post.write(id, tutti_units::Normalized::of(0.75))

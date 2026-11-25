@@ -724,10 +724,14 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
-    /// The Processor has taken every value queued to it: its drain's sweep has
-    /// reached the writes made.
-    fn writes_delivered(&self) -> bool {
-        self.queue_delivered()
+    /// The values queued to the Processor.
+    fn queued(&self) -> Option<tutti_rt::Generation> {
+        Some(self.queued_edits())
+    }
+
+    /// The plugin has processed the values queued up to `upto`.
+    fn delivered(&self, upto: tutti_rt::Generation) -> bool {
+        self.edits_delivered(upto)
     }
 
     /// Applied at the head of the Processor's next block: the slot of the

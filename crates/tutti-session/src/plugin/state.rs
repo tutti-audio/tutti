@@ -24,9 +24,9 @@ use std::time::Duration;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::{Answer, PluginAnswers};
+use tutti_plugin_host::PendingWrites;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
-use tutti_rt::Generation;
 
 use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::{AnyPlugin, Gate};
@@ -143,9 +143,9 @@ impl PluginOp for SaveStateOp {
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        mark: Generation,
+        pending: &mut PendingWrites,
     ) -> Poll<Result<Vec<u8>, StateError>> {
-        handle.save_state_on(main, self.state_use, mark)
+        handle.save_state_on(main, self.state_use, pending)
     }
 
     fn send(&self, answers: &PluginAnswers) -> Answer<Result<Vec<u8>, StateError>> {
@@ -244,7 +244,7 @@ impl PluginOp for RestoreStateOp {
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        _mark: Generation,
+        _pending: &mut PendingWrites,
     ) -> Poll<Result<(), StateError>> {
         handle.load_state(main, self.state.bytes())
     }
