@@ -481,7 +481,7 @@ impl MidiSession {
     /// and has settled; otherwise in the OS's description of the device. It
     /// sends as MPE to the [`mpe_zones`](Self::mpe_zones) of the device. A
     /// later change of either is the caller's to apply, from what
-    /// [`poll`](Self::poll) reports, with [`OpenOutput::follow`].
+    /// [`poll`](Self::poll) reports, with [`follow`](Self::follow).
     ///
     /// `started` is what [`start`](Self::start) resolved to: the backend is ready.
     ///
@@ -499,8 +499,28 @@ impl MidiSession {
         {
             output.set_config(stream.config());
         }
-        output.follow_mpe_zones(self);
+        self.send_mpe(&mut output);
         Ok(output)
+    }
+
+    /// `output` follows what a [`poll`](Self::poll) reported: a settled or changed
+    /// Stream of its device is its [`set_config`](OpenOutput::set_config), a change
+    /// of its Profiles is the [`mpe_zones`](Self::mpe_zones) it sends to, and any
+    /// other report, or another device's, changes nothing.
+    pub fn follow(&self, output: &mut OpenOutput, polled: &Polled) {
+        match polled {
+            Polled::Stream(id, stream) if id == output.id() => output.set_config(stream.config()),
+            Polled::Profile(id, ..) if id == output.id() => self.send_mpe(output),
+            _ => {}
+        }
+    }
+
+    /// `output` sends as MPE to the zones of its device.
+    fn send_mpe(&self, output: &mut OpenOutput) {
+        for group in MidiGroup::all() {
+            let zones = self.mpe_zones(output.id(), group);
+            output.set_mpe_zones(group, zones);
+        }
     }
 
     /// Whether `id` is an open input that is still delivering: one whose
@@ -530,7 +550,7 @@ impl MidiSession {
     /// not declare them static), and the MIDI-CI peers that were found,
     /// changed or lost ([`Polled::Ci`]). An output a caller holds follows its
     /// device's Protocol and JR Timestamps once the caller hands it each report
-    /// ([`OpenOutput::follow`]).
+    /// ([`follow`](Self::follow)).
     ///
     /// The stepping is done when this returns; the iterator only hands out what
     /// it found, so ignoring it loses nothing but the report.

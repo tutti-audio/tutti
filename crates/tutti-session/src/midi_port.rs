@@ -1626,7 +1626,7 @@ impl Ports {
             // `MidiOut` phase that drains next stamps by it.
             for port in &mut self.outputs {
                 if let Some(out) = port.link.open_mut() {
-                    out.destination_mut().follow(io, &polled);
+                    io.follow(out.destination_mut(), &polled);
                 }
             }
             let device = match &polled {

@@ -174,7 +174,7 @@ impl Wire {
         let polled: Vec<_> = self.session.poll(self.at(ms)).collect();
         if let Some(output) = &mut self.output {
             for report in &polled {
-                output.follow(&self.session, report);
+                self.session.follow(output, report);
             }
         }
         polled

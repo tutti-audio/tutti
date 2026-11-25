@@ -43,6 +43,10 @@ fn holds::Holds::pedal
 fn holds::Holds::sostenuto
 fn holds::Holds::sustain_up
 fn holds::Holds::sustained
+fn mpe_sender::MpeSender::feed
+fn mpe_sender::MpeSender::new
+fn mpe_sender::MpeSender::set_profile
+fn mpe_sender::MpeSender::unsent
 fn per_note::PerNoteState::clear
 fn per_note::PerNoteState::end
 fn per_note::PerNoteState::new
@@ -96,6 +100,7 @@ struct channel::ChannelState
 struct controller::Controller
 struct holds::Holds
 struct master::MasterGain
+struct mpe_sender::MpeSender
 struct per_note::PerNoteState
 struct table::NoteStart
 struct table::VoiceTable

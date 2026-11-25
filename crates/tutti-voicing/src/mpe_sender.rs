@@ -47,9 +47,9 @@ const OMNI_OFF: u8 = 124;
 ///   channel's Pitch Bend over its Pitch Bend Sensitivity (RPN 0/0), the Per-Note
 ///   Pitch Bend over its (RPN 0/7), and the pitch a Note On attribute or
 ///   Registered Per-Note Controller 3 gives ([`PerNoteState`] has the rules of
-///   those), over the one bend range of the zone (section 3.5). A bend past the range is sent as the range's end. Nothing
-///   is sent as the Manager's Pitch Bend, which would move the notes of every
-///   source channel.
+///   those), over the one bend range of the zone (section 3.5). A bend past the
+///   range is sent as the range's end. Nothing is sent as the Manager's Pitch
+///   Bend, which would move the notes of every source channel.
 /// - **A Member's Channel Pressure** is the greater of its note's and its
 ///   source channel's; its **Control Change 74** is its note's (Assignable
 ///   Per-Note Controller 74, section 4.5), else its source channel's, else the
@@ -105,20 +105,8 @@ impl MpeSender {
             *held = None;
             return;
         };
-        let zoned = held.get_or_insert_with(|| Box::new(Zoned::new(zones)));
-        let had = core::mem::replace(&mut zoned.zones, zones);
-        for channel in MidiChannel::all() {
-            if had.zone_of(channel) != zones.zone_of(channel) {
-                while zoned.end(|n| n.source == channel).is_some() {}
-                zoned.ranges[channel.index()] = None;
-                zoned.members[channel.index()] = Member::IDLE;
-            }
-            // What the channel was told outside a zone.
-            let range = self.sources[group.index()][channel.index()].note_range;
-            let value = ControlValue::new(range.to_rpn_bits());
-            let rpn = Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY;
-            zoned.step(channel, Voice2::registered(rpn, value));
-        }
+        held.get_or_insert_with(|| Box::new(Zoned::new(zones)))
+            .set(zones, &self.sources[group.index()]);
     }
 
     /// Some of what [`feed`](Self::feed) made was not sent: the receiver may
@@ -126,12 +114,7 @@ impl MpeSender {
     /// at its next change or note, and each zone its bend range.
     pub fn unsent(&mut self) {
         for zoned in self.zoned.iter_mut().flatten() {
-            zoned.ranges = [None; CHANNELS];
-            for member in &mut zoned.members {
-                member.bend = None;
-                member.pressure = None;
-                member.brightness = None;
-            }
+            zoned.unsent();
         }
     }
 
@@ -160,8 +143,7 @@ impl MpeSender {
             sources[address.channel.index()].observe(voice);
         }
         let zoned = self.zoned[address.group.index()].as_mut();
-        let Some((zone, zoned)) = zoned.and_then(|z| Some((*z.zones.zone_of(address.channel)?, z)))
-        else {
+        let Some((zone, zoned)) = zoned.and_then(|z| Some((z.zone_of(address.channel)?, z))) else {
             out(packet);
             return true;
         };
@@ -398,22 +380,48 @@ impl Zoned {
         }
     }
 
-    /// The range `zone` was sent, or the one it was set with before that.
-    fn range(&self, zone: &ProfileZone) -> Range {
-        self.ranges[zone.manager().index()].unwrap_or_else(|| Range::covering(zone.range()))
+    /// Takes `zones`, and what the channels were told outside a zone.
+    fn set(&mut self, zones: ProfileZones, sources: &[Source; CHANNELS]) {
+        let had = core::mem::replace(&mut self.zones, zones);
+        let changed = |channel| had.zone_of(channel) != zones.zone_of(channel);
+        while self.end(|n| changed(n.source)).is_some() {}
+        for channel in MidiChannel::all() {
+            if changed(channel) {
+                self.ranges[channel.index()] = None;
+                self.members[channel.index()] = Member::IDLE;
+            }
+            let range = sources[channel.index()].note_range;
+            let value = ControlValue::new(range.to_rpn_bits());
+            let rpn = Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY;
+            self.step(channel, Voice2::registered(rpn, value));
+        }
     }
 
-    /// Sends the range of `zone` on its Manager when its sources need another than
-    /// the receiver has.
+    /// Takes the receiver to hold nothing it was told.
+    fn unsent(&mut self) {
+        self.ranges = [None; CHANNELS];
+        for member in &mut self.members {
+            member.bend = None;
+            member.pressure = None;
+            member.brightness = None;
+        }
+    }
+
+    /// The zone `channel` is in.
+    fn zone_of(&self, channel: MidiChannel) -> Option<ProfileZone> {
+        self.zones.zone_of(channel).copied()
+    }
+
+    /// The bend range of `zone`, which its sources need, sent on its Manager when
+    /// the receiver has another.
     fn fit_range(
         &mut self,
         zone: &ProfileZone,
         sources: &[Source; CHANNELS],
         send: &mut impl FnMut(MidiChannel, Voice2),
-    ) {
-        let layout = zone.layout();
+    ) -> Range {
         let range = MidiChannel::all()
-            .filter(|c| layout.handles_channel(*c))
+            .filter(|c| self.zone_of(*c) == Some(*zone))
             .map(|c| Range::covering(sources[c.index()].note_range))
             .fold(Range::covering(zone.range()), Range::max);
         let held = &mut self.ranges[zone.manager().index()];
@@ -425,6 +433,7 @@ impl Zoned {
             );
             send(zone.manager(), voice);
         }
+        range
     }
 
     /// Tells the Members of the notes of `zone` that `changed` what they now sound
@@ -436,9 +445,14 @@ impl Zoned {
         changed: impl Fn(&Note) -> bool,
         send: &mut impl FnMut(MidiChannel, Voice2),
     ) {
-        let (range, layout) = (self.range(zone), zone.layout());
+        let zones = self.zones;
+        let told = |note: &Note| zones.zone_of(note.source) == Some(zone) && changed(note);
+        if !self.notes.iter().any(told) {
+            return;
+        }
+        let range = self.fit_range(zone, sources, send);
         for note in &self.notes {
-            if layout.handles_channel(note.source) && changed(note) {
+            if told(note) {
                 let expression = note.expression(&sources[note.source.index()], range);
                 self.members[note.member.index()].tell(note.member, expression, send);
             }
@@ -533,11 +547,8 @@ impl Zoned {
                 .contains(&Rpn::new(bank, index)) =>
             {
                 self.step(source, voice);
-                let range = self.range(zone);
-                self.fit_range(zone, sources, send);
-                let zone_changed = self.range(zone) != range;
-                let changed = |n: &Note| zone_changed || n.source == source;
-                self.tell(zone, sources, changed, send);
+                // Its range may have changed, for every note.
+                self.tell(zone, sources, |_| true, send);
             }
             // It changes a range this sends by value.
             Voice2::RelativeRegistered { bank, index, .. }
@@ -551,8 +562,11 @@ impl Zoned {
                 CCNumber::ALL_SOUND_OFF | CCNumber::ALL_NOTES_OFF if manager => {
                     // The receiver ends the notes of the whole zone.
                     send(source, voice);
-                    let layout = zone.layout();
-                    while self.end(|n| layout.handles_channel(n.source)).is_some() {}
+                    let zones = self.zones;
+                    while self
+                        .end(|n| zones.zone_of(n.source) == Some(zone))
+                        .is_some()
+                    {}
                 }
                 CCNumber::ALL_SOUND_OFF | CCNumber::ALL_NOTES_OFF => {
                     while let Some(note) = self.end(|n| n.source == source) {

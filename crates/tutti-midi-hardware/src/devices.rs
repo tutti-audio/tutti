@@ -24,6 +24,7 @@ use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, Endpoint, EndpointId, MidiDeviceId, OsChange, OsDevice,
     PortDirection, Resolved,
 };
+use tutti_midi_protocol::ProfileZones;
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
 use tutti_ump::{MidiGroup, StreamConfig};
 
@@ -681,7 +682,7 @@ impl OpenInput {
 /// note on a Member Channel of its own; and JR Timestamps go only to a device whose configuration receives them.
 /// The configuration is the OS's description of the device until
 /// [`set_config`](Self::set_config) says what a negotiation settled
-/// ([`follow`](Self::follow) takes it from a
+/// ([`MidiSession::follow`](crate::MidiSession::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
     /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
@@ -794,29 +795,9 @@ impl OpenOutput {
         }
     }
 
-    /// Follows what a [`MidiSession::poll`](crate::MidiSession::poll) of `session`
-    /// reported: a settled or changed Stream of this output's device is its
-    /// [`set_config`](Self::set_config), a change of its Profiles is
-    /// the [`mpe_zones`](crate::MidiSession::mpe_zones) it sends to, and any
-    /// other report, or another device's, changes nothing.
-    pub fn follow(&mut self, session: &crate::MidiSession, polled: &crate::Polled) {
-        match polled {
-            crate::Polled::Stream(id, stream) if *id == self.info.id => {
-                self.set_config(stream.config());
-            }
-            crate::Polled::Profile(id, ..) if *id == self.info.id => {
-                self.follow_mpe_zones(session);
-            }
-            _ => {}
-        }
-    }
-
-    /// Sends as MPE to the zones `session` knows of this output's device.
-    pub(crate) fn follow_mpe_zones(&mut self, session: &crate::MidiSession) {
-        for group in MidiGroup::all() {
-            let zones = session.mpe_zones(&self.info.id, group);
-            self.wire.set_profile(group, zones);
-        }
+    /// Sends as MPE to `zones` of `group` from now on.
+    pub(crate) fn set_mpe_zones(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
+        self.wire.set_profile(group, zones);
     }
 }
 

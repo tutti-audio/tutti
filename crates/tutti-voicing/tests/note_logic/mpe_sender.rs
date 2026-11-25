@@ -608,6 +608,29 @@ fn values_not_sent_are_sent_again() {
     );
 }
 
+/// A bend after that is over the range the zone has, not the one it starts with:
+/// 24 semitones of 96, with the range sent ahead of it.
+#[test]
+fn a_bend_after_an_unsent_range_is_over_the_zones_range() {
+    let mut s = started(1);
+    feed(&mut s, 0, note_bend_range(96));
+    feed(&mut s, 0, note_on(60));
+    s.unsent();
+    let sent = feed(&mut s, 0, note_bend(60, 0xA000_0000));
+    assert_eq!(sent[0], (0, bend_range(96)));
+    assert_bend(&sent[1..2], 1, bend_of(24.0, 96.0));
+}
+
+/// A zone that goes forgets a note its source, a Member, plays on a lower Member.
+#[test]
+fn a_zone_that_changes_forgets_a_note_of_a_higher_source() {
+    let mut s = sender(3);
+    feed(&mut s, 3, note_on(60)); // on Ch2
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone(0, 5))));
+    assert!(feed(&mut s, 3, note_off(60)).is_empty());
+    assert_eq!(notes(&feed(&mut s, 3, note_on(60))), [(1, note_on(60))]);
+}
+
 /// **To a MIDI 1.0 device the same messages go as MIDI 1.0 bytes** (M2-104
 /// D.4.1): the range as the Manager's four Control Changes, the Member's values
 /// centred at 0x2000, 0x40 and 0, and the note on the Member.
