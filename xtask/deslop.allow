@@ -199,9 +199,7 @@ field-leak tutti_graph::edit::editor::Editor::prepare
 field-leak tutti_graph::edit::editor::Editor::shapes
 field-leak tutti_graph::edit::editor::Editor::spec
 field-leak tutti_graph::edit::editor::Editor::values
-field-leak tutti_graph::edit::editor::MainOutputState::fade
-field-leak tutti_graph::edit::editor::MainOutputState::fading
-field-leak tutti_graph::edit::editor::MainOutputState::gate
+field-leak tutti_graph::edit::editor::main_output::MainOutput::gate
 field-leak tutti_graph::edit::editor::outlets::Outlets::pending
 field-leak tutti_graph::exec::Executor::plan
 field-leak tutti_graph::exec::Executor::prepare
