@@ -407,9 +407,9 @@ impl EventInletNode {
     /// [`pair`](Self::pair), the node counting its evicted and late events
     /// and the writer its refused pushes on `totals`, which outlive it. An
     /// owner that replaces its inlet (a device unplugged and plugged again)
-    /// passes the same tally to each, so it reads one cumulative figure; the tally takes the adds of an old inlet
-    /// still leaving the graph and its successor at once. Allocates; control
-    /// side.
+    /// passes the same tally to each, so it reads one cumulative figure; the
+    /// tally takes the adds of an old inlet still leaving the graph and its
+    /// successor at once. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair_with(capacity: EventCapacity, totals: &Tally<Losses>) -> (Self, EventInletWriter) {
         let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
