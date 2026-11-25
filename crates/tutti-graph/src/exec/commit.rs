@@ -146,7 +146,7 @@ pub(super) struct Incoming<F: Float = f32> {
 /// A kept unit's rebuilt bypass line.
 pub(super) struct Relined<F: Float = f32> {
     pub(super) idx: UnitIdx,
-    pub(super) latency: usize,
+    pub(super) latency: Samples,
     pub(super) line: Option<BypassLine<F>>,
 }
 
@@ -293,7 +293,7 @@ impl<F: Float> Commit<F> {
                 let shape = &plan.unit(p.key)?.shape;
                 Some(Relined {
                     idx: p.idx,
-                    latency: shape.latency.samples().get(),
+                    latency: shape.latency.samples(),
                     line: BypassLine::for_shape(shape),
                 })
             })
