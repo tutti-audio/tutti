@@ -7,8 +7,7 @@ use crate::{Address, HeldControllers, MidiGroup, NoteKey, NoteKeyEvent, Protocol
 
 tutti_units::ranged! {
     /// A channel of one protocol: the position of a (protocol, Group, Channel) in a
-    /// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
-    /// [`NoteKey`] packs above its note.
+    /// table of 512 entries, MIDI 1.0 lanes first.
     #[derive(Eq, PartialOrd, Ord, Hash)]
     GroupChannelIndex(u16), GroupChannelIndexOutOfRange, "within 0..512", |raw| raw < 512
 }
@@ -26,11 +25,6 @@ impl GroupChannelIndex {
             Protocol::Midi2 => Some(Self(256 + address.index() as u16)),
             Protocol::Reserved(_) => None,
         }
-    }
-
-    /// The lane of the 9 bits a [`NoteKey`] packs above its note.
-    pub(crate) const fn from_packed(bits: u16) -> Self {
-        Self(bits & 0x1ff)
     }
 
     /// Every lane, in table order.
@@ -68,9 +62,9 @@ impl GroupChannelIndex {
     }
 }
 
-const WORDS: usize = 1 << 10;
+const WORDS: usize = 1 << 9;
 
-/// A set of [`NoteKey`]s: one bit for each of the 65536 packed keys, 8 KiB, kept in
+/// A set of [`NoteKey`]s: one bit for each of the 32768 packed keys, 4 KiB, kept in
 /// key order. It holds no allocation: a caller that wants it off the stack boxes
 /// it.
 ///
@@ -78,7 +72,7 @@ const WORDS: usize = 1 << 10;
 /// use tutti_ump::{Address, NoteKey, KeyBitset, MidiChannel, NoteNumber, Protocol};
 ///
 /// let mut held = KeyBitset::new();
-/// let key = NoteKey::new(Protocol::Midi2, Address::first(MidiChannel::of(0)), NoteNumber::of(60)).unwrap();
+/// let key = NoteKey::new(Address::first(MidiChannel::of(0)), NoteNumber::of(60));
 /// assert!(held.insert(key));
 /// assert!(!held.insert(key));
 /// assert_eq!(held.iter().collect::<Vec<_>>(), [key]);
@@ -198,8 +192,8 @@ impl KeyBitset {
 /// ([`observe`](Self::observe)) and, when the source ends, lets go of what it
 /// held as the messages that end it ([`release`](Self::release)).
 ///
-/// **What a release sends, and why not All Notes Off.** Per held key a Note
-/// Off, in the protocol the key was started in; then, for each hold pedal
+/// **What a release sends, and why not All Notes Off.** Per held key a MIDI
+/// 2.0 Note Off at velocity 0, whatever protocol started the note; then, for each hold pedal
 /// (CC 64, 66, 67, 69) that is down a pedal-up and for each pitch bend off
 /// centre a centred bend, in the protocol it was sent in. Nothing channelwide
 /// (CC 120, 121, 123): a channel is shared, because several sources merge into
@@ -218,7 +212,7 @@ impl KeyBitset {
 /// (M2-104 section 2.1.2, Appendix B.1), and what Active Sensing or a System
 /// Reset says of a cable is about that cable's Group.
 ///
-/// The tables are boxed, 8 KiB of keys and 1 KiB of controllers, allocated in
+/// The tables are boxed, 4 KiB of keys and 1 KiB of controllers, allocated in
 /// [`new`](Self::new). Nothing else allocates.
 ///
 /// ```
@@ -228,7 +222,7 @@ impl KeyBitset {
 /// held.observe(Ump([0x2090_3c64, 0, 0, 0])); // Note On, group 0, channel 0, key 60
 /// let mut offs = Vec::new();
 /// assert!(held.release(None, |ump| { offs.push(ump); true }));
-/// assert_eq!(offs, [Ump([0x2080_3c00, 0, 0, 0])]);
+/// assert_eq!(offs, [Ump([0x4080_3c00, 0, 0, 0])]); // a MIDI 2.0 Note Off
 /// assert!(held.is_empty());
 /// ```
 #[derive(Clone, Default)]
@@ -347,15 +341,15 @@ mod tests {
         Voice1, Voice2,
     };
 
-    fn key(protocol: Protocol, index: usize, note: u8) -> NoteKey {
+    fn key(index: usize, note: u8) -> NoteKey {
         let address = Address::from_index(index).unwrap();
-        NoteKey::new(protocol, address, NoteNumber::of(note)).unwrap()
+        NoteKey::new(address, NoteNumber::of(note))
     }
 
     #[test]
     fn a_key_is_in_the_set_once_and_the_set_counts_keys() {
         let mut set = KeyBitset::new();
-        let k = key(Protocol::Midi1, 17, 60);
+        let k = key(17, 60);
         assert!(set.insert(k));
         assert!(!set.insert(k));
         assert_eq!(set.len(), 1);
@@ -367,12 +361,7 @@ mod tests {
     #[test]
     fn the_keys_come_back_in_key_order_across_every_word() {
         let mut set = KeyBitset::new();
-        let keys = [
-            key(Protocol::Midi2, 255, 127),
-            key(Protocol::Midi1, 0, 0),
-            key(Protocol::Midi1, 200, 64),
-            key(Protocol::Midi2, 0, 1),
-        ];
+        let keys = [key(255, 127), key(0, 0), key(200, 64), key(0, 1)];
         for k in keys {
             set.insert(k);
         }
@@ -384,11 +373,7 @@ mod tests {
     #[test]
     fn next_from_walks_the_keys_while_they_are_removed() {
         let mut set = KeyBitset::new();
-        let keys = [
-            key(Protocol::Midi1, 0, 5),
-            key(Protocol::Midi1, 9, 127),
-            key(Protocol::Midi2, 255, 127),
-        ];
+        let keys = [key(0, 5), key(9, 127), key(255, 127)];
         for k in keys {
             set.insert(k);
         }
@@ -401,16 +386,16 @@ mod tests {
         }
         assert_eq!(walked, keys);
         assert!(set.is_empty());
-        assert_eq!(set.next_from(65_536), None);
+        assert_eq!(set.next_from(32_768), None);
     }
 
     #[test]
     fn a_union_counts_the_keys_both_hold_once() {
         let (mut a, mut b) = (KeyBitset::new(), KeyBitset::new());
-        let shared = key(Protocol::Midi1, 3, 10);
+        let shared = key(3, 10);
         a.insert(shared);
         b.insert(shared);
-        b.insert(key(Protocol::Midi2, 3, 10));
+        b.insert(key(3, 11));
         a.union_with(&b);
         assert_eq!(a.len(), 2);
         a.clear();
@@ -432,7 +417,6 @@ mod tests {
             GroupChannelIndex::at(Protocol::Reserved(crate::Reserved::wire(3)), address),
             None
         );
-        assert_eq!(key(Protocol::Midi2, 0x2B, 5).lane(), m2);
     }
 
     const G0: MidiGroup = MidiGroup::FIRST;
@@ -449,7 +433,7 @@ mod tests {
 
     fn off(group: MidiGroup, channel: u8, note: u8) -> Ump {
         let address = Address::new(group, MidiChannel::of(channel));
-        Ump::note_off(NoteKey::new(Protocol::Midi2, address, NoteNumber::of(note)).unwrap())
+        Ump::note_off(NoteKey::new(address, NoteNumber::of(note)))
     }
 
     fn drain(held: &mut Held, group: Option<MidiGroup>) -> Vec<Ump> {
@@ -550,7 +534,7 @@ mod tests {
     /// Specification Appendix A-5: a pedal that is down defeats the offs), each
     /// one a message in the protocol it was sent in: Group 3 channel 6 holds a
     /// key, the four pedals and an off-centre bend in MIDI 1.0 and in MIDI 2.0.
-    /// The release is the two Note Offs, then for each protocol CC 64, 66, 67
+    /// The release is the MIDI 2.0 Note Off, then for each protocol CC 64, 66, 67
     /// and 69 at 0 (MIDI 1.0 Detailed Specification, Control Change messages:
     /// Damper Pedal (Sustain), Sostenuto, Soft Pedal, Hold 2) and the bend at its
     /// centre (0x2000 in MIDI 1.0, 0x80000000 in MIDI 2.0), as these words.
@@ -583,7 +567,7 @@ mod tests {
         assert_eq!(
             drain(&mut held, None),
             [
-                m1(0x0080_3c00),
+                m2(0x0080_3c00, 0),
                 m1(0x00b0_4000),
                 m1(0x00b0_4200),
                 m1(0x00b0_4300),

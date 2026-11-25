@@ -166,7 +166,6 @@ impl InputInlets {
             map: None,
             timing: writers.timing,
             resyncs: writers.resyncs,
-            lost: writers.lost,
         };
         (input, node)
     }
@@ -194,15 +193,13 @@ pub struct InputWriters {
 }
 
 /// The cells a [`DeviceInput`] writes: the latest correction its clock map made,
-/// the count of its re-anchors, and what its inlet lost (pushes the ring
-/// refused, and the totals of events evicted from the waiting list and events
-/// the port refused).
+/// the count of its re-anchors, and what its inlet lost (the totals of pushes
+/// the ring refused and events evicted from the waiting list).
 #[derive(Debug)]
 #[must_use = "the writers are how an input reports its timing and its losses"]
 pub struct DeviceWriters {
     timing: GaugeWriter<Seconds>,
     resyncs: CounterWriter<Resyncs>,
-    lost: CounterWriter<Losses>,
     inlet: Tally<Losses>,
 }
 
@@ -214,10 +211,9 @@ pub struct InputReaders {
     pub timing: Gauge<Seconds>,
     /// The clock map's re-anchors.
     pub resyncs: Counter<Resyncs>,
-    /// The events the inlet had no room for.
-    pub lost: Counter<Losses>,
-    /// The events the inlets dropped from their waiting lists for room, and
-    /// those their ports refused: totals the successive inlets share.
+    /// The events the inlets lost: pushes their rings refused and events
+    /// dropped from their waiting lists for room, totals the successive inlets
+    /// share.
     pub inlet: Tally<Losses>,
     /// The MIDI-CI messages the device's output refused.
     pub ci_refused: Counter<Losses>,
@@ -229,7 +225,6 @@ impl InputWriters {
     pub fn new() -> (Self, InputReaders) {
         let (timing, timing_reader) = gauge(Seconds::ZERO);
         let (resyncs, resyncs_reader) = counter();
-        let (lost, lost_reader) = counter();
         let (ci_refused, ci_refused_reader) = counter();
         let inlet = tally();
         (
@@ -237,7 +232,6 @@ impl InputWriters {
                 device: DeviceWriters {
                     timing,
                     resyncs,
-                    lost,
                     inlet: inlet.clone(),
                 },
                 ci_refused,
@@ -245,7 +239,6 @@ impl InputWriters {
             InputReaders {
                 timing: timing_reader,
                 resyncs: resyncs_reader,
-                lost: lost_reader,
                 inlet,
                 ci_refused: ci_refused_reader,
             },
@@ -262,7 +255,6 @@ impl InputWriters {
             device: DeviceWriters {
                 timing: readers.timing.reopen()?,
                 resyncs: readers.resyncs.reopen()?,
-                lost: readers.lost.reopen()?,
                 inlet: readers.inlet.clone(),
             },
             ci_refused: readers.ci_refused.reopen()?,
@@ -301,8 +293,6 @@ pub struct DeviceInput {
     timing: GaugeWriter<Seconds>,
     /// The map's re-anchors.
     resyncs: CounterWriter<Resyncs>,
-    /// The pushes the ring refused.
-    lost: CounterWriter<Losses>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -322,8 +312,8 @@ impl DeviceInput {
 
     /// The inlet's counts, readable from any thread ([`InletCounts::losses`]):
     /// events the ring had no room for (`lost`), the waiting list had no room
-    /// for (`evicted`), the port refused (`refused`), and events that came
-    /// late.
+    /// for (`evicted`), and events that came late. Cumulative across
+    /// connections, as [`InputReaders::inlet`] is.
     #[must_use]
     pub fn counts(&self) -> InletCounts {
         self.counts.clone()
@@ -337,21 +327,16 @@ impl DeviceInput {
     /// # Errors
     ///
     /// [`PushError::Full`] when the ring was full: the event is dropped and
-    /// counted in the input's `lost` cell ([`InputReaders::lost`], cumulative
-    /// across connections; the ring's own count, [`counts`](Self::counts), is
-    /// this connection's). [`PushError::Disconnected`] once the inlet's node is
+    /// counted in [`Losses::lost`] ([`counts`](Self::counts)).
+    /// [`PushError::Disconnected`] once the inlet's node is
     /// gone: not counted, the event had nowhere to go.
     #[inline]
     pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> Result<(), PushError> {
         let ump = ump.into();
-        let sent = match self.moment_of(arrival) {
+        match self.moment_of(arrival) {
             Some(at) => self.writer.push(at, ump),
             None => self.writer.push(Stamp::NextBlock, ump),
-        };
-        if sent == Err(PushError::Full) {
-            self.lost.add(Losses::lost(1));
         }
-        sent
     }
 
     /// The moment `arrival` plus the lead is, by the latest block reading.

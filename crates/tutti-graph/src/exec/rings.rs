@@ -24,7 +24,7 @@ use std::collections::VecDeque;
 
 use tutti_buffers::Float;
 use tutti_rt::CappedVec;
-use tutti_units::Samples;
+use tutti_units::{Frame, Samples};
 
 use crate::event::types::Event;
 use crate::exec::held::Held;
@@ -154,21 +154,22 @@ impl<F: Float> AudioRing<F> {
 /// Sized on the control side from a **declared rate**: at most `cap` events
 /// per port per `max_block` frames (the same `cap` every event slot holds per
 /// block). A delay of `len` frames then holds at most
-/// `cap × (⌈len / max_block⌉ + 2)` events; that is the `limit`. Above it,
-/// a quarter again is **reserved for note-offs**. Past the limit an incoming
-/// non-note-off is dropped (and counted); a note-off uses the reserve, and if
-/// even that is full it evicts the oldest non-note-off instead. A note-off is
-/// dropped only when the whole FIFO is note-offs.
+/// `cap × (⌈len / max_block⌉ + 2)` events; that is the `limit`, and `cap` is
+/// the port's [`note_off_room`](crate::note_off_room), so the limit holds the
+/// note-offs a port takes past its declared capacity. Past the limit an
+/// incoming non-note-off is dropped (and counted); an incoming note-off evicts
+/// the oldest non-note-off instead, and is dropped only when the whole FIFO is
+/// note-offs.
 ///
 /// **A table of owed closes** (a cut edge's held keys that did not fit when
 /// it was cut) is poured into the queue as room frees, never past the limit
-/// less one block's input: the closes can neither displace a live note-off
-/// (the reserve stays free) nor make a live event of the source refused
-/// (a block's input always fits), so nothing live is dropped while a table
-/// drains, and a table never overflows: no close is lost.
+/// less one block's input. What is left is the room a block's live input
+/// needs, note-offs included, so a table draining never makes a live event of
+/// the source refused, and a table never overflows: no close is lost.
 ///
-/// The queue never grows past `limit + reserve` ([`bound`](Self::bound)),
-/// and the compiler prices the delay's output slot at that same bound
+/// The queue never grows past the limit ([`bound`](Self::bound)) except
+/// by what a carry across a lowered bound brought, and the compiler prices
+/// the delay's output slot at that same bound
 /// (`EventSlotCapacity::fifo`), so everything that falls due in a block —
 /// events input across several source blocks, or a backlog a retune made
 /// overdue — is delivered in it. A FIFO carried across a recompile that
@@ -179,18 +180,18 @@ impl<F: Float> AudioRing<F> {
 /// drops: should the slot be full anyway, the due events stay queued and go
 /// out at offset 0 of the next block — late, not lost.
 pub(crate) struct EventFifo {
-    /// The events in flight, with the note-off reserve.
+    /// The events in flight.
     events: Lane<Event>,
     /// The param events in flight. It has room only in a FIFO built for a
     /// source that writes them ([`with_params`](Self::with_params)); a param
     /// event past its room is dropped and counted, newest first, with no
     /// note-off to keep.
     params: Lane<ParamEvent>,
-    /// The delay, in frames.
-    delay: u64,
+    /// The delay.
+    delay: Samples,
     /// The frame the next block starts at: the time every queued event's due
     /// frame (its input time plus the delay) is read against.
-    now: u64,
+    now: Frame,
     /// The declared events per block of the port it carries: what one block's
     /// input needs room for.
     rate: usize,
@@ -241,52 +242,46 @@ impl Queued for ParamEvent {
     }
 }
 
-/// One kind of event in flight through a delay: due time and event, oldest
-/// first. Holds at most `limit` events, and a note-off may use `reserve`
-/// more, evicting the oldest other event when even that is full. Never grows
-/// past the room it was built with.
+/// One kind of event in flight through a delay: input time and event, oldest
+/// first. Holds at most `limit` events, and a note-off at the limit evicts the
+/// oldest other event. Never grows past the room it was built with.
 struct Lane<T> {
-    q: VecDeque<(u64, T)>,
+    q: VecDeque<(Frame, T)>,
     limit: usize,
-    reserve: usize,
 }
 
 impl<T: Queued> Lane<T> {
-    /// A lane with room for `room` events, holding at most `limit` (and
-    /// `reserve` more note-offs). Control side: allocates.
-    fn with_room(room: usize, limit: usize, reserve: usize) -> Self {
+    /// A lane with room for `room` events, holding at most `limit`. Control
+    /// side: allocates.
+    fn with_room(room: usize, limit: usize) -> Self {
         Self {
             q: VecDeque::with_capacity(room),
             limit,
-            reserve,
         }
     }
 
-    /// Re-derive the limit and reserve, clamped to the room the lane has.
-    fn fit(&mut self, limit: usize, reserve: usize) {
-        let room = self.q.capacity();
-        self.limit = limit.min(room);
-        self.reserve = reserve.min(room - self.limit);
+    /// Re-derive the limit, clamped to the room the lane has.
+    fn fit(&mut self, limit: usize) {
+        self.limit = limit.min(self.q.capacity());
     }
 
     /// Queue this block's `input`, which starts at frame `start`. Returns how
     /// many were dropped.
-    fn push(&mut self, start: u64, input: &[T]) -> u32 {
+    fn push(&mut self, start: Frame, input: &[T]) -> u32 {
         let mut dropped = 0;
         for e in input {
-            let item = (start + u64::from(e.offset().get()), *e);
+            let item = (start + Samples::new(e.offset().get() as usize), *e);
             if self.q.len() < self.limit {
                 self.q.push_back(item);
             } else if !e.is_note_off() {
                 dropped += 1;
-            } else if self.q.len() < self.limit + self.reserve {
-                self.q.push_back(item);
             } else if let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off()) {
                 // `remove` shifts in place and never reallocates, but it is
                 // O(n) in the queue length, as is the `position` scan. That
-                // is paid only on overflow — the rate the FIFO was sized for
-                // has already been exceeded — so it buys note-off safety at
-                // the one moment it is needed, not every block.
+                // is paid only on overflow (the rate the FIFO was sized for
+                // has already been exceeded) or past a lowered bound, so it
+                // buys note-off safety at the one moment it is needed, not
+                // every block.
                 self.q.remove(i);
                 self.q.push_back(item);
                 dropped += 1;
@@ -300,16 +295,16 @@ impl<T: Queued> Lane<T> {
     /// Emit into `out` what falls due in the block of `frames` starting at
     /// frame `start`, for a delay of `delay` frames. Stops, without dropping,
     /// when `out` is full.
-    fn pop_due(&mut self, delay: u64, start: u64, out: &mut CappedVec<T>, frames: usize) {
-        let end = start + frames as u64;
+    fn pop_due(&mut self, delay: Samples, start: Frame, out: &mut CappedVec<T>, frames: usize) {
+        let end = start + Samples::new(frames);
         while let Some(&(t, e)) = self.q.front() {
             let due = t + delay;
             if due >= end || out.is_full() {
                 break;
             }
             self.q.pop_front();
-            // `start <= … < end`: inside this block by the loop condition.
-            out.push(e.at(Offset::raw(due.saturating_sub(start) as u32)));
+            // Inside this block by the loop condition, or overdue: offset 0.
+            out.push(e.at(Offset::raw(due.since(start).map_or(0, |d| d.get() as u32))));
         }
     }
 
@@ -349,12 +344,12 @@ impl EventFifo {
     /// FIFO that takes over another's queue must hold all of it. Control
     /// side: allocates.
     pub(crate) fn sized_for(len: Samples, cap: usize, max_block: usize, room: usize) -> Self {
-        let (limit, reserve) = Self::bounds(len.get(), cap, max_block);
+        let limit = Self::bound(len.get(), cap, max_block);
         Self {
-            events: Lane::with_room((limit + reserve).max(room), limit, reserve),
-            params: Lane::with_room(0, 0, 0),
-            delay: len.get() as u64,
-            now: 0,
+            events: Lane::with_room(limit.max(room), limit),
+            params: Lane::with_room(0, 0),
+            delay: len,
+            now: Frame::ZERO,
             rate: cap.max(1),
             owed: None,
         }
@@ -363,7 +358,7 @@ impl EventFifo {
     /// This FIFO with room for param events: as many as it holds events (its
     /// limit), for a source that writes them. Control side: allocates.
     pub(crate) fn with_params(mut self) -> Self {
-        self.params = Lane::with_room(self.events.limit, self.events.limit, 0);
+        self.params = Lane::with_room(self.events.limit, self.events.limit);
         self
     }
 
@@ -397,10 +392,9 @@ impl EventFifo {
 
     /// Queue what is owed, at the clock: behind everything in flight, ahead
     /// of this block's input, as far as the queue stays a block's input short
-    /// of its limit. The room left holds the live input of the block (so a
-    /// table draining never makes a source's own events refused) and the
-    /// note-off reserve stays free, so a live note-off always finds room.
-    /// Allocates nothing.
+    /// of its limit. The room left is what the block's live input needs,
+    /// note-offs included, so a table draining never makes a source's own
+    /// events refused. Allocates nothing.
     pub(crate) fn pour(&mut self) {
         let room = self.events.limit.saturating_sub(self.rate);
         let Some(owed) = &mut self.owed else {
@@ -414,29 +408,23 @@ impl EventFifo {
         }
     }
 
-    /// The most a FIFO for a delay of `len` at this rate ever holds: its
-    /// limit plus the note-off reserve. What its output slot is sized for.
+    /// The most a FIFO for a delay of `len` at this rate holds: `cap` events
+    /// for each of its [`blocks`](Self::blocks). What its output slot is
+    /// sized for.
     pub(crate) fn bound(len: usize, cap: usize, max_block: usize) -> usize {
-        let (limit, reserve) = Self::bounds(len, cap, max_block);
-        limit + reserve
+        cap.max(1) * Self::blocks(len, max_block)
     }
 
     /// `⌈len / max_block⌉ + 2`: how many declared blocks' worth of events a
     /// delay of `len` holds at most (see the type docs). The compiler prices
-    /// with it (`EventSlotCapacity::fifo`), so it and [`bounds`](Self::bounds)
+    /// with it (`EventSlotCapacity::fifo`), so it and [`bound`](Self::bound)
     /// are one formula.
     pub(crate) fn blocks(len: usize, max_block: usize) -> usize {
         len.div_ceil(max_block.max(1)) + 2
     }
 
-    /// `(limit, note-off reserve)` for a delay of `len` at the declared rate.
-    fn bounds(len: usize, cap: usize, max_block: usize) -> (usize, usize) {
-        let limit = cap.max(1) * Self::blocks(len, max_block);
-        (limit, limit / 4 + 8)
-    }
-
     pub(crate) fn retune(&mut self, len: Samples) {
-        self.delay = len.get() as u64;
+        self.delay = len;
     }
 
     /// Re-derive the limit for the current length at this rate and maximum
@@ -451,15 +439,15 @@ impl EventFifo {
     /// The limit is the new bound, not the new bound plus what is queued:
     /// while the backlog is at or past the new limit, a new non-note-off is
     /// refused (dropped, and counted in the executor's dropped events) and a
-    /// note-off takes the reserve or evicts the oldest non-note-off, as
-    /// [`push`](Self::push) does at any full FIFO. Queued events past a smaller
+    /// note-off evicts the oldest non-note-off, as [`push`](Self::push) does
+    /// at any full FIFO. Queued events past a smaller
     /// new bound are kept, and the output slot is widened by the most they
     /// can be, so they still go out on their frames even if they all fall
     /// due at once.
     pub(crate) fn resize(&mut self, cap: usize, max_block: usize) {
-        let (limit, reserve) = Self::bounds(self.delay as usize, cap, max_block);
-        self.events.fit(limit, reserve);
-        self.params.fit(limit, 0);
+        let limit = Self::bound(self.delay.get(), cap, max_block);
+        self.events.fit(limit);
+        self.params.fit(limit);
         self.rate = cap.max(1);
         // A table pours up to `limit - rate`: staging sizes the room for the
         // new bound, so the clamp above never leaves a FIFO that carries
@@ -507,7 +495,11 @@ impl EventFifo {
     /// keeps its length, appended to `out` as far as its capacity takes.
     /// Returns how many did not fit. Allocates nothing.
     pub(crate) fn flush_into(&self, out: &mut CappedVec<Event>) -> usize {
-        let first = self.events.q.front().map_or(0, |&(t, _)| t + self.delay);
+        let first = self
+            .events
+            .q
+            .front()
+            .map_or(Frame::ZERO, |&(t, _)| t + self.delay);
         // The param events in flight go no further: a sink that outlives its
         // delay takes up the source's own segments again (each is absolute).
         let mut lost = self.params.q.len();
@@ -517,7 +509,11 @@ impl EventFifo {
                 continue;
             }
             out.push(Event {
-                offset: Offset::raw(((t + self.delay) - first).min(u64::from(u32::MAX)) as u32),
+                offset: Offset::raw(
+                    (t + self.delay)
+                        .since(first)
+                        .map_or(0, |d| d.get().min(u32::MAX as usize) as u32),
+                ),
                 ..e
             });
         }
@@ -542,7 +538,7 @@ impl EventFifo {
 
     /// Move the clock past a block of `frames`.
     pub(crate) fn advance(&mut self, frames: usize) {
-        self.now += frames as u64;
+        self.now += Samples::new(frames);
     }
 
     /// A PDC delay's whole block: emit what was already queued and falls
@@ -706,7 +702,8 @@ mod tests {
         f.retune(Samples::new(1));
         f.resize(2, 64);
         let input = [note(0, false, 100), note(1, false, 101)];
-        let mut out = CappedVec::with_capacity(EventFifo::bound(1, 2, 64));
+        // Room for the backlog and the input: the slot's own bound is the limit.
+        let mut out = CappedVec::with_capacity(limit + input.len());
         let dropped = run(&mut f, &input, &mut out, 64);
         assert_eq!(dropped, 0, "nothing refused");
         let tags: Vec<u32> = out
@@ -793,31 +790,34 @@ mod tests {
         )
     }
 
-    /// A note-off survives an overflow: past the limit it takes the reserve,
-    /// and when even that is full it evicts the oldest non-note-off.
+    /// **A live note-off is never dropped while a non-note-off is queued.** A
+    /// FIFO carried across a lowered bound holds more than its new limit; each
+    /// note-off arriving then evicts the oldest note-on, every one is kept, and
+    /// the queue does not grow.
     #[test]
-    fn a_note_off_survives_overflow() {
-        let mut f = EventFifo::sized(Samples::new(4), 1, 4);
-        let limit = f.events.limit;
-        let cap = f.events.q.capacity();
-        let ons: Vec<Event> = (0..cap as u32 + 5).map(|i| note(0, false, i)).collect();
-        let dropped = push_events(&mut f, &ons);
-        assert_eq!(f.events.q.len(), limit, "note-ons stop at the limit");
-        assert_eq!(dropped as usize, ons.len() - limit);
-        // Fill the reserve with note-offs, then one more.
-        let offs: Vec<Event> = (0..(cap - limit) as u32 + 1)
-            .map(|i| note(0, true, i))
-            .collect();
-        push_events(&mut f, &offs);
-        let kept_offs = f.pending().filter(Event::is_note_off).count();
-        assert_eq!(kept_offs, offs.len(), "every note-off is kept");
-        assert!(f.events.q.len() <= cap, "and the FIFO never grew");
+    fn a_live_note_off_is_never_dropped_while_a_non_note_off_is_queued() {
+        let mut f = EventFifo::sized(Samples::new(64), 4, 8);
+        let held = f.events.limit;
+        let ons: Vec<Event> = (0..held as u32).map(|i| note(0, false, i)).collect();
+        assert_eq!(push_events(&mut f, &ons), 0);
+        f.retune(Samples::new(1));
+        f.resize(4, 8);
+        assert!(
+            f.events.limit < held,
+            "the bound was lowered under the queue"
+        );
+        let offs: Vec<Event> = (0..5).map(|i| note(0, true, 100 + i)).collect();
+        let evicted = push_events(&mut f, &offs);
+        assert_eq!(evicted, 5, "each note-off evicted a note-on");
+        let (kept_offs, kept_ons): (Vec<_>, Vec<_>) = f.pending().partition(Event::is_note_off);
+        assert_eq!(kept_offs, offs, "every note-off is kept, in order");
+        assert_eq!(kept_ons, ons[5..], "the oldest note-ons went");
     }
 
     /// The queue never passes its bound, however much room its allocation
     /// has: a FIFO resized from a longer delay keeps its larger allocation,
-    /// but its note-off reserve is counted against the new bound, which is
-    /// what its output slot is priced at.
+    /// but holds only the new bound, which is what its output slot is priced
+    /// at.
     #[test]
     fn a_fifo_never_holds_more_than_its_bound() {
         let mut f = EventFifo::sized(Samples::new(64), 4, 8);

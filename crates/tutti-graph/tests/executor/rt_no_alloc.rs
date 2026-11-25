@@ -2333,7 +2333,7 @@ impl Holder {
     }
 }
 
-/// Counts the MIDI 1.0 note offs sent to its event inputs.
+/// Counts the MIDI 2.0 note offs sent to its event inputs.
 struct OffCount {
     offs: Arc<AtomicUsize>,
     inputs: u16,
@@ -2348,7 +2348,7 @@ impl Node for OffCount {
         for port in self.shape().event_inputs() {
             for e in io.events(port) {
                 if let EventKind::Midi(Ump(w)) = e.kind
-                    && w[0] >> 28 == 2
+                    && w[0] >> 28 == 4
                     && (w[0] >> 20) & 0xf == 8
                 {
                     self.offs.fetch_add(1, Ordering::Relaxed);
@@ -2902,7 +2902,7 @@ impl Node for Latch {
     fn reset(&mut self) {}
 }
 
-/// Counts what closes a [`Latch`]: MIDI 1.0 note offs, hold pedals at 0 and
+/// Counts what closes a [`Latch`]: MIDI 2.0 note offs, hold pedals at 0 and
 /// bends at their centre (MIDI 1.0 Pitch Bend, 0x2000).
 struct Closed {
     offs: Arc<AtomicUsize>,
@@ -2926,7 +2926,7 @@ impl Node for Closed {
                 continue;
             };
             match (w[0] >> 28, (w[0] >> 20) & 0xf) {
-                (2, 0x8) => &self.offs,
+                (4, 0x8) => &self.offs,
                 (2, 0xb) if w[0] & 0x7f == 0 => &self.pedals_up,
                 (2, 0xe) if w[0] & 0x7f7f == 0x0040 => &self.bends_centred,
                 _ => continue,
