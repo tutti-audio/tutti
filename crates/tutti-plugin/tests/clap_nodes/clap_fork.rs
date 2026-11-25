@@ -18,6 +18,8 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::clap_probe;
 use crate::ramp_source::{RampSource, ramp};
 use tutti_buffers::{Planes, PlanesMut};
@@ -323,7 +325,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         ),
     );
     editor
-        .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     match editor.fork(
         ForkTarget::Node(key),
@@ -418,7 +420,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         ),
     );
     editor
-        .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
 
     let (fork_ed, fork_exec) = editor
@@ -458,7 +460,7 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
         ),
     );
     editor
-        .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     let (fork_ed, fork_exec) = editor
         .fork(
@@ -653,7 +655,7 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     (live, exec)
 }
@@ -976,7 +978,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             ),
         );
         feed_note(&mut live, key, NOTE_FRAME);
-        live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
             .unwrap();
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
@@ -1065,7 +1067,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         EventEdge::Direct(EventOutputPort::new(clip, 0)),
     )
     .unwrap();
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
@@ -1192,7 +1194,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             EventEdge::Direct(EventOutputPort::new(key, 0)),
         )
         .unwrap();
-        live.wire_outputs(vec![
+        live.wire_declared_outputs(vec![
             PortSource::Node(OutputPort::new(key, 0)),
             PortSource::Node(OutputPort::new(sink, 0)),
         ])
@@ -1270,7 +1272,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
         ))
         .unwrap();
     }
-    live.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    live.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
 
     let graph = fork_graph(&live, rate);
@@ -1441,7 +1443,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.wire_outputs(vec![
+    live.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(9), 0)),
         PortSource::Node(OutputPort::new(NodeKey(10), 0)),
     ])
@@ -1570,7 +1572,7 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
         ),
     );
     editor
-        .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     let (fork_ed, fork_exec) = editor
         .fork(

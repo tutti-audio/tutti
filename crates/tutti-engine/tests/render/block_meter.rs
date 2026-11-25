@@ -13,6 +13,8 @@
 //! 24 000 frames, and a click is heard a frame after its beat (its first
 //! sample is `sin(0)`).
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_engine::Engine;
@@ -54,7 +56,7 @@ fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
         "click",
         ClickNode::from(ClickNodeConfig::new(settings)),
     );
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
         .unwrap();
     ed.commit().expect("commits");
     (ed, exec)

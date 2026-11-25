@@ -12,6 +12,8 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
@@ -628,7 +630,7 @@ fn solo() -> (Editor, tutti_graph::Executor) {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1)]).unwrap();
     ed.set_mix(key(1), Mix::new(0.25)).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();

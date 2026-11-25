@@ -16,6 +16,8 @@
 //! 0.25 s) there. A fall is the ramp standing more than 0.05 (6 500 source frames) below
 //! where it stood 256 frames before.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Wave};
@@ -115,8 +117,10 @@ fn render_with(
                 .expect("room");
         }
     }
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let map = TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {

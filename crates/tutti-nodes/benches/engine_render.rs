@@ -43,6 +43,8 @@
 //!
 //! Baselines are per-machine and do not travel; see `cargo xtask bench-save`.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_graph::EdgeId;
@@ -103,8 +105,10 @@ fn chain_engine(outputs: usize) -> Engine {
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
-    ed.wire_outputs((0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
@@ -362,7 +366,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         .unwrap();
         last = k;
     }
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(last, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(last, 0))])
         .unwrap();
     ed.commit().expect("commits");
     let engine =

@@ -12,6 +12,8 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_graph::EdgeId;
@@ -246,7 +248,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -523,7 +525,7 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
         ed.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
         ed.connect_edge(EdgeId::into_port(at(2, 0), Edge::Direct(out(1, 0))))
             .unwrap();
-        ed.wire_outputs(vec![out(2, 0)]).unwrap();
+        ed.wire_declared_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -587,7 +589,7 @@ fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     if let Some(m) = mix {
         ed.set_mix(key(1), m).expect("a node");
     }
@@ -677,7 +679,7 @@ fn a_node_inserted_at_a_removed_nodes_key_starts_active_and_wet() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     assert_eq!(ed.mix(key(1)), Mix::WET);
     assert_eq!(ed.mode(key(1)), NodeMode::Active);
     ed.commit().expect("commits");
@@ -711,7 +713,7 @@ fn a_mix_set_while_a_commit_is_in_flight_is_read_back_and_lands_on_the_unit() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     ed.set_mix(key(1), Mix::new(0.5)).expect("a node");
     assert_eq!(ed.mix(key(1)), Mix::new(0.5));
@@ -827,7 +829,8 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![out(1, 0), out(1, 1)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0), out(1, 1)])
+        .unwrap();
     ed.commit().expect("nothing hears its pass yet");
 
     let no_pass = PassError::Unplaced {

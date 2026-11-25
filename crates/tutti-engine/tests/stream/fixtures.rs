@@ -6,6 +6,8 @@
 //! `no_alloc/block_no_alloc.rs` keeps its own copy, deliberately: every line
 //! it runs before the gate has to be auditable in one file.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
@@ -40,7 +42,7 @@ pub(crate) fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
 pub(crate) fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
         .unwrap();
 }
 

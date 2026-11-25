@@ -2,6 +2,8 @@
 //! moved) recompiles at the next commit, moves the silence skip's park time,
 //! and touches neither the unit nor a running crossfade.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -80,7 +82,7 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
         Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0))),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -208,7 +210,7 @@ fn set_tail_does_not_cut_a_fade() {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();

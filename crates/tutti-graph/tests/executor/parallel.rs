@@ -11,6 +11,8 @@
 //! on random graphs as well; this file is the direct comparison, on one graph
 //! that has everything at once.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 use tutti_graph::testing::feed_input;
@@ -288,7 +290,7 @@ fn build(ed: &mut Editor) {
     .unwrap();
     ed.connect_edge(EdgeId::into_port(at(51, 0), from(50, 0)))
         .unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(9, 0)),
         PortSource::Node(out(40, 0)),
         PortSource::Node(out(41, 1)),
@@ -606,7 +608,7 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         ))
         .unwrap();
     }
-    ed.wire_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))))
+    ed.wire_declared_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))))
         .unwrap();
     ed.commit().expect("commits");
     let input = vec![0.5f32; MAX_BLOCK];
@@ -741,7 +743,7 @@ fn the_executor_waits_by_its_pools_budget() {
         at(3, 0),
         [Edge::Direct(PortSource::Node(out(1, 0)))],
     );
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(out(2, 0)),
         PortSource::Node(out(3, 0)),
     ])
@@ -809,7 +811,7 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
                 .unwrap();
             outputs.push(PortSource::Node(out(fx.0, 0)));
         }
-        ed.wire_outputs(outputs).unwrap();
+        ed.wire_declared_outputs(outputs).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

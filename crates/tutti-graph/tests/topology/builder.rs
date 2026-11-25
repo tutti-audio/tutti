@@ -3,6 +3,8 @@
 //! rules are written out independently below ([`net_rule`]) and each render
 //! is pinned to the figure they give in closed form.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
 use tutti_graph::EdgeId;
@@ -331,7 +333,7 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         Edge::Direct(PortSource::Node(from(0, 0))),
     ))
     .unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
     ])
@@ -651,7 +653,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);

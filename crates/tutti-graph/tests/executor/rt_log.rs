@@ -3,6 +3,8 @@
 //! coalesced, gated and merged by frame, on the one-participant executor and on the
 //! parallel one, which renders the same samples with logging on.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::{TestPool, prepare, test_pool};
@@ -110,7 +112,7 @@ fn build(
         );
         outputs.push(PortSource::Node(OutputPort::new(key, 0)));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

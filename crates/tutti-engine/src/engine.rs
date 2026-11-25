@@ -1690,6 +1690,7 @@ mod tests {
     use tutti_buffers::Placement;
     use tutti_buffers::{ChannelSet, ChannelTopology};
     use tutti_graph::Prepare;
+    use tutti_graph::testing::WireDeclared;
     use tutti_timeline::Timeline;
     use tutti_timeline::{MotionCommand, Transport};
     use tutti_units::Amplitude;
@@ -2049,8 +2050,10 @@ mod tests {
         use tutti_graph::NodeKey;
         use tutti_graph::{OutputPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
-        ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-            .unwrap();
+        ed.wire_declared_outputs(
+            (0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+        )
+        .unwrap();
         ed.commit().expect("commits");
     }
 
@@ -3020,7 +3023,7 @@ mod tests {
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "probe", tutti_graph::Unforkable(TempoProbe));
-        ed.wire_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))))
+        ed.wire_declared_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))))
             .unwrap();
         ed.commit().expect("commits");
         let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
@@ -3039,8 +3042,10 @@ mod tests {
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
         use tutti_graph::{NodeKey, OutputPort, PortSource};
         let dc = PortSource::Node(OutputPort::new(NodeKey(1), 0));
-        ed.wire_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }))
-            .unwrap();
+        ed.wire_declared_outputs(
+            (0..width).map(|c| if c == channel { dc } else { PortSource::Zero }),
+        )
+        .unwrap();
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -3483,7 +3488,7 @@ mod tests {
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc =
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(tutti_graph::NodeKey(1), 0));
-        ed.wire_outputs([dc, dc]).unwrap();
+        ed.wire_declared_outputs([dc, dc]).unwrap();
         ed.commit().expect("commits");
         heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
@@ -3564,7 +3569,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.wire_outputs([count, late]).unwrap();
+        ed.wire_declared_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3579,7 +3584,7 @@ mod tests {
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.declare_main_output(ed.spec().main_output, id);
-        ed.wire_outputs([late, count]).unwrap();
+        ed.wire_declared_outputs([late, count]).unwrap();
         ed.commit().expect("commits");
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         // The counter's value at absolute frame `t` is `t + 1`; delayed by 16
@@ -3620,7 +3625,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.wire_outputs([count, late]).unwrap();
+        ed.wire_declared_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3638,7 +3643,7 @@ mod tests {
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.declare_main_output(ed.spec().main_output, id);
-        ed.wire_outputs([count, PortSource::Zero]).unwrap();
+        ed.wire_declared_outputs([count, PortSource::Zero]).unwrap();
         ed.commit().expect("commits");
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),

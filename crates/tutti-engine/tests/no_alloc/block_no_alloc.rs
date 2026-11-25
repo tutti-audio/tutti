@@ -23,6 +23,8 @@
 //! width. `renders_something_to_gate` asserts that, so the gates cannot pass
 //! by rendering nothing.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
@@ -79,7 +81,7 @@ fn rolling_state_with(
         Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
         .unwrap();
     let reader = tap.then(|| {
         let sources: Vec<_> = ed

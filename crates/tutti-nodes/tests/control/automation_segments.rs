@@ -16,6 +16,8 @@
 //! within a tolerance (the curve's `powf`, `sqrt` and the port's `f32`
 //! progress differ in the last bits).
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
@@ -80,7 +82,7 @@ fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .unwrap();
     ed.connect_param(
         ParamIn {

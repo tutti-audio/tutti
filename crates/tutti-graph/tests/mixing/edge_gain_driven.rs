@@ -7,6 +7,8 @@
 //! the driver's steps give at each frame, written out in the test. The
 //! parallel executor is compared against the one-participant one, bit for bit.
 
+use tutti_graph::testing::WireDeclared;
+
 use common::spec_of;
 use tutti_graph::testing as common;
 use tutti_graph::testing::wire_like;
@@ -614,7 +616,7 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     ed.insert(key(1), "dc", Unforkable(common::TestNode::new(dc(1.0))));
     ed.insert(key(2), "driver", Forkable(driver(0)));
     ed.insert(key(3), "driver", Forkable(driver(0)));
-    ed.wire_outputs([out(1)]).unwrap();
+    ed.wire_declared_outputs([out(1)]).unwrap();
     let id = EdgeId::into_output(0, out(1));
     ed.set_edge_gain(id, amp(1.0)).expect("the edge exists");
     ed.commit().expect("commits");
@@ -671,7 +673,7 @@ fn a_fork_carries_the_driven_lane() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "dc", Forkable(dc(1.0)));
     ed.insert(key(2), "driver", Forkable(driver(0)));
-    ed.wire_outputs([out(1)]).unwrap();
+    ed.wire_declared_outputs([out(1)]).unwrap();
     let id = EdgeId::into_output(0, out(1));
     ed.set_edge_gain(id, amp(1.0)).expect("edge");
     ed.connect_edge_gain(id, lane_out(2)).unwrap();

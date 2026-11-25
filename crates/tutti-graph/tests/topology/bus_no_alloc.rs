@@ -7,6 +7,8 @@
 //! The renders are not compared: the figures are `bus_edges.rs`'s and
 //! `mode.rs`'s. This pins the cost.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -113,7 +115,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");
     ed.set_mix(key(4), Mix::DRY).expect("a mix");
     let out = |n: u64, port: u16| PortSource::Node(OutputPort::new(key(n), port));
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         out(2, 0),
         out(2, 1),
         out(3, 0),

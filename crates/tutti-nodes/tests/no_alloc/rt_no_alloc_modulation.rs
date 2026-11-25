@@ -3,6 +3,8 @@
 //! and 200 lanes of every layer kind with republishes, knob writes and range edits between
 //! blocks. The LFO, the delays and the modulation effects are rows of the table.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use crate::harness::bus;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
@@ -121,7 +123,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         .unwrap();
         outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -413,7 +415,7 @@ fn lanes_200(
         for p in 0..8 {
             {
                 let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-                ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+                declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
                 ed.connect_edge(EdgeId::into_output(
                     channel,
                     PortSource::Node(OutputPort::new(NodeKey(1000 + j), p)),
@@ -708,7 +710,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         ed.insert(probe(k), "probe", ForkByClone(ParamProbe));
         {
             let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
-            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+            declare_outputs(&mut ed, ChannelLayout::from_count(channel + 1));
             ed.connect_edge(EdgeId::into_output(
                 channel,
                 PortSource::Node(OutputPort::new(probe(k), 0)),
@@ -1021,7 +1023,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         Edge::Direct(PortSource::Node(OutputPort::new(saw, 0))),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
         .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);

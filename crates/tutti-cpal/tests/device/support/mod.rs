@@ -6,6 +6,8 @@
 //! closed form instead of sampled. That is what makes the sample-format matrix
 //! assertable.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -27,7 +29,7 @@ pub(crate) fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackS
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level.to_f64())));
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])

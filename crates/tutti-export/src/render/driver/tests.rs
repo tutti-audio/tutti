@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
+use tutti_graph::testing::declare_outputs;
 use tutti_tempo::TempoMap;
 use tutti_timeline::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::Ump;
@@ -187,7 +188,7 @@ fn a_spec_narrowed_without_a_commit_still_renders_the_committed_width() {
     let (mut editor, executor) = g.build(RenderGraph::prepare(RATE)).expect("builds");
     let committed = editor.spec().topology.outputs.len();
     assert!(committed >= 2, "a stereo graph has two outputs");
-    editor.resize_outputs(ChannelLayout::from_count(1));
+    declare_outputs(&mut editor, ChannelLayout::from_count(1));
     let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
     let frames = render(&mut graph, &FrozenClock, 2, 16);
     assert!(frames.iter().all(|f| f[0] == 0.5 && f[1] == 0.5));

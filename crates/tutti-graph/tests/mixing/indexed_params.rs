@@ -16,6 +16,8 @@
 //! The kind-and-index encoding itself is pinned in `tutti-units`
 //! (`unit_param.rs`); the session side in its own suites.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::testing as common;
 
 use common::prepare;
@@ -172,7 +174,8 @@ fn graph(to: &[(UnitAddr, f64)]) -> (Editor, tutti_graph::Executor, ParamSet) {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.wire_outputs(vec![out(BANDS, 0), out(BANDS, 1)]).unwrap();
+    ed.wire_declared_outputs(vec![out(BANDS, 0), out(BANDS, 1)])
+        .unwrap();
     (ed, exec, controls)
 }
 
@@ -438,7 +441,8 @@ fn a_node_declares_up_to_the_cap_and_no_more() {
             to: vec![(last, -7.0)],
         }),
     );
-    ed.wire_outputs(vec![out(BANDS, 0), out(BANDS, 1)]).unwrap();
+    ed.wire_declared_outputs(vec![out(BANDS, 0), out(BANDS, 1)])
+        .unwrap();
     ed.connect_param(param(last), src_out()).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();

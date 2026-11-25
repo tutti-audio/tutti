@@ -6,6 +6,8 @@
 //! A meter reads the signal and changes nothing: the properties here are
 //! analytic figures and the one-participant render against the parallel one.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 use tutti_graph::testing::feed_output;
@@ -85,7 +87,7 @@ fn constants(r: &mut Rig, values: &[f32]) {
         );
         outputs.push(out(key));
     }
-    r.ed.wire_outputs(outputs).unwrap();
+    r.ed.wire_declared_outputs(outputs).unwrap();
 }
 
 fn commit(r: &mut Rig) {
@@ -210,7 +212,7 @@ fn a_spike_is_held_until_read_and_read_once() {
             done: false,
         }),
     );
-    r.ed.wire_outputs(vec![out(1)]).unwrap();
+    r.ed.wire_declared_outputs(vec![out(1)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -281,7 +283,7 @@ fn the_main_output_follows_the_outputs() {
     feed_output(&mut r.ed, 0, []);
     {
         let channel = u16::try_from(r.ed.spec().topology.outputs.len()).expect("a width");
-        r.ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+        declare_outputs(&mut r.ed, ChannelLayout::from_count(channel + 1));
         r.ed.connect_edge(EdgeId::into_output(channel, out(1)))
             .unwrap()
     };
@@ -470,7 +472,7 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
         .unwrap();
         outputs.push(out(gain));
     }
-    r.ed.wire_outputs(outputs.clone()).unwrap();
+    r.ed.wire_declared_outputs(outputs.clone()).unwrap();
     let mut readers = Vec::new();
     if main_output {
         readers.push(
@@ -551,7 +553,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| PortSource::Node(OutputPort::new(NodeKey(1), p));
-    r.ed.wire_outputs(vec![port(0)]).unwrap();
+    r.ed.wire_declared_outputs(vec![port(0)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
             .expect("the sources exist");
@@ -618,7 +620,7 @@ fn the_main_output_reads_at_the_outputs_time() {
     ))
     .unwrap();
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
-    r.ed.wire_outputs(vec![out(3), out(1)]).unwrap();
+    r.ed.wire_declared_outputs(vec![out(3), out(1)]).unwrap();
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -710,7 +712,7 @@ fn a_main_output_meter_cannot_outgrow_its_cells() {
     let _main_output =
         r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
-    r.ed.wire_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
+    r.ed.wire_declared_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
         .unwrap();
     assert!(matches!(
         r.ed.commit(),

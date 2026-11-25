@@ -12,6 +12,8 @@
 //! - a thread reading the snapshot while the engine applies edits reads one
 //!   of the regions written.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::Record;
@@ -66,7 +68,7 @@ fn engine_logging(transport: &Transport, log: Option<Record<Seen>>) -> (Engine, 
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "probe", Unforkable(LoopProbe(log)));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");

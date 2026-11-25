@@ -13,6 +13,8 @@
 //! Read the numbers the way `engine_render`'s header describes: elem/s ÷
 //! 48 000 is the realtime multiple, and at 64 frames the budget is 1.333 ms.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -37,7 +39,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "sine", Osc::sine(Hz::new(440.0)));
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])

@@ -15,6 +15,8 @@
 //! pieces from the block's start, so a device block that is a multiple of 64
 //! frames is the same pieces, and must render the same bits.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
@@ -87,7 +89,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
     for (i, u) in units.into_iter().enumerate() {
         ed.insert(NodeKey(i as u64 + 1), "voice", u);
     }
-    ed.wire_outputs(routes(n).into_iter().map(|(unit, port)| {
+    ed.wire_declared_outputs(routes(n).into_iter().map(|(unit, port)| {
         PortSource::Node(OutputPort::new(NodeKey(unit as u64 + 1), port as u16))
     }))
     .unwrap();

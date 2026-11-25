@@ -17,6 +17,8 @@
 
 #![cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -86,8 +88,10 @@ fn render_probes(workers: usize, entry: Entry) {
         ))
         .unwrap();
     }
-    ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

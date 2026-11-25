@@ -3,6 +3,8 @@
 //! generation that moved without its unit, or a gain entry without its cell,
 //! so these write the spec directly.
 
+use crate::testing::WireDeclared;
+
 use tutti_buffers::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
@@ -120,7 +122,7 @@ fn a_fork_source_from_an_older_generation_is_refused() {
     let pre = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "const", ForkByClone(Dc));
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.spec_mut().generations.insert(NodeKey(1), 7);
     assert_eq!(
@@ -143,7 +145,7 @@ fn an_entry_without_a_cell_commits_as_a_unity_lane() {
             width: 1,
         })),
     );
-    ed.wire_outputs(vec![out(1, 0)]).unwrap();
+    ed.wire_declared_outputs(vec![out(1, 0)]).unwrap();
     let id = EdgeId::into_output(0, out(1, 0));
     ed.spec_mut().set_edge_gain(id, EdgeGain::default());
     assert!(ed.edge_gain_cell(id).is_none(), "no cell yet");

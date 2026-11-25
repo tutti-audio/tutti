@@ -15,6 +15,8 @@
 //! and mute) is not in the graph yet, so a bypassed source's silence is
 //! M1's to test.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -174,7 +176,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
         Edge::Direct(out(90)),
     ))
     .unwrap();
-    ed.wire_outputs([out(91)]).unwrap();
+    ed.wire_declared_outputs([out(91)]).unwrap();
     Rig {
         ed,
         exec,

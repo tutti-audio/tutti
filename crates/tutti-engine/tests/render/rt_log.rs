@@ -1,6 +1,8 @@
 //! What a node logs on the audio thread reaches the control side through the
 //! engine's `rt_log()` readers, from the block after the filter is stored.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::Engine;
@@ -45,7 +47,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
         MaxBlock::of(Samples::new(64)),
     ));
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     let mut exec = exec;

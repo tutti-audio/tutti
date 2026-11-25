@@ -931,6 +931,7 @@ fn testing::bits_of
 fn testing::block
 fn testing::block_in
 fn testing::cap_of
+fn testing::declare_outputs
 fn testing::declick
 fn testing::driver_value
 fn testing::feed_input
@@ -1145,6 +1146,7 @@ trait node::fork::ForkSource
 trait node::instrument::InstrumentNode
 trait node::setting::HasSetting
 trait node::setting::SettingCell
+trait testing::WireDeclared
 trait testing::Word
 type compile::Shapes
 type event::types::UmpAt

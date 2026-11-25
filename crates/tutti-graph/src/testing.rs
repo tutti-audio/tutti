@@ -56,6 +56,37 @@ pub fn feed_input<F: Float>(
     }
 }
 
+/// Declares the main output `width` channels wide on a bare editor (test
+/// support; a session declares it through its builder). Returns whether the
+/// width changed.
+pub fn declare_outputs<F: Float>(ed: &mut Editor<F>, width: ChannelLayout) -> bool {
+    ed.resize_outputs(width)
+}
+
+/// Wiring for tests that start from a bare editor.
+pub trait WireDeclared {
+    /// Declares the main output as wide as there are `sources` and wires
+    /// channel `c` to the `c`th of them ([`declare_outputs`], then
+    /// [`Editor::wire_outputs`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Editor::wire_outputs`].
+    fn wire_declared_outputs(
+        &mut self,
+        sources: impl IntoIterator<Item = crate::PortSource>,
+    ) -> Result<(), crate::WireError>;
+}
+
+impl<F: Float> WireDeclared for Editor<F> {
+    fn wire_declared_outputs(
+        &mut self,
+        sources: impl IntoIterator<Item = crate::PortSource>,
+    ) -> Result<(), crate::WireError> {
+        self.wire_outputs(sources)
+    }
+}
+
 /// Makes `sources` exactly the sources of main output `channel`, widening the
 /// main output to reach it.
 pub fn feed_output<F: Float>(
@@ -64,7 +95,7 @@ pub fn feed_output<F: Float>(
     sources: impl IntoIterator<Item = crate::PortSource>,
 ) {
     if ed.spec().topology.outputs.len() <= usize::from(channel) {
-        ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+        declare_outputs(ed, ChannelLayout::from_count(channel + 1));
     }
     let held = ed.spec().topology.outputs[usize::from(channel)].clone();
     for from in held {
@@ -107,9 +138,7 @@ pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
     for (channel, sources) in spec.topology.outputs.iter().enumerate() {
         feed_output(ed, channel as u16, sources.iter().copied());
     }
-    ed.resize_outputs(tutti_buffers::ChannelLayout::clamped(
-        spec.topology.outputs.len(),
-    ));
+    declare_outputs(ed, ChannelLayout::clamped(spec.topology.outputs.len()));
     for (at, edges) in &spec.events {
         for edge in edges {
             ed.connect_events(*at, *edge).unwrap();

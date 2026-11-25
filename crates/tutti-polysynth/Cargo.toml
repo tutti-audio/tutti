@@ -49,7 +49,7 @@ tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 # lane nodes of the integration tests.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # The graph contract's test harness.
-tutti-graph = { path = "../tutti-graph", features = ["contract"] }
+tutti-graph = { path = "../tutti-graph", features = ["contract", "testing"] }
 criterion.workspace = true
 # `check_range_contract`'s serde shape, for `UnisonVoices` and `GlideTime`
 # (whose raw is `Seconds`).

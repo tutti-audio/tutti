@@ -1,6 +1,8 @@
 //! `Editor::set_latency`: a runtime latency change — a plugin whose latency
 //! atomic moved — recompiles and moves PDC, without touching the unit.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
@@ -100,7 +102,7 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
         ))
         .unwrap();
     }
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(PLUGIN, 0)),
         PortSource::Node(OutputPort::new(DRY, 0)),
     ])

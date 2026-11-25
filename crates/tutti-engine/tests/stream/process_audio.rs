@@ -1,6 +1,8 @@
 //! `process_audio` drives the transport's clock: a block advances the beat, and
 //! a loop wraps it.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
@@ -48,7 +50,7 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
     ))
     .unwrap();
     // The filter's single output on both device channels.
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
         .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

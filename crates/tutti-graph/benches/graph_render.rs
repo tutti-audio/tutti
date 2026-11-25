@@ -25,6 +25,8 @@
 //! cargo bench -p tutti-graph --bench graph_render -- overhead
 //! ```
 
+use tutti_graph::testing::WireDeclared;
+
 use std::hint::black_box;
 use tutti_buffers::MaxBlock;
 use tutti_graph::EdgeId;
@@ -264,7 +266,7 @@ fn executor_for(shape: &Topo) -> Executor {
             last
         }
     };
-    ed.wire_outputs(vec![node(last)]).unwrap();
+    ed.wire_declared_outputs(vec![node(last)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -391,7 +393,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
                 .unwrap();
         }
     }
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(
         NodeKey(n as u64 - 1),
         0,
     ))])

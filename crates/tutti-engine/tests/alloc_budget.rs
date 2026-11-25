@@ -31,6 +31,8 @@
 //! refactor. A failure here means "this got an order of magnitude worse", and
 //! the message says so.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -130,7 +132,7 @@ fn graph(nodes: usize) -> (Editor, Executor) {
         .unwrap();
     }
     let last = PortSource::Node(OutputPort::new(NodeKey(nodes as u64), 0));
-    ed.wire_outputs(vec![last, last]).unwrap();
+    ed.wire_declared_outputs(vec![last, last]).unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -239,7 +241,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
         ))
         .unwrap();
     }
-    ed.wire_outputs(
+    ed.wire_declared_outputs(
         [1, 2]
             .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),

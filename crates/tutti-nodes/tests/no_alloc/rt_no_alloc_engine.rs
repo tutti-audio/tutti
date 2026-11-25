@@ -16,6 +16,8 @@
 //! one gates them *inside the engine*, where the executor drives them through
 //! its own buffers and the transport advances on the same `process` call.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::EdgeId;
@@ -84,7 +86,7 @@ fn build_engine_with_chain() -> Engine {
     wire(strip, 1, eq, 0);
     wire(limiter, 0, strip, 0);
     wire(limiter, 1, strip, 1);
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(limiter, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(limiter, port))))
         .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

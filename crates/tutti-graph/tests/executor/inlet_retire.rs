@@ -3,6 +3,8 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
@@ -27,7 +29,7 @@ fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
 }
 
 fn outputs(ed: &mut Editor) {
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))))
         .unwrap();
 }
 
@@ -61,7 +63,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     }
 
     ed.remove(KEY);
-    ed.wire_outputs([PortSource::Zero, PortSource::Zero])
+    ed.wire_declared_outputs([PortSource::Zero, PortSource::Zero])
         .unwrap();
     ed.commit().expect("compiles");
     exec.apply_pending();

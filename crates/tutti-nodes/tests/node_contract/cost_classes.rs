@@ -3,6 +3,8 @@
 //! into fewer tasks than undeclared ones, and the render on a pool is bit
 //! for bit the one-participant one.
 
+use tutti_graph::testing::WireDeclared;
+
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
@@ -115,7 +117,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
                 .unwrap();
         }
     }
-    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SUM, port))))
+    ed.wire_declared_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SUM, port))))
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();

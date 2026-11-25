@@ -5,6 +5,8 @@
 //! shifted or folded frame is visible. The fade itself is
 //! `tutti-session`'s `tests/wiring/engine.rs`.
 
+use tutti_graph::testing::WireDeclared;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
@@ -48,8 +50,10 @@ fn rig(width: u16) -> (Engine, HeardTaps) {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
-    ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
-        .unwrap();
+    ed.wire_declared_outputs(
+        (0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let mut engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
     Box::leak(Box::new((ed, transport)));

@@ -17,6 +17,8 @@
 //! stated rather than implied: a node that allocates is the node's bug,
 //! which this test catches only for the nodes it runs.
 
+use tutti_graph::testing::{WireDeclared, declare_outputs};
+
 use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 use tutti_graph::testing::{feed_input, feed_output};
@@ -171,7 +173,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         .unwrap();
     ed.connect_edge(EdgeId::into_port(at(9, 0), from(8, 0)))
         .unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(9), 0)),
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
     ])
@@ -285,7 +287,7 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     };
     wire(&mut ed, 1);
     wire(&mut ed, 2);
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -354,7 +356,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
         Edge::Direct(PortSource::MainInput(1)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
         PortSource::Node(OutputPort::new(NodeKey(3), 0)),
     ])
@@ -468,7 +470,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             Unforkable(HeldChaser(Arc::clone(&a[k as usize]))),
         );
     }
-    ed.wire_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_declared_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .unwrap();
     ed.commit().expect("commits");
     let mut out = vec![vec![0.0f32; 64]; KEYS as usize];
@@ -544,7 +546,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
         Arc::new(AtomicU64::new(0)),
     );
     ed.insert(NodeKey(1), "chaser", Unforkable(HeldChaser(Arc::clone(&a))));
-    ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     let mut out = vec![0.0f32; 64];
@@ -891,7 +893,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
         .unwrap();
         ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
             .unwrap();
-        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
             .unwrap();
     }
     let cut = ParamIn {
@@ -1022,7 +1024,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
         .unwrap();
         ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
             .unwrap();
-        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
             .unwrap();
     }
     let port = |p| EventInputPort::new(NodeKey(1), p);
@@ -1101,7 +1103,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
         .unwrap();
         ed.connect_edge(EdgeId::into_port(at(1, 0), from(2, 0)))
             .unwrap();
-        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
             .unwrap();
     }
     ed.commit().expect("commits");
@@ -1243,7 +1245,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1287,7 +1289,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1338,7 +1340,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1360,7 +1362,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     }
     ed.remove(NodeKey(1));
     ed.remove(NodeKey(4));
-    ed.wire_outputs(Vec::new()).unwrap();
+    ed.wire_declared_outputs(Vec::new()).unwrap();
     ed.commit().expect("commits");
     for _ in 0..8 {
         exec.process(64, &transport, &[], &mut [&mut out[..64]]);
@@ -1441,7 +1443,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
             .unwrap();
         outputs.push(PortSource::Node(OutputPort::new(fx, 0)));
     }
-    ed.wire_outputs(outputs).unwrap();
+    ed.wire_declared_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1515,10 +1517,10 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                         ed.connect_edge(EdgeId::into_port(at(sink.0, 0), from(k, 0)))
                             .unwrap();
                     }
-                    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
+                    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                         .unwrap();
                 } else {
-                    ed.resize_outputs(ChannelLayout::from_count(1));
+                    declare_outputs(&mut ed, ChannelLayout::from_count(1));
                     feed_output(
                         &mut ed,
                         0,
@@ -1605,10 +1607,10 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     ed.connect_edge(EdgeId::into_port(at(sink.0, 0), from(k, 0)))
                         .unwrap();
                 }
-                ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
+                ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                     .unwrap();
             } else {
-                ed.resize_outputs(ChannelLayout::from_count(1));
+                declare_outputs(&mut ed, ChannelLayout::from_count(1));
                 feed_output(
                     &mut ed,
                     0,
@@ -1820,7 +1822,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         .unwrap();
     ed.connect_edge(EdgeId::into_port(at(9, 0), from(8, 0)))
         .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1896,7 +1898,7 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
         Edge::Direct(PortSource::MainInput(0)),
     ))
     .unwrap();
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -2078,7 +2080,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         sink: PortSink::Output(0),
         from: from(k, 0),
     };
-    ed.resize_outputs(ChannelLayout::from_count(1));
+    declare_outputs(&mut ed, ChannelLayout::from_count(1));
     feed_output(
         &mut ed,
         0,
@@ -2185,7 +2187,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             }),
         );
     }
-    ed.wire_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_declared_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
@@ -2249,7 +2251,7 @@ fn edge_fades_are_allocation_free() {
         ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
     }
     let src = |n: u64| PortSource::Node(OutputPort::new(NodeKey(n), 0));
-    ed.wire_outputs([src(1)]).unwrap();
+    ed.wire_declared_outputs([src(1)]).unwrap();
     ed.connect_edge(EdgeId::into_output(0, src(2))).unwrap();
     let id = |n: u64| EdgeId::into_output(0, src(n));
     ed.set_edge_gain(id(1), Gain::new(0.5))
@@ -2464,7 +2466,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.resize_inputs(ChannelLayout::MONO);
     let first = pdc_pair(&mut ed, 1, 40);
     let out_of = |node: NodeKey| PortSource::Node(OutputPort::new(node, 0));
-    ed.wire_outputs(vec![out_of(first)]).unwrap();
+    ed.wire_declared_outputs(vec![out_of(first)]).unwrap();
     let cap = Samples::new(1 << 16);
     let mut tap = ed
         .open_tap(TapId::of(1), vec![out_of(first)], TapOptions::new(cap))
@@ -2508,7 +2510,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // event tap and the held keys are in them.
     let second = pdc_pair(&mut ed, 10, 25);
     event_pdc(&mut ed, 20);
-    ed.wire_outputs(vec![out_of(first), out_of(second)])
+    ed.wire_declared_outputs(vec![out_of(first), out_of(second)])
         .unwrap();
     let events = ed
         .open_event_tap(
@@ -2543,7 +2545,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         ed.connect_edge(EdgeId::into_port(at(200, i as u16), from(sum.0, 0)))
             .unwrap();
     }
-    ed.wire_outputs(vec![out_of(first), out_of(second), out_of(wide)])
+    ed.wire_declared_outputs(vec![out_of(first), out_of(second), out_of(wide)])
         .unwrap();
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -2629,7 +2631,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.connect_events(sink(312, 0), EventEdge::Direct(ev(311, 0)))
         .unwrap();
     ed.connect_events(sink(312, 1), efb(128)).unwrap();
-    ed.wire_outputs(vec![
+    ed.wire_declared_outputs(vec![
         out_of(first),
         out_of(second),
         out_of(wide),
@@ -3113,7 +3115,7 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
         ed.connect_edge(EdgeId::into_port(at(200, i as u16), from(sum.0, 0)))
             .unwrap();
     }
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))])
         .unwrap();
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, 4);
@@ -3153,7 +3155,8 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         })),
     );
     let port = |p| PortSource::Node(OutputPort::new(node, p));
-    ed.wire_outputs(vec![port(0), port(1), port(2)]).unwrap();
+    ed.wire_declared_outputs(vec![port(0), port(1), port(2)])
+        .unwrap();
     let mut wide = ed
         .open_heard_tap(TapId::of(1), 3, Samples::new(1024))
         .expect("the outputs exist");
@@ -3174,7 +3177,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     run(&mut exec, 4);
 
     // The main output narrows to one channel and its tap is opened again.
-    ed.wire_outputs(vec![port(0)]).unwrap();
+    ed.wire_declared_outputs(vec![port(0)]).unwrap();
     let mut narrow = ed
         .open_heard_tap(TapId::of(1), 1, Samples::new(1024))
         .expect("the outputs exist");

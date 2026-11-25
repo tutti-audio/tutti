@@ -24,6 +24,8 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_graph::testing::WireDeclared;
+
 use crate::clap_probe;
 use crate::ramp_source::{RampSource, ramp};
 use clap_probe::{ProbeEnv, load_probe, render};
@@ -183,7 +185,7 @@ fn run_live(
         ))
         .unwrap();
     }
-    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .unwrap();
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;
