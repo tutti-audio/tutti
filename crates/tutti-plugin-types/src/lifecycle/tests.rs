@@ -23,6 +23,7 @@ enum Fx {
     Rebuild,
     Recall,
     Lend,
+    SetMode(RenderMode),
     Latency,
     Tail,
     Layout,
@@ -41,6 +42,7 @@ enum Fx {
     Reloaded,
     StateNotRestoredNotice,
     RefusedNotice,
+    ModeRefusedNotice,
     StuckNotice,
     LostNotice,
     TransportNotice(TransportRequest),
@@ -53,6 +55,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::Rebuild => Fx::Rebuild,
         Effect::Recall => Fx::Recall,
         Effect::Lend => Fx::Lend,
+        Effect::SetMode(mode) => Fx::SetMode(*mode),
         Effect::ReadLatency => Fx::Latency,
         Effect::ReadTail => Fx::Tail,
         Effect::ReadLayout => Fx::Layout,
@@ -71,6 +74,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::Notify(Notice::Reloaded) => Fx::Reloaded,
         Effect::Notify(Notice::StateNotRestored { .. }) => Fx::StateNotRestoredNotice,
         Effect::Notify(Notice::Refused { .. }) => Fx::RefusedNotice,
+        Effect::Notify(Notice::ModeRefused { .. }) => Fx::ModeRefusedNotice,
         Effect::Notify(Notice::Stuck { .. }) => Fx::StuckNotice,
         Effect::Notify(Notice::Lost { .. }) => Fx::LostNotice,
         Effect::Notify(Notice::Transport(asked)) => Fx::TransportNotice(*asked),
@@ -179,6 +183,8 @@ enum Kind {
     ReconfigureOp,
     DeactivateOp,
     RelendOp,
+    SetModeOp,
+    Answered,
     Request,
     Tick,
     Activated,
@@ -194,6 +200,8 @@ fn kind(event: &Event) -> Kind {
         Event::Op(HostOp::Reconfigure(_)) => Kind::ReconfigureOp,
         Event::Op(HostOp::Deactivate) => Kind::DeactivateOp,
         Event::Op(HostOp::Relend) => Kind::RelendOp,
+        Event::Op(HostOp::SetMode(_)) => Kind::SetModeOp,
+        Event::Answered(_) => Kind::Answered,
         Event::Request(_) => Kind::Request,
         Event::Tick => Kind::Tick,
         Event::Replied(Reply::Activated) => Kind::Activated,
@@ -1006,36 +1014,66 @@ fn rule_3_a_plugin_lost_during_a_rollback_tells_the_refusal_as_inactive() {
     assert_eq!(s.stage(), Stage::Poisoned);
 }
 
-/// **A live retune applies the fields it takes, and a difference in another
-/// field survives it**: the rate, block ceiling and callback size are applied
-/// by `retuned`, the width is not, so the plugin is still behind and an
-/// activation follows.
+/// **A retuning Processor is told its rate, not restarted, and its answer is
+/// what the plugin has**: the rate, block ceiling and callback size are not
+/// behind for a Processor that takes them live, a taken rate applies what the
+/// retune takes, and a difference in the width still needs an activation.
 #[test]
-fn rule_3_a_retune_applies_what_it_takes_and_a_difference_in_another_field_remains() {
+fn rule_3_a_taken_retune_applies_what_it_takes_and_a_difference_in_another_field_remains() {
     let p = prep(1);
     let live = p
         .with_rate(SampleRate::SR_96K)
         .with_quantum(MaxBlock::of(Samples::new(32)));
     let mut s = active(REST, p);
     s.want(live);
-    assert!(s.behind(true));
-    s.retuned();
+    assert_eq!(s.behind(false, RenderModeSupport::Unsupported), Behind::Restart);
+    assert_eq!(s.behind(true, RenderModeSupport::Unsupported), Behind::No);
+    let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_96K)));
     assert_eq!(s.applied(), Some(live));
-    assert!(!s.behind(true), "everything a retune takes is applied");
 
     let other_width = live.with_format(match p.format() {
         FloatWidth::F32 => FloatWidth::F64,
         FloatWidth::F64 => FloatWidth::F32,
     });
+    let mut s = s;
     s.want(other_width.with_rate(SampleRate::SR_48K));
-    s.retuned();
+    let (s, _) = go(s, Event::Answered(Told::RateTook(SampleRate::SR_48K)));
     assert_eq!(s.applied().map(|a| a.rate()), Some(SampleRate::SR_48K));
     assert_eq!(
         s.applied().map(|a| a.format()),
         Some(p.format()),
         "not taken"
     );
-    assert!(s.behind(true), "the width still needs an activation");
+    assert_eq!(
+        s.behind(true, RenderModeSupport::Unsupported),
+        Behind::Restart,
+        "the width still needs an activation"
+    );
+}
+
+/// **A refused retune gives the rate up and tells the plugin's standing**: the
+/// plugin has what it had, the host wants it again, and the notice names the
+/// refused rate with the rate the plugin runs at.
+#[test]
+fn rule_3_a_refused_retune_rolls_the_wanted_rate_back_and_tells_the_refusal() {
+    let p = prep(1);
+    let mut s = active(REST, p);
+    s.want(p.with_rate(SampleRate::SR_96K));
+    let cause = RateRefusalCause::RolledBack {
+        running: p.rate(),
+        reason: "no".into(),
+    };
+    let refusal = RateRefusal::new(SampleRate::SR_96K, cause);
+    let (s, out) = step(s, Event::Answered(Told::RateRefused(refusal)));
+    assert_eq!(s.applied(), Some(p));
+    assert_eq!(s.wanted(), Some(p));
+    assert!(matches!(
+        out.as_slice(),
+        [Effect::Notify(Notice::Refused {
+            recovery: Recovery::RolledBack { running },
+            ..
+        })] if *running == p
+    ));
 }
 
 /// **A plugin's own restart after a refused rate activates with the rate it
@@ -1680,7 +1718,7 @@ proptest! {
                     HostOp::Reconfigure(p) => want = Some(p),
                     HostOp::Deactivate => want = None,
                     HostOp::Activate(p) => want = want.or(Some(p)),
-                    HostOp::Relend => {}
+                    HostOp::Relend | HostOp::SetMode(_) => {}
                 }
             }
             match want {
@@ -1839,24 +1877,66 @@ fn a_mapping_change_beside_a_restart_is_rebuilt_after_the_activation() {
     assert!(go(s, Event::Tick).1.is_empty());
 }
 
+/// **A live mode is told once, and the answer is what the plugin runs in**: an
+/// active plugin asked for a mode is behind in it until told, is told by one
+/// effect, is not behind while the answer is out, and a taken answer applies
+/// the mode without planning a restart; a later restart activates in it.
 #[test]
-fn set_mode_changes_the_next_activation_and_restarts_nothing() {
+fn a_live_mode_is_told_once_and_a_taken_answer_applies_it_without_a_restart() {
     let p = prep(1);
+    let offline = p.with_mode(RenderMode::Offline);
     let mut s = active(RESTARTS, p);
-    s.set_mode(RenderMode::Offline);
+    s.want(offline);
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Served),
+        Behind::Mode(RenderMode::Offline)
+    );
+    let (s, fx) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    assert_eq!(fx, [Fx::SetMode(RenderMode::Offline)]);
+    assert_eq!(
+        s.behind(false, RenderModeSupport::Served),
+        Behind::No,
+        "told, and not asked again while the answer is out"
+    );
+    let (s, fx) = go(s, Event::Answered(Told::ModeTook(RenderMode::Offline)));
+    assert!(fx.is_empty());
     assert_eq!(s.applied().map(|p| p.mode()), Some(RenderMode::Offline));
     assert_eq!(s.stage(), Stage::Active);
-    assert!(
-        go(s.clone(), Event::Tick).1.is_empty(),
-        "nothing is planned"
-    );
+    assert!(go(s.clone(), Event::Tick).1.is_empty(), "nothing is planned");
 
     let s = req(s, Request::Restart);
     let (s, _) = go(s, Event::Tick);
     let (s, _) = reply(s, Reply::Returned);
     let (_, fx) = reply(s, Reply::Deactivated);
-    let want = p.with_mode(RenderMode::Offline);
-    assert_eq!(fx, [Fx::Activate(want)]);
+    assert_eq!(fx, [Fx::Activate(offline)]);
+}
+
+/// **A refused live mode is given up**: the wanted mode goes back to the one
+/// the plugin runs in, the host is told, and the plugin is not behind.
+#[test]
+fn a_refused_live_mode_rolls_the_wanted_mode_back_and_is_told() {
+    let p = prep(1);
+    let mut s = active(RESTARTS, p);
+    s.want(p.with_mode(RenderMode::Offline));
+    let (s, _) = go(s, Event::Op(HostOp::SetMode(RenderMode::Offline)));
+    let (s, fx) = go(s, Event::Answered(Told::ModeRefused(RenderMode::Offline)));
+    assert_eq!(fx, [Fx::ModeRefusedNotice]);
+    assert_eq!(s.wanted(), Some(p));
+    assert_eq!(s.behind(false, RenderModeSupport::Live), Behind::No);
+}
+
+/// **A mode read at activation restarts the plugin, and a plugin with no mode
+/// is never behind in it**: the wanted mode is only kept.
+#[test]
+fn a_mode_read_at_activation_restarts_and_no_mode_is_never_behind() {
+    let p = prep(1);
+    let mut s = active(RESTARTS, p);
+    s.want(p.with_mode(RenderMode::Offline));
+    assert_eq!(
+        s.behind(false, RenderModeSupport::OnActivation),
+        Behind::Restart
+    );
+    assert_eq!(s.behind(false, RenderModeSupport::Unsupported), Behind::No);
 }
 
 /// **A `Prepare` carries its rate and a block of at least one frame**: both

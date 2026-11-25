@@ -563,6 +563,7 @@ impl FakePlugin {
             RenderModeSupport::OnActivation => 0,
             RenderModeSupport::Live => 1,
             RenderModeSupport::Unsupported => 2,
+            RenderModeSupport::Served => 3,
         };
         self.0.render_mode_support.store(code, Ordering::Relaxed);
     }
@@ -846,6 +847,7 @@ macro_rules! fake_control {
                 match self.shared.render_mode_support.load(Ordering::Relaxed) {
                     1 => RenderModeSupport::Live,
                     2 => RenderModeSupport::Unsupported,
+                    3 => RenderModeSupport::Served,
                     _ => RenderModeSupport::OnActivation,
                 }
             }
@@ -853,7 +855,10 @@ macro_rules! fake_control {
             /// Takes the mode where the fake is [`RenderModeSupport::Live`],
             /// recording it for [`FakePlugin::told_render_mode`].
             fn set_render_mode(&mut self, main: MainThreadMarker, mode: RenderMode) -> bool {
-                if self.render_mode_support(main) != RenderModeSupport::Live {
+                if !matches!(
+                    self.render_mode_support(main),
+                    RenderModeSupport::Live | RenderModeSupport::Served
+                ) {
                     return false;
                 }
                 let code = if mode.is_offline() { 2 } else { 1 };

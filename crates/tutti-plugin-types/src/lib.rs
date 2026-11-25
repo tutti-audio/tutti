@@ -329,8 +329,8 @@ pub use harmony::{
     NoteExpressionTextChanges, NoteExpressionTextValue, ScaleChanges, ScaleValue,
 };
 pub use lifecycle::{
-    EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice, Prepare,
-    Recovery, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId,
+    Behind, EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice, Prepare,
+    Recovery, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId, Told,
     standing, step,
 };
 pub use load_stage::LoadStage;

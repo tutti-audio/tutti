@@ -40,7 +40,7 @@ use crate::{
 };
 use crate::{
     MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    StateUse, TimerId, TrackInfo, Wakeups, Widths,
+    StateUse, TimerId, Told, TrackInfo, Wakeups, Widths,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_units::Normalized;
@@ -379,6 +379,13 @@ pub trait Control: EditorWindow {
     /// Returns how this plugin takes a change of render mode: told live,
     /// read at its next activation, or not at all.
     fn render_mode_support(&self, main: MainThreadMarker) -> RenderModeSupport;
+
+    /// Appends what the plugin answered, since the last call, to a setting it
+    /// was told without waiting (a served plugin's rate and render mode), oldest
+    /// first, to `out`. A plugin whose settings answer in the call has none.
+    fn take_answers(&mut self, main: MainThreadMarker, out: &mut Vec<Told>) {
+        let _ = (main, out);
+    }
 
     /// Tells a [`Live`](RenderModeSupport::Live) plugin its render mode now,
     /// and returns whether it took it. A host calls this only where
@@ -946,6 +953,10 @@ impl<W: Wraps> Control for W {
 
     fn take_requests(&mut self, main: MainThreadMarker, out: &mut Vec<Request>) {
         self.plugin_mut().take_requests(main, out);
+    }
+
+    fn take_answers(&mut self, main: MainThreadMarker, out: &mut Vec<Told>) {
+        self.plugin_mut().take_answers(main, out);
     }
 
     fn render_mode_support(&self, main: MainThreadMarker) -> RenderModeSupport {

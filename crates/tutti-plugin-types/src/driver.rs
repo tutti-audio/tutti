@@ -17,6 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
     Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
+    RenderModeSupport, Told,
     PluginError, PluginWiring, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
 };
 
@@ -257,6 +258,7 @@ impl<L: Loaded> Lifecycle<L> {
                     | Effect::CallDeactivate
                     | Effect::Rebuild
                     | Effect::Recall
+                    | Effect::SetMode(_)
                     | Effect::ReadParams(_)
                     | Effect::RebuildMidiMapping
                     | Effect::RunMainThread
@@ -363,6 +365,18 @@ impl<L: Loaded> Lifecycle<L> {
             | Effect::Recall => {
                 unreachable!("transitions and moves are applied by `apply`")
             }
+            Effect::SetMode(mode) => match self.control() {
+                Some(control) => {
+                    let told = control.set_render_mode(main, mode);
+                    match control.render_mode_support(main) {
+                        // The server answers later, as an event.
+                        RenderModeSupport::Served => Reply::Done,
+                        _ if told => Reply::Answered(Told::ModeTook(mode)),
+                        _ => Reply::Answered(Told::ModeRefused(mode)),
+                    }
+                }
+                None => Reply::NotActive,
+            },
             Effect::ReadLatency => match self {
                 Self::Active { controller, .. } => Reply::Latency(controller.latency(main)),
                 _ => Reply::NotActive,

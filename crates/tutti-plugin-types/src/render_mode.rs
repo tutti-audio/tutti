@@ -16,8 +16,8 @@
 /// and a plugin may lack it altogether. A host asks this once and acts on the
 /// answer: a [`Live`](Self::Live) plugin is told, an
 /// [`OnActivation`](Self::OnActivation) one is deactivated and activated again
-/// in the new mode, and an [`Unsupported`](Self::Unsupported) one is left
-/// running.
+/// in the new mode, a [`Served`](Self::Served) one is told and answers later,
+/// and an [`Unsupported`](Self::Unsupported) one is left running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RenderModeSupport {
     /// The plugin takes the mode while active: CLAP's `render.set`, or VST2's
@@ -28,6 +28,11 @@ pub enum RenderModeSupport {
     /// `setupProcessing`, AU's `AudioUnitInitialize`. A change is a
     /// deactivation and an activation in the new mode.
     OnActivation,
+    /// A server holds the plugin and takes the mode for it, as its own format
+    /// does: the host tells the server, which answers later
+    /// ([`Told`](crate::Told)). The call itself says only that the server
+    /// was told.
+    Served,
     /// The plugin has no render mode (a CLAP plugin without `clap.render`, an
     /// Audio Unit that refuses `kAudioUnitProperty_OfflineRender`) and renders
     /// the same either way. A change is recorded for the next activation and
