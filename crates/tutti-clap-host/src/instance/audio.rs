@@ -399,7 +399,7 @@ impl ClapProcessor {
             // kept for the block, any other goes out of band now.
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(|id, value| {
-                    if waits_for_process(&table.ranges, id) {
+                    if waits_for_process(ParamBounds::find(&table.ranges, id)) {
                         kept &= keep_latest(held, id, value);
                     } else {
                         each(id, value);
@@ -407,7 +407,7 @@ impl ClapProcessor {
                 });
             });
             for queue in &changes.queues {
-                if waits_for_process(&table.ranges, queue.param_id)
+                if waits_for_process(ParamBounds::find(&table.ranges, queue.param_id))
                     && let Some(point) = queue.points.last()
                 {
                     kept &= keep_latest(held, queue.param_id, point.value);
@@ -415,7 +415,7 @@ impl ClapProcessor {
             }
             if !changes.is_empty() {
                 input_events.add_param_changes_where(changes, &table.ranges, table.claims, |b| {
-                    !b.is_some_and(|b| b.requires_process)
+                    !waits_for_process(b)
                 });
             }
         }
@@ -633,11 +633,12 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
     }
 }
 
-/// Whether a change to `id` waits for the next block's `process`: the plugin is
-/// active and the parameter requires it (`CLAP_PARAM_REQUIRES_PROCESS`), so a
-/// flush never delivers it.
-fn waits_for_process(ranges: &[ParamBounds], id: ParamId) -> bool {
-    ParamBounds::find(ranges, id).is_some_and(|b| b.requires_process && !b.read_only)
+/// Whether a change to the parameter with `bounds` waits for the next block's
+/// `process`: the plugin is active and the parameter requires it
+/// (`CLAP_PARAM_REQUIRES_PROCESS`), so a flush never delivers it. The one
+/// predicate for what a flush keeps and what it sends.
+fn waits_for_process(bounds: Option<&ParamBounds>) -> bool {
+    bounds.is_some_and(|b| b.requires_process && !b.read_only)
 }
 
 /// Keeps `value` as the latest of `id` in `held`, which has room for every
