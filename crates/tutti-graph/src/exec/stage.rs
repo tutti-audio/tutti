@@ -263,13 +263,16 @@ struct FifoMemo {
     param_room: bool,
 }
 
-/// The injection buffers of the last commit, with the commit that made them
-/// and, once it was seen applied, the block count then. The buffers are
-/// dropped from the count two blocks after the commit applied.
+/// The injection buffers of the last commit, in the order the executor holds
+/// them, with the commit that made them and, once it was seen applied, the
+/// block count then. The next commit flushes each that is live, whenever it
+/// comes; the buffers are left out of the room it sizes two blocks after the
+/// commit applied (`settled`), when a render has emptied them.
 struct Shells {
     list: Vec<Shell>,
     seq: u64,
     seen: Option<u64>,
+    settled: bool,
 }
 
 impl Shells {
@@ -278,6 +281,7 @@ impl Shells {
             list: Vec::new(),
             seq: 0,
             seen: None,
+            settled: false,
         }
     }
 
@@ -287,22 +291,20 @@ impl Shells {
             list,
             seq,
             seen: None,
+            settled: false,
         };
     }
 
     /// The executor has applied commits up to `acked` and rendered `blocks`:
-    /// the buffers are empty once it has rendered two blocks since it applied
+    /// the buffers are settled once it has rendered two blocks since it applied
     /// theirs.
     fn observe(&mut self, acked: u64, blocks: u64) {
-        if self.list.is_empty() || acked < self.seq {
+        if self.settled || self.list.is_empty() || acked < self.seq {
             return;
         }
         match self.seen {
             None => self.seen = Some(blocks),
-            Some(seen) if blocks >= seen + 2 => {
-                self.list.clear();
-                self.seen = None;
-            }
+            Some(seen) if blocks >= seen + 2 => self.settled = true,
             Some(_) => {}
         }
     }
@@ -711,8 +713,12 @@ impl Stager {
         for (n, s) in self.shells.list.iter().enumerate() {
             if let Some(to) = cx.sink_of(EventInputPort::new(s.key, s.port)) {
                 let r = rooms.entry((to.unit, to.port)).or_default();
-                r.flush += s.flush;
-                r.room = r.room.max(s.room);
+                // A settled buffer holds no events, but the tables it still
+                // owes need their slots in the buffer they move to.
+                if !self.shells.settled {
+                    r.flush += s.flush;
+                    r.room = r.room.max(s.room);
+                }
                 r.carried += s.owed;
                 deliveries.push(Delivery {
                     from: Origin::Injection(n),

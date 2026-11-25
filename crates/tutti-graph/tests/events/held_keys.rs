@@ -1141,6 +1141,48 @@ fn closes_that_do_not_fit_a_block_follow_in_the_next() {
     assert_eq!(offs, 200, "every held key is closed");
 }
 
+/// Closes owed to a sink that cannot take them all at once stay owed across
+/// commits, however many blocks have passed since the one that made them:
+/// the next commit moves them on, and each is delivered or counted lost.
+#[test]
+fn closes_still_owed_many_blocks_later_are_delivered_or_counted() {
+    let mut r = Rig::new(Mode::Serial, &[2, 3]);
+    r.wire(&[(1, 2)]);
+    // 16 channels of 100 held keys, 50 a block: more closes than a block's
+    // room takes.
+    for channel in 0..16u8 {
+        for half in 0..2u8 {
+            for note in 0..50u8 {
+                r.send(m1_on(channel, half * 50 + note));
+            }
+            r.block();
+        }
+    }
+    assert_eq!(r.exec.dropped_event_count(), 0, "every key is held");
+    let offs = |r: &Rig| {
+        r.words(2)
+            .iter()
+            .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+            .count()
+    };
+    r.wire(&[]);
+    r.block();
+    // Past the window in which the stager sizes for the cut's buffers, and
+    // with closes still owed, another commit.
+    r.block();
+    r.block();
+    r.block();
+    r.wire(&[(1, 3)]);
+    for _ in 0..60 {
+        r.block();
+    }
+    assert_eq!(
+        offs(&r) as u64 + r.exec.dropped_event_count(),
+        1600,
+        "each held key's close is delivered or counted lost"
+    );
+}
+
 /// A third fade queues while closes are still owed: the owed keys stay
 /// owed, the new unit's table starts empty, and every key is closed exactly
 /// once.
