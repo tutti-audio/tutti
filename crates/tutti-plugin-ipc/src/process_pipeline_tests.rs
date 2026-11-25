@@ -334,6 +334,7 @@ fn bridge_with_server_mode(
                             midi_out: Default::default(),
                             status: Default::default(),
                             refused,
+                            writes: crate::BlockWrites::Handed,
                         }
                     }
                     _ => continue,
@@ -1626,6 +1627,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
                             midi_out,
                             status: status_for(seq),
                             refused: false,
+                            writes: crate::BlockWrites::Handed,
                         }
                     }
                     _ => continue,
@@ -1986,6 +1988,7 @@ fn two_stale_blocks(
                     midi_out: Default::default(),
                     status: Default::default(),
                     refused: false,
+                    writes: crate::BlockWrites::Handed,
                 };
                 if try_send_bridge_msg(&server_stream, &reply).is_err() {
                     break;

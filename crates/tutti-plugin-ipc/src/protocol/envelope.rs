@@ -106,7 +106,7 @@ pub enum AudioRequest {
     /// applies them through the format's own route for flushing parameters
     /// (CLAP `params.flush`, VST3 `process` with no samples, a direct set for
     /// VST2 and AU) between blocks, and answers
-    /// [`ParametersApplied`](AudioReply::ParametersApplied).
+    /// [`ParametersApplied`](AudioReply::ParametersApplied) with the outcome.
     ApplyParameters {
         /// What the acknowledgement echoes.
         id: ReqId,
@@ -155,13 +155,52 @@ pub enum AudioReply {
         /// or the plugin refused the sample rate. The host reads the block as
         /// silence, and counts a missed one refused.
         refused: bool,
+        /// Whether the block's parameter changes reached the plugin: a fact
+        /// apart from `refused`, which is about the audio.
+        writes: BlockWrites,
     },
-    /// The changes of an [`ApplyParameters`](AudioRequest::ApplyParameters) are
-    /// in the plugin.
+    /// The answer to an [`ApplyParameters`](AudioRequest::ApplyParameters),
+    /// sent once the render thread has tried the changes: the outcome says
+    /// whether the plugin has them.
     ParametersApplied {
         /// The `id` of the request.
         id: ReqId,
+        /// Whether the plugin has the changes.
+        outcome: ApplyOutcome,
     },
+}
+
+/// What became of the parameter changes a block carried, as the server's
+/// render thread answers it.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BlockWrites {
+    /// The block never reached the plugin (no seat, a refused rate, a block the
+    /// slab or the ports could not hold): its changes were dropped.
+    #[default]
+    Dropped,
+    /// The changes were handed to the plugin with the block, whatever `process`
+    /// returned: a `process` error after the hand-over is not a lost write, the
+    /// format had the changes, and the block fault is counted as one.
+    Handed,
+}
+
+/// What became of the changes of an
+/// [`ApplyParameters`](AudioRequest::ApplyParameters), as the server's render
+/// thread answers them.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApplyOutcome {
+    /// The plugin has them.
+    Applied,
+    /// The plugin's Processor was here and refused them (no flush route, the
+    /// audio claim held, or the call failed): none was applied.
+    Refused,
+    /// No Processor was here to take them (recalled for a rate change, or
+    /// refused at the seat): none was applied.
+    Unseated,
 }
 
 /// A lane the broker connection opens to the server.

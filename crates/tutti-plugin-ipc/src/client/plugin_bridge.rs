@@ -1,6 +1,6 @@
 //! Plugin bridge — a served plugin's audio and its editor.
 
-use super::audio::{AudioBridge, IpcThread, Replies, WriteRefused};
+use super::audio::{AudioBridge, IpcThread, Replies};
 use super::editor_site::EditorSite;
 use crate::ControlStream;
 use crate::ServerWatch;
@@ -125,25 +125,22 @@ impl PluginBridge {
     ///
     /// # Errors
     ///
-    /// [`UnknownParam`](tutti_plugin_types::UnknownParam) when the plugin does
-    /// not declare `param_id`.
+    /// [`ParamWriteError::Undeclared`](tutti_plugin_types::ParamWriteError::Undeclared)
+    /// when the plugin does not declare `param_id`;
+    /// [`Lost`](tutti_plugin_types::ParamWriteError::Lost) when it crashed and
+    /// [`Unanswered`](tutti_plugin_types::ParamWriteError::Unanswered) when it
+    /// gave no parameter list: nothing is stored.
     pub fn set_parameter_value(
         &self,
         param_id: ParamId,
         value: Normalized,
-    ) -> Result<(), tutti_plugin_types::UnknownParam> {
+    ) -> Result<(), tutti_plugin_types::ParamWriteError> {
         // Cosmetic GUI mirror (keeps the display in sync): queued for the next
         // `editor_idle`, a bounded lock-free queue that never blocks. The
         // authoritative delivery is the slot below; a dropped mirror write
         // self-heals on the next edit.
         self.editor.show_parameter(param_id, value);
-        match self.audio.write_parameter(param_id, value) {
-            Err(WriteRefused::Unknown(unknown)) => Err(unknown),
-            // A crashed plugin, or one with no parameter list, stores nothing;
-            // its recovery restores from the host's mirror, so the caller's
-            // write is not an error.
-            Ok(()) | Err(WriteRefused::Crashed | WriteRefused::Unlisted) => Ok(()),
-        }
+        self.audio.write_parameter(param_id, value)
     }
 
     /// Sends the host's automation mode to the plugin, mirrored into an open

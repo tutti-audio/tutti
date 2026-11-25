@@ -7,8 +7,8 @@ use crate::compile::shapes::Units;
 use crate::compile::{CompileError, CycleEdge};
 use crate::model::spec::{EventEdge, ValidGraph};
 use crate::{
-    Edge, EdgeGain, EdgeId, EventInputPort, EventOutputPort, InputPort, NodeKey, ParamIn, PortSink,
-    PortSource,
+    BusFeed, BusOutputPort, Edge, EdgeGain, EdgeId, EventInputPort, EventOutputPort, InputPort,
+    NodeBus, NodeKey, ParamIn, PortSink, PortSource,
 };
 use std::collections::BTreeMap;
 
@@ -23,12 +23,14 @@ pub(crate) struct Dependencies {
 }
 
 /// The wiring a dependency is read from: the audio, event, param and gain
-/// edges of a spec.
+/// edges of a spec, and its bus edges when it is not lowered.
 pub(crate) struct Wiring<'a> {
     pub(crate) edges: &'a BTreeMap<InputPort, Vec<Edge>>,
     pub(crate) events: &'a BTreeMap<EventInputPort, Vec<EventEdge>>,
     pub(crate) params: &'a BTreeMap<ParamIn, EventOutputPort>,
     pub(crate) gains: &'a BTreeMap<EdgeId, EdgeGain>,
+    /// The unlowered bus edges, read at node level; empty over a lowered graph.
+    pub(crate) buses: &'a BTreeMap<NodeBus, Vec<BusFeed>>,
 }
 
 /// The direct audio, event, param and gain dependencies of `wiring` over
@@ -80,6 +82,22 @@ pub(crate) fn dependencies(
             depend(from.node, at.node, CycleEdge::Gain { at, from });
         }
     }
+    // A bus edge from a node's bus is a dependency of the sink's node; one
+    // from the main input is not.
+    for (&at, feeds) in wiring.buses {
+        for feed in feeds {
+            if let BusOutputPort::Node(from) = feed.source {
+                depend(
+                    from.node,
+                    at.node,
+                    CycleEdge::Bus {
+                        at,
+                        from: feed.source,
+                    },
+                );
+            }
+        }
+    }
     let mut succ: Vec<Vec<usize>> = vec![Vec::new(); count];
     for (d, ps) in preds.iter().enumerate() {
         for &s in ps {
@@ -111,10 +129,10 @@ pub(super) fn acyclic(graph: &ValidGraph, units: &Units) -> Result<Dependencies,
         events: graph.events(),
         params: graph.params(),
         gains: graph.gains(),
+        buses: &BTreeMap::new(),
     };
-    let (dependencies, cycle) = dependencies(&wiring, units.keys.len(), |k| {
-        units.get(k).map(PlanUnitId::index)
-    });
+    let (dependencies, cycle) =
+        dependencies(&wiring, units.keys.len(), |k| Some(units.unit(k).index()));
     if cycle.is_empty() {
         Ok(dependencies)
     } else {

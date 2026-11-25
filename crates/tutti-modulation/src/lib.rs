@@ -47,7 +47,7 @@
 //! ```rust
 //! use tutti_modulation::{
 //!     compile, LayerClock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
-//!     RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey, Waveform,
+//!     RouteKey, Source, SourceKey, TargetDecl, TargetKey, Waveform,
 //! };
 //! use tutti_rt::Param;
 //! use tutti_units::{Beat, BeatsPerCycle, Bipolar, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
@@ -64,10 +64,11 @@
 //!     RouteKey(1),
 //!     RouteDecl {
 //!         source: SourceKey(1),
-//!         to: RouteTarget::Param(cutoff),
+//!         to: cutoff,
 //!         depth: Param::new(Bipolar::of(0.25)),
 //!         polarity: Polarity::Bipolar,
 //!         curve: Law::Linear,
+//!         scale: None,
 //!     },
 //! )];
 //! let targets = [(cutoff, TargetDecl { min: 200.0, max: 1_000.0, automation: None })];
@@ -105,8 +106,8 @@ mod sources;
 
 pub use compile::{
     Compiled, Declarations, MAX_CLOCK_PHASE, ProgramCompileError, RATE_ANCHOR_MARGIN, RouteDecl,
-    RouteKey, RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey,
-    compile, layer_id,
+    RouteKey, Scale, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile,
+    layer_id,
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{

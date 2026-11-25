@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tutti_buffers::Float;
 use tutti_graph::{EdgeId, EventOutputPort, NodeKey, PassError};
-use tutti_modulation::{ProgramCompileError, RouteKey, RouteTarget, SourceKey, TargetKey};
+use tutti_modulation::{ProgramCompileError, RouteKey, SourceKey, TargetKey};
 use tutti_nodes::automation::LaneControls;
 use tutti_platform::Instant;
 
@@ -140,11 +140,8 @@ fn compile_route(cause: &ProgramCompileError) -> Option<RouteKey> {
     match cause {
         C::DuplicateRoute(route)
         | C::UnknownSource { route }
-        | C::UnknownRoute { route }
         | C::UndeclaredTarget { route }
-        | C::DepthByChain { route }
-        | C::DepthBySignal { route }
-        | C::TwoDepthBy { route } => Some(*route),
+        | C::DepthBySignal { route } => Some(*route),
         _ => None,
     }
 }
@@ -224,10 +221,7 @@ impl OwnMods {
 
     /// The target of `route`, as a [`Problem`] reports it.
     fn route_target_name(&self, route: RouteKey) -> Option<TargetName> {
-        match self.routes.get(&route)?.decl.to {
-            RouteTarget::Param(t) => self.target_name(t),
-            RouteTarget::Depth(_) => None,
-        }
+        self.target_name(self.routes.get(&route)?.decl.to)
     }
 
     /// `refusal` as the [`Problem`] that names it in the session's terms.

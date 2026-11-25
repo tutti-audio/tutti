@@ -40,8 +40,7 @@ use tutti_graph::{
     PortSource, ScheduleError,
 };
 use tutti_modulation::{
-    Compiled, ControlProgram, Declarations, RouteTarget, SignalKind, SourceId, SourceKey,
-    TargetKey, compile,
+    Compiled, ControlProgram, Declarations, SignalKind, SourceId, SourceKey, TargetKey, compile,
 };
 use tutti_nodes::automation::{
     ControlLaneNode, ForeignLaneConfig, ForeignLaneControls, LaneControls, UnitLaneConfig,
@@ -726,10 +725,8 @@ fn check_cycle<F: Float>(
     let mut routes: Vec<_> = decl.routes.iter().collect();
     routes.sort_by_key(|(k, _)| *k);
     for (key, route) in routes {
-        if let RouteTarget::Param(t) = route.to
-            && lowered.edges.contains(&(route.source, t))
-            && closes(route.source, t)
-        {
+        let t = route.to;
+        if lowered.edges.contains(&(route.source, t)) && closes(route.source, t) {
             return Err(Refusal::Cycle { route: *key });
         }
     }

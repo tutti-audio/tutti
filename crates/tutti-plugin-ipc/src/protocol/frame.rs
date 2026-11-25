@@ -212,13 +212,13 @@ pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> IpcResult<T> {
 /// move it there. The wire is the same as [`read_frame`] and [`write_frame`].
 ///
 /// ```
-/// use tutti_plugin_ipc::{AudioReply, FrameBuf, ReqId};
+/// use tutti_plugin_ipc::{ApplyOutcome, AudioReply, FrameBuf, ReqId};
 ///
 /// let mut buf = FrameBuf::new(16, 16);
 /// let mut wire = Vec::new();
-/// buf.write(&mut wire, &AudioReply::ParametersApplied { id: ReqId::new(7) }).unwrap();
+/// buf.write(&mut wire, &AudioReply::ParametersApplied { id: ReqId::new(7), outcome: ApplyOutcome::Applied }).unwrap();
 /// let back: AudioReply = buf.read(&mut wire.as_slice()).unwrap();
-/// assert!(matches!(back, AudioReply::ParametersApplied { id } if id == ReqId::new(7)));
+/// assert!(matches!(back, AudioReply::ParametersApplied { id, .. } if id == ReqId::new(7)));
 /// ```
 #[derive(Debug)]
 pub struct FrameBuf {

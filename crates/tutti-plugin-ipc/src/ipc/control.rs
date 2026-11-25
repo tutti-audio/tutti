@@ -10,11 +10,11 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParameterInfo,
-    PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset,
-    PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport,
-    Request, StateError, StateUse, TerminationReason, Told, TrackInfo, UnknownParam, WindowHandle,
-    bypass_value,
+    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParamWriteError,
+    ParameterInfo, PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError,
+    PluginPreset, PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode,
+    RenderModeSupport, Request, StateError, StateUse, TerminationReason, Told, TrackInfo,
+    WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -73,7 +73,7 @@ macro_rules! served_control {
                 &self,
                 id: ParamId,
                 value: Normalized,
-            ) -> Result<(), UnknownParam> {
+            ) -> Result<(), ParamWriteError> {
                 self.link.bridge.set_parameter_value(id, value)
             }
 
@@ -89,7 +89,8 @@ macro_rules! served_control {
                     OwnBypass::Parameter(id) => {
                         match self.set_parameter_value(id, bypass_value(bypassed)) {
                             Ok(()) => BypassWrite::Sent,
-                            Err(UnknownParam(_)) => BypassWrite::Refused,
+                            Err(ParamWriteError::Lost(_)) => BypassWrite::Lost,
+                            Err(_) => BypassWrite::Refused,
                         }
                     }
                     OwnBypass::Property => BypassWrite::Lost,
@@ -242,7 +243,23 @@ macro_rules! served_control {
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value)
-                    .map_err(|UnknownParam(id)| tutti_plugin_types::ParamWriteError::Undeclared(id))
+            }
+
+            /// The host's writes made so far: what a flush the server answers
+            /// must have carried ([`AudioBridge::edits_queued`]).
+            ///
+            /// [`AudioBridge::edits_queued`]: crate::AudioBridge
+            fn queued(&self) -> Option<tutti_rt::Generation> {
+                self.link.bridge.audio().edits_queued()
+            }
+
+            /// Whether the server answered a request that carried the writes up
+            /// to `upto`; when not, asks the audio lane to flush them
+            /// ([`AudioBridge::edits_delivered`]).
+            ///
+            /// [`AudioBridge::edits_delivered`]: crate::AudioBridge
+            fn delivered(&self, upto: tutti_rt::Generation) -> bool {
+                self.link.bridge.audio().edits_delivered(upto)
             }
 
             /// From the declared parameters the client keeps, not a round trip
@@ -442,7 +459,13 @@ impl Health for IpcController {
     }
 
     fn refused_edits(&self) -> u64 {
+        // Two counts of one kind, each in the place that sees it: the server
+        // counts the edits its plugin refused when applied
+        // (`ServerLosses::edits_refused`), the client counts the writes a flush
+        // the server answered as not applied did not deliver
+        // (`AudioBridge::unapplied_edits`).
         self.link.counters.server_losses().edits_refused
+            + self.link.bridge.audio().unapplied_edits()
     }
 
     fn terminate(&self, reason: TerminationReason) {

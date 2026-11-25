@@ -972,8 +972,8 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
     use tutti_graph::{Editor, EventOutputPort, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
-        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, RouteTarget,
-        Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform, compile,
+        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, Source as ModSource,
+        SourceKey, TargetDecl, TargetKey, Waveform, compile,
     };
     use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
     use tutti_nodes::testing::Osc;
@@ -985,10 +985,11 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
         RouteKey(1),
         RouteDecl {
             source: SourceKey(1),
-            to: RouteTarget::Param(cutoff),
+            to: cutoff,
             depth: tutti_rt::Param::new(Bipolar::of(0.2)),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
+            scale: None,
         },
     )];
     let targets = [(

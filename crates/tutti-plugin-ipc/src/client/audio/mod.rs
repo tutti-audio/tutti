@@ -42,8 +42,8 @@ use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::Answer;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
-    PresetError, StateError, StateUse, UnknownParam, edit_slots,
+    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, ParamWriteError,
+    PluginFailure, PresetError, StateError, StateUse, edit_slots,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -96,20 +96,6 @@ impl Submitted {
     }
 }
 
-/// Why a parameter write was not stored for the plugin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum WriteRefused {
-    /// The plugin did not declare the parameter.
-    #[error(transparent)]
-    Unknown(#[from] UnknownParam),
-    /// The plugin crashed.
-    #[error("the plugin crashed")]
-    Crashed,
-    /// The plugin did not answer its parameter list.
-    #[error("the plugin did not answer its parameter list")]
-    Unlisted,
-}
-
 use ask::Ask;
 #[cfg(test)]
 pub(crate) use channels::COMMAND_QUEUE_SIZE;
@@ -126,7 +112,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::Timeouts;
-use tutti_rt::Mutex;
+use tutti_rt::{Generation, Mutex};
 
 pub use messages::IpcEvent;
 pub use thread::IpcThread;
@@ -424,6 +410,17 @@ impl AudioBridge {
         self.channels.commands_refused_cell()
     }
 
+    /// The host parameter writes the plugin did not get, ever: what a flush the
+    /// server refused or had no Processor for left undelivered, counted when
+    /// its answer comes, late or not. A flush never answered counts nothing: it
+    /// may still land, and a flush in flight when the server is lost has no
+    /// answer to say whether the plugin took it (the loss is the crash, which
+    /// ends the plugin with everything it held). A write refused at the call is
+    /// not here ([`ParamWriteError`]).
+    pub(crate) fn unapplied_edits(&self) -> u64 {
+        self.channels.unapplied_edits_cell().get()
+    }
+
     /// The count of parameter buffers the audio thread leaked rather than
     /// free, shared. See `commands_refused_cell`.
     pub(crate) fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
@@ -463,23 +460,22 @@ impl AudioBridge {
     /// the first write asks the plugin for its parameters, once.
     ///
     /// A crashed plugin, or one that does not answer the parameter list, stores
-    /// nothing and is refused by name: its recovery restores from the host's
-    /// mirror.
+    /// nothing and is refused by name.
     ///
     /// # Errors
     ///
-    /// [`WriteRefused::Unknown`] when the parameters the table holds do not
-    /// include `id`. The table follows the plugin's own word that its list
+    /// [`ParamWriteError::Undeclared`] when the parameters the table holds do
+    /// not include `id`. The table follows the plugin's own word that its list
     /// changed ([`invalidate_host_edits`](Self::invalidate_host_edits)), never a
-    /// write. [`WriteRefused::Crashed`] and [`WriteRefused::Unlisted`] for the
-    /// two cases above.
+    /// write. [`ParamWriteError::Lost`] for a crashed plugin and
+    /// [`ParamWriteError::Unanswered`] for one that gave no list.
     pub(crate) fn write_parameter(
         &self,
         id: ParamId,
         value: Normalized,
-    ) -> Result<(), WriteRefused> {
+    ) -> Result<(), ParamWriteError> {
         if self.lifecycle.is_crashed() {
-            return Err(WriteRefused::Crashed);
+            return Err(ParamWriteError::Lost(id));
         }
         if let Some(table) = self.host_edits.lock().as_mut() {
             table.written = true;
@@ -488,7 +484,7 @@ impl AudioBridge {
         // No table: the plugin's list is asked, once, outside the lock (a round
         // trip), and the table is built from it.
         let Some(infos) = self.parameters() else {
-            return Err(WriteRefused::Unlisted);
+            return Err(ParamWriteError::Unanswered(id));
         };
         self.declare_host_edits(infos.iter().map(ParameterInfo::id));
         match self.host_edits.lock().as_mut() {
@@ -496,7 +492,7 @@ impl AudioBridge {
                 table.written = true;
                 Ok(table.writer.write(id, value)?)
             }
-            None => Err(WriteRefused::Unlisted),
+            None => Err(ParamWriteError::Unanswered(id)),
         }
     }
 
@@ -570,6 +566,43 @@ impl AudioBridge {
         }
     }
 
+    /// How many of the host's writes have been made, as the generation
+    /// [`edits_delivered`](Self::edits_delivered) waits for; `None` before the
+    /// first write, when the table does not exist.
+    pub(crate) fn edits_queued(&self) -> Option<Generation> {
+        self.host_edits
+            .lock()
+            .as_ref()
+            .map(|table| table.writer.written())
+    }
+
+    /// Asks for the delivery of the host's writes up to `upto`
+    /// ([`edits_queued`](Self::edits_queued)) and answers whether the server has
+    /// answered a flush that carried them: `false` asks the audio lane to flush
+    /// (idempotent: one already queued is not asked again), and the answer, in
+    /// its window or late, makes a later call `true`. A flush that timed out is
+    /// asked for again, empty if nothing was written since: the lane hears the
+    /// late answer ahead of that one's, so a settle that keeps asking moves on
+    /// by its own poll. A flush that is never answered leaves it `false`, and
+    /// the caller's deadline ends the wait. A crashed plugin reads as
+    /// delivered: the call that follows fails on its own. Control side; never
+    /// waits.
+    pub(crate) fn edits_delivered(&self, upto: Generation) -> bool {
+        if self.lifecycle.is_crashed() || self.channels.acked().has_reached(upto) {
+            return true;
+        }
+        // The answer is read from the cell, not from this ask. Writes not yet
+        // flushed are asked for as a read asks; with none, a flush still owed
+        // an answer is waited behind by one that may be empty.
+        if self.request_flush().is_none() && self.channels.ask_flush() {
+            let (_ask, done) = ask::ask::<bool>();
+            if !self.channels.push_block(AudioCommand::Params { done }) {
+                self.channels.flush_dequeued();
+            }
+        }
+        false
+    }
+
     /// Has the plugin apply the writes no block has carried yet, before the
     /// caller's next request: they go on the audio lane, in order with the
     /// blocks pushed before them, and the server applies them through the
@@ -577,6 +610,8 @@ impl AudioBridge {
     /// answer. Control side.
     fn flush_host_edits(&self) {
         if let Some(applied) = self.request_flush() {
+            // The audio lane counts a flush that did not deliver
+            // ([`Channels::note_unapplied_edits`]); this waits for it to end.
             let _ = await_reply(applied, self.lifecycle.timeouts().param_wait());
         }
     }
@@ -1309,6 +1344,15 @@ impl AudioBridge {
 mod tests {
     use super::*;
 
+    /// The state the audio lane's thread keeps, for a test that takes a flush's
+    /// frame as the lane would.
+    fn lane_state() -> dispatch::AudioState {
+        dispatch::AudioState::new(
+            tutti_plugin_types::Timeouts::default().drain,
+            channels::response_ring().0,
+        )
+    }
+
     /// A bridge with no lane thread: its commands stay in the queues for a test
     /// to take, as the lane's thread would.
     fn bridge_without_a_lane() -> AudioBridge {
@@ -1345,7 +1389,7 @@ mod tests {
         let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() else {
             panic!("the flush is queued");
         };
-        let changes = dispatch::host_edit_changes(&bridge.channels);
+        let (changes, _) = lane_state().flush_frame(&bridge.channels);
         let sent: Vec<f64> = changes
             .queues
             .iter()
@@ -1395,8 +1439,9 @@ mod tests {
         }));
         assert_eq!(bridge.write_parameter(id, Normalized::of(0.75)), Ok(()));
         let mut last = None;
+        let mut state = lane_state();
         while let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() {
-            let changes = dispatch::host_edit_changes(&bridge.channels);
+            let (changes, _) = state.flush_frame(&bridge.channels);
             for point in changes.queues.iter().flat_map(|q| q.points.iter()) {
                 last = Some(point.value.get());
             }

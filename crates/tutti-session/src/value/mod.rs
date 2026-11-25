@@ -62,7 +62,7 @@ pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
-pub use depth::{DepthKey, DepthTarget};
+pub use depth::DepthTarget;
 pub use edit_log::{EditLog, EditMark};
 #[cfg(feature = "plugin")]
 pub use error::{PluginParamRefusal, UnitError};
@@ -92,8 +92,8 @@ pub(crate) use slot::{
     TempoCell, WordSlot,
 };
 pub use slot::{
-    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, OutputPolicyTarget, SettingTarget,
-    TempoTarget,
+    ClickTargets, ClickVolumeTarget, DepthKey, LoopTarget, MeterTarget, OutputPolicyTarget,
+    SettingTarget, ShapeKey, TempoTarget,
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

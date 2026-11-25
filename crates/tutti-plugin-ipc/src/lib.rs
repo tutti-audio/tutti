@@ -97,9 +97,9 @@ pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
-    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, Answered, AppMidiMapApplied,
-    ArmPluginMidiLearn, AudioReply, AudioRequest, CONTROL_FRAME_BYTES, CloseEditor, ControlFrame,
-    ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed,
+    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, Answered, AppMidiMapApplied, ApplyOutcome,
+    ArmPluginMidiLearn, AudioReply, AudioRequest, BlockWrites, CONTROL_FRAME_BYTES, CloseEditor,
+    ControlFrame, ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
     GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling, Lane,
     LaneOpened, LoadPlugin, LoadPreset, LoadState, Message, ModeOutcome, News, OpenEditor,

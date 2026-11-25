@@ -704,6 +704,12 @@ impl ParamAccess {
     }
 }
 
+impl From<crate::UnknownParam> for ParamWriteError {
+    fn from(crate::UnknownParam(id): crate::UnknownParam) -> Self {
+        Self::Undeclared(id)
+    }
+}
+
 impl ParamWriteError {
     /// The parameter the refused write named.
     #[must_use]

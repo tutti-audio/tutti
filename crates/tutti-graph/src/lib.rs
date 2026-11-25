@@ -719,7 +719,6 @@ pub use compile::plan::{
     EventFeedbackKey, EventSlotCapacity, FeedbackSpec, GainPortOp, InputBound, Op, ParamPortOp,
     Placement, Plan, PlanUnit, Rewired, Span, UnitIdx, Value,
 };
-pub use compile::preroll::PrerollTable;
 pub use compile::tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use edges::inlet::{InletNode, InletRing};
 pub use edges::meter::{Level, MeterReader, MeterWriter};

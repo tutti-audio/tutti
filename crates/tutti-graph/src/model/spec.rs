@@ -595,9 +595,10 @@ impl GraphSpec {
     /// [`compile`](fn@crate::compile) runs, over every dependency it orders
     /// (audio, event, param and gain edges; a feedback edge is cut), on the
     /// spec's own nodes, so a wiring that would not compile can be found
-    /// before it is written. An edge with an end that is not a node of the
-    /// spec is not read, and a bus edge is read only once the editor lowers it
-    /// to per-port edges. The edges are in key order.
+    /// before it is written. A bus edge not yet lowered is read at node level:
+    /// a feed from a node's bus is a dependency of the sink bus's node, and one
+    /// from the main input is none. An edge with an end that is not a node of
+    /// the spec is not read. The edges are in key order.
     #[must_use]
     pub fn cycle(&self) -> Option<Vec<crate::CycleEdge>> {
         let index: BTreeMap<NodeKey, usize> = self
@@ -612,6 +613,7 @@ impl GraphSpec {
             events: &self.events,
             params: &self.params,
             gains: &self.gains,
+            buses: &self.bus_edges,
         };
         let (_, cycle) = crate::compile::schedule::dependencies(&wiring, index.len(), |k| {
             index.get(&k).copied()

@@ -38,7 +38,7 @@ use tutti_platform::Instant;
 use tutti_graph::NodeKey;
 use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
-    RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
+    Source, SourceKey, TargetDecl, TargetKey,
 };
 use tutti_nodes::automation::{AutomationRecorder, RecordMode, Trajectory};
 use tutti_rt::Param;
@@ -52,7 +52,7 @@ use tutti_buffers::Float;
 use crate::graph::Graph;
 use crate::value::{
     Automation, AutomationCell, AutomationField, Bounds, Declared, DepthKey, DepthSlot, Edited,
-    Field, MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
+    Field, MacroField, PublishedSlot, RangeSlot, RateField, ShapeKey, SlotId, ValueTable,
 };
 
 pub(crate) mod derived;
@@ -377,16 +377,6 @@ pub enum RouteError {
     /// The route's source was removed (or is another session's).
     #[error(transparent)]
     NoSuchSource(NoSuchModSource),
-    /// The route to scale was removed (or is another session's).
-    #[error(transparent)]
-    NoSuchRoute(NoSuchModRoute),
-    /// Another source already scales the route's depth: a route's depth has
-    /// one scaler.
-    #[error("the depth of route {route:?} is already scaled by another source")]
-    AlreadyScaled {
-        /// The route a scale was asked of.
-        route: ModRouteId,
-    },
     /// The source already has a route into `target`: a route is named by its
     /// source and target ([`DepthTarget::of`](crate::DepthTarget::of)), so a
     /// second between the two would have no name.
@@ -397,6 +387,41 @@ pub enum RouteError {
     },
 }
 
+/// Why [`Mods::scale`] refused a scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ScaleError {
+    /// The route to scale was removed (or is another session's).
+    #[error(transparent)]
+    NoSuchRoute(NoSuchModRoute),
+    /// The scaling source was removed (or is another session's).
+    #[error(transparent)]
+    NoSuchSource(NoSuchModSource),
+    /// A depth is scaled by a time function (an LFO or a macro) only, and
+    /// only a route from one: the scale's source or the route's is a
+    /// follower or a note envelope.
+    #[error("the depth of route {route:?} is scaled by a time function only, on both sides")]
+    SignalSource {
+        /// The route a scale was asked of.
+        route: ModRouteId,
+    },
+}
+
+/// What scales a route's depth: `source`'s value, through `depth`
+/// ([`Mods::scale`]). Bipolar and linear.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scale {
+    source: ModSourceId,
+    depth: Bipolar,
+}
+
+impl Scale {
+    /// A scale by `source` at `depth` of it.
+    #[must_use]
+    pub const fn new(source: ModSourceId, depth: Bipolar) -> Self {
+        Self { source, depth }
+    }
+}
 /// The targets of a set of declarations, as `tutti_modulation` takes them, from
 /// ranges and automations: a range and an automation on one target
 /// make one [`TargetDecl`]; an automation with no range is unclamped
@@ -564,13 +589,26 @@ struct OwnSource {
 /// curve are the targets' (`ModRouteId::polarity`, `curve`): `decl` holds
 /// their values as declared, and [`decl`](Self::decl) the ones in force. Its
 /// depth is `decl.depth`, the cell the route's lane reads
-/// ([`DepthTarget`](crate::DepthTarget)).
+/// ([`DepthTarget`](crate::DepthTarget)); its scale, if any, is
+/// `decl.scale` ([`Mods::scale`]).
 #[derive(Debug)]
 struct OwnRoute {
     decl: RouteDecl,
-    /// What the route modulates: for a route that scales another's depth
-    /// ([`RouteSpec::scaling`]), the scaled route's target.
+    /// What the route modulates.
     target: ModTarget,
+    polarity: Arc<Declared<Polarity>>,
+    curve: Arc<Declared<Law>>,
+    /// The route's one scale ([`Mods::scale`]). `decl.scale` is always
+    /// `None`: [`decl`](Self::decl) builds the compiled scale from this.
+    scale: Option<OwnScale>,
+}
+
+/// A route's scale: its source and depth, and the polarity and curve in
+/// force, the targets of `PolarityTarget::scale_of` and `CurveTarget::scale_of`.
+#[derive(Debug)]
+struct OwnScale {
+    source: SourceKey,
+    depth: Param<Bipolar>,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
 }
@@ -581,6 +619,12 @@ impl OwnRoute {
         RouteDecl {
             polarity: self.polarity.get(),
             curve: self.curve.get(),
+            scale: self.scale.as_ref().map(|s| tutti_modulation::Scale {
+                source: s.source,
+                depth: s.depth.clone(),
+                polarity: s.polarity.get(),
+                curve: s.curve.get(),
+            }),
             ..self.decl.clone()
         }
     }
@@ -665,27 +709,63 @@ impl OwnMods {
     /// Registers the targets of route `id`.
     fn provide_route(&self, id: ModRouteId, route: &OwnRoute) {
         self.table.provide_staged(
-            SlotId::RoutePolarity(id),
+            SlotId::RoutePolarity(ShapeKey::Route(id)),
             PublishedSlot::new(Field(Arc::clone(&route.polarity))),
         );
         self.table.provide_staged(
-            SlotId::RouteCurve(id),
+            SlotId::RouteCurve(ShapeKey::Route(id)),
             PublishedSlot::new(Field(Arc::clone(&route.curve))),
         );
         self.table.provide(
             Self::depth_slot(route),
             Arc::new(DepthSlot(route.decl.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
+        if let Some(scale) = &route.scale {
+            self.provide_scale(id, scale);
+        }
     }
 
-    /// The slot of `route`'s depth: named by its source and what it drives,
-    /// a target or another route's depth.
+    /// The slot of `route`'s depth: named by its source and its target.
     fn depth_slot(route: &OwnRoute) -> SlotId {
-        let source = source_id(route.decl.source);
-        SlotId::RouteDepth(match route.decl.to {
-            RouteTarget::Param(_) => DepthKey::Into(source, route.target),
-            RouteTarget::Depth(scaled) => DepthKey::Scaling(source, route_id(scaled)),
-        })
+        SlotId::RouteDepth(DepthKey::Into(source_id(route.decl.source), route.target))
+    }
+
+    /// The slots of the scale of route `id`: its depth, polarity and curve.
+    fn scale_slots(id: ModRouteId) -> [SlotId; 3] {
+        [
+            SlotId::RouteDepth(DepthKey::Scale(id)),
+            SlotId::RoutePolarity(ShapeKey::Scale(id)),
+            SlotId::RouteCurve(ShapeKey::Scale(id)),
+        ]
+    }
+
+    /// Registers the targets of the scale of route `id`.
+    fn provide_scale(&self, id: ModRouteId, scale: &OwnScale) {
+        let [depth, polarity, curve] = Self::scale_slots(id);
+        self.table.provide(
+            depth,
+            Arc::new(DepthSlot(scale.depth.handle())) as crate::value::SlotCell<Bipolar>,
+        );
+        self.table.provide_staged(
+            polarity,
+            PublishedSlot::new(Field(Arc::clone(&scale.polarity))),
+        );
+        self.table
+            .provide_staged(curve, PublishedSlot::new(Field(Arc::clone(&scale.curve))));
+    }
+
+    /// Clears the scale of every route that `source` scales.
+    fn clear_scales_by(&mut self, source: SourceKey) {
+        let slots: Vec<SlotId> = self
+            .routes
+            .iter_mut()
+            .filter(|(_, r)| r.scale.as_ref().is_some_and(|s| s.source == source))
+            .flat_map(|(&key, r)| {
+                r.scale = None;
+                Self::scale_slots(route_id(key))
+            })
+            .collect();
+        self.table.unprovide(&slots);
     }
 
     /// Registers the target `source` has: an LFO's rate, a macro's value.
@@ -716,10 +796,14 @@ impl OwnMods {
             .into_iter()
             .flat_map(|(key, route)| {
                 let id = route_id(key);
+                let [depth, polarity, curve] = Self::scale_slots(id);
                 [
-                    SlotId::RoutePolarity(id),
-                    SlotId::RouteCurve(id),
+                    SlotId::RoutePolarity(ShapeKey::Route(id)),
+                    SlotId::RouteCurve(ShapeKey::Route(id)),
                     Self::depth_slot(&route),
+                    depth,
+                    polarity,
+                    curve,
                 ]
             })
             .collect();
@@ -880,27 +964,19 @@ impl OwnMods {
         let lost: Vec<RouteKey> = self
             .routes
             .iter()
-            .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Param(t) if gone(&t)))
+            .filter(|(_, r)| gone(&r.decl.to))
             .map(|(&k, _)| k)
             .collect();
         let lost = self.take_routes(lost);
         self.retire_routes(lost);
     }
 
-    /// Removes `keys` and the routes that scale them, returning what went.
+    /// Removes `keys`, returning what went.
     fn take_routes(
         &mut self,
         keys: impl IntoIterator<Item = RouteKey>,
     ) -> Vec<(RouteKey, OwnRoute)> {
-        let mut gone: BTreeSet<RouteKey> = keys.into_iter().collect();
-        let scales: Vec<RouteKey> = self
-            .routes
-            .iter()
-            .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Depth(s) if gone.contains(&s)))
-            .map(|(&k, _)| k)
-            .collect();
-        gone.extend(scales);
-        gone.into_iter()
+        keys.into_iter()
             .filter_map(|key| Some((key, self.routes.remove(&key)?)))
             .collect()
     }
@@ -957,21 +1033,13 @@ impl ModSession {
     }
 }
 
-/// What a route declared by [`RouteSpec`] drives.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Aim {
-    Target(ModTarget),
-    /// The depth of another route.
-    Depth(ModRouteId),
-}
-
 /// A route to declare: what [`Mods::route`] takes. A route is `depth` of
 /// `target`'s range, bipolar and linear until [`polarity`](Self::polarity) and
 /// [`curve`](Self::curve) say otherwise.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RouteSpec {
     source: ModSourceId,
-    aim: Aim,
+    target: ModTarget,
     depth: Bipolar,
     polarity: Polarity,
     curve: Law,
@@ -983,24 +1051,7 @@ impl RouteSpec {
     pub fn new(source: ModSourceId, target: impl Into<ModTarget>, depth: Bipolar) -> Self {
         Self {
             source,
-            aim: Aim::Target(target.into()),
-            depth,
-            polarity: Polarity::Bipolar,
-            curve: Law::Linear,
-        }
-    }
-
-    /// A route from `source` into the depth of `route`, at `depth` of it: the
-    /// route's depth is scaled by `source`'s value. `source` is a time
-    /// function (an LFO or a macro); the route and its source are too, and a
-    /// route has at most one such scale. The scale goes when `route` does.
-    /// [`Mods::route`] refuses it with [`RouteError::NoSuchRoute`] when `route`
-    /// is not declared.
-    #[must_use]
-    pub fn scaling(source: ModSourceId, route: ModRouteId, depth: Bipolar) -> Self {
-        Self {
-            source,
-            aim: Aim::Depth(route),
+            target: target.into(),
             depth,
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
@@ -1030,11 +1081,10 @@ pub struct RouteInfo {
     pub id: ModRouteId,
     /// The source it reads.
     pub source: ModSourceId,
-    /// What it drives: for a route that scales another's depth, that route's
-    /// target.
+    /// What it drives.
     pub target: ModTarget,
-    /// The route whose depth it scales ([`RouteSpec::scaling`]), if it is one.
-    pub scales: Option<ModRouteId>,
+    /// The source that scales its depth ([`Mods::scale`]), if any.
+    pub scale: Option<ModSourceId>,
     /// Its depth, a fraction of the target's range.
     pub depth: Bipolar,
     /// How the source's value maps onto the span.
@@ -1136,10 +1186,7 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
-            scales: match self.decl.to {
-                RouteTarget::Depth(scaled) => Some(route_id(scaled)),
-                RouteTarget::Param(_) => None,
-            },
+            scale: self.scale.as_ref().map(|s| source_id(s.source)),
             depth: self.decl.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
@@ -1262,6 +1309,7 @@ impl Mods<'_> {
             return Err(NoSuchModSource(id));
         }
         self.own.retire_source(id);
+        self.own.clear_scales_by(key);
         let lost: Vec<RouteKey> = self
             .own
             .routes
@@ -1285,31 +1333,18 @@ impl Mods<'_> {
     ///
     /// [`RouteError::UndeclaredRange`], naming the target, when no range was
     /// declared for it; [`RouteError::NoSuchSource`] when the source was
-    /// removed; [`RouteError::NoSuchRoute`] when a [`RouteSpec::scaling`]
-    /// route names one that is not declared. Nothing is added.
+    /// removed; [`RouteError::Duplicate`] when the source already has a route
+    /// into the target. Nothing is added.
     pub fn route(&mut self, spec: RouteSpec) -> Result<ModRouteId, RouteError> {
         let source = SourceKey(spec.source.get());
         if !self.own.sources.contains_key(&source) {
             return Err(RouteError::NoSuchSource(NoSuchModSource(spec.source)));
         }
-        let (target, to) = match spec.aim {
-            Aim::Depth(scaled) => {
-                let inner = self
-                    .own
-                    .routes
-                    .get(&RouteKey(scaled.get()))
-                    .ok_or(RouteError::NoSuchRoute(NoSuchModRoute(scaled)))?;
-                (inner.target, RouteTarget::Depth(RouteKey(scaled.get())))
-            }
-            Aim::Target(target) => {
-                let target_key = self.own.key_of(target);
-                if !self.own.ranges.contains_key(&target_key) {
-                    return Err(RouteError::UndeclaredRange { target });
-                }
-                (target, RouteTarget::Param(target_key))
-            }
-        };
-        // What a route drives is its target, or the depth of the route it scales.
+        let target = spec.target;
+        let to = self.own.key_of(target);
+        if !self.own.ranges.contains_key(&to) {
+            return Err(RouteError::UndeclaredRange { target });
+        }
         if self
             .own
             .routes
@@ -1317,11 +1352,6 @@ impl Mods<'_> {
             .any(|r| r.decl.source == source && r.decl.to == to)
         {
             return Err(RouteError::Duplicate { target });
-        }
-        if let (Aim::Depth(route), RouteTarget::Depth(_)) = (spec.aim, to)
-            && self.own.routes.values().any(|r| r.decl.to == to)
-        {
-            return Err(RouteError::AlreadyScaled { route });
         }
         let key = RouteKey(self.own.mint());
         let route = OwnRoute {
@@ -1331,10 +1361,12 @@ impl Mods<'_> {
                 depth: Param::new(spec.depth),
                 polarity: spec.polarity,
                 curve: spec.curve,
+                scale: None,
             },
             target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
+            scale: None,
         };
         self.own.provide_route(route_id(key), &route);
         self.own.routes.insert(key, route);
@@ -1354,6 +1386,57 @@ impl Mods<'_> {
         }
         let lost = self.own.take_routes([key]);
         self.own.retire_routes(lost);
+        Ok(())
+    }
+
+    /// Sets, replaces (`Some`) or clears (`None`) what scales the depth of
+    /// `route`: a route has at most one scale. The scale's depth is
+    /// [`DepthTarget::scale_of`](crate::DepthTarget::scale_of), starting at
+    /// the one `scale` gives; its polarity and curve are
+    /// [`PolarityTarget::scale_of`](crate::PolarityTarget::scale_of) and
+    /// [`CurveTarget::scale_of`](crate::CurveTarget::scale_of), starting
+    /// bipolar and linear. A `Some` is a new scale: it replaces the old one's
+    /// depth, polarity and curve, so a change to the depth alone goes through
+    /// [`DepthTarget::scale_of`](crate::DepthTarget::scale_of). A scale goes
+    /// with its route, and with its source when that is removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ScaleError::NoSuchRoute`] or [`ScaleError::NoSuchSource`] when the
+    /// route or the scale's source was removed; [`ScaleError::SignalSource`]
+    /// when either source is a follower or a note envelope. Nothing changes.
+    pub fn scale(&mut self, route: ModRouteId, scale: Option<Scale>) -> Result<(), ScaleError> {
+        let key = RouteKey(route.get());
+        let Some(declared) = self.own.routes.get(&key) else {
+            return Err(ScaleError::NoSuchRoute(NoSuchModRoute(route)));
+        };
+        let new = match scale {
+            None => None,
+            Some(scale) => {
+                let source = SourceKey(scale.source.get());
+                let Some(by) = self.own.sources.get(&source) else {
+                    return Err(ScaleError::NoSuchSource(NoSuchModSource(scale.source)));
+                };
+                let scaled = self.own.sources.get(&declared.decl.source);
+                if by.source.get().is_signal() || scaled.is_some_and(|s| s.source.get().is_signal())
+                {
+                    return Err(ScaleError::SignalSource { route });
+                }
+                Some(OwnScale {
+                    source,
+                    depth: Param::new(scale.depth),
+                    polarity: Declared::new(Polarity::Bipolar, &self.own.edited),
+                    curve: Declared::new(Law::Linear, &self.own.edited),
+                })
+            }
+        };
+        self.own.table.unprovide(&OwnMods::scale_slots(route));
+        if let Some(scale) = &new {
+            self.own.provide_scale(route, scale);
+        }
+        if let Some(declared) = self.own.routes.get_mut(&key) {
+            declared.scale = new;
+        }
         Ok(())
     }
 

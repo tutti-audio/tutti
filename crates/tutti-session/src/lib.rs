@@ -154,6 +154,7 @@ mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
 mod policy;
+mod preroll;
 #[cfg(feature = "record")]
 mod recorder;
 #[cfg(feature = "plugin")]
@@ -294,7 +295,7 @@ pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRouteId, ModSourceId, ModState, ModTarget, Mods, ModsView,
     NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteSpec, SourceError, SourceInfo, SourceName, TargetName,
+    RouteInfo, RouteSpec, Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
 };
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
@@ -323,6 +324,7 @@ pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
+pub use preroll::PrerollTable;
 #[cfg(feature = "record")]
 pub use recorder::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
 #[cfg(feature = "plugin")]
@@ -375,8 +377,8 @@ pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
     DepthKey, DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead,
     LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, ParamTarget,
-    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
-    TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
+    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, ShapeKey,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 pub use value::{
     Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
