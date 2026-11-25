@@ -11,7 +11,6 @@ const program::MAX_LANE_INPUTS
 const program::MAX_LANE_LAYERS
 const source::CONTROL_GRID
 enum compile::ProgramCompileError
-enum compile::RouteTarget
 enum compile::SignalKind
 enum compile::Source
 enum compile::TargetKey
@@ -22,6 +21,7 @@ enum program::Waveform
 enum shape::LfoShape
 enum shape::Polarity
 enum sources::LfoRate
+fn compile::Source::is_signal
 fn compile::TargetKey::edge
 fn compile::TargetKey::mix
 fn compile::TargetKey::node
@@ -81,6 +81,7 @@ struct compile::Compiled
 struct compile::Declarations
 struct compile::RouteDecl
 struct compile::RouteKey
+struct compile::Scale
 struct compile::SignalSource
 struct compile::SourceKey
 struct compile::TargetDecl

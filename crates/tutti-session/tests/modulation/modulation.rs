@@ -1,6 +1,5 @@
 //! Modulation in the session: the session's
-//! own declarations ([`Session::mods`]) and a host's ([`ModInput`]), applied
-//! by `Phase::Modulation`, committed once and resynced by `Phase::Commit`.
+//! own declarations ([`Session::mods`]), applied by `Phase::Modulation`, committed once and resynced by `Phase::Commit`.
 //!
 //! The render tests stand on analytic figures (doc 014 §5.3's bound for a
 //! sine on the control grid, a follower's closed form), never on a
@@ -9,7 +8,6 @@
 use crate::common;
 use crate::offline::offline_48k;
 
-use std::cell::Cell;
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -18,18 +16,15 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_modulation::ControlProgram;
-use tutti_modulation::{
-    Declarations, Follower, Lfo, Polarity, RouteDecl, RouteKey, RouteTarget, Source, SourceKey,
-    TargetDecl, TargetKey,
-};
+use tutti_modulation::{Follower, Lfo, Polarity, TargetKey};
+use tutti_nodes::ReconcileError;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_nodes::{Feed, ModHost, ReconcileError};
 use tutti_session::{
-    MainOutput, ModInput, ModRefusal, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
+    MainOutput, ModRefusal, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
     RouteSpec, Session, SessionEvent, TargetName,
 };
 use tutti_units::Samples;
-use tutti_units::{BeatsPerCycle, Bipolar, Hz, ParamAddr, UnitParam};
+use tutti_units::{BeatsPerCycle, Bipolar, Hz, UnitParam};
 
 use common::probe::{ProbeUnit, Pulse};
 
@@ -40,27 +35,14 @@ const STEP: usize = 32;
 const DECLICK: usize = 240;
 
 /// An offline session at 48 kHz, stereo.
-/// Every phase at `now`, with `mods` the host's declarations (`None`: the
-/// session's own): one update, at a time the test picks.
-fn update_at(s: &mut Session, now: Instant, mods: Option<ModInput<'_>>) -> Vec<SessionEvent> {
-    let mut cx = PhaseCx::at(now);
-    if let Some(mods) = mods {
-        cx = cx.with_mods(mods);
-    }
+/// Every phase at `now`: one update, at a time the test picks.
+fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
+    let cx = PhaseCx::at(now);
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, cx, &mut out);
     }
     out
-}
-
-/// A problem for a target that has waited no time: what a target the last apply
-/// could not resolve is, in the update that first finds it.
-fn unresolved(target: TargetName) -> Problem {
-    Problem::Unresolved {
-        target,
-        waited: Duration::ZERO,
-    }
 }
 
 /// Updates until nothing is left to resolve: nodes committed, then lanes.
@@ -182,117 +164,6 @@ fn the_8_1_example_renders_its_analytic_values() {
     assert!(low < 0.4, "the pad dips with the kick: {low}");
 }
 
-/// A host's keys: target key 1 names `node` once it is set; source 1 has
-/// no feed (an LFO).
-struct HostKeys {
-    node: Cell<Option<NodeKey>>,
-}
-
-impl ModHost for HostKeys {
-    fn node(&self, target: u64) -> Option<NodeKey> {
-        (target == 1).then(|| self.node.get()).flatten()
-    }
-
-    fn feed(&self, _: SourceKey) -> Option<Feed> {
-        None
-    }
-}
-
-/// The host's §8.1 cutoff wobble, keyed by its own ids: source 1, route 2,
-/// target `(1, Cutoff)` over `0..=1000`.
-struct HostDecl {
-    sources: Vec<(SourceKey, Source)>,
-    routes: Vec<(RouteKey, RouteDecl)>,
-    targets: Vec<(TargetKey, TargetDecl)>,
-}
-
-const HOST_TARGET: TargetKey = TargetKey::param(1, ParamAddr::Unit(UnitParam::Cutoff));
-
-impl HostDecl {
-    fn new(range: bool) -> Self {
-        Self {
-            sources: vec![(SourceKey(1), Lfo::sine().rate(Hz::new(3.0)).into())],
-            routes: vec![(
-                RouteKey(2),
-                RouteDecl {
-                    source: SourceKey(1),
-                    to: RouteTarget::Param(HOST_TARGET),
-                    depth: tutti_rt::Param::new(Bipolar::of(0.3)),
-                    polarity: tutti_modulation::Polarity::Bipolar,
-                    curve: tutti_modulation::Law::Linear,
-                },
-            )],
-            targets: if range {
-                vec![(
-                    HOST_TARGET,
-                    TargetDecl {
-                        min: 0.0,
-                        max: 1_000.0,
-                        automation: None,
-                    },
-                )]
-            } else {
-                Vec::new()
-            },
-        }
-    }
-
-    fn input<'a>(&'a self, keys: &'a HostKeys) -> ModInput<'a> {
-        ModInput {
-            declarations: Declarations {
-                sources: &self.sources,
-                routes: &self.routes,
-                targets: &self.targets,
-            },
-            keys,
-        }
-    }
-}
-
-/// **A target that names no node stays unresolved, and resolves in the one
-/// commit of the update its node is added in.** On the first update the
-/// host's target key names no node: `ModState::problems()` names it. On the
-/// second it names a node added in that update: the apply binds the lane to
-/// the node's staged cells, so after that one update, which sent exactly one
-/// plan, nothing is unresolved, the lane exists and nothing waits to be
-/// committed.
-#[test]
-fn a_target_added_later_resolves_in_that_updates_one_plan() {
-    let mut s = offline_48k();
-    let keys = HostKeys {
-        node: Cell::new(None),
-    };
-    let decl = HostDecl::new(true);
-    let now = Instant::now();
-
-    update_at(&mut s, now, Some(decl.input(&keys)));
-    assert_eq!(
-        s.mod_state().problems().cloned().collect::<Vec<_>>(),
-        [unresolved(TargetName::Host(HOST_TARGET))]
-    );
-    assert!(s.mod_state().lane(HOST_TARGET).is_none());
-
-    let plans = s.graph_ref().testing().commits_sent();
-    let probe = s.graph().add(ProbeUnit::new(500.0));
-    keys.node.set(Some(probe.erase()));
-    update_at(&mut s, now, Some(decl.input(&keys)));
-    assert_eq!(
-        s.mod_state().problems().next(),
-        None,
-        "resolved on the update its node was placed"
-    );
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "one plan for the node and its lane"
-    );
-    assert!(s.mod_state().lane(HOST_TARGET).is_some(), "with its lane");
-    assert!(
-        !s.graph_ref().has_uncommitted_edits(),
-        "and the lane committed"
-    );
-}
-
 /// **The unresolved warning fires after 4 s of `now`, not after N
 /// updates.** A target whose key names no node stays unresolved: a
 /// thousand updates at one instant report nothing, nor does one at 3.9 s;
@@ -300,17 +171,19 @@ fn a_target_added_later_resolves_in_that_updates_one_plan() {
 #[test]
 fn the_unresolved_warning_fires_after_four_seconds_not_n_updates() {
     let mut s = offline_48k();
-    let keys = HostKeys {
-        node: Cell::new(None),
-    };
-    let decl = HostDecl::new(true);
+    let ghost = ParamRef::unit(NodeKey(999), UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(ghost, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
+    m.route(RouteSpec::new(lfo, ghost, Bipolar::of(0.3)))
+        .unwrap();
     let t0 = Instant::now();
-    let warnings = |events: Vec<SessionEvent>| -> Vec<(TargetKey, Duration)> {
+    let warnings = |events: Vec<SessionEvent>| -> Vec<(ModTarget, Duration)> {
         events
             .into_iter()
             .filter_map(|e| match e {
                 SessionEvent::Modulation(Problem::Unresolved {
-                    target: TargetName::Host(target),
+                    target: TargetName::Own(target),
                     waited,
                 }) => Some((target, waited)),
                 _ => None,
@@ -319,29 +192,19 @@ fn the_unresolved_warning_fires_after_four_seconds_not_n_updates() {
     };
 
     for _ in 0..1_000 {
-        assert_eq!(
-            warnings(update_at(&mut s, t0, Some(decl.input(&keys)))),
-            vec![]
-        );
+        assert_eq!(warnings(update_at(&mut s, t0)), vec![]);
     }
     let early = t0 + Duration::from_millis(3_900);
-    assert_eq!(
-        warnings(update_at(&mut s, early, Some(decl.input(&keys)))),
-        vec![]
-    );
+    assert_eq!(warnings(update_at(&mut s, early)), vec![]);
     let due = t0 + Duration::from_secs(4);
     assert_eq!(
-        warnings(update_at(&mut s, due, Some(decl.input(&keys)))),
-        vec![(HOST_TARGET, Duration::from_secs(4))],
+        warnings(update_at(&mut s, due)),
+        vec![(ModTarget::Param(ghost), Duration::from_secs(4))],
         "reported once it has waited 4 s"
     );
     for later in 1..10 {
         let at = due + Duration::from_secs(later);
-        assert_eq!(
-            warnings(update_at(&mut s, at, Some(decl.input(&keys)))),
-            vec![],
-            "and once only"
-        );
+        assert_eq!(warnings(update_at(&mut s, at)), vec![], "and once only");
     }
 }
 
@@ -435,33 +298,6 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
     );
     let _ = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "applies clean");
-}
-
-/// **A session has one declarer.** While `s.mods_mut()` holds declarations, a
-/// host's `ModInput` is refused (`ModRefusal::TwoDeclarers`) and applies
-/// nothing.
-#[test]
-fn a_host_and_the_session_cannot_both_declare() {
-    let mut s = offline_48k();
-    let probe = s.graph().add(ProbeUnit::new(500.0));
-    s.mods_mut().macro_(0.5);
-    let keys = HostKeys {
-        node: Cell::new(Some(probe.erase())),
-    };
-    let decl = HostDecl::new(true);
-    let events = update_at(&mut s, Instant::now(), Some(decl.input(&keys)));
-    let refusal = Problem::Refused {
-        cause: ModRefusal::TwoDeclarers,
-        at: None,
-    };
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Modulation(p) if *p == refusal)),
-        "{events:?}"
-    );
-    assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&refusal]);
-    assert!(s.mod_state().lane(HOST_TARGET).is_none());
 }
 
 /// **The graph's own removal takes the session's declarations too**, as

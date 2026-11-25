@@ -60,9 +60,8 @@ pub const RATE_ANCHOR_MARGIN: Samples = Samples::new(3 * LARGEST_BLOCK_FRAMES);
 /// re-anchors at [`RATE_ANCHOR_MARGIN`] instead (see `anchored`).
 const ANCHOR_REUSE_MIN: Samples = Samples::new(2 * LARGEST_BLOCK_FRAMES);
 
-/// A source's key: the host's identity for it. Only compared. The session's own
-/// declarations name a source with a
-/// minted `ModSourceId` instead, and a host's keys are for `ModInput`.
+/// A source's key: the declarer's identity for it. Only compared. The session
+/// names a source with a minted `ModSourceId` and keys it by that number.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SourceKey(pub u64);
 
@@ -170,16 +169,41 @@ pub enum Source {
     },
 }
 
-/// Where a route goes.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RouteTarget {
-    /// A target param: a layer (or an input layer) of its program.
-    Param(TargetKey),
-    /// Another route's depth: that route's layer is scaled by this route's
-    /// source through this route's amount ([`DepthBy`]). The other route
-    /// must go to a param (a chain is refused), and both sources must be
-    /// time functions (an LFO or a macro).
-    Depth(RouteKey),
+impl Source {
+    /// Whether the source is a signal: a node in the graph (a follower or a
+    /// note envelope), not a time function. A depth is scaled by a time
+    /// function only.
+    #[must_use]
+    pub fn is_signal(&self) -> bool {
+        signal_kind(self).is_some()
+    }
+}
+
+/// What scales a route's depth: a time function whose value, through its own
+/// amount, multiplies the route's offset ([`DepthBy`]).
+///
+/// A route has at most one, so a scale of a scale cannot be written. Both
+/// sources must be time functions (an LFO or a macro); [`compile`] refuses a
+/// signal source ([`ProgramCompileError::DepthBySignal`]).
+#[derive(Clone, Debug)]
+pub struct Scale {
+    /// What scales.
+    pub source: SourceKey,
+    /// A fraction of the route's scale, read when compiled.
+    pub depth: Param<Bipolar>,
+    /// Both ways or one.
+    pub polarity: Polarity,
+    /// The response curve on the magnitude.
+    pub curve: Law,
+}
+
+impl PartialEq for Scale {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.depth.ptr_eq(&other.depth)
+            && self.polarity == other.polarity
+            && self.curve == other.curve
+    }
 }
 
 /// A route: a source into a target, shaped by an amount.
@@ -193,18 +217,19 @@ pub struct RouteDecl {
     /// What modulates.
     pub source: SourceKey,
     /// What it modulates.
-    pub to: RouteTarget,
-    /// A fraction of the target's range (of the scale, for a depth route).
-    /// The cell a route into a param binds to its layer: the lane reads it at
-    /// every evaluation, so a write to it republishes no program. A depth
-    /// route's is read when compiled. A host keeps the cell across applies: a
-    /// route rebuilt with a new cell is a changed route (every lane it feeds
-    /// is recompiled and republished).
+    pub to: TargetKey,
+    /// A fraction of the target's range. The cell is bound to the route's
+    /// layer: the lane reads it at every evaluation, so a write to it
+    /// republishes no program. A host keeps the cell across applies: a route
+    /// rebuilt with a new cell is a changed route (every lane it feeds is
+    /// recompiled and republished).
     pub depth: Param<Bipolar>,
     /// Both ways or one.
     pub polarity: Polarity,
     /// The response curve on the magnitude.
     pub curve: Law,
+    /// What scales the depth, if anything.
+    pub scale: Option<Scale>,
 }
 
 impl PartialEq for RouteDecl {
@@ -214,16 +239,27 @@ impl PartialEq for RouteDecl {
             && self.depth.ptr_eq(&other.depth)
             && self.polarity == other.polarity
             && self.curve == other.curve
+            && self.scale == other.scale
     }
 }
 
 impl RouteDecl {
-    /// The amount with `depth`: a layer's route carries none (its cell is
-    /// bound to the program, so a write to it changes no program), a depth
-    /// route's is read now.
-    fn amount(&self, depth: Bipolar) -> Amount {
+    /// The route's amount, with no depth: its cell is bound to the program,
+    /// so a write to it changes no program.
+    fn amount(&self) -> Amount {
         Amount {
-            depth,
+            depth: Bipolar::ZERO,
+            polarity: self.polarity,
+            curve: self.curve,
+        }
+    }
+}
+
+impl Scale {
+    /// The scale's amount, with its depth as the cell holds it when compiled.
+    fn amount(&self) -> Amount {
+        Amount {
+            depth: self.depth.load(),
             polarity: self.polarity,
             curve: self.curve,
         }
@@ -392,12 +428,6 @@ pub enum ProgramCompileError {
         /// The route.
         route: RouteKey,
     },
-    /// A depth route to a route not declared.
-    #[error("route {}: the route it scales is not declared", .route.0)]
-    UnknownRoute {
-        /// The depth route.
-        route: RouteKey,
-    },
     /// A route to a target not declared: a route needs the target's range.
     #[error("route {}: its target is not declared", .route.0)]
     UndeclaredTarget {
@@ -456,24 +486,11 @@ pub enum ProgramCompileError {
         /// How many.
         count: usize,
     },
-    /// A depth route to a route that is itself a depth route: `depth_by`
-    /// chains are one deep.
-    #[error("route {}: a depth_by chain deeper than one", .route.0)]
-    DepthByChain {
-        /// The outer depth route.
-        route: RouteKey,
-    },
-    /// A depth route from a signal-driven source, or to a route from one: a
-    /// depth is scaled by a time function only.
+    /// A scale from a signal-driven source, or of a route from one: a depth
+    /// is scaled by a time function only.
     #[error("route {}: depth_by takes a time function on both sides", .route.0)]
     DepthBySignal {
-        /// The depth route.
-        route: RouteKey,
-    },
-    /// Two depth routes to one route: a layer has one `depth_by`.
-    #[error("route {}: two depth routes", .route.0)]
-    TwoDepthBy {
-        /// The route both go to.
+        /// The scaled route.
         route: RouteKey,
     },
     /// Two layers of one target derived the same [`LayerId`] (a 64-bit hash
@@ -489,9 +506,9 @@ const MACRO_CLOCK: LayerClock = LayerClock::Beats {
     phase: PhaseIncrement::new(0.0),
 };
 
-/// The [`LayerId`] of `route`'s layer, scaled by `depth_by` (if any).
+/// The [`LayerId`] of `route`'s layer, scaled by the source `depth_by` (if any).
 /// Stable: keys only, so an edit that keeps both keys keeps the id.
-pub fn layer_id(route: RouteKey, depth_by: Option<RouteKey>) -> LayerId {
+pub fn layer_id(route: RouteKey, depth_by: Option<SourceKey>) -> LayerId {
     let h = SplitMix64::mix(route.0);
     LayerId(match depth_by {
         None => h,
@@ -544,29 +561,17 @@ pub fn compile(
         }
     }
 
-    // Depth routes: the route each scales, and its one scaler.
-    let is_signal = |s: SourceKey| {
-        matches!(
-            sources[&s],
-            Source::Follower { .. } | Source::NoteEnvelope { .. }
-        )
-    };
-    let mut depth_of: BTreeMap<RouteKey, RouteKey> = BTreeMap::new();
+    // Scales: a time function scales a route of a time function.
+    let is_signal = |s: SourceKey| sources[&s].is_signal();
     for (&key, route) in &routes {
-        let RouteTarget::Depth(scaled) = route.to else {
+        let Some(scale) = &route.scale else {
             continue;
         };
-        let Some(inner) = routes.get(&scaled) else {
-            return Err(ProgramCompileError::UnknownRoute { route: key });
-        };
-        if matches!(inner.to, RouteTarget::Depth(_)) {
-            return Err(ProgramCompileError::DepthByChain { route: key });
+        if !sources.contains_key(&scale.source) {
+            return Err(ProgramCompileError::UnknownSource { route: key });
         }
-        if is_signal(route.source) || is_signal(inner.source) {
+        if is_signal(scale.source) || is_signal(route.source) {
             return Err(ProgramCompileError::DepthBySignal { route: key });
-        }
-        if depth_of.insert(scaled, key).is_some() {
-            return Err(ProgramCompileError::TwoDepthBy { route: scaled });
         }
     }
 
@@ -630,14 +635,11 @@ pub fn compile(
         (clocks.get(&key).copied().unwrap_or(clock), wave)
     };
     for (&key, route) in &routes {
-        let RouteTarget::Param(target) = route.to else {
-            continue;
-        };
+        let target = route.to;
         if !targets.contains_key(&target) {
             return Err(ProgramCompileError::UndeclaredTarget { route: key });
         }
-        let scaler = depth_of.get(&key).copied();
-        let id = layer_id(key, scaler);
+        let id = layer_id(key, route.scale.as_ref().map(|s| s.source));
         let entry = layers.entry(target).or_default();
         origin.insert(id, route.source);
         depths
@@ -649,26 +651,25 @@ pub fn compile(
                 entry.1.push(InputLayer {
                     id,
                     source: nodes[&route.source].id,
-                    amount: route.amount(Bipolar::ZERO),
+                    amount: route.amount(),
                 });
                 edges.insert((route.source, target));
             }
             Source::Lfo { .. } | Source::Macro { .. } => {
                 let (clock, wave) = dated(route.source);
-                let depth_by = scaler.map(|d| {
-                    let by = &routes[&d];
+                let depth_by = route.scale.as_ref().map(|by| {
                     let (clock, wave) = dated(by.source);
                     DepthBy {
                         clock,
                         wave,
-                        amount: by.amount(by.depth.load()),
+                        amount: by.amount(),
                     }
                 });
                 entry.0.push(Layer {
                     id,
                     clock,
                     wave,
-                    amount: route.amount(Bipolar::ZERO),
+                    amount: route.amount(),
                     depth_by,
                 });
             }

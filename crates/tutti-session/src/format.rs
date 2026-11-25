@@ -13,7 +13,7 @@ pub trait Sealed: tutti_rt::RingFloat {
     #[doc(hidden)]
     fn serve_plugins<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
-        cx: PhaseCx<'_>,
+        cx: PhaseCx,
         out: &mut Vec<SessionEvent>,
     );
 
@@ -36,7 +36,7 @@ impl Sealed for f32 {
 
     fn serve_plugins<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
-        cx: PhaseCx<'_>,
+        cx: PhaseCx,
         out: &mut Vec<SessionEvent>,
     ) {
         #[cfg(feature = "plugin")]
@@ -61,7 +61,7 @@ impl Sealed for f64 {
 
     fn serve_plugins<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
-        _: PhaseCx<'_>,
+        _: PhaseCx,
         _: &mut Vec<SessionEvent>,
     ) {
     }
