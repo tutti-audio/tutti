@@ -51,6 +51,12 @@
 //! never a message without its end nor a later message that leans on a lost
 //! earlier one.
 //!
+//! The clip's own events go out the same way: a message of several packets of
+//! one type (a System Exclusive run, a Mixed Data Set chunk) is one event at
+//! its first packet's beat, sent whole there or, with no room for every
+//! packet, counted lost whole. Unlike the header's, a lost event costs only
+//! itself: the events after it play.
+//!
 //! A key (group, channel, note number) is held or not (the MIDI convention),
 //! by one note at a time, as a DAW plays notes of one key that overlap (M2-104
 //! Appendix C.2 would allow several, told apart by a Detach, which a clip does
@@ -161,6 +167,11 @@ pub struct ClipEvents {
     /// counted from 0 at the header's start; the node ignores the times and
     /// sends all at once.
     header: Box<[Box<[TimedMidiEvent]>]>,
+    /// The packets after the first of each multi-packet message among
+    /// `events` (a System Exclusive run, a Mixed Data Set chunk), each event's
+    /// in its own [`Rest`] range. The node sends a message whole or not at
+    /// all, so a full port never takes a Start without its End.
+    rests: Box<[TimedMidiEvent]>,
 }
 
 /// A note of a clip: a note-on and the note-off that ends it, if one does
@@ -186,7 +197,7 @@ pub struct ClipNote {
 
 impl ClipEvents {
     /// Control thread: builds the chase table and the note ends.
-    fn new(events: Box<[ClipEvent]>) -> Self {
+    fn new(events: Box<[ClipEvent]>, rests: Box<[TimedMidiEvent]>) -> Self {
         let chase = chase_table(&events);
         let ends = note_ends(&events);
         Self {
@@ -194,6 +205,7 @@ impl ClipEvents {
             chase,
             ends,
             header: Box::default(),
+            rests,
         }
     }
 
@@ -245,10 +257,27 @@ impl ClipEvents {
             })
     }
 
-    /// How many events the clip holds.
+    /// How many events the clip holds: a message of several packets (a System
+    /// Exclusive run) is one.
     #[must_use]
     pub fn len(&self) -> usize {
         self.events.len()
+    }
+
+    /// The clip's side of a block's walk, sending through `sending` into a
+    /// port of `capacity` events.
+    fn playing<'a, 'w>(
+        &self,
+        sending: Sending<'a, 'w, NoteId>,
+        capacity: usize,
+    ) -> Playing<'a, 'w, '_> {
+        Playing {
+            sending,
+            chase: &self.chase,
+            header: &self.header,
+            rests: &self.rests,
+            capacity,
+        }
     }
 
     /// Whether the clip holds no event.
@@ -260,15 +289,16 @@ impl ClipEvents {
 
 impl FromIterator<TimedMidiEvent> for ClipEvents {
     fn from_iter<I: IntoIterator<Item = TimedMidiEvent>>(events: I) -> Self {
-        Self::new(sorted(translated(events)))
+        let (messages, rests) = messages(translated(events));
+        Self::new(sorted(messages), rests)
     }
 }
 
-/// Equal by events, pairing and header: the chase table is a function of the
-/// events.
+/// Equal by events, pairing, header and the packets of multi-packet messages:
+/// the chase table is a function of the events.
 impl PartialEq for ClipEvents {
     fn eq(&self, other: &Self) -> bool {
-        self.events == other.events && self.header == other.header
+        self.events == other.events && self.header == other.header && self.rests == other.rests
     }
 }
 
@@ -384,6 +414,50 @@ struct ClipEvent {
     /// For a note-on, its own id; for a note-off, the id of the note-on it
     /// ends; `None` for a note-off that ends none, and for any other message.
     note: Option<NoteId>,
+    /// The packets of its message after `timed`, in [`ClipEvents`]' rests.
+    rest: Rest,
+}
+
+/// Where the packets of a message after its first are in a clip's rests:
+/// empty for a message of one packet.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Rest {
+    start: u32,
+    len: u32,
+}
+
+impl Rest {
+    fn of(self, rests: &[TimedMidiEvent]) -> &[TimedMidiEvent] {
+        let start = self.start as usize;
+        &rests[start..start + self.len as usize]
+    }
+}
+
+/// `events`, in list order, as messages: each multi-packet message whose
+/// packets are all of one message type (a System Exclusive run, interleaved
+/// runs of other Groups included; a Mixed Data Set chunk) is one item at its
+/// first packet, with the rest of its packets in the returned rests. A
+/// message with a packet of another type inside it (a note between a Start
+/// and its End) stays one item per packet, as do messages of one packet.
+/// Control thread.
+fn messages(events: Vec<TimedMidiEvent>) -> (Vec<(TimedMidiEvent, Rest)>, Box<[TimedMidiEvent]>) {
+    let mut items = Vec::with_capacity(events.len());
+    let mut rests = Vec::new();
+    for message in spans(&events, TimedMidiEvent::event) {
+        let packets = message.packets();
+        let kind = packets[0].event().message_type();
+        if packets.len() > 1 && packets.iter().all(|p| p.event().message_type() == kind) {
+            let rest = Rest {
+                start: u32::try_from(rests.len()).expect("a clip's packets fit u32"),
+                len: u32::try_from(packets.len() - 1).expect("a clip's packets fit u32"),
+            };
+            rests.extend_from_slice(&packets[1..]);
+            items.push((packets[0], rest));
+        } else {
+            items.extend(packets.iter().map(|&p| (p, Rest::default())));
+        }
+    }
+    (items, rests.into_boxed_slice())
 }
 
 /// A note's id: the index of its note-on in the sorted clip.
@@ -469,11 +543,18 @@ fn translated(events: impl IntoIterator<Item = TimedMidiEvent>) -> Vec<TimedMidi
 /// before a note-on of the same note stays first). A note's id is its note-on's index in the
 /// sorted clip, so two clips with the same events and the same pairing are
 /// equal. Control thread.
-fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> {
+fn sorted(events: impl IntoIterator<Item = (TimedMidiEvent, Rest)>) -> Box<[ClipEvent]> {
     let mut v: Vec<(u32, ClipEvent)> = events
         .into_iter()
         .enumerate()
-        .map(|(i, timed)| (i as u32, ClipEvent { timed, note: None }))
+        .map(|(i, (timed, rest))| {
+            let event = ClipEvent {
+                timed,
+                note: None,
+                rest,
+            };
+            (i as u32, event)
+        })
         .collect();
     // Each key's note-ons in list order, and a cursor past the taken ones at
     // its head (so notes that do not overlap pair in one step each).
@@ -594,7 +675,8 @@ impl MidiClipControls {
         self.cell.current()
     }
 
-    /// How many events the clip holds.
+    /// How many events the clip holds: a message of several packets (a System
+    /// Exclusive run) is one.
     #[must_use]
     pub fn len(&self) -> usize {
         self.cell.current().len()
@@ -710,17 +792,23 @@ struct Playing<'a, 'w, 'c> {
     sending: Sending<'a, 'w, NoteId>,
     chase: &'c [Box<[Setter]>],
     header: &'c [Box<[TimedMidiEvent]>],
-    /// The port's declared capacity: what a header message's room is read from.
+    rests: &'c [TimedMidiEvent],
+    /// The port's declared capacity: what a message's room is read from.
     capacity: usize,
 }
 
 impl Playing<'_, '_, '_> {
+    /// The events the port still takes this block.
+    fn room(&self) -> usize {
+        self.capacity.saturating_sub(self.sending.written())
+    }
+
     /// Sends the header at `at`, message by message, each whole or not at all.
     /// At the first message the port has no room for, every packet from it on
     /// is counted lost and nothing more is sent.
     fn send_header(&mut self, at: Offset) {
         for (i, message) in self.header.iter().enumerate() {
-            if message.len() > self.capacity.saturating_sub(self.sending.written()) {
+            if message.len() > self.room() {
                 let lost = self.header[i..].iter().map(|m| m.len()).sum();
                 self.sending.count_lost(lost);
                 return;
@@ -787,8 +875,19 @@ impl Visit<ClipEvent> for Playing<'_, '_, '_> {
         }
     }
 
+    /// Sends `e`, and the rest of its message with it: a message of several
+    /// packets goes whole, at its first packet's time, or is counted lost
+    /// whole when the port has no room for all of it.
     fn event(&mut self, at: Offset, e: &ClipEvent) {
+        let rest = e.rest.of(self.rests);
+        if !rest.is_empty() && 1 + rest.len() > self.room() {
+            self.sending.count_lost(1 + rest.len());
+            return;
+        }
         self.sending.send(at, e.timed.event(), e.note);
+        for packet in rest {
+            self.sending.send(at, packet.event(), None);
+        }
     }
 }
 
@@ -811,12 +910,10 @@ impl<F: Float> Node<F> for MidiClipNode {
         let seq = clip.seq();
         let replaced = std::mem::replace(&mut self.last_seq, seq) != seq;
         let Play { walk, held } = &mut self.play;
-        let mut playing = Playing {
-            sending: held.block(io.event_out(Self::OUT), first),
-            chase: &clip.chase,
-            header: &clip.header,
-            capacity: self.capacity.get() as usize,
-        };
+        let mut playing = clip.playing(
+            held.block(io.event_out(Self::OUT), first),
+            self.capacity.get() as usize,
+        );
         if replaced {
             playing.sending.release_all(first);
         }
