@@ -253,7 +253,7 @@ macro_rules! served_control {
                 self.link.bridge.audio().edits_queued()
             }
 
-            /// Whether the server answered a flush that carried the writes up
+            /// Whether the server answered a request that carried the writes up
             /// to `upto`; when not, asks the audio lane to flush them
             /// ([`AudioBridge::edits_delivered`]).
             ///

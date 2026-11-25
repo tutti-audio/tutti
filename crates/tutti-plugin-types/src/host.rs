@@ -177,7 +177,7 @@ pub trait Control: EditorWindow {
     /// Asks for the delivery of every value queued up to `upto`
     /// ([`queued`](Self::queued)) and answers whether it happened: the plugin
     /// has them (the Processor's `process` call that took them has returned, or
-    /// a served plugin's server answered a flush that carried them), so a read
+    /// a served plugin's server answered a request that carried them), so a read
     /// or a save made now sees them. An ask is idempotent, and a caller asks
     /// again until it is `true`. Later writes do not move it.
     fn delivered(&self, upto: Generation) -> bool {

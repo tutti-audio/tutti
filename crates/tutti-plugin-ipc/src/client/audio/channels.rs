@@ -430,7 +430,8 @@ impl Channels {
         self.flush_asked.store(false, Ordering::Release);
     }
 
-    /// The writes the server has answered a flush for ([`note_acked`](Self::note_acked)).
+    /// The writes the server has answered for, by any request that carried them
+    /// ([`note_acked`](Self::note_acked)).
     /// Wait-free, any thread.
     pub(super) fn acked(&self) -> Generation {
         Generation::new(self.acked.load(Ordering::Acquire))
