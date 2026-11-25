@@ -14,7 +14,7 @@ use tutti_rt::FaultLatch;
 use tutti_winmm_ffi::{Event, InputPort, MidiIn};
 
 /// An open winmm input. Dropping it stops the port and returns its buffers.
-pub struct WinMmInput {
+pub(super) struct WinMmInput {
     /// Raised when the driver closes the port or the callback panics.
     died: Arc<FaultLatch<InputFault>>,
     port: MidiIn,

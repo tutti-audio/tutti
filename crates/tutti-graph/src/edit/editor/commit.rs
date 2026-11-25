@@ -76,6 +76,10 @@ impl<F: Float> Editor<F> {
     ///
     /// When the box coming back is a [`reprepare`](Self::reprepare)'s first
     /// half, this re-prepares the units it carries and sends the second.
+    ///
+    /// Items an executor apply had no room to hand back, leaked rather than
+    /// freed on the audio thread, are logged with `tracing::error!` once per
+    /// increase: such a count is a tutti bug.
     pub fn collect(&mut self) -> Vec<NodeKey> {
         let mut keys = Vec::new();
         while let Some(done) = self.link.pop_returned() {
@@ -95,6 +99,14 @@ impl<F: Float> Editor<F> {
             drop(x);
         }
         self.stager.observe(self.link.acked());
+        // Control thread: the audio thread only counts what its lists refused.
+        let leaked = self.link.take_leaked();
+        if leaked > 0 {
+            tracing::error!(
+                leaked,
+                "an executor apply had no room to hand back {leaked} owned items and leaked them; this is a tutti bug"
+            );
+        }
         keys
     }
 
@@ -205,7 +217,7 @@ impl<F: Float> Editor<F> {
         )
         .map_err(CommitError::Compile)?;
         plan.main_output_id = self.spec.main_output_id;
-        // The crossfades `replace` asked for, for the keys this delta
+        // The crossfades `replace_or_swap` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
             .replace
@@ -231,7 +243,7 @@ impl<F: Float> Editor<F> {
         debug_assert_eq!(
             plan.verify_fades(self.base().map(|p| &**p), &delta),
             Ok(()),
-            "`replace` checked every fade it attached"
+            "`replace_or_swap` checked every fade it attached"
         );
         let needed: Vec<NodeKey> = delta
             .insert

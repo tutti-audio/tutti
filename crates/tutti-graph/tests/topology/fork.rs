@@ -756,7 +756,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
 }
 
 /// **A replace moves forking to the new unit**: a fork after
-/// `Editor::replace` forks the incoming unit, a replace with a unit that
+/// `Editor::replace_or_swap` forks the incoming unit, a replace with a unit that
 /// hands over no fork source makes the key unforkable, and a *refused*
 /// replace (a different width) changes nothing.
 #[test]
@@ -770,16 +770,17 @@ fn a_replace_moves_forking_to_the_new_unit() {
     exec.apply_pending();
     ed.collect();
 
-    ed.replace(key, consts(1, 0.9), fade).expect("same shape");
+    ed.replace_or_swap(key, consts(1, 0.9), fade)
+        .expect("same shape");
     assert!(matches!(
-        ed.replace(key, consts(2, 0.1), fade),
+        ed.replace_or_swap(key, consts(2, 0.1), fade),
         Err(tutti_graph::CommitError::FadeShape { .. })
     ));
     let (fe, fx) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     let forked = render(fe, fx, 64);
     assert!(forked[0].iter().all(|&x| x == 0.9), "{:?}", &forked[0][..4]);
 
-    ed.replace(key, Unforkable(consts(1, 0.7).into_node().0), fade)
+    ed.replace_or_swap(key, Unforkable(consts(1, 0.7).into_node().0), fade)
         .expect("same shape");
     assert_eq!(
         ed.fork(ForkTarget::MainOutput, prepare(64)).err(),

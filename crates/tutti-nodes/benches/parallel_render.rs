@@ -21,12 +21,17 @@
 //!   output's fan-in (the graph sums `lanes * fan` addends): heavy work with
 //!   cheap siblings, where packing the siblings (and not dispatching each)
 //!   matters. `-undeclared` again for the gains declaring nothing.
+//! - `parked/<lanes>x<depth>` — `wide`'s graph on a pool whose helpers park
+//!   as soon as a job ends, so each block pays their wake.
+//! - `narrow/<lanes>x<depth>` — two long chains: fewer ready tasks than
+//!   participants on the wider pools, where the idle helpers must cost
+//!   nothing.
 //!
 //! `workers` is the participant count, the calling thread included; `1` is
 //! no pool. The pool is `tutti_graph::WorkerPool`
 //! with its default waits, so a block's helpers are usually still spinning
-//! from the last block (criterion runs blocks back to back); the wake cost
-//! of a parked helper is not in these numbers.
+//! from the last block (criterion runs blocks back to back); `parked` is the
+//! group that pays the wake of a parked helper.
 //!
 //! ```text
 //! cargo bench -p tutti-nodes --bench parallel_render
@@ -37,6 +42,7 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_graph::EdgeId;
 
@@ -71,20 +77,37 @@ fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
     .unwrap();
 }
 
+/// How a pool's helpers wait between blocks.
+#[derive(Clone, Copy)]
+enum Waits {
+    /// The pool's defaults: a helper spins, then yields, before it parks, so
+    /// back-to-back blocks find it awake.
+    Default,
+    /// A helper parks as soon as its job ends, so every block wakes it: the
+    /// cost a callback pays when its helpers slept through the gap since the
+    /// last one.
+    Park,
+}
+
+/// A pool of `workers` participants, the caller included.
+fn pool(workers: usize, waits: Waits) -> Arc<WorkerPool> {
+    let builder = WorkerPool::builder().num_threads(workers);
+    let builder = match waits {
+        Waits::Default => builder,
+        Waits::Park => builder.spin_budget(Duration::ZERO).idle(Duration::ZERO),
+    };
+    Arc::new(builder.build().expect("a worker pool"))
+}
+
 /// `lanes` chains of `depth` filters (depth 0: a lone oscillator per lane),
 /// summed; on a pool of `workers` participants when more than one.
-fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
+fn wide(lanes: usize, depth: usize, workers: usize, waits: Waits) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
-        exec.set_pool(Some(Arc::new(
-            WorkerPool::builder()
-                .num_threads(workers)
-                .build()
-                .expect("a worker pool"),
-        )));
+        exec.set_pool(Some(pool(workers, waits)));
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
@@ -168,12 +191,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
         MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
-        exec.set_pool(Some(Arc::new(
-            WorkerPool::builder()
-                .num_threads(workers)
-                .build()
-                .expect("a worker pool"),
-        )));
+        exec.set_pool(Some(pool(workers, Waits::Default)));
     }
     ed.resize_inputs(ChannelLayout::MONO);
     // One silent main output, which each lane's end joins as a source: the
@@ -208,12 +226,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
         MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
-        exec.set_pool(Some(Arc::new(
-            WorkerPool::builder()
-                .num_threads(workers)
-                .build()
-                .expect("a worker pool"),
-        )));
+        exec.set_pool(Some(pool(workers, Waits::Default)));
     }
     // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
@@ -273,9 +286,9 @@ fn group(c: &mut Criterion, name: &str, cases: &[(String, &dyn Fn(usize) -> Exec
 }
 
 fn bench_wide(c: &mut Criterion) {
-    let w8: &dyn Fn(usize) -> Executor = &|w| wide(8, 8, w);
-    let w32: &dyn Fn(usize) -> Executor = &|w| wide(32, 8, w);
-    let w64: &dyn Fn(usize) -> Executor = &|w| wide(64, 16, w);
+    let w8: &dyn Fn(usize) -> Executor = &|w| wide(8, 8, w, Waits::Default);
+    let w32: &dyn Fn(usize) -> Executor = &|w| wide(32, 8, w, Waits::Default);
+    let w64: &dyn Fn(usize) -> Executor = &|w| wide(64, 16, w, Waits::Default);
     group(
         c,
         "wide",
@@ -288,7 +301,7 @@ fn bench_wide(c: &mut Criterion) {
 }
 
 fn bench_deep(c: &mut Criterion) {
-    let d: &dyn Fn(usize) -> Executor = &|w| wide(1, 128, w);
+    let d: &dyn Fn(usize) -> Executor = &|w| wide(1, 128, w, Waits::Default);
     group(c, "deep", &[("128".into(), d)]);
 }
 
@@ -315,5 +328,23 @@ fn bench_mixed(c: &mut Criterion) {
     );
 }
 
-criterion_group!(benches, bench_wide, bench_deep, bench_tiny, bench_mixed);
+fn bench_parked(c: &mut Criterion) {
+    let w8: &dyn Fn(usize) -> Executor = &|w| wide(8, 8, w, Waits::Park);
+    group(c, "parked", &[("8x8".into(), w8)]);
+}
+
+fn bench_narrow(c: &mut Criterion) {
+    let n2: &dyn Fn(usize) -> Executor = &|w| wide(2, 32, w, Waits::Default);
+    group(c, "narrow", &[("2x32".into(), n2)]);
+}
+
+criterion_group!(
+    benches,
+    bench_wide,
+    bench_deep,
+    bench_tiny,
+    bench_mixed,
+    bench_parked,
+    bench_narrow
+);
 criterion_main!(benches);

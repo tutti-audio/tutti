@@ -23,7 +23,7 @@ const WAKE: RequestFlag = RequestFlag::of(0);
 /// notifies between two blocks wake the node once.
 ///
 /// The handle belongs to one placement of the node: a node that replaces it
-/// ([`Editor::replace`](crate::Editor::replace)) or a fork's copy of it
+/// ([`Editor::replace_or_swap`](crate::Editor::replace_or_swap)) or a fork's copy of it
 /// ([`Editor::fork`](crate::Editor::fork)) is a different node with its own
 /// handle, and a notify on the old one wakes nothing of the new.
 ///

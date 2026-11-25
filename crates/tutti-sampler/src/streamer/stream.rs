@@ -96,11 +96,22 @@ pub struct StreamHandle<F: RingFloat> {
     /// The ring's published control: the loop as applied is read from it
     /// ([`StreamStatus::loop_`]).
     control: Publisher<RingControl<F>>,
-    /// The loop asked for, which the streamer reads and applies on its own
-    /// thread. The same cell the stream's node steers.
+    /// The loop and direction asked for, which the streamer reads and applies
+    /// on its own thread: the cells the stream's node steers. Shared with the
+    /// sweep [`reclaimer`](Self::reclaimer) hands out, which ends with the handle.
+    asked: Arc<Asked>,
+}
+
+/// What a stream is asked to play: the two cells the streamer reads.
+struct Asked {
     looping: ControlCell<Option<Loop>>,
-    /// The direction asked for, read and applied the same way.
     direction: ControlCell<PlayDirection>,
+}
+
+impl tutti_rt::Reclaim for Asked {
+    fn reclaim(&self) -> usize {
+        self.looping.reclaim() + self.direction.reclaim()
+    }
 }
 
 impl<F: RingFloat> std::fmt::Debug for StreamHandle<F> {
@@ -130,8 +141,7 @@ impl<F: RingFloat> StreamHandle<F> {
             underruns: AtomicU64::new(0),
             file,
             control,
-            looping,
-            direction,
+            asked: Arc::new(Asked { looping, direction }),
         }
     }
 
@@ -176,13 +186,13 @@ impl<F: RingFloat> StreamHandle<F> {
     /// until one is published to [`looping_cell`](Self::looping_cell).
     #[must_use]
     pub fn loop_(&self) -> Option<Loop> {
-        *self.looping.current()
+        *self.asked.looping.current()
     }
 
     /// The direction asked for.
     #[must_use]
     pub fn direction(&self) -> PlayDirection {
-        *self.direction.current()
+        *self.asked.direction.current()
     }
 
     /// The stream this handle steers: the identity every command it sends
@@ -211,7 +221,7 @@ impl<F: RingFloat> StreamHandle<F> {
     /// ([`reclaim`](Self::reclaim)).
     #[must_use]
     pub fn looping_cell(&self) -> &ControlCell<Option<Loop>> {
-        &self.looping
+        &self.asked.looping
     }
 
     /// The cell holding the direction the stream plays.
@@ -224,13 +234,24 @@ impl<F: RingFloat> StreamHandle<F> {
     /// read it from there, and nothing polls a flag.
     #[must_use]
     pub fn direction_cell(&self) -> &ControlCell<PlayDirection> {
-        &self.direction
+        &self.asked.direction
     }
 
     /// Frees the loops and directions the control side replaced and no
-    /// streamer cycle holds. Control thread, from the owner's tick.
+    /// streamer cycle holds. Control thread, from the owner's tick: the session
+    /// calls it for a stream it opened ([`reclaimer`](Self::reclaimer)); a caller
+    /// without a session calls it on its own tick.
     pub fn reclaim(&self) -> usize {
-        self.looping.reclaim() + self.direction.reclaim()
+        tutti_rt::Reclaim::reclaim(&*self.asked)
+    }
+
+    /// This handle's [`reclaim`](Self::reclaim), held weakly: it upgrades for
+    /// as long as the handle lives and not after, so a holder of many keeps
+    /// no cell of a stream that ended. The session keeps one per stream it opens.
+    #[must_use]
+    pub fn reclaimer(&self) -> std::sync::Weak<dyn tutti_rt::Reclaim + Send + Sync> {
+        let asked: Arc<dyn tutti_rt::Reclaim + Send + Sync> = self.asked.clone();
+        Arc::downgrade(&asked)
     }
 }
 

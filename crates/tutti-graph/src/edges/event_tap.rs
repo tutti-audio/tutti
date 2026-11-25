@@ -26,7 +26,7 @@
 //! ([`EventTapReader::rate`]). A re-prepare at another rate moves the graph's
 //! clock to the same wall time on a new scale; the reader of a tap opened
 //! before it keeps the old figure, so whoever re-prepares reopens the tap
-//! (`tutti-session`'s `Graph::reopen_event_taps`), and one reader's frames are
+//! (`tutti-session` does on its own re-prepare), and one reader's frames are
 //! always on one scale.
 //!
 //! The ring is `tutti_rt::ring`, the one single-producer, single-consumer

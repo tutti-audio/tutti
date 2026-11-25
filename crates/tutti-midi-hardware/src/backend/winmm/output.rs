@@ -35,7 +35,7 @@ struct Shared {
 /// executor's last clone elsewhere and drops it while an output is open costs the
 /// executor's shutdown bound, and the thread is then detached with a warning (it
 /// ends when the output drops). Drop an output before its executor.
-pub struct WinMmOutput {
+pub(super) struct WinMmOutput {
     shared: Arc<Shared>,
     task: Option<Task<()>>,
 }

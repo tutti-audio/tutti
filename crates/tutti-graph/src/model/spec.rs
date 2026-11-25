@@ -490,7 +490,7 @@ impl GraphSpec {
     ///   lane does, having nothing in flight; a hand-wired source answers
     ///   [`EventKind::Resync`](crate::EventKind::Resync) or drives the knob
     ///   instead).
-    /// - **A crossfade's base.** A [`replace`](crate::Editor::replace) with a
+    /// - **A crossfade's base.** A [`replace`](crate::Editor::replace_or_swap) with a
     ///   fade keeps the key's param state, so both units hear one source;
     ///   the base is the incoming unit's control, ramped over one block like
     ///   any control move, not over the fade. Ramping it over the fade would

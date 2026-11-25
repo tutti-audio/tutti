@@ -24,7 +24,7 @@ const BLOCK: usize = 64;
 const SINK: NodeKey = EventRig::SINK;
 const INPUT: NodeKey = NodeKey(2);
 
-pub struct Listener {
+pub(crate) struct Listener {
     rig: EventRig,
     clock: BlockClock,
     origin: Instant,
@@ -35,13 +35,13 @@ pub struct Listener {
 
 impl Listener {
     /// A graph over `inlets`, whose clock reads the wall time now at frame 0.
-    pub fn over(inlets: &Arc<InputInlets>) -> Self {
+    pub(crate) fn over(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, false)
     }
 
     /// As [`over`](Self::over), with the engine's input node between the
     /// inlets and the log: a MIDI 1.0 message arrives translated.
-    pub fn over_input(inlets: &Arc<InputInlets>) -> Self {
+    pub(crate) fn over_input(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }
 
@@ -71,7 +71,7 @@ impl Listener {
 
     /// Adds the inlet of a port that opened and wires it to the entry's one
     /// event input.
-    pub fn attach(&mut self, inlet: EventInletNode) {
+    pub(crate) fn attach(&mut self, inlet: EventInletNode) {
         let key = NodeKey(100);
         self.rig.editor.insert(key, "inlet", inlet);
         self.rig
@@ -107,7 +107,7 @@ impl Listener {
     /// for [`SETTLE`] more, so that an event beyond `count` is heard too, and
     /// returns what arrived. The wait is for the events, not a span guessed to
     /// be long enough for a loaded machine.
-    pub fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
+    pub(crate) fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
         let end = Instant::now() + patience;
         while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {
             self.play();
@@ -120,7 +120,7 @@ impl Listener {
     /// drains the probes still in flight. The wait is for the connection to
     /// carry an event, not a span guessed to be long enough: nothing is
     /// buffered when it returns, and an event sent after it is the test's.
-    pub fn ready(&mut self, mut probe: impl FnMut(), patience: Duration) {
+    pub(crate) fn ready(&mut self, mut probe: impl FnMut(), patience: Duration) {
         let end = Instant::now() + patience;
         loop {
             probe();
@@ -136,7 +136,7 @@ impl Listener {
     }
 
     /// Plays for `span` of real time and returns what arrived.
-    pub fn listen(&mut self, span: Duration) -> Vec<Ump> {
+    pub(crate) fn listen(&mut self, span: Duration) -> Vec<Ump> {
         let end = Instant::now() + span;
         while Instant::now() < end {
             self.play();

@@ -18,11 +18,11 @@ use tutti_ump::Ump;
 use tutti_units::{SampleRate, Samples};
 
 /// The block length a [`Hand`] renders: 64 frames.
-pub const BLOCK: usize = 64;
+pub(crate) const BLOCK: usize = 64;
 
 /// A node (a [`PolySynth`] unless another is named) driven by hand. Derefs to the node, so its
 /// own methods (`volume`, `active_voice_count`, …) are reachable.
-pub struct Hand<N: Node = PolySynth<f32>> {
+pub(crate) struct Hand<N: Node = PolySynth<f32>> {
     direct: Direct<N>,
     input: InEvents,
     queued: Vec<Event>,
@@ -31,12 +31,12 @@ pub struct Hand<N: Node = PolySynth<f32>> {
 impl<N: Node> Hand<N> {
     /// `synth`, prepared at 48 kHz (the rate every test here builds it
     /// at) for [`BLOCK`]-frame blocks.
-    pub fn new(synth: N) -> Self {
+    pub(crate) fn new(synth: N) -> Self {
         Self::at(synth, SampleRate::SR_48K)
     }
 
     /// `synth`, prepared at `rate` for [`BLOCK`]-frame blocks.
-    pub fn at(synth: N, rate: SampleRate) -> Self {
+    pub(crate) fn at(synth: N, rate: SampleRate) -> Self {
         let direct = Direct::new(synth, rate, BLOCK);
         Self {
             input: Node::shape(&*direct.node)
@@ -49,14 +49,14 @@ impl<N: Node> Hand<N> {
 
     /// Play `events` in the next block, each on its first frame.
     /// Allocation-free up to `HAND_EVENT_CAPACITY` a block.
-    pub fn queue_midi(&mut self, events: &[Ump]) {
+    pub(crate) fn queue_midi(&mut self, events: &[Ump]) {
         for e in events {
             self.queued.push(Event::midi(Offset::ZERO, *e));
         }
     }
 
     /// Play `events` in the next block, each on its own `Offset`.
-    pub fn queue_midi_at(&mut self, events: &[UmpAt]) {
+    pub(crate) fn queue_midi_at(&mut self, events: &[UmpAt]) {
         for (at, ump) in events {
             self.queued.push(Event::midi(*at, *ump));
         }
@@ -65,7 +65,7 @@ impl<N: Node> Hand<N> {
     /// One block of `frames` (at most [`BLOCK`]): the queued events in it,
     /// stable-sorted by offset (an event past a shorter block lands on its
     /// last frame). `(left, right)`.
-    pub fn block(&mut self, frames: usize) -> (&[f32], &[f32]) {
+    pub(crate) fn block(&mut self, frames: usize) -> (&[f32], &[f32]) {
         self.direct.set_block_len(frames);
         let last = Offset::of(Samples::new(frames - 1), Samples::new(frames));
         for e in &mut self.queued {
@@ -92,7 +92,7 @@ impl<N: Node> Hand<N> {
     }
 
     /// One frame (a one-frame block): `[left, right]`.
-    pub fn tick(&mut self) -> [f32; 2] {
+    pub(crate) fn tick(&mut self) -> [f32; 2] {
         let (l, r) = self.block(1);
         [l[0], r[0]]
     }
@@ -111,4 +111,4 @@ impl<N: Node> DerefMut for Hand<N> {
     }
 }
 
-pub mod instruments;
+pub(crate) mod instruments;

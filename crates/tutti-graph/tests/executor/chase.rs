@@ -191,7 +191,7 @@ fn the_chased_state_is_heard_on_the_incoming_nodes_first_block() {
     let set = cc(7, 100);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &log));
     assert_eq!(block(&mut exec)[0], data(&set), "the old node's state");
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &log)),
         cut(),
@@ -212,7 +212,7 @@ fn a_node_that_does_not_chase_hands_nothing_over() {
     let log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = rig(Keeper::new(Some(cc(7, 100)), false, 8, &log));
     block(&mut exec);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &log)),
         cut(),
@@ -232,7 +232,7 @@ fn a_crossfade_chases_the_incoming_node_alone() {
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &old_log));
     block(&mut exec);
     let fade = Fade::new(Samples::new(4 * BLOCK)).law(FadeLaw::EqualPower);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &new_log)),
         fade,
@@ -275,7 +275,7 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     ed.commit().expect("commits");
     block(&mut exec);
     on.store(true, Ordering::Relaxed);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &log)),
         cut(),
@@ -312,7 +312,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
         .unwrap();
     ed.commit().expect("commits");
     block(&mut exec);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &log)),
         cut(),
@@ -362,7 +362,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             } else {
                 Fade::new(Samples::new(3 * BLOCK)).law(FadeLaw::EqualPower)
             };
-            ed.replace(
+            ed.replace_or_swap(
                 NodeKey(k),
                 Unforkable(Keeper::new(None, true, 8, &log)),
                 fade,
@@ -374,7 +374,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
         // The odd keys replace again behind their running fades: chased when
         // those fades end.
         for k in keys.clone().filter(|k| k % 2 == 1) {
-            ed.replace(
+            ed.replace_or_swap(
                 NodeKey(k),
                 Unforkable(Keeper::new(None, true, 8, &log)),
                 Fade::new(Samples::new(2 * BLOCK)).law(FadeLaw::EqualPower),
@@ -408,7 +408,7 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &a));
     block(&mut exec);
     let fade = || Fade::new(Samples::new(8 * BLOCK)).law(FadeLaw::EqualPower);
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &b)),
         fade(),
@@ -422,7 +422,7 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
         &[(0, 0, set.words()[0])],
         "the first swap chased B"
     );
-    ed.replace(
+    ed.replace_or_swap(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &c)),
         fade(),
@@ -481,14 +481,14 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
     ed.commit().expect("commits");
     block(&mut exec);
     let fade = || Fade::new(Samples::new(4 * BLOCK)).law(FadeLaw::EqualPower);
-    ed.replace(NodeKey(1), Unforkable(Mute), fade())
+    ed.replace_or_swap(NodeKey(1), Unforkable(Mute), fade())
         .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec);
     let before = exec.dropped_event_count();
     // Behind the running fade: what the first Mute wrote is held for the
     // second, which has no event input to take it.
-    ed.replace(NodeKey(1), Unforkable(Mute), fade())
+    ed.replace_or_swap(NodeKey(1), Unforkable(Mute), fade())
         .expect("fits");
     ed.commit().expect("commits");
     for _ in 0..8 {

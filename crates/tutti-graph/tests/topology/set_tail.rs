@@ -213,7 +213,7 @@ fn set_tail_does_not_cut_a_fade() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    ed.replace(NodeKey(2), Unforkable(gain(2.0)), fade)
+    ed.replace_or_swap(NodeKey(2), Unforkable(gain(2.0)), fade)
         .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec, 1.0);

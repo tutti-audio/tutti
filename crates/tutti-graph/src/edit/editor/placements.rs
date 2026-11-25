@@ -30,7 +30,7 @@ struct Placement<F: Float> {
     /// Where the key's forks come from, with the generation of the unit
     /// that handed it over. `None`: the key is not forkable.
     fork: Option<(u32, Box<dyn ForkSource<F>>)>,
-    /// The crossfade a `replace` asked for, carried by the next commit.
+    /// The crossfade a `replace_or_swap` asked for, carried by the next commit.
     fade: Option<Fade>,
     /// Whether `set_latency` changed the key since the last commit: a
     /// crossfade running or waiting there is cut by it.
