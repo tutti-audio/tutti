@@ -3,19 +3,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::compile::carry::Carry;
 use crate::compile::ids::{PlanUnitId, Table};
 use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, UnitIdx};
+use crate::compile::program::{BySlot, Program};
 use crate::compile::shapes::Units;
 use crate::compile::timing::Timing;
 use crate::model::spec::ValidGraph;
-use crate::node::Wired;
 use crate::node::shape::Shape;
+use crate::node::{Prepare, Wired};
 use crate::{Edge, InputPort, NodeKey, OutputPort, PortSource};
 
 /// The plan's units with their store indices, and the delta against the
 /// previous plan.
 ///
-/// Every unit has a distinct store index below `delta.store_len`; a key the
+/// Every unit has a distinct store index below `delta.store_len()`; a key the
 /// previous plan had keeps its index. After this pass nothing is keyed:
 /// the units are a table by [`PlanUnitId`].
 pub(super) struct Placed {
@@ -27,8 +29,9 @@ pub(super) struct Placed {
 
 /// Places every unit of `units` in the store, diffed against `prev`.
 ///
-/// Takes the graph, the checked units, the `timing` for each unit's arrival
-/// and the plan being replaced; returns the [`Placed`] units. A surviving key
+/// Takes the graph, the checked units, the `timing` for each unit's arrival,
+/// the `program` and the `prepare` it was built for, and the plan being
+/// replaced; returns the [`Placed`] units. A surviving key
 /// keeps its store index (a changed generation is a replace), a new key takes
 /// the lowest free index, and a key gone from the graph retires.
 ///
@@ -40,13 +43,17 @@ pub(super) fn place(
     graph: &ValidGraph,
     units: &Units,
     timing: &Timing,
+    program: &Program<BySlot>,
+    prepare: &Prepare,
     prev: Option<&Plan>,
 ) -> Placed {
     let topology = graph.topology();
     let prev_units: BTreeMap<NodeKey, PlanUnit> = prev
         .map(|p| p.units.iter().map(|u| (u.key, *u)).collect())
         .unwrap_or_default();
-    let mut delta = Delta::default();
+    let mut replace = Vec::new();
+    let mut insert = Vec::new();
+    let mut retire = Vec::new();
     let mut idx: Table<PlanUnitId, Option<UnitIdx>> = Table::filled(units.keys.len(), None);
     let mut taken: BTreeSet<UnitIdx> = BTreeSet::new();
     for (n, &key) in units.keys.iter_enumerated() {
@@ -55,7 +62,7 @@ pub(super) fn place(
             idx[n] = Some(old.idx);
             taken.insert(old.idx);
             if old.generation != generation {
-                delta.replace.push((
+                replace.push((
                     Placement {
                         key,
                         generation: old.generation,
@@ -80,7 +87,7 @@ pub(super) fn place(
         }
         taken.insert(next_free);
         idx[n] = Some(next_free);
-        delta.insert.push(Placement {
+        insert.push(Placement {
             key,
             generation: graph.generation(key),
             idx: next_free,
@@ -88,14 +95,16 @@ pub(super) fn place(
     }
     for (key, old) in &prev_units {
         if !topology.nodes.contains_key(key) {
-            delta.retire.push(Placement {
+            retire.push(Placement {
                 key: *key,
                 generation: old.generation,
                 idx: old.idx,
             });
         }
     }
-    delta.store_len = taken.last().map_or(0, |m| m.0 + 1);
+    let store_len = taken.last().map_or(0, |m| m.0 + 1);
+    let carry = Carry::between(prev, program, prepare, graph.main_output_bank());
+    let delta = Delta::new(insert, retire, replace, store_len, carry);
 
     let consumed = consumed_outputs(topology);
     let placed = units

@@ -53,6 +53,7 @@ use crate::{EdgeId, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, Samples, UnitAddr};
 
 use crate::compile::VerifyError;
+use crate::compile::carry::Carry;
 use crate::compile::coarsen::Tasks;
 use crate::compile::ids::{
     AudioDelayId, AudioFeedbackId, AudioSlotId, EventDelayId, EventFeedbackId, EventSlotId, Id,
@@ -538,6 +539,17 @@ pub struct PlanUnit {
     /// Its audio ports with a source or a consumer in this plan
     /// ([`Io::wired_inputs`](crate::Io::wired_inputs)).
     pub wired: Wired,
+}
+
+impl PlanUnit {
+    /// Where the unit goes in the store.
+    pub(crate) fn placement(&self) -> Placement {
+        Placement {
+            key: self.key,
+            generation: self.generation,
+            idx: self.idx,
+        }
+    }
 }
 
 /// One step of the plan.
@@ -1682,27 +1694,85 @@ pub struct Placement {
 /// attached on the control side (see `Editor::commit`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Delta {
+    insert: Vec<Placement>,
+    retire: Vec<Placement>,
+    replace: Vec<(Placement, Placement)>,
+    fades: Vec<(NodeKey, Fade)>,
+    cuts: Vec<Placement>,
+    store_len: u32,
+    /// What the plan takes over from the one it replaces.
+    pub(crate) carry: Carry,
+}
+
+impl Delta {
+    /// The delta `compile` found: the placements and what carries.
+    pub(super) fn new(
+        insert: Vec<Placement>,
+        retire: Vec<Placement>,
+        replace: Vec<(Placement, Placement)>,
+        store_len: u32,
+        carry: Carry,
+    ) -> Self {
+        Self {
+            insert,
+            retire,
+            replace,
+            fades: Vec::new(),
+            cuts: Vec::new(),
+            store_len,
+            carry,
+        }
+    }
+
     /// New keys.
-    pub insert: Vec<Placement>,
+    #[must_use]
+    pub fn insert(&self) -> &[Placement] {
+        &self.insert
+    }
+
     /// Keys that are gone. Their units come back to the control thread.
-    pub retire: Vec<Placement>,
+    #[must_use]
+    pub fn retire(&self) -> &[Placement] {
+        &self.retire
+    }
+
     /// Keys whose generation changed: `(old, new)`, same index.
-    pub replace: Vec<(Placement, Placement)>,
+    #[must_use]
+    pub fn replace(&self) -> &[(Placement, Placement)] {
+        &self.replace
+    }
+
     /// Replaces that crossfade rather than swap: each names a key in
-    /// `replace`, at most once. `compile` never fills this — a fade is an
-    /// edit, not part of the graph value — the editor attaches it (see
-    /// [`Editor::replace`](crate::Editor::replace)), and
-    /// [`Plan::verify_fades`] checks it.
-    pub fades: Vec<(NodeKey, Fade)>,
+    /// [`replace`](Self::replace), at most once. `compile` never fills this;
+    /// the editor attaches it (see [`Editor::replace`](crate::Editor::replace)),
+    /// and [`Plan::verify_fades`] checks it.
+    #[must_use]
+    pub fn fades(&self) -> &[(NodeKey, Fade)] {
+        &self.fades
+    }
+
     /// Kept units whose crossfade, running or waiting, is **cut**: every
     /// unit at the key but the newest retires. A hard edit that is not a new
-    /// generation — [`Editor::set_latency`](crate::Editor::set_latency) —
-    /// attaches it, since a fade's two units must share the latency the
-    /// plan compensates. Harmless on a key with no fade. `compile` never
-    /// fills it; [`Plan::verify_fades`] checks it.
-    pub cuts: Vec<Placement>,
+    /// generation ([`Editor::set_latency`](crate::Editor::set_latency))
+    /// attaches it. `compile` never fills it; [`Plan::verify_fades`] checks it.
+    #[must_use]
+    pub fn cuts(&self) -> &[Placement] {
+        &self.cuts
+    }
+
     /// The store length the new plan needs.
-    pub store_len: u32,
+    #[must_use]
+    pub fn store_len(&self) -> u32 {
+        self.store_len
+    }
+
+    /// Sets the [`fades`](Self::fades) and [`cuts`](Self::cuts) of a delta
+    /// `compile` found, replacing any set before. [`Editor::package`](crate::Editor::package)
+    /// verifies them.
+    pub fn attach(&mut self, fades: Vec<(NodeKey, Fade)>, cuts: Vec<Placement>) {
+        self.fades = fades;
+        self.cuts = cuts;
+    }
 }
 
 #[cfg(test)]

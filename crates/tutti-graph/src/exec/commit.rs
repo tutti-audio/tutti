@@ -18,7 +18,7 @@ use super::state::{Gone, State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
 use crate::compile::ids::Generation;
-use crate::compile::plan::{Delta, Plan, UnitIdx};
+use crate::compile::plan::{Delta, Placement, Plan, PlanUnit, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -166,6 +166,10 @@ pub(crate) struct Commit<F: Float = f32> {
     pub(super) suspend: Option<Prepare>,
     pub(super) plan: Option<Arc<Plan>>,
     pub(super) delta: Delta,
+    /// This is a re-prepare's resume: the executor's store is empty, every
+    /// unit of the plan comes back, and the held-key tables of those the plan
+    /// keeps go back to them.
+    pub(super) resumed: bool,
     pub(super) incoming: Vec<Incoming<F>>,
     /// Kept units whose declared latency changed, each with its rebuilt
     /// bypass line (`Editor::set_latency`).
@@ -223,23 +227,37 @@ impl<F: Float> Default for Opened<F> {
 impl<F: Float> Commit<F> {
     /// `params` builds each incoming unit's param state from its key and
     /// declared port count (the editor's range cells).
+    ///
+    /// A unit arrives for each key `delta` inserts or replaces. On a `resumed`
+    /// commit the store is empty, so every unit of the plan arrives, and
+    /// `delta` is the one `compile` found against the plan before the
+    /// re-prepare: its `retire` and `replace` only depart held keys and parked
+    /// tables. They never touch the store: no retire of an empty slot, no
+    /// chase, and no copy from a ring the suspend dropped.
     pub(crate) fn build(
         seq: u64,
         plan: Arc<Plan>,
         delta: Delta,
+        resumed: bool,
         mut units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         mut params: impl FnMut(NodeKey, usize, usize) -> ParamState<F>,
         mut modes: impl FnMut(NodeKey) -> ModeState<F>,
         mut wakes: impl FnMut(NodeKey) -> Wake,
         opened: Opened<F>,
     ) -> Box<Commit<F>> {
-        let wanted = delta
-            .insert
-            .iter()
-            .copied()
-            .chain(delta.replace.iter().map(|&(_, new)| new));
+        let wanted: Vec<Placement> = if resumed {
+            plan.units().iter().map(PlanUnit::placement).collect()
+        } else {
+            delta
+                .insert()
+                .iter()
+                .copied()
+                .chain(delta.replace().iter().map(|&(_, new)| new))
+                .collect()
+        };
         let max_block = plan.prepare.max_block().get();
         let incoming = wanted
+            .into_iter()
             .map(|p| {
                 let unit = units
                     .remove(&p.key)
@@ -247,7 +265,7 @@ impl<F: Float> Commit<F> {
                 // A fade's scratch holds the outgoing unit's outputs, which
                 // have the incoming unit's width (`verify_fades`).
                 let fade = delta
-                    .fades
+                    .fades()
                     .iter()
                     .find(|(k, f)| *k == p.key && !f.is_cut())
                     .map(|&(key, f)| {
@@ -287,7 +305,7 @@ impl<F: Float> Commit<F> {
         // A kept unit whose declared latency changed gets the line its new
         // latency needs, built here (`Editor::set_latency` cuts it).
         let relined = delta
-            .cuts
+            .cuts()
             .iter()
             .filter_map(|p| {
                 let shape = &plan.unit(p.key)?.shape;
@@ -304,12 +322,11 @@ impl<F: Float> Commit<F> {
             units.keys().collect::<Vec<_>>()
         );
         // Reserved here so applying moves retirees in without growing.
-        let retired = CappedVec::with_capacity(delta.retire.len() + delta.replace.len());
+        let delta_units = delta.retire().len() + delta.replace().len();
+        let retired = CappedVec::with_capacity(delta_units);
         // Every incoming unit's may come back unused, and every unit leaving
         // brings its own.
-        let spare_params =
-            CappedVec::with_capacity(incoming.len() + delta.retire.len() + delta.replace.len());
-        let delta_units = delta.retire.len() + delta.replace.len();
+        let spare_params = CappedVec::with_capacity(incoming.len() + delta_units);
         let spare_modes = CappedVec::with_capacity(incoming.len() + delta_units);
         let spare_lines = CappedVec::with_capacity(relined.len());
         Box::new(Self {
@@ -318,6 +335,7 @@ impl<F: Float> Commit<F> {
             suspend: None,
             plan: Some(plan),
             delta,
+            resumed,
             incoming,
             relined,
             retired,
@@ -344,6 +362,7 @@ impl<F: Float> Commit<F> {
             suspend: Some(prepare),
             plan: None,
             delta: Delta::default(),
+            resumed: false,
             incoming: Vec::new(),
             relined: Vec::new(),
             retired: CappedVec::with_capacity(units),

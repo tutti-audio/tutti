@@ -139,6 +139,13 @@ fn compile::main_output::fold_to_topology_with
 fn compile::main_output::fold_to_width
 fn compile::plan::Csr::row
 fn compile::plan::Csr::rows
+fn compile::plan::Delta::attach
+fn compile::plan::Delta::cuts
+fn compile::plan::Delta::fades
+fn compile::plan::Delta::insert
+fn compile::plan::Delta::replace
+fn compile::plan::Delta::retire
+fn compile::plan::Delta::store_len
 fn compile::plan::EventSlotCapacity::covering
 fn compile::plan::EventSlotCapacity::events
 fn compile::plan::EventSlotCapacity::holds

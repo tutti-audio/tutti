@@ -4,9 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
-use crate::compile::plan::{Delta, Placement, Plan};
+use crate::compile::plan::{Delta, Plan};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
@@ -219,37 +218,34 @@ impl<F: Float> Editor<F> {
         plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
-        delta.fades = delta
-            .replace
+        let fades = delta
+            .replace()
             .iter()
             .filter_map(|&(_, new)| self.placements.fade(new.key).map(|f| (new.key, f)))
             .collect();
         // The keys `set_latency` changed that this delta keeps: their
         // crossfades are cut (see `Delta::cuts`).
         let base = self.life.plan().map(|p| &**p);
-        delta.cuts = self
+        let cuts = self
             .placements
             .latency_cuts()
             .filter_map(|key| {
                 let now = plan.unit(key)?;
                 let was = base?.unit(key)?;
-                (was.generation == now.generation && was.idx == now.idx).then_some(Placement {
-                    key,
-                    generation: now.generation,
-                    idx: now.idx,
-                })
+                (was.generation == now.generation && was.idx == now.idx).then(|| now.placement())
             })
             .collect();
+        delta.attach(fades, cuts);
         debug_assert_eq!(
             plan.verify_fades(self.base().map(|p| &**p), &delta),
             Ok(()),
             "`replace` checked every fade it attached"
         );
         let needed: Vec<NodeKey> = delta
-            .insert
+            .insert()
             .iter()
             .map(|p| p.key)
-            .chain(delta.replace.iter().map(|(_, new)| new.key))
+            .chain(delta.replace().iter().map(|(_, new)| new.key))
             .collect();
         // Check before taking anything, so a failed commit leaves every
         // pending unit where it was.
@@ -263,7 +259,7 @@ impl<F: Float> Editor<F> {
             .collect();
         self.placements.clear_fades_and_cuts();
         let rewired = Rewired::between(self.base().map(|p| &**p), &plan);
-        self.send(plan, delta, units, &weights, None);
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = fading;
         self.sync_ranges();
         self.life
@@ -469,21 +465,21 @@ impl<F: Float> Editor<F> {
         // The plan was compiled elsewhere, from the spec as it stands (as a
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
-        self.send(plan, delta, units, &weights, None);
+        self.send(plan, delta, units, &weights, false);
         self.main_output.fading = None;
         Ok(())
     }
 
     /// Builds the commit of `plan` and sends it: the caller checked the
     /// link's room (`check_room`, `fade_room`), so the send cannot fail.
-    /// `resume` is a re-prepare's second half.
+    /// `resumed` is a re-prepare's second half.
     pub(super) fn send(
         &mut self,
         plan: Plan,
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         bus_weights: &BusLanes,
-        resume: Option<Resume>,
+        resumed: bool,
     ) {
         self.touch();
         let fades = starting(&delta);
@@ -513,6 +509,7 @@ impl<F: Float> Editor<F> {
             self.link.next_seq(),
             Arc::clone(&plan),
             delta,
+            resumed,
             units,
             params,
             modes,
@@ -533,8 +530,6 @@ impl<F: Float> Editor<F> {
             &mut commit,
             StageIn {
                 old: old.as_deref(),
-                carry: resume.is_none_or(|r| r.carry),
-                resumed: resume.is_some(),
                 mix_lane: &|key| {
                     mode_cells
                         .get(key)

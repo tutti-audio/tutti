@@ -856,6 +856,65 @@ fn a_key_held_across_a_reprepare_is_closed() {
     assert_eq!(r.words(2), vec![on60(), off60()]);
 }
 
+/// A source with a probe that says whether the executor still holds it.
+struct Probed {
+    src: Src,
+    _alive: Arc<()>,
+}
+
+impl Node for Probed {
+    fn shape(&self) -> Shape {
+        self.src.shape()
+    }
+    fn prepare(&mut self, prepare: &Prepare) {
+        self.src.prepare(prepare);
+    }
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        self.src.process(cx, io)
+    }
+    fn reset(&mut self) {
+        self.src.reset();
+    }
+}
+
+/// A unit removed before a re-prepare does not come back: the resume commit
+/// departs its held keys once (the sink is sent one off) and installs nothing
+/// at its index, so the executor lets go of the unit.
+#[test]
+fn a_source_removed_before_a_reprepare_is_closed_once_and_not_installed() {
+    let mut r = Rig::new(Mode::Serial, &[2]);
+    let alive = Arc::new(());
+    r.ed.insert(
+        NodeKey(1),
+        "src",
+        Unforkable(Probed {
+            src: Src {
+                mail: r.mail.clone(),
+            },
+            _alive: Arc::clone(&alive),
+        }),
+    );
+    r.wire(&[(1, 2)]);
+    r.send(on60());
+    r.block();
+    assert_eq!(Arc::strong_count(&alive), 2, "the executor runs the unit");
+    r.ed.remove(NodeKey(1));
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
+    ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
+    exec.apply_pending();
+    ed.collect();
+    exec.apply_pending();
+    ed.collect();
+    assert_eq!(
+        Arc::strong_count(&alive),
+        1,
+        "the unit was freed on the control side, not installed again"
+    );
+    r.block();
+    r.block();
+    assert_eq!(r.words(2), vec![on60(), off60()]);
+}
+
 /// A feedback edge that is cut: the event in flight is delivered, and the
 /// close follows it.
 #[test]

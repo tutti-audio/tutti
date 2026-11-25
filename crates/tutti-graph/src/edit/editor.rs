@@ -905,5 +905,5 @@ type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 /// Each is built into the commit and comes back once on the fade-return
 /// ring (`Commit::build`).
 fn starting(delta: &Delta) -> usize {
-    delta.fades.iter().filter(|(_, f)| !f.is_cut()).count()
+    delta.fades().iter().filter(|(_, f)| !f.is_cut()).count()
 }
