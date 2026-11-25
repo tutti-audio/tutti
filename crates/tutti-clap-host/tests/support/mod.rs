@@ -7,14 +7,14 @@
 
 #![allow(dead_code)]
 
-pub use tutti_fixtures::main_thread;
+pub(crate) use tutti_fixtures::main_thread;
 
-pub mod active;
-pub mod logs;
-pub mod raw;
+pub(crate) mod active;
+pub(crate) mod logs;
+pub(crate) mod raw;
 
 /// The MIDI events an output list holds, as the processor drains them.
-pub fn midi_events(
+pub(crate) fn midi_events(
     list: &mut tutti_clap_host::OutputEventList,
 ) -> Vec<tutti_plugin_types::WireMidi> {
     let mut out = tutti_plugin_types::RtMidiEvents::new();
@@ -23,7 +23,7 @@ pub fn midi_events(
 }
 
 /// The parameter changes an output list holds, grouped by parameter.
-pub fn param_changes(
+pub(crate) fn param_changes(
     list: &tutti_clap_host::OutputEventList,
 ) -> tutti_plugin_types::ParameterChanges {
     let mut out = tutti_plugin_types::ParameterChanges::reserved(16, 64);
@@ -32,7 +32,7 @@ pub fn param_changes(
 }
 
 /// The note expressions an output list holds, as the processor drains them.
-pub fn note_expressions(
+pub(crate) fn note_expressions(
     list: &tutti_clap_host::OutputEventList,
 ) -> Vec<tutti_clap_host::ClapNoteExpression> {
     let mut out = tutti_clap_host::RtNoteExpressions::new();

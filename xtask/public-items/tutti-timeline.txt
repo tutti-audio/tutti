@@ -38,9 +38,7 @@ fn clock::TransportClock::publish_position
 fn clock::TransportClock::sample_rate
 fn clock::TransportClock::set_sample_rate
 fn fsm::TransportFsm::complete_declick
-fn fsm::TransportFsm::declick_outcome
 fn fsm::TransportFsm::motion
-fn fsm::TransportFsm::new
 fn fsm::TransportFsm::transition
 fn handle::Transport::audio
 fn handle::Transport::motion

@@ -29,7 +29,7 @@ use tutti_units::{Normalized, ParamId};
 use crate::clap_probe::{ProbeEnv, load_probe};
 
 /// The plugin's id for extra parameter `i`.
-pub fn extra(i: usize) -> ParamId {
+pub(crate) fn extra(i: usize) -> ParamId {
     ParamId::new(EXTRA_PARAM_BASE + u32::try_from(i).expect("a few params"))
 }
 
@@ -38,7 +38,7 @@ pub fn extra(i: usize) -> ParamId {
 /// its knob on its first block and whenever the knob moves
 /// (`ForeignLaneControls::store`), and again on `LaneControls::resync`.
 /// Returned with its controls.
-pub fn knob(id: ParamId, value: f32) -> (ControlLaneNode<ForeignLane>, ForeignLaneControls) {
+pub(crate) fn knob(id: ParamId, value: f32) -> (ControlLaneNode<ForeignLane>, ForeignLaneControls) {
     ForeignLaneConfig::new(id, ControlProgram::default(), ParamRange::of(0.0, 1.0))
         .knob(Normalized::of(f64::from(value)))
         .build()
@@ -46,7 +46,7 @@ pub fn knob(id: ParamId, value: f32) -> (ControlLaneNode<ForeignLane>, ForeignLa
 
 /// The CLAP probe with `params` extra parameters, loaded through a real
 /// `plugin-server`. The caller holds `exclusive()`.
-pub fn load_param_probe(params: usize, sample_rate: f64) -> (PluginClient, PluginHandle) {
+pub(crate) fn load_param_probe(params: usize, sample_rate: f64) -> (PluginClient, PluginHandle) {
     let _env = ProbeEnv::new().extra_params(params);
     let probe = load_probe(sample_rate);
     (probe.client, probe.handle)
@@ -54,7 +54,7 @@ pub fn load_param_probe(params: usize, sample_rate: f64) -> (PluginClient, Plugi
 
 /// One [`knob`] lane per extra parameter `0..n`, each at `value(i)`, and their
 /// controls.
-pub fn knobs(
+pub(crate) fn knobs(
     n: usize,
     value: impl Fn(usize) -> f32,
 ) -> (Vec<ForeignLaneControls>, Vec<ControlLaneNode<ForeignLane>>) {
@@ -64,7 +64,11 @@ pub fn knobs(
 
 /// Polls `check` after each `step`, which renders and waits for the server's
 /// answer, until it holds or `timeout` passes. Returns whether it held.
-pub fn until(timeout: Duration, mut step: impl FnMut(), mut check: impl FnMut() -> bool) -> bool {
+pub(crate) fn until(
+    timeout: Duration,
+    mut step: impl FnMut(),
+    mut check: impl FnMut() -> bool,
+) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
         step();

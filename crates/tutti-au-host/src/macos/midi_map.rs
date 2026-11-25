@@ -616,7 +616,7 @@ fn transact(plan: &Plan, mut write: impl FnMut(&Op) -> bool) -> Written {
 /// [`AuError::OsStatus`](crate::error::AuError::OsStatus) with
 /// `kAudioUnitErr_InvalidProperty` (-10879) from a unit that does not implement
 /// the property.
-pub fn all(unit: &Unit) -> Result<Vec<AuMidiMapping>> {
+pub(crate) fn all(unit: &Unit) -> Result<Vec<AuMidiMapping>> {
     let bytes = unit.get_bytes::<AllParameterMidiMappings>(Scope::GLOBAL, Element::ZERO)?;
     Ok(decode_table(&bytes))
 }
@@ -664,7 +664,7 @@ fn write_table<P: Property>(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<(
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
 /// family. A `noErr` return does not prove the mapping is meaningful; verify
 /// with [`all`].
-pub fn add(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
+pub(crate) fn add(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
     if mappings.is_empty() {
         return Ok(());
     }
@@ -680,7 +680,7 @@ pub fn add(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
 /// family.
-pub fn remove(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
+pub(crate) fn remove(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
     if mappings.is_empty() {
         return Ok(());
     }
@@ -696,7 +696,7 @@ pub fn remove(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
 /// family. The empty-slice path additionally surfaces the [`all`] read's error.
-pub fn set_all(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
+pub(crate) fn set_all(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
     if mappings.is_empty() {
         let existing = all(unit)?;
         return remove(unit, &existing);
@@ -714,7 +714,7 @@ pub fn set_all(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
 /// family.
-pub fn arm_hot_map(unit: &Unit, mapping: &AuMidiMapping) -> Result<()> {
+pub(crate) fn arm_hot_map(unit: &Unit, mapping: &AuMidiMapping) -> Result<()> {
     let raw = mapping.to_raw();
     Ok(unit.set_bytes::<HotMapParameterMidiMapping>(
         Scope::GLOBAL,
@@ -728,7 +728,7 @@ pub fn arm_hot_map(unit: &Unit, mapping: &AuMidiMapping) -> Result<()> {
 /// `None` means nothing is armed or nothing has arrived yet, decided on
 /// `mStatus == 0`: zero is not a valid MIDI status byte, so it cannot collide
 /// with a genuine mapping. An AU that errors is also reported as `None`.
-pub fn hot_map(unit: &Unit) -> Option<AuMidiMapping> {
+pub(crate) fn hot_map(unit: &Unit) -> Option<AuMidiMapping> {
     let bytes = unit
         .get_bytes::<HotMapParameterMidiMapping>(Scope::GLOBAL, Element::ZERO)
         .ok()?;
@@ -738,7 +738,7 @@ pub fn hot_map(unit: &Unit) -> Option<AuMidiMapping> {
 }
 
 /// Whether the AU currently reports a completed hot map waiting to be read.
-pub fn hot_map_pending(unit: &Unit) -> bool {
+pub(crate) fn hot_map_pending(unit: &Unit) -> bool {
     hot_map(unit).is_some()
 }
 
@@ -747,7 +747,7 @@ pub fn hot_map_pending(unit: &Unit) -> bool {
 /// Asks `AudioUnitGetPropertyInfo` for property 41 rather than reading the
 /// table, because a unit that implements it answers `noErr` with size 0 when it
 /// has no mappings.
-pub fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
+pub(crate) fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
     unit.property_info::<AllParameterMidiMappings>(Scope::GLOBAL, Element::ZERO)
         .is_ok()
 }

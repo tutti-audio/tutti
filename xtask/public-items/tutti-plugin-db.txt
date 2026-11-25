@@ -10,7 +10,6 @@ enum loadable::BindError
 enum loadable::Hosting
 enum loadable::Resolved
 enum pedal::CrashRecoveryFailure
-enum probing::Probing
 enum scanner::FileFailureCause
 enum scanner::FilesError
 enum scanner::ForgetError
@@ -128,7 +127,6 @@ struct mtime::BeforeEpoch
 struct mtime::Mtime
 struct pedal::PedalError
 struct pedal::Recovered
-struct probe::ProbeState
 struct scanner::FileFailure
 struct scanner::ProbeFailure
 struct scanner::ProbeListing

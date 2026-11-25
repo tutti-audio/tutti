@@ -223,7 +223,7 @@ pub use gauge::{
     Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
     gauge, tally,
 };
-pub use handoff::{Handoff, Rt, handoff};
+pub use handoff::{Handback, Handoff, Rt, handoff};
 pub use job_gate::JobGate;
 pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};

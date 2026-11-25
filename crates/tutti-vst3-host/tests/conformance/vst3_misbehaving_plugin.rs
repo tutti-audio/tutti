@@ -56,20 +56,20 @@ static PROBE_ENV_LOCK: Mutex<()> = Mutex::new(());
 /// no compiler check on this correspondence, so a change on either side has to
 /// be mirrored by hand.
 mod misbehave {
-    pub const SET_ACTIVE_FAILS: &str = "1";
-    pub const LATENCY_LIES: &str = "2";
-    pub const EXTRA_BUSES: &str = "3";
-    pub const PROCESS_FAILS: &str = "4";
-    pub const PROCESS_WRITES_NOTHING: &str = "5";
-    pub const STATE_FAILS: &str = "6";
-    pub const SETUP_FAILS: &str = "7";
-    pub const STATE_NOT_IMPLEMENTED: &str = "8";
-    pub const INITIALIZE_FAILS: &str = "9";
-    pub const CONTROLLER_CONNECT_FAILS: &str = "10";
-    pub const ARRANGEMENT_REFUSED: &str = "11";
-    pub const LATENCY_FOLLOWS_RATE: &str = "12";
-    pub const SAMPLE64_AFTER_INIT: &str = "13";
-    pub const OBSERVED_WRITABLE_LATE: &str = "16";
+    pub(super) const SET_ACTIVE_FAILS: &str = "1";
+    pub(super) const LATENCY_LIES: &str = "2";
+    pub(super) const EXTRA_BUSES: &str = "3";
+    pub(super) const PROCESS_FAILS: &str = "4";
+    pub(super) const PROCESS_WRITES_NOTHING: &str = "5";
+    pub(super) const STATE_FAILS: &str = "6";
+    pub(super) const SETUP_FAILS: &str = "7";
+    pub(super) const STATE_NOT_IMPLEMENTED: &str = "8";
+    pub(super) const INITIALIZE_FAILS: &str = "9";
+    pub(super) const CONTROLLER_CONNECT_FAILS: &str = "10";
+    pub(super) const ARRANGEMENT_REFUSED: &str = "11";
+    pub(super) const LATENCY_FOLLOWS_RATE: &str = "12";
+    pub(super) const SAMPLE64_AFTER_INIT: &str = "13";
+    pub(super) const OBSERVED_WRITABLE_LATE: &str = "16";
 }
 
 /// Width the probe's main *input* keeps under `ARRANGEMENT_REFUSED`, having
