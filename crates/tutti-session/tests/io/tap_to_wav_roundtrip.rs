@@ -1,5 +1,5 @@
 //! The end-to-end this crate describes but never ran: **graph tap →
-//! `PumpLoop` → `FileOut` → read it back**.
+//! `PumpLoop` → `EncoderSink` → read it back**.
 //!
 //! Every piece had unit coverage and the whole had none. `tap_in.rs`'s tests
 //! push frames and pop them again; `wav_out.rs`'s write into a sink and read
@@ -27,7 +27,7 @@ use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Sink, Source};
-use tutti_codec::{FileOut, Format, Pcm, Spec};
+use tutti_codec::{EncoderOptions, EncoderSink, Format, Pcm, Spec};
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,
     Unforkable,
@@ -155,15 +155,17 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
         "the tap has two lanes; the sink below is built to match"
     );
 
-    let sink = FileOut::new(
-        &Spec::of_channels(
-            Format::Wav(Pcm::Float(FloatWidth::F32)),
-            ChannelSet::default_for(ChannelLayout::STEREO),
-            SampleRate::SR_48K,
-        ),
-        std::fs::File::create(&path).expect("file opens"),
-    )
-    .expect("sink opens");
+    let spec = Spec::of_channels(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelSet::default_for(ChannelLayout::STEREO),
+        SampleRate::SR_48K,
+    );
+    let sink = EncoderSink::new(
+        EncoderOptions::new(&spec)
+            .in_place()
+            .create(&path)
+            .expect("sink opens"),
+    );
 
     let mut pump =
         PumpLoop::new(src, sink, Samples::new(1024)).expect("stereo source into a stereo sink");
@@ -232,15 +234,17 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
 
     let (mut graph, reader) = graph_tap(2 * 512);
     let src = reader;
-    let sink = FileOut::new(
-        &Spec::of_channels(
-            Format::Wav(Pcm::Float(FloatWidth::F32)),
-            ChannelSet::default_for(ChannelLayout::STEREO),
-            SampleRate::SR_48K,
-        ),
-        std::fs::File::create(&path).expect("file opens"),
-    )
-    .expect("sink opens");
+    let spec = Spec::of_channels(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelSet::default_for(ChannelLayout::STEREO),
+        SampleRate::SR_48K,
+    );
+    let sink = EncoderSink::new(
+        EncoderOptions::new(&spec)
+            .in_place()
+            .create(&path)
+            .expect("sink opens"),
+    );
 
     let mut pump =
         PumpLoop::new(src, sink, Samples::new(1024)).expect("stereo source into a stereo sink");
@@ -284,15 +288,17 @@ fn a_gap_in_a_take_is_counted_and_the_file_closes_up_over_it() {
     let path = dir.path().join("gappy.wav");
     let (mut graph, reader) = graph_tap(512);
     let src = reader;
-    let sink = FileOut::new(
-        &Spec::of_channels(
-            Format::Wav(Pcm::Float(FloatWidth::F32)),
-            ChannelSet::default_for(ChannelLayout::STEREO),
-            SampleRate::SR_48K,
-        ),
-        std::fs::File::create(&path).expect("file opens"),
-    )
-    .expect("sink opens");
+    let spec = Spec::of_channels(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelSet::default_for(ChannelLayout::STEREO),
+        SampleRate::SR_48K,
+    );
+    let sink = EncoderSink::new(
+        EncoderOptions::new(&spec)
+            .in_place()
+            .create(&path)
+            .expect("sink opens"),
+    );
     let mut pump = PumpLoop::new(src, sink, Samples::new(1024)).expect("pairs");
 
     graph.render(2048);

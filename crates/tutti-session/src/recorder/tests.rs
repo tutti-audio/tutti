@@ -7,20 +7,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::Interleaved;
-use tutti_codec::{FileOut, Format, Pcm, Spec};
+use tutti_codec::{EncoderOptions, EncoderSink, Format, Pcm, Spec};
 use tutti_units::SampleRate;
 
-/// A WAV sink `channels` wide at 48 kHz.
-fn sink(path: &std::path::Path, channels: u16, pcm: Pcm) -> FileOut {
-    FileOut::new(
-        &Spec::of_channels(
-            Format::Wav(pcm),
-            ChannelSet::default_for(ChannelLayout::from(channels)),
-            SampleRate::SR_48K,
-        ),
-        std::fs::File::create(path).expect("file opens"),
-    )
-    .expect("sink opens")
+/// An in-place WAV sink `channels` wide at 48 kHz.
+fn sink(path: &std::path::Path, channels: u16, pcm: Pcm) -> EncoderSink {
+    sink_limited(path, channels, pcm, None)
+}
+
+/// As [`sink`], holding at most `limit` frames when given.
+fn sink_limited(
+    path: &std::path::Path,
+    channels: u16,
+    pcm: Pcm,
+    limit: Option<u64>,
+) -> EncoderSink {
+    let spec = Spec::of_channels(
+        Format::Wav(pcm),
+        ChannelSet::default_for(ChannelLayout::from(channels)),
+        SampleRate::SR_48K,
+    );
+    let options = EncoderOptions::new(&spec).in_place();
+    let options = match limit {
+        Some(frames) => options.limit_frames(frames),
+        None => options,
+    };
+    EncoderSink::new(options.create(path).expect("sink opens"))
 }
 
 /// A finite in-memory [`Source`]: hands out its frames in bounded chunks,
@@ -72,7 +84,7 @@ where
     total
 }
 
-/// Pumping a fake source into a real [`FileOut`] and finalizing yields a WAV
+/// Pumping a fake source into a real [`EncoderSink`] and finalizing yields a WAV
 /// whose frame count matches what was fed: the round trip a recorder runs,
 /// minus only the thread.
 #[test]
@@ -500,7 +512,7 @@ fn frames_buffered_at_the_fault_are_written_first() {
 fn a_failed_sink_fails_the_take() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("full.wav");
-    let wav = sink(&path, 2, Pcm::Float(FloatWidth::F32)).limit_frames(4);
+    let wav = sink_limited(&path, 2, Pcm::Float(FloatWidth::F32), Some(4));
     let mut pump_loop = PumpLoop::new(
         DyingMic {
             queued: frames(10),
@@ -516,11 +528,10 @@ fn a_failed_sink_fails_the_take() {
     assert!(
         matches!(
             &err,
-            FinalizeError::Sink(io)
-                if matches!(
-                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::EncodeError>()),
-                    Some(tutti_codec::EncodeError::WavTooLarge { limit_frames: 4 })
-                )
+            FinalizeError::Sink(tutti_codec::Kept::Unfinished {
+                source: tutti_codec::EncodeError::WavTooLarge { limit_frames: 4 },
+                ..
+            })
         ),
         "{err:?}"
     );

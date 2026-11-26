@@ -141,7 +141,7 @@ codec = ["dep:tutti-codec"]
 
 # The pump loop (`tutti-session`'s `record`, in `tutti::session`).
 # Implies `session` and `codec` with the WAV writer: the sink is `tutti-codec`'s
-# `FileOut`, which writes a `Format`, and a `Format` has a value only with an
+# `EncoderSink`, which writes a `Format`, and a `Format` has a value only with an
 # `encode-*` feature. Implied by `capture`, so it is rarely named directly.
 record = ["session", "tutti-session/record", "encode-wav"]
 

@@ -1028,50 +1028,38 @@ fn names(dir: &tempfile::TempDir) -> Vec<std::ffi::OsString> {
     names
 }
 
-/// **A take with `create_new` onto an existing file ends `Failed` with an
-/// `AlreadyExists` commit, the path keeps its old bytes, and the file kept
-/// beside it holds the take's frames.** The ramp the test pushed is frame `i`
-/// is `[i, -i]`, so the kept file's frames count up by one from its first.
+/// **A take onto an existing file is refused when it is armed, with `Exists`: the path keeps
+/// its old bytes and nothing is left beside it.**
 #[test]
-fn a_create_new_take_onto_an_existing_file_keeps_the_take_and_leaves_the_path() {
+fn a_take_onto_an_existing_file_is_refused_at_arming() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_to_end(TakeFile::wav(path.clone()).create_new());
-    let [SessionEvent::Take(TakeEvent::Failed { error, .. })] = events
-        .iter()
-        .filter(|e| matches!(e, SessionEvent::Take(_)))
-        .skip(1)
-        .collect::<Vec<_>>()
-        .as_slice()
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.step(256);
+    let Err(error) = rig
+        .session
+        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
     else {
-        panic!("not a lone Failed after Started: {events:?}");
+        panic!("the path exists");
     };
-    let TakeError::Commit(commit) = error else {
-        panic!("not a commit failure: {error:?}");
-    };
-    assert_eq!(commit.kind(), std::io::ErrorKind::AlreadyExists);
+    assert!(
+        matches!(&error, TakeError::Open(e)
+            if matches!(**e, tutti_codec::EncodeError::Exists { .. })),
+        "{error:?}"
+    );
     assert_eq!(std::fs::read(&path).unwrap(), b"old bytes");
-    let kept = commit.kept();
-    assert_eq!(kept.parent(), path.parent(), "kept beside the path");
-    let frames = read(kept);
-    assert!(!frames.is_empty(), "the kept file holds no frame");
-    let first = frames[0][0];
-    for (k, frame) in frames.iter().enumerate() {
-        let want = first + k as f32;
-        assert_eq!(*frame, [want, -want], "kept frame {k}");
-    }
-    assert_eq!(names(&dir).len(), 2, "the path and the kept file only");
+    assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);
 }
 
-/// **A take without `create_new` replaces what is at its path and leaves no
-/// temporary file beside it.**
+/// **A take with `replace` replaces what is at its path and leaves no temporary file beside
+/// it.**
 #[test]
-fn a_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
+fn a_replacing_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_to_end(TakeFile::wav(path.clone()));
+    let events = record_to_end(TakeFile::wav(path.clone()).replace());
     let done = recorded(&events);
     assert_eq!(read(&path).len(), done.frames().get());
     assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);

@@ -313,7 +313,7 @@ pub struct Bounce<N = NodeKey, M = NoMainOutput, F: Float = f32> {
     serial: bool,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
-    create_new: bool,
+    replace: bool,
     edit: Option<PrepareEdit<F>>,
 }
 
@@ -345,7 +345,7 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
             serial: false,
             on_event_loss: EventLossPolicy::default(),
             normalize: None,
-            create_new: false,
+            replace: false,
             edit: None,
         }
     }
@@ -403,7 +403,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             serial,
             on_event_loss,
             normalize,
-            create_new,
+            replace,
             edit,
         } = self;
         Bounce {
@@ -421,7 +421,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             serial,
             on_event_loss,
             normalize,
-            create_new,
+            replace,
             edit,
         }
     }
@@ -457,7 +457,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             serial,
             on_event_loss,
             normalize,
-            create_new,
+            replace,
             edit,
         } = self;
         let stems = stems
@@ -479,7 +479,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             serial,
             on_event_loss,
             normalize,
-            create_new,
+            replace,
             edit,
         })
     }
@@ -562,18 +562,19 @@ impl<N, M, F: Float> Bounce<N, M, F> {
         self
     }
 
-    /// Refuses a path that already exists, for every file the bounce writes
-    /// (the main output and each file stem), instead of replacing it.
+    /// Replaces a path that already exists, for every file the bounce writes (the main
+    /// output and each file stem). A bounce refuses an existing path by default, with
+    /// [`tutti_codec::EncodeError::Exists`] reported as [`BounceError::Export`] before
+    /// anything is rendered.
     ///
-    /// Each file is written beside its path and put in place when the bounce
-    /// finishes. A path that exists then fails the commit with
-    /// [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists`, reported as
-    /// [`BounceError::Export`] (or inside
-    /// [`NotCommitted`](tutti_export::RenderError::NotCommitted) when earlier files
-    /// had landed). What is at the path is left alone and the complete file is
-    /// kept at the error's `kept` path: the app owns it, to move or delete.
-    pub fn create_new(mut self) -> Self {
-        self.create_new = true;
+    /// Each file is written beside its path and put in place when the bounce finishes. A
+    /// path that appears by then fails the commit with
+    /// [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists` (inside
+    /// [`NotCommitted`](tutti_export::RenderError::NotCommitted) when earlier files had
+    /// landed). What is at the path is left alone and the complete file is kept at the
+    /// error's `kept` path: the app owns it, to move or delete.
+    pub fn replace(mut self) -> Self {
+        self.replace = true;
         self
     }
 
@@ -631,7 +632,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("serial", &self.serial)
             .field("on_event_loss", &self.on_event_loss)
             .field("normalize", &self.normalize)
-            .field("create_new", &self.create_new)
+            .field("replace", &self.replace)
             .field("edit", &self.edit.is_some())
             .finish()
     }
@@ -1130,9 +1131,9 @@ fn file_options(
     }
 }
 
-/// `file`, refusing an existing path when the bounce asks for it.
-fn refusing_existing(file: FileTarget, create_new: bool) -> FileTarget {
-    if create_new { file.create_new() } else { file }
+/// `file`, replacing an existing path when the bounce asks for it.
+fn replacing(file: FileTarget, replace: bool) -> FileTarget {
+    if replace { file.replace() } else { file }
 }
 
 impl From<tutti_export::RenderError> for BounceError {
@@ -1987,7 +1988,7 @@ where
             serial,
             on_event_loss,
             normalize,
-            create_new,
+            replace,
             edit,
         } = bounce;
         if self.graph.outputs() == 0 {
@@ -2019,7 +2020,7 @@ where
                     None => file,
                 };
                 let file = file_options(file, resample, normalize.map(NormalizeSpec::own));
-                refusing_existing(file, create_new).into()
+                replacing(file, replace).into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
@@ -2075,7 +2076,7 @@ where
                         )),
                     };
                     let file = file_options(FileTarget::new(path, format, layout), resample, gain);
-                    refusing_existing(file, create_new).into()
+                    replacing(file, replace).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
             };
