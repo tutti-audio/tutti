@@ -87,11 +87,15 @@ impl Resolved {
 
     /// The audio edges the wire is: one channel, one per channel of a main
     /// bus, none for a bus or an event wire.
-    pub(crate) fn edges<F: Float>(self, graph: &Graph<F>) -> Vec<ChannelEdge> {
+    pub(crate) fn edges<F: Float>(
+        self,
+        graph: &Graph<F>,
+        pending: Pending<'_>,
+    ) -> Vec<ChannelEdge> {
         match self {
             Self::Channel(o, i) => vec![ChannelEdge::new(o, i)],
             Self::Main(from, to) => graph
-                .main_wires(None, from, to)
+                .main_wires(pending, from, to)
                 .map(|wires| {
                     wires
                         .into_iter()
@@ -100,6 +104,21 @@ impl Resolved {
                 })
                 .unwrap_or_default(),
             Self::Bus(..) | Self::Event(..) => Vec::new(),
+        }
+    }
+
+    /// Whether the graph holds the wire: every edge of it, or for an event or
+    /// bus wire the edge itself.
+    pub(crate) fn held<F: Float>(self, graph: &Graph<F>) -> bool {
+        match self {
+            Self::Channel(..) | Self::Main(..) => {
+                let edges = self.edges(graph, None);
+                !edges.is_empty() && edges.into_iter().all(|edge| graph.holds_edge(edge))
+            }
+            Self::Event(from, to) => graph
+                .sources(to)
+                .is_ok_and(|sources| sources.contains(&from)),
+            Self::Bus(from, to) => graph.holds_bus_edge(from, to),
         }
     }
 

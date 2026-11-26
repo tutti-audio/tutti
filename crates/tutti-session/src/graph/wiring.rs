@@ -3,11 +3,12 @@
 
 use tutti_buffers::Float;
 use tutti_graph::{
-    BusError, BusOutputPort, Buses, EventInputPort, EventOutputPort, NodeKey, Shape, Shapes,
+    BusError, BusOutputPort, Buses, Edge as RawEdge, EdgeFade, EdgeId, EventInputPort,
+    EventOutputPort, NodeKey, PortSource, Shape, Shapes,
 };
 
 use crate::key::{BusEnd, BusInputPort, InEnd, MainSink};
-use crate::{ConnectError, InputPort, MainOutput, NoSuchNode, OutputPort};
+use crate::{ChannelEdge, ConnectError, InputPort, MainOutput, NoSuchNode, OutputPort};
 
 use super::Graph;
 
@@ -17,6 +18,42 @@ use super::Graph;
 pub(crate) type Pending<'a> = Option<&'a Shapes>;
 
 impl<F: Float> Graph<F> {
+    /// Every direct audio link between two nodes the graph holds and is not
+    /// fading out: its edge, its source node and its sink node.
+    pub(crate) fn direct_links(&self) -> Vec<(EdgeId, NodeKey, NodeKey)> {
+        let mut links = Vec::new();
+        for (at, froms) in &self.editor.spec().topology.edges {
+            for &from in froms {
+                let id = EdgeId::into_port(*at, from);
+                if let RawEdge::Direct(PortSource::Node(source)) = from
+                    && !self.fading_out(id)
+                {
+                    links.push((id, source.node(), at.node()));
+                }
+            }
+        }
+        links
+    }
+
+    /// Whether the graph holds `edge` and is not fading it out.
+    pub(crate) fn holds_edge(&self, edge: ChannelEdge) -> bool {
+        Self::edge_id(edge)
+            .is_some_and(|id| self.editor.spec().has_edge(id) && !self.fading_out(id))
+    }
+
+    /// Whether the graph holds the bus edge `from -> to` and is not fading it
+    /// out.
+    pub(crate) fn holds_bus_edge(&self, from: BusOutputPort, to: BusInputPort) -> bool {
+        let sink = match to.0 {
+            BusEnd::Node(bus) => Some(bus),
+            BusEnd::MainOutput => None,
+        };
+        self.editor
+            .spec()
+            .bus_fade(from, sink)
+            .is_some_and(|fade| fade != EdgeFade::Out)
+    }
+
     fn contains_in(&self, pending: Pending<'_>, node: NodeKey) -> bool {
         pending.is_some_and(|p| p.contains_key(&node)) || self.contains(node)
     }

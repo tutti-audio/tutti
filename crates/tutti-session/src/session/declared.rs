@@ -95,6 +95,13 @@ pub enum PatchError<K> {
     /// A wire names a key that no part of the patch declares.
     #[error("{0:?} is mentioned by a wire but not declared in the patch")]
     Undeclared(K),
+    /// A wire closes a cycle of direct audio edges with the edges the graph
+    /// holds and the wires declared before it. A feedback edge is not one.
+    #[error("the wire {ends:?} closes a cycle of direct edges")]
+    Cycle {
+        /// The wire.
+        ends: WireEnds<K>,
+    },
     /// A wire the graph would refuse: a port or a node the declared shape does
     /// not have, a width or a fold that does not fit.
     #[error("the wire {ends:?} is refused: {cause}")]
@@ -133,14 +140,13 @@ pub struct Patched<K> {
     pub dormant: Vec<(WireEnds<K>, ConnectError)>,
 }
 
-/// One declaration with what the plan decided: its fate, the key its node has
-/// (a new key for a new node), and the node built for it once.
+/// One declaration with what the plan decided: its fate, and the key its node
+/// has (a new key for a new node).
 struct PlannedNode<K, F: Float> {
     key: K,
     declaration: Declaration<Graph<F>>,
     fate: Fate,
     id: NodeKey,
-    built: Option<Built>,
 }
 
 /// A patch's declarations planned: the shapes of the nodes it builds, and the
@@ -149,6 +155,22 @@ struct Planned<K, F: Float> {
     nodes: Vec<PlannedNode<K, F>>,
     shapes: Shapes,
     at: BTreeMap<K, NodeKey>,
+}
+
+/// Whether `goal` is reachable from `start` over `after`, `start` itself
+/// included.
+fn reaches(after: &BTreeMap<NodeKey, BTreeSet<NodeKey>>, start: NodeKey, goal: NodeKey) -> bool {
+    let mut seen = BTreeSet::new();
+    let mut open = vec![start];
+    while let Some(node) = open.pop() {
+        if node == goal {
+            return true;
+        }
+        if seen.insert(node) {
+            open.extend(after.get(&node).into_iter().flatten());
+        }
+    }
+    false
 }
 
 /// What a patch declared of one key, and the node it made.
@@ -173,17 +195,17 @@ impl<K, F: Float> Default for Kept<K, F> {
     }
 }
 
-/// What a declaration does to the node under its key.
-#[derive(Clone, Copy, PartialEq)]
+/// What a declaration does to the node under its key, with the node it builds
+/// (built once, in the plan).
 enum Fate {
     /// The key is new.
-    Add,
+    Add(Built),
     /// The node is gone or the config is of another type: a new node.
-    Readd,
+    Readd(Built),
     /// The structure is the same: the differing values are written.
     Values,
     /// Another structure: the node is swapped.
-    Swap,
+    Swap(Built),
 }
 
 impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
@@ -245,7 +267,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// A node or an edge that [`Graph::add`](crate::Graph::add) or
     /// [`Graph::connect`](crate::Graph::connect) made is not declared: a patch
-    /// never removes or changes it.
+    /// never removes or changes it. Declaring a wire that `connect` already made
+    /// adopts that edge: it is kept once, and a later patch that drops the wire
+    /// disconnects it. A wire declared and removed by hand is made again.
     ///
     /// # Errors
     ///
@@ -287,7 +311,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let host = self.host_values();
         let mut kept = std::mem::take(&mut self.declared);
         let planned = self.plan(&kept, patch.nodes, &host);
-        let checked = self.check_wires(&planned, &wires);
+        let checked = self
+            .check_wires(&planned, &wires)
+            .and_then(|()| self.check_acyclic(&planned, &wires, &kept));
         if let Err(refused) = checked {
             self.declared = kept;
             return Err(refused);
@@ -316,10 +342,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let mut writes = Vec::new();
         let mut fresh = BTreeSet::new();
         for planned in planned.nodes {
-            if matches!(planned.fate, Fate::Add | Fate::Readd) {
+            if matches!(planned.fate, Fate::Add(_) | Fate::Readd(_)) {
                 fresh.insert(planned.key.clone());
             }
-            self.declare(&mut kept, planned, &host, &mut patched, &mut writes);
+            self.declare(&mut kept, planned, &mut patched, &mut writes);
         }
         let old = std::mem::take(&mut kept.wires);
         kept.wires = self.wire(&kept, old, wires, &fresh, &mut patched, &mut writes);
@@ -364,19 +390,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             at: BTreeMap::new(),
         };
         for (key, declaration) in nodes {
-            let fate = self.fate(kept, &key, &declaration);
-            let (id, built) = match fate {
-                Fate::Add | Fate::Readd => {
-                    let built = declaration.config.build(host);
-                    (NodeKey::fresh(), Some(built))
-                }
-                Fate::Swap => {
-                    let built = declaration.config.build(host);
-                    (kept.nodes[&key].node, Some(built))
-                }
-                Fate::Values => (kept.nodes[&key].node, None),
+            let fate = self.fate(kept, &key, &declaration, host);
+            let id = match &fate {
+                Fate::Add(_) | Fate::Readd(_) => NodeKey::fresh(),
+                Fate::Values | Fate::Swap(_) => kept.nodes[&key].node,
             };
-            if let Some(built) = &built {
+            if let Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built) = &fate {
                 planned.shapes.insert(id, built.shape);
             }
             planned.at.insert(key.clone(), id);
@@ -385,7 +404,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 declaration,
                 fate,
                 id,
-                built,
             });
         }
         planned
@@ -396,18 +414,19 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         kept: &Kept<K, C::Float>,
         key: &K,
         declaration: &Declaration<Graph<C::Float>>,
+        host: &HostValues,
     ) -> Fate {
-        let Some(old) = kept.nodes.get(key) else {
-            return Fate::Add;
-        };
         let new = &declaration.config;
+        let Some(old) = kept.nodes.get(key) else {
+            return Fate::Add(new.build(host));
+        };
         let same_type = old.declaration.config.config_type() == new.config_type();
         if !self.graph.contains(old.node) || !same_type {
-            Fate::Readd
+            Fate::Readd(new.build(host))
         } else if old.declaration.config.same_structure(&**new) {
             Fate::Values
         } else {
-            Fate::Swap
+            Fate::Swap(new.build(host))
         }
     }
 
@@ -438,6 +457,52 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 ends: bus_ends[at].clone(),
                 cause: ConnectError::Bus(cause),
             });
+        }
+        Ok(())
+    }
+
+    /// Refuses a wire that closes a cycle of direct audio edges: the graph
+    /// holds, less the edges this patch takes out, plus the declared wires. A
+    /// feedback edge is the author's own and is not one.
+    fn check_acyclic(
+        &self,
+        planned: &Planned<K, C::Float>,
+        wires: &BTreeMap<WireEnds<K>, KeptWire>,
+        kept: &Kept<K, C::Float>,
+    ) -> Result<(), PatchError<K>> {
+        let mut taken = Vec::new();
+        for ends in kept.wires.keys().filter(|ends| !wires.contains_key(*ends)) {
+            let held = [Some(ends.source()), ends.sink()]
+                .into_iter()
+                .flatten()
+                .all(|key| kept.nodes.contains_key(key));
+            if held {
+                let resolved = Resolved::of(ends, |key| kept.nodes[key].node);
+                taken.extend(
+                    resolved
+                        .edges(&self.graph, None)
+                        .into_iter()
+                        .filter_map(Graph::<C::Float>::edge_id),
+                );
+            }
+        }
+        let mut after: BTreeMap<NodeKey, BTreeSet<NodeKey>> = BTreeMap::new();
+        for (id, from, to) in self.graph.direct_links() {
+            if !taken.contains(&id) {
+                after.entry(from).or_default().insert(to);
+            }
+        }
+        for ends in wires.keys() {
+            let resolved = Resolved::of(ends, |key| planned.at[key]);
+            for edge in resolved.edges(&self.graph, Some(&planned.shapes)) {
+                let (from, Some(to)) = (edge.source().node(), edge.sink().node()) else {
+                    continue;
+                };
+                if reaches(&after, to, from) {
+                    return Err(PatchError::Cycle { ends: ends.clone() });
+                }
+                after.entry(from).or_default().insert(to);
+            }
         }
         Ok(())
     }
@@ -486,7 +551,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 .flatten()
                 .any(|key| fresh.contains(key));
             match old.get(&ends) {
-                Some(before) if !touches_fresh => {
+                Some(before) if !touches_fresh && resolved.held(&self.graph) => {
                     self.regain(resolved, before.initial, options.initial, writes);
                 }
                 _ => {
@@ -515,7 +580,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         if before == now {
             return;
         }
-        for edge in wire.edges(&self.graph) {
+        for edge in wire.edges(&self.graph, None) {
             match (before, now) {
                 (None, Some(gain)) => {
                     self.graph
@@ -540,7 +605,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         &mut self,
         kept: &mut Kept<K, C::Float>,
         planned: PlannedNode<K, C::Float>,
-        _host: &HostValues,
         patched: &mut Patched<K>,
         writes: &mut Vec<AnyAssign>,
     ) {
@@ -549,11 +613,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             declaration,
             fate,
             id,
-            built,
         } = planned;
         let new = &declaration.config;
-        match (fate, built) {
-            (Fate::Add, Some(built)) => {
+        match fate {
+            Fate::Add(built) => {
                 new.add(&mut self.graph, id, built);
                 kept.nodes.insert(
                     key,
@@ -563,7 +626,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     },
                 );
             }
-            (Fate::Readd, Some(built)) => {
+            Fate::Readd(built) => {
                 // Taking out a node that is gone finds nothing.
                 if let Some(old) = kept.nodes.get(&key) {
                     self.take_out(old);
@@ -578,7 +641,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     },
                 );
             }
-            (Fate::Swap, Some(built)) => {
+            Fate::Swap(built) => {
                 let old = kept.nodes.get_mut(&key).expect("a swap has its old node");
                 // A replace seeds each param from the outgoing node only where
                 // both declared one initial (`ValueTable::address`), so an
@@ -591,7 +654,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     Err(refused) => patched.unconverged.push((key, refused)),
                 }
             }
-            (Fate::Values, _) => {
+            Fate::Values => {
                 let old = kept.nodes.get_mut(&key).expect("a kept key has its node");
                 declared_writes(
                     &self.graph,
@@ -602,9 +665,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     writes,
                 );
                 old.declaration = declaration;
-            }
-            (Fate::Add | Fate::Readd | Fate::Swap, None) => {
-                unreachable!("a node that changes is built in the plan")
             }
         }
     }

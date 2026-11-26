@@ -398,3 +398,63 @@ fn an_event_wire_is_connected() {
     let source = tutti_graph::EventOutputPort::new(src_node(&s), 0);
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [source]);
 }
+
+/// **A declared wire removed by hand is made again by the next patch**, with
+/// its initial gain.
+#[test]
+fn a_wire_removed_by_hand_is_made_again_with_its_gain() {
+    let mut s = session();
+    let patch = || {
+        (
+            NodeDecl::new("src", src()),
+            NodeDecl::new("pass", pass()),
+            Mention::new("src")
+                .connect(Mention::new("pass"))
+                .unfaded()
+                .initial_gain(amp(0.5)),
+        )
+    };
+    s.patch(patch()).unwrap();
+    let (out, input) = (
+        OutputPort::new(src_node(&s), 0),
+        InputPort::new(pass_node(&s), 0),
+    );
+    s.graph().disconnect(out, input).unwrap().unfaded();
+    assert!(fed(&s).is_empty());
+
+    let patched = s.patch(patch()).unwrap();
+
+    assert!(patched.dormant.is_empty());
+    assert_eq!(fed(&s), [out]);
+    let target = s.graph_ref().gain_target(out, input).unwrap();
+    assert_eq!(s.get(target).unwrap(), amp(0.5));
+}
+
+/// **A wire that closes a cycle of direct edges is refused**, naming it, with
+/// nothing changed; a patch that turns a wire around is not a cycle.
+#[test]
+fn a_wire_closing_a_cycle_is_refused_with_nothing_changed() {
+    let mut s = session();
+    let nodes = || {
+        (
+            NodeDecl::new("src", src()),
+            NodeDecl::new("pass", pass()),
+            NodeDecl::new("other", pass()),
+        )
+    };
+    let forward = || Mention::new("pass").connect(Mention::new("other"));
+    let back = || Mention::new("other").connect(Mention::new("pass"));
+
+    let empty = s.graph_ref().node_count();
+    let refused = s.patch((nodes(), forward(), back()));
+    assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
+    assert_eq!(s.graph_ref().node_count(), empty);
+
+    s.patch((nodes(), forward())).unwrap();
+    let nodes_now = s.graph_ref().node_count();
+    let refused = s.patch((nodes(), forward(), back()));
+    assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
+    assert_eq!(s.graph_ref().node_count(), nodes_now);
+
+    s.patch((nodes(), back())).unwrap();
+}
