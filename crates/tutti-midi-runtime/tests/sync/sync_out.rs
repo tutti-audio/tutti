@@ -43,8 +43,9 @@ struct Rig {
     exec: Executor,
     seen: Seen,
     controls: std::sync::Arc<SyncOutControls>,
-    /// The meter the host lends each block (`Cx::meter`): 4/4 unless a test sets it.
-    meter: MeterMap,
+    /// The meter the host lends each block (`Cx::meter`): 4/4 unless a test
+    /// sets it, `None` for a host that lends none.
+    meter: Option<MeterMap>,
     /// The first frame of the next block.
     frame: u64,
 }
@@ -69,7 +70,7 @@ impl Rig {
             exec: rig.exec,
             seen: rig.seen,
             controls,
-            meter: MeterMap::default(),
+            meter: Some(MeterMap::default()),
             frame: 0,
         }
     }
@@ -91,7 +92,7 @@ impl Rig {
         self.seen.lock().unwrap().clear();
         self.exec.apply_pending();
         self.exec
-            .render_applied(len, &start, &cuts, &[], &mut [], Some(&self.meter), None);
+            .render_applied(len, &start, &cuts, &[], &mut [], self.meter.as_ref(), None);
         self.frame += len as u64;
         heard(&self.seen)
     }
@@ -461,7 +462,7 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
             ..SyncMessages::OFF
         },
     );
-    rig.meter = in_meter(3, 4);
+    rig.meter = Some(in_meter(3, 4));
     let flexes = |events: &[(u64, Ump)]| -> Vec<(u64, tutti_ump::Flex)> {
         events
             .iter()
@@ -496,7 +497,7 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
 
     // The meter is read from each block's `Cx`: lent as 6/8, the next start
     // states it on its frame.
-    rig.meter = in_meter(6, 8);
+    rig.meter = Some(in_meter(6, 8));
     rig.block(BLOCK, stopped(beat(0.0, 2 * BLOCK)), &[]);
     let restart_frame = rig.frame;
     let restarted = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
@@ -525,7 +526,7 @@ fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
                 ..SyncMessages::OFF
             },
         );
-        rig.meter = in_meter(6, 8);
+        rig.meter = Some(in_meter(6, 8));
         rig.block(BLOCK, rolling(Beat::new(0.0)), &[])
     };
     assert!(sent(false).is_empty());
@@ -738,6 +739,29 @@ fn a_locate_or_a_wrap_with_mtc_and_no_clock_sends_no_song_position_and_no_stop()
         ]
     );
     assert!(not_time_code(&wrap).is_empty(), "{wrap:?}");
+}
+
+/// **A host that lends no meter gets no Flex Data**: Flex on, a start with
+/// no `Cx::meter` sends neither Set Tempo nor Set Time Signature (with one
+/// lent, `flex_states_the_tempo_and_the_nodes_meter_once` sends both).
+#[test]
+fn a_host_that_lends_no_meter_gets_no_flex_data() {
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            flex: true,
+            ..SyncMessages::OFF
+        },
+    );
+    rig.meter = None;
+    let flex_count = |events: &[(u64, Ump)]| {
+        events
+            .iter()
+            .filter(|(_, ump)| matches!(ump.decode(), Ok(Message::Flex(..))))
+            .count()
+    };
+    let started = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
+    assert_eq!(flex_count(&started), 0, "{started:?}");
 }
 
 /// **A forked sync node sends what the live one was sending, under the meter
