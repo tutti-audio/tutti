@@ -240,15 +240,6 @@ fn channels_of<F: Float>(output: &Output<F>, main_output: &ChannelSet) -> Channe
     })
 }
 
-/// Whether the channels were stated: they are the default layout for their width, or not.
-fn placement_of(channels: &ChannelSet) -> tutti_buffers::Placement {
-    if *channels == ChannelSet::default_for(channels.width()) {
-        tutti_buffers::Placement::Default
-    } else {
-        tutti_buffers::Placement::Stated
-    }
-}
-
 /// Opens every output: its fold, its file (refused before it is touched when
 /// the format cannot hold the render) or its planes.
 fn open_lanes<F: FftFloat>(
@@ -264,7 +255,12 @@ fn open_lanes<F: FftFloat>(
         let set = channels_of(&output, main_output);
         let placement = match output.target() {
             Target::Buffers(b) => b.width.placement(),
-            Target::File(_) => placement_of(&set),
+            // Stated when the encoding names its channels, whatever they are: the default
+            // layout is what a file that names none is taken to have.
+            Target::File(f) if f.encoding().channel_set().is_some() => {
+                tutti_buffers::Placement::Stated
+            }
+            Target::File(_) => tutti_buffers::Placement::Default,
         };
         let (feed, target) = output.into_parts();
         let layout = set.width();

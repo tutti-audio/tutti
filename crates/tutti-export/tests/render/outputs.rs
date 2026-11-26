@@ -17,7 +17,7 @@ use symphonia::core::meta::MetadataOptions;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
-use tutti_buffers::{ChannelTopology, Speaker};
+use tutti_buffers::{Bed, ChannelTopology};
 use tutti_codec::Encoding;
 use tutti_codec::IntPcm;
 use tutti_codec::ToFile;
@@ -889,8 +889,9 @@ fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
     )
 }
 
-/// A file with the engine's order for its width reports the default placement, and one whose
-/// speakers are placed otherwise reports it was stated.
+/// A file whose encoding names no channels takes the feed's and its `Written` says the
+/// placement is the default; one whose encoding names its channels, the default 5.1 too, says it
+/// was stated.
 #[test]
 fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
     let dir = tempfile::tempdir().unwrap();
@@ -913,28 +914,17 @@ fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
             .expect("a file")
             .placement
     };
-    assert_eq!(
-        placement(file_of(&dir.path().join("a.wav"), 6)),
-        tutti_buffers::Placement::Default
+    let unstated = FileTarget::new(
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
+        ToFile::new(dir.path().join("a.wav")),
     );
-    assert_eq!(
-        placement(FileTarget::new(
-            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))).channels(ChannelSet::from(
-                // The 5.1 speakers with the front pair swapped: no bed.
-                ChannelTopology::new([
-                    Speaker::FrontRight,
-                    Speaker::FrontLeft,
-                    Speaker::FrontCenter,
-                    Speaker::LowFrequency,
-                    Speaker::SideLeft,
-                    Speaker::SideRight,
-                ])
-                .unwrap(),
-            )),
-            ToFile::new(dir.path().join("b.wav")).replace(),
-        )),
-        tutti_buffers::Placement::Stated
+    assert_eq!(placement(unstated), tutti_buffers::Placement::Default);
+    let stated = FileTarget::new(
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+            .channels(ChannelSet::from(Bed::Surround51.topology())),
+        ToFile::new(dir.path().join("b.wav")),
     );
+    assert_eq!(placement(stated), tutti_buffers::Placement::Stated);
 }
 
 /// A Lufs output of a width with no default layout is refused up front with
