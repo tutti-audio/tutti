@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_units::{SettingKind, UnitAddr};
 
+use crate::exec::published::PublishedKind;
+
 use crate::node::IntoNode;
 
 /// A node's config: plain data from which the node is built, and by whose
@@ -22,8 +24,9 @@ use crate::node::IntoNode;
 /// what the node is (the `required` and `options` of the cells form, each
 /// `PartialEq`) is structure: a change builds a new node. A setting with no
 /// [`SettingKind`] has no address, so nothing can write a changed initial to a
-/// running node: it is structure too. A declared param and a kinded setting are
-/// values: a change is a write to the running node, which keeps its state.
+/// running node: it is structure too. A declared param, a kinded setting and a
+/// published value are values: a change is a write to the running node, which
+/// keeps its state.
 pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
     /// What the config makes.
     type Node: IntoNode<F> + Send + 'static;
@@ -40,13 +43,14 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
     /// differing [`initials`](Self::initials) are written to it.
     fn same_structure(&self, other: &Self) -> bool;
 
-    /// The initial value of each declared param and kinded setting the config
-    /// gives. Read from the config's fields, never by building the node.
+    /// The initial value of each declared param, kinded setting and published
+    /// value the config gives. Read from the config's fields, never by building the node.
     fn initials(&self) -> Initials;
 }
 
 /// The initial values a config gives, by address: each declared param's raw in its
-/// unit, and each setting that has a [`SettingKind`] as its encoded word.
+/// unit, each setting that has a [`SettingKind`] as its encoded word, and each
+/// published value by its [`PublishedKind`].
 ///
 /// A param left out has no value (an `Option` param given none). A setting with
 /// no kind has no address, so it is not listed: it is structure, compared by
@@ -59,6 +63,60 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
 pub struct Initials {
     params: Vec<(UnitAddr, f64)>,
     settings: Vec<(SettingKind, u64)>,
+    published: Vec<PublishedInitial>,
+}
+
+/// One published value a config gives, erased: its kind and the value, which
+/// a session writes to the running node's published target of that kind.
+///
+/// Two are equal when they are of one kind and their values are equal by the
+/// value's own `PartialEq`, which is what a published cell compares by
+/// ([`Published::replace`](crate::Published::replace)); a value that is an
+/// `Arc` of a large resource is cheap to compare when its `PartialEq` starts
+/// at identity.
+#[derive(Clone)]
+pub struct PublishedInitial {
+    kind: TypeId,
+    kind_name: &'static str,
+    value: Arc<dyn Any + Send + Sync>,
+    same: fn(&dyn Any, &dyn Any) -> bool,
+}
+
+impl PublishedInitial {
+    fn new<K: PublishedKind>(value: K::Value) -> Self {
+        Self {
+            kind: TypeId::of::<K>(),
+            kind_name: type_name::<K>(),
+            value: Arc::new(value),
+            same: |a, b| match (a.downcast_ref::<K::Value>(), b.downcast_ref::<K::Value>()) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
+        }
+    }
+
+    /// The value, when this is of the kind `K`.
+    #[must_use]
+    pub fn value<K: PublishedKind>(&self) -> Option<K::Value> {
+        if self.kind != TypeId::of::<K>() {
+            return None;
+        }
+        self.value.downcast_ref::<K::Value>().cloned()
+    }
+}
+
+impl PartialEq for PublishedInitial {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && (self.same)(&*self.value, &*other.value)
+    }
+}
+
+impl fmt::Debug for PublishedInitial {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublishedInitial")
+            .field("kind", &self.kind_name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Initials {
@@ -82,6 +140,19 @@ impl Initials {
     pub fn setting(mut self, kind: SettingKind, word: u64) -> Self {
         self.settings.push((kind, word));
         self
+    }
+
+    /// Also `value` as the initial value of the published value of the kind `K`.
+    #[must_use]
+    pub fn published<K: PublishedKind>(mut self, value: K::Value) -> Self {
+        self.published.push(PublishedInitial::new::<K>(value));
+        self
+    }
+
+    /// The published values' initials, in declaration order.
+    #[must_use]
+    pub fn published_values(&self) -> &[PublishedInitial] {
+        &self.published
     }
 
     /// The params' initial raws, in declaration order.

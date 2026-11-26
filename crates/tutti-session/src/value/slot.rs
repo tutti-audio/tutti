@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey, SettingCell};
+use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey, PublishedKind, SettingCell};
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
@@ -937,33 +937,72 @@ fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
 /// kind is one the session knows (each kind here has the value type its
 /// session target holds): a node that publishes another kind has nothing that
 /// can address its value, and is left out.
+pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
+    #[cfg_attr(
+        not(any(feature = "midi", feature = "sampler")),
+        allow(dead_code, reason = "no kind is addressed without a feature")
+    )]
+    struct Cell<'a>(NodeKey, &'a ErasedPublished);
+    impl KindVisitor for Cell<'_> {
+        type Out = (SlotId, Erased);
+
+        fn kind<K: PublishedKind>(&mut self, id: fn(NodeKey) -> SlotId) -> Option<Self::Out> {
+            let cell = self.1.cell::<K>()?;
+            #[cfg(any(feature = "midi", feature = "sampler"))]
+            return Some((id(self.0), node_cell(cell)));
+            #[cfg(not(any(feature = "midi", feature = "sampler")))]
+            {
+                let _ = (cell, id);
+                None
+            }
+        }
+    }
+    visit_kinds(&mut Cell(node, entry))
+}
+
+/// What is asked of each published kind the session addresses.
 #[cfg_attr(
     not(any(feature = "midi", feature = "sampler")),
-    allow(unused_variables)
+    allow(dead_code, reason = "no kind is addressed without a feature")
 )]
-pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
+pub(crate) trait KindVisitor {
+    type Out;
+
+    /// The answer for the kind `K`, whose value is addressed as the slot `id`
+    /// makes of a node; `None` when the visitor's subject is not of that kind.
+    fn kind<K: PublishedKind>(&mut self, id: fn(NodeKey) -> SlotId) -> Option<Self::Out>;
+}
+
+/// The first answer of `visitor` over the published kinds the session
+/// addresses: the one list of them. A node that publishes another kind has
+/// nothing that can address its value, and the session leaves it out.
+#[cfg_attr(
+    not(any(feature = "midi", feature = "sampler")),
+    allow(unused_variables, unused_mut)
+)]
+pub(crate) fn visit_kinds<V: KindVisitor>(visitor: &mut V) -> Option<V::Out> {
     #[cfg(feature = "midi")]
     {
-        if let Some(cell) = entry.cell::<tutti_midi_runtime::ClipEventsKind>() {
-            return Some((SlotId::ClipEvents(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_midi_runtime::ClipEventsKind>(SlotId::ClipEvents) {
+            return Some(out);
         }
-        if let Some(cell) = entry.cell::<tutti_midi_runtime::HarmonyChangesKind>() {
-            return Some((SlotId::Harmony(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_midi_runtime::HarmonyChangesKind>(SlotId::Harmony) {
+            return Some(out);
         }
     }
     #[cfg(feature = "sampler")]
     {
-        if let Some(cell) = entry.cell::<tutti_sampler::WindowKind>() {
-            return Some((SlotId::Window(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_sampler::WindowKind>(SlotId::Window) {
+            return Some(out);
         }
-        if let Some(cell) = entry.cell::<tutti_sampler::LoopingKind>() {
-            return Some((SlotId::Looping(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_sampler::LoopingKind>(SlotId::Looping) {
+            return Some(out);
         }
-        if let Some(cell) = entry.cell::<tutti_sampler::DirectionKind>() {
-            return Some((SlotId::Direction(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_sampler::DirectionKind>(SlotId::Direction) {
+            return Some(out);
         }
-        if let Some(cell) = entry.cell::<tutti_sampler::SpeedKind>() {
-            return Some((SlotId::Speed(node), node_cell(cell)));
+        if let Some(out) = visitor.kind::<tutti_sampler::SpeedKind>(SlotId::Speed) {
+            return Some(out);
         }
     }
     None

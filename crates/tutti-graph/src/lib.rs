@@ -705,7 +705,7 @@ pub use exec::command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleEr
 pub use exec::lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use model::fade::Fade;
-pub use node::config::{Asset, HostValues, Initials, NodeConfig};
+pub use node::config::{Asset, HostValues, Initials, NodeConfig, PublishedInitial};
 pub use node::controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };

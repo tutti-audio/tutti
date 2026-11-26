@@ -85,7 +85,7 @@ pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, Ra
 pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
 pub use saved::SavedValues;
-pub(crate) use saved::{declared_param, declared_setting};
+pub(crate) use saved::{declared_param, declared_published, declared_setting};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 #[cfg(feature = "midi-hardware")]

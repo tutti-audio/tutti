@@ -13,13 +13,13 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{DeclaredUnit, NodeKey};
+use tutti_graph::{DeclaredUnit, NodeKey, PublishedKind};
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Failure, IntoAssign, Stageable};
 use super::error::{SetRefusal, ValueError};
-use super::slot::{SettingWord, SlotCell, SlotId};
+use super::slot::{KindVisitor, SettingWord, SlotCell, SlotId, visit_kinds};
 use super::state::{Params, ValueState, Values};
 use super::target::{
     AnyAssign, AnyTarget, Assign, Target, TargetId,
@@ -328,6 +328,33 @@ pub(crate) fn declared_setting(
         value: SettingWord::new(word, of),
     }
     .erase()
+}
+
+/// The assignment of `initial` to the published value of `node` of its kind:
+/// `None` when the session addresses no such kind.
+pub(crate) fn declared_published(
+    node: NodeKey,
+    initial: &tutti_graph::PublishedInitial,
+) -> Option<AnyAssign> {
+    struct Assigned<'a>(NodeKey, &'a tutti_graph::PublishedInitial);
+    impl KindVisitor for Assigned<'_> {
+        type Out = AnyAssign;
+
+        fn kind<K: PublishedKind>(&mut self, id: fn(NodeKey) -> SlotId) -> Option<AnyAssign> {
+            let value = self.1.value::<K>()?;
+            Some(
+                Assign {
+                    target: SlotValue::<K::Value> {
+                        id: id(self.0),
+                        value: PhantomData,
+                    },
+                    value,
+                }
+                .erase(),
+            )
+        }
+    }
+    visit_kinds(&mut Assigned(node, initial))
 }
 
 /// The assignment of the value `cell` holds, a slot registered as `V`.

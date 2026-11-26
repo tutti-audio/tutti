@@ -20,7 +20,7 @@ use tutti_buffers::Float;
 use tutti_graph::{Fade, HostValues, Initials, IntoNode, NodeConfig, NodeKey};
 use tutti_units::Samples;
 
-use crate::value::{declared_param, declared_setting};
+use crate::value::{declared_param, declared_published, declared_setting};
 use crate::{AnyAssign, AppKey, Clock, Graph, Key, ReplaceRefused, Replacement, Session};
 
 /// How a declaration is swapped or removed.
@@ -479,23 +479,21 @@ impl<K: AppKey, F: Float> Kept<K, F> {
             patched.readded.push(key.clone());
             self.nodes.insert(key, Stored { node, declaration });
         } else if old.declaration.config.same_structure(&**new) {
-            let changed = changed_initials(
+            declared_writes(
+                &session.graph,
+                old.node,
+                new.node_type(),
                 &old.declaration.config.initials(),
                 &declaration.config.initials(),
+                writes,
             );
-            declared_writes(&session.graph, old.node, new.node_type(), &changed, writes);
             old.declaration = declaration;
         } else {
+            // A replace seeds each param from the outgoing node only where
+            // both declared one initial (`ValueTable::address`), so an initial
+            // this patch changed is already the incoming node's.
             match new.replace(&mut session.graph, host, old.node, declaration.fading) {
                 Ok(()) => {
-                    // The old unit's live values seed the new one; an initial
-                    // this patch changed wins over them.
-                    let changed = changed_initials(
-                        &old.declaration.config.initials(),
-                        &declaration.config.initials(),
-                    );
-                    let owner = declaration.config.node_type();
-                    declared_writes(&session.graph, old.node, owner, &changed, writes);
                     patched.rebuilt.push(key);
                     old.declaration = declaration;
                 }
@@ -517,42 +515,39 @@ fn take_out<K: AppKey, C: Clock>(session: &mut Session<K, C>, stored: &Stored<C:
     true
 }
 
-/// The assignments of `changed` to the node at `node`, of the node type `owner`.
+/// The assignments of what `new` gives that `old` did not give or gave
+/// another value, to the node at `node`, of the node type `owner`.
 fn declared_writes<F: Float>(
     graph: &Graph<F>,
     node: NodeKey,
     owner: TypeId,
-    changed: &Initials,
+    old: &Initials,
+    new: &Initials,
     writes: &mut Vec<AnyAssign>,
 ) {
     writes.extend(
-        changed
-            .params()
+        new.params()
             .iter()
+            .filter(|given| !old.params().contains(given))
             .map(|&(addr, raw)| declared_param(node, addr, owner, raw)),
     );
-    for &(kind, word) in changed.settings() {
+    for &(kind, word) in new.settings() {
+        if old.settings().contains(&(kind, word)) {
+            continue;
+        }
         let of = graph
             .setting_enum(node, kind)
             .expect("a kinded initial names a setting the node holds");
         writes.push(declared_setting(node, kind, word, of));
     }
-}
-
-/// The initials in `new` that `old` did not give or gave another value.
-fn changed_initials(old: &Initials, new: &Initials) -> Initials {
-    let mut changed = Initials::new();
-    for &(addr, raw) in new.params() {
-        if !old.params().contains(&(addr, raw)) {
-            changed = changed.param(addr, raw);
-        }
-    }
-    for &(kind, word) in new.settings() {
-        if !old.settings().contains(&(kind, word)) {
-            changed = changed.setting(kind, word);
-        }
-    }
-    changed
+    // A kind the session does not address has no target to write: its node
+    // is left out of the session's values, as at insertion.
+    writes.extend(
+        new.published_values()
+            .iter()
+            .filter(|given| !old.published_values().contains(given))
+            .filter_map(|initial| declared_published(node, initial)),
+    );
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {

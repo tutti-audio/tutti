@@ -495,8 +495,8 @@ pub mod graph {
         ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
         Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
         ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
-        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
-        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
+        PublishedCell, PublishedInitial, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
+        SampleRates, Scalar, SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

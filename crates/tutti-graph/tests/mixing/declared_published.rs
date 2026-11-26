@@ -133,3 +133,22 @@ fn a_fork_starts_from_the_published_value_and_shares_nothing() {
         .publish(Numbers(vec![5]));
     assert_eq!(*fork.cells.events().lend(), Numbers(vec![4]));
 }
+
+/// A config's initials list each published entry that has a default, by kind,
+/// and two lists differ exactly where a value does.
+#[test]
+fn initials_list_the_published_values_with_a_default() {
+    use tutti_graph::NodeConfig;
+
+    let base = HolderConfig::new().initials();
+    let [only] = base.published_values() else {
+        panic!("one entry has a default");
+    };
+    assert_eq!(only.value::<ChangesKind>(), Some(Numbers(vec![7])));
+    assert_eq!(only.value::<EventsKind>(), None, "another kind is no match");
+
+    let same = HolderConfig::new().initials();
+    assert_eq!(base.published_values(), same.published_values());
+    let other = HolderConfig::new().changes(Numbers(vec![8])).initials();
+    assert_ne!(base.published_values(), other.published_values());
+}
