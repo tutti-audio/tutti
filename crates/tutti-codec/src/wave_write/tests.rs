@@ -163,51 +163,27 @@ fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
     assert_eq!(got, [4_194_305.0 / scale]);
 }
 
-/// A path destination replaces an existing file by default, and `create_new`
-/// refuses it with `AlreadyExists`, leaving the old bytes and no temporary.
+/// A path destination refuses an existing file with `Exists`, leaving the old bytes and no
+/// temporary, and writes a path with nothing at it.
 #[test]
-fn a_path_replaces_by_default_and_create_new_refuses() {
+fn a_path_refuses_an_existing_file_and_writes_a_new_one() {
     use crate::{EncodeError, Pcm};
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[0.5f32; 8]));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
     std::fs::write(&path, b"old").unwrap();
-    let refused = write_wave(
-        &wave,
-        Destination::from(&path).create_new(),
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
+    let refused = write_wave(&wave, &path, Format::Wav(Pcm::Float(FloatWidth::F32)));
+    assert!(
+        matches!(&refused, Err(EncodeError::Exists { path: p }) if *p == path),
+        "an existing file is refused: {refused:?}"
     );
-    let Err(EncodeError::Commit(e)) = refused else {
-        panic!("an existing file is refused: {refused:?}");
-    };
-    let kept = e.kept().to_path_buf();
-    let kept_bytes = std::fs::read(&kept).unwrap();
-    assert_eq!(e.into_source().kind(), std::io::ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
-    assert_eq!(&kept_bytes[..4], b"RIFF");
-    std::fs::remove_file(&kept).unwrap();
-    let whole = dir.path().join("whole.wav");
-    write_wave(&wave, &whole, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
-    assert_eq!(
-        kept_bytes,
-        std::fs::read(&whole).unwrap(),
-        "the kept file is whole"
-    );
-    std::fs::remove_file(&whole).unwrap();
-
-    write_wave(&wave, &path, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
-    assert_eq!(&std::fs::read(&path).unwrap()[..4], b"RIFF");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 
     let fresh = dir.path().join("fresh.wav");
-    write_wave(
-        &wave,
-        Destination::from(&fresh).create_new(),
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
-    )
-    .unwrap();
+    write_wave(&wave, &fresh, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
     assert_eq!(&std::fs::read(&fresh).unwrap()[..4], b"RIFF");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
 }
 
 /// A writer that only appends: no `Seek`, and not a `Vec`.

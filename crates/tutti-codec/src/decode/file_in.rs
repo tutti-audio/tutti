@@ -9,7 +9,7 @@
 //! width, so a caller sizes its view from the trait and never has to ask the
 //! concrete type.
 //!
-//! It is the read edge, the counterpart of [`FileOut`](crate::FileOut).
+//! It is the read edge, the counterpart of [`EncoderSink`](crate::EncoderSink).
 //!
 //! **It does not downmix.** [`channel_set`](FileIn::channel_set) says which speaker
 //! each channel feeds, and a caller wanting another width builds a
