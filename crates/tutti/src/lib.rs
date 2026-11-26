@@ -491,11 +491,11 @@ pub mod tempo {
 pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
-        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Initials,
-        Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
-        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell,
-        PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell,
-        Shape, Status, Unforkable, declare_params, param_parts,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
+        Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
+        ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
+        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

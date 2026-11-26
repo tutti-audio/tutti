@@ -332,10 +332,11 @@
 //! ## Its config
 //!
 //! A node written with the cells form of [`declare_params!`] is made from a
-//! config, and the config implements [`NodeConfig`]: `build` makes the node,
-//! `same_structure` says whether another config makes the same node but for its
-//! param values, and `initials` lists those values by address. The `required` and
-//! `options` fields are structure and must be `PartialEq`; a shared resource in
+//! config, and the config implements [`NodeConfig`]: `build` makes the node
+//! (from the config and the host's [`HostValues`]), `same_structure` says whether
+//! another config makes the same node but for its param values, and `initials`
+//! lists those values by address. The `required` and `options` fields, and a
+//! setting with no kind, are structure and must be `PartialEq`; a shared resource in
 //! one is an [`Asset`], equal only to itself. A config with a field that is not
 //! `PartialEq` has no `NodeConfig`.
 //!
@@ -704,7 +705,7 @@ pub use exec::command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleEr
 pub use exec::lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use model::fade::Fade;
-pub use node::config::{Asset, Initials, NodeConfig};
+pub use node::config::{Asset, HostValues, Initials, NodeConfig};
 pub use node::controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };
@@ -789,8 +790,8 @@ pub use tutti_units::PlayReading;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::node::declare::{
-        BuiltFrom, Cells, CompareIn, Initial, OwnedCell, ParamEntry, Row, Visit, base, input,
-        ports, row, set,
+        BuiltFrom, Cells, CompareIn, Initial, OwnedCell, ParamEntry, Row, SettingStructure, Visit,
+        base, input, ports, row, set,
     };
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
