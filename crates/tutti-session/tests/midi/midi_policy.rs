@@ -57,6 +57,7 @@ fn policy(model: u8, name: &str) -> MidiPolicy {
             instance: None,
         }),
         properties: None,
+        profiles: tutti_midi_ci::ProfileOffer::default(),
     }
 }
 
@@ -190,8 +191,8 @@ impl Clock {
     }
 
     /// Runs `ms` updates, answering the session's own Stream negotiation as a
-    /// device that offers both Protocols would. Returns the MIDI-CI messages
-    /// the session sent meanwhile.
+    /// device that offers both Protocols would. Returns the MIDI-CI Discovery,
+    /// Invalidate MUID and Profile Report messages the session sent meanwhile.
     fn run(&mut self, s: &mut Session, fake: &FakeCounters, ms: u64) -> Vec<CiMessage> {
         let mut peer = Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -256,7 +257,12 @@ impl Clock {
                 }
                 if matches!(
                     message,
-                    CiMessage::Discovery { .. } | CiMessage::InvalidateMuid { .. }
+                    CiMessage::Discovery { .. }
+                        | CiMessage::InvalidateMuid { .. }
+                        | CiMessage::ProfileAdded { .. }
+                        | CiMessage::ProfileRemoved { .. }
+                        | CiMessage::ProfileEnabled { .. }
+                        | CiMessage::ProfileDisabled { .. }
                 ) {
                     sent_ci.push(message);
                 }
@@ -734,5 +740,120 @@ fn a_store_is_refused_on_a_session_with_no_os_midi_layer() {
             .unwrap()
             .properties
             .is_none()
+    );
+}
+
+fn one(max: u16) -> tutti_midi_ci::ProfileOfferEntry {
+    tutti_midi_ci::ProfileOfferEntry::new(tutti_midi_ci::ProfileChannels::of(max))
+}
+
+fn channel_0() -> CiDeviceId {
+    CiDeviceId::Channel(tutti_ump::MidiChannel::of(0))
+}
+
+/// The Profile of the offer under test.
+fn profile() -> tutti_midi_ci::ProfileId {
+    tutti_midi_ci::ProfileId::ARTICULATION
+}
+
+/// M2-102 §2.4, §2.6: the Profiles the policy offers are announced, a peer's Set Profile On
+/// is answered with the Enabled Report to everyone and reaches the app as an event, and the
+/// policy still holds what the app wrote: offering the same again keeps what the peer switched.
+/// Spec: m2-102/2.6#1, m2-102/2.6#2
+#[test]
+fn a_policy_offer_is_served_and_a_peers_set_on_is_answered() {
+    use tutti_midi_ci::{
+        ProfileChannels, ProfileFormat, ProfileOffer, ProfileState, ProfileTarget,
+    };
+    let (mut s, fake, _ports) = wired(0);
+    let offer = ProfileOffer::default().with(channel_0(), profile(), one(1));
+    let with = |profiles: ProfileOffer| MidiPolicy {
+        profiles,
+        ..policy(2, "My App")
+    };
+    s.set(s.policy::<MidiPolicy>().to(with(offer.clone())))
+        .unwrap();
+    let mut clock = Clock::new();
+    let sent = clock.run(&mut s, &fake, 400);
+    let ours = sent
+        .iter()
+        .find_map(|m| match m {
+            CiMessage::Discovery { source, .. } => Some(*source),
+            _ => None,
+        })
+        .expect("the session announced itself");
+    assert!(
+        sent.iter().any(|m| matches!(
+            m,
+            CiMessage::ProfileAdded { header, profile: p }
+                if header.device_id == channel_0() && *p == profile()
+        )),
+        "the offer is announced: {sent:?}"
+    );
+
+    let target = ProfileTarget::Channel {
+        channel: tutti_ump::MidiChannel::of(0),
+        channels: ProfileChannels::of(1),
+    };
+    let set = CiMessage::SetProfileOn {
+        source: PEER,
+        format: ProfileFormat::current(target),
+        to: ours,
+        profile: profile(),
+    };
+    let now = clock.0 + Duration::from_millis(clock.1);
+    for ump in set.packets(MidiGroup::FIRST).unwrap() {
+        assert!(fake.send_input(EndpointId::from_raw(RAW), ump, now));
+    }
+    let answered = clock.run(&mut s, &fake, 5);
+    assert!(
+        answered.iter().any(|m| matches!(
+            m,
+            CiMessage::ProfileEnabled { source, profile: p, .. }
+                if *source == ours && *p == profile()
+        )),
+        "the Enabled Report: {answered:?}"
+    );
+    assert!(clock.profile_changes().contains(&ProfilesChange::Switched {
+        profile: profile(),
+        target,
+        state: ProfileState::Enabled,
+    }));
+    assert_eq!(s.get(s.policy::<MidiPolicy>()).unwrap().profiles, offer);
+
+    // The same offer written again keeps the peer's switch: nothing is reported.
+    s.set(s.policy::<MidiPolicy>().to(with(offer))).unwrap();
+    let sent = clock.run(&mut s, &fake, 20);
+    assert!(
+        !sent.iter().any(|m| matches!(
+            m,
+            CiMessage::ProfileEnabled { .. } | CiMessage::ProfileDisabled { .. }
+        )),
+        "{sent:?}"
+    );
+}
+
+/// An offer on a session with no OS MIDI layer is refused where it is set, as a store is,
+/// and the policy in force is kept; the empty offer is always accepted.
+#[test]
+fn an_offer_is_refused_on_a_session_with_no_os_midi_layer() {
+    let s = Session::builder()
+        .sample_rate(SampleRate::of(48_000.0))
+        .build()
+        .expect("builds");
+    let offer = MidiPolicy {
+        profiles: tutti_midi_ci::ProfileOffer::default().with(channel_0(), profile(), one(1)),
+        ..MidiPolicy::default()
+    };
+    assert_eq!(
+        s.set(s.policy::<MidiPolicy>().to(offer)).unwrap_err().kind,
+        ValueErrorKind::Refused(SetRefusal::MidiPolicy(MidiPolicyError::NoHardware(
+            tutti_session::NoHardware
+        )))
+    );
+    assert!(s.get(s.policy::<MidiPolicy>()).unwrap().profiles.is_empty());
+    assert_eq!(
+        s.set(s.policy::<MidiPolicy>().to(MidiPolicy::default())),
+        Ok(())
     );
 }

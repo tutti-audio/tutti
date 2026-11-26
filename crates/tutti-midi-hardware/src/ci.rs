@@ -107,6 +107,18 @@
 //! [`ReportEnd::Ended`] that is the report's [`Answer`]. A lost peer's Initiator
 //! goes with it ([`ProcessChange::Dropped`]).
 //!
+//! # Profile Configuration as Responder
+//!
+//! Each member device answers from the one [`ProfileOffer`] the session was given and
+//! Reports what the offer changed to the Broadcast MUID, the offer compared entry by entry
+//! (see [`CiDevice::offer_profiles`](tutti_midi_ci::CiDevice::offer_profiles)): the step
+//! hands each device the offer after the Groups are reconciled, so a device that starts later
+//! announces it then. A peer's switch of an offered Profile is a
+//! [`ProfilesChange::Switched`] for the peer, and never changes the
+//! offer. For each Profile a peer lists on a Channel without a declared maximum, the
+//! devices ask for its Number of MIDI Channels (M2-102 §2.5.1) once the peer's list is
+//! whole, so a Set Profile On never asks for more than the peer allows.
+//!
 //! # Property Exchange
 //!
 //! A peer whose Discovery Reply declares Property Exchange
@@ -144,9 +156,11 @@
 //!
 //! - **Identity**: the app's, as given to [`MidiSession::open`](crate::MidiSession::open).
 //! - **Categories**: Profile Configuration, Process Inquiry and Property Exchange. The
-//!   devices initiate all three and answer Property Exchange from their store.
-//!   They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
-//!   that has none to reply) and NAK a Set Profile On or Off; they answer an Inquiry:
+//!   devices initiate all three and answer Property Exchange from their store and
+//!   Profile Configuration from the Profiles the app offered
+//!   ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)): with none, a
+//!   Profile Inquiry gets empty lists (M2-101 §7.13) and a Set Profile On or Off a NAK. They
+//!   answer an Inquiry:
 //!   Process Inquiry Capabilities with MIDI Message Report supported, and a MIDI Message
 //!   Report of the Function Block or Group with an empty Reply and the End (§9.6, §9.8),
 //!   as a device with no MIDI state to report does, and one of a Channel with a NAK, since
@@ -172,9 +186,9 @@ use tutti_graph::Offset;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
     CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader, CiMessage, CiPeer, Decoded, Initiator,
-    MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction,
-    ProfileChange, ProfileId, ProfileInitiator, ProfileRequest, ProfileRequestError,
-    ResourceInitiator, ResourceResponder, ResourceStore,
+    InquiryTarget, MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator,
+    ProfileAction, ProfileChange, ProfileId, ProfileInitiator, ProfileOffer, ProfileRequest,
+    ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
 };
 use tutti_midi_device::MidiDeviceId;
 use tutti_midi_protocol::MpeFeatures;
@@ -182,7 +196,8 @@ use tutti_midi_runtime::{ask_mpe_features, mpe_features};
 use tutti_rt::CounterWriter;
 use tutti_rt::SplitMix64;
 use tutti_ump::{
-    DeviceIdentity, MessageType, MidiChannel, MidiGroup, SysexAssembler, SysexStep, Ump,
+    DeviceIdentity, MessageType, MidiChannel, MidiGroup, MpeZoneSpan, SysexAssembler, SysexStep,
+    Ump,
 };
 use tutti_units::Losses;
 
@@ -205,9 +220,10 @@ pub(crate) const MAX_SYSEX: MaxSysexSize = MaxSysexSize::of(MaxSysexSize::INITIA
 /// What the devices declare: Management, Profile Configuration, Process
 /// Inquiry and Property Exchange, which the session initiates with every peer that
 /// declares them too (the
-/// module's "What it does"). They answer a Profile Inquiry with no Profiles, and NAK a
-/// Set Profile On or Off, since they have none to enable; they answer a Process
-/// Inquiry with the report of a device with no MIDI state.
+/// module's "What it does"). They answer Profile Configuration from the Profiles the app
+/// offered ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)), none
+/// until then; they answer a Process Inquiry with the report of a device with no MIDI
+/// state.
 const CATEGORIES: CiCategories = CiCategories::PROFILE_CONFIGURATION
     .union(CiCategories::PROCESS_INQUIRY)
     .union(CiCategories::PROPERTY_EXCHANGE);
@@ -559,6 +575,7 @@ impl Ci {
         heard: &Heard<'_>,
         identity: Option<DeviceIdentity>,
         store: &mut ResourceStore,
+        offer: &ProfileOffer,
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
@@ -577,6 +594,7 @@ impl Ci {
         match (&mut self.running, identity) {
             (Some(running), _) => {
                 running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
+                running.offer(offer, now, out, &mut changes);
                 running.step(store, now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
@@ -659,6 +677,20 @@ impl Ci {
         ask.check(self.property_peers.iter())?;
         self.calls.push(ask);
         Ok(())
+    }
+
+    /// The MPE Profile zones of `group` enabled on the devices' offered Profiles, by the
+    /// app's offer or a peer's switch.
+    pub(crate) fn offered_mpe_zones(&self, group: MidiGroup) -> Vec<MpeZoneSpan> {
+        self.running.as_ref().map_or_else(Vec::new, |running| {
+            running
+                .members
+                .iter()
+                .filter(|member| member.group == group)
+                .filter_map(|member| member.device.mpe_zones())
+                .flat_map(|zones| zones.zones().collect::<Vec<_>>())
+                .collect()
+        })
     }
 
     /// Every peer found, by Group then MUID.
@@ -986,6 +1018,25 @@ impl Running {
         changes.refused += send(out, &sends);
     }
 
+    /// Makes every device offer `offer` (see [`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)):
+    /// a device that already offers it sends nothing. It runs on every poll, on the
+    /// control side, and compares the whole offer once per device; an equal offer
+    /// returns early.
+    fn offer(
+        &mut self,
+        offer: &ProfileOffer,
+        now: Instant,
+        out: &mut OpenOutput,
+        changes: &mut CiChanges,
+    ) {
+        let mut sends = Vec::new();
+        for member in &mut self.members {
+            let actions = member.device.offer_profiles(offer);
+            member.apply(actions, now, &mut sends, changes);
+        }
+        changes.refused += send(out, &sends);
+    }
+
     /// Sends the switches the app asked for (see [`Ci::set_profile`]): each goes
     /// to the Initiator of its peer, which refuses one already waiting.
     fn start_switches(
@@ -1085,6 +1136,19 @@ impl Member {
                     }
                     self.forget_property(muid, changes);
                 }
+                CiAction::ProfileSwitched {
+                    peer,
+                    profile,
+                    target,
+                    state,
+                } => changes.profiles.push((
+                    self.peer_id(peer),
+                    ProfilesChange::Switched {
+                        profile,
+                        target,
+                        state,
+                    },
+                )),
                 CiAction::MuidChanged { new, .. } => self.renew_property(new),
                 // The device's own MUID changing reaches the app as every peer
                 // lost (and so every Initiator dropped), and the Responder is
@@ -1306,7 +1370,14 @@ impl Member {
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
-            Err(ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. }) => {}
+            Err(ProfileRequestError::AlreadyAsking) => {}
+            // The check of `Ci::set_profile` read a table that had no maximum yet.
+            Err(ProfileRequestError::OverMaximum { .. }) => changes.answers.push((
+                self.peer_id(switch.at.peer().muid),
+                Answer::SwitchLost {
+                    request: switch.request(),
+                },
+            )),
         }
     }
 
@@ -1324,13 +1395,17 @@ impl Member {
     ) {
         let id = self.peer_id(muid);
         let mut enabled = Vec::new();
+        let mut known = false;
         for action in actions {
             let change = match action {
                 ProfileAction::Send(message) => {
                     sends.push((self.group, message));
                     continue;
                 }
-                ProfileAction::ProfilesKnown => ProfilesChange::Known,
+                ProfileAction::ProfilesKnown => {
+                    known = true;
+                    ProfilesChange::Known
+                }
                 ProfileAction::InquiryTimedOut => ProfilesChange::InquiryTimedOut,
                 ProfileAction::InquiryRefused(_) => ProfilesChange::InquiryRefused,
                 ProfileAction::Changed {
@@ -1373,6 +1448,16 @@ impl Member {
                     };
                     ProfilesChange::MpeFeatures { manager, features }
                 }
+                // The session's own inquiry for a maximum: the table has it, or the
+                // peer declared none.
+                ProfileAction::Resolved {
+                    request:
+                        ProfileRequest::Details {
+                            target: InquiryTarget::NUMBER_OF_CHANNELS,
+                            ..
+                        },
+                    ..
+                } => continue,
                 ProfileAction::Resolved { request, outcome } => {
                     changes
                         .answers
@@ -1392,16 +1477,17 @@ impl Member {
             };
             changes.profiles.push((id, change));
         }
+        if known && let Some(initiator) = self.initiators.get_mut(&muid) {
+            let asked = initiator.ask_maximums(now);
+            self.carry_out(muid, asked, now, sends, changes);
+        }
         for manager in enabled {
             let Some(initiator) = self.initiators.get_mut(&muid) else {
                 return;
             };
-            match ask_mpe_features(initiator, manager, now) {
-                Ok(asked) => self.carry_out(muid, asked, now, sends, changes),
-                // The answer to the one in flight is what the session waits for.
-                Err(
-                    ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. },
-                ) => {}
+            // An inquiry already in flight is the answer the session waits for.
+            if let Ok(asked) = ask_mpe_features(initiator, manager, now) {
+                self.carry_out(muid, asked, now, sends, changes);
             }
         }
     }

@@ -662,14 +662,7 @@ pub(crate) fn hot_plug_session_ci(
 fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
     s.set(
         s.policy::<tutti_session::MidiPolicy>()
-            .to(tutti_session::MidiPolicy {
-                identity: Some(tutti_midi_device::MidiIdentity {
-                    device: identity,
-                    name: tutti_ump::EndpointName::new("Session").unwrap(),
-                    instance: None,
-                }),
-                properties: None,
-            }),
+            .to(s_policy(identity)),
     )
     .expect("the session has an OS MIDI layer");
 }
@@ -1903,6 +1896,109 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     assert!(fake.send_input(raw, omni_off(2), next_block()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");
+}
+
+/// **The input follows the MPE zones of the app's own offer, whatever changed
+/// them** (M2-120 sections 3.3 and 3.4). The app offers the MPE Profile enabled
+/// on Channel 1 with four Channels: Omni Off on a Member Channel, which the
+/// Profile prohibits, is dropped. The app removes the entry and it passes again.
+/// No peer switches anything.
+#[cfg(feature = "midi-hardware")]
+#[test]
+fn an_mpe_profile_the_app_offers_and_withdraws_switches_its_inputs_rules() {
+    use tutti_midi_ci::{ProfileChannels, ProfileId, ProfileOffer, ProfileOfferEntry};
+    use tutti_ump::{CCNumber, Message, Voice2};
+
+    let identity = tutti_ump::DeviceIdentity {
+        manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
+        family: [tutti_ump::U7::of(1); 2],
+        model: [tutti_ump::U7::of(2); 2],
+        revision: tutti_ump::SoftwareRevision::from([tutti_ump::U7::of(3); 4]),
+    };
+    let (mut s, fake) = hot_plug_session_ci(identity);
+    let (synth, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::new().to(synth))
+        .expect("routes");
+    plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
+    let _ = s.update();
+    let _port = connect(&mut s, &["wire"]).remove(0);
+    let mut peer = MpePeer::new();
+    play(&s);
+    let start = Instant::now();
+    let clock = std::cell::Cell::new(0u64);
+    let mut run = |s: &mut Session, ms: u64| {
+        for _ in 0..ms {
+            clock.set(clock.get() + 1);
+            let now = start + Duration::from_millis(clock.get());
+            let _ = update_at(s, now);
+            peer.answer(&fake, now);
+            blocks(s, 1);
+        }
+    };
+    let omni_offs = |seen: &Seen| {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| {
+                matches!(
+                    e.decode(),
+                    Ok(Message::Midi2(a, Voice2::ControlChange { controller, .. }))
+                        if controller == CCNumber::of(124) && a.channel.get() == 2
+                )
+            })
+            .count()
+    };
+    let raw = EndpointId::from_raw(MpePeer::RAW);
+    let omni_off = || midi::m1_cc(MidiChannel::of(2), CCNumber::of(124), tutti_ump::U7::of(0));
+    let with = |profiles| tutti_session::MidiPolicy {
+        profiles,
+        ..s_policy(identity)
+    };
+    run(&mut s, 60);
+    assert!(fake.send_input(raw, omni_off(), next_block()));
+    run(&mut s, 5);
+    assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
+
+    let mpe = ProfileOffer::default().with(
+        tutti_midi_ci::CiDeviceId::Channel(MidiChannel::of(0)),
+        ProfileId::MPE,
+        ProfileOfferEntry::new(ProfileChannels::of(15)).enabled(ProfileChannels::of(4)),
+    );
+    s.set(s.policy::<tutti_session::MidiPolicy>().to(with(mpe)))
+        .unwrap();
+    run(&mut s, 60);
+    assert!(fake.send_input(raw, omni_off(), next_block()));
+    run(&mut s, 5);
+    assert_eq!(
+        omni_offs(&seen),
+        1,
+        "the offered zone prohibits it on a Member"
+    );
+
+    s.set(
+        s.policy::<tutti_session::MidiPolicy>()
+            .to(with(ProfileOffer::default())),
+    )
+    .unwrap();
+    run(&mut s, 60);
+    assert!(fake.send_input(raw, omni_off(), next_block()));
+    run(&mut s, 5);
+    assert_eq!(omni_offs(&seen), 2, "the zone went with the entry");
+}
+
+/// The policy [`present`] sets for `identity`.
+#[cfg(feature = "midi-hardware")]
+fn s_policy(identity: tutti_ump::DeviceIdentity) -> tutti_session::MidiPolicy {
+    tutti_session::MidiPolicy {
+        identity: Some(tutti_midi_device::MidiIdentity {
+            device: identity,
+            name: tutti_ump::EndpointName::new("Session").unwrap(),
+            instance: None,
+        }),
+        properties: None,
+        profiles: Default::default(),
+    }
 }
 
 /// **A MIDI-CI peer's MIDI Message Report is asked for through the session**

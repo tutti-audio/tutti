@@ -17,9 +17,10 @@
 //! [`ChannelCount`], and a [`WholeSwitcher`] (on the Group or Function Block)
 //! has no count to get wrong, since there the field is the width of what is
 //! addressed. A count of 0 on a Channel is unwritable. The limit a peer
-//! declares in a Profile Details reply (M2-102 §2.5.1) is not known to this
-//! module: it never sends that inquiry, so a count above it is the app's to
-//! avoid, and the peer's Disabled Report is how a refusal arrives.
+//! declares in a Profile Details reply (M2-102 §2.5.1) is read when the peer's
+//! Profile list is known, for each Profile on a Channel ([`ProfileEntry::max`]),
+//! and a switch for more Channels than it is refused ([`ProfileError::OverMaximum`]);
+//! until the reply arrives the peer's Disabled Report is how a refusal arrives.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -31,7 +32,7 @@ use tutti_midi_ci::{
 use tutti_midi_protocol::{
     ChannelResponse, MpeFeatures, PitchBendSensitivity, ProfileZone, ProfileZones,
 };
-use tutti_ump::{MidiChannel, MpeOverlap};
+use tutti_ump::{MidiChannel, MpeOverlap, MpeZoneSpan};
 
 use crate::peer::{PeerRef, PeerRequestError};
 
@@ -130,7 +131,9 @@ impl ProfileSwitch {
     ///
     /// [`PeerRequestError::NoSuchPeer`] (as [`ProfileError::Peer`]) when no peer of
     /// `peers` is the switch's,
-    /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
+    /// [`ProfileError::NotListed`] when it no longer lists the Profile there,
+    /// [`ProfileError::OverMaximum`] when it asks for more Channels than the peer
+    /// declared for it.
     pub fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a PeerProfiles>,
@@ -140,8 +143,17 @@ impl ProfileSwitch {
             Switch::On(target) => target.address(),
             Switch::Off(address) => address,
         };
-        if peer.table().get(address, self.profile).is_none() {
+        let Some(entry) = peer.table().get(address, self.profile) else {
             return Err(ProfileError::NotListed);
+        };
+        if let Switch::On(target) = self.switch
+            && let Some(max) = entry.max()
+            && !entry.allows(target.channels())
+        {
+            return Err(ProfileError::OverMaximum {
+                requested: target.channels(),
+                max,
+            });
         }
         Ok(())
     }
@@ -339,9 +351,8 @@ impl PeerProfiles {
             .zones
             .map_or_else(Vec::new, |set| set.zones().collect());
         spans.into_iter().map(|span| {
-            let zone = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT);
             let features = self.features.get(&span.manager()).copied();
-            zone.mpe_features(features.unwrap_or_default())
+            profile_zone(span).mpe_features(features.unwrap_or_default())
         })
     }
 
@@ -379,6 +390,11 @@ impl PeerProfiles {
     }
 }
 
+/// The zone of `span` at the pitch bend range the MPE Profile starts with.
+pub(crate) fn profile_zone(span: MpeZoneSpan) -> ProfileZone {
+    ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT)
+}
+
 /// The zones of `zones` as a set: one that shares a Channel with an earlier one
 /// is left out (M2-120 section 3.4).
 pub(crate) fn zones_of(zones: impl Iterator<Item = ProfileZone>) -> Option<ProfileZones> {
@@ -399,7 +415,8 @@ pub(crate) type Snapshot = Arc<[PeerProfiles]>;
 pub enum ProfilesChange {
     /// The peer's final Reply to Profile Inquiry arrived: its table is whole.
     Known,
-    /// A Report (Added, Removed, Enabled or Disabled) changed one Profile.
+    /// A Report (Added, Removed, Enabled or Disabled), or the peer's declared
+    /// maximum Channels, changed one Profile.
     Changed {
         /// Where the Profile is.
         address: CiDeviceId,
@@ -424,6 +441,18 @@ pub enum ProfilesChange {
         profile: ProfileId,
         /// The data, uninterpreted.
         data: SpecificData,
+    },
+    /// The peer switched a Profile this session offers
+    /// ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)): the
+    /// session already answered with its Report. The app's offer is unchanged;
+    /// to put its own value back it changes the entry.
+    Switched {
+        /// The Profile.
+        profile: ProfileId,
+        /// Where, and the Channels it uses there.
+        target: ProfileTarget,
+        /// What it is now.
+        state: ProfileState,
     },
     /// A zone the peer enabled is not one of its
     /// [`mpe_zones`](PeerProfiles::mpe_zones): it is left out, and this says why.
@@ -481,4 +510,13 @@ pub enum ProfileError {
     /// older than a Removed Report).
     #[error("the peer does not list that Profile at that address")]
     NotListed,
+    /// The switch asks for more Channels than the peer declared as the Profile's
+    /// maximum (M2-102 §2.5.1).
+    #[error("{requested:?} Channels asked for, past the declared maximum {max:?}")]
+    OverMaximum {
+        /// The count the switch asks for.
+        requested: ProfileChannels,
+        /// The count the peer declared.
+        max: ProfileChannels,
+    },
 }

@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tutti_platform::{Executor, Instant};
 
-use tutti_midi_ci::ResourceStore;
+use tutti_midi_ci::{ProfileOffer, ResourceStore};
 
 use crate::answer::Answer;
 use crate::backend;
@@ -54,7 +54,9 @@ use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
 use crate::peer::{PeerRef, PeerRequestError};
 use crate::process::{ProcessChange, ReportAsk, Reporter};
-use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, zones_of};
+use crate::profiles::{
+    PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, profile_zone, zones_of,
+};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::start::Started;
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
@@ -121,6 +123,9 @@ pub struct MidiSession {
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: ResourceStore,
+    /// The Profiles the MIDI-CI devices offer ([`MidiSession::offer_profiles`]); none by
+    /// default.
+    profiles: ProfileOffer,
     /// The latest `now` a [`poll`](MidiSession::poll) was given: time never
     /// steps back across two callers.
     last_poll: Option<Instant>,
@@ -286,6 +291,7 @@ impl MidiSession {
             presented: None,
             generated_instance: None,
             properties: ResourceStore::default(),
+            profiles: ProfileOffer::default(),
             last_poll: None,
         })
     }
@@ -631,9 +637,9 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held
-                .stream
-                .poll(now, &heard, presented, &mut self.properties);
+            let stepped =
+                held.stream
+                    .poll(now, &heard, presented, &mut self.properties, &self.profiles);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {
@@ -805,6 +811,24 @@ impl MidiSession {
         self.ports.ring();
     }
 
+    /// Makes the MIDI-CI devices offer `offer` as their Profiles (M2-101 §7, M2-102
+    /// §2.4 to §2.7): on every open input and every input opened later, at the next
+    /// [`poll`](Self::poll). A device answers a peer's Profile Inquiry, Set Profile On
+    /// and Off and Details Inquiry from it, and Reports to the Broadcast MUID
+    /// what changed since the offer it had: the offer is compared entry by entry,
+    /// by Profile Id and address. An entry the app changed takes the app's value
+    /// (and drops what a peer switched); an entry left equal keeps what a peer switched; a new
+    /// entry is Added, and Enabled if it is; one removed is Disabled if it was
+    /// enabled, then Removed. An equal offer changes nothing.
+    ///
+    /// A peer's switch is a [`ProfilesChange::Switched`], never a change of this
+    /// offer. An MPE Profile that is enabled reaches an input's MPE zones
+    /// ([`received_mpe_zones`](Self::received_mpe_zones)).
+    pub fn offer_profiles(&mut self, offer: ProfileOffer) {
+        self.profiles = offer;
+        self.ports.ring();
+    }
+
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
     /// gave, as peers' Sets have changed it. Only
     /// [`poll`](Self::poll) changes it between calls.
@@ -860,6 +884,26 @@ impl MidiSession {
     #[must_use]
     pub fn mpe_zones(&self, id: &MidiDeviceId, group: MidiGroup) -> Option<ProfileZones> {
         self.mpe_zones_where(id, group, |_| true)
+    }
+
+    /// The zones the MIDI of the open input `id` on `group` is read in (M2-120): the
+    /// [`mpe_zones`](Self::mpe_zones) of its peers and the zones of the MPE Profile
+    /// the session offers ([`offer_profiles`](Self::offer_profiles)) that are
+    /// enabled, by the app's offer or a peer's switch, the whole set again without
+    /// a zone that shares a Channel with one before.
+    #[must_use]
+    pub fn received_mpe_zones(&self, id: &MidiDeviceId, group: MidiGroup) -> Option<ProfileZones> {
+        let offered = self
+            .inputs
+            .get(id)
+            .map_or_else(Vec::new, |held| held.stream.offered_mpe_zones(group));
+        let peers = self.profiles(id);
+        let zones = peers
+            .iter()
+            .filter(|peer| peer.at().peer().group == group)
+            .flat_map(PeerProfiles::zones)
+            .chain(offered.into_iter().map(profile_zone));
+        zones_of(zones)
     }
 
     /// The [`mpe_zones`](Self::mpe_zones) that are to be `kept`.

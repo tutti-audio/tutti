@@ -1037,6 +1037,8 @@ struct InputPort {
     saved: DeviceInfo,
     /// The proof the open brought, which every reopen of the port's device takes.
     started: Started,
+    /// The MPE zones last given to the input node, by Group.
+    zones: std::collections::BTreeMap<tutti_ump::MidiGroup, tutti_midi_protocol::ProfileZones>,
 }
 
 /// A device's output stamps iff its negotiated configuration receives JR
@@ -1356,6 +1358,7 @@ fn close_connection<F: tutti_buffers::Float>(
     }
     port.writer.depart();
     port.controls.clear_mpe_profiles();
+    port.zones = Default::default();
 }
 
 impl Ports {
@@ -1375,13 +1378,26 @@ impl Ports {
         self.inputs.iter().any(|port| port.node == node)
     }
 
-    /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
-    /// what its input node follows.
-    fn sync_mpe_profiles(&self, io: &MidiSession, device: &MidiDeviceId) {
-        if let Some(port) = self.inputs.iter().find(|p| p.shared.is_open_on(device)) {
+    /// Makes every open input node follow the MPE Profile zones its device reads
+    /// ([`MidiSession::received_mpe_zones`]): the zones enabled by the app's offer
+    /// or a peer's switch, and those of the peers' own Profiles. Each Group is
+    /// given to the node only when it differs from the zones last given, so
+    /// whatever changed them is followed and an unchanged Group costs a
+    /// comparison.
+    fn sync_mpe_profiles(&mut self, io: &MidiSession) {
+        for port in &mut self.inputs {
+            let (InputLink::Open { .. }, Some(device)) = (&port.link, port.shared.device()) else {
+                continue;
+            };
             for group in tutti_ump::MidiGroup::all() {
-                let zones = io.mpe_zones(device, group);
-                port.controls.set_mpe_profile(group, zones);
+                let zones = io.received_mpe_zones(&device, group);
+                if port.zones.get(&group).copied() != zones {
+                    port.controls.set_mpe_profile(group, zones);
+                    match zones {
+                        Some(zones) => port.zones.insert(group, zones),
+                        None => port.zones.remove(&group),
+                    };
+                }
             }
         }
     }
@@ -1630,7 +1646,6 @@ impl Ports {
         let mut edits = Edits::default();
         out.append(&mut self.notices);
         let mut touched: Vec<MidiDeviceId> = Vec::new();
-        let mut profile_devices: Vec<MidiDeviceId> = Vec::new();
         for polled in polled {
             // The output follows what its device settled, at once: the
             // `MidiOut` phase that drains next stamps by it.
@@ -1647,9 +1662,6 @@ impl Ports {
                         && let Some(port) = self.port_of(device)
                     {
                         port.shared.pending.lock().lose_switches(*peer);
-                    }
-                    if !profile_devices.contains(device) {
-                        profile_devices.push(device.clone());
                     }
                     out.push(
                         MidiEvent::CiProfiles {
@@ -1702,9 +1714,7 @@ impl Ports {
                 touched.push(device);
             }
         }
-        for device in &profile_devices {
-            self.sync_mpe_profiles(io, device);
-        }
+        self.sync_mpe_profiles(io);
         for port in &mut self.inputs {
             // A Subscription's data that changed, or whose lease dropped, is a
             // change of the info too.
@@ -1938,6 +1948,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             },
             saved,
             started,
+            zones: Default::default(),
         });
         link.register(&shared);
         let at = self.state.ports.inputs.len() - 1;
