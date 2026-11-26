@@ -1,7 +1,9 @@
 //! A topology placed on output channels (`Fold::to_channels`): by speaker where both ends have an order, by index
 //! where either has none, and never a guess.
 
-use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
+use tutti_buffers::{
+    AmbisonicFormat, AmbisonicOrder, ChannelLayout, ChannelSet, ChannelTopology, Speaker,
+};
 use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
 use tutti_units::Amplitude;
 
@@ -171,4 +173,22 @@ fn a_level_that_is_not_a_gain_is_refused_even_by_index() {
             "into {dst:?}"
         );
     }
+}
+
+/// An ambisonic source is not speaker feeds, so onto output channels it goes by
+/// index (where `Fold::between` would decode or refuse it): first order's four
+/// components keep their channels in a quad output, and a stereo output, which
+/// is narrower, is refused rather than truncated.
+#[test]
+fn an_ambisonic_source_goes_by_index() {
+    let foa = ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
+    let fold = to_width(&foa, width(4)).unwrap();
+    let src = [1.0f32, 2.0, 3.0, 4.0];
+    let mut out = [9.0f32; 4];
+    fold.frame(&src, &mut out);
+    assert_eq!(out, src, "channel i stays channel i");
+    assert!(matches!(
+        to_width(&foa, width(2)),
+        Err(FoldError::Unplaced { .. })
+    ));
 }
