@@ -243,6 +243,9 @@ pub(crate) struct CiChanges {
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
+    /// The Groups whose device changed its MUID (M2-101 §3.3.1): its Function
+    /// Block is announced again.
+    pub(crate) muid_changed: Vec<MidiGroup>,
     /// The Groups whose device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, getrandom::Error)>,
     /// The CI messages the output refused in this step.
@@ -1151,7 +1154,10 @@ impl Member {
                         state,
                     },
                 )),
-                CiAction::MuidChanged { new, .. } => self.renew_property(new),
+                CiAction::MuidChanged { new, .. } => {
+                    self.renew_property(new);
+                    changes.muid_changed.push(self.group);
+                }
                 // The device's own MUID changing reaches the app as every peer
                 // lost (and so every Initiator dropped), and the Responder is
                 // made again for it; the window closing is the core's own
