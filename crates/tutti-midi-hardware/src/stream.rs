@@ -93,8 +93,7 @@ use tutti_units::Losses;
 use crate::answer::Answer;
 use crate::capability::{described, is_ump_endpoint};
 use crate::ci::{
-    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, block_of_device, groups_after_settle,
-    groups_of_a_midi1_port,
+    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
 use crate::peer::PeerRequestError;
@@ -780,7 +779,7 @@ impl UmpNegotiation {
     /// later request of the session's cannot undo a grant.
     ///
     /// A MIDI-CI Device of `muid_changed` that changed its MUID tells the
-    /// device its Function Block's Info again, unasked (M2-101 §3.3.1).
+    /// device our Function Block's Info again, unasked (M2-101 §3.3.1).
     fn answer(
         &mut self,
         heard: &Heard<'_>,
@@ -828,15 +827,18 @@ impl UmpNegotiation {
                 );
             }
         }
-        // A changed MUID announces its Function Block (M2-101 §3.3.1): the
-        // block that placed the device on `group`, with the Info it declares.
-        if let Run::Done { stream, .. } = &self.run {
-            for &group in muid_changed {
-                if let Some(block) = block_of_device(stream.endpoint(), group) {
-                    replies.push(Ump::from(Message::Stream(Stream::FunctionBlockInfo(
-                        block.info(),
-                    ))));
-                }
+        // A changed MUID announces our Function Block (M2-101 §3.3.1): the
+        // block of the answering Endpoint that spans the device's Group. A
+        // Group outside our span has no block, and sends nothing.
+        for &group in muid_changed {
+            let block = answering.endpoint.function_blocks().find(|block| {
+                let first = block.first_group().get();
+                (first..first + block.groups().get()).contains(&group.get())
+            });
+            if let Some(block) = block {
+                replies.push(Ump::from(Message::Stream(Stream::FunctionBlockInfo(
+                    block.info(),
+                ))));
             }
         }
         let mut granted = None;

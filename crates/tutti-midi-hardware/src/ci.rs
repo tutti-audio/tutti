@@ -192,7 +192,7 @@ use tutti_midi_ci::{
     ProfileAction, ProfileChange, ProfileId, ProfileInitiator, ProfileOffer, ProfileRequest,
     ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
 };
-use tutti_midi_device::{Endpoint, FunctionBlock, MidiDeviceId};
+use tutti_midi_device::MidiDeviceId;
 use tutti_midi_protocol::MpeFeatures;
 use tutti_midi_runtime::{ask_mpe_features, mpe_features};
 use tutti_rt::CounterWriter;
@@ -510,26 +510,12 @@ pub(crate) fn groups_after_settle(stream: &DeviceStream) -> Vec<MidiGroup> {
     }
     let mut groups: Vec<MidiGroup> = endpoint
         .function_blocks()
-        .filter_map(device_group)
+        .filter(|block| block.midi_ci_version().is_some())
+        .filter_map(|block| MidiGroup::new(block.first_group().get()))
         .collect();
     groups.sort_unstable();
     groups.dedup();
     groups
-}
-
-/// The Group of the MIDI-CI Device of `block`: its first Group, when it
-/// declares MIDI-CI (M2-101 §3.2.2).
-fn device_group(block: &FunctionBlock) -> Option<MidiGroup> {
-    block.midi_ci_version()?;
-    MidiGroup::new(block.first_group().get())
-}
-
-/// The Function Block whose MIDI-CI Device is on `group`: the inverse of
-/// [`groups_after_settle`].
-pub(crate) fn block_of_device(endpoint: &Endpoint, group: MidiGroup) -> Option<&FunctionBlock> {
-    endpoint
-        .function_blocks()
-        .find(|block| device_group(block) == Some(group))
 }
 
 /// The Groups of a MIDI 1.0 port.

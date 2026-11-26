@@ -391,32 +391,32 @@ fn an_invalidate_muid_of_a_found_peer_removes_it_and_is_reported() {
     assert!(wire.session.ci_peers(&wire.id).is_empty());
 }
 
-/// §3.3.1: when a Function Block's MUID changes (here an Invalidate MUID for
-/// ours) the Device sends the Function Block Info Notification of that block
-/// (M2-104 §7.1.8), once, with the block's own fields. Block 0 spans Groups
-/// 0 and 1 and declares no MIDI-CI; block 1 starts on Group 1 and does, so the
-/// device is on Group 1 and the Notification is block 1's, not the first block
-/// that spans the Group.
+/// §3.3.1: when our MUID changes (here an Invalidate MUID for ours) the Device
+/// sends the Function Block Info Notification of its own block (M2-104
+/// §7.1.8), once: the block of the Endpoint the session presents, not the
+/// peer's. The peer's MIDI-CI block here is id 1, output-only, so it cannot be
+/// mistaken for ours.
 /// Spec: m2-101/3.3.1#5
 #[test]
-fn a_changed_muid_sends_the_blocks_info_notification_once() {
-    let wide = FunctionBlock::builder(
-        FunctionBlockId::new(0).unwrap(),
-        BlockDirection::Bidirectional,
+fn a_changed_muid_sends_our_blocks_info_notification_once() {
+    let peers_block = FunctionBlock::builder(
+        FunctionBlockId::new(1).unwrap(),
+        BlockDirection::Output,
         FirstGroup::new(0).unwrap(),
-        GroupSpan::new(2).unwrap(),
+        GroupSpan::new(1).unwrap(),
     )
-    .name(BlockName::new("W").unwrap())
+    .midi_ci(CiVersion::new(2).unwrap(), Sysex8StreamCount::new(0))
+    .name(BlockName::new("P").unwrap())
     .build()
     .unwrap();
-    let mut wire = endpoint_wire(&[wide, ci_block(1, 1, 2)]);
+    let mut wire = endpoint_wire(&[ci_block(0, 5, 0), peers_block]);
     let [(_, ours)] = discoveries(&wire)[..] else {
         panic!("one Discovery");
     };
     let _ = received(&wire);
     say(
         &wire,
-        MidiGroup::of(1),
+        GROUP_0,
         &CiMessage::InvalidateMuid {
             header: CiHeader::new(Muid::of(0x00AB_CDEF)),
             target: ours,
@@ -434,10 +434,11 @@ fn a_changed_muid_sends_the_blocks_info_notification_once() {
     let [info] = infos[..] else {
         panic!("one Function Block Info Notification, got {infos:?}");
     };
+    let groups = presented(identity()).groups;
     assert!(info.active);
-    assert_eq!(info.id.value(), FunctionBlockId::new(1));
-    assert_eq!(info.first_group.value(), FirstGroup::new(1));
-    assert_eq!(info.groups_spanned.value(), GroupSpan::new(1));
+    assert_eq!(info.id.value(), FunctionBlockId::new(0));
+    assert_eq!(info.first_group.value(), FirstGroup::new(0));
+    assert_eq!(info.groups_spanned.value(), Some(groups));
     assert_eq!(info.direction, BlockDirection::Bidirectional);
 }
 
