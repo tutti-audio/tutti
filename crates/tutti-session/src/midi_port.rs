@@ -1165,9 +1165,13 @@ struct OutputPort {
     link: OutLink,
     /// The proof the open brought, which every reopen of the port's device takes.
     started: Started,
-    /// The MPE 1.1 zones written for each Group ([`Mpe11Target`](crate::Mpe11Target)).
-    mpe11: Vec<(MidiGroup, Arc<crate::value::Cell<Option<Mpe11Zones>>>)>,
+    /// The MPE 1.1 zones written for each Group ([`Mpe11Target`](crate::Mpe11Target)),
+    /// by [`MidiGroup::index`].
+    mpe11: [Mpe11Cell; MidiGroup::COUNT as usize],
 }
+
+/// The MPE 1.1 zones written for one Group of an output port.
+type Mpe11Cell = Arc<crate::value::Cell<Option<Mpe11Zones>>>;
 
 /// An input port leaves nothing while its node goes: its device's notes are being
 /// released by the node.
@@ -1803,7 +1807,7 @@ impl OutputPort {
         let Some(out) = self.link.open_mut() else {
             return;
         };
-        for (group, cell) in &self.mpe11 {
+        for (group, cell) in MidiGroup::all().zip(&self.mpe11) {
             let written = cell.take_staged();
             let zones = match (written, reopened) {
                 (Some(zones), _) => Some(zones),
@@ -1811,7 +1815,7 @@ impl OutputPort {
                 (None, false) => None,
             };
             if let Some(zones) = zones {
-                out.destination_mut().set_mpe11(*group, zones);
+                out.destination_mut().set_mpe11(group, zones);
             }
         }
     }
@@ -2008,14 +2012,16 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         });
         let (claim, held) = Held::new(Arc::clone(&shared), node);
         let values = self.graph.value_table();
-        let mpe11 = MidiGroup::all().map(|group| {
+        let mut mpe11 = MidiGroup::all().map(|group| {
             let cell = crate::value::Cell::new(None, |_| Ok(()));
             values.provide(
                 SlotId::Mpe11((node, group)),
                 Arc::clone(&cell) as SlotCell<Option<Mpe11Zones>>,
             );
-            (group, cell)
+            cell
         });
+        let mpe11: [Mpe11Cell; MidiGroup::COUNT as usize] =
+            core::array::from_fn(|_| mpe11.next().expect("one cell per Group"));
         self.state.ports.outputs.push(OutputPort {
             claim: held,
             shared: Arc::clone(&shared),
@@ -2028,7 +2034,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             record: Record::default(),
             link,
             started,
-            mpe11: mpe11.collect(),
+            mpe11,
         });
         Ok(MidiOutput { claim })
     }

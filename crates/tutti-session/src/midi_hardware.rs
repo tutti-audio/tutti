@@ -41,7 +41,8 @@ use crate::midi::Midi;
 /// serves an empty store. A policy holds the store by `Arc`, and two policies
 /// are equal when they hold the same `Arc` ([`Arc::ptr_eq`]), never by content:
 /// writing the same store again is not a change, and a store that changed is a
-/// new `Arc`. A peer's Set changes the copy the devices serve, which
+/// new `Arc`, served afresh: a new `Arc` of equal content discards what peers'
+/// Sets changed. A peer's Set changes the copy the devices serve, which
 /// [`MidiSession::served_properties`](tutti_midi_hardware::MidiSession::served_properties)
 /// reads, not the store in the policy.
 ///
