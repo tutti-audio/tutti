@@ -228,9 +228,23 @@ pub(crate) struct Erased {
     stage: Option<Arc<dyn Stage>>,
     /// The assignment of the value now, made from the cell's value type.
     capture: fn(SlotId, &(dyn Any + Send + Sync)) -> AnyAssign,
+    /// The value the slot held when it was registered: its declaration's
+    /// initial, which a replace compares ([`Erased::seed_from`]).
+    initial: Box<dyn Any + Send + Sync>,
+    /// [`Erased::seed_from`], made from the cell's value type.
+    carry: fn(Parts<'_>, Parts<'_>),
 }
 
 impl Erased {
+    /// Carries `old`'s value into this slot, when both hold the same value
+    /// type, both were registered at one initial value and this slot accepts
+    /// it: the node a replace puts in keeps what the outgoing node was set
+    /// to, and takes a declaration that changed. Control side, under the
+    /// value lock; a published value is staged, as a write is.
+    pub(super) fn seed_from(&self, old: &Self) {
+        (self.carry)((&*self.cell, &*self.initial), (&*old.cell, &*old.initial));
+    }
+
     /// The assignment of the value `id` holds now.
     pub(super) fn capture(&self, id: SlotId) -> AnyAssign {
         (self.capture)(id, &*self.cell)
@@ -248,9 +262,33 @@ impl std::fmt::Debug for Erased {
 /// An atomic slot: its writes land at once.
 pub(crate) fn erase<V: Clone + PartialEq + Send + Sync + 'static>(slot: SlotCell<V>) -> Erased {
     Erased {
+        initial: Box::new(slot.load()),
         cell: Box::new(slot),
         stage: None,
         capture: capture::<V>,
+        carry: carry::<V>,
+    }
+}
+
+/// A slot's cell and its initial value, each behind `Any`: what
+/// [`Erased::seed_from`] compares and carries.
+type Parts<'a> = (&'a (dyn Any + Send + Sync), &'a (dyn Any + Send + Sync));
+
+/// [`Erased::seed_from`] for the value type `V`.
+fn carry<V: Clone + PartialEq + Send + Sync + 'static>(new: Parts<'_>, old: Parts<'_>) {
+    let (Some(to), Some(from)) = (
+        new.0.downcast_ref::<SlotCell<V>>(),
+        old.0.downcast_ref::<SlotCell<V>>(),
+    ) else {
+        return;
+    };
+    let same_declaration = matches!(
+        (new.1.downcast_ref::<V>(), old.1.downcast_ref::<V>()),
+        (Some(a), Some(b)) if a == b
+    );
+    let live = from.load();
+    if same_declaration && to.check(&live).is_ok() {
+        to.store(&live);
     }
 }
 
@@ -260,9 +298,11 @@ pub(crate) fn erase_staged<V: Clone + PartialEq + Send + Sync + 'static, S: Slot
     slot: Arc<S>,
 ) -> Erased {
     Erased {
+        initial: Box::new(slot.load()),
         cell: Box::new(Arc::clone(&slot) as SlotCell<V>),
         stage: Some(slot),
         capture: capture::<V>,
+        carry: carry::<V>,
     }
 }
 
@@ -679,6 +719,9 @@ macro_rules! published_methods {
     };
 }
 
+// A published kind is listed three times: here (its key method), in `SlotId`
+// (its slot) and in `published_kinds!` (registration and the patch's write).
+// A new kind goes in all three.
 published_methods! {
     #[cfg(feature = "midi")]
     events, ClipEventsTarget => tutti_midi_runtime::ClipEventsKind,
@@ -950,6 +993,7 @@ pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId,
 /// its slot of a node: the one list of those kinds. A node that publishes
 /// another kind has nothing that can address its value, and the session
 /// leaves it out.
+// A new kind also goes in `published_methods!` and `SlotId`.
 macro_rules! published_kinds {
     ($kind:ident, $id:ident => $body:expr) => {{
         #[allow(unused_mut, reason = "no kind is addressed without a feature")]
