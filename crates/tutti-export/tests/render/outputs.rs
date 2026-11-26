@@ -15,9 +15,12 @@ use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
-use tutti_buffers::{Bed, ChannelTopology};
+use tutti_buffers::{ChannelTopology, Speaker};
+use tutti_codec::Encoding;
 use tutti_codec::IntPcm;
+use tutti_codec::ToFile;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement, Produced,
@@ -115,19 +118,21 @@ fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
         Pcm::Int(int) => Pcm::Int(int.no_dither()),
         float => float,
     };
-    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).replace()
+    FileTarget::new(
+        Encoding::new(Format::Wav(pcm)).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ToFile::new(path).replace(),
+    )
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
     FileTarget::new(
-        path,
-        Format::Flac {
+        Encoding::new(Format::Flac {
             pcm: IntPcm::new(depth).no_dither(),
             level: FlacLevel::default(),
-        },
-        ChannelLayout::STEREO,
+        })
+        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ToFile::new(path).replace(),
     )
-    .replace()
 }
 
 fn planes(produced: Produced) -> Vec<Vec<f32>> {
@@ -289,18 +294,19 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
     assert_eq!(names(dir.path()), ["a.wav", "b.flac"], "no temporary left");
 }
 
-/// Two outputs of one render in one dithered format get different noise: a bounce's stems and
-/// its master are summed later, and one noise sequence would add coherently. Silence into a
-/// dithered 16-bit file is the dither alone, so equal files would be equal noise.
+/// Each output is dithered with the seed its encoding states: a bounce's stems and its master are
+/// summed later, so the caller gives each its own, and the pass neither picks nor shares one.
+/// Silence into a dithered 16-bit file is the dither alone, so equal files are equal noise.
 #[test]
-fn two_dithered_outputs_of_one_render_do_not_share_noise() {
+fn each_output_is_dithered_with_its_own_seed() {
     let dir = tempfile::tempdir().unwrap();
-    let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.wav"));
-    let dithered = |path: &std::path::Path| {
+    let paths = ["a.wav", "b.wav", "c.wav"].map(|name| dir.path().join(name));
+    let dithered = |path: &std::path::Path, seed: u64| {
         FileTarget::new(
-            path,
-            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
-            ChannelLayout::STEREO,
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO))
+                .dither_seed(seed),
+            ToFile::new(path),
         )
     };
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
@@ -311,17 +317,19 @@ fn two_dithered_outputs_of_one_render_do_not_share_noise() {
         &job(4_096),
         &FrozenClock,
         vec![
-            Output::main_output(dithered(&a)),
-            Output::main_output(dithered(&b)),
+            Output::main_output(dithered(&paths[0], 1)),
+            Output::main_output(dithered(&paths[1], 2)),
+            Output::main_output(dithered(&paths[2], 1)),
         ],
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let (a, b) = (decode(&a), decode(&b));
+    let [a, b, c] = paths.map(|path| decode(&path));
     assert!(a[0].iter().any(|&s| s != 0.0), "the file holds dither");
-    assert_ne!(a, b, "two outputs shared one noise sequence");
+    assert_ne!(a, b, "two seeds shared one noise sequence");
+    assert_eq!(a, c, "one seed gave two noise sequences");
 }
 
 /// Stereo `0.5` through a `0.5` gain, on the main output, with a tap on each of the
@@ -534,9 +542,9 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
                 // not downmixed, so there is no place for them.
                 Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
                 FileTarget::new(
-                    dir.path().join("t.wav"),
-                    Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
-                    ChannelLayout::MONO,
+                    Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+                        .channels(ChannelSet::default_for(ChannelLayout::MONO)),
+                    ToFile::new(dir.path().join("t.wav")),
                 ),
             ),
         ],
@@ -582,9 +590,9 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .collect();
     let float = |path: &std::path::Path, spec| {
         FileTarget::new(
-            path,
-            Format::Wav(Pcm::Float(FloatWidth::F32)),
-            ChannelLayout::STEREO,
+            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new(path),
         )
         .normalize(spec)
     };
@@ -829,9 +837,9 @@ fn an_unmeasurable_output_names_its_index() {
         vec![
             Output::main_output(
                 FileTarget::new(
-                    dir.path().join("m.wav"),
-                    Format::Wav(Pcm::Float(FloatWidth::F32)),
-                    ChannelLayout::STEREO,
+                    Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+                    ToFile::new(dir.path().join("m.wav")),
                 )
                 .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
@@ -839,9 +847,9 @@ fn an_unmeasurable_output_names_its_index() {
                 reader,
                 stereo_placement(),
                 FileTarget::new(
-                    dir.path().join("s.wav"),
-                    Format::Wav(Pcm::Float(FloatWidth::F32)),
-                    ChannelLayout::STEREO,
+                    Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+                    ToFile::new(dir.path().join("s.wav")),
                 )
                 .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
@@ -875,15 +883,14 @@ fn wide(width: u16) -> RenderGraph {
 
 fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
     FileTarget::new(
-        path,
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
-        ChannelLayout::from(width),
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+            .channels(ChannelSet::default_for(ChannelLayout::from(width))),
+        ToFile::new(path).replace(),
     )
-    .replace()
 }
 
-/// A file whose topology is not stated is taken to be the engine's order for
-/// its width, and its `Written` says so; a stated one says it was stated.
+/// A file with the engine's order for its width reports the default placement, and one whose
+/// speakers are placed otherwise reports it was stated.
 #[test]
 fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
     let dir = tempfile::tempdir().unwrap();
@@ -911,7 +918,21 @@ fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
         tutti_buffers::Placement::Default
     );
     assert_eq!(
-        placement(file_of(&dir.path().join("b.wav"), 6).topology(Bed::Surround51.topology())),
+        placement(FileTarget::new(
+            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))).channels(ChannelSet::from(
+                // The 5.1 speakers with the front pair swapped: no bed.
+                ChannelTopology::new([
+                    Speaker::FrontRight,
+                    Speaker::FrontLeft,
+                    Speaker::FrontCenter,
+                    Speaker::LowFrequency,
+                    Speaker::SideLeft,
+                    Speaker::SideRight,
+                ])
+                .unwrap(),
+            )),
+            ToFile::new(dir.path().join("b.wav")).replace(),
+        )),
         tutti_buffers::Placement::Stated
     );
 }

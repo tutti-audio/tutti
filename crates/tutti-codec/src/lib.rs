@@ -25,8 +25,12 @@
 //!   `Format` the build can write. It keeps the first write error (later writes are skipped and
 //!   return `SinkFailed`), and `finalize` is `FileEncoder::finish_keeping`, so a recording cut
 //!   short is kept, with the first error in `Kept`.
-//! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
-//!   a path (staged, and refusing a file that is there) or into a borrowed writer.
+//! - `Encoding` is the pipeline in front of the encoder: the `Format` plus the `channels` it is
+//!   folded onto (`tutti_buffers::Fold::to_channels`; the source's by default), a `Resample` and
+//!   the dither seed. `ToFile` is a path (`replace`, `in_place`). `write(&wave, &encoding,
+//!   &to_file)` saves a whole `Wave` (folded, resampled, quantized, put in place), `encode(&wave,
+//!   &encoding)` gives the bytes of the same file in memory, and a `Chain` is the streaming form
+//!   of both: blocks in, then `finalize` and `Closed::commit`, with a gain `set_gain` can apply.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::channel_set` and `FileIn::channel_set` say which speaker each channel feeds,
@@ -46,12 +50,12 @@
 //!
 //! ## What this crate does not own
 //!
-//! The pipeline in front of the encoder: pulling blocks from a render or a live
-//! source, and resampling. An encoder takes blocks already at the rate
-//! and width the `Spec` states, and nothing here stops a caller from handing it
-//! others. `tutti-export` is the offline pipeline and
-//! `EncoderSink` the live one; both write through this crate, so a bounced
-//! and a recorded file quantize and lay out a given sample identically.
+//! Pulling blocks from a render or a live source, and measuring them for a normalize. An
+//! encoder takes blocks already at the rate and width the `Spec` states, and nothing here stops a
+//! caller from handing it others; a `Chain` folds and resamples what it is given. `tutti-export`
+//! is the offline pipeline (it pulls the render through a `Chain`) and `EncoderSink` the live
+//! one; both write through this crate, so a bounced and a recorded file quantize and lay out a
+//! given sample identically.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // With no format feature a `Format` has no value, so every body that follows
@@ -70,20 +74,24 @@
 
 #[cfg(feature = "encode-aiff")]
 mod aiff;
+mod chain;
 #[cfg(all(test, encode))]
 mod contract;
 mod decode;
 mod decode_error;
 mod encoder;
 mod encoder_sink;
+mod encoding;
 mod error;
 #[cfg(feature = "encode-flac")]
 mod flac;
 mod format;
 mod pcm;
+mod resample;
 mod spec;
 #[cfg(test)]
 mod test_sink;
+mod to_file;
 #[cfg(feature = "encode-wav")]
 mod wav;
 #[cfg(any(feature = "encode-wav", decode))]
@@ -92,6 +100,7 @@ mod wave_mask;
 mod wave_write;
 mod writer;
 
+pub use chain::{Chain, Closed, Landed};
 #[cfg(decode)]
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
@@ -100,9 +109,13 @@ pub use encoder::{
     Encoder, EncoderOptions, FileEncoder, FileOptions, FinalizedFile, Kept, Unfinished,
 };
 pub use encoder_sink::EncoderSink;
+pub use encoding::Encoding;
 pub use error::{Codec, EncodeError, Result, SpecError};
 pub use format::{FlacLevel, Format};
 pub use pcm::{IntDepth, IntPcm, Pcm};
+pub use resample::{Converter, Resample};
 pub use spec::Spec;
+pub use to_file::ToFile;
+pub use tutti_dsp::ChunkSize;
 #[cfg(encode)]
-pub use wave_write::write_wave;
+pub use wave_write::{encode, write};

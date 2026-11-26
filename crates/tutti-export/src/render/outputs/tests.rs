@@ -2,8 +2,11 @@ use super::*;
 use crate::Setup;
 use crate::spill::SPILL_MEMORY_BYTES;
 use crate::{BufferTarget, Normalize, NormalizeSpec, Progress, TailPolicy};
+use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
+use tutti_codec::Encoding;
 use tutti_codec::Pcm;
+use tutti_codec::ToFile;
 use tutti_graph::GraphBuilder;
 use tutti_timeline::FrozenClock;
 use tutti_units::Samples;
@@ -49,9 +52,9 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
     let token = crate::CancelToken::new();
     let mut control = Control::new(&token).on_progress(&mut watch);
     let target = crate::FileTarget::new(
-        &path,
-        tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)),
-        ChannelLayout::STEREO,
+        Encoding::new(tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)))
+            .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ToFile::new(&path),
     )
     .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))));
     let produced = render_outputs(
@@ -142,9 +145,9 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
     let target = || {
         Output::main_output(
             crate::FileTarget::new(
-                &path,
-                tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)),
-                ChannelLayout::STEREO,
+                Encoding::new(tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)))
+                    .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+                ToFile::new(&path),
             )
             .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
         )

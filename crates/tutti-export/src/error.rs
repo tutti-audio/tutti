@@ -273,6 +273,8 @@ impl From<tutti_codec::EncodeError> for RenderError {
     fn from(error: tutti_codec::EncodeError) -> Self {
         match error {
             tutti_codec::EncodeError::Io(e) => Self::Io(e),
+            tutti_codec::EncodeError::Buffer(e) => Self::Buffer(e),
+            tutti_codec::EncodeError::Resample(e) => Self::Resample(e),
             other => Self::Encode(other),
         }
     }

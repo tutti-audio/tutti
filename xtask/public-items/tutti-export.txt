@@ -61,9 +61,6 @@ fn output::BufferTarget::topology
 fn output::FileTarget::new
 fn output::FileTarget::normalize
 fn output::FileTarget::path
-fn output::FileTarget::replace
-fn output::FileTarget::resample
-fn output::FileTarget::topology
 fn output::NormalizeSpec::from_output
 fn output::NormalizeSpec::own
 fn output::Output::feed
@@ -91,8 +88,6 @@ fn rendered::Rendered::layout
 fn rendered::Rendered::new
 fn rendered::Rendered::planes
 fn rendered::Rendered::sample_rate
-fn resample::Resample::to
-fn write_buffers
 struct Written
 struct control::CancelToken
 struct control::Control
@@ -106,6 +101,5 @@ struct output::NormalizeSpec
 struct output::Output
 struct output::Placement
 struct rendered::Rendered
-struct resample::Resample
 trait graph::RtLogSink
 type error::Result

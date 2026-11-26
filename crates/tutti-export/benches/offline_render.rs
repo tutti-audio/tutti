@@ -25,6 +25,9 @@
 //! `--profile-time` plus samply.
 
 use std::hint::black_box;
+use tutti_buffers::ChannelSet;
+use tutti_codec::Encoding;
+use tutti_codec::ToFile;
 use tutti_units::Seconds;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -32,10 +35,10 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
-use tutti_codec::{Format, Pcm};
+use tutti_codec::{Format, Pcm, Resample};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph,
-    Rendered, Resample, Setup, TailPolicy, Written, render_one,
+    Rendered, Setup, TailPolicy, Written, render_one,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -93,11 +96,12 @@ impl Case {
         path: impl Into<std::path::PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        let target = FileTarget::new(path, self.format, self.channels);
-        let target = match self.resample {
-            Some(resample) => target.resample(resample),
-            None => target,
+        let encoding = Encoding::new(self.format).channels(ChannelSet::default_for(self.channels));
+        let encoding = match self.resample {
+            Some(resample) => encoding.resample(resample),
+            None => encoding,
         };
+        let target = FileTarget::new(encoding, ToFile::new(path));
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
             None => target,

@@ -1,6 +1,9 @@
 use super::*;
+use tutti_buffers::ChannelSet;
+use tutti_codec::Encoding;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
+use tutti_codec::ToFile;
 
 /// Every reading a control delivers while `run` drives it.
 fn delivered(weights: Weights, run: impl FnOnce(&mut Control<'_>)) -> Vec<Progress> {
@@ -174,9 +177,9 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
     ))];
     let normalized = [Output::main_output(
         FileTarget::new(
-            "n.wav",
-            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
-            ChannelLayout::STEREO,
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new("n.wav"),
         )
         .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-1.0)))),
     )];

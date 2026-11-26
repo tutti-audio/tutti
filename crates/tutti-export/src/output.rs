@@ -6,14 +6,13 @@
 //! constructor and getters, and none has a default for a rate, a format or a
 //! duration.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
-use tutti_codec::Format;
+use tutti_codec::{Encoding, ToFile};
 use tutti_graph::TapReader;
 
-use crate::Resample;
 use crate::normalize::Normalize;
 use crate::{Rendered, Written};
 
@@ -108,65 +107,43 @@ impl Width {
     }
 }
 
-/// A file one output is written to: where, in what format and width, and how
-/// it is converted on the way (rate, normalize). An integer format's dither and noise shaping
-/// are those of its `tutti_codec::IntPcm`.
+/// A file one output is written to: how it is encoded ([`Encoding`]: format, channels,
+/// resample, dither seed), where it lands ([`ToFile`]) and how it is normalized. An integer
+/// format's dither and noise shaping are those of its `tutti_codec::IntPcm`.
+///
+/// Outputs of one render are summed later (a bounce's stems and its master), so each takes its
+/// own dither seed ([`Encoding::dither_seed`], `SplitMix64::mix` of its index): two files with
+/// one noise sequence would add it coherently.
 ///
 /// A format and width the encoder cannot take, and a topology the fold cannot
 /// place the channels into, are refused when the render starts (the file's rate is not known
 /// until then), before any frame is rendered and before the path is touched.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileTarget {
-    path: PathBuf,
-    format: Format,
-    pub(crate) width: Width,
-    pub(crate) resample: Option<Resample>,
+    encoding: Encoding,
+    to: ToFile,
     pub(crate) normalize: Option<NormalizeSpec>,
-    replace: bool,
 }
 
 impl FileTarget {
-    /// A file at `path` of `format`, `channels` wide, at the render's rate,
-    /// and no normalize.
+    /// The file `encoding` is written to at `to`, with no normalize. An encoding that states no
+    /// channels has the feed's.
     #[must_use]
-    pub fn new(path: impl Into<PathBuf>, format: Format, channels: ChannelLayout) -> Self {
+    pub fn new(encoding: Encoding, to: ToFile) -> Self {
         Self {
-            path: path.into(),
-            format,
-            width: Width::Count(channels),
-            resample: None,
+            encoding,
+            to,
             normalize: None,
-            replace: false,
         }
-    }
-
-    /// Which speaker each file channel feeds: for the WAV speaker mask
-    /// and the fold onto the file. It replaces the
-    /// width [`new`](Self::new) was given: the file is as wide as the
-    /// topology, and without one it has the engine's order for the width
-    /// ([`Written::placement`] reports which).
-    #[must_use]
-    pub fn topology(mut self, topology: ChannelTopology) -> Self {
-        self.width = Width::Placed(topology);
-        self
-    }
-
-    /// Writes at another rate than the render's.
-    #[must_use]
-    pub fn resample(mut self, resample: Resample) -> Self {
-        self.resample = Some(resample);
-        self
     }
 
     /// Normalizes this output ([`NormalizeSpec`]); without it the output is
     /// written as rendered.
     ///
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
-    /// stands, so it needs a placement: the topology stated by
-    /// [`topology`](Self::topology), or, for a file that states none,
-    /// [`ChannelTopology::default_for`] for its width, which
-    /// [`Written::placement`] reports as `Default`. A width with no default
-    /// placement (3, 5, 7 or 9 channels, say) is refused when the render
+    /// stands, so it needs a placement: the topology of the file's channels
+    /// ([`Encoding::channels`], else the feed's). A width with no placement
+    /// (3, 5, 7 or 9 channels, say) is refused when the render
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
     #[must_use]
@@ -175,54 +152,18 @@ impl FileTarget {
         self
     }
 
-    /// Replaces a path that already exists instead of refusing it. A target refuses an
-    /// existing path by default, with [`tutti_codec::EncodeError::Exists`] before anything is
-    /// rendered into the file. The file is written beside the path, so a path that appears
-    /// before the commit is refused there, with a [`tutti_codec::EncodeError::Commit`] of kind
-    /// `AlreadyExists` that leaves what is at the path alone and keeps the complete file at the
-    /// error's `kept` path for the caller.
-    #[must_use]
-    pub fn replace(mut self) -> Self {
-        self.replace = true;
-        self
-    }
-
-    /// Whether an existing path is replaced ([`replace`](Self::replace)).
-    #[must_use]
-    pub(crate) fn replaces_existing(&self) -> bool {
-        self.replace
-    }
-
     /// Where the file lands.
     #[must_use]
     pub fn path(&self) -> &Path {
-        &self.path
+        self.to.path()
     }
 
-    /// The container and its settings.
-    #[must_use]
-    pub(crate) fn format(&self) -> Format {
-        self.format
+    pub(crate) fn encoding(&self) -> &Encoding {
+        &self.encoding
     }
 
-    /// The file's width.
-    #[must_use]
-    pub(crate) fn channels(&self) -> ChannelLayout {
-        self.width.layout()
-    }
-
-    /// Whether the file's speakers are stated ([`topology`](Self::topology))
-    /// or the default layout for its width ([`ChannelTopology::default_for`]).
-    #[must_use]
-    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
-        self.width.placement()
-    }
-
-    /// The file's channels: the stated topology, or [`ChannelSet::default_for`]
-    /// its width ([`placement`](Self::placement) says which); no topology past
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
-    pub(crate) fn channel_set(&self) -> ChannelSet {
-        self.width.channel_set()
+    pub(crate) fn to_file(&self) -> &ToFile {
+        &self.to
     }
 }
 
@@ -302,6 +243,11 @@ impl Placement {
     #[must_use]
     pub fn of_width(layout: ChannelLayout) -> Self {
         Self(ChannelSet::default_for(layout))
+    }
+
+    /// The lanes' channels: the topology, or the engine's order for the width.
+    pub(crate) fn channel_set(&self) -> ChannelSet {
+        self.0
     }
 
     /// How many lanes.
@@ -471,16 +417,11 @@ pub enum TargetError {
         /// The index it names.
         index: usize,
     },
-    /// [`write_buffers`](crate::write_buffers) was given a target that asks to
-    /// normalize: planes are written as they are, so the gain is applied first
-    /// ([`Rendered::apply_gain`](crate::Rendered::apply_gain)).
-    #[error("planes are written as they are: apply the gain first, and ask no normalize")]
-    NormalizeOfPlanes,
     /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
     /// is weighted by each speaker's placement, and a file with no stated
     /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
     /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
-    /// ([`FileTarget::topology`]) that is a known bed, or normalize by
+    /// ([`Encoding::channels`]) that is a known bed, or normalize by
     /// [`Normalize::Peak`].
     #[error(
         "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \

@@ -129,3 +129,44 @@ fn noise_shaping_feeds_the_rounding_error_back() {
         assert!((f64::from(s) - tone(n)).abs() <= bound + 0.01, "sample {n}");
     }
 }
+
+/// **Each file of a bounce has its own dither noise.** The master and its stems are summed
+/// later, and one noise sequence in two of them would add coherently. Silence into a dithered
+/// 16-bit file is the dither alone, so equal files would be equal noise.
+#[test]
+fn the_files_of_a_bounce_are_dithered_with_different_noise() {
+    use tutti_session::Stem;
+    let mut session = Session::builder()
+        .outputs_floor(ChannelLayout::STEREO)
+        .build_detached(SampleRate::SR_48K)
+        .expect("a detached session builds");
+    let silence = session
+        .graph()
+        .add(ForkByClone(Const::new(0.0, ChannelLayout::STEREO)));
+    session
+        .graph()
+        .connect(silence, MainOutput)
+        .unwrap()
+        .unfaded();
+    let dir = tempfile::tempdir().expect("dir");
+    let paths = ["main.wav", "one.wav", "two.wav"].map(|name| dir.path().join(name));
+    let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)));
+    let bounce = Bounce::new()
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
+        .main_output(&paths[0], format)
+        .stem_with(Stem::new(silence.erase()).file(&paths[1], format))
+        .stem_with(Stem::new(silence.erase()).file(&paths[2], format))
+        .tail(tutti_session::BounceTail::None);
+    bounced(&mut session, bounce).expect("renders");
+    let [main, one, two] = paths.map(|path| {
+        hound::WavReader::open(path)
+            .expect("readable")
+            .samples::<i16>()
+            .map(|s| s.expect("a sample"))
+            .collect::<Vec<_>>()
+    });
+    assert!(main.iter().any(|&s| s != 0), "the file holds dither");
+    assert_ne!(main, one, "the master and a stem shared one noise sequence");
+    assert_ne!(main, two, "the master and a stem shared one noise sequence");
+    assert_ne!(one, two, "two stems shared one noise sequence");
+}

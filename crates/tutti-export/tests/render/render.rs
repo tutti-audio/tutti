@@ -18,8 +18,9 @@ use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 use crate::support::{render_to_buffers, render_to_file};
 use tutti_buffers::FloatWidth;
 use tutti_codec::IntPcm;
+use tutti_codec::Resample;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
-use tutti_export::{Control, Normalize, Progress, RenderGraph, Resample, Setup, Stage, TailPolicy};
+use tutti_export::{Control, Normalize, Progress, RenderGraph, Setup, Stage, TailPolicy};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_timeline::{FrozenClock, RenderClock};
@@ -547,7 +548,7 @@ fn a_resample_request_reaches_the_file() {
     );
 }
 
-/// `write_buffers` completes the measure-then-apply cycle: render, normalize,
+/// `tutti_codec::write` completes the measure-then-apply cycle: render, normalize,
 /// write. Without it a caller who normalized would have nowhere to put the
 /// result — and it shares every encoder with the streaming path rather than
 /// growing a second writer per format.
@@ -570,8 +571,9 @@ fn normalized_audio_can_be_written_to_every_format() {
     ] {
         s.encode.format = format;
         let p = d.path().join(format!("n.{ext}"));
-        let w = support::write_buffers(&audio, &s, &p).expect("write");
-        assert!(w.bytes > 100, "{ext} wrote {} bytes", w.bytes);
+        support::write_rendered(&audio, &s, &p).expect("write");
+        let bytes = std::fs::metadata(&p).unwrap().len();
+        assert!(bytes > 100, "{ext} wrote {bytes} bytes");
     }
 
     // The written WAV must carry the gain: 0.5 at -6 dB is ~0.25. (The WAV was
@@ -626,56 +628,6 @@ fn a_resample_reaches_every_format_not_just_wav() {
         (flac_frames as i64 - 48_000).abs() < 512,
         "flac: header says 48000 but payload holds {flac_frames} frames \
          (44100 means the resample was skipped)"
-    );
-}
-
-/// `write_buffers` must resample from the rate the FRAMES are at, not from
-/// whatever `config.render.sample_rate` happens to hold.
-///
-/// The frames handed to `write_buffers` already exist; `config.render` describes
-/// a render that already happened, and may be a different rate entirely. Reading
-/// it made the output 2.18x too long and pitched down, under a header that said
-/// otherwise.
-#[test]
-fn write_buffers_resamples_from_the_frames_own_rate() {
-    let d = tempfile::tempdir().unwrap();
-
-    // Render at 96k...
-    let mut render_cfg = config(
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
-        ChannelLayout::STEREO,
-    );
-    render_cfg.render.sample_rate = tutti_units::SampleRate::SR_96K;
-    render_cfg.render.duration_seconds = Seconds::new(1.0);
-    let audio =
-        render_to_buffers(dc(render_cfg.render.sample_rate), &render_cfg, &FrozenClock).unwrap();
-    assert_eq!(audio.sample_rate().get(), 96_000.0);
-
-    // ...then write with a config whose `render` half is left at its DEFAULT
-    // 44100 — the case the doc tells a caller is fine to ignore.
-    let mut write_cfg = config(
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
-        ChannelLayout::STEREO,
-    );
-    write_cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
-    assert_eq!(
-        write_cfg.render.sample_rate.get(),
-        44_100.0,
-        "this test is only meaningful while the config's render rate differs"
-    );
-
-    let p = d.path().join("w.wav");
-    support::write_buffers(&audio, &write_cfg, &p).unwrap();
-
-    let rd = hound::WavReader::open(&p).unwrap();
-    assert_eq!(rd.spec().sample_rate, 48_000);
-    let frames = rd.into_samples::<f32>().count() / 2;
-    // 96k -> 48k halves the length. Reading 44100 as the source instead would
-    // give ~104_490 frames.
-    assert!(
-        (frames as i64 - 48_000).abs() < 512,
-        "expected ~48000 frames (96k halved), got {frames} \
-         (~104490 means it resampled from the config's rate, not the audio's)"
     );
 }
 
@@ -1183,7 +1135,7 @@ fn an_unnamed_main_output_width_exports_at_that_width() {
 /// the same rejecting dispatch.
 #[test]
 fn an_odd_width_round_trips_through_buffers() {
-    use support::write_buffers;
+    use support::write_rendered;
 
     let d = tempfile::tempdir().unwrap();
     for width in [3u16, 5] {
@@ -1201,8 +1153,8 @@ fn an_odd_width_round_trips_through_buffers() {
         assert_eq!(rendered.layout(), layout);
 
         let p = d.path().join(format!("buf{width}.wav"));
-        write_buffers(&rendered, &cfg, &p)
-            .unwrap_or_else(|e| panic!("width {width}: write_buffers failed: {e}"));
+        write_rendered(&rendered, &cfg, &p)
+            .unwrap_or_else(|e| panic!("width {width}: write failed: {e}"));
         assert_eq!(hound::WavReader::open(&p).unwrap().spec().channels, width);
     }
 }

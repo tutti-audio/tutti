@@ -1,0 +1,111 @@
+//! [`Encoding`]: what happens to audio on its way into a file.
+
+use crate::{Format, Resample};
+use tutti_buffers::ChannelSet;
+use tutti_dsp::DitherNoise;
+use tutti_units::SampleRate;
+
+/// The pipeline in front of the encoder: the format a file is written as, the
+/// channels it holds, the rate it is converted to and the dither noise it is
+/// quantized with. It names no destination: [`ToFile`](crate::ToFile) is a
+/// path, [`write`](crate::write) and [`encode`](crate::encode) take an
+/// `Encoding` for a whole buffer, and a [`Chain`](crate::Chain) takes one for a
+/// stream.
+///
+/// The stages run in the order fold, resample, gain, quantize. Quantizing is
+/// last because an integer file's dither is scaled to one least significant bit
+/// at the file's depth, and a rate conversion after it would filter that noise
+/// along with the signal.
+///
+/// A `Chain` reads the options once, when it is made.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "encode-wav")] {
+/// use tutti_buffers::{ChannelLayout, ChannelSet};
+/// use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm, Resample};
+/// use tutti_units::SampleRate;
+///
+/// let encoding = Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
+///     .channels(ChannelSet::default_for(ChannelLayout::STEREO))
+///     .resample(Resample::to(SampleRate::SR_44K1))
+///     .dither_seed(7);
+/// assert_eq!(encoding.rate(SampleRate::SR_48K), SampleRate::SR_44K1);
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+#[must_use = "an encoding does nothing until a `write`, `encode` or `Chain` takes it"]
+pub struct Encoding {
+    format: Format,
+    channels: Option<ChannelSet>,
+    resample: Option<Resample>,
+    seed: u64,
+}
+
+impl Encoding {
+    /// An encoding to `format`, with the channels and the rate of its source
+    /// and the dither of [`DitherNoise::DEFAULT_SEED`].
+    pub fn new(format: Format) -> Self {
+        Self {
+            format,
+            channels: None,
+            resample: None,
+            seed: DitherNoise::DEFAULT_SEED,
+        }
+    }
+
+    /// Writes `channels`, folded from the source's by [`tutti_buffers::Fold::to_channels`]
+    /// (a width it cannot place is an error, never a dropped channel). Without it the file
+    /// has the source's channels.
+    pub fn channels(mut self, channels: ChannelSet) -> Self {
+        self.channels = Some(channels);
+        self
+    }
+
+    /// Writes at another rate than the source's.
+    pub fn resample(mut self, resample: Resample) -> Self {
+        self.resample = Some(resample);
+        self
+    }
+
+    /// The noise sequence an integer file's dither draws from (a float file has none).
+    ///
+    /// Files that are summed later (a bounce's stems and its master) take seeds mixed from
+    /// distinct indices ([`SplitMix64::mix`](tutti_rt::SplitMix64::mix)), never one seed, which would add their noise
+    /// coherently.
+    pub fn dither_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// The container and its settings.
+    #[must_use]
+    pub fn format(&self) -> Format {
+        self.format
+    }
+
+    /// The channels the file holds, when stated: `None` is the source's.
+    #[must_use]
+    pub fn channel_set(&self) -> Option<&ChannelSet> {
+        self.channels.as_ref()
+    }
+
+    /// The resample, when there is one.
+    #[must_use]
+    pub fn resampling(&self) -> Option<Resample> {
+        self.resample
+    }
+
+    /// The dither seed.
+    #[must_use]
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// The rate the file is written at: the resample's target, else `source`.
+    #[must_use]
+    pub fn rate(&self, source: SampleRate) -> SampleRate {
+        self.resample.map_or(source, |r| r.target_rate)
+    }
+}

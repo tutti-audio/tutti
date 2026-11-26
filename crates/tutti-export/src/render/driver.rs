@@ -5,9 +5,8 @@
 //! [`drive`] pulls it block by block, applying the latency and length gate,
 //! and hands each block to the outputs (the fold onto each one's layout is
 //! theirs, [`FileChannels::fold_from`]), so the graph is stepped exactly once
-//! per block however many outputs there are. [`PlaneSource`] replays planes a
-//! caller already holds, through the same [`Replay`] the spilled audio of a
-//! normalized output is read back by.
+//! per block however many outputs there are. The audio a normalized output spilled
+//! is read back through a [`Replay`].
 //!
 //! The frame width is a runtime value carried by
 //! `Interleaved`, never a `const CH`. A width in the type can only carry one that is a property of the
@@ -25,9 +24,7 @@ use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
-use tutti_buffers::{
-    Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample, interleave,
-};
+use tutti_buffers::{Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample};
 use tutti_graph::RtLogReaders;
 use tutti_timeline::RenderClock;
 use tutti_units::Samples;
@@ -390,88 +387,14 @@ pub(crate) fn check_loss(policy: crate::EventLossPolicy, lost: u64) -> crate::Re
     Ok(())
 }
 
-/// Audio read back in blocks: planes a caller holds, or what a normalized
-/// output spilled while the graph rendered.
+/// Audio read back in blocks: what a normalized output spilled while the graph rendered.
 pub(crate) trait Replay<F: Sample = f32> {
     /// Fills the leading frames of `out`, returning how many frames were
     /// written; `0` is the end.
     fn fill(&mut self, out: InterleavedMut<'_, F>) -> crate::Result<usize>;
 }
 
-/// Replays already-rendered planes.
-///
-/// Planes of the file's own width replay as they are. Any other width is
-/// folded onto the file's through the [`Fold`] the caller built
-/// ([`FileChannels::fold_from`]), the way the graph's outputs are: a wider
-/// render is placed by position and a narrower one by the engine's order,
-/// never truncated or zero-padded.
-pub(crate) struct PlaneSource<'a, F: Float = f32> {
-    planes: &'a [Vec<F>],
-    fold: Option<Fold<F>>,
-    /// The zeros a channel the planes lack reads: grown to a block, never
-    /// shrunk.
-    silence: Vec<F>,
-    pos: Samples,
-}
-
-impl<'a, F: Float> PlaneSource<'a, F> {
-    pub(crate) fn new(planes: &'a [Vec<F>], fold: Option<Fold<F>>) -> Self {
-        Self {
-            planes,
-            fold,
-            silence: Vec::new(),
-            pos: Samples::new(0),
-        }
-    }
-}
-
-impl<F: Float> Replay<F> for PlaneSource<'_, F> {
-    fn fill(&mut self, mut out: InterleavedMut<'_, F>) -> crate::Result<usize> {
-        let available = self
-            .planes
-            .first()
-            .map_or(0, |p| p.len().saturating_sub(self.pos.get()));
-        let n = out.frames().get().min(available);
-        if n == 0 {
-            return Ok(0);
-        }
-        let block = out.slice_mut(Samples::ZERO..Samples::new(n));
-        let pos = self.pos.get();
-        let span = Samples::new(pos)..Samples::new(pos + n);
-        // Both write every sample of every frame (rather than leaving whatever
-        // the buffer held), which matters because the caller's block is reused
-        // across iterations.
-        match &self.fold {
-            Some(fold) => {
-                let planes = Planes::from_vecs(self.planes)?.slice(span);
-                fold.fold_planar_to_interleaved(planes, block)?;
-            }
-            // Planes of the file's own width interleave strictly. A render with
-            // another channel count is silent in the channels it lacks (a
-            // plane of zeros stands in for each) and its extra planes are not
-            // written: the planes the file has are interleaved strictly.
-            None if self.planes.len() == block.channels() => {
-                interleave(Planes::from_vecs(self.planes)?.slice(span), block)?;
-            }
-            None => {
-                let width = block.channels();
-                if self.silence.len() < n {
-                    self.silence.resize(n, F::ZERO);
-                }
-                self.silence[..n].fill(F::ZERO);
-                let silence = &self.silence[..n];
-                let table: Vec<&[F]> = (0..width)
-                    .map(|c| self.planes.get(c).map_or(silence, |p| &p[pos..pos + n]))
-                    .collect();
-                interleave(Planes::new(&table)?, block)?;
-            }
-        }
-        self.pos += Samples::new(n);
-        Ok(n)
-    }
-}
-
-/// The frames the replay of planes hands out per block: 64, which only paces
+/// The frames a replay hands out per block: 64, which only paces
 /// the encoder.
 ///
 /// Not raised to the graph's block: a 1024-frame replay measured no faster.

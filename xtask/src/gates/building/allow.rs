@@ -260,6 +260,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "opening a file for decoding: the failure is the file's, not a value's",
     ),
     ty(
+        "crates/tutti-codec/src/chain.rs",
+        "Chain::new",
+        CTOR,
+        "beginning a file for the pipeline: the failure is the file's and the format's (an existing path, a length the format cannot hold), not a value's",
+    ),
+    ty(
         "crates/tutti-tempo/",
         "TempoMap::from_beats",
         CTOR,
@@ -783,6 +789,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "ClockMap::set_rate",
         SETTER,
         "a live command on a running map: a re-prepare at another rate moves the anchor in place",
+    ),
+    ty(
+        "crates/tutti-codec/src/chain.rs",
+        "Chain::set_gain",
+        SETTER,
+        "a command on a running chain: a normalize's gain is measured from audio that is only written once the chain is open",
     ),
     ty(
         "crates/tutti-midi-runtime/src/live/input_node.rs",
