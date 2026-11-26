@@ -38,7 +38,7 @@ use tutti::midi::{MidiChannel, MidiFile, NoteNumber, StandardMidiFile, Tick, Tim
 use tutti::session::MainOutputKind;
 use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
-    SampleRate, Samples, Session, SessionEvent, Written,
+    SampleRate, Samples, Saved, Session, SessionEvent, Written,
 };
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
@@ -78,7 +78,7 @@ fn load(
         .cloned()
         .ok_or("the scan could not read the plugin's id")?;
     let plugin = entry.plugin_ref();
-    let state = state.map(|bytes| PeerState::of_plugin(plugin, bytes));
+    let state = state.map(|bytes| Saved::new(PeerState::of_plugin(plugin, bytes)));
     let loaded = match s.load_plugin(&id, &catalog)? {
         LoadPlugin::InProcess(mut load) => {
             if let Some(state) = state {
@@ -153,7 +153,10 @@ fn play_to_file(
     out: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
-        bounce.main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
+        // `replace`: a rerun overwrites the output of the last one.
+        bounce
+            .replace()
+            .main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
     })
 }
 

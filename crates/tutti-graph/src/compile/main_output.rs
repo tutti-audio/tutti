@@ -2,8 +2,7 @@
 //! topology, so how a main output of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
-use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
-use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
+use tutti_buffers::FoldError;
 
 /// The generation of the graph's main output: each commit that changes the main output's
 /// declaration carries the next one.
@@ -104,107 +103,4 @@ pub enum MainOutputError {
         /// The most main outputs that may be pending.
         limit: usize,
     },
-}
-
-/// Builds the fold from `src` into a destination of which only the width is
-/// known: a device, a file, a node's outputs.
-///
-/// The destination is taken to be the engine's own order for its width
-/// ([`ChannelSet::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4,
-/// and unassigned channels past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS). A
-/// destination that states its placement is [`fold_to_channels`].
-///
-/// # Errors
-///
-/// As [`fold_to_channels`].
-pub fn fold_to_width<F: Float>(
-    src: &ChannelTopology,
-    dst: ChannelLayout,
-) -> Result<Fold<F>, FoldError> {
-    fold_to_channels(src, &ChannelSet::default_for(dst), FoldLevels::default())
-}
-
-/// [`fold_to_topology_with`] into the channels `dst`: by speaker where it has a
-/// topology, and by index into a destination wider than
-/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), which has none.
-///
-/// # Errors
-///
-/// As [`fold_to_topology_with`].
-pub fn fold_to_channels<F: Float>(
-    src: &ChannelTopology,
-    dst: &ChannelSet,
-    levels: FoldLevels,
-) -> Result<Fold<F>, FoldError> {
-    match dst.topology() {
-        Some(topology) => fold_to_topology_with(src, topology, levels),
-        None => {
-            refuse_unnamed(src)?;
-            Fold::by_index(src.width(), dst.width())
-        }
-    }
-}
-
-/// [`FoldError::Unnamed`] for a source with an [`Unknown`](Speaker::Unknown)
-/// channel, whatever the destination.
-fn refuse_unnamed(src: &ChannelTopology) -> Result<(), FoldError> {
-    match src
-        .positions()
-        .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
-    {
-        Some(channel) => Err(FoldError::Unnamed {
-            end: FoldEnd::Source,
-            channel,
-        }),
-        None => Ok(()),
-    }
-}
-
-/// Builds the fold from `src` into `dst`. A mono source lands on the centre of
-/// a 6, 8 or 12-wide destination and the front pair of a 2 or 4-wide one. The
-/// source is placed by speaker, except where a speaker cannot be named:
-///
-/// - a source with an [`Unknown`](Speaker::Unknown) channel (a second LFE, a
-///   wide or high speaker) is [`FoldError::Unnamed`], whatever the
-///   destination: nothing can be said about where it goes;
-/// - a source whose channels are all [`Unassigned`](Speaker::Unassigned) is
-///   independent buses, so channel `i` stays channel `i` ([`Fold::by_index`]):
-///   a wider destination is zero-filled and a narrower one is an error, never
-///   a matrix. A caller that reads a bare count in the engine's order says so
-///   with [`ChannelTopology::default_for`] before it calls;
-/// - a destination with no named speaker (3, 5, 7, 9 to 11, 13 and up
-///   unassigned) takes channels by index too, and a narrowing is
-///   [`FoldError::Unplaced`], never a truncation;
-/// - otherwise, [`Fold::between`].
-///
-/// # Errors
-///
-/// As [`Fold::between`] and [`Fold::by_index`], and [`FoldError::Unnamed`] as
-/// above.
-pub fn fold_to_topology<F: Float>(
-    src: &ChannelTopology,
-    dst: &ChannelTopology,
-) -> Result<Fold<F>, FoldError> {
-    fold_to_topology_with(src, dst, FoldLevels::default())
-}
-
-/// [`fold_to_topology`] with the downmix levels stated: where [`Fold::between`]
-/// is the fold, `levels` are its gains ([`Fold::spec`]). Channels placed by
-/// index have no levels.
-///
-/// # Errors
-///
-/// As [`fold_to_topology`].
-pub fn fold_to_topology_with<F: Float>(
-    src: &ChannelTopology,
-    dst: &ChannelTopology,
-    levels: FoldLevels,
-) -> Result<Fold<F>, FoldError> {
-    refuse_unnamed(src)?;
-    // An ambisonic source is as unplaced as unassigned channels: by index.
-    if src.is_unassigned() || src.ambisonic().is_some() || dst.is_unassigned() {
-        Fold::by_index(src.width(), dst.width())
-    } else {
-        Fold::spec(src, dst).levels(levels).build()
-    }
 }

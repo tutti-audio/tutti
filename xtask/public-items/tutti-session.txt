@@ -133,7 +133,6 @@ fn analyze::live::Analyzer::refused
 fn apply::Session::apply
 fn bounce::Bounce::channels
 fn bounce::Bounce::clock
-fn bounce::Bounce::create_new
 fn bounce::Bounce::edit
 fn bounce::Bounce::file_topology
 fn bounce::Bounce::latency
@@ -145,6 +144,7 @@ fn bounce::Bounce::new
 fn bounce::Bounce::normalize
 fn bounce::Bounce::on_event_loss
 fn bounce::Bounce::range
+fn bounce::Bounce::replace
 fn bounce::Bounce::resample
 fn bounce::Bounce::sample_rate
 fn bounce::Bounce::serial
@@ -607,6 +607,11 @@ fn plugin::preset::Session::load_preset_file
 fn plugin::scan::Session::measure_plugin
 fn plugin::scan::Session::register_plugin
 fn plugin::scan::Session::scan_plugins
+fn plugin::state::Saved::into_state
+fn plugin::state::Saved::new
+fn plugin::state::Saved::pending
+fn plugin::state::Saved::state
+fn plugin::state::Saved::with_pending
 fn plugin::state::Session::restore_state
 fn plugin::state::Session::save_state
 fn plugin_diagnostics::Diagnostics::block_counts
@@ -746,8 +751,8 @@ fn take::Take::id
 fn take::Take::placement
 fn take::Take::rolling
 fn take::Take::window
-fn take::TakeFile::create_new
 fn take::TakeFile::new
+fn take::TakeFile::replace
 fn take::TakeFile::wav
 fn take::TakePlacement::first_frame
 fn take::TakePlacement::latency
@@ -992,6 +997,7 @@ struct plugin::preset::LoadedPreset
 struct plugin::state::RestoreStateOp
 struct plugin::state::RestoredState
 struct plugin::state::SaveStateOp
+struct plugin::state::Saved
 struct plugin_diagnostics::Diagnostics
 struct plugin_diagnostics::PluginBuses
 struct plugin_params::ParamGesture

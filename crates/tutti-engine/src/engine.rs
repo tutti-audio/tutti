@@ -573,7 +573,7 @@ impl<F: Float> Engine<F> {
     /// stream is built for a device wider than that (or at all, to say so); it
     /// is a no-op for a width already supported. The device is taken to be the
     /// engine's order for its width where it has one: see
-    /// [`fold_to_width`](tutti_graph::fold_to_width). A buffer of a width not
+    /// [`Fold::to_channels`](tutti_buffers::Fold::to_channels). A buffer of a width not
     /// supported is not rendered into: the call is silent and counted in
     /// [`BlockCounts::silenced`], in
     /// every build.
@@ -687,7 +687,7 @@ impl<F: Float> Engine<F> {
     /// rendered at its **own** output width (at most [`MAX_CHANNELS`],
     /// which the editor's limits enforce) into scratch, then each frame is
     /// folded to the *output's* width — the device / target width — by
-    /// [`fold_to_width`](tutti_graph::fold_to_width), built in
+    /// [`Fold::to_channels`](tutti_buffers::Fold::to_channels), built in
     /// [`support_output`](Self::support_output): a surround main output plays folded to a
     /// stereo device by the ITU/Dolby matrix, or straight through to a
     /// matching-width one; a mono main output feeds the centre of a surround device

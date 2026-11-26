@@ -153,7 +153,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         .perform(main)
         .expect("saves");
     let restored = s
-        .restore_state(&key, state)
+        .restore_state(&key, tutti_session::Saved::new(state))
         .expect("its own plugin's")
         .perform(main)
         .expect("restores");

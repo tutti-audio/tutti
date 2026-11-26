@@ -2,9 +2,9 @@
 
 use core::marker::PhantomData;
 
-use super::{Fold, FoldError};
-use crate::ChannelTopology;
+use super::{Fold, FoldEnd, FoldError};
 use crate::Float;
+use crate::{ChannelSet, ChannelTopology, Speaker};
 use tutti_units::Amplitude;
 
 /// The gains a fold applies where a speaker the destination lacks folds into
@@ -101,18 +101,35 @@ impl FoldLevels {
 }
 
 /// A fold from one topology into another, with its levels stated and not yet
-/// built ([`Fold::spec`]).
+/// built ([`Fold::spec`], [`Fold::to_channels`]).
 #[derive(Debug, Clone, Copy)]
 #[must_use = "a spec builds nothing until `build`"]
 pub struct FoldSpec<'a, F: Float = f32> {
     src: &'a ChannelTopology,
-    dst: &'a ChannelTopology,
+    dst: Dest<'a>,
     levels: FoldLevels,
     float: PhantomData<F>,
 }
 
+/// What the spec folds into, and so which rules `build` applies.
+#[derive(Debug, Clone, Copy)]
+enum Dest<'a> {
+    /// A topology, by [`Fold::between`]'s rules alone.
+    Topology(&'a ChannelTopology),
+    /// A set of output channels, by [`Fold::to_channels`]'s rules.
+    Channels(&'a ChannelSet),
+}
+
 impl<'a, F: Float> FoldSpec<'a, F> {
     pub(super) fn new(src: &'a ChannelTopology, dst: &'a ChannelTopology) -> Self {
+        Self::of(src, Dest::Topology(dst))
+    }
+
+    pub(super) fn to_channels(src: &'a ChannelTopology, dst: &'a ChannelSet) -> Self {
+        Self::of(src, Dest::Channels(dst))
+    }
+
+    fn of(src: &'a ChannelTopology, dst: Dest<'a>) -> Self {
         Self {
             src,
             dst,
@@ -131,9 +148,36 @@ impl<'a, F: Float> FoldSpec<'a, F> {
     ///
     /// # Errors
     ///
-    /// As [`Fold::between`], and [`FoldError::NotAGain`] for a level that is
-    /// NaN, infinite or negative.
+    /// As [`Fold::between`] or [`Fold::to_channels`], whichever made the spec,
+    /// and [`FoldError::NotAGain`] for a level that is NaN, infinite or
+    /// negative.
     pub fn build(self) -> Result<Fold<F>, FoldError> {
-        Fold::build(self.src, self.dst, self.levels)
+        let (src, levels) = (self.src, self.levels);
+        match self.dst {
+            Dest::Topology(dst) => Fold::build(src, dst, levels),
+            Dest::Channels(set) => {
+                levels.check()?;
+                let unknown = src
+                    .positions()
+                    .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))));
+                if let Some(channel) = unknown {
+                    return Err(FoldError::Unnamed {
+                        end: FoldEnd::Source,
+                        channel,
+                    });
+                }
+                match set.topology() {
+                    // An ambisonic source is as unplaced as unassigned channels.
+                    Some(dst)
+                        if !(src.is_unassigned()
+                            || src.ambisonic().is_some()
+                            || dst.is_unassigned()) =>
+                    {
+                        Fold::build(src, dst, levels)
+                    }
+                    _ => Fold::by_index(src.width(), set.width()),
+                }
+            }
+        }
     }
 }

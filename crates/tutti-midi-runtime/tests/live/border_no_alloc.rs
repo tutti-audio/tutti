@@ -7,13 +7,13 @@
 use tutti_buffers::MaxBlock;
 use tutti_graph::{
     Editor, EventEdge, EventInletNode, EventInletWriter, EventInputPort, EventOutputPort, Harmony,
-    Prepare, TransportPosition,
+    Prepare, TransportChanges, TransportPosition,
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
-    DeviceGeneration, HarmonyChanges, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode,
-    MidiInputNode, MidiKeys, MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony,
-    TimedMidiEvent,
+    ClipEvents, DeviceGeneration, HarmonyChanges, HarmonyConfig, HarmonyNode, LIVE_INLET_CAPACITY,
+    MidiClipConfig, MidiClipNode, MidiInputNode, MidiKeys, MidiOutNode, MpeTransformNode,
+    SyncMessages, SyncOut, SyncOutConfig, TimedHarmony, TimedMidiEvent,
 };
 use tutti_music::{FrameClock, LoopRange};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
@@ -71,20 +71,18 @@ fn the_border_nodes_process_without_allocating() {
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
     let meter = tutti_timeline::ProjectMeter::default();
-    let sync_meter = meter.clone();
+    let mut lent_meter = meter.reader();
     ed.insert(
         NodeKey(3),
         "sync",
-        SyncOut::new(MidiGroup::FIRST)
-            .meter(move || sync_meter.reader())
-            .sending(SyncMessages {
-                clock: true,
-                mtc: true,
-                mmc: Some(Recipient::AllCall),
-                flex: true,
-                metronome: true,
-                rate: MtcRate::Fps30,
-            }),
+        SyncOut::from(SyncOutConfig::new(MidiGroup::FIRST).sending(SyncMessages {
+            clock: true,
+            mtc: true,
+            mmc: Some(Recipient::AllCall),
+            flex: true,
+            metronome: true,
+            rate: MtcRate::Fps30,
+        })),
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     ed.commit().unwrap();
@@ -122,12 +120,19 @@ fn the_border_nodes_process_without_allocating() {
         }
         let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
         let at = Beat::new(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
-        exec.process(
+        // The host lends the meter once a block, as the session does.
+        let lent = lent_meter.lend();
+        exec.apply_pending();
+        exec.render_applied(
             512,
             &TransportPosition::new(b % 50 != 0, tempo, at, None),
+            &TransportChanges::NONE,
             &[],
             &mut [],
+            Some(&*lent),
+            None,
         );
+        drop(lent);
         let n = out.poll_into(&mut drain);
         for (_, ump) in &drain[..n] {
             match ump.decode() {
@@ -392,38 +397,42 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
     ed.insert(
         NodeKey(1),
         "clip",
-        MidiClipNode::new([
-            TimedMidiEvent::new(beat(1_010.0), note_on(0, 60)).unwrap(),
-            TimedMidiEvent::new(beat(1_040.0), note_on(0, 64)).unwrap(),
-            // Held across every wrap, so each wrap lifts the pedal and
-            // centres the bend.
-            TimedMidiEvent::new(
-                beat(1_020.0),
-                Message::midi2(
-                    MidiChannel::FIRST,
-                    Voice2::control_change(tutti_ump::CCNumber::SUSTAIN, ControlValue::MAX),
-                ),
-            )
-            .unwrap(),
-            TimedMidiEvent::new(
-                beat(1_030.0),
-                Message::midi2(
-                    MidiChannel::FIRST,
-                    Voice2::PitchBend(BendValue::new(0xA000_0000)),
-                ),
-            )
-            .unwrap(),
-        ]),
+        MidiClipNode::from(
+            MidiClipConfig::default().events(ClipEvents::from_iter([
+                TimedMidiEvent::new(beat(1_010.0), note_on(0, 60)).unwrap(),
+                TimedMidiEvent::new(beat(1_040.0), note_on(0, 64)).unwrap(),
+                // Held across every wrap, so each wrap lifts the pedal and
+                // centres the bend.
+                TimedMidiEvent::new(
+                    beat(1_020.0),
+                    Message::midi2(
+                        MidiChannel::FIRST,
+                        Voice2::control_change(tutti_ump::CCNumber::SUSTAIN, ControlValue::MAX),
+                    ),
+                )
+                .unwrap(),
+                TimedMidiEvent::new(
+                    beat(1_030.0),
+                    Message::midi2(
+                        MidiChannel::FIRST,
+                        Voice2::PitchBend(BendValue::new(0xA000_0000)),
+                    ),
+                )
+                .unwrap(),
+            ])),
+        ),
     );
     ed.insert(
         NodeKey(2),
         "harmony",
-        HarmonyNode::new(
-            HarmonyChanges::new([
-                TimedHarmony::new(Beat::new(0.0), Harmony::chord(60, 60, 0b1001_0001)),
-                TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
-            ])
-            .expect("two chords at distinct finite beats"),
+        HarmonyNode::from(
+            HarmonyConfig::default().changes(
+                HarmonyChanges::new([
+                    TimedHarmony::new(Beat::new(0.0), Harmony::chord(60, 60, 0b1001_0001)),
+                    TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
+                ])
+                .expect("two chords at distinct finite beats"),
+            ),
         ),
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
@@ -487,7 +496,11 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(64)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
@@ -556,7 +569,11 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(512)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
@@ -748,11 +765,11 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
         .insert(
             NodeKey(1),
             "mmc",
-            SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
+            SyncOut::from(SyncOutConfig::new(MidiGroup::FIRST).sending(SyncMessages {
                 mmc: Some(Recipient::AllCall),
                 rate: MtcRate::Fps30,
                 ..SyncMessages::OFF
-            }),
+            })),
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
@@ -810,14 +827,14 @@ fn resetting_the_border_nodes_allocates_nothing() {
 
     let rate = SampleRate::SR_48K;
     let mut input = Direct::new(MidiInputNode::new(), rate, 64);
-    let sync = SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
+    let sync = SyncOut::from(SyncOutConfig::new(MidiGroup::FIRST).sending(SyncMessages {
         clock: true,
         mtc: true,
         mmc: Some(Recipient::AllCall),
         flex: true,
         metronome: true,
         rate: MtcRate::Fps30,
-    });
+    }));
     let mut sync = Direct::new(sync, rate, 64);
     let sent = |d: &mut Direct<SyncOut>, playing: bool, beat: f64| {
         let out = tutti_graph::Node::<f32>::shape(&*d.node)

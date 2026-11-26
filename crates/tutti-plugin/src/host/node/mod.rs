@@ -791,7 +791,7 @@ impl PluginAnswers {
     pub fn save_state(
         &self,
         state_use: tutti_plugin_types::StateUse,
-    ) -> Answer<Result<Vec<u8>, tutti_plugin_types::StateError>> {
+    ) -> Answer<Result<tutti_plugin_types::PluginState, tutti_plugin_types::StateError>> {
         self.bridge.audio().save_state_answer(state_use)
     }
 

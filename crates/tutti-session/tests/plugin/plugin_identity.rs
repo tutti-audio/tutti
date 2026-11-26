@@ -127,7 +127,7 @@ fn a_state_is_refused_by_another_plugin() {
     let id_of = |id: &str| PluginId::Clap(id.into());
     let refused = s
         .load_out_of_process(&id_of(second_id()), &catalog)
-        .initial_state(from_first.clone())
+        .initial_state(tutti_session::Saved::new(from_first.clone()))
         .expect_err("the first plugin's state is not the second's");
     let SavedPeer::Plugin(expected) = refused.expected() else {
         panic!("a plugin: {:?}", refused.expected());
@@ -140,21 +140,21 @@ fn a_state_is_refused_by_another_plugin() {
     );
     assert!(
         s.load_out_of_process(&id_of(first_id()), &catalog)
-            .initial_state(from_first.clone())
+            .initial_state(tutti_session::Saved::new(from_first.clone()))
             .is_ok(),
         "its own state is accepted"
     );
 
     // The hosted plugin.
     let refused = s
-        .restore_state(&second, from_first.clone())
+        .restore_state(&second, tutti_session::Saved::new(from_first.clone()))
         .expect_err("a hosted plugin refuses another's state");
     assert!(
         matches!(refused, StateStartError::OtherPeer(_)),
         "{refused:?}"
     );
     let restored = s
-        .restore_state(&second, from_second)
+        .restore_state(&second, tutti_session::Saved::new(from_second))
         .expect("and takes its own")
         .perform(main)
         .expect("the plugin takes it");

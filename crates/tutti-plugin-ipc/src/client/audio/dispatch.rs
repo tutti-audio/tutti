@@ -848,9 +848,6 @@ pub(super) fn handle_audio(
             // Taken now, as this lane dequeues it: every block queued before it
             // has taken what was written before that block, and what is taken
             // here is newer than all of it.
-            // An ask made meanwhile may queue one more: an extra flush, possibly
-            // empty, goes out, which is harmless.
-            channels.flush_dequeued();
             // Sent even when empty: its answer, heard after any earlier
             // request's, acknowledges the writes that request carried.
             let (changes, swept) = state.flush_frame(channels);

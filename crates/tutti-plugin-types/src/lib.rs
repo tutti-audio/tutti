@@ -276,7 +276,7 @@ pub use tutti_music::{BeatsPerBar, NoteValue, TimeSignature};
 pub use tutti_units::{BarNumber, Seconds};
 
 pub use answer::{Answer, AnswerSender};
-pub use any_thread::{AnyThread, Health};
+pub use any_thread::{AnyThread, Health, PluginState, PluginValue};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{IpcError, IpcResult, NoEditorHost, PluginForkError};
@@ -288,7 +288,9 @@ pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, si
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};
-pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots, epoch_before};
+pub use edit_slots::{
+    EditReader, EditWriter, UnknownParam, edit_slots, epoch_before, overlay_writes,
+};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorMirrorError, EditorOpened,
     EditorUnit, InvalidContentScale, KeyEvent, KeyUse, ModifierConvention, ResizeHints,

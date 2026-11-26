@@ -18,7 +18,7 @@ use tutti_graph::{
     Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_polysynth::{OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -104,7 +104,11 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.wire_declared_outputs([PortSource::Zero; 2]).unwrap();
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));
-        ed.insert(clip, "clip", MidiClipNode::new(notes(k)));
+        ed.insert(
+            clip,
+            "clip",
+            MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(notes(k)))),
+        );
         match (k < LIGHT, declared) {
             (true, true) => {
                 ed.insert(key, "synth", synth(8, 1));

@@ -29,7 +29,7 @@ impl AnyThread for ServedHandle {
         self.served.parameter_descriptors()
     }
 
-    fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
+    fn parameter_value(&self, id: ParamId) -> Answer<Option<tutti_plugin_types::PluginValue>> {
         self.served.parameter_value(id)
     }
 
@@ -53,7 +53,10 @@ impl AnyThread for ServedHandle {
         self.served.parameter_value_from_text(id, text)
     }
 
-    fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+    fn save_state(
+        &self,
+        state_use: StateUse,
+    ) -> Result<tutti_plugin_types::PluginState, StateError> {
         self.served.save_state(state_use)
     }
 

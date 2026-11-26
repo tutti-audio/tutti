@@ -16,7 +16,7 @@ use tutti_rt::Mutex;
 use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
 
 use crate::ledger::NoteLedger;
-use crate::{ClipEvents, MidiClipControls, MidiClipNode, TimedMidiEvent};
+use crate::{ClipEvents, MidiClipConfig, MidiClipControls, MidiClipNode, TimedMidiEvent};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_fixtures::midi;
@@ -512,7 +512,11 @@ fn clip_rig(events: Vec<TimedMidiEvent>) -> (Editor, Executor, Shared) {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(64)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     let tally = sink(&mut ed, 2);
     connect(&mut ed, 1, 2);
     ed.commit().unwrap();
@@ -637,7 +641,10 @@ fn holding_clip() -> (Editor, Executor, crate::MidiClipControls, Shared, Shared)
         .insert(
             NodeKey(1),
             "clip",
-            MidiClipNode::new([at(0, on(60)), at(100_000, off(60))]),
+            MidiClipNode::from(
+                MidiClipConfig::default()
+                    .events(ClipEvents::from_iter([at(0, on(60)), at(100_000, off(60))])),
+            ),
         )
         .controls;
     let a = sink(&mut ed, 2);
@@ -680,7 +687,10 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     ed.insert(
         NodeKey(1),
         "clip",
-        MidiClipNode::new([at(0, on(60)), at(100_000, off(60))]),
+        MidiClipNode::from(
+            MidiClipConfig::default()
+                .events(ClipEvents::from_iter([at(0, on(60)), at(100_000, off(60))])),
+        ),
     );
     ed.insert(NodeKey(4), "latent", Unforkable(Latent(1_024)));
     let a = Shared::default();
@@ -731,7 +741,10 @@ fn forkable_rig() -> (
         .insert(
             NodeKey(1),
             "clip",
-            MidiClipNode::new([at(10, on(60)), at(300, off(60))]),
+            MidiClipNode::from(
+                MidiClipConfig::default()
+                    .events(ClipEvents::from_iter([at(10, on(60)), at(300, off(60))])),
+            ),
         )
         .controls;
     let tally = Shared::default();
@@ -791,7 +804,10 @@ fn a_fork_starts_with_an_empty_table() {
 #[test]
 fn a_reset_node_forgets_the_notes_it_held() {
     let stop_after = |reset: bool| {
-        let clip = MidiClipNode::new([at(10, on(60)), at(5_000, off(60))]);
+        let clip = MidiClipNode::from(
+            MidiClipConfig::default()
+                .events(ClipEvents::from_iter([at(10, on(60)), at(5_000, off(60))])),
+        );
         let mut d = Direct::new(clip, SampleRate::SR_48K, 256);
         let out = tutti_graph::Node::<f32>::shape(&*d.node)
             .event_output(0)
@@ -1146,7 +1162,13 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
             MaxBlock::of(Samples::new(64)),
         ));
         let controls: MidiClipControls = ed
-            .insert(NodeKey(1), "clip", MidiClipNode::new(first.clone()))
+            .insert(
+                NodeKey(1),
+                "clip",
+                MidiClipNode::from(
+                    MidiClipConfig::default().events(ClipEvents::from_iter(first.clone())),
+                ),
+            )
             .controls;
         let tally = sink(&mut ed, 2);
         connect(&mut ed, 1, 2);

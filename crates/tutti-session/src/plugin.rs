@@ -193,7 +193,7 @@ pub use preset::{
 pub use state::{
     PluginApplyError, RestoreState, RestoreStateInProcess, RestoreStateOp,
     RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess, SaveStateOp,
-    SaveStateOutOfProcess, StateStartError,
+    SaveStateOutOfProcess, Saved, StateStartError,
 };
 
 use crate::plugin_diagnostics::Figures;
@@ -222,7 +222,7 @@ pub(crate) struct PluginLoad {
     loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
-    state: Option<Arc<PeerState>>,
+    state: Option<Arc<Saved>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
     /// The session's executor, which an out-of-process plugin's exit watch runs on. The
@@ -305,7 +305,7 @@ impl PluginLoad {
         // a plugin may take its mode from the state at activation. A refusal
         // does not abort the load: a plugin at its defaults beats no plugin. But
         // it is not silent.
-        let state = self.state.as_deref().map(PeerState::bytes);
+        let state = self.state.as_deref().map(|saved| saved.state().bytes());
         let opened = match (at, state) {
             (Opening::OutOfProcess, None) => self.executor().and_then(|executor| {
                 HostPlugin::open_served(
@@ -356,6 +356,12 @@ impl PluginLoad {
             }
             Err(e) => (Err(e), None),
         };
+        // The writes the state did not hold, once the plugin took it: replayed
+        // once the plugin is a record's, through its ledger.
+        let replay = match (&plugin, &restore, &self.state) {
+            (Ok(_), Some(Ok(())), Some(saved)) => saved.pending().to_vec(),
+            _ => Vec::new(),
+        };
         if let (Ok(plugin), Some(Err(e))) = (&plugin, &restore) {
             tracing::warn!(
                 "{}: saved state was not restored ({e}); the plugin is loaded at its \
@@ -391,6 +397,7 @@ impl PluginLoad {
             plugin,
             restore,
             mirror,
+            replay,
         }
     }
 }
@@ -420,6 +427,9 @@ struct Open {
     /// The state restore, if one was asked for, and the refusal when it was refused.
     restore: Option<Result<(), StateError>>,
     mirror: Option<Mirror>,
+    /// The writes the restored state did not hold, to replay through the
+    /// record's ledger once the plugin is one's.
+    replay: Vec<(tutti_units::ParamId, tutti_units::Normalized)>,
 }
 
 impl Open {
@@ -429,6 +439,7 @@ impl Open {
             plugin: Err(why),
             restore: None,
             mirror: None,
+            replay: Vec::new(),
         }
     }
 }
@@ -662,6 +673,21 @@ pub enum PluginChange {
         /// Why the state was not restored.
         reason: String,
     },
+    /// A parameter write the plugin refused because it no longer declares the
+    /// parameter (a rescan dropped it after the session read its list). The
+    /// write is given up: sending it again would repeat the refusal. Reported
+    /// once per write.
+    ParamUndeclared {
+        /// The parameter, by the id the write named.
+        id: ParamId,
+    },
+    /// A parameter write the plugin refused because it declares the parameter
+    /// read-only. The write is given up: sending it again would repeat the
+    /// refusal. Reported once per write.
+    ParamReadOnly {
+        /// The parameter, by the id the write named.
+        id: ParamId,
+    },
     /// The plugin was prepared off the main thread, where a render mode change
     /// cannot run: it keeps the mode it runs in, and the next prepare on the
     /// main thread applies it. Not a refusal by the plugin.
@@ -728,7 +754,7 @@ pub enum PluginChange {
         why: GiveUp,
         /// The last state worth keeping, for a host that offers the user a
         /// manual reload: the state a reload withheld, else the last good one.
-        state: Option<Box<PeerState>>,
+        state: Option<Box<Saved>>,
     },
 }
 
@@ -960,13 +986,13 @@ pub(crate) struct HostedPlugin {
     pub(crate) told: bool,
     /// The plugin's own bypass against the node's mode.
     pub(crate) bypass: crate::bypass::BypassSync,
-    snapshot: Option<PeerState>,
+    snapshot: Option<Saved>,
     /// When the snapshot's capture was asked for.
     snapshot_from: Option<Instant>,
     /// A snapshot left out of a reload ([`StateRestore::Withheld`]), kept for
     /// the host ([`StateView::withheld`]); later
     /// snapshots go to `snapshot` and never replace it.
-    withheld: Option<PeerState>,
+    withheld: Option<Saved>,
     /// Until when a plugin that has just restored a state is suspected of
     /// dying of it.
     probation_until: Option<Instant>,
@@ -997,8 +1023,9 @@ pub(crate) struct HostedPlugin {
     /// The writes the plugin did not take after the session read its
     /// declaration (a dropped parameter, a lost plugin, one that did not
     /// answer), which the value table counts and
-    /// [`Plugin::losses`] reports as refused.
-    refused_writes: Arc<std::sync::atomic::AtomicU64>,
+    /// [`Plugin::losses`] reports as refused; and the ones owed again or
+    /// refused by name ([`WriteLedger`](crate::value::WriteLedger)).
+    writes: Arc<crate::value::WriteLedger>,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` starts it as a task.
@@ -1264,7 +1291,7 @@ impl HostedPlugin {
             mirror,
             gate: Gate::default(),
             driven: crate::plugin_params::Driven::default(),
-            refused_writes: Arc::default(),
+            writes: Arc::default(),
             param_read: Some(read),
             carried: None,
             mirror_token: Arc::new(()),
@@ -1419,10 +1446,7 @@ impl HostedPlugin {
         self.banked
             + self.node_losses()
             + tutti_units::Losses::lost(self.handle.dropped_parameter_events())
-            + tutti_units::Losses::refused(
-                self.refused_writes
-                    .load(std::sync::atomic::Ordering::Relaxed),
-            )
+            + tutti_units::Losses::refused(self.writes.lost())
     }
 
     /// Keeps the declarations and values the mirror holds when `incoming` is
@@ -1473,6 +1497,8 @@ impl HostedPlugin {
         // The incoming plugin has been told nothing of its track.
         self.track.resend();
         self.midi_map.resend();
+        // The writes owed or untold were the outgoing plugin's.
+        self.writes.end_epoch();
         self.snapshot = None;
         self.snapshot_from = None;
         self.withheld = None;
@@ -1579,7 +1605,7 @@ impl HostedPlugin {
             self.driven.clone(),
             &self.mirror,
             self.carried.as_deref(),
-            Arc::clone(&self.refused_writes),
+            Arc::clone(&self.writes),
         );
         let mode = self
             .takes_automation_mode()
@@ -1842,7 +1868,7 @@ impl<'a> StateView<'a> {
     /// The last state captured while the plugin was healthy: the
     /// crash-recovery copy a reload restores, up to a snapshot interval
     /// stale. A project is saved with [`Session::save_state`], not from this.
-    pub fn last_good(&self) -> Option<&'a PeerState> {
+    pub fn last_good(&self) -> Option<&'a Saved> {
         self.hosted.snapshot.as_ref()
     }
 
@@ -1851,7 +1877,7 @@ impl<'a> StateView<'a> {
     /// host may still offer to load by hand. Kept until the plugin is
     /// withheld from again or replaced by the host; the states captured since
     /// (of a plugin at its defaults) do not replace it.
-    pub fn withheld(&self) -> Option<&'a PeerState> {
+    pub fn withheld(&self) -> Option<&'a Saved> {
         self.hosted.withheld.as_ref()
     }
 }
@@ -2023,7 +2049,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         node: NodeKey,
         token: &Arc<()>,
         asked: Instant,
-        state: Result<Vec<u8>, StateError>,
+        state: Result<tutti_plugin_types::PluginState, StateError>,
     ) -> bool {
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return false;
@@ -2033,8 +2059,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return false;
         }
         match state {
-            Ok(bytes) => {
-                hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), bytes));
+            Ok(state) => {
+                hosted.snapshot = Some(Saved::with_pending(
+                    PeerState::of_plugin(hosted.plugin.clone(), state.bytes),
+                    state.pending,
+                ));
                 hosted.snapshot_from = Some(asked);
                 true
             }
@@ -2139,6 +2168,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             plugin,
             restore,
             mirror,
+            replay: _,
         } = opened;
         let client = match plugin.map(HostPlugin::into_client) {
             Ok(Ok(client)) => client,
@@ -2305,6 +2335,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return;
         };
+        // The writes the restored snapshot did not hold, through the new
+        // plugin's ledger: the swap ended the old one's epoch, so nothing owed by
+        // the dead instance is sent over them.
+        if matches!(restore, StateRestore::Restored { .. })
+            && let Some(saved) = &snapshot
+        {
+            hosted.writes.send_each(&hosted.handle, saved.pending());
+        }
         hosted.snapshot = snapshot;
         hosted.withheld = withheld_bytes;
         hosted.snapshot_from = snapshot_from;
@@ -2649,6 +2687,27 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 hosted.track.deliver(&hosted.handle, main);
                 hosted.midi_map.deliver(&hosted.handle, main);
             }
+            // The writes the plugin could not answer for are sent again, and the
+            // ones it refused by name are told.
+            out.extend(
+                hosted
+                    .writes
+                    .resend(&hosted.handle)
+                    .into_iter()
+                    .map(|refusal| {
+                        event(
+                            node,
+                            match refusal {
+                                crate::value::WriteRefusal::Undeclared(id) => {
+                                    PluginChange::ParamUndeclared { id }
+                                }
+                                crate::value::WriteRefusal::ReadOnly(id) => {
+                                    PluginChange::ParamReadOnly { id }
+                                }
+                            },
+                        )
+                    }),
+            );
             match hosted.liveness.observe(cause.is_none(), now) {
                 LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,
                 LivenessVerdict::Failing { .. } => hosted.status = PluginLiveness::Failing,
@@ -3376,13 +3435,13 @@ mod tests {
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
-        fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::Answer::ready(
-                self.params
-                    .iter()
-                    .find(|(a, _)| *a == id)
-                    .map(|&(_, v)| Normalized::clamped(f64::from(v))),
-            )
+        fn parameter_value(
+            &self,
+            id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
+            tutti_plugin_types::Answer::ready(self.params.iter().find(|(a, _)| *a == id).map(
+                |&(_, v)| tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v))),
+            ))
         }
         /// A held list is a round trip in flight: a thread of its own waits for the test's
         /// token and then answers, so no executor thread waits on it. A dropped sender
@@ -3432,11 +3491,12 @@ mod tests {
         fn save_state(
             &self,
             _: tutti_plugin_types::StateUse,
-        ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        ) -> Result<tutti_plugin_types::PluginState, tutti_plugin_types::StateError> {
             self.saves.fetch_add(1, Ordering::SeqCst);
             self.held();
             self.state
                 .clone()
+                .map(tutti_plugin_types::PluginState::new)
                 .ok_or(tutti_plugin_types::StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
@@ -3744,7 +3804,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PeerState::bytes),
+                .map(|saved| saved.state().bytes()),
             Some(&[1u8, 2, 3][..])
         );
         assert_eq!(rig.snapshot_holders(), 2, "a landed task frees it");
@@ -3767,7 +3827,10 @@ mod tests {
     fn a_declined_save_keeps_the_previous_snapshot() {
         let mut rig = rig(None);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
-        hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), vec![4, 2]));
+        hosted.snapshot = Some(Saved::new(PeerState::of_plugin(
+            hosted.plugin.clone(),
+            vec![4, 2],
+        )));
         let _ = rig.events_at(0);
         let _ = rig.events_at(1_000);
         rig.settle();
@@ -3783,7 +3846,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PeerState::bytes),
+                .map(|saved| saved.state().bytes()),
             Some(&[4u8, 2][..]),
             "a declined save must keep the last good snapshot"
         );
@@ -4018,7 +4081,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PeerState::bytes),
+                .map(|saved| saved.state().bytes()),
             None,
             "the outgoing plugin's snapshot is not the incoming one's"
         );
@@ -4031,7 +4094,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PeerState::bytes),
+                .map(|saved| saved.state().bytes()),
             None,
             "the outgoing plugin's task must not land on the incoming plugin"
         );
@@ -4048,7 +4111,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PeerState::bytes),
+                .map(|saved| saved.state().bytes()),
             Some(&[9u8][..])
         );
     }

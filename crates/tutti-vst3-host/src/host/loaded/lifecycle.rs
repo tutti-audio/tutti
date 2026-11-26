@@ -165,6 +165,7 @@ impl Vst3Loaded {
             descriptor: OnceLock::new(),
             active: Activation::default(),
             carried: Vec::new(),
+            refused: tutti_rt::tally(),
             declared: None,
             assignments: Vec::new(),
             dropped_seen: 0,

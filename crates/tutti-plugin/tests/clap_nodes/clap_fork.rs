@@ -211,7 +211,8 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         .expect("the probe forks");
     let state_at_fork = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the probe saves");
+        .expect("the probe saves")
+        .bytes;
 
     // After the fork: the live instance moves to -15 dB.
     probe
@@ -280,7 +281,8 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     assert_eq!(
         handle
             .save_state(tutti_plugin_types::StateUse::Project)
-            .expect("the probe saves"),
+            .expect("the probe saves")
+            .bytes,
         state_at_fork,
         "rendering the fork changed the live instance's state"
     );
@@ -361,7 +363,8 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
     let project = probe
         .handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the project save");
+        .expect("the project save")
+        .bytes;
     assert_eq!(project[CONTEXT_BYTE], 3, "a project save is FOR_PROJECT");
 
     probe
@@ -815,7 +818,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
 /// notes, started on frame `on` and ended on frame `off`.
 fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) {
     use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
-    use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
     use tutti_ump::{MidiChannel, MidiGroup};
     use tutti_units::Beat;
 
@@ -842,7 +845,11 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
         ]
     });
     let clip = NodeKey(1);
-    live.insert(clip, "clip", MidiClipNode::new(events));
+    live.insert(
+        clip,
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     live.connect_events(
         EventInputPort::new(plugin, 0),
         EventEdge::Direct(EventOutputPort::new(clip, 0)),
@@ -917,7 +924,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
 /// frames).
 fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
     use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
-    use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
 
@@ -925,14 +932,16 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
     live.insert(
         clip,
         "clip",
-        MidiClipNode::new([TimedMidiEvent::new(
-            Beat::new(frame as f64 / 24_000.0),
-            Message::midi2(
-                MidiChannel::FIRST,
-                Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
-            ),
-        )
-        .unwrap()]),
+        MidiClipNode::from(
+            MidiClipConfig::default().events(ClipEvents::from_iter([TimedMidiEvent::new(
+                Beat::new(frame as f64 / 24_000.0),
+                Message::midi2(
+                    MidiChannel::FIRST,
+                    Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
+                ),
+            )
+            .unwrap()])),
+        ),
     );
     live.connect_events(
         EventInputPort::new(plugin, 0),
@@ -1025,7 +1034,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
 #[test]
 fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
-    use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
 
@@ -1045,14 +1054,16 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     live.insert(
         clip,
         "clip",
-        MidiClipNode::new([TimedMidiEvent::new(
-            Beat::new(NOTE_FRAME as f64 / 24_000.0),
-            Message::midi2(
-                MidiChannel::FIRST,
-                Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
-            ),
-        )
-        .unwrap()]),
+        MidiClipNode::from(
+            MidiClipConfig::default().events(ClipEvents::from_iter([TimedMidiEvent::new(
+                Beat::new(NOTE_FRAME as f64 / 24_000.0),
+                Message::midi2(
+                    MidiChannel::FIRST,
+                    Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
+                ),
+            )
+            .unwrap()])),
+        ),
     );
     let _controls = live.insert(
         key,
@@ -1144,7 +1155,7 @@ impl tutti_graph::Node for MidiSink {
 #[test]
 fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
     use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
-    use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
 
@@ -1165,9 +1176,9 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
         live.insert(
             clip,
             "clip",
-            MidiClipNode::new([
+            MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
                 TimedMidiEvent::new(Beat::new(NOTE_FRAME as f64 / 24_000.0), on).unwrap(),
-            ]),
+            ]))),
         );
         let _controls = live.insert(
             key,
@@ -1393,7 +1404,8 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let state = probe
         .handle
         .save_state(StateUse::Duplicate)
-        .expect("the probe saves");
+        .expect("the probe saves")
+        .bytes;
     let dir = tempfile::TempDir::new().expect("a directory");
     let preset = dir.path().join("a.tutti-preset");
     std::fs::write(&preset, b"x").expect("a preset file");

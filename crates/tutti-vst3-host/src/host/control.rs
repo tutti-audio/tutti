@@ -66,16 +66,6 @@ pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> Plugin
 }
 
 impl Vst3Loaded {
-    /// [`Control::save_state`], with `undrained` stored beside the carried
-    /// writes: the Controller's, which no block has taken.
-    pub(super) fn save_state_with(
-        &mut self,
-        main: MainThreadMarker,
-        undrained: &[(ParamId, Normalized)],
-    ) -> PluginResult<Vec<u8>> {
-        self.read_state(main, undrained).map_err(plugin_error)
-    }
-
     /// [`Control::load_state`], keeping the writes the blob carried: applied to
     /// the controller already, and owed to the component's next block.
     pub(super) fn restore_state(
@@ -411,7 +401,17 @@ impl Control for Vst3Loaded {
     }
 
     fn save_state(&mut self, main: MainThreadMarker, _: StateUse) -> PluginResult<Vec<u8>> {
-        self.save_state_with(main, &[])
+        self.read_state(main).map_err(plugin_error)
+    }
+
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        self.refused.clone()
+    }
+
+    /// The writes made while the plugin was not active, waiting for the next
+    /// activation's first block.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.carried.clone()
     }
 
     /// Restores the state. The writes a rejoin carried are older than it, and

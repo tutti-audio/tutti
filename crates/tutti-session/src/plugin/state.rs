@@ -12,27 +12,82 @@
 //! Nothing is posted to the session and no `update` has to run for either. Both are an
 //! [`Op`] over a [`PluginOp`].
 //!
-//! A save is pure data ([`PeerState`]). A restore ends as a [`RestoredState`],
+//! A save is pure data ([`Saved`]: the plugin's [`PeerState`] and the parameter
+//! writes the state does not hold yet). A restore ends as a [`RestoredState`],
 //! which [`Session::apply`] takes back: it queues the read of the plugin's
 //! parameters, and refuses by name when the node it was cut from is gone or
 //! now hosts another plugin instance. For an out-of-process plugin it also has
 //! the plugin's editor-only in-process instance (an Audio Unit's) load the state,
 //! on the main thread at the session's next update.
 
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::{Answer, PluginAnswers};
-use tutti_plugin_host::PendingWrites;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
+use tutti_plugin_types::{MainThreadMarker, PluginRef, PluginState, StateError, StateUse};
+use tutti_units::{Normalized, ParamId};
 
 use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::{AnyPlugin, Gate};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Key, NoSuchNode, OtherPeer, PeerState, SavedPeer, Session};
+
+/// A plugin's saved state: the [`PeerState`] its own bytes make, and the
+/// parameter writes the host made that those bytes do not hold yet.
+///
+/// A save never waits for a block ([`Session::save_state`]): a write a block has
+/// not applied is stated in [`pending`](Self::pending), the newest value of each
+/// parameter, and [`Session::restore_state`] replays it after the load, so the
+/// plugin ends on what the host wanted. A state with nothing pending is one the
+/// plugin's bytes hold whole.
+///
+/// **The one gap.** A change the plugin made itself (its editor, its own
+/// automation) whose report has not reached the host yet is not in the host's
+/// record: replaying a pending write over it can overwrite it, by one report's
+/// latency. The record follows the plugin's reports.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Saved {
+    state: PeerState,
+    pending: Vec<(ParamId, Normalized)>,
+}
+
+impl Saved {
+    /// `state` with nothing pending.
+    #[must_use]
+    pub fn new(state: PeerState) -> Self {
+        Self::with_pending(state, Vec::new())
+    }
+
+    /// `state` with the writes it does not hold yet, to replay after a load.
+    #[must_use]
+    pub fn with_pending(state: PeerState, pending: Vec<(ParamId, Normalized)>) -> Self {
+        Self { state, pending }
+    }
+
+    /// The plugin's own state.
+    #[must_use]
+    pub fn state(&self) -> &PeerState {
+        &self.state
+    }
+
+    /// The newest unapplied host write of each parameter: what a restore replays
+    /// after the load.
+    #[must_use]
+    pub fn pending(&self) -> &[(ParamId, Normalized)] {
+        &self.pending
+    }
+
+    /// The plugin's own state, with the pending writes dropped.
+    #[must_use]
+    pub fn into_state(self) -> PeerState {
+        self.state
+    }
+}
 
 /// Why [`Session::restore_state`] made no value.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -80,7 +135,7 @@ pub type SaveState = Op<SaveStateOp>;
 /// The value [`Session::save_state`] returns for a plugin in this process:
 /// `!Send`, run on the
 /// main thread. Its [`poll`](InProcessOp::poll) asks the plugin for its state and
-/// yields the [`PeerState`]; it ends in [`StateError::Lost`] when the node was
+/// yields the [`Saved`]; it ends in [`StateError::Lost`] when the node was
 /// removed or the plugin replaced since the value was made (nothing is asked),
 /// otherwise the plugin's own error: it is gone, busy, refused, or has no state
 /// route.
@@ -119,8 +174,8 @@ pub struct SaveStateOp {
 impl OpSealed for SaveStateOp {}
 
 impl PluginOp for SaveStateOp {
-    type Reply = Vec<u8>;
-    type Output = PeerState;
+    type Reply = PluginState;
+    type Output = Saved;
     type Error = StateError;
 
     fn ended(&self) -> bool {
@@ -143,17 +198,19 @@ impl PluginOp for SaveStateOp {
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        pending: &mut PendingWrites,
-    ) -> Poll<Result<Vec<u8>, StateError>> {
-        handle.save_state_on(main, self.state_use, pending)
+    ) -> Poll<Result<PluginState, StateError>> {
+        Poll::Ready(handle.save_state_on(main, self.state_use))
     }
 
-    fn send(&self, answers: &PluginAnswers) -> Answer<Result<Vec<u8>, StateError>> {
+    fn send(&self, answers: &PluginAnswers) -> Answer<Result<PluginState, StateError>> {
         answers.save_state(self.state_use)
     }
 
-    fn finish(self, bytes: Vec<u8>, _answers: Option<&PluginAnswers>) -> PeerState {
-        PeerState::of_plugin(self.plugin, bytes)
+    fn finish(self, saved: PluginState, _answers: Option<&PluginAnswers>) -> Saved {
+        Saved::with_pending(
+            PeerState::of_plugin(self.plugin, saved.bytes),
+            saved.pending,
+        )
     }
 }
 
@@ -214,7 +271,11 @@ pub type RestoreStateOutOfProcess = OutOfProcessOp<RestoreStateOp>;
 #[derive(Debug)]
 pub struct RestoreStateOp {
     landed: Landed,
-    state: PeerState,
+    saved: Saved,
+    /// The plugin's handle and its write ledger, which the pending writes are
+    /// replayed through once the state has loaded: the one write path.
+    handle: PluginHandle,
+    writes: Arc<crate::value::WriteLedger>,
 }
 
 impl OpSealed for RestoreStateOp {}
@@ -240,21 +301,27 @@ impl PluginOp for RestoreStateOp {
         StateError::Stalled { after }
     }
 
-    fn run(
-        &self,
-        handle: &PluginHandle,
-        main: MainThreadMarker,
-        _pending: &mut PendingWrites,
-    ) -> Poll<Result<(), StateError>> {
-        handle.load_state(main, self.state.bytes())
+    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Poll<Result<(), StateError>> {
+        handle.load_state(main, self.saved.state().bytes())
     }
 
     fn send(&self, answers: &PluginAnswers) -> Answer<Result<(), StateError>> {
-        answers.load_state(self.state.bytes())
+        answers.load_state(self.saved.state().bytes())
     }
 
     fn finish(self, (): (), answers: Option<&PluginAnswers>) -> RestoredState {
-        let Self { mut landed, state } = self;
+        let Self {
+            mut landed,
+            saved,
+            handle,
+            writes,
+        } = self;
+        // The writes the state does not hold, after it: the load made every
+        // write before it stale, so these are the plugin's wanted values. Each
+        // is sent as any write is: one the plugin does not answer for is owed,
+        // one it refuses is told.
+        writes.send_each(&handle, saved.pending());
+        let state = saved.into_state();
         // What `Session::apply` has the editor-only instance load, once the
         // server took the state.
         landed.mirror = answers.map(|answers| Mirror {
@@ -380,7 +447,8 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         ))
     }
 
-    /// Puts `state` back into the plugin hosted at `node`: run it on the main
+    /// Puts `saved` back into the plugin hosted at `node`: its state, then its
+    /// pending writes, in the one call: run it on the main
     /// thread with [`RestoreStateInProcess::poll`] or await it
     /// ([`RestoreStateOutOfProcess`]), then hand its output to
     /// [`apply`](Self::apply).
@@ -388,19 +456,28 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// # Errors
     ///
     /// [`StateStartError::NoNode`] when no plugin is hosted at `node`;
-    /// [`StateStartError::OtherPeer`] when `state` was saved from another peer
+    /// [`StateStartError::OtherPeer`] when `saved` was saved from another peer
     /// than this plugin (nothing is sent).
     pub fn restore_state(
         &self,
         node: &Key<AnyPlugin>,
-        state: PeerState,
+        saved: Saved,
     ) -> Result<RestoreState, StateStartError> {
         let hosted = self.hosted_at(node)?;
-        state
+        saved
+            .state()
             .check_for(&SavedPeer::Plugin(hosted.plugin.clone()))
             .map_err(StateStartError::OtherPeer)?;
         let landed = Landed::of(self, *node, hosted.gate.clone());
-        Ok(Op::at(hosted, RestoreStateOp { landed, state }))
+        Ok(Op::at(
+            hosted,
+            RestoreStateOp {
+                landed,
+                saved,
+                handle: hosted.handle.clone(),
+                writes: Arc::clone(&hosted.writes),
+            },
+        ))
     }
 
     /// The record of the plugin hosted at `node`.

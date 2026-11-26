@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     ChannelTable, EditReader, ParamAccess, ParamEdit, ParamWriteError, PluginError, PluginIo,
     PluginResult, Processor, ReportSink, RtMidiEvents,
 };
-use tutti_rt::{DrainBeat, TallyWriter, tally};
+use tutti_rt::{TallyWriter, tally};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -214,16 +214,16 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// The plugin's `outputParameterChanges` on their way to the Controller:
     /// the last point of each emitted parameter, per block.
     reports: ReportSink,
-    /// Counts the drains, for the Controller's record of what a block has taken.
-    beat: DrainBeat,
     /// The writes taken for the block in hand, latest per parameter, and what
     /// a rejoin carried over from the last activation before the first block.
     /// Holds one write per declared parameter and no more: it is reserved at
     /// activation and never grows on the audio thread.
     pending: Vec<(ParamId, Normalized)>,
     /// Writes to a parameter the plugin did not declare or declared read-only,
-    /// carried into the activation or drained from the slots, since activation.
-    edits_dropped: u64,
+    /// carried into the activation, drained from the slots or named by a
+    /// block's changes: the plugin's count, which its Control reads
+    /// ([`Control::refused_edits`](tutti_plugin_types::Control::refused_edits)).
+    refused: TallyWriter<u64>,
     /// The parameters the plugin declared at activation and what each declares
     /// of its writability, sorted by id: the write policy
     /// ([`ParamWriteError::check_sorted`]) reads it, so a Controller write or
@@ -256,8 +256,9 @@ pub(super) struct ProcessorParts {
     pub context_requirements: Option<ProcessContextRequirements>,
     pub drain: EditReader,
     pub reports: ReportSink,
-    pub beat: DrainBeat,
-    pub carried: Vec<(ParamId, Normalized)>,
+    /// The plugin's count of refused writes, which the activation already added
+    /// the carried ones it refused to.
+    pub refused: TallyWriter<u64>,
     pub declared: Arc<[(ParamId, ParamAccess)]>,
 }
 
@@ -270,21 +271,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             context_requirements,
             drain,
             reports,
-            beat,
-            carried,
+            refused,
             declared,
         } = parts;
-        let mut pending = Vec::with_capacity(declared.len());
-        let mut refused = 0u64;
-        for (id, value) in carried {
-            if ParamWriteError::check_sorted(id, &declared).is_err() {
-                refused += 1;
-            } else if let Some(slot) = pending.iter_mut().find(|(known, _)| *known == id) {
-                *slot = (id, value);
-            } else {
-                pending.push((id, value));
-            }
-        }
+        let pending = Vec::with_capacity(declared.len());
         Self {
             _format: std::marker::PhantomData,
             audio,
@@ -294,9 +284,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             context_requirements,
             drain,
             reports,
-            beat,
             pending,
-            edits_dropped: refused,
+            refused,
             declared,
             processing: true,
             shell: Hold::new(shell),
@@ -353,14 +342,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         &self.audio.output.emitted_stream
     }
 
-    /// Writes the ring held that no block took, since activation, for want of
-    /// room in the block in hand, and those to a parameter the plugin did not
-    /// declare or declared read-only (which no write reaches).
-    #[must_use]
-    pub fn edits_dropped(&self) -> u64 {
-        self.edits_dropped
-    }
-
     /// Moves what the slots hold into `pending`, the latest write to each
     /// parameter winning. Allocation-free: `pending` is reserved for every
     /// declared parameter.
@@ -368,11 +349,11 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         let Self {
             drain,
             pending,
-            edits_dropped,
+            refused,
             declared,
             ..
         } = self;
-        drain.drain(|id, value| stage_write(pending, edits_dropped, declared, id, value));
+        drain.drain(|id, value| stage_write(pending, refused, declared, id, value));
     }
 
     /// Runs one realtime processing block.
@@ -426,7 +407,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // The Controller's writes since the last block, put ahead of this
         // block's automation below, so where both set one parameter the
         // automation has the last word.
-        self.beat.begin();
         self.drain_slots();
 
         // MIDI learn (IMidiLearn): when armed, capture each incoming controller
@@ -464,6 +444,19 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // block is silence, nothing is emitted, and the skip is counted
         // (`lists_busy`). The controller's writes wait in `pending`.
         let input_params = param_changes.filter(|pc| !pc.is_empty());
+        // A queue for a parameter the plugin did not declare or declared
+        // read-only is a write it refuses (counted per queue; the list counts
+        // the points).
+        if let Some(changes) = input_params {
+            let refused = changes
+                .queues
+                .iter()
+                .filter(|q| ParamWriteError::check_sorted(q.param_id, &self.declared).is_err())
+                .count();
+            if refused > 0 {
+                self.refused.add(refused as u64);
+            }
+        }
         let staged = (|| {
             let mut staging = self.audio.input.param_changes.try_begin().ok_or(Busy)?;
             if let Some(changes) = input_params {
@@ -486,7 +479,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         }
-        self.pending.clear();
 
         let mut process_context = to_process_context(
             transport,
@@ -526,6 +518,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 return Err(ProcessFailed { error });
             }
         };
+        // The staged writes reach the plugin only from here: every return
+        // before this keeps them in `pending` for the next block, so the
+        // applied mark below never covers a write the plugin was not handed.
+        self.pending.clear();
         let result = self.audio_side.process(ProcessIo {
             mode: self.audio.config.block_mode,
             num_samples: frames.get(),
@@ -539,6 +535,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             setup: &setup,
         });
 
+        // The plugin has the values the drain took once its call returned,
+        // whatever it answered; a block that left before the call leaves them
+        // in `pending` for the next one.
+        self.drain.publish_applied();
         if let Err(error) = result {
             buffer.output().silence();
             return Err(ProcessFailed { error });
@@ -598,6 +598,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         }
         self.drain_slots();
         if self.pending.is_empty() {
+            self.drain.publish_applied();
             return Ok(false);
         }
         let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
@@ -618,6 +619,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
+        self.drain.publish_applied();
         result
             .map(|()| true)
             .map_err(|error| ProcessFailed { error })
@@ -648,19 +650,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             // the Controller queued.
             let Self {
                 pending,
-                edits_dropped,
+                refused,
                 declared,
                 ..
             } = self;
             for queue in &changes.queues {
                 if let Some(point) = queue.points.last() {
-                    stage_write(
-                        pending,
-                        edits_dropped,
-                        declared,
-                        queue.param_id,
-                        point.value,
-                    );
+                    stage_write(pending, refused, declared, queue.param_id, point.value);
                 }
             }
             return Ok(());
@@ -671,6 +667,16 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             });
         };
         let declared = &self.declared;
+        // A queue for a parameter the plugin did not declare, or declared
+        // read-only, is a write it refuses; the list counts its points dropped.
+        let refused = changes
+            .queues
+            .iter()
+            .filter(|q| ParamWriteError::check_sorted(q.param_id, declared).is_err())
+            .count();
+        if refused > 0 {
+            self.refused.add(refused as u64);
+        }
         let staged = staging
             .refill_where(changes, |id| {
                 ParamWriteError::check_sorted(id, declared).is_ok()
@@ -687,13 +693,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             });
         }
         self.pending.clear();
-        self.audio_side
-            .flush(FlushIo {
-                mode: self.audio.config.block_mode,
-                input_params: &self.audio.input.param_changes,
-                output_params: &self.audio.output.param_changes,
-            })
-            .map_err(|error| ProcessFailed { error })
+        let result = self.audio_side.flush(FlushIo {
+            mode: self.audio.config.block_mode,
+            input_params: &self.audio.input.param_changes,
+            output_params: &self.audio.output.param_changes,
+        });
+        self.drain.publish_applied();
+        result.map_err(|error| ProcessFailed { error })
     }
 
     /// Feed incoming MIDI CC controllers to the MIDI-learn capture (for
@@ -1077,19 +1083,19 @@ impl<T: Vst3Sample> Vst3Processor<T> {
 /// declared parameter.
 fn stage_write(
     pending: &mut Vec<(ParamId, Normalized)>,
-    dropped: &mut u64,
+    dropped: &TallyWriter<u64>,
     declared: &[(ParamId, ParamAccess)],
     id: ParamId,
     value: Normalized,
 ) {
     if ParamWriteError::check_sorted(id, declared).is_err() {
-        *dropped += 1;
+        dropped.add(1);
     } else if let Some(slot) = pending.iter_mut().find(|(waiting, _)| *waiting == id) {
         slot.1 = value;
     } else if pending.len() < declared.len() {
         pending.push((id, value));
     } else {
-        *dropped += 1;
+        dropped.add(1);
     }
 }
 

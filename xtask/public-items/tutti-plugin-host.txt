@@ -64,7 +64,6 @@ fn control_handle::PluginHandle::terminate
 fn control_handle::PluginHandle::transport_sink
 fn control_handle::PluginHandle::wiring
 fn control_handle::PluginHandle::with_server_pid
-fn control_handle::PluginHandle::writes
 fn control_handle::PluginStatus::cause
 fn control_handle::PluginStatus::is_alive
 fn control_handle::PluginStatus::is_dead
@@ -187,7 +186,6 @@ fn time_signature::PluginTimeSignature::retired_len
 fn time_signature::PluginTimeSignature::set_meter
 fn wakeups::service_now
 struct control_handle::InstanceId
-struct control_handle::PendingWrites
 struct control_handle::PluginHandle
 struct controls::ForkedSources
 struct controls::NodeControls

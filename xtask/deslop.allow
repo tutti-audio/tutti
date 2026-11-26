@@ -20,7 +20,7 @@ module-cycle tutti_dsp::reverb::fdn::design,tutti_dsp::reverb::fdn::kind
 module-cycle tutti_dsp::reverb::network::queries,tutti_dsp::reverb::network::response
 module-cycle tutti_dsp::sos::analog,tutti_dsp::sos::butterworth
 module-cycle tutti_engine::callback,tutti_engine::callback_frames,tutti_engine::stream
-module-cycle tutti_export::control,tutti_export::encode,tutti_export::error,tutti_export::graph,tutti_export::normalize,tutti_export::output,tutti_export::planar,tutti_export::process,tutti_export::render,tutti_export::spill
+module-cycle tutti_export::control,tutti_export::encode,tutti_export::error,tutti_export::graph,tutti_export::normalize,tutti_export::output,tutti_export::planar,tutti_export::render,tutti_export::spill
 module-cycle tutti_graph::compile,tutti_graph::edges,tutti_graph::edit,tutti_graph::event,tutti_graph::exec,tutti_graph::model,tutti_graph::node
 module-cycle tutti_graph::compile::carry,tutti_graph::compile::coarsen,tutti_graph::compile::colour,tutti_graph::compile::plan,tutti_graph::compile::program,tutti_graph::compile::timing,tutti_graph::compile::verify
 module-cycle tutti_graph::contract::drive,tutti_graph::contract::rig
@@ -137,12 +137,10 @@ field-leak tutti_clap_host::instance::table::ParamTable::ranges
 field-leak tutti_clap_host::types::PluginInfo::features
 field-leak tutti_codec::decode::file_in::FileIn::fault
 field-leak tutti_codec::decode::read::PacketDecoder::planes
-field-leak tutti_codec::encoder::Encoder::first_error
 field-leak tutti_dsp::bit_crush::BitCrusher::controls
 field-leak tutti_dsp::comb::CombFilter::form
 field-leak tutti_dsp::comb::CombFilter::gain
 field-leak tutti_dsp::convolver::LevelState::crossed
-field-leak tutti_dsp::dither::sink::DitherSink::inner
 field-leak tutti_dsp::dynamics::key_filter::KeyStage::ty
 field-leak tutti_dsp::envelope::Fall::frames
 field-leak tutti_dsp::filter::ladder::model::LadderModel::design
@@ -184,7 +182,6 @@ field-leak tutti_engine::output::OutputControl::stage
 field-leak tutti_engine::restart::StreamHost::stream
 field-leak tutti_engine::stream::OutputStream::spec
 field-leak tutti_export::control::Control::output
-field-leak tutti_export::encode::EncoderSink::error
 field-leak tutti_export::render::driver::GraphSource::main_output
 field-leak tutti_graph::compile::plan::NodePorts::borrows
 field-leak tutti_graph::compile::plan::NodePorts::event_assemble

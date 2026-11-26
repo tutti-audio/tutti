@@ -28,7 +28,7 @@ use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{
     Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample, interleave,
 };
-use tutti_graph::{RtLogReaders, fold_to_channels};
+use tutti_graph::RtLogReaders;
 use tutti_timeline::RenderClock;
 use tutti_units::Samples;
 
@@ -43,7 +43,7 @@ impl FileChannels {
     /// declared (`main_output`: the graph's main output, or a tap's placement), or else the engine's order for its width (a bare 4 is
     /// quad); the file the channels it states or else the default layout for
     /// its width; where either has no order, or the file states unassigned
-    /// channels, the channels go by index ([`fold_to_channels`],
+    /// channels, the channels go by index ([`Fold::to_channels`],
     /// [`Fold::by_index`]).
     ///
     /// # Errors
@@ -68,9 +68,7 @@ impl FileChannels {
         // A main output past the widths a topology holds has none: its
         // channels go by index.
         let fold = match (main_output.topology(), self.channels.topology()) {
-            (Some(from), _) => {
-                fold_to_channels(from, &self.channels, tutti_buffers::FoldLevels::default())
-            }
+            (Some(from), _) => Fold::to_channels(from, &self.channels).build(),
             // A file that names no speaker takes the graph's channels by
             // index, as it says; `between` never pads by a guess.
             (None, Some(topology)) if !topology.is_unassigned() => Err(FoldError::Unassigned {

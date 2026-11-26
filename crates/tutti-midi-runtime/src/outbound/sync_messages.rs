@@ -36,8 +36,8 @@ pub struct SyncMessages {
     /// The Flex Data tempo and meter: a Set Tempo (M2-104 §7.5.3) when the
     /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
     /// does, each on the Group at the times the clock's docs give. Sent with or
-    /// without the Beat Clock. The meter is the node's
-    /// ([`SyncOut::meter`](crate::SyncOut::meter)).
+    /// without the Beat Clock. The meter is the one the host lends
+    /// each block (`Cx::meter`).
     pub flex: bool,
     /// The Flex Data metronome: a Set Metronome (§7.5.5) on every bar boundary
     /// where the meter in force differs from the one last stated. It states the
@@ -47,8 +47,8 @@ pub struct SyncMessages {
     /// boundary where the meter differs from the last one stated. A meter with
     /// no Set Metronome form (a 64th-note beat) sends none, and the receiver
     /// keeps the click it was last told. Sent with or without
-    /// [`flex`](Self::flex), on the same Group. The meter is the node's
-    /// ([`SyncOut::meter`](crate::SyncOut::meter)).
+    /// [`flex`](Self::flex), on the same Group. The meter is the one the host lends
+    /// each block (`Cx::meter`).
     pub metronome: bool,
     /// The SMPTE frame rate every time code is stated at: the quarter-frames,
     /// the Full Messages and an MMC Locate, so they cannot disagree.

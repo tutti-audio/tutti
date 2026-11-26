@@ -15,8 +15,6 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use tutti_platform::Instant;
-use tutti_plugin_host::PendingWrites;
-
 use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetSupport};
@@ -67,14 +65,13 @@ pub trait PluginOp: sealed::Sealed + Sized {
     #[doc(hidden)]
     fn stalled(after: Duration) -> Self::Error;
 
-    /// Asks a plugin in this process, on the main thread. `Pending` while the
-    /// host's parameter writes `pending` names are not yet the plugin's.
+    /// Asks a plugin in this process, on the main thread. `Pending` while a
+    /// node holds the claim a load needs, so no drain straddles it.
     #[doc(hidden)]
     fn run(
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        pending: &mut PendingWrites,
     ) -> Poll<Result<Self::Reply, Self::Error>>;
 
     /// Queues the call with the bridge of a plugin in a `plugin-server` process.
@@ -106,7 +103,6 @@ impl<O: PluginOp> Op<O> {
         match &hosted.answers {
             None => Self::InProcess(InProcessOp {
                 op: Some(op),
-                pending: hosted.handle.writes(),
                 handle: Box::new(hosted.handle.clone()),
                 support,
                 started: None,
@@ -124,16 +120,15 @@ impl<O: PluginOp> Op<O> {
 /// A call on a plugin that runs in this process, a polled value: the app asks
 /// it again, on the main thread, until it is `Ready`.
 ///
-/// `!Send`: the plugin is called on the main thread. The call sees every
-/// parameter write the host made before the value was made; a plugin node
-/// draining those writes at the moment of a poll leaves the call `Pending`.
-/// It resolves to [`stalled`](PluginOp::stalled) once [`deadline`](Self::deadline)
-/// has passed: the deadline guards a hang, and nothing is waited for.
+/// `!Send`: the plugin is called on the main thread. A save never waits for a
+/// block: it states the parameter writes no block has applied beside its
+/// result ([`Saved`](crate::Saved)). A load is `Pending` only while a plugin
+/// node holds the claim it needs, for the length of one drain. It resolves to
+/// [`stalled`](PluginOp::stalled) once [`deadline`](Self::deadline) has passed:
+/// the deadline guards a hang, and nothing is waited for.
 #[must_use = "work does nothing until it is polled"]
 pub struct InProcessOp<O: PluginOp> {
     op: Option<O>,
-    /// The host's parameter writes made when the value was made.
-    pending: PendingWrites,
     handle: Box<PluginHandle>,
     support: PresetSupport,
     /// When the first poll was made.
@@ -151,11 +146,11 @@ impl<O: PluginOp + fmt::Debug> fmt::Debug for InProcessOp<O> {
 
 /// How long an in-process call may stay `Pending`: a hang guard, as a node
 /// holds the writes' reader for the length of one drain.
-const SETTLE_LIMIT: Duration = Duration::from_secs(2);
+const CLAIM_LIMIT: Duration = Duration::from_secs(2);
 
 impl<O: PluginOp> InProcessOp<O> {
-    /// Calls the plugin on the main thread at `now`, unless a node is draining
-    /// the host's earlier parameter writes: then `Pending`, and the app polls
+    /// Calls the plugin on the main thread at `now`, unless a load finds a node
+    /// draining the host's parameter writes: then `Pending`, and the app polls
     /// again. The session is not touched, and no `update` has to run.
     ///
     /// # Errors
@@ -183,14 +178,14 @@ impl<O: PluginOp> InProcessOp<O> {
             return Poll::Ready(Err(error));
         }
         let started = *self.started.get_or_insert(now);
-        match op.run(&self.handle, main, &mut self.pending) {
+        match op.run(&self.handle, main) {
             Poll::Ready(reply) => {
                 let op = self.op.take().expect("a call resolves once");
                 Poll::Ready(reply.map(|reply| op.finish(reply, None)))
             }
-            Poll::Pending if now >= started + SETTLE_LIMIT => {
+            Poll::Pending if now >= started + CLAIM_LIMIT => {
                 self.op = None;
-                Poll::Ready(Err(O::stalled(SETTLE_LIMIT)))
+                Poll::Ready(Err(O::stalled(CLAIM_LIMIT)))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -199,7 +194,7 @@ impl<O: PluginOp> InProcessOp<O> {
     /// When a call polled so far gives up: `None` before the first poll.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.started.map(|started| started + SETTLE_LIMIT)
+        self.started.map(|started| started + CLAIM_LIMIT)
     }
 }
 
