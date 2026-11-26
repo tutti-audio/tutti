@@ -6,12 +6,14 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
-use crate::common::{blocks, offline, tap};
+use crate::common::{blocks, offline, polled, tap};
 use futures_lite::StreamExt;
 use tutti_fixtures::{block_on_within, wait_until};
+use tutti_midi_device::UMP_VERSION;
 use tutti_midi_network::{
     Admission, ByeReason, Client, Command, Credentials, DatagramBuilder, EndedBy, EndpointIdentity,
     Event, Host, HostConfig, NetworkEndpoint, NetworkLink, PingId, SessionConfig, parse,
+    txt_properties,
 };
 use tutti_platform::{Executor, Instant};
 use tutti_session::{
@@ -19,10 +21,10 @@ use tutti_session::{
     Session, SessionEvent, Stamp,
 };
 use tutti_ump::{
-    Address, CCNumber, ControlValue, EndpointName, Message, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, ProductInstanceId, Sysex7Packet, SysexStatus, U7,
+    Address, CCNumber, ControlValue, DiscoveryFilter, EndpointName, Form, Message, MidiChannel,
+    MidiGroup, NoteNumber, NoteVelocity, ProductInstanceId, Sysex7Packet, SysexStatus, U7,
 };
-use tutti_ump::{Ump, Voice2};
+use tutti_ump::{Stream, Ump, Voice2};
 
 /// A hang guard, never reached by a wait that ends.
 const HANG_GUARD: Duration = Duration::from_secs(30);
@@ -552,4 +554,225 @@ fn a_client_session_hears_its_host() {
         !seen.lock().unwrap().is_empty()
     });
     assert_eq!(seen.lock().unwrap()[0].1, note_on(65));
+}
+
+// --- The Endpoint a network peer discovers ---
+
+/// An Endpoint Discovery asking for the Endpoint Info, name and Product Instance Id.
+fn discovery() -> Ump {
+    Message::Stream(Stream::EndpointDiscovery {
+        version: UMP_VERSION,
+        filter: DiscoveryFilter {
+            endpoint_info: true,
+            device_identity: false,
+            endpoint_name: true,
+            product_instance_id: true,
+            stream_configuration: false,
+        },
+    })
+    .into()
+}
+
+/// The text of the Stream notifications `part` takes the 14 bytes of, in order.
+fn text(packets: &[Ump], part: fn(Stream) -> Option<(Form, [u8; 14])>) -> String {
+    let bytes: Vec<u8> = packets
+        .iter()
+        .filter_map(|ump| match ump.decode() {
+            Ok(Message::Stream(stream)) => part(stream),
+            _ => None,
+        })
+        .flat_map(|(_, bytes)| bytes)
+        .take_while(|&byte| byte != 0)
+        .collect();
+    String::from_utf8(bytes).unwrap()
+}
+
+fn name_part(stream: Stream) -> Option<(Form, [u8; 14])> {
+    match stream {
+        Stream::EndpointName(form, bytes) => Some((form, bytes)),
+        _ => None,
+    }
+}
+
+fn instance_part(stream: Stream) -> Option<(Form, [u8; 14])> {
+    match stream {
+        Stream::ProductInstanceId(form, bytes) => Some((form, bytes)),
+        _ => None,
+    }
+}
+
+/// The Endpoint Name and Product Instance Id Notifications among `packets`, and whether
+/// an Endpoint Info came: what a discovery answered.
+fn answered(packets: &[Ump]) -> (String, String, bool) {
+    let info = packets
+        .iter()
+        .any(|ump| matches!(ump.decode(), Ok(Message::Stream(Stream::EndpointInfo(_)))));
+    (text(packets, name_part), text(packets, instance_part), info)
+}
+
+/// **A Host answers a peer's Endpoint Discovery as the Endpoint its TXT record and its
+/// Invitation reply describe**: the Endpoint Info, then the name and the Product
+/// Instance Id the TXT carries, which are the ones the Invitation reply named.
+///
+/// Spec: m2-124/4.4#4, m2-124/4.4#9, m2-124/6.5#6
+#[test]
+fn a_hosts_endpoint_notifications_equal_its_txt_and_its_invitation_reply() {
+    let studio = identity("Studio", "HOST-1");
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut peer = Peer::new("Laptop", port);
+    peer.connect();
+    let replied = peer.next_event(|e| match e {
+        Event::Established { remote, .. } => Some(*remote),
+        _ => None,
+    });
+    peer.barrier(1);
+    let _ = s.update();
+
+    peer.send(&[discovery()]);
+    peer.barrier(2);
+    let _ = s.update();
+    let mut heard = Vec::new();
+    while heard.len() < 3 {
+        heard.push(peer.next_event(|e| match e {
+            Event::Ump { packet, .. } => Some(*packet),
+            _ => None,
+        }));
+    }
+
+    let (name, instance, info) = answered(&heard);
+    assert!(info, "an Endpoint Info Notification answers a discovery");
+    let txt = txt_properties(&studio);
+    assert_eq!(
+        name, txt[0].1,
+        "the Endpoint Name Notification is the TXT's"
+    );
+    assert_eq!(instance, txt[1].1, "the Product Instance Id is the TXT's");
+    assert_eq!(replied, studio, "the Invitation reply named the same");
+    assert_eq!(name, replied.name().as_str());
+    assert_eq!(instance, replied.instance_id().as_str());
+    assert_eq!(net.losses().refused, 0);
+}
+
+/// **A Client answers its Host's Endpoint Discovery as the Endpoint its Invitation
+/// named**: the name and the Product Instance Id of the Notifications are the
+/// Invitation's.
+///
+/// Spec: m2-124/6.4#15, m2-124/6.4#19
+#[test]
+fn a_clients_endpoint_notifications_equal_its_invitation() {
+    let executor = Executor::new();
+    let host = NetworkLink::bind(
+        &executor,
+        "127.0.0.1:0",
+        Host::new(HostConfig::new(identity("Studio", "HOST-1"))),
+    )
+    .unwrap();
+    let addr = host.local_addr().unwrap();
+    let mut s = offline();
+    let laptop = identity("Laptop", "CLIENT-1");
+    let net = s
+        .midi()
+        .open_network_client(OpenClient::new(
+            laptop,
+            SocketAddr::from(([127, 0, 0, 1], addr.port())),
+        ))
+        .expect("binds");
+    let mut events = host.events();
+    let invited = block_on_within(
+        async {
+            while let Some(event) = events.next().await {
+                if let Event::Established { remote, .. } = event {
+                    return Some(remote);
+                }
+            }
+            None
+        },
+        HANG_GUARD,
+    )
+    .expect("the Host establishes within the hang guard")
+    .expect("the stream does not end");
+    let studio = identity("Studio", "HOST-1");
+    wait_until("the session to connect", HANG_GUARD, || {
+        let _ = s.update();
+        net.input_node(studio).is_some()
+    });
+
+    let client = SocketAddr::from(([127, 0, 0, 1], net.local_addr().unwrap().port()));
+    host.with(|h, now| h.send(now, client, &[discovery()]))
+        .unwrap();
+    let mut heard = Vec::new();
+    wait_until("the Client to answer", HANG_GUARD, || {
+        let _ = s.update();
+        while let Some(Some(event)) = polled(events.next()) {
+            if let Event::Ump { packet, .. } = event {
+                heard.push(packet);
+            }
+        }
+        heard.len() >= 3
+    });
+    assert_eq!(heard.len(), 3);
+
+    let (name, instance, info) = answered(&heard);
+    assert!(info, "an Endpoint Info Notification answers a discovery");
+    assert_eq!(invited, laptop, "the Invitation named the Client");
+    assert_eq!(name, invited.name().as_str());
+    assert_eq!(instance, invited.instance_id().as_str());
+}
+
+/// A Stream request is the Endpoint's to answer and never reaches the input; a
+/// Stream notification and a musical message do.
+#[test]
+fn a_stream_request_does_not_reach_the_input_and_a_notification_and_a_note_do() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let (target, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::new().to(target))
+        .expect("the tap takes MIDI");
+    let mut peer = Peer::new("Laptop", port);
+    peer.join();
+    let _ = s.update();
+
+    let notification: Ump = Message::Stream(Stream::EndpointName(
+        Form::Complete,
+        *b"Laptop\0\0\0\0\0\0\0\0",
+    ))
+    .into();
+    peer.send(&[discovery(), notification, note_on(60)]);
+    peer.barrier(2);
+    let _ = s.update();
+    blocks(&mut s, 2);
+    let heard: Vec<Ump> = seen.lock().unwrap().iter().map(|(_, ump)| *ump).collect();
+    // The input node orders what it hears by port, not by arrival.
+    assert_eq!(heard.len(), 2, "the request is not input: {heard:?}");
+    assert!(heard.contains(&notification) && heard.contains(&note_on(60)));
+    drop(net);
+}
+
+/// A reply the link refuses is counted in the network's `refused` and not retried: a
+/// peer that left before the reply was sent takes none of its three messages.
+#[test]
+fn a_reply_the_link_refuses_is_counted_refused() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut peer = Peer::new("Laptop", port);
+    peer.join();
+    let _ = s.update();
+
+    peer.send(&[discovery()]);
+    peer.close(ByeReason::UserTerminated);
+    // The Bye Reply is sent after the discovery was queued for the session, so one
+    // update reads both: the Session is gone from the link when the reply is sent.
+    loop {
+        let datagram = peer.recv();
+        let replied = parse(&datagram)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|c| c == Command::ByeReply);
+        if replied {
+            break;
+        }
+    }
+    let _ = s.update();
+    assert_eq!(net.losses().refused, 3, "Info, name and instance id");
+    let _ = s.update();
+    assert_eq!(net.losses().refused, 3, "not retried");
 }

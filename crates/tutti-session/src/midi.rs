@@ -970,6 +970,9 @@ impl MidiState {
         for joined in self.networks.take_joined() {
             self.sinks.catch_up(&joined);
         }
+        for (sink, n) in self.networks.take_refused() {
+            self.sinks.refuse(sink, n);
+        }
         edited
     }
 

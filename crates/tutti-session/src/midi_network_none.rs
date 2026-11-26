@@ -58,6 +58,11 @@ impl Networks {
         Vec::new()
     }
 
+    /// No reply is refused.
+    pub(crate) fn take_refused(&mut self) -> Vec<(NodeKey, u64)> {
+        Vec::new()
+    }
+
     /// No network to poll: the graph is not edited.
     pub(crate) fn poll<F: Float>(
         &mut self,

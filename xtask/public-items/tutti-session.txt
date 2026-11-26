@@ -466,9 +466,11 @@ fn midi_network::MidiNetwork::output_node
 fn midi_network::OpenClient::client_of
 fn midi_network::OpenClient::config
 fn midi_network::OpenClient::credentials
+fn midi_network::OpenClient::device
 fn midi_network::OpenClient::new
 fn midi_network::OpenHost::admission
 fn midi_network::OpenHost::config
+fn midi_network::OpenHost::device
 fn midi_network::OpenHost::max_sessions
 fn midi_network::OpenHost::new
 fn midi_port::MidiInput::losses
