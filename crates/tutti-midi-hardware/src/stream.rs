@@ -79,7 +79,7 @@ use tutti_graph::Offset;
 use tutti_midi_ci::{ProfileOffer, ResourceStore};
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
-    FunctionBlock, IdentityInquiry, InquiryAction, Learned, Supports,
+    IdentityInquiry, InquiryAction, Learned, Supports,
 };
 use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
@@ -93,7 +93,8 @@ use tutti_units::Losses;
 use crate::answer::Answer;
 use crate::capability::{described, is_ump_endpoint};
 use crate::ci::{
-    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
+    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, block_of_device, groups_after_settle,
+    groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
 use crate::peer::PeerRequestError;
@@ -828,23 +829,14 @@ impl UmpNegotiation {
             }
         }
         // A changed MUID announces its Function Block (M2-101 §3.3.1): the
-        // block that spans the device's Group, as a discovery of it would.
-        for &group in muid_changed {
-            let block = answering.endpoint.function_blocks().find(|block| {
-                let first = block.first_group().get();
-                (first..first + block.groups().get()).contains(&group.get())
-            });
-            if let Some(id) = block.map(FunctionBlock::id) {
-                let _ = answering.endpoint.reply(
-                    Message::Stream(Stream::FunctionBlockDiscovery {
-                        block: BlockSelect::One(id),
-                        filter: BlockFilter {
-                            info: true,
-                            name: false,
-                        },
-                    }),
-                    &mut replies,
-                );
+        // block that placed the device on `group`, with the Info it declares.
+        if let Run::Done { stream, .. } = &self.run {
+            for &group in muid_changed {
+                if let Some(block) = block_of_device(stream.endpoint(), group) {
+                    replies.push(Ump::from(Message::Stream(Stream::FunctionBlockInfo(
+                        block.info(),
+                    ))));
+                }
             }
         }
         let mut granted = None;
