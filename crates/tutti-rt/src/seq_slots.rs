@@ -208,20 +208,33 @@ impl std::fmt::Debug for EpochWatch {
 pub fn generation_watch() -> (GenerationPublisher, GenerationWatch) {
     let word = Arc::new(AtomicU32::new(0));
     (
-        GenerationPublisher(Arc::clone(&word)),
+        GenerationPublisher {
+            word: Arc::clone(&word),
+            last: Generation(0),
+        },
         GenerationWatch(word),
     )
 }
 
-/// The one end of a [`generation_watch`] that publishes.
+/// The one end of a [`generation_watch`] that publishes: it is not `Clone`, and
+/// [`publish`](Self::publish) takes it by `&mut`, so there is one publisher.
 #[derive(Debug)]
-pub struct GenerationPublisher(Arc<AtomicU32>);
+pub struct GenerationPublisher {
+    word: Arc<AtomicU32>,
+    /// The generation last stored: the watch never reads one earlier than it.
+    last: Generation,
+}
 
 impl GenerationPublisher {
-    /// Publishes `generation`: everything the publisher did before this call
-    /// is visible to a watch that reads it. Wait-free.
-    pub fn publish(&self, generation: Generation) {
-        self.0.store(generation.0, Ordering::Release);
+    /// Publishes `generation` if it [has reached](Generation::has_reached) the last one
+    /// published, and keeps the last one otherwise, so a watch never moves back.
+    /// Everything the publisher did before a published call is visible to a watch that
+    /// reads it. Wait-free.
+    pub fn publish(&mut self, generation: Generation) {
+        if generation.has_reached(self.last) {
+            self.last = generation;
+            self.word.store(generation.0, Ordering::Release);
+        }
     }
 }
 
