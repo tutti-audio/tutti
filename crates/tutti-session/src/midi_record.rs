@@ -52,8 +52,8 @@
 //!
 //! **Order of a catch-up, and why.** SysEx and Flex setup first: a device
 //! reset must come before the state it would erase. Then, one Channel after
-//! another: the bank in force, the modes and the program (a controller's
-//! meaning can depend on the patch), then the rest of [`ChannelState`]'s order (the
+//! another: the bank in force, the modes, then [`ChannelState`]'s order (the
+//! program, since a controller's meaning can depend on the patch, the
 //! parameters, the controllers, the pressure and the pitch bend), the bank sent
 //! since, and the select in force (last, so the joiner is left on the stream's
 //! selection, whatever order the parameters replay in). The held notes come
@@ -89,9 +89,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use tutti_ump::{
-    Address, Attribute, CCNumber, ChannelEffect, ChannelState, Data128, Flex, FlexAddress,
-    GroupChannelIndex, Held, Message, MidiGroup, NoteKey, NoteNumber, NoteVelocity, ParameterKind,
-    Protocol, SysexStatus, U7, UNIVERSAL_NON_REAL_TIME, Ump, Voice1, Voice2,
+    Address, Attribute, CCNumber, ChannelEffect, ChannelMode, ChannelState, Data128, Flex,
+    FlexAddress, GroupChannelIndex, Held, Message, MidiGroup, NoteKey, NoteNumber, NoteVelocity,
+    ParameterKind, Protocol, SysexStatus, U7, UNIVERSAL_NON_REAL_TIME, Ump, Voice1, Voice2,
 };
 
 /// How many complete SysEx messages a record keeps. A device setup is a few
@@ -143,6 +143,8 @@ enum Half {
 enum What {
     /// MIDI 1.0 bank select as the last Program Change took it.
     Bank(Half),
+    /// A channel mode in force, one per pair.
+    Mode(ChannelMode),
     /// A value of the channel's state, in [`ChannelState`]'s order.
     State(ChannelState),
     /// MIDI 1.0 bank select sent since the last Program Change.
@@ -437,9 +439,7 @@ impl Record {
         }
         match effect {
             ChannelEffect::Sets(state) => self.put_one(lane, What::State(state), ump),
-            ChannelEffect::Mode(mode) => {
-                self.put_one(lane, What::State(ChannelState::Mode(mode)), ump);
-            }
+            ChannelEffect::Mode(mode) => self.put_one(lane, What::Mode(mode), ump),
             ChannelEffect::EndsNotes | ChannelEffect::ResetsControllers => {}
         }
     }
@@ -928,8 +928,8 @@ mod tests {
     }
 
     /// All Sound Off, All Notes Off and the channel modes (Omni Off, Omni On,
-    /// Mono, Poly: CC 120, 123 to 127) end the channel's keys; a channel mode's
-    /// value is kept as a controller.
+    /// Mono, Poly: CC 120, 123 to 127) end the channel's keys; a channel mode is
+    /// kept as one setting per pair, the last one sent.
     #[test]
     fn mode_messages_end_the_channels_keys_and_the_last_of_each_pair_is_kept() {
         for mode in [120, 123] {

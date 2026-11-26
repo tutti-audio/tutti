@@ -138,7 +138,6 @@ fn notes_and_polyphonic_pressure_are_not_channel_state() {
 fn the_order_of_the_state_is_the_order_a_receiver_is_told_it_in() {
     let parameter = |kind| ChannelState::Parameter(kind, U7::of(0), U7::of(0));
     let order = [
-        ChannelState::Mode(ChannelMode::MonoPoly),
         ChannelState::Program,
         parameter(ParameterKind::Registered),
         parameter(ParameterKind::Assignable),

@@ -13,8 +13,9 @@ pub enum ParameterKind {
     Assignable,
 }
 
-/// A channel mode: a command whose setting a receiver keeps. Each is one slot, the
-/// last message of its pair being the one in force.
+/// A channel mode: a command whose setting a receiver keeps, not a value a chase
+/// restores. Each is one setting, the last message of its pair being the one in
+/// force.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChannelMode {
     /// Local Control (CC 122).
@@ -28,15 +29,12 @@ pub enum ChannelMode {
 /// One value of a channel's state: what a receiver that joins late has to be told
 /// to sound as the channel does.
 ///
-/// The derived order is the order to tell them in: the modes first (they decide how
-/// a receiver reads the rest), then the program (a controller's meaning can depend
-/// on the patch), the parameters (a bend range
-/// among them) before the bend they scale, then the controllers, the pressure
-/// and the bend.
+/// The derived order is the order to tell them in: the program first (a
+/// controller's meaning can depend on the patch), the parameters (a bend range
+/// among them) before the bend they scale, then the controllers, the pressure and
+/// the bend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChannelState {
-    /// A channel mode in force.
-    Mode(ChannelMode),
     /// The program (MIDI 2.0: with its bank).
     Program,
     /// A registered or assignable parameter, by its bank (MSB) and index (LSB).
@@ -50,8 +48,7 @@ pub enum ChannelState {
 }
 
 /// What a channel voice message does to its channel's state: the one
-/// classification a record of what a stream said, a clip's chase and a MIDI
-/// Message Report share.
+/// classification a record of what a stream said and a clip's chase share.
 ///
 /// Notes, polyphonic pressure and the per-note and relative controllers are not
 /// channel state ([`of_midi1`](Self::of_midi1) and [`of_midi2`](Self::of_midi2)
