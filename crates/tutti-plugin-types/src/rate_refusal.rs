@@ -58,14 +58,13 @@ impl RateRefusal {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::*;
 
     /// **A cause from a newer peer this build does not know is a decode
     /// failure**, never a different cause: the wire's variant index is the
     /// arm.
-    #[cfg(feature = "serde")]
     #[test]
     fn an_unknown_cause_from_a_newer_peer_fails_to_decode() {
         let unknown = [0x7f_u8];
