@@ -659,6 +659,9 @@ fn node::bus::Buses::with
 fn node::bus::InBus::width
 fn node::bus::OutBus::width
 fn node::config::Asset::arc
+fn node::config::Initials::params
+fn node::config::Initials::settings
+fn node::config::initials
 fn node::controls::DeclaredUnit::of
 fn node::controls::DeclaredUnit::value
 fn node::controls::ParamFork::fork_node
@@ -1080,6 +1083,7 @@ struct node::bus::InEvents
 struct node::bus::OutBus
 struct node::bus::OutEvents
 struct node::config::Asset
+struct node::config::Initials
 struct node::controls::DeclaredUnit
 struct node::controls::ParamFork
 struct node::controls::ParamSet

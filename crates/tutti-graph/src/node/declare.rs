@@ -686,9 +686,8 @@ pub fn input<'a, F: Float>(
 ///   `Node` (its `From<Config>` builds it): the `required` and `options` fields
 ///   and whether each `Option` param is given are its structure, so each
 ///   `required` and `options` type must be `PartialEq`, or the config has no
-///   `NodeConfig`. A config that does not name its node (generic over what
-///   the node is generic over) ends the macro call with `without_node_config`,
-///   and has none.
+///   `NodeConfig`. The config's generics are the node's, so the config names
+///   its node.
 ///
 /// The node's `Node` impl forwards to the declaration: `shape` takes
 /// `self.declared_ports()` ([`Shape::param_ports`](crate::Shape::param_ports)) and `param_base` answers
@@ -892,7 +891,7 @@ macro_rules! declare_params {
         $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
         $(settings { $($sname:ident $(@ $skind:ty)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
         $(published { $($pubtoks:tt)* })?
-    } $($skip:ident)?) => {
+    }) => {
         $crate::declare_params!(@pub {
             [$($g)*] [$($g)*] $ty,
             [$(#[$cattr])*] $cfg [$($($cn : $cb,)+)?] [$($($cn,)+)?],
@@ -900,7 +899,6 @@ macro_rules! declare_params {
             [$($($req : $rty,)*)?]
             [$($($oname : $oty = $odefault,)+)?]
             [$($($sname [$($skind)?] : $sty = $sdefault_value,)+)?]
-            [$($skip)?]
         } { $($($ptoks)*)? } [] [] @ $($($pubtoks)*)?);
     };
 
@@ -989,7 +987,6 @@ macro_rules! declare_params {
         [$($req:ident : $rty:ty,)*]
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
         [$($sname:ident [$($skind:ty)?] : $sty:ty = $sdefault:expr,)*]
-        $skip:tt
     } [$(
         [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$($flag:ident)?] [$default:expr]]
     )*]) => {
@@ -1127,10 +1124,10 @@ macro_rules! declare_params {
         $crate::declare_params!(@munch [$($g)*] $ty, n, [];
             $($mode $kind => $field $([$count])? : $row [$($flag)?],)*);
 
-        $crate::declare_params!(@config $skip [$($g)*] [$($cd)*] {
+        $crate::declare_params!(@config [$($g)*] [$($cd)*] {
             $ty, $cfg [$($cu)*],
             [$($req : $rty,)*] [$($oname : $oty,)*]
-            [$($kind $field,)*]
+            [$($kind $field,)*] [$($sname [$($skind)?],)*]
         });
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
@@ -1193,26 +1190,23 @@ macro_rules! declare_params {
         }
     };
 
-    // The `NodeConfig` of a cells-form config. A node with a config that does
-    // not name it (`without_node_config`) has none written. A non-generic node
-    // builds at any float; a generic node whose config is not generic builds at
+    // The `NodeConfig` of a cells-form config. A non-generic node builds at any float; a generic node whose config is not generic builds at
     // the node's own float; otherwise the config's generics name the node's.
-    (@config [without_node_config] $g:tt $cd:tt $body:tt) => {};
-    (@config [] [] [$($cd:tt)*] $body:tt) => {
+    (@config [] [$($cd:tt)*] $body:tt) => {
         $crate::declare_params!(@config_impl [__LaneF: $crate::__private::Float, $($cd)*]
             __LaneF $body);
     };
-    (@config [] [$f:ident : $($b:tt)+] [] $body:tt) => {
+    (@config [$f:ident : $($b:tt)+] [] $body:tt) => {
         $crate::declare_params!(@config_impl [$f: $($b)+] $f $body);
     };
-    (@config [] [$($g:tt)+] [$($cd:tt)+] $body:tt) => {
+    (@config [$($g:tt)+] [$($cd:tt)+] $body:tt) => {
         $crate::declare_params!(@config_impl [__LaneF: $crate::__private::Float, $($cd)+]
             __LaneF $body);
     };
     (@config_impl [$($ig:tt)*] $float:ident {
         $ty:ty, $cfg:ident [$($cu:tt)*],
         [$($req:ident : $rty:ty,)*] [$($oname:ident : $oty:ty,)*]
-        [$($kind:ident $field:ident,)*]
+        [$($kind:ident $field:ident,)*] [$($sname:ident [$($skind:ty)?],)*]
     }) => {
         impl<$($ig)*> $crate::NodeConfig<$float> for $cfg<$($cu)*>
         where
@@ -1239,14 +1233,20 @@ macro_rules! declare_params {
             }
 
             #[allow(unused_mut)]
-            fn initials(&self) -> ::std::vec::Vec<($crate::__private::UnitAddr, f64)> {
-                let mut initials = ::std::vec::Vec::new();
+            fn initials(&self) -> $crate::Initials {
+                let mut params = ::std::vec::Vec::new();
                 $($crate::__private::Initial::extend(
                     self.$field,
                     $crate::__private::UnitParam::$kind,
-                    &mut initials,
+                    &mut params,
                 );)*
-                initials
+                #[allow(unused_mut)]
+                let mut settings = ::std::vec::Vec::new();
+                $($(settings.push((
+                    <$skind as $crate::__private::Setting>::KIND,
+                    $crate::__private::AtomicWord::to_word(self.$sname),
+                ));)?)*
+                $crate::__private::initials(params, settings)
             }
         }
     };

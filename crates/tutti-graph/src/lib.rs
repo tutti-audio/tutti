@@ -337,9 +337,7 @@
 //! param values, and `initials` lists those values by address. The `required` and
 //! `options` fields are structure and must be `PartialEq`; a shared resource in
 //! one is an [`Asset`], equal only to itself. A config with a field that is not
-//! `PartialEq` has no `NodeConfig`. A node whose config does not name it (its
-//! config is generic over something else) ends the declaration with
-//! `without_node_config`.
+//! `PartialEq` has no `NodeConfig`.
 //!
 //! ## Events in and out
 //!
@@ -706,7 +704,7 @@ pub use exec::command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleEr
 pub use exec::lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use model::fade::Fade;
-pub use node::config::{Asset, NodeConfig};
+pub use node::config::{Asset, Initials, NodeConfig};
 pub use node::controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };
@@ -790,6 +788,7 @@ pub use tutti_units::PlayReading;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::node::config::initials;
     pub use crate::node::declare::{
         BuiltFrom, Cells, CompareIn, Initial, OwnedCell, ParamEntry, Row, Visit, base, input,
         ports, row, set,
@@ -797,7 +796,7 @@ pub mod __private {
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};
-    pub use tutti_units::{UnitAddr, UnitParam};
+    pub use tutti_units::{Setting, UnitAddr, UnitParam};
 }
 
 #[cfg(test)]

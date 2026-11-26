@@ -6,7 +6,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use tutti_buffers::Float;
-use tutti_units::UnitAddr;
+use tutti_units::{SettingKind, UnitAddr};
 
 use crate::node::IntoNode;
 
@@ -33,10 +33,40 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
     /// differing [`initials`](Self::initials) are written to it.
     fn same_structure(&self, other: &Self) -> bool;
 
-    /// The initial value of each declared param the config gives, by address,
-    /// as the raw of its unit. Read from the config's fields, never by building
-    /// the node.
-    fn initials(&self) -> Vec<(UnitAddr, f64)>;
+    /// The initial value of each declared param and kinded setting the config
+    /// gives. Read from the config's fields, never by building the node.
+    fn initials(&self) -> Initials;
+}
+
+/// The initial values a config gives, by address: each declared param's raw in its
+/// unit, and each setting that has a [`SettingKind`] as its encoded word.
+///
+/// A param left out has no value (an `Option` param given none). A setting with
+/// no kind has no address, so it is not listed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Initials {
+    params: Vec<(UnitAddr, f64)>,
+    settings: Vec<(SettingKind, u64)>,
+}
+
+impl Initials {
+    /// The params' initial raws, in declaration order.
+    #[must_use]
+    pub fn params(&self) -> &[(UnitAddr, f64)] {
+        &self.params
+    }
+
+    /// The settings' initial words ([`AtomicWord::to_word`](tutti_rt::AtomicWord::to_word)),
+    /// in declaration order.
+    #[must_use]
+    pub fn settings(&self) -> &[(SettingKind, u64)] {
+        &self.settings
+    }
+}
+
+/// What `declare_params!` writes `NodeConfig::initials` with.
+pub fn initials(params: Vec<(UnitAddr, f64)>, settings: Vec<(SettingKind, u64)>) -> Initials {
+    Initials { params, settings }
 }
 
 /// A shared resource a config holds (a wavetable, a wave, an impulse response),

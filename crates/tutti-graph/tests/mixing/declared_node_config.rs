@@ -10,11 +10,11 @@ use tutti_graph::{
     Asset, Cx, IntoNode, Io, Node, NodeConfig, Prepare, Shape, Status, declare_params,
 };
 use tutti_rt::atomic_word;
-use tutti_units::{Amplitude, Db, Hz, UnitAddr, UnitParam};
+use tutti_units::{Amplitude, Db, Hz, SettingKind, SyncSetting, UnitAddr, UnitParam};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
-enum Mode {
+pub enum Mode {
     Off,
     On,
 }
@@ -36,7 +36,7 @@ declare_params!([] Voiced, VoicedConfig, VoicedCells {
         Volume => volume: Option<Amplitude> = None,
     }
     options { seed: u64 = 0 }
-    settings { mode: Mode = Mode::Off }
+    settings { mode @ SyncSetting: Mode = Mode::Off }
 });
 
 impl From<VoicedConfig> for Voiced {
@@ -77,7 +77,9 @@ fn a_param_or_setting_initial_is_a_value_not_structure() {
     let louder = config().cutoff(Hz::new(2_000.0)).mode(Mode::On);
     assert!(base.same_structure(&louder));
     assert!(louder.same_structure(&base));
-    assert_ne!(base.initials(), louder.initials());
+    assert_ne!(base.initials().params(), louder.initials().params());
+    assert_eq!(base.initials().settings(), &[(SettingKind::Sync, 0)]);
+    assert_eq!(louder.initials().settings(), &[(SettingKind::Sync, 1)]);
 }
 
 /// A `required` value is structure: a different width, or a different asset,
@@ -124,8 +126,8 @@ fn an_asset_is_equal_by_identity() {
 #[test]
 fn initials_list_each_declared_param_at_its_address() {
     assert_eq!(
-        config().initials(),
-        vec![
+        config().initials().params(),
+        [
             (UnitAddr::first(UnitParam::Cutoff), 1_000.0),
             (UnitAddr::new(UnitParam::Threshold, 0), -10.0),
             (UnitAddr::new(UnitParam::Threshold, 1), -10.0),
@@ -135,6 +137,7 @@ fn initials_list_each_declared_param_at_its_address() {
     assert!(
         given
             .initials()
+            .params()
             .contains(&(UnitAddr::first(UnitParam::Volume), 0.25))
     );
 }
@@ -148,9 +151,20 @@ fn a_built_node_starts_its_params_at_the_initials() {
         .volume(Some(Amplitude::new(0.25)));
     let (_node, controls) = config.build().into_node();
     let initials = config.initials();
-    assert_eq!(initials.len(), 4);
-    assert_eq!(controls.params().count(), initials.len());
-    for (addr, value) in initials {
+    assert_eq!(initials.params().len(), 4);
+    assert_eq!(controls.params().count(), initials.params().len());
+    for &(addr, value) in initials.params() {
         assert_eq!(controls.get(addr), Some(value));
     }
+}
+
+/// The node `build` makes starts its setting at the config's initial word.
+#[test]
+fn a_built_node_starts_its_setting_at_the_initial() {
+    let config = config().mode(Mode::On);
+    let node = config.build();
+    let settings = IntoNode::<f32>::into_parts(node).settings;
+    assert_eq!(settings.len(), 1);
+    assert_eq!(settings[0].kind(), SettingKind::Sync);
+    assert_eq!(settings[0].load::<Mode>(), Some(Mode::On));
 }
