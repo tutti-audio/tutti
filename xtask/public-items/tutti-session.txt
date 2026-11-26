@@ -812,6 +812,7 @@ fn value::saved::SavedValues::remove
 fn value::saved::SavedValues::retain_live
 fn value::slot::ClickTargets::mode
 fn value::slot::ClickTargets::volume
+fn value::slot::Mpe11Target::of
 fn value::state::Params::cell
 fn value::state::Params::seed
 fn value::state::Values::edit_log

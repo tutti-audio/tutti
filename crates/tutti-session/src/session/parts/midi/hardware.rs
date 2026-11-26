@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tutti_platform::Instant;
 
 use tutti_buffers::Float;
+use tutti_midi_ci::ResourceStore;
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
 
@@ -35,6 +36,8 @@ pub(crate) struct Hardware {
     pub(crate) io: Option<Arc<MidiLink>>,
     /// Who the session is on the wire, as set ([`Session::policy`](crate::Session::policy)).
     policy: Arc<Cell<MidiPolicy>>,
+    /// The store the layer serves now, as the policy held it.
+    served: Option<Arc<ResourceStore>>,
 }
 
 impl Hardware {
@@ -52,6 +55,7 @@ impl Hardware {
                 _task: task,
                 io,
                 policy,
+                served: None,
             },
             state,
         )
@@ -97,19 +101,28 @@ impl Hardware {
         state.midi_input_phase(self.link(), graph, now, out)
     }
 
+    /// Makes the layer present the policy's identity and serve its store. The
+    /// policy is cloned once per poll, an `Arc` clone on the control side, and
+    /// the store is handed to the layer only when it is not the one served:
+    /// `None` serves the empty store.
     fn apply_policy(&mut self, nodes: Option<&MidiNodes>) {
+        let policy = self.policy.current();
         let groups = nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |nodes| nodes.input_ports)
             .groups();
-        let wanted = self
-            .policy
-            .current()
+        let wanted = policy
             .identity
             .map(|identity: MidiIdentity| Presented { identity, groups });
-        if let Some(mut io) = self.locked()
-            && io.presented() != wanted
-        {
+        let Some(mut io) = self.locked() else {
+            return;
+        };
+        if io.presented() != wanted {
             io.present(wanted);
+        }
+        if !crate::midi_hardware::same_store(&policy.properties, &self.served) {
+            io.serve_properties(policy.properties.as_deref().cloned().unwrap_or_default());
+            drop(io);
+            self.served = policy.properties;
         }
     }
 
