@@ -237,7 +237,7 @@ pub enum ProfileRequestError {
     AlreadyAsking,
     /// A Set Profile On asks for more Channels than the peer declared as the
     /// Profile's maximum (M2-102 §2.5.1; M2-120 §3.1, §A.3).
-    #[error("{requested:?} Channels asked for, past the declared maximum {max:?}")]
+    #[error("{} Channels asked for, past the declared maximum {}", .requested.get(), .max.get())]
     OverMaximum {
         /// The count asked.
         requested: ProfileChannels,

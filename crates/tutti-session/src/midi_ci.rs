@@ -79,7 +79,7 @@ pub enum SwitchRefusal {
     #[error("the peer NAKed the switch: {0:?}")]
     Nak(Nak),
     /// The switch asks for more Channels than the peer declared.
-    #[error("{requested:?} Channels asked for, past the declared maximum {max:?}")]
+    #[error("{} Channels asked for, past the declared maximum {}", .requested.get(), .max.get())]
     OverMaximum {
         /// The Channels asked for.
         requested: tutti_midi_ci::ProfileChannels,

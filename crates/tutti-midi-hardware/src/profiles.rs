@@ -512,7 +512,7 @@ pub enum ProfileError {
     NotListed,
     /// The switch asks for more Channels than the peer declared as the Profile's
     /// maximum (M2-102 §2.5.1).
-    #[error("{requested:?} Channels asked for, past the declared maximum {max:?}")]
+    #[error("{} Channels asked for, past the declared maximum {}", .requested.get(), .max.get())]
     OverMaximum {
         /// The count the switch asks for.
         requested: ProfileChannels,

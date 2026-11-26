@@ -143,7 +143,7 @@ const fn counted(address: CiDeviceId, count: ProfileChannels) -> ProfileChannels
 pub enum OfferError {
     /// The entry is enabled with more Channels than its maximum: a Responder never
     /// reports a count above its declared maximum (M2-102 §2.5.1).
-    #[error("{enabled:?} Channels in use, past the declared maximum {max:?}")]
+    #[error("{} Channels in use, past the declared maximum {}", .enabled.get(), .max.get())]
     OverMaximum {
         /// The Channels the entry is enabled with.
         enabled: ProfileChannels,
