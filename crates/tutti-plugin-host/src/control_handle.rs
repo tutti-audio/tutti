@@ -1166,6 +1166,11 @@ mod tests {
     }
 
     impl Control for FakePresets {
+        /// A count that never moves: The fake refuses no write at the drain.
+        fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+            tutti_rt::tally()
+        }
+
         fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
             Vec::new()
         }

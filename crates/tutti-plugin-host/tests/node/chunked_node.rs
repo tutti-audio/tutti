@@ -140,6 +140,11 @@ struct RecController {
 macro_rules! rec_control {
     ($ty:ty) => {
         impl Control for $ty {
+            /// A count that never moves: The fake refuses no write at the drain.
+            fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+                tutti_rt::tally()
+            }
+
             fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
                 Vec::new()
             }

@@ -167,13 +167,10 @@ pub trait Control: EditorWindow {
     /// parameter the activation did not declare, or declared read-only), as a
     /// cumulative count over the plugin's life, across activations. The control
     /// side reads it ([`Health::refused_edits`](crate::Health::refused_edits));
-    /// the Processor adds to it. A write refused at the call is not counted. The
-    /// default is a count that never moves, for a format whose Processor refuses
-    /// no write by itself: CLAP's refusals are the event list's own
-    /// (`input_events_refused`), and VST2 and AU write the plugin at the call.
-    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
-        tutti_rt::tally()
-    }
+    /// the Processor adds to it. A write refused at the call is not counted. A
+    /// format whose Processor refuses no write by itself answers a count that
+    /// never moves, and says why.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64>;
 
     /// The writes made through this `Control` that the saved state does not hold
     /// yet: the newest value of each parameter that a

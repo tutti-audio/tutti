@@ -298,6 +298,11 @@ impl AuLoaded {
 }
 
 impl Control for AuLoaded {
+    /// A count that never moves: AU writes the unit at the call: its Processor refuses no write by itself.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
     /// None: an AU unit is written at the call; the writes its Processor marks
     /// for a tick are its Controller's ([`Wraps::pending`]).
     fn pending(&mut self) -> Vec<(ParamId, Normalized)> {

@@ -111,6 +111,11 @@ impl Vst2Loaded {
 }
 
 impl Control for Vst2Loaded {
+    /// A count that never moves: VST2 writes the plugin at the call: its Processor refuses no write by itself.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
     /// None: VST2 has no slots, and a write is applied to the plugin at the
     /// call (the node's own record states what a block has not applied).
     fn pending(&mut self) -> Vec<(ParamId, Normalized)> {

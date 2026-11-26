@@ -270,6 +270,11 @@ impl ClapLoaded {
 }
 
 impl Control for ClapLoaded {
+    /// A count that never moves: CLAP's refusals are the event list's own (`input_events_refused`), already in the losses.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
     /// None: a loaded CLAP plugin is written at the call (`params.flush`); the
     /// writes the Processor holds are its Controller's ([`Wraps::pending`]).
     fn pending(&mut self) -> Vec<(ParamId, Normalized)> {

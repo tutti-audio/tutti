@@ -223,6 +223,11 @@ macro_rules! served_control {
         }
 
         impl Control for $ty {
+            /// A count that never moves: A served plugin's refusals are the server's (`ServerLosses::edits_refused`), read through `Health`.
+            fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+                tutti_rt::tally()
+            }
+
             /// None: the bridge flushes the host's writes before every request
             /// and saves after them, so none is held back to state (P3b-2 states
             /// the writes the server has not answered for).

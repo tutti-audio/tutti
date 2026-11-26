@@ -723,6 +723,11 @@ fn set_value(values: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normal
 macro_rules! fake_control {
     ($ty:ty, $set:expr, $flush:expr, $pending:expr) => {
         impl Control for $ty {
+            /// A count that never moves: The fake refuses no write at the drain.
+            fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+                tutti_rt::tally()
+            }
+
             fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
                 let pending: fn(&mut Self) -> Vec<(ParamId, Normalized)> = $pending;
                 pending(self)
