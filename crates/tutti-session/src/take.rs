@@ -55,8 +55,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Sample, Sink, SinkFailed};
+use tutti_buffers::{
+    ChannelLayout, ChannelSet, Float, FloatWidth, Interleaved, InterleavedMut, Sample, Sink,
+    SinkFailed,
+};
 use tutti_codec::{FileEncoder, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
@@ -68,8 +70,6 @@ use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::transport_handle::When;
 use crate::{Input, Session, SessionEvent, Start, TakeLatency, TransportHandle, Trim};
-use tutti_buffers::ChannelSet;
-use tutti_buffers::FloatWidth;
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
@@ -1023,6 +1023,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             recorder: None,
         };
 
+        // The id seeds the file's dither, so it is minted before the open; an open that
+        // fails leaves a gap in the ids, which only need to be unique.
         let id = self.transport.handle.next_take_id();
         let (sink, path) = open_target(target, layout, rate, SplitMix64::mix(id.get()))?;
 
