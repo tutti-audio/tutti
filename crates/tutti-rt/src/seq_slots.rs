@@ -204,6 +204,9 @@ impl std::fmt::Debug for EpochWatch {
 /// a plugin takes them inside the call that follows, which can still be running.
 /// The holder of the reader publishes `swept` once that call has returned, so a
 /// watch that has reached a write shows the value processed.
+///
+/// A watch belongs to one slot array: its order is that writer's count, from 0.
+/// Slots built again count from 0 again, so they take a new watch.
 #[must_use]
 pub fn generation_watch() -> (GenerationPublisher, GenerationWatch) {
     let word = Arc::new(AtomicU32::new(0));
