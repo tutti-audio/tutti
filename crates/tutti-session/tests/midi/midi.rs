@@ -668,6 +668,7 @@ fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
                     name: tutti_ump::EndpointName::new("Session").unwrap(),
                     instance: None,
                 }),
+                properties: None,
             }),
     )
     .expect("the session has an OS MIDI layer");

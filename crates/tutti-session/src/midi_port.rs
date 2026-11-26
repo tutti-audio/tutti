@@ -43,12 +43,13 @@ use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, OpenOutput, PeerProfiles,
     ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
 };
+use tutti_midi_protocol::Mpe11Zones;
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
     MidiInputPorts,
 };
 use tutti_rt::{Bell, Counter, Gauge, Mutex};
-use tutti_ump::StreamConfig;
+use tutti_ump::{MidiGroup, StreamConfig};
 use tutti_units::{Frame, Losses};
 use tutti_units::{Resyncs, Seconds};
 
@@ -62,6 +63,7 @@ use crate::midi_ci::{
     Subscription, at_peer, resolve,
 };
 use crate::midi_record::Record;
+use crate::value::{SlotCell, SlotId};
 use crate::{
     EventInputPort, EventOutputPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId,
     Presence, Resource, ResourceFact, Session, SessionEvent,
@@ -1163,6 +1165,8 @@ struct OutputPort {
     link: OutLink,
     /// The proof the open brought, which every reopen of the port's device takes.
     started: Started,
+    /// The MPE 1.1 zones written for each Group ([`Mpe11Target`](crate::Mpe11Target)).
+    mpe11: Vec<(MidiGroup, Arc<crate::value::Cell<Option<Mpe11Zones>>>)>,
 }
 
 /// An input port leaves nothing while its node goes: its device's notes are being
@@ -1592,7 +1596,9 @@ impl Ports {
                     cause: PortCause::ReopenFailed,
                 },
             };
-            // The device lost its setup: it hears what the port said.
+            // The device lost its setup: it hears the zones chosen for it, then
+            // what the port said.
+            port.send_mpe11(true);
             port.catch_up();
             port.refresh(out);
             port.publish(out);
@@ -1709,6 +1715,7 @@ impl Ports {
             }
         }
         for port in &mut self.outputs {
+            port.send_mpe11(false);
             port.refresh(out);
         }
         // An input whose reader ended on an error while its device stays
@@ -1787,6 +1794,26 @@ impl OutputPort {
             .collect();
         let refused = out.send_frames(&events, None) as u64;
         self.losses.refused(refused);
+    }
+
+    /// Sends the open device the MPE 1.1 zones written since the last call; with
+    /// `reopened`, the zones in force of every Group, which a device that came
+    /// back has lost. A written value waits while the device is away.
+    fn send_mpe11(&mut self, reopened: bool) {
+        let Some(out) = self.link.open_mut() else {
+            return;
+        };
+        for (group, cell) in &self.mpe11 {
+            let written = cell.take_staged();
+            let zones = match (written, reopened) {
+                (Some(zones), _) => Some(zones),
+                (None, true) => cell.current().map(Some),
+                (None, false) => None,
+            };
+            if let Some(zones) = zones {
+                out.destination_mut().set_mpe11(*group, zones);
+            }
+        }
     }
 
     /// Takes in the output's Protocol and JR Timestamps as they are now.
@@ -1980,6 +2007,15 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             }),
         });
         let (claim, held) = Held::new(Arc::clone(&shared), node);
+        let values = self.graph.value_table();
+        let mpe11 = MidiGroup::all().map(|group| {
+            let cell = crate::value::Cell::new(None, |_| Ok(()));
+            values.provide(
+                SlotId::Mpe11((node, group)),
+                Arc::clone(&cell) as SlotCell<Option<Mpe11Zones>>,
+            );
+            (group, cell)
+        });
         self.state.ports.outputs.push(OutputPort {
             claim: held,
             shared: Arc::clone(&shared),
@@ -1992,6 +2028,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             record: Record::default(),
             link,
             started,
+            mpe11: mpe11.collect(),
         });
         Ok(MidiOutput { claim })
     }
