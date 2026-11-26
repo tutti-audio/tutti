@@ -279,7 +279,9 @@ fn restore_round_trip(hosting: Hosting) {
 
     set(&s, 0.1);
     blocks(&mut s);
-    let restore = s.restore_state(&node, tutti_session::Saved::new(state)).expect("its own plugin's");
+    let restore = s
+        .restore_state(&node, tutti_session::Saved::new(state))
+        .expect("its own plugin's");
     assert_eq!(
         matches!(restore, tutti_session::RestoreState::InProcess(_)),
         in_process,

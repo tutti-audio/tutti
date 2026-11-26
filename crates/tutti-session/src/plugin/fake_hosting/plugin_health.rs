@@ -542,7 +542,12 @@ fn a_failed_periodic_snapshot_is_counted() {
             .failed_snapshots()
     };
     assert_eq!(diagnostics(&s), Calls::ZERO);
-    assert!(s.land_snapshot(node, &token, Instant::now(), Ok(tutti_plugin_types::PluginState::new(vec![1, 2, 3])),));
+    assert!(s.land_snapshot(
+        node,
+        &token,
+        Instant::now(),
+        Ok(tutti_plugin_types::PluginState::new(vec![1, 2, 3])),
+    ));
     assert_eq!(
         diagnostics(&s),
         Calls::ZERO,

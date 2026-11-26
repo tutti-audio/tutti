@@ -144,10 +144,7 @@ impl Vst3Loaded {
     /// component half is the one a project cannot be restored without, and
     /// plenty of controllers have no UI state to give. That half degrades to
     /// empty and the component half is still returned.
-    pub(in crate::host) fn read_state(
-        &self,
-        main: MainThreadMarker,
-    ) -> Result<Vec<u8>> {
+    pub(in crate::host) fn read_state(&self, main: MainThreadMarker) -> Result<Vec<u8>> {
         let component = self.read_component_state(main)?;
         let controller = self.read_controller_state(main);
         Ok(pack_state(&component, &controller)?)

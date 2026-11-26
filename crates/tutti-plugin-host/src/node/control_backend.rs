@@ -887,7 +887,10 @@ mod off_main_tests {
         let (mut unit, handle, _pump) = loaded();
         let id = ParamId::new(1);
         let applied = handle.any_thread().save_state(StateUse::Project).unwrap();
-        assert!(applied.pending.is_empty(), "the load's block applied its write");
+        assert!(
+            applied.pending.is_empty(),
+            "the load's block applied its write"
+        );
         handle
             .any_thread()
             .set_parameter_value(id, Normalized::of(0.25))

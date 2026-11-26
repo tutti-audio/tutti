@@ -327,7 +327,11 @@ fn a_save_after_a_write_states_it_pending() {
     let at_once = save();
     assert_eq!(at_once.bytes, before.bytes, "no block has applied it");
     assert_eq!(at_once.pending, [(ParamId::new(0), Normalized::of(0.5))]);
-    assert_eq!(read(&handle, 0), Some(0.5), "the mirror reads what is wanted");
+    assert_eq!(
+        read(&handle, 0),
+        Some(0.5),
+        "the mirror reads what is wanted"
+    );
     unit.block();
     let after = save();
     assert!(after.pending.is_empty(), "the block applied it");

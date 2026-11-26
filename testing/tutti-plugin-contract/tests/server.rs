@@ -45,7 +45,8 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let state = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves").bytes;
+        .expect("saves")
+        .bytes;
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
     assert!(
         handle
@@ -56,7 +57,8 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let saved = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves again").bytes;
+        .expect("saves again")
+        .bytes;
     let after = Transcript::parse(&F::extract_blob(&saved));
     assert_eq!(after.mode, Mode::Level.index(), "the mode crossed");
     // The mirror a session reads: its load-time read of the served plugin's values.

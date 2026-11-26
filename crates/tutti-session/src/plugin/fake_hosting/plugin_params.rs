@@ -1131,7 +1131,10 @@ fn an_owed_write_is_not_sent_to_the_replacement() {
     let again = Fake::new();
     replace_with(&mut s, key.erase(), &again, "fake.clap");
     let _ = update(&mut s);
-    assert!(again.sets().is_empty(), "the old plugin's owed write died with it");
+    assert!(
+        again.sets().is_empty(),
+        "the old plugin's owed write died with it"
+    );
 }
 
 /// **One plugin parameter named in two value types in one batch is refused**:

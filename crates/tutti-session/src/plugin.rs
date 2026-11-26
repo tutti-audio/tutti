@@ -2674,19 +2674,25 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             // The writes the plugin could not answer for are sent again, and the
             // ones it refused by name are told.
-            out.extend(hosted.writes.resend(&hosted.handle).into_iter().map(|refusal| {
-                event(
-                    node,
-                    match refusal {
-                        crate::value::WriteRefusal::Undeclared(id) => {
-                            PluginChange::ParamUndeclared { id }
-                        }
-                        crate::value::WriteRefusal::ReadOnly(id) => {
-                            PluginChange::ParamReadOnly { id }
-                        }
-                    },
-                )
-            }));
+            out.extend(
+                hosted
+                    .writes
+                    .resend(&hosted.handle)
+                    .into_iter()
+                    .map(|refusal| {
+                        event(
+                            node,
+                            match refusal {
+                                crate::value::WriteRefusal::Undeclared(id) => {
+                                    PluginChange::ParamUndeclared { id }
+                                }
+                                crate::value::WriteRefusal::ReadOnly(id) => {
+                                    PluginChange::ParamReadOnly { id }
+                                }
+                            },
+                        )
+                    }),
+            );
             match hosted.liveness.observe(cause.is_none(), now) {
                 LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,
                 LivenessVerdict::Failing { .. } => hosted.status = PluginLiveness::Failing,
@@ -3418,11 +3424,9 @@ mod tests {
             &self,
             id: ParamId,
         ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
-            tutti_plugin_types::Answer::ready(
-                self.params.iter().find(|(a, _)| *a == id).map(|&(_, v)| {
-                    tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v)))
-                }),
-            )
+            tutti_plugin_types::Answer::ready(self.params.iter().find(|(a, _)| *a == id).map(
+                |&(_, v)| tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v))),
+            ))
         }
         /// A held list is a round trip in flight: a thread of its own waits for the test's
         /// token and then answers, so no executor thread waits on it. A dropped sender

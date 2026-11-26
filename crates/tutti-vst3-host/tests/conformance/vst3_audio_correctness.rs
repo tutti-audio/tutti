@@ -1564,12 +1564,9 @@ mod loaded_writes {
     /// applied beside them.
     fn saved(plugin: &mut impl Control) -> (Vec<u8>, Vec<(ParamId, Normalized)>) {
         let pending = Control::pending(plugin);
-        let blob = Control::save_state(
-            plugin,
-            main_thread(),
-            tutti_plugin_types::StateUse::Project,
-        )
-        .expect("the probe saves");
+        let blob =
+            Control::save_state(plugin, main_thread(), tutti_plugin_types::StateUse::Project)
+                .expect("the probe saves");
         (blob, pending)
     }
 

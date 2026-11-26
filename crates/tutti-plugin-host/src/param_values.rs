@@ -222,9 +222,7 @@ impl Future for ReadingParams {
                 Question::Value(answer) => std::task::ready!(Pin::new(answer).poll(cx))
                     .flatten()
                     .map(tutti_plugin_types::PluginValue::wanted),
-                Question::Default(answer) => {
-                    std::task::ready!(Pin::new(answer).poll(cx)).flatten()
-                }
+                Question::Default(answer) => std::task::ready!(Pin::new(answer).poll(cx)).flatten(),
             };
             let value = match (&*question, answered) {
                 (_, Some(value)) => value,
@@ -534,9 +532,7 @@ mod tests {
                 .iter()
                 .find(|(a, _)| *a == id)
                 .and_then(|(_, v)| *v)
-                .map(|v| {
-                    tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v)))
-                });
+                .map(|v| tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v))));
             self.deliver(value, matches!(self.mode, Mode::ValuesCanceled))
         }
         fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Answer<Option<Normalized>> {

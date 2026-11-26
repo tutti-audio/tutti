@@ -269,7 +269,10 @@ pub(crate) mod tests {
                 ParameterInfo::new(ID, "bypass").with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
             ]))
         }
-        fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
+        fn parameter_value(
+            &self,
+            _id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
             tutti_plugin_types::Answer::ready(self.read().map(tutti_plugin_types::PluginValue::new))
         }
         /// The way an in-process backend reads it: the plugin's own value, at

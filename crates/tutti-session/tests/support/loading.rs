@@ -228,13 +228,15 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         let opened = match load? {
             Load::InProcess(mut load) => {
                 if let Some(state) = state {
-                    load.initial_state(Saved::new(state)).expect("a state of the plugin");
+                    load.initial_state(Saved::new(state))
+                        .expect("a state of the plugin");
                 }
                 load.run(main)?
             }
             Load::OutOfProcess(mut load) => {
                 if let Some(state) = state {
-                    load.initial_state(Saved::new(state)).expect("a state of the plugin");
+                    load.initial_state(Saved::new(state))
+                        .expect("a state of the plugin");
                 }
                 load.block()?
             }

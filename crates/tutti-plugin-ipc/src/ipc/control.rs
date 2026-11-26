@@ -37,7 +37,10 @@ macro_rules! served_control {
 
             /// A served read states no pending write: the host's writes reach the
             /// server by a flush the read does not wait for or report.
-            fn parameter_value(&self, id: ParamId) -> Answer<Option<tutti_plugin_types::PluginValue>> {
+            fn parameter_value(
+                &self,
+                id: ParamId,
+            ) -> Answer<Option<tutti_plugin_types::PluginValue>> {
                 self.link.bridge.audio().parameter_answer(id)
             }
 

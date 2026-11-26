@@ -131,11 +131,7 @@ impl PluginOp for LoadPresetOp {
         PresetError::Stalled { after }
     }
 
-    fn run(
-        &self,
-        handle: &PluginHandle,
-        main: MainThreadMarker,
-    ) -> Poll<Result<(), PresetError>> {
+    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Poll<Result<(), PresetError>> {
         handle.load_preset(main, &self.id)
     }
 

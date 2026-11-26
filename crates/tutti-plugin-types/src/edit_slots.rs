@@ -356,7 +356,11 @@ mod tests {
             [(id(1), Normalized::of(0.5)), (id(2), Normalized::of(0.75))]
         );
         assert_eq!(drained(&mut reader).len(), 2);
-        assert_eq!(writer.pending().len(), 2, "taken, the call has not returned");
+        assert_eq!(
+            writer.pending().len(),
+            2,
+            "taken, the call has not returned"
+        );
         reader.publish_applied();
         assert!(writer.pending().is_empty());
         writer.write(id(2), Normalized::of(0.125)).unwrap();

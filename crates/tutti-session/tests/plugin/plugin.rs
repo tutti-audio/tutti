@@ -38,11 +38,11 @@ use tutti_plugin_types::PluginFailure;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::RenderMode;
 use tutti_session::BufferMainOutput;
+use tutti_session::Peer as _;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
     Range, Session, SessionEvent,
 };
-use tutti_session::Peer as _;
 use tutti_session::{RecoveryFailure, ReloadCause};
 use tutti_units::{Chunks, SampleRate, Samples};
 
@@ -1297,7 +1297,8 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         .state()
         .last_good()
         .unwrap()
-        .state().bytes()
+        .state()
+        .bytes()
         .to_vec();
     let mut drive = Drive::new();
     drive.until(&mut s, "a second attempt", |e| {
@@ -1470,7 +1471,8 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .state()
         .last_good()
         .unwrap()
-        .state().bytes()
+        .state()
+        .bytes()
         .to_vec();
     let mut drive = Drive::new();
     drive.until(&mut s, "recovered", |e| {
@@ -1525,7 +1527,8 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .state()
         .last_good()
         .expect("a new snapshot")
-        .state().bytes();
+        .state()
+        .bytes();
     assert_ne!(fresh, users.as_slice(), "the plugin is at its defaults");
     assert_eq!(
         s.plugin_view(node)

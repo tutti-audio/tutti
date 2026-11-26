@@ -309,7 +309,10 @@ mod tests {
         assert!(post.pending().is_empty(), "the call returned");
         post.write(id(2), Normalized::of(0.125)).unwrap();
         post.reset();
-        assert!(post.pending().is_empty(), "a load replaced what it was written against");
+        assert!(
+            post.pending().is_empty(),
+            "a load replaced what it was written against"
+        );
     }
 
     /// **A write made while a load runs is applied after it, and one made

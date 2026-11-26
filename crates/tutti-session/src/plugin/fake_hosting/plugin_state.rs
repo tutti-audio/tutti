@@ -233,7 +233,10 @@ impl tutti_plugin_host::MainThreadControl for Draining {
         f(&mut self.plugin.clone());
     }
 
-    fn restoring(&self, f: &mut dyn FnMut(&mut dyn tutti_plugin_types::Control)) -> std::task::Poll<()> {
+    fn restoring(
+        &self,
+        f: &mut dyn FnMut(&mut dyn tutti_plugin_types::Control),
+    ) -> std::task::Poll<()> {
         if self.draining.load(std::sync::atomic::Ordering::Acquire) {
             return std::task::Poll::Pending;
         }
@@ -284,9 +287,17 @@ fn a_restore_is_pending_while_a_node_drains_and_stalls_at_its_deadline() {
     else {
         panic!("a fake plugin runs in process");
     };
-    assert_eq!(restore.deadline(), None, "nothing is due before the first poll");
+    assert_eq!(
+        restore.deadline(),
+        None,
+        "nothing is due before the first poll"
+    );
     assert!(restore.poll(main, now).is_pending());
-    assert_eq!(loads(&fake), 0, "the plugin is not asked while writes drain");
+    assert_eq!(
+        loads(&fake),
+        0,
+        "the plugin is not asked while writes drain"
+    );
     control.draining.store(false, Ordering::Release);
     assert!(matches!(restore.poll(main, now), Poll::Ready(Ok(_))));
     assert_eq!(loads(&fake), 1);

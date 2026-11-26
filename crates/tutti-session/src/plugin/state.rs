@@ -206,7 +206,10 @@ impl PluginOp for SaveStateOp {
     }
 
     fn finish(self, saved: PluginState, _answers: Option<&PluginAnswers>) -> Saved {
-        Saved::with_pending(PeerState::of_plugin(self.plugin, saved.bytes), saved.pending)
+        Saved::with_pending(
+            PeerState::of_plugin(self.plugin, saved.bytes),
+            saved.pending,
+        )
     }
 }
 
@@ -296,11 +299,7 @@ impl PluginOp for RestoreStateOp {
         StateError::Stalled { after }
     }
 
-    fn run(
-        &self,
-        handle: &PluginHandle,
-        main: MainThreadMarker,
-    ) -> Poll<Result<(), StateError>> {
+    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Poll<Result<(), StateError>> {
         handle.load_state(main, self.saved.state().bytes())
     }
 

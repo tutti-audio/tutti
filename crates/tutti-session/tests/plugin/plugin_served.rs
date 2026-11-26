@@ -334,7 +334,8 @@ fn a_reload_awaited_on_a_spawned_thread_is_swapped_in_with_its_state() {
         tutti_session::LoadPlugin::OutOfProcess(load) => load,
         other => panic!("{other:?}"),
     };
-    load.initial_state(tutti_session::Saved::new(state)).expect("its own plugin's state");
+    load.initial_state(tutti_session::Saved::new(state))
+        .expect("its own plugin's state");
     let revived = std::thread::spawn(move || load.block())
         .join()
         .expect("the load's thread ends")
@@ -436,7 +437,8 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     );
 
     let mut load = s.load_out_of_process(&first_id(), &catalog);
-    load.initial_state(tutti_session::Saved::new(state)).expect("its own plugin's state");
+    load.initial_state(tutti_session::Saved::new(state))
+        .expect("its own plugin's state");
     let second = load.block().expect("the plugin loads");
     let second_handle = second.instance();
     let b = s.apply(second).unwrap();
@@ -993,7 +995,9 @@ fn block_on_save(save: SaveState) -> PeerState {
     let SaveState::OutOfProcess(save) = save else {
         panic!("a served plugin's save is awaited");
     };
-    tutti_fixtures::block_on(save).expect("a state").into_state()
+    tutti_fixtures::block_on(save)
+        .expect("a state")
+        .into_state()
 }
 
 /// **A save awaited on a spawned thread returns the plugin's state**, which a
@@ -1080,7 +1084,10 @@ fn a_restore_awaited_off_main_takes_effect_when_applied() {
     let held = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
     assert_ne!(held.bytes(), saved.bytes(), "the plugin holds 0.9, not 0.3");
 
-    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, tutti_session::Saved::new(saved)).unwrap() else {
+    let RestoreState::OutOfProcess(restore) = s
+        .restore_state(&node, tutti_session::Saved::new(saved))
+        .unwrap()
+    else {
         panic!("a served plugin's restore is awaited");
     };
     let restored = std::thread::spawn(move || tutti_fixtures::block_on(restore))
@@ -1109,10 +1116,15 @@ fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
         .unwrap()
         .target();
     s.set(target.to(Normalized::of(0.9))).unwrap();
-    drop(s.restore_state(&node, tutti_session::Saved::new(default)).unwrap());
+    drop(
+        s.restore_state(&node, tutti_session::Saved::new(default))
+            .unwrap(),
+    );
     let after = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
     let mut loaded = s.load_out_of_process(&first_id(), &catalog);
-    loaded.initial_state(tutti_session::Saved::new(after)).unwrap();
+    loaded
+        .initial_state(tutti_session::Saved::new(after))
+        .unwrap();
     let c = s.apply(loaded.block().unwrap()).unwrap();
     let held = s
         .plugin_view(c)
@@ -1137,7 +1149,10 @@ fn a_restore_the_server_dies_in_ends_as_the_dead_plugin() {
     let mut s = session(false);
     let (_, node) = in_a_node(&mut s, &catalog, &first_id());
     let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
-    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, tutti_session::Saved::new(state)).unwrap() else {
+    let RestoreState::OutOfProcess(restore) = s
+        .restore_state(&node, tutti_session::Saved::new(state))
+        .unwrap()
+    else {
         panic!("a served plugin's restore is awaited");
     };
     let ended = std::thread::spawn(move || tutti_fixtures::block_on(restore))

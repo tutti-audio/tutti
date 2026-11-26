@@ -518,7 +518,11 @@ mod tests {
         assert_eq!(post.pending(), [(id, value)], "no block has run");
         fake.fail_blocks(true);
         unit.block();
-        assert_eq!(post.pending(), [(id, value)], "the failed block applied nothing");
+        assert_eq!(
+            post.pending(),
+            [(id, value)],
+            "the failed block applied nothing"
+        );
         fake.fail_blocks(false);
         unit.block();
         assert!(post.pending().is_empty(), "the block that ran applied it");

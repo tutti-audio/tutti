@@ -490,7 +490,10 @@ fn handle_save_state_roundtrip() {
         });
 
     let state = handle.save_state(tutti_plugin_types::StateUse::Project);
-    assert_eq!(state.expect("mock answered").bytes, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    assert_eq!(
+        state.expect("mock answered").bytes,
+        vec![0xDE, 0xAD, 0xBE, 0xEF]
+    );
 }
 
 #[test]

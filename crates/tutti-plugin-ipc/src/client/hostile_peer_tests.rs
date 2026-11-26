@@ -2223,7 +2223,10 @@ fn an_awaited_save_state_is_filled_with_the_servers_state() {
         .bridge
         .audio()
         .save_state_answer(tutti_plugin_types::StateUse::Project);
-    assert_eq!(await_answer(answer), Some(Ok(tutti_plugin_types::PluginState::new(bytes))));
+    assert_eq!(
+        await_answer(answer),
+        Some(Ok(tutti_plugin_types::PluginState::new(bytes)))
+    );
 }
 
 /// **A server that never answers a save is cut off by the control lane's
