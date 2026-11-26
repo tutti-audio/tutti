@@ -118,8 +118,6 @@ tutti-graph  ctor-result  crates/tutti-graph/src/node/param.rs::ParamPorts::try_
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new
-tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/clip_node.rs::MidiClipNode::new
-tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_node.rs::HarmonyNode::new
 
 
 # tutti-music

@@ -29,8 +29,8 @@ use tutti_rt::Mutex;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkSource, Forked, Harmony, HarmonyKind,
-    HasPublished, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents,
-    Prepare, Published, PublishedKind, RenderMode, Shape, Status,
+    HasPublished, HostValues, Initials, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeConfig,
+    NodeParts, Offset, OutEvents, Prepare, Published, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
 use tutti_units::{Beat, FramesPerBeat};
@@ -187,12 +187,12 @@ impl HarmonyChanges {
 /// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Harmony, Prepare};
-/// use tutti_midi_runtime::{HarmonyChanges, HarmonyNode, TimedHarmony};
+/// use tutti_midi_runtime::{HarmonyChanges, HarmonyConfig, HarmonyNode, TimedHarmony};
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let c_major = Harmony::chord(60, 60, 0b1001_0001);
 /// let changes = HarmonyChanges::new([TimedHarmony::new(Beat::new(0.0), c_major)]).unwrap();
-/// let node = HarmonyNode::new(changes);
+/// let node = HarmonyNode::from(HarmonyConfig::default().changes(changes));
 /// let controls = editor.insert(NodeKey(1), "harmony", node).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```
@@ -239,12 +239,6 @@ impl HarmonyNode {
         .event_output(0)
         .expect("declared");
 
-    /// A node sending `changes`.
-    #[must_use]
-    pub fn new(changes: HarmonyChanges) -> Self {
-        Self::over(Publisher::new(changes))
-    }
-
     /// A node over `cell`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
     fn over(cell: Publisher<HarmonyChanges>) -> Self {
@@ -256,6 +250,51 @@ impl HarmonyNode {
             sent: Sent::default(),
             capacity: MIN_EVENT_PORT_CAPACITY,
         }
+    }
+}
+
+/// What a [`HarmonyNode`] is made from: the lanes it sends from its first
+/// block. The lanes are a published value a session replaces
+/// (`harmony.changes()`), so the config has no structure: any two make the same
+/// node, and a running node's lanes are replaced through
+/// [`HarmonyControls::set`].
+#[derive(Clone, Debug, Default)]
+pub struct HarmonyConfig {
+    changes: Arc<HarmonyChanges>,
+}
+
+impl HarmonyConfig {
+    /// The lanes the node sends from its first block.
+    #[must_use]
+    pub fn changes(mut self, changes: impl Into<Arc<HarmonyChanges>>) -> Self {
+        self.changes = changes.into();
+        self
+    }
+}
+
+impl From<HarmonyConfig> for HarmonyNode {
+    /// Control thread: registering a reader may allocate.
+    fn from(config: HarmonyConfig) -> Self {
+        Self::over(Publisher::from_arc(config.changes))
+    }
+}
+
+impl<F: Float> NodeConfig<F> for HarmonyConfig {
+    type Node = HarmonyNode;
+
+    fn build(&self, _host: &HostValues) -> HarmonyNode {
+        HarmonyNode::from(self.clone())
+    }
+
+    /// Every harmony config makes the same node: the lanes are published, not
+    /// structure.
+    fn same_structure(&self, _other: &Self) -> bool {
+        true
+    }
+
+    /// None: the lanes are a published value, not a param or a setting.
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }
 

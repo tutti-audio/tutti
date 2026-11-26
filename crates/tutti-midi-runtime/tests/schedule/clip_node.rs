@@ -11,11 +11,13 @@ use crate::common::{at, beat_of, off, on, rolling};
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_fixtures::{EventRig, Seen, heard};
-use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{ClipEvents, MidiClipControls, MidiClipNode, TimedMidiEvent};
+use tutti_graph::{HostValues, NodeKey};
+use tutti_midi_runtime::{
+    ClipEvents, MidiClipConfig, MidiClipControls, MidiClipNode, TimedMidiEvent,
+};
 use tutti_music::LoopRange;
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
@@ -54,11 +56,13 @@ fn roll(exec: &mut Executor, frames: u64, block: usize) {
 fn notes_land_on_their_frames_whatever_the_blocks() {
     let frames = [100u64, 255, 256, 999, 1_000, 5_000];
     for block in [256usize, 100] {
-        let clip = MidiClipNode::new(
-            frames
-                .iter()
-                .enumerate()
-                .map(|(i, &f)| at(f, if i % 2 == 0 { on(60) } else { off(60) })),
+        let clip = MidiClipNode::from(
+            MidiClipConfig::default().events(ClipEvents::from_iter(
+                frames
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &f)| at(f, if i % 2 == 0 { on(60) } else { off(60) })),
+            )),
         );
         let (_ed, mut exec, _c, seen) = rig(clip, 256);
         roll(&mut exec, 6_000, block);
@@ -73,7 +77,10 @@ fn notes_land_on_their_frames_whatever_the_blocks() {
 /// plays at block frame 300; the held note 60 ends at 200, before it.
 #[test]
 fn a_seek_inside_a_block_plays_from_the_seek() {
-    let clip = MidiClipNode::new([at(24, on(60)), at(48_100, on(62))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default()
+            .events(ClipEvents::from_iter([at(24, on(60)), at(48_100, on(62))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let mut changes = TransportChanges::NONE;
     changes
@@ -98,7 +105,11 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
 /// 0: timeline frame 23 800 is executor frame 0.)
 #[test]
 fn a_loop_that_wraps_inside_a_block_plays_its_start() {
-    let clip = MidiClipNode::new([at(48, on(62)), at(23_850, on(60)), at(23_950, on(64))]);
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        at(48, on(62)),
+        at(23_850, on(60)),
+        at(23_950, on(64)),
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
@@ -121,7 +132,9 @@ fn a_loop_that_wraps_inside_a_block_plays_its_start() {
 /// second stopped block sends nothing.
 #[test]
 fn stopping_ends_the_held_notes_once() {
-    let clip = MidiClipNode::new([at(10, on(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(10, on(60))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     let stopped = TransportPosition::new(false, Bpm::of(120.0), beat_of(64), None);
@@ -136,7 +149,10 @@ fn stopping_ends_the_held_notes_once() {
 /// at frame 100 plays.
 #[test]
 fn a_new_clip_ends_the_old_clips_notes() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(1_000, off(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default()
+            .events(ClipEvents::from_iter([at(10, on(60)), at(1_000, off(60))])),
+    );
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     publish(&controls, [at(100, on(72))]);
@@ -154,7 +170,10 @@ fn a_new_clip_ends_the_old_clips_notes() {
 /// the fourth block's first frame, and two more blocks send nothing more.
 #[test]
 fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(100_000, off(60))]);
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        at(10, on(60)),
+        at(100_000, off(60)),
+    ])));
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     for f in [0, 64, 128] {
         exec.process(64, &rolling(f), &[], &mut []);
@@ -172,7 +191,11 @@ fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
 /// note-off each.
 #[test]
 fn two_publishes_between_blocks_release_each_held_note_once() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(20, on(62)), at(100_000, off(60))]);
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        at(10, on(60)),
+        at(20, on(62)),
+        at(100_000, off(60)),
+    ])));
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     publish(&controls, [at(5_000, on(72))]);
@@ -192,7 +215,10 @@ fn two_publishes_between_blocks_release_each_held_note_once() {
 #[test]
 fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
     use tutti_graph::{NodeParts, RenderMode};
-    let NodeParts { controls, fork, .. } = MidiClipNode::new([at(300, on(60))]).into_parts();
+    let NodeParts { controls, fork, .. } = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(300, on(60))])),
+    )
+    .into_parts();
     let forked = fork
         .expect("a clip is forkable")
         .fork(RenderMode::Realtime)
@@ -209,7 +235,9 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
 /// from 0. Note 60, on at 23 850, is ended at executor frame 200.
 #[test]
 fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
-    let clip = MidiClipNode::new([at(23_850, on(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(23_850, on(60))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
@@ -256,7 +284,9 @@ fn a_shifted_event_moves_its_beat_and_refuses_a_beat_that_is_not_finite() {
 #[test]
 fn refused_note_offs_are_retried_until_none_is_held() {
     let note = |i: u16| midi::note_on(MidiChannel::of((i / 128) as u8), (i % 128) as u8, 0xFFFF);
-    let clip = MidiClipNode::new((0..400u16).map(|i| at(if i < 200 { 10 } else { 300 }, note(i))));
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(
+        (0..400u16).map(|i| at(if i < 200 { 10 } else { 300 }, note(i))),
+    )));
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     roll(&mut exec, 512, 256);
     // The seek, far from any event, then rolling on from it.
@@ -283,10 +313,10 @@ fn refused_note_offs_are_retried_until_none_is_held() {
 /// transport beat is `frame / 32 000` (not exact in binary).
 #[test]
 fn a_note_lands_on_its_frame_at_ninety_bpm() {
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         TimedMidiEvent::new(Beat::new(1.0), on(60)).unwrap(),
         TimedMidiEvent::new(Beat::new(3.0), on(62)).unwrap(),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     let mut f = 0u64;
     while f < 100_000 {
@@ -304,7 +334,9 @@ fn a_note_lands_on_its_frame_at_ninety_bpm() {
 /// times, and is ended within each.
 #[test]
 fn a_loop_shorter_than_a_block_plays_every_pass() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(60, off(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(10, on(60)), at(60, off(60))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let lp = Some(LoopRange::new(Beat::new(0.0), beat_of(100)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
@@ -326,7 +358,11 @@ fn a_loop_shorter_than_a_block_plays_every_pass() {
 /// at frame 64 ends it.
 #[test]
 fn a_note_started_twice_and_ended_once_leaves_nothing_sounding() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(20, on(60)), at(30, off(60))]);
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        at(10, on(60)),
+        at(20, on(60)),
+        at(30, off(60)),
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     exec.process(64, &rolling(48_000), &[], &mut []);
@@ -386,7 +422,9 @@ fn overlapping_notes_of_one_key_leave_the_newest_whole() {
         ),
     ];
     for (name, events, want) in cases {
-        let clip = MidiClipNode::new(events.into_iter().map(|(f, u)| at(f, u)));
+        let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(
+            events.into_iter().map(|(f, u)| at(f, u)),
+        )));
         let (_ed, mut exec, _c, seen) = rig(clip, 256);
         exec.process(256, &rolling(0), &[], &mut []);
         assert_eq!(heard(&seen), want, "{name}");
@@ -400,12 +438,12 @@ fn overlapping_notes_of_one_key_leave_the_newest_whole() {
 /// the key again, and its note-off at 30 ends it.
 #[test]
 fn a_keys_owner_starts_over_at_a_loop_wrap() {
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(10, on(60)),
         at(30, off(60)),
         at(50, on(60)),
         at(150, off(60)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     // Three passes, then a block from the loop's start (the third wrap falls
     // on the first block's edge, and is ended on the next block's first frame).
@@ -450,7 +488,9 @@ fn looping_at(tempo: f64, beat: Beat, start: Beat, end: Beat) -> TransportPositi
 /// its first frame.
 #[test]
 fn a_pass_ending_on_a_block_edge_ends_what_it_held() {
-    let clip = MidiClipNode::new([at(95, on(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(95, on(60))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(
         500,
@@ -480,7 +520,9 @@ fn a_pass_ending_on_a_block_edge_ends_what_it_held() {
 /// note 5 frames in and ends it 30 frames in.
 #[test]
 fn a_tempo_change_inside_a_block_re_times_the_passes() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(60, off(60))]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(10, on(60)), at(60, off(60))])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let mut changes = TransportChanges::NONE;
     changes
@@ -521,11 +563,13 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
     let (start, end) = (Beat::new(3.0), Beat::new(3.00126));
     let fpb = RATE * 60.0 / TEMPO;
     let notes = [3.000_1, 3.000_5, 3.001_1];
-    let clip = MidiClipNode::new(
-        notes
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| TimedMidiEvent::new(Beat::new(b), on(60 + i as u8)).unwrap()),
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter(
+            notes
+                .iter()
+                .enumerate()
+                .map(|(i, &b)| TimedMidiEvent::new(Beat::new(b), on(60 + i as u8)).unwrap()),
+        )),
     );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let region = Region::new(start, end).unwrap();
@@ -594,7 +638,9 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
 fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let clip = MidiClipNode::new([TimedMidiEvent::new(start, on(60)).unwrap()]);
+        let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+            TimedMidiEvent::new(start, on(60)).unwrap(),
+        ])));
         let (_ed, mut exec, _c, seen) = rig(clip, 64);
         let mut clock =
             tutti_music::FrameClock::new(start, tutti_units::Bpm::of(120.0), SampleRate::of(RATE));
@@ -645,12 +691,12 @@ fn a_clip_ending_on_a_lone_cc_6_flushes_its_rpn_at_the_cc_6() {
     use tutti_ump::{CCNumber, Message, U7, Voice2};
     let ch = MidiChannel::FIRST;
     let cc = |n: CCNumber, v: u8| midi::m1_cc(ch, n, U7::of(v));
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(100, cc(CCNumber::RPN_MSB, 0)),
         at(200, cc(CCNumber::RPN_LSB, 0)),
         at(300, cc(CCNumber::DATA_ENTRY, 12)),
         at(5_000, on(60)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     roll(&mut exec, 6_000, 256);
     let seen = heard(&seen);
@@ -691,14 +737,14 @@ fn stopping_lifts_the_pedals_and_centres_the_bend_after_the_note_offs() {
     let sostenuto = CCNumber::SOSTENUTO;
     let soft = CCNumber::SOFT_PEDAL;
     let hold2 = CCNumber::new(69).unwrap();
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(10, on(60)),
         at(20, pedal(0, sustain, DOWN)),
         at(21, pedal(0, sostenuto, DOWN)),
         at(22, pedal(0, soft, DOWN)),
         at(23, pedal(0, hold2, DOWN)),
         at(24, bend(0, 0x9000_0000)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     let stopped = TransportPosition::new(false, Bpm::of(120.0), beat_of(64), None);
@@ -728,13 +774,13 @@ fn stopping_lifts_the_pedals_and_centres_the_bend_after_the_note_offs() {
 #[test]
 fn a_controller_at_rest_is_not_resent_at_a_stop() {
     let s = CCNumber::SUSTAIN;
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(10, pedal(0, s, DOWN)),
         at(11, pedal(0, s, 0)),
         at(12, bend(0, 0xA000_0000)),
         at(13, bend(0, CENTRE)),
         at(14, pedal(1, s, DOWN)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     exec.process(
@@ -757,10 +803,10 @@ fn a_controller_at_rest_is_not_resent_at_a_stop() {
 /// note, then releases the pedal, on that frame (M1 p. 31; A-5 for the order).
 #[test]
 fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(23_850, on(60)),
         at(23_851, pedal(0, CCNumber::SUSTAIN, DOWN)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
@@ -782,11 +828,11 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
 /// where playback is, sends nothing.
 #[test]
 fn a_seek_returns_the_controllers_where_the_jump_happens() {
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(24, on(60)),
         at(25, pedal(0, CCNumber::SUSTAIN, DOWN)),
         at(26, bend(0, 0x7000_0000)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let mut changes = TransportChanges::NONE;
     changes
@@ -822,10 +868,12 @@ fn a_seek_returns_the_controllers_where_the_jump_happens() {
 fn a_refused_pedal_up_is_owed_and_follows_the_last_note_off() {
     let note = |i: u16| midi::note_on(MidiChannel::of((i / 128) as u8), (i % 128) as u8, 0xFFFF);
     let s = CCNumber::SUSTAIN;
-    let clip = MidiClipNode::new(
-        (0..400u16)
-            .map(|i| at(if i < 200 { 10 } else { 300 }, note(i)))
-            .chain([at(5, pedal(15, s, DOWN))]),
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter(
+            (0..400u16)
+                .map(|i| at(if i < 200 { 10 } else { 300 }, note(i)))
+                .chain([at(5, pedal(15, s, DOWN))]),
+        )),
     );
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     roll(&mut exec, 512, 256);
@@ -868,7 +916,7 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
         Rpn::PITCH_BEND_SENSITIVITY,
         0x1800_0000,
     );
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(10, midi::program_change(Address::new(g, c0), 5, None)),
         at(20, volume(c0, 0x1000_0000)),
         at(30, on(60)),
@@ -897,7 +945,7 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
         at(80, volume(c1, 0x5000_0000)),
         at(96_000, volume(c0, 0x6000_0000)),
         at(100_000, volume(c0, 0x7000_0000)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
     let got: Vec<Ump> = heard(&seen).iter().map(|&(_, u)| u).collect();
@@ -923,7 +971,10 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
 /// set before beat 0, so the first block holds only what the walk plays.
 #[test]
 fn a_render_from_the_start_chases_nothing() {
-    let clip = MidiClipNode::new([at(0, bend(0, 0x7000_0000)), at(10, on(60))]);
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        at(0, bend(0, 0x7000_0000)),
+        at(10, on(60)),
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(0), &[], &mut []);
     assert_eq!(heard(&seen), vec![(0, bend(0, 0x7000_0000)), (10, on(60))]);
@@ -937,21 +988,23 @@ fn a_render_from_the_start_chases_nothing() {
 #[test]
 fn a_chased_program_carries_the_bank_in_force() {
     let c = MidiChannel::FIRST;
-    let clip = MidiClipNode::new([
-        at(10, midi::m1_cc(c, CCNumber::BANK_SELECT, U7::of(1))),
-        at(
-            11,
-            parse_exact(MidiGroup::FIRST, &[0xC0, 5])
-                .map(Ump::from)
-                .unwrap(),
-        ),
-        at(
-            20,
-            parse_exact(MidiGroup::FIRST, &[0xC0, 7])
-                .map(Ump::from)
-                .unwrap(),
-        ),
-    ]);
+    let clip = MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter([
+            at(10, midi::m1_cc(c, CCNumber::BANK_SELECT, U7::of(1))),
+            at(
+                11,
+                parse_exact(MidiGroup::FIRST, &[0xC0, 5])
+                    .map(Ump::from)
+                    .unwrap(),
+            ),
+            at(
+                20,
+                parse_exact(MidiGroup::FIRST, &[0xC0, 7])
+                    .map(Ump::from)
+                    .unwrap(),
+            ),
+        ])),
+    );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
     let programs: Vec<(u8, Option<u8>)> = heard(&seen)
@@ -973,7 +1026,7 @@ fn a_chased_program_carries_the_bank_in_force() {
 #[test]
 fn channel_mode_messages_are_not_chased() {
     let (g, c) = (MidiGroup::FIRST, MidiChannel::FIRST);
-    let clip = MidiClipNode::new([
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
         at(
             10,
             midi::cc(Address::new(g, c), CCNumber::VOLUME, 0x1000_0000),
@@ -984,7 +1037,7 @@ fn channel_mode_messages_are_not_chased() {
             midi::cc(Address::new(g, c), CCNumber::VOLUME, 0x2000_0000),
         ),
         at(40, midi::cc(Address::new(g, c), CCNumber::ALL_SOUND_OFF, 0)),
-    ]);
+    ])));
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
     assert_eq!(
@@ -1004,18 +1057,20 @@ fn channel_mode_messages_are_not_chased() {
 #[test]
 fn a_chase_larger_than_the_port_is_cut_short_and_counted() {
     let g = MidiGroup::FIRST;
-    let clip = MidiClipNode::new((0..16u8).flat_map(|ch| {
-        (40..70u8).map(move |n| {
-            at(
-                u64::from(ch) * 30 + u64::from(n),
-                midi::cc(
-                    Address::new(g, MidiChannel::of(ch)),
-                    CCNumber::of(n),
-                    0x1000_0000,
-                ),
-            )
-        })
-    }));
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(
+        (0..16u8).flat_map(|ch| {
+            (40..70u8).map(move |n| {
+                at(
+                    u64::from(ch) * 30 + u64::from(n),
+                    midi::cc(
+                        Address::new(g, MidiChannel::of(ch)),
+                        CCNumber::of(n),
+                        0x1000_0000,
+                    ),
+                )
+            })
+        }),
+    )));
     let (mut ed, mut exec, _c, seen) = rig(clip, 256);
     exec.process(256, &rolling(96_000), &[], &mut []);
     let seen = heard(&seen);
@@ -1038,7 +1093,10 @@ fn a_chase_larger_than_the_port_is_cut_short_and_counted() {
 #[test]
 fn setting_the_same_events_cuts_nothing() {
     let events = [at(10, on(60)), at(1_000, off(60))];
-    let (_ed, mut exec, controls, seen) = rig(MidiClipNode::new(events), 64);
+    let (_ed, mut exec, controls, seen) = rig(
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+        64,
+    );
     exec.process(64, &rolling(0), &[], &mut []);
     publish(&controls, [events[1], events[0]]);
     exec.process(64, &rolling(64), &[], &mut []);
@@ -1077,7 +1135,7 @@ fn headed(events: impl IntoIterator<Item = TimedMidiEvent>, header: &[Ump]) -> C
 
 /// A clip node over an empty clip, with `clip` set before the first block.
 fn rig_headed(clip: ClipEvents, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
-    let (ed, exec, controls, seen) = rig(MidiClipNode::new([]), max);
+    let (ed, exec, controls, seen) = rig(MidiClipNode::from(MidiClipConfig::default()), max);
     controls.set(clip);
     (ed, exec, controls, seen)
 }
@@ -1352,7 +1410,10 @@ fn a_clip_sysex_that_does_not_fit_is_dropped_whole() {
     let mut events: Vec<TimedMidiEvent> = (0..254u32).map(|n| at(0, volume(n << 20))).collect();
     events.extend([sysex7(Start), sysex7(Continue), sysex7(End)].map(|u| at(0, u)));
     events.push(at(1, volume(0x7000_0000)));
-    let (mut ed, mut exec, _c, seen) = rig(MidiClipNode::new(events.clone()), 64);
+    let (mut ed, mut exec, _c, seen) = rig(
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events.clone()))),
+        64,
+    );
     exec.process(64, &rolling(0), &[], &mut []);
     let got: Vec<Ump> = heard(&seen).iter().map(|&(_, u)| u).collect();
     let want: Vec<Ump> = events[..254]
@@ -1374,7 +1435,10 @@ fn a_clip_sysex_run_is_one_event_sent_at_its_start() {
     let run = [sysex7(Start), sysex7(Continue), sysex7(End)];
     let events = [at(10, run[0]), at(20, run[1]), at(30, run[2])];
     assert_eq!(events.into_iter().collect::<ClipEvents>().len(), 1);
-    let (_ed, mut exec, _c, seen) = rig(MidiClipNode::new(events), 64);
+    let (_ed, mut exec, _c, seen) = rig(
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+        64,
+    );
     exec.process(64, &rolling(0), &[], &mut []);
     assert_eq!(heard(&seen), run.map(|u| (10, u)));
 }
@@ -1445,5 +1509,30 @@ fn a_start_releases_before_the_header_and_the_chase() {
     assert_eq!(
         heard(&seen)[3..],
         [(64, off(60)), (64, program(1)), (64, program(5))]
+    );
+}
+
+/// **A clip config has no structure: the clip is a published value.** Any two
+/// configs make the same node, so a config with other events keeps the running
+/// node (the events are a write to it). The config lists no initial value (the
+/// clip is no param or setting), and builds a node that plays its events.
+#[test]
+fn a_clip_config_has_no_structure_and_builds_a_node_playing_its_events() {
+    use tutti_graph::{Initials, IntoNode, NodeConfig};
+    let one = MidiClipConfig::default().events(ClipEvents::from_iter([at(10, on(60))]));
+    let other =
+        MidiClipConfig::default().events(ClipEvents::from_iter([at(20, on(62)), at(30, off(62))]));
+    assert!(NodeConfig::<f32>::same_structure(&one, &other));
+    assert!(NodeConfig::<f32>::same_structure(
+        &one,
+        &MidiClipConfig::default()
+    ));
+    assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
+    let node = NodeConfig::<f32>::build(&other, &HostValues::new());
+    let controls = IntoNode::<f32>::into_parts(node).controls;
+    assert_eq!(controls.len(), 2);
+    assert_eq!(
+        *controls.current(),
+        ClipEvents::from_iter([at(20, on(62)), at(30, off(62))])
     );
 }
