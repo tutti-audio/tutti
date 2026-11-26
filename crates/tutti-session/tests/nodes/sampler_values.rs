@@ -7,7 +7,7 @@ use crate::offline::offline_48k;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
 use tutti_sampler::{Clip, PlayError, VoiceWindow};
-use tutti_session::{MainOutput, OutputPort, Session, ValueErrorKind};
+use tutti_session::{MainOutput, OutputPort, Replacement, Session, ValueErrorKind};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -885,4 +885,39 @@ fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
         let source = if f < 512 { f } else { 512 + 2 * (f - 512) };
         assert_eq!(x.to_bits(), ramp_value(source).to_bits(), "frame {f}");
     }
+}
+
+fn speed_clip(speed: f64) -> Clip<f32> {
+    Clip::new(level(0.5))
+        .expect("a placeable wave")
+        .at(Beat::new(0.0))
+        .speed(rate(speed))
+}
+
+/// **A replace keeps a published value the app set, unless its declared initial
+/// changed**: a speed of 2 set on a clip declared at 1.5 survives a replace by
+/// a clip declared at 1.5 (the read answers it, and the update publishes it to
+/// the incoming node's cell), and a replace by a clip declared at 0.5 takes
+/// the new initial.
+#[test]
+fn a_replace_keeps_a_set_published_value_unless_its_initial_changed() {
+    let mut s = offline_48k();
+    let clip = s.graph().add(speed_clip(1.5));
+    s.set(clip.speed().to(rate(2.0))).unwrap();
+
+    let clip = s
+        .graph()
+        .replace(clip, Replacement::new(speed_clip(1.5)))
+        .unwrap_or_else(|_| panic!("an offline graph swaps at once"));
+    assert_eq!(s.get(clip.speed()).unwrap(), rate(2.0), "kept");
+    let _ = s.update();
+    assert_eq!(*handle_of(&s, &clip).speed_cell().current(), rate(2.0));
+
+    let clip = s
+        .graph()
+        .replace(clip, Replacement::new(speed_clip(0.5)))
+        .unwrap_or_else(|_| panic!("an offline graph swaps at once"));
+    assert_eq!(s.get(clip.speed()).unwrap(), rate(0.5), "changed");
+    let _ = s.update();
+    assert_eq!(*handle_of(&s, &clip).speed_cell().current(), rate(0.5));
 }
