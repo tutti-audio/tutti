@@ -40,6 +40,7 @@ use tutti_ump::{
     UNIVERSAL_NON_REAL_TIME, Ump,
 };
 
+mod action;
 mod articulation;
 mod curve;
 mod deadline;
@@ -60,6 +61,7 @@ mod process;
 mod process_initiator;
 mod profile;
 mod profile_details;
+mod profile_responder;
 mod read;
 mod rotary;
 mod status;
@@ -67,6 +69,7 @@ mod text;
 mod two_state;
 mod wait;
 
+pub use action::CiAction;
 pub use articulation::{
     ArticulationDetails, ArticulationDetailsError, ArticulationFeatures, ArticulationLevel,
     CustomSounds, NotVariationCount, Sound, SoundSet, SubclassCounts, VariationCount,
@@ -74,7 +77,7 @@ pub use articulation::{
 pub use curve::{send_level, volume_gain};
 pub use deadline::Deadline;
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
-pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
+pub use device::{CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
     CiCategories, DeviceBody, DiscoveryData, MaxSysexSize, NotASysexSize, ReplyData, ReplyVersion2,
     SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY,
@@ -149,6 +152,7 @@ pub use profile::{
     StandardProfile,
 };
 pub use profile_details::ProfileDetails;
+pub use profile_responder::{ProfileOffer, ProfileOfferEntry};
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;
@@ -1310,6 +1314,28 @@ impl Unread {
             to: self.source?,
             nak: Nak::new(U7::new(self.sub_id2)?, self.reason.nak_status()),
         })
+    }
+}
+
+/// The one NAK builder (M2-101 §5.11): from the device of `from`, to `to`, of the
+/// message with Sub-ID#2 `original`; `profile` fills the five detail bytes
+/// (§5.11.3) of a NAK about a Profile.
+pub(crate) fn nak_message(
+    from: CiHeader,
+    to: Muid,
+    original: u8,
+    status: NakStatus,
+    profile: Option<ProfileId>,
+) -> CiMessage {
+    // A sub-ID#2 is seven bits wherever it was read from.
+    let nak = Nak::new(U7::new(original).unwrap_or_default(), status);
+    CiMessage::Nak {
+        header: from,
+        to,
+        nak: match profile {
+            Some(profile) => nak.with_details(profile.to_bytes().map(U7::masked)),
+            None => nak,
+        },
     }
 }
 

@@ -1306,7 +1306,7 @@ impl Member {
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
-            Err(ProfileRequestError::AlreadyAsking) => {}
+            Err(ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. }) => {}
         }
     }
 
@@ -1399,7 +1399,9 @@ impl Member {
             match ask_mpe_features(initiator, manager, now) {
                 Ok(asked) => self.carry_out(muid, asked, now, sends, changes),
                 // The answer to the one in flight is what the session waits for.
-                Err(ProfileRequestError::AlreadyAsking) => {}
+                Err(
+                    ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. },
+                ) => {}
             }
         }
     }
