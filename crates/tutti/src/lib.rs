@@ -229,7 +229,7 @@ pub use tutti_session::{
     InputPort, IntoPatch, Key, KeyError, MainOutput, Mention, NoSuchNode, NodeDecl, Offline,
     OfflineSession, OutputEnd, OutputPort, PatchError, PatchTarget, Patched, Playhead, RealTime,
     Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
-    TransportHandle, WireEnd, WireStart, Workers,
+    TransportHandle, WireEnd, WireEnds, WireStart, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{

@@ -5,7 +5,7 @@
 //! edge `Graph::connect` made is never the patch's.
 
 use tutti_buffers::{ChannelLayout, InterleavedMut};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
+use tutti_graph::{Cx, EventInputPort, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_session::{
     ChangedBy, ConnectError, InputPort, MainOutput, Mention, NodeDecl, OutputPort, PatchError,
     Session, WireStart,
@@ -39,7 +39,9 @@ impl From<SrcConfig> for Src {
 
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout).param_ports(self.declared_ports())
+        Shape::source_unassigned(self.layout)
+            .events(0, 1)
+            .param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -77,7 +79,9 @@ impl From<PassConfig> for Pass {
 
 impl Node for Pass {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(self.layout).param_ports(self.declared_ports())
+        Shape::through_unassigned(self.layout)
+            .events(1, 0)
+            .param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -348,7 +352,7 @@ fn a_wire_is_dormant_until_its_nodes_swap_lands() {
     assert_eq!(refused.unconverged.len(), 1);
     assert!(matches!(
         refused.dormant.as_slice(),
-        [(_, _, ConnectError::NoSuchOutPort(_))]
+        [(_, ConnectError::NoSuchOutPort(_))]
     ));
     assert!(fed(&s).is_empty());
 
@@ -378,4 +382,19 @@ fn an_imperative_edge_survives_a_patch() {
     declare(&mut s);
 
     assert_eq!(fed(&s), [OutputPort::new(a, 0)]);
+}
+
+/// **An event wire is connected by the event ports it names**: the sink's event
+/// input is fed by the source's event output.
+#[test]
+fn an_event_wire_is_connected() {
+    let mut s = session();
+    let (a, b) = (NodeDecl::new("src", src()), NodeDecl::new("pass", pass()));
+    let wire = a.event_output(0).connect(b.event_input(0));
+
+    s.patch((a, b, wire)).unwrap();
+
+    let sink = EventInputPort::new(pass_node(&s), 0);
+    let source = tutti_graph::EventOutputPort::new(src_node(&s), 0);
+    assert_eq!(s.graph_ref().sources(sink).unwrap(), [source]);
 }

@@ -181,6 +181,8 @@ mod transport_handle;
     feature = "export"
 ))]
 mod unblocked;
+mod wire_ends;
+pub use wire_ends::{Chain, Connected, InputEnd, Mention, OutputEnd, WireEnd, WireStart};
 mod value;
 #[cfg(feature = "device")]
 mod watch;
@@ -319,10 +321,7 @@ use hang::HangDetector;
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
-pub use patch::{
-    Chain, Connected, Declarations, InputEnd, IntoPatch, KeyError, Mention, NodeDecl, OutputEnd,
-    PatchTarget, WireEnd, WireStart,
-};
+pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, WireEnds};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]

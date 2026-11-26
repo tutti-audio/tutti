@@ -1,8 +1,8 @@
 //! The declarations of a patch: the nodes an app declares by its own keys.
 //!
 //! - [`NodeDecl`] names one node: an app key and the config it is built from.
-//! - [`Mention`], [`Chain`] and [`Connected`] are the wires between declared
-//!   nodes, made by `connect` on a [`WireStart`].
+//! - The wires between declared nodes are parts too, made by `connect` on a
+//!   [`WireStart`](crate::WireStart); [`WireEnds`] names one.
 //! - [`Declarations`] is the declarations of one
 //!   [`Session::patch`](crate::Session::patch) call, and [`IntoPatch`] is
 //!   everything that can be part of one: a declaration, a tuple, array, `Vec`
@@ -19,10 +19,10 @@ use thiserror::Error;
 use tutti_graph::{Fade, HostValues, Initials, NodeKey, Shape};
 use tutti_units::Samples;
 
-pub(crate) mod wire;
+mod wire;
 
-pub use wire::{Chain, Connected, InputEnd, Mention, OutputEnd, WireEnd, WireStart};
-pub(crate) use wire::{InPort, OutPort, WireDecl};
+pub(crate) use wire::WireDecl;
+pub use wire::WireEnds;
 
 /// How a declaration is swapped or removed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
