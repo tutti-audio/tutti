@@ -42,7 +42,7 @@ pub struct BufferKey {
 }
 
 /// Why a [`Done`] has no result for a key.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DoneError {
     /// Another [`Outputs`] made the key.
