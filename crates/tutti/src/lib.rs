@@ -193,8 +193,6 @@ pub use tutti_plugin::catalog::ResolvedHosting;
 pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
-#[cfg(all(feature = "session", feature = "midi-hardware"))]
-pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::PluginParams;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
@@ -256,6 +254,8 @@ pub use tutti_session::{
     MidiMap, PluginAutomationModeTarget, PluginMidiMapTarget, PluginParamRefusal,
     PluginParamTarget, PluginTrackInfoTarget, PluginUnit, UnitError,
 };
+#[cfg(all(feature = "session", feature = "midi-hardware"))]
+pub use tutti_session::{MidiPolicyTarget, Mpe11Target};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream, OpeningStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -491,11 +491,11 @@ pub mod tempo {
 pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
-        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Initials,
-        Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
-        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell,
-        PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell,
-        Shape, Status, Unforkable, declare_params, param_parts,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
+        Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
+        ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
+        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -1163,11 +1163,11 @@ pub mod midi {
             PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place,
             Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse,
             ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
-            ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent,
-            RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
-            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
-            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
-            UntypedResource, UpdateKind,
+            ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceStore, ResourceTarget,
+            ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
+            SimultaneousRequests, StandardResource, StateId, StateRev, StateSize, StateStamp,
+            StepCount, StoreError, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds,
+            UnlistedText, UnmodelledResource, UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

@@ -8,9 +8,14 @@ use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
 use crate::common::{MF, blocks, note, play};
+use std::sync::Arc;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
+    BodyLimit, BufferLimit, CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody,
+    Initiator as _, MaxSysexSize, PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits,
+    PeSettings, ReplyData, ResourceAction, ResourceEntry, ResourceEvent, ResourceFailure,
+    ResourceGet, ResourceInitiator, ResourceSet, ResourceStore, ResourceTarget,
+    SimultaneousRequests, StandardResource, StreamLimit,
 };
 use tutti_midi_device::{
     Capabilities, Endpoint, EndpointId, MidiIdentity, PortDirection, Supports,
@@ -51,6 +56,7 @@ fn policy(model: u8, name: &str) -> MidiPolicy {
             name: EndpointName::new(name).unwrap(),
             instance: None,
         }),
+        properties: None,
     }
 }
 
@@ -135,12 +141,52 @@ fn ask_everything() -> Ump {
     }))
 }
 
-/// The wire's clock: one update per millisecond from a fixed start.
-struct Clock(Instant, u64, Vec<SessionEvent>);
+/// The wire's clock: one update per millisecond from a fixed start, and, when
+/// the test asks for one, a peer that declares Property Exchange and asks the
+/// session for its Resources.
+struct Clock(Instant, u64, Vec<SessionEvent>, Option<Asker>);
+
+/// The Initiator of the peer, once the session's Discovery gave it a MUID to
+/// ask, and what it heard answered.
+#[derive(Default)]
+struct Asker {
+    init: Option<ResourceInitiator>,
+    events: Vec<ResourceEvent>,
+}
+
+impl Asker {
+    /// The packets of what the Initiator sends, the events it reports kept.
+    fn send(&mut self, actions: Vec<ResourceAction>) -> Vec<Ump> {
+        let mut packets = Vec::new();
+        for action in actions {
+            match action {
+                ResourceAction::Send(message) => {
+                    packets.extend(message.packets(MidiGroup::FIRST).unwrap());
+                }
+                ResourceAction::Event(event) => self.events.push(*event),
+                _ => {}
+            }
+        }
+        packets
+    }
+}
+
+fn limits() -> PeReassemblyLimits {
+    PeReassemblyLimits {
+        streams: StreamLimit::of(8),
+        bytes: BufferLimit::of(1 << 16),
+    }
+}
 
 impl Clock {
     fn new() -> Self {
-        Self(Instant::now(), 0, Vec::new())
+        Self(Instant::now(), 0, Vec::new(), None)
+    }
+
+    /// A clock whose peer declares Property Exchange, in place of Profile
+    /// Configuration, and asks the session for its Resources.
+    fn asking() -> Self {
+        Self(Instant::now(), 0, Vec::new(), Some(Asker::default()))
     }
 
     /// Runs `ms` updates, answering the session's own Stream negotiation as a
@@ -164,9 +210,14 @@ impl Clock {
                 // The peer of the wire answers each Discovery, declaring
                 // Profile Configuration.
                 if let CiMessage::Discovery { source, .. } = &message {
+                    let categories = if self.3.is_some() {
+                        CiCategories::PROPERTY_EXCHANGE
+                    } else {
+                        CiCategories::PROFILE_CONFIGURATION
+                    };
                     let data = ReplyData::new(DeviceBody::new(
                         device(1),
-                        CiCategories::PROFILE_CONFIGURATION,
+                        categories,
                         MaxSysexSize::of(256),
                     ));
                     answers.extend(
@@ -179,6 +230,29 @@ impl Clock {
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
                     );
+                    if let Some(asker) = &mut self.3
+                        && asker.init.is_none()
+                    {
+                        let (init, actions) = ResourceInitiator::new(
+                            PEER,
+                            *source,
+                            PeSettings {
+                                capabilities: PeCapabilities::new(SimultaneousRequests::of(4)),
+                                peer_max_sysex: MaxSysexSize::of(512),
+                                reassembly: limits(),
+                                body_limit: BodyLimit::of(1 << 16),
+                            },
+                            now,
+                        );
+                        asker.init = Some(init);
+                        answers.extend(asker.send(actions));
+                    }
+                }
+                if let Some(asker) = &mut self.3
+                    && let Some(init) = &mut asker.init
+                {
+                    let actions = init.on_message(&Decoded::Message(message.clone()), now);
+                    answers.extend(asker.send(actions));
                 }
                 if matches!(
                     message,
@@ -195,6 +269,42 @@ impl Clock {
             }
         }
         sent_ci
+    }
+
+    /// The peer asks for `target`, and the session answers within 20 updates:
+    /// what it got.
+    fn get(
+        &mut self,
+        s: &mut Session,
+        fake: &FakeCounters,
+        target: StandardResource,
+    ) -> Result<PeData, ResourceFailure> {
+        let now = self.0 + Duration::from_millis(self.1);
+        let asker = self.3.as_mut().expect("a clock that asks");
+        let get = ResourceGet::new(ResourceTarget::try_from(target).unwrap());
+        let (call, actions) = asker
+            .init
+            .as_mut()
+            .expect("the peer found the session")
+            .get(&get, now)
+            .expect("the ResourceList lists it");
+        let said = asker.send(actions);
+        asker.events.clear();
+        for ump in said {
+            assert!(fake.send_input(EndpointId::from_raw(RAW), ump, now));
+        }
+        self.run(s, fake, 20);
+        self.3
+            .as_ref()
+            .and_then(|asker| {
+                asker.events.iter().find_map(|event| match event {
+                    ResourceEvent::Got {
+                        call: of, result, ..
+                    } if *of == call => Some(result.clone()),
+                    _ => None,
+                })
+            })
+            .expect("the Get ended")
     }
 
     /// The profile changes the updates reported since the last call.
@@ -514,5 +624,114 @@ fn under_jitter_reduction_the_endpoint_reports_that_it_receives_jr() {
             tx_jr: false,
         }),
         "{sent:?}"
+    );
+}
+
+/// A store of one Resource a peer can Set, LocalOn, holding `on`.
+fn local_on(on: bool) -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::standard(StandardResource::LocalOn)
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, PeData::LocalOn(PeLocalOn(on)))
+        .expect("declared");
+    store
+}
+
+/// What the peer's Set of LocalOn to `on` was answered.
+fn set_local_on(clock: &mut Clock, s: &mut Session, fake: &FakeCounters, on: bool) {
+    let now = clock.0 + Duration::from_millis(clock.1);
+    let asker = clock.3.as_mut().expect("a clock that asks");
+    let set = ResourceSet::full(
+        ResourceTarget::try_from(StandardResource::LocalOn).unwrap(),
+        PeData::LocalOn(PeLocalOn(on)),
+    )
+    .unwrap();
+    let (_, actions) = asker.init.as_mut().unwrap().set(&set, now).unwrap();
+    for ump in asker.send(actions) {
+        assert!(fake.send_input(EndpointId::from_raw(RAW), ump, now));
+    }
+    clock.run(s, fake, 20);
+}
+
+/// The session serves the store its policy holds to a peer that declared Property
+/// Exchange, serves it again only when the policy holds another `Arc`, and
+/// serves nothing once it holds none: a peer's Set stays through the same
+/// store written again, is undone by a new `Arc` of equal content, and a Get
+/// is refused once the store is gone.
+#[test]
+fn the_session_serves_the_store_of_its_policy_and_replaces_it_only_by_another_arc() {
+    let (mut s, fake, _ports) = wired(0);
+    let store = Arc::new(local_on(true));
+    let with = |properties| MidiPolicy {
+        properties,
+        ..policy(2, "My App")
+    };
+    s.set(s.policy::<MidiPolicy>().to(with(Some(Arc::clone(&store)))))
+        .unwrap();
+    let mut clock = Clock::asking();
+    clock.run(&mut s, &fake, 400);
+    assert_eq!(
+        clock.get(&mut s, &fake, StandardResource::LocalOn),
+        Ok(PeData::LocalOn(PeLocalOn(true))),
+        "served from the store"
+    );
+
+    set_local_on(&mut clock, &mut s, &fake, false);
+    s.set(s.policy::<MidiPolicy>().to(with(Some(Arc::clone(&store)))))
+        .unwrap();
+    clock.run(&mut s, &fake, 5);
+    assert_eq!(
+        clock.get(&mut s, &fake, StandardResource::LocalOn),
+        Ok(PeData::LocalOn(PeLocalOn(false))),
+        "the same Arc written again is not a change: the peer's Set stands"
+    );
+
+    s.set(
+        s.policy::<MidiPolicy>()
+            .to(with(Some(Arc::new(local_on(true))))),
+    )
+    .unwrap();
+    clock.run(&mut s, &fake, 5);
+    assert_eq!(
+        clock.get(&mut s, &fake, StandardResource::LocalOn),
+        Ok(PeData::LocalOn(PeLocalOn(true))),
+        "another Arc is served in place of the first, equal content or not"
+    );
+
+    s.set(s.policy::<MidiPolicy>().to(with(None))).unwrap();
+    clock.run(&mut s, &fake, 5);
+    assert!(
+        clock.get(&mut s, &fake, StandardResource::LocalOn).is_err(),
+        "no store, no Resource"
+    );
+}
+
+/// A store is refused on a session with no OS MIDI layer, as an identity is,
+/// and the policy in force is kept.
+#[test]
+fn a_store_is_refused_on_a_session_with_no_os_midi_layer() {
+    let s = Session::builder()
+        .sample_rate(SampleRate::of(48_000.0))
+        .build()
+        .expect("builds");
+    let store = MidiPolicy {
+        properties: Some(Arc::new(ResourceStore::new())),
+        ..MidiPolicy::default()
+    };
+    assert_eq!(
+        s.set(s.policy::<MidiPolicy>().to(store)).unwrap_err().kind,
+        ValueErrorKind::Refused(SetRefusal::MidiPolicy(MidiPolicyError::NoHardware(
+            tutti_session::NoHardware
+        )))
+    );
+    assert!(
+        s.get(s.policy::<MidiPolicy>())
+            .unwrap()
+            .properties
+            .is_none()
     );
 }

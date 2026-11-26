@@ -788,8 +788,8 @@ impl MidiSession {
 
     /// Makes the MIDI-CI devices' Property Exchange Responders serve `store`
     /// (M2-103): on every open input and every input opened later, at the next
-    /// [`poll`](Self::poll). It replaces what was served. The session serves an
-    /// empty store until this is called.
+    /// [`poll`](Self::poll). It replaces what was served: `ResourceStore::default()`
+    /// ends serving, and the session serves an empty store until this is called.
     ///
     /// Every device on every input serves this one store, so a peer's Set
     /// through one Group is seen by the others and by the app

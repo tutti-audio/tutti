@@ -1729,3 +1729,119 @@ fn a_device_that_makes_the_saved_one_ambiguous_while_pending_fails_the_apply() {
         "the failed apply left no port"
     );
 }
+
+/// The MPE Configuration Message of a lower zone of `members` Member Channels
+/// on Group `group`, in MIDI 2.0 (M1-100 section 2.2.1): the RPN 6 of the
+/// Manager Channel.
+fn configuration(group: u8, members: u32) -> Ump {
+    Ump([0x4020_0006 | u32::from(group) << 24, members << 25, 0, 0])
+}
+
+fn lower_zone(members: u8) -> tutti_midi_protocol::Mpe11Zones {
+    use tutti_midi_protocol::{MemberCount, Mpe11Zone, Mpe11Zones, PitchBendSensitivity};
+    Mpe11Zones::single(Mpe11Zone::lower(
+        MemberCount::of(members),
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+    ))
+}
+
+/// **An app chooses MPE 1.1 for one Group of a device output, and the device
+/// hears the zone's Configuration Message**: it goes in the update after the
+/// write, on the Group written and no other, and `None` sends the message again
+/// with no Member Channels (M1-100 section 2.2.1).
+#[test]
+fn an_mpe11_zone_written_for_an_output_is_sent_as_its_configuration_message() {
+    use tutti_session::Mpe11Target;
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let port = output(&mut s, &synth);
+    let _ = fake.take_sent(EndpointId::from_raw(1));
+    let target = Mpe11Target::of(port.node(), MidiGroup::of(1));
+
+    s.set(target.to(Some(lower_zone(7)))).expect("an output");
+    assert_eq!(s.get(target), Ok(Some(lower_zone(7))));
+    assert_eq!(
+        fake.take_sent(EndpointId::from_raw(1)),
+        [],
+        "nothing before the update"
+    );
+    let _ = s.update();
+    assert_eq!(
+        fake.take_sent(EndpointId::from_raw(1)),
+        [configuration(1, 7)]
+    );
+
+    s.set(target.to(None)).expect("an output");
+    let _ = s.update();
+    assert_eq!(
+        fake.take_sent(EndpointId::from_raw(1)),
+        [configuration(1, 0)],
+        "the zone ends with no Member Channels"
+    );
+}
+
+/// **The zone an app chose outlives the device**: a device that is unplugged and
+/// plugged again is sent the zone in force, ahead of what the port said, and a
+/// value written while it was away waits for it.
+#[test]
+fn an_mpe11_zone_is_sent_again_to_a_device_that_returns() {
+    use tutti_session::Mpe11Target;
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let port = output(&mut s, &synth);
+    let first = Mpe11Target::of(port.node(), MidiGroup::FIRST);
+    let second = Mpe11Target::of(port.node(), MidiGroup::of(2));
+    s.set(first.to(Some(lower_zone(7)))).expect("an output");
+    let _ = s.update();
+
+    unplug(&fake, 1);
+    let _ = s.update();
+    s.set(second.to(Some(lower_zone(3)))).expect("an output");
+    let _ = s.update();
+    plug(&fake, 1, "Synth", PortDirection::Output);
+    let _ = fake.take_sent(EndpointId::from_raw(1));
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(1));
+    assert_eq!(
+        sent,
+        [configuration(0, 7), configuration(2, 3)],
+        "each Group's zone in force, and the one written while away"
+    );
+}
+
+/// **Only a MIDI output port of the session has the target**: a write that names
+/// the node of an input port, or of a node that is no port, fails at the call.
+#[test]
+fn an_mpe11_write_for_a_node_that_is_not_an_output_fails_at_the_call() {
+    use tutti_session::{Mpe11Target, ValueErrorKind};
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Synth", PortDirection::Duplex);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let keys = input(&mut s, &synth);
+    let clip = s.graph().add(MidiClipNode::new([]));
+    for node in [keys.node(), clip.erase()] {
+        let target = Mpe11Target::of(node, MidiGroup::FIRST);
+        assert_eq!(
+            s.set(target.to(Some(lower_zone(7)))).unwrap_err().kind,
+            ValueErrorKind::NoSuchTarget
+        );
+    }
+    let port = output(&mut s, &synth);
+    let node = port.node();
+    drop(port);
+    let _ = s.update();
+    let _ = s.remove(node);
+    let _ = s.update();
+    assert_eq!(
+        s.set(Mpe11Target::of(node, MidiGroup::FIRST).to(None))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::NoSuchTarget
+    );
+}
