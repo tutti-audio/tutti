@@ -201,6 +201,30 @@ std only. A rule the compiler already enforces is not a gate.
   platform's own, the graph's render workers, the engine's deviceless clock, the CoreMIDI
   hub) carry an `#[expect]` with their reason; test code allows the lint at its root.
 
+### Wanted and applied
+
+A value one side wants and something else carries to where it takes effect (a plugin
+parameter, a setting, a staged session value, a request to a device) follows one pattern,
+stated where the value is declared:
+
+- **Wanted** is one record on the writer's side, read without asking the target. A read
+  answers wanted, else applied.
+- **The carrier follows the value's kind.** A level goes in a latest-per-key carrier
+  (`tutti_rt::SeqSlotsWriter` and its reader, or a `DirtySet` over cells). A command or a timed stream goes in an
+  ordered queue that refuses at the call by name or counts what it drops. A carrier never
+  waits.
+- **Applied** is a `tutti_rt::Generation` taken at the call and compared with `has_reached`,
+  exact while the gap is under 2^31. The holder of the reader publishes it after the
+  target's own call returns; it is never read off the carrier. A reply that carries a value
+  names the ask it answers.
+- **A loss is counted where it happens, and named.** A level the carrier lost is owed and
+  sent again. A level the target refused is given up with a named notice. An answer that
+  says a write was applied never covers one that was lost. A reset ends an epoch stored
+  beside the value; nothing from an earlier epoch is sent again.
+- **A read or a save states what is not yet applied** beside its result, and a load replays
+  it. It never waits for a carrier: a synchronous entry, a fork or an undriven graph has
+  none.
+
 ### Unsafe and runtime structure
 
 - A library with no `unsafe` carries `#![forbid(unsafe_code)]` (`cargo xtask check-ffi`).
