@@ -94,3 +94,44 @@ fn a_changed_published_initial_is_written_and_the_same_one_is_not() {
     assert_eq!(change.value.len(), 3);
     assert_eq!(s.get(key.events()).unwrap().len(), 3);
 }
+
+/// **The hand-written `MidiClipConfig` lists its clip as an initial**: a
+/// re-patch with another clip writes it to the running clip node and a watcher
+/// sees it, and the same clip writes nothing.
+#[test]
+fn a_midi_clip_config_declares_its_clip_as_a_published_initial() {
+    use tutti_midi_runtime::MidiClipConfig;
+
+    let mut s = session();
+    let first = clip(1);
+    s.patch(NodeDecl::new(
+        "clip",
+        MidiClipConfig::default().events(first.clone()),
+    ))
+    .unwrap();
+    let key = s.key::<MidiClipConfig>(&"clip").unwrap();
+    assert_eq!(s.get(key.events()).unwrap().len(), 1);
+    let mut watcher = s.watch(key.events()).unwrap();
+
+    s.patch(NodeDecl::new(
+        "clip",
+        MidiClipConfig::default().events(first),
+    ))
+    .unwrap();
+    assert!(
+        watcher.changes().unwrap().is_none(),
+        "the same clip writes nothing"
+    );
+
+    s.patch(NodeDecl::new(
+        "clip",
+        MidiClipConfig::default().events(clip(4)),
+    ))
+    .unwrap();
+    let change = watcher
+        .changes()
+        .unwrap()
+        .expect("the patch moved the clip");
+    assert_eq!(change.by, ChangedBy::App);
+    assert_eq!(change.value.len(), 4);
+}
