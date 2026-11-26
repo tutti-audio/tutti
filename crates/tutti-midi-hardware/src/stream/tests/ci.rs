@@ -391,6 +391,57 @@ fn an_invalidate_muid_of_a_found_peer_removes_it_and_is_reported() {
     assert!(wire.session.ci_peers(&wire.id).is_empty());
 }
 
+/// §3.3.1: when our MUID changes (here an Invalidate MUID for ours) the Device
+/// sends the Function Block Info Notification of its own block (M2-104
+/// §7.1.8), once: the block of the Endpoint the session presents, not the
+/// peer's. The peer's MIDI-CI block here is id 1, output-only, so it cannot be
+/// mistaken for ours.
+/// Spec: m2-101/3.3.1#5
+#[test]
+fn a_changed_muid_sends_our_blocks_info_notification_once() {
+    let peers_block = FunctionBlock::builder(
+        FunctionBlockId::new(1).unwrap(),
+        BlockDirection::Output,
+        FirstGroup::new(0).unwrap(),
+        GroupSpan::new(1).unwrap(),
+    )
+    .midi_ci(CiVersion::new(2).unwrap(), Sysex8StreamCount::new(0))
+    .name(BlockName::new("P").unwrap())
+    .build()
+    .unwrap();
+    let mut wire = endpoint_wire(&[ci_block(0, 5, 0), peers_block]);
+    let [(_, ours)] = discoveries(&wire)[..] else {
+        panic!("one Discovery");
+    };
+    let _ = received(&wire);
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::InvalidateMuid {
+            header: CiHeader::new(Muid::of(0x00AB_CDEF)),
+            target: ours,
+        },
+        200,
+    );
+    let _ = polled(&mut wire, 210);
+    let infos: Vec<tutti_ump::FunctionBlockInfo> = received(&wire)
+        .into_iter()
+        .filter_map(|ump| match ump.decode() {
+            Ok(Message::Stream(Stream::FunctionBlockInfo(info))) => Some(info),
+            _ => None,
+        })
+        .collect();
+    let [info] = infos[..] else {
+        panic!("one Function Block Info Notification, got {infos:?}");
+    };
+    let groups = presented(identity()).groups;
+    assert!(info.active);
+    assert_eq!(info.id.value(), FunctionBlockId::new(0));
+    assert_eq!(info.first_group.value(), FirstGroup::new(0));
+    assert_eq!(info.groups_spanned.value(), Some(groups));
+    assert_eq!(info.direction, BlockDirection::Bidirectional);
+}
+
 /// A SysEx that is not MIDI-CI (General MIDI System On, M1 p.52) is ignored:
 /// nothing is answered and no peer appears.
 #[test]

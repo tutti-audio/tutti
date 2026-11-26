@@ -10,9 +10,9 @@
 //!
 //! The device is not associated with a Function Block (§5.6.2): it speaks with
 //! Device ID `0x7F` and answers Discovery with Function Block `0x7F`. A device with
-//! Function Blocks owes a Function Block Info Change Alert (UMP) whenever its MUID
-//! changes (§3.3.1); this one has none to alert, and [`CiAction::MuidChanged`] is how
-//! the caller learns of the change.
+//! Function Blocks owes a Function Block Info Notification (M2-104 §7.1.8) whenever
+//! its MUID changes (§3.3.1); this one has none to notify, and [`CiAction::MuidChanged`]
+//! is how the caller learns of the change.
 //!
 //! # The rules
 //!

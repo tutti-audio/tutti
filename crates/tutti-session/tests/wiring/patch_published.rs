@@ -9,7 +9,7 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_midi_runtime::{ClipEvents, ClipEventsKind, TimedMidiEvent};
 use tutti_session::{ChangedBy, DetachedSession, NodeDecl, Session};
 use tutti_ump::MidiChannel;
-use tutti_units::{Beat, SampleRate};
+use tutti_units::{Beat, Hz, SampleRate};
 
 /// A silent source holding a clip.
 #[derive(Clone)]
@@ -18,6 +18,7 @@ pub struct Player {
 }
 
 declare_params!([] Player, PlayerConfig, PlayerCells {
+    params { Cutoff => cutoff: Hz = Hz::new(1_000.0) }
     published { events: ClipEventsKind = Arc::new(ClipEvents::default()) }
 });
 
@@ -63,25 +64,22 @@ fn session() -> DetachedSession {
 }
 
 /// **A changed published initial is written to the running node and seen by a
-/// watcher as an app change; the same value written again changes nothing.**
+/// watcher as an app change; an equal value, built afresh, changes nothing**:
+/// the initials compare by content, not by the `Arc`.
 #[test]
-fn a_changed_published_initial_is_written_and_the_same_one_is_not() {
+fn a_changed_published_initial_is_written_and_an_equal_one_is_not() {
     let mut s = session();
-    let first = clip(2);
-    s.patch(NodeDecl::new(
-        "p",
-        PlayerConfig::new().events(first.clone()),
-    ))
-    .unwrap();
+    s.patch(NodeDecl::new("p", PlayerConfig::new().events(clip(2))))
+        .unwrap();
     let key = s.key::<PlayerConfig>(&"p").unwrap();
     let mut watcher = s.watch(key.events()).unwrap();
     assert!(watcher.changes().unwrap().is_none());
 
-    s.patch(NodeDecl::new("p", PlayerConfig::new().events(first)))
+    s.patch(NodeDecl::new("p", PlayerConfig::new().events(clip(2))))
         .unwrap();
     assert!(
         watcher.changes().unwrap().is_none(),
-        "the same clip writes nothing"
+        "an equal clip writes nothing"
     );
 
     s.patch(NodeDecl::new("p", PlayerConfig::new().events(clip(3))))
@@ -134,4 +132,27 @@ fn a_midi_clip_config_declares_its_clip_as_a_published_initial() {
         .expect("the patch moved the clip");
     assert_eq!(change.by, ChangedBy::App);
     assert_eq!(change.value.len(), 4);
+}
+
+/// **A patch that changes a param and a published value writes both as one
+/// gesture**: the published write joins the params' batch.
+#[test]
+fn a_changed_param_and_published_value_are_one_gesture() {
+    let mut s = session();
+    s.patch(NodeDecl::new("p", PlayerConfig::new().events(clip(1))))
+        .unwrap();
+    let key = s.key::<PlayerConfig>(&"p").unwrap();
+    let mut watcher = s.watch((key.cutoff(), key.events())).unwrap();
+
+    s.patch(NodeDecl::new(
+        "p",
+        PlayerConfig::new().cutoff(Hz::new(300.0)).events(clip(3)),
+    ))
+    .unwrap();
+
+    let (cutoff, events) = watcher.changes().unwrap();
+    let (cutoff, events) = (cutoff.unwrap(), events.unwrap());
+    assert_eq!(cutoff.value, Hz::new(300.0));
+    assert_eq!(events.value.len(), 3);
+    assert_eq!(cutoff.gesture.unwrap().id, events.gesture.unwrap().id);
 }
