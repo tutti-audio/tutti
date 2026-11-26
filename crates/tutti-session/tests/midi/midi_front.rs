@@ -503,6 +503,8 @@ mod hardware {
         fake.unplug(EndpointId::from_raw(1));
         fake.unplug(EndpointId::from_raw(3));
         let _ = s.update();
+        // A device has one output port: the first one goes before another opens.
+        drop(pad_port);
         let gone = s.open_output(pad_out).expect("opens absent");
         assert_eq!(gone.presence(), Presence::Lost(PortCause::Unplugged));
     }

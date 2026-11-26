@@ -1873,11 +1873,11 @@ fn a_second_output_on_a_device_is_in_use_and_the_first_still_sends() {
     assert!(sent.iter().any(|u| is_on(u, 64)), "{sent:?}");
 }
 
-/// **A restore gives a device to the first port in saved order**: two ports opened on
-/// a device while it was away reopen when it returns, the first on it and the second
-/// refused the way an input's failed reopen is, reading `ReopenFailed`.
+/// **A device has one output port, away or open**: a second open of a device whose
+/// output port is away, saved under the same identity, is `InUse` as one of an open
+/// port is.
 #[test]
-fn a_restore_of_two_outputs_on_one_device_opens_the_first_and_refuses_the_second() {
+fn a_second_output_on_a_device_whose_first_port_is_away_is_in_use() {
     let (mut s, fake) = session();
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
@@ -1885,15 +1885,57 @@ fn a_restore_of_two_outputs_on_one_device_opens_the_first_and_refuses_the_second
     unplug(&fake, 10);
     let _ = s.update();
     let first = s.open_output(synth.clone()).expect("opens, away");
-    let second = s.open_output(synth).expect("opens, away");
+    assert_eq!(first.presence(), Presence::Lost(PortCause::Unplugged));
+    let error = s
+        .open_output(synth.clone())
+        .expect_err("the device has a port");
+    assert!(
+        matches!(&error, MidiPortError::InUse(id) if *id == synth.id),
+        "{error:?}"
+    );
+}
+
+/// **Two saved identities that resolve to one arriving device share it by port
+/// order**: the first away port opens it, the second reads `Lost(InUse)` and opens
+/// at the next arrival after the first has closed.
+#[test]
+fn two_identities_for_one_arriving_device_open_the_first_and_the_second_when_it_closes() {
+    let (mut s, fake) = session();
+    // Two units the OS tells by one unique id are ordinal 0 and 1 of it; either
+    // resolves to the lone device that carries the id.
+    let unit = |raw: u32| tutti_midi_hardware::OsEndpoint {
+        identity: tutti_midi_device::OsEndpointIdentity::CoreMidi(5),
+        ..endpoint(u64::from(raw), "Synth")
+    };
+    fake.plug(unit(10), PortDirection::Output);
+    fake.plug(unit(11), PortDirection::Output);
     let _ = s.update();
-    plug(&fake, 10, "Synth", PortDirection::Output);
+    let mut both = s.midi().devices();
+    both.sort_by_key(|d| d.id.clone());
+    let [first_identity, second_identity] = <[DeviceInfo; 2]>::try_from(both).expect("two units");
+    unplug(&fake, 10);
+    unplug(&fake, 11);
+    let _ = s.update();
+    assert_ne!(first_identity.id, second_identity.id);
+    let first = s.open_output(first_identity).expect("opens, away");
+    let second = s.open_output(second_identity).expect("opens, away");
+    let _ = s.update();
+
+    fake.plug(unit(12), PortDirection::Output);
     let _ = s.update();
     assert_eq!(first.presence(), Presence::Live);
+    assert_eq!(second.presence(), Presence::Lost(PortCause::InUse));
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
+
+    drop(first);
+    let _ = s.update();
+    unplug(&fake, 12);
+    let _ = s.update();
+    fake.plug(unit(12), PortDirection::Output);
+    let _ = s.update();
     assert_eq!(
         second.presence(),
-        Presence::Lost(PortCause::ReopenFailed),
-        "the second is refused"
+        Presence::Live,
+        "it takes the device once the first closed"
     );
-    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
 }

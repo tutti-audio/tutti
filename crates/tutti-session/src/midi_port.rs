@@ -91,6 +91,12 @@ pub enum PortCause {
     /// The device returned and is the one a load would bind, but opening it failed.
     /// It is tried again when its device next appears in the device list.
     ReopenFailed,
+    /// The device returned and is the one a load would bind, but another output
+    /// port of this session, saved under another identity that resolves to the same
+    /// device, has it open. The first port in order takes a device; this one is tried
+    /// again when the device next appears in the device list, and takes it once the
+    /// other has closed.
+    InUse,
     /// The reader of an open input died while its device stayed listed, for
     /// the [`InputFault`] it carries. The session reopens it at once, and the
     /// port reads this only when that failed; it is tried again when its device
@@ -990,8 +996,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// The apply: [`MidiPortError::Stale`] for another session's open;
     /// [`MidiPortError::Ambiguous`] when the table now holds several that could be
-    /// `saved`; [`MidiPortError::InUse`] when a held output port of this session
-    /// has the device open already (a device has one output port); and
+    /// `saved`; [`MidiPortError::InUse`] when a held output port of this session,
+    /// open or away, is saved under the same device, or has the device open already
+    /// (a device has one output port); and
     /// [`MidiPortError::Hardware`] when the present device cannot be opened.
     pub fn open_midi_output(&self, saved: DeviceInfo) -> Result<OpeningMidiOutput, MidiPortError> {
         let start = self.midi_layer_for(&saved)?;
@@ -1619,16 +1626,14 @@ impl Ports {
             let held = self.holds_output(&arrived.id);
             let port = &mut self.outputs[at];
             let opened = if held {
-                Err(MidiPortError::InUse(arrived.id.clone()))
+                Err(PortCause::InUse)
             } else {
                 open_device_output(io, port.started, &arrived.id, port.active_sensing)
+                    .map_err(|_| PortCause::ReopenFailed)
             };
             port.link = match opened {
                 Ok(device) => OutLink::open(device, stream),
-                Err(_) => OutLink::Away {
-                    stream,
-                    cause: PortCause::ReopenFailed,
-                },
+                Err(cause) => OutLink::Away { stream, cause },
             };
             // The device lost its setup: it hears the zones chosen for it, then
             // what the port said.
@@ -1658,6 +1663,13 @@ impl Ports {
         if let Some(ask) = unanswered {
             io.decline_report(device, &ask);
         }
+    }
+
+    /// Whether a held output port, open or away, is saved under `saved`.
+    fn holds_saved(&self, saved: &MidiDeviceId) -> bool {
+        self.outputs
+            .iter()
+            .any(|port| port.claim.is_held() && port.saved.id == *saved)
     }
 
     /// Whether a held output port has `device` open.
@@ -2071,6 +2083,9 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         }
         // One output port a device, as one input port: a second would send the
         // device a second stream, and a report has one port to answer on.
+        if self.state.ports.holds_saved(&saved.id) {
+            return Err(MidiPortError::InUse(saved.id));
+        }
         if let Some(info) = &found
             && self.state.ports.holds_output(&info.id)
         {
