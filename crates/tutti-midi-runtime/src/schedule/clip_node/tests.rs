@@ -11,7 +11,9 @@ use tutti_units::Beat;
 #[test]
 fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-    let mut node = MidiClipNode::new([TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]);
+    let mut node = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+        TimedMidiEvent::new(Beat::new(1.0), on).unwrap(),
+    ])));
     let controls = MidiClipControls {
         cell: node.cell.clone(),
         serial: Arc::default(),
@@ -31,7 +33,7 @@ fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
 /// **A clip node's held-note table is 16 KiB**, allocated with the node.
 #[test]
 fn a_clip_nodes_table_is_16_kib() {
-    let node = MidiClipNode::new([]);
+    let node = MidiClipNode::from(MidiClipConfig::default());
     assert_eq!(node.play.held.heap_bytes(), 2_048 * 8);
 }
 

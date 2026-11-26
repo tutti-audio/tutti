@@ -1315,9 +1315,10 @@ mod tests {
         slot.publish_pending();
         assert_eq!(cell.seq(), start + 1);
 
-        let controls =
-            tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
-                .controls;
+        let controls = tutti_graph::IntoNode::<f32>::into_parts(
+            tutti_midi_runtime::MidiClipNode::from(tutti_midi_runtime::MidiClipConfig::default()),
+        )
+        .controls;
         let slot = PublishedSlot::new(NodeCell(Arc::new(controls.clone())));
         let before = controls.current();
         slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));

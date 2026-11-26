@@ -445,19 +445,21 @@ fn a_clip_into_a_synth_is_allocation_free() {
     use tutti_graph::{
         Editor, EventEdge, EventInputPort, EventOutputPort, Prepare, TransportPosition,
     };
-    use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
     use tutti_units::{Beat, Bpm, Samples};
 
     const BLOCK: usize = 256;
     // A note on or off every 37 frames over the first 8 192.
-    let clip = MidiClipNode::new((0..220u64).map(|i| {
-        let event = if i % 2 == 0 {
-            note_on(0, 48 + (i % 24) as u8, 100)
-        } else {
-            note_off(0, 48 + ((i - 1) % 24) as u8)
-        };
-        TimedMidiEvent::new(Beat::new((i * 37) as f64 / 24_000.0), event).unwrap()
-    }));
+    let clip = MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(
+        (0..220u64).map(|i| {
+            let event = if i % 2 == 0 {
+                note_on(0, 48 + (i % 24) as u8, 100)
+            } else {
+                note_off(0, 48 + ((i - 1) % 24) as u8)
+            };
+            TimedMidiEvent::new(Beat::new((i * 37) as f64 / 24_000.0), event).unwrap()
+        }),
+    )));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(BLOCK)),

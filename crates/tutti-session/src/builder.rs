@@ -987,11 +987,9 @@ impl<C: Clock> SessionBuilder<C> {
         // each output.
         #[cfg(feature = "midi")]
         let midi = {
-            let meter = transport.settings().project_meter().clone();
-            let sync = graph.add(
-                tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
-                    .meter(move || meter.reader()),
-            );
+            let sync = graph.add(tutti_midi_runtime::SyncOut::from(
+                tutti_midi_runtime::SyncOutConfig::new(tutti_ump::MidiGroup::FIRST),
+            ));
             let sync_controls = graph
                 .controls(&sync)
                 .cloned()

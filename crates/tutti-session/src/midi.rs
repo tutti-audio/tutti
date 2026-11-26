@@ -23,9 +23,9 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapOptions, EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
-    MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
-    RouteRule, SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipConfig, MidiClipNode,
+    MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms,
+    Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_rt::Mint;
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
@@ -1401,7 +1401,9 @@ impl<F: Float> Midi<'_, F> {
                 clip.erase()
             }
             None => {
-                let clip = self.graph.add(MidiClipNode::new([]));
+                let clip = self
+                    .graph
+                    .add(MidiClipNode::from(MidiClipConfig::default()));
                 // A clip that cannot take its events is not left in the
                 // graph.
                 if let Err(refused) = self.publish_clip(clip, events) {
