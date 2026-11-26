@@ -1128,3 +1128,57 @@ fn an_mpe11_zone_with_other_channels_ends_its_notes() {
     );
     assert_eq!(feed(&mut s, 0, note_off(60)), []);
 }
+
+/// An MPE Configuration Message of `members` Member Channels, as fed back.
+fn mcm_voice(members: u32) -> Voice2 {
+    Voice2::registered(Rpn::MPE_CONFIGURATION, ControlValue::new(members << 25))
+}
+
+/// **A zone that goes is turned off before another one takes its channels**:
+/// going from an upper zone of 15 Members to a lower one of 15, the upper
+/// Master's message comes first, while Ch16 is still its own (M1-100 section
+/// 2.2.1: the most recent message takes precedence).
+#[test]
+fn a_zone_that_goes_is_turned_off_before_the_zone_that_takes_its_channels() {
+    let mut s = MpeSender::new();
+    configure(&mut s, MidiGroup::FIRST, one(upper(15, 48)));
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(15, 48))),
+        [mcm(0, 15, 0), mcm(0, 0, 15)]
+    );
+}
+
+/// **Once MPE Profile zones went, each side is configured again**: the receiver
+/// left MPE 1.1 with the Profile, so the zone it had is sent once more, and
+/// the side with no zone a message of no Members, ahead of the next note.
+#[test]
+fn mpe11_zones_are_configured_again_after_a_profile() {
+    let mut s = sender11(3, 48);
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone(0, 2))));
+    s.set_profile(MidiGroup::FIRST, None);
+    let sent = feed(&mut s, 0, note_on(60));
+    assert_eq!(sent[..2], [(15, mcm_voice(0)), (0, mcm_voice(3))]);
+    assert_eq!(notes(&sent), [(1, note_on(60))]);
+    // Told once: the next note has no message.
+    assert_eq!(notes(&feed(&mut s, 0, note_on(62))), [(2, note_on(62))]);
+}
+
+/// **A Configuration Message the device refused is sent again**: every side is
+/// told what it is ahead of the next packet, and the notes of the zone are
+/// forgotten, since the receiver that takes the message ends them (section
+/// 2.2.3).
+#[test]
+fn a_refused_configuration_is_sent_again_ahead_of_the_next_packet() {
+    let mut s = sender11(3, 48);
+    feed(&mut s, 0, note_on(60));
+    s.resend_configuration(MidiGroup::FIRST);
+    let sent = feed(&mut s, 0, note_off(60));
+    assert_eq!(sent, [(15, mcm_voice(0)), (0, mcm_voice(3))]);
+    // A turned-off zone is told so again.
+    configure(&mut s, MidiGroup::FIRST, None);
+    s.resend_configuration(MidiGroup::FIRST);
+    assert_eq!(
+        feed(&mut s, 0, note_on(60)),
+        [(0, mcm_voice(0)), (15, mcm_voice(0)), (0, note_on(60))]
+    );
+}

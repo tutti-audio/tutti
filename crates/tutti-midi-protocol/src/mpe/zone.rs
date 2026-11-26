@@ -81,11 +81,18 @@ impl Mcm {
     }
 
     /// The message that takes a receiver whose `zone` has `had` Member Channels
-    /// (none: no zone) to `want`, if there is one.
-    fn between(zone: MpeZone, had: Option<MemberCount>, want: Option<MemberCount>) -> Option<Self> {
+    /// (`Some(None)`: no zone; `None`: not known) to `want`, if there is one: a
+    /// zone of unknown configuration is always told what it is.
+    fn between(
+        zone: MpeZone,
+        had: Option<Option<MemberCount>>,
+        want: Option<MemberCount>,
+    ) -> Option<Self> {
         match (had, want) {
-            (had, Some(members)) if had != Some(members) => Some(Self::Configure { zone, members }),
-            (Some(_), None) => Some(Self::Disable { zone }),
+            (had, Some(members)) if had != Some(Some(members)) => {
+                Some(Self::Configure { zone, members })
+            }
+            (had, None) if had != Some(None) => Some(Self::Disable { zone }),
             _ => None,
         }
     }
@@ -695,11 +702,13 @@ impl Mpe11Zones {
     }
 
     /// The MPE Configuration Messages (M1-100 section 2.2.1) in `group` that take
-    /// a receiver configured with the zones `had` to `want`, the lower zone's
-    /// first: one for each zone `want` has with Member Channels `had` has not,
-    /// and one with no Member Channels for each zone `had` has and `want`
-    /// has not. A zone that stays as it is, whatever its ranges and response,
-    /// is no message, since the message has neither.
+    /// a receiver configured with the zones `had` to `want`: one with no Member
+    /// Channels for each zone `had` has and `want` has not, then one for each
+    /// zone `want` has with Member Channels `had` has not, the lower zone's
+    /// first. A zone that goes is turned off before another one is configured,
+    /// so a zone that takes its channels never overlaps it. A zone that stays as
+    /// it is, whatever its ranges and response, is no message, since the
+    /// message has neither.
     ///
     /// The message is a MIDI 2.0 Registered Controller (RPN), address
     /// [`Rpn::MPE_CONFIGURATION`], on the zone's *master* channel (Ch1 lower /
@@ -712,12 +721,43 @@ impl Mpe11Zones {
         want: Option<Self>,
         group: MidiGroup,
     ) -> impl Iterator<Item = Ump> {
-        [MpeZone::Lower, MpeZone::Upper]
+        Self::messages(group, move |side| {
+            (
+                Some(Self::members_on(had, side)),
+                Self::members_on(want, side),
+            )
+        })
+    }
+
+    /// The MPE Configuration Messages in `group` that take a receiver whose
+    /// configuration is not known to `want`: as
+    /// [`configuration`](Self::configuration), with a message for each zone,
+    /// one with no Member Channels for a zone `want` has not.
+    pub fn full_configuration(want: Option<Self>, group: MidiGroup) -> impl Iterator<Item = Ump> {
+        Self::messages(group, move |side| (None, Self::members_on(want, side)))
+    }
+
+    /// The messages that take each side from what `of` says it had (`None`:
+    /// not known) to what it says it wants, the ones that turn a zone off
+    /// first.
+    fn messages(
+        group: MidiGroup,
+        of: impl Fn(MpeZone) -> (Option<Option<MemberCount>>, Option<MemberCount>),
+    ) -> impl Iterator<Item = Ump> {
+        let sides = [MpeZone::Lower, MpeZone::Upper];
+        let mcms = sides.map(|side| {
+            let (had, want) = of(side);
+            Mcm::between(side, had, want)
+        });
+        let off = mcms
             .into_iter()
-            .filter_map(move |side| {
-                let (had, want) = (Self::members_on(had, side), Self::members_on(want, side));
-                Mcm::between(side, had, want).map(|mcm| mcm.to_ump(group))
-            })
+            .flatten()
+            .filter(|m| matches!(m, Mcm::Disable { .. }));
+        let on = mcms
+            .into_iter()
+            .flatten()
+            .filter(|m| matches!(m, Mcm::Configure { .. }));
+        off.chain(on).map(move |mcm| mcm.to_ump(group))
     }
 
     /// How many Member Channels the zone of `zones` on `side` has, if it has one.

@@ -111,9 +111,12 @@ impl MpeSender {
     /// While a Group has Profile zones the MPE 1.1 zones of
     /// [`set_mpe11`](Self::set_mpe11) are held and not used; once the Profile
     /// zones go they apply, and their Configuration Messages are sent ahead of
-    /// the next packet fed on the Group.
+    /// the next packet fed on the Group. The receiver's MPE 1.1 configuration
+    /// is not known once a Profile was enabled, so each zone is sent one.
     pub fn set_profile(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
-        self.groups[group.index()].profile = zones;
+        let held = &mut self.groups[group.index()];
+        held.profile = zones;
+        held.unconfirmed |= zones.is_some() && held.configured.is_some();
         self.apply(group);
     }
 
@@ -151,17 +154,35 @@ impl MpeSender {
         }
     }
 
+    /// The receiver of `group` may not hold the MPE 1.1 zones it was sent (a
+    /// Configuration Message the device refused): ahead of the next packet fed
+    /// on the Group each side is sent its zone again, or no zone, and the
+    /// notes of the Group's zones are forgotten, since the receiver ends them
+    /// (M1-100 section 2.2.3).
+    pub fn resend_configuration(&mut self, group: MidiGroup) {
+        self.groups[group.index()].unconfirmed = true;
+    }
+
     /// Calls `out` with the MPE Configuration Messages that take what the
     /// receiver of `group` was configured with to the MPE 1.1 zones in use.
+    /// Nothing is sent while the Group has Profile zones.
     fn configure(&mut self, group: MidiGroup, out: &mut impl FnMut(Ump)) {
         let held = &mut self.groups[group.index()];
-        let wanted = if held.profile.is_some() {
-            held.configured
+        if held.profile.is_some() {
+            return;
+        }
+        let wanted = held.mpe11;
+        let unconfirmed = core::mem::take(&mut held.unconfirmed);
+        if unconfirmed {
+            Mpe11Zones::full_configuration(wanted, group).for_each(out);
+            held.zoned = None;
         } else {
-            held.mpe11
-        };
-        Mpe11Zones::configuration(held.configured, wanted, group).for_each(out);
+            Mpe11Zones::configuration(held.configured, wanted, group).for_each(out);
+        }
         held.configured = wanted;
+        if unconfirmed {
+            self.apply(group);
+        }
     }
 
     /// The receiver may hold other values than it was told: each Member is told
@@ -218,6 +239,9 @@ struct Group {
     mpe11: Option<Mpe11Zones>,
     /// The MPE 1.1 zones the receiver was sent Configuration Messages for.
     configured: Option<Mpe11Zones>,
+    /// The receiver may not hold `configured`: the next configuration tells
+    /// each side what it is.
+    unconfirmed: bool,
     /// What plays in the zones in use, if there are any.
     zoned: Option<Box<Zoned>>,
 }
@@ -227,6 +251,7 @@ impl Group {
         profile: None,
         mpe11: None,
         configured: None,
+        unconfirmed: false,
         zoned: None,
     };
 

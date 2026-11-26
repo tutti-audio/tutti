@@ -107,6 +107,11 @@ impl Wire {
         messages
     }
 
+    /// The device may not hold the MPE 1.1 zones of `group` it was sent.
+    pub(crate) fn resend_configuration(&mut self, group: MidiGroup) {
+        self.mpe.resend_configuration(group);
+    }
+
     /// Whether the device is in a Protocol that has no MIDI 2.0 Channel Voice:
     /// MIDI 1.0, and the reserved values, which nobody can speak.
     fn speaks_midi1(&self) -> bool {

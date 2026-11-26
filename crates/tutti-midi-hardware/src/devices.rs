@@ -807,8 +807,9 @@ impl OpenOutput {
     /// The MPE Configuration Message of each zone that starts or changes, and
     /// of each that goes (its Member Channels none), is queued now like any
     /// event, and counted in [`losses`](Self::losses) when the device has no
-    /// room for it. While the device has MPE Profile zones on `group` these
-    /// are held and not used. For a control thread: it allocates.
+    /// room for it; then each zone is sent again ahead of the next event on
+    /// `group`. While the device has MPE Profile zones on `group` these are
+    /// held and not used. For a control thread: it allocates.
     pub fn set_mpe11(&mut self, group: MidiGroup, zones: Option<Mpe11Zones>) {
         let messages: Vec<UmpAt> = self
             .wire
@@ -816,8 +817,11 @@ impl OpenOutput {
             .into_iter()
             .map(|ump| (Offset::ZERO, ump))
             .collect();
-        // `queue` counts what the device did not take.
-        let _ = self.queue(&messages);
+        // `queue` counts what the device did not take; the zones are sent
+        // again ahead of the next event on the Group.
+        if self.queue(&messages).packets() < messages.len() {
+            self.wire.resend_configuration(group);
+        }
     }
 }
 

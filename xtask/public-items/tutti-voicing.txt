@@ -46,6 +46,7 @@ fn holds::Holds::sustained
 fn mpe_sender::MpeSender::feed
 fn mpe_sender::MpeSender::new
 fn mpe_sender::MpeSender::resend
+fn mpe_sender::MpeSender::resend_configuration
 fn mpe_sender::MpeSender::set_mpe11
 fn mpe_sender::MpeSender::set_profile
 fn per_note::PerNoteState::clear
