@@ -276,6 +276,26 @@ pub trait CompareIn<F>: PartialEq {}
 
 impl<F, T: PartialEq> CompareIn<F> for T {}
 
+/// Whether a setting of type `T` is structure, by what its entry names after
+/// `@`: `()` (no kind, no address) compares it, and `(Kind,)` leaves it a value
+/// the running node is written. Only the kindless case needs `T: PartialEq`.
+#[doc(hidden)]
+pub trait SettingStructure<F, T> {
+    fn same(a: &T, b: &T) -> bool;
+}
+
+impl<F, T: CompareIn<F>> SettingStructure<F, T> for () {
+    fn same(a: &T, b: &T) -> bool {
+        a == b
+    }
+}
+
+impl<F, K, T> SettingStructure<F, T> for (K,) {
+    fn same(_: &T, _: &T) -> bool {
+        true
+    }
+}
+
 /// A cell a declaration names, whose value is in `U`: what makes the unit a
 /// declaration states agree with the cell's own type. Implemented for a
 /// `&Param<U>` (any unit but its own does not compile), for a switch's
@@ -643,6 +663,10 @@ pub fn input<'a, F: Float>(
 ///   [`HasSetting`](crate::HasSetting) for the kind and the cell in
 ///   [`ParamNode::settings`](crate::ParamNode::settings), which
 ///   [`param_parts`](crate::param_parts) puts in the node's [`NodeParts`](crate::NodeParts).
+///   A setting with no kind has no address, so nothing can write a changed
+///   initial to a running node: it is structure, compared by
+///   [`NodeConfig::same_structure`](crate::NodeConfig::same_structure) (its type
+///   must be `PartialEq`), and a change builds a new node.
 ///
 /// - **A published value**, `published { events: ClipEventsKind }`
 ///   (`name: Kind`), is a value a session writes at `update()` and the node
@@ -1130,7 +1154,7 @@ macro_rules! declare_params {
         $crate::declare_params!(@config [$($g)*] [$($cd)*] {
             $ty, $cfg [$($cu)*],
             [$($req : $rty,)*] [$($oname : $oty,)*]
-            [$($kind $field,)*] [$($sname [$($skind)?],)*]
+            [$($kind $field,)*] [$($sname [$($skind)?] : $sty,)*]
         });
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
@@ -1209,7 +1233,7 @@ macro_rules! declare_params {
     (@config_impl [$($ig:tt)*] $float:ident {
         $ty:ty, $cfg:ident [$($cu:tt)*],
         [$($req:ident : $rty:ty,)*] [$($oname:ident : $oty:ty,)*]
-        [$($kind:ident $field:ident,)*] [$($sname:ident [$($skind:ty)?],)*]
+        [$($kind:ident $field:ident,)*] [$($sname:ident [$($skind:ty)?] : $sty:ty,)*]
     }) => {
         impl<$($ig)*> $crate::NodeConfig<$float> for $cfg<$($cu)*>
         where
@@ -1217,10 +1241,11 @@ macro_rules! declare_params {
             $cfg<$($cu)*>: Clone + Send + 'static,
             $($rty: $crate::__private::CompareIn<$float>,)*
             $($oty: $crate::__private::CompareIn<$float>,)*
+            $(($($skind,)?): $crate::__private::SettingStructure<$float, $sty>,)*
         {
             type Node = $ty;
 
-            fn build(&self) -> $ty {
+            fn build(&self, _: &$crate::HostValues) -> $ty {
                 <$ty as $crate::__private::BuiltFrom<Self, $float>>::built_from(
                     ::core::clone::Clone::clone(self),
                 )
@@ -1231,6 +1256,10 @@ macro_rules! declare_params {
                 true
                     $(&& self.$req == other.$req)*
                     $(&& self.$oname == other.$oname)*
+                    $(&& <($($skind,)?) as $crate::__private::SettingStructure<$float, $sty>>::same(
+                        &self.$sname,
+                        &other.$sname,
+                    ))*
                     $(&& $crate::__private::Initial::present(self.$field)
                         == $crate::__private::Initial::present(other.$field))*
             }

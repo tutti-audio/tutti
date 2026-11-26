@@ -5,7 +5,7 @@
 //! nowhere lower. Everything the mic feeds is device-free and lives lower: the
 //! inlet node that copies the monitor ring into the graph (`tutti-graph`'s
 //! `InletNode`, opened by `tutti-session`'s `Graph::add_inlet`), the
-//! `tutti_codec::FileOut` a take records into, and the pump that moves
+//! `tutti_codec::EncoderSink` a take records into, and the pump that moves
 //! frames between them (`tutti-session`'s take). What this crate contributes is the one live
 //! [`Source`] that touches hardware.
 //!
@@ -48,7 +48,7 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 
 use tutti_buffers::{ChannelLayout, ChannelSet, SampleFormat};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Pull, Source};
-use tutti_codec::{FileOut, Format, Spec};
+use tutti_codec::{Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
 use tutti_units::Samples;
@@ -96,8 +96,8 @@ struct StreamHandle(
 /// The CPAL input callback selects the inputs the mic was opened with from each
 /// device frame and pushes them into a lock-free ring of about one second; this
 /// value is the consumer end. Pull from it with [`pull`](Source::pull),
-/// or hand it to a `tutti_session::PumpLoop` with a sink from
-/// [`matching_sink`](Self::matching_sink) to record. If the consumer falls
+/// or hand it to a `tutti_session::PumpLoop` with a sink over a file of
+/// [`file_spec`](Self::file_spec) to record. If the consumer falls
 /// behind, the callback drops the newest frames rather than block. Capture
 /// stops when this value is dropped.
 ///
@@ -488,41 +488,40 @@ impl<F: Float> MicIn<F> {
         ChannelSet::unassigned(self.tap.layout())
     }
 
-    /// Creates a file sink that matches this mic: its sample rate, its
+    /// The [`Spec`] of a file that matches this mic: its sample rate and its
     /// layout (one channel a selected input), in `format`.
     ///
     /// A source and sink must agree on rate and channel count, and nothing
     /// downstream can check the rate: [`Source`] carries none, so an 8 kHz
     /// sink fed by a 48 kHz mic writes a valid WAV that plays six times too
-    /// slow. Building the sink here rules that out.
+    /// slow. Building the file from this spec rules that out; the options carry everything
+    /// else, and a capture usually wants a file in place, which a crash or a fault leaves for
+    /// the take to keep:
+    ///
+    /// ```no_run
+    /// # use tutti_codec::{EncoderOptions, EncoderSink, Format, Pcm};
+    /// # use tutti_buffers::FloatWidth;
+    /// # fn capture(mic: &tutti_cpal::MicIn) -> tutti_codec::Result<()> {
+    /// let spec = mic.file_spec(Format::Wav(Pcm::Float(FloatWidth::F32)));
+    /// let sink = EncoderSink::<f32>::new(EncoderOptions::new(&spec).file("take.wav").in_place().create()?);
+    /// # Ok(()) }
+    /// ```
     ///
     /// The file is dithered as `format`'s [`Pcm`](tutti_codec::Pcm) says: a capture into an
     /// integer file gets triangular dither by default. A capture whose floats already sit on
     /// the file's grid (a 24-bit converter into a 24-bit file) gains about one LSB of noise it
     /// did not need and loses bit-transparency; an `IntPcm` with
     /// [`no_dither`](tutti_codec::IntPcm::no_dither) keeps it bit-exact.
-    ///
-    /// # Errors
-    ///
-    /// Whatever [`FileOut::new`] reports: the format cannot be written at
-    /// this width, or the header not written.
-    pub fn matching_sink(
-        &self,
-        file: std::fs::File,
-        format: Format,
-    ) -> tutti_codec::Result<FileOut> {
+    #[must_use]
+    pub fn file_spec(&self, format: Format) -> Spec {
         // Read off `Source::layout` rather than hard-coded, so this pairing
         // cannot drift from what `pull` actually hands back; a sink built
         // from a *different* width than the source reports is exactly what
-        // `PumpLoop::new` refuses, and this helper exists to be the pairing
-        // that always passes.
-        FileOut::new(
-            &Spec::of_channels(
-                format,
-                ChannelSet::default_for(Source::layout(self)),
-                self.sample_rate(),
-            ),
-            file,
+        // `PumpLoop::new` refuses, and this spec is the pairing that always passes.
+        Spec::of_channels(
+            format,
+            ChannelSet::default_for(Source::layout(self)),
+            self.sample_rate(),
         )
     }
 }

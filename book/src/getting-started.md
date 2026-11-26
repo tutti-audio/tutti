@@ -114,10 +114,12 @@ one.
 All that is left is to capture the sound. Recording the output of a session
 into a file is called a *bounce* (also known as *export*, or *mixdown*).
 First we describe what we want to keep: the first two seconds, in
-stereo.
+stereo. A bounce never overwrites a file by accident, so we also say that a
+second run of the program may replace the file the first one wrote.
 
 ```rust,ignore
 Bounce::new()
+    .replace() // overwrite the file a previous run wrote
     .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
     .channels(ChannelLayout::STEREO) // left and right
 ```

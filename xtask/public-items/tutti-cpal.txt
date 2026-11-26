@@ -41,8 +41,8 @@ fn mic::MicConfig::sample_format
 fn mic::MicIn::channel_set
 fn mic::MicIn::device_inputs
 fn mic::MicIn::faults
+fn mic::MicIn::file_spec
 fn mic::MicIn::latency
-fn mic::MicIn::matching_sink
 fn mic::MicIn::open
 fn mic::MicIn::open_with_monitor
 fn mic::MicIn::sample_rate

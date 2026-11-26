@@ -59,6 +59,14 @@ pub enum EncodeError {
         limit_frames: u64,
     },
 
+    /// Something is already at the path and the encoder was not made with
+    /// [`replace`](crate::FileOptions::replace); nothing was written.
+    #[error("{} already exists", path.display())]
+    Exists {
+        /// The path.
+        path: std::path::PathBuf,
+    },
+
     /// A block whose width is not the encoder's.
     #[error("A block of {got:?} was written to an encoder of {expected:?}")]
     BlockWidth {
@@ -88,6 +96,7 @@ impl EncodeError {
             Self::WavTooLarge { limit_frames } => Self::WavTooLarge {
                 limit_frames: *limit_frames,
             },
+            Self::Exists { path } => Self::Exists { path: path.clone() },
             Self::BlockWidth { expected, got } => Self::BlockWidth {
                 expected: *expected,
                 got: *got,

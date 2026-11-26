@@ -60,9 +60,11 @@ fn mono_tone() -> Session {
 /// The format of every file here.
 const FORMAT: Format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)));
 
-/// The first `seconds` of the project.
+/// The first `seconds` of the project, replacing the file an earlier run of this example wrote.
 fn first(seconds: f64) -> Bounce {
-    Bounce::new().range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
+    Bounce::new()
+        .replace()
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -12,22 +12,21 @@
 //! - `Spec` is what a file is written as: the format, the speakers (the topology,
 //!   which is also the width) and the rate. `Spec::of_channels` takes a
 //!   `ChannelSet`, and `ChannelSet::default_for` states the engine's order for a bare width.
-//! - `Encoder` is `create(spec, sink)`, a fallible `write(block)` and `finish()`.
-//!   `FileEncoder::create` writes beside the path and moves the file into place
-//!   on `finish` (which returns `()`: the file is synced and closed first, so
-//!   nothing holds it open); dropping the encoder first removes it, and so does
-//!   `finish` after a failed `write`.
-//! - `FileOut` is the file sink, `FileIn`'s mirror: a `Sink` over an
-//!   `Encoder`, created from a `Spec` and a `File` the caller opened (and so
-//!   chose to replace or refuse what was there), for any `Format` the build can
-//!   write. It keeps whole frames only, keeps the first write error (later
-//!   writes are skipped and return `SinkFailed`) and `finalize` returns that
-//!   error, else the result of `finish`. It writes in place rather than staged,
-//!   because a recording cut short is worth keeping. `FileEncoder::create`
-//!   takes a path or a `tutti_platform::Staged`, for a caller that chooses `create_new`.
+//! - `EncoderOptions::new(&spec)` is how a file is begun: chained options (`dither_seed`,
+//!   `planned`, `limit_frames`), then `wrap(sink)` for an `Encoder` over any `Write + Seek`, or
+//!   `file(path)` for the `FileOptions` of a file (`replace`, `in_place`) and `create()` for a
+//!   `FileEncoder`. An `Encoder` has a fallible `write(block)` and `finish()`. A `FileEncoder`
+//!   is staged by default: it writes beside the path and moves the file into place on `finish`
+//!   (which returns `()`: the file is synced and closed first, so nothing holds it open);
+//!   dropping it first removes the file, and so does `finish` after a failed `write`. With
+//!   `in_place` it writes the path from the start, and a recording cut short is kept. An
+//!   existing file at the path is refused (`EncodeError::Exists`) unless `replace` is set.
+//! - `EncoderSink` is the file sink, `FileIn`'s mirror: a `Sink` over a `FileEncoder`, for any
+//!   `Format` the build can write. It keeps the first write error (later writes are skipped and
+//!   return `SinkFailed`), and `finalize` is `FileEncoder::finish_keeping`, so a recording cut
+//!   short is kept, with the first error in `Kept`.
 //! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
-//!   a path (staged: replacing what is there, or refusing it under
-//!   `Destination::create_new`) or into a borrowed writer.
+//!   a path (staged, and refusing a file that is there) or into a borrowed writer.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::channel_set` and `FileIn::channel_set` say which speaker each channel feeds,
@@ -51,7 +50,7 @@
 //! source, and resampling. An encoder takes blocks already at the rate
 //! and width the `Spec` states, and nothing here stops a caller from handing it
 //! others. `tutti-export` is the offline pipeline and
-//! `FileOut` the live one; both write through this crate, so a bounced
+//! `EncoderSink` the live one; both write through this crate, so a bounced
 //! and a recorded file quantize and lay out a given sample identically.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -76,8 +75,8 @@ mod contract;
 mod decode;
 mod decode_error;
 mod encoder;
+mod encoder_sink;
 mod error;
-mod file_out;
 #[cfg(feature = "encode-flac")]
 mod flac;
 mod format;
@@ -97,9 +96,11 @@ mod writer;
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, FileEncoder, FinalizedFile, Kept, Unfinished};
+pub use encoder::{
+    Encoder, EncoderOptions, FileEncoder, FileOptions, FinalizedFile, Kept, Unfinished,
+};
+pub use encoder_sink::EncoderSink;
 pub use error::{Codec, EncodeError, Result, SpecError};
-pub use file_out::FileOut;
 pub use format::{FlacLevel, Format};
 pub use pcm::{IntDepth, IntPcm, Pcm};
 pub use spec::Spec;

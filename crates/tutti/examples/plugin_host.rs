@@ -255,8 +255,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 10. Bounce four beats to a 24-bit WAV. The plugin hears Offline while it
     //    renders, and Realtime from the update after the apply.
+    //    `replace`: the output named on the command line is overwritten.
     let rendering = session.bounce(
         Bounce::new()
+            .replace()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
             .main_output(
                 out.as_path(),
