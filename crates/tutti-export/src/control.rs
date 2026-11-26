@@ -192,13 +192,12 @@ pub(crate) enum Weights {
 }
 
 impl Weights {
-    /// The table `outputs` render under: normalized if any file output
-    /// measures a gain, streaming otherwise. The one rule, for the render and
-    /// for whoever reports [`Stage::Preparing`] before it.
-    pub(crate) fn of<'a>(targets: impl IntoIterator<Item = &'a crate::Target>) -> Self {
-        let normalizes = targets
-            .into_iter()
-            .any(|t| matches!(t, crate::Target::File(f) if f.normalize.is_some()));
+    /// The table the `files` render under: normalized if any of them takes a
+    /// normalized gain, streaming otherwise (planes in memory never
+    /// normalize). The one rule, for the render and for whoever reports
+    /// [`Stage::Preparing`] before it.
+    pub(crate) fn of<'a>(files: impl IntoIterator<Item = &'a crate::FileTarget>) -> Self {
+        let normalizes = files.into_iter().any(|f| f.normalize.is_some());
         if normalizes {
             Self::Normalized
         } else {
@@ -315,7 +314,7 @@ impl<'a> Control<'a> {
     }
 
     /// Reports [`Stage::Preparing`]: `done` of `of` steps of building what
-    /// `targets` will be rendered from, in the band they will render under.
+    /// the outputs of `files` will be rendered from, in the band they will render under.
     ///
     /// The session calls this between its steps (the gather, the fork's
     /// build, the edit, the commit), before [`render`](crate::render()); the
@@ -324,11 +323,11 @@ impl<'a> Control<'a> {
     /// frames.
     pub fn preparing<'t>(
         &mut self,
-        targets: impl IntoIterator<Item = &'t crate::Target>,
+        files: impl IntoIterator<Item = &'t crate::FileTarget>,
         done: u32,
         of: u32,
     ) {
-        self.weigh(Weights::of(targets));
+        self.weigh(Weights::of(files));
         let within = if of == 0 {
             1.0
         } else {

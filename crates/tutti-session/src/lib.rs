@@ -200,7 +200,7 @@ pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
     BounceRendered, BounceTail, Bounced, Bouncing, BufferMainOutput, BufferStem, ExportClock,
     FileMainOutput, FileStem, MainOutputKind, NoMainOutput, PrepareEdit, PreparedGraph, Range,
-    Stem, StemGain,
+    Stem, StemGain, StemKey,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
@@ -364,7 +364,8 @@ pub use tutti_dsp::DitherShape;
 pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
-    EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Stage, Written,
+    BufferKey, Done, DoneError, EventLossPolicy, FileKey, Normalize, Outcome, Progress, Rendered,
+    Stage, Written,
 };
 pub use tutti_graph::{
     BusError, BusOutputPort, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,

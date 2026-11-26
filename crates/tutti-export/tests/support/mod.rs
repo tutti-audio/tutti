@@ -1,6 +1,6 @@
 //! The renders a test that has nothing to cancel and nobody to tell makes:
 //! one output into a file, into memory, or into a normalized file, from the
-//! [`ExportConfig`] that describes it, each [`tutti_export::render_one`] under
+//! [`ExportConfig`] that describes it, each [`tutti_export::render`] of one under
 //! [`Control::none`] and its finished value.
 //!
 //! [`ExportConfig`] is this suite's own bundle (what the crate's public one
@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Wave};
 use tutti_codec::{Encoding, Format, Landed, Pcm, Resample, ToFile};
 use tutti_export::{
-    BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
-    Output, Produced, RenderGraph, Rendered, Result, Setup, TailPolicy, Written, render_one,
+    BufferTarget, Control, EventLossPolicy, FileTarget, Gain, Job, Normalize, Outcome, Output,
+    Outputs, RenderGraph, Rendered, Result, Setup, TailPolicy, Written, render,
 };
 use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
@@ -115,7 +115,7 @@ impl ExportConfig {
         // A test renders over its scratch path again and again.
         let target = FileTarget::new(self.encoding(), ToFile::new(path).replace());
         match normalize {
-            Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
+            Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,
         }
     }
@@ -165,21 +165,38 @@ fn finished<T>(outcome: Outcome<T>) -> T {
         .expect("a control with no token is never cancelled")
 }
 
-/// One output of `config`'s render, rendered under [`Control::none`].
-fn render_output(
+/// The file `target`, rendered from the graph's main output under `control`.
+fn render_file(
     mut graph: impl BorrowMut<RenderGraph>,
-    job: tutti_export::Job,
+    job: &Job,
     clock: &dyn RenderClock,
-    output: Output,
-) -> Result<Produced> {
-    render_one(
-        graph.borrow_mut(),
-        &job,
-        clock,
-        output,
-        &mut Control::none(),
-    )
-    .map(finished)
+    target: FileTarget,
+    control: &mut Control<'_>,
+) -> Result<Outcome<Written>> {
+    let mut outputs = Outputs::new();
+    let key = outputs.file(Output::main_output(target));
+    render(graph.borrow_mut(), job, clock, outputs, control).map(|outcome| {
+        outcome.map(|done| done.file(&key).expect("the key of these outputs").clone())
+    })
+}
+
+/// The planes `target`, rendered from the graph's main output under `control`.
+fn render_planes(
+    mut graph: impl BorrowMut<RenderGraph>,
+    job: &Job,
+    clock: &dyn RenderClock,
+    target: BufferTarget,
+    control: &mut Control<'_>,
+) -> Result<Outcome<Rendered>> {
+    let mut outputs = Outputs::new();
+    let key = outputs.buffers(Output::main_output(target));
+    render(graph.borrow_mut(), job, clock, outputs, control).map(|outcome| {
+        outcome.map(|done| {
+            done.buffers(&key)
+                .expect("the key of these outputs")
+                .clone()
+        })
+    })
 }
 
 /// `config`'s render into a file at `path`.
@@ -190,8 +207,14 @@ pub(crate) fn render_to_file(
     path: impl AsRef<Path>,
 ) -> Result<Written> {
     let job = config.job()?;
-    let output = Output::main_output(config.file_target(path.as_ref(), None));
-    render_output(graph, job, clock, output).map(|p| p.into_file().expect("a file output"))
+    render_file(
+        graph,
+        &job,
+        clock,
+        config.file_target(path.as_ref(), None),
+        &mut Control::none(),
+    )
+    .map(finished)
 }
 
 /// `config`'s render into memory (not resampled, not dithered).
@@ -201,8 +224,14 @@ pub(crate) fn render_to_buffers(
     clock: &dyn RenderClock,
 ) -> Result<Rendered> {
     let job = config.buffers_job()?;
-    let output = Output::main_output(config.buffer_target());
-    render_output(graph, job, clock, output).map(|p| p.into_buffers().expect("a buffers output"))
+    render_planes(
+        graph,
+        &job,
+        clock,
+        config.buffer_target(),
+        &mut Control::none(),
+    )
+    .map(finished)
 }
 
 /// `config`'s render into a file at `path`, normalized by `normalize`.
@@ -214,15 +243,21 @@ pub(crate) fn render_normalized_to_file(
     path: impl AsRef<Path>,
 ) -> Result<Written> {
     let job = config.job()?;
-    let output = Output::main_output(config.file_target(path.as_ref(), Some(normalize)));
-    render_output(graph, job, clock, output).map(|p| p.into_file().expect("a file output"))
+    render_file(
+        graph,
+        &job,
+        clock,
+        config.file_target(path.as_ref(), Some(normalize)),
+        &mut Control::none(),
+    )
+    .map(finished)
 }
 
 /// `config`'s render into a file at `path` (normalized when `normalize` is
 /// set), under `control`: the outcome as the render returns it, for a test that
 /// cancels or watches.
 pub(crate) fn render_file_under(
-    mut graph: impl BorrowMut<RenderGraph>,
+    graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
     normalize: Option<Normalize>,
@@ -230,20 +265,22 @@ pub(crate) fn render_file_under(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Written>> {
     let job = config.job()?;
-    let output = Output::main_output(config.file_target(path.as_ref(), normalize));
-    render_one(graph.borrow_mut(), &job, clock, output, control)
-        .map(|o| o.map(|p| p.into_file().expect("a file output")))
+    render_file(
+        graph,
+        &job,
+        clock,
+        config.file_target(path.as_ref(), normalize),
+        control,
+    )
 }
 
 /// `config`'s render into memory under `control`, as the render returns it.
 pub(crate) fn render_buffers_under(
-    mut graph: impl BorrowMut<RenderGraph>,
+    graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
     control: &mut Control<'_>,
 ) -> Result<Outcome<Rendered>> {
     let job = config.buffers_job()?;
-    let output = Output::main_output(config.buffer_target());
-    render_one(graph.borrow_mut(), &job, clock, output, control)
-        .map(|o| o.map(|p| p.into_buffers().expect("a buffers output")))
+    render_planes(graph, &job, clock, config.buffer_target(), control)
 }

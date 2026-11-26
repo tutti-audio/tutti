@@ -186,6 +186,11 @@ pub enum RenderError {
         cause: tutti_codec::EncodeError,
     },
 
+    /// A result was read from the finished render by a key it has none for
+    /// ([`DoneError`](crate::DoneError)): for a caller that reads results on its own caller's behalf.
+    #[error("Export result unavailable: {0}")]
+    Key(#[from] crate::DoneError),
+
     /// A forked unit failed while the render ran: a hosted plugin's
     /// server crashed, or stopped answering (`kind`). Past that point the
     /// render holds silence where the unit's output belongs, so the export is

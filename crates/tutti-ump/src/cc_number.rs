@@ -101,11 +101,23 @@ impl CCNumber {
     pub const ALL_SOUND_OFF: CCNumber = CCNumber(120);
     /// CC 121 — Reset All Controllers.
     pub const RESET_ALL: CCNumber = CCNumber(121);
+    /// CC 122 — Local Control.
+    pub const LOCAL_CONTROL: CCNumber = CCNumber(122);
     /// CC 123.
     pub const ALL_NOTES_OFF: CCNumber = CCNumber(123);
+    /// CC 124 — Omni Mode Off.
+    pub const OMNI_MODE_OFF: CCNumber = CCNumber(124);
+    /// CC 125 — Omni Mode On.
+    pub const OMNI_MODE_ON: CCNumber = CCNumber(125);
     /// CC 126 — Mono Mode On (Omni-Off/Mono): its value is a
     /// [`MonoChannels`](crate::MonoChannels) count.
     pub const MONO_MODE_ON: CCNumber = CCNumber(126);
+    /// CC 127 — Poly Mode On.
+    pub const POLY_MODE_ON: CCNumber = CCNumber(127);
+    /// CC 96 — Data Increment (an event, not a value).
+    pub const DATA_INCREMENT: CCNumber = CCNumber(96);
+    /// CC 97 — Data Decrement (an event, not a value).
+    pub const DATA_DECREMENT: CCNumber = CCNumber(97);
 
     // Effects depths.
     /// CC 91 — Effects 1 Depth (reverb send level).

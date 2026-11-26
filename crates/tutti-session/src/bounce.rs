@@ -69,12 +69,12 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
 
-use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::{Encoding, Format, Resample, ToFile};
 use tutti_export::{
-    BufferTarget, CancelToken, Control, EventLossPolicy, FileTarget, GRAPH_MAX_BLOCK, Job,
-    JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
-    TailPolicy, Target, Written,
+    BufferKey, BufferTarget, CancelToken, Control, Done, DoneError, EventLossPolicy, FileKey,
+    FileTarget, GRAPH_MAX_BLOCK, Gain, Job, JobError, Normalize, Outcome, Output, Outputs,
+    Placement, Progress, Rendered, TailPolicy, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
 use tutti_rt::{Mutex, SplitMix64};
@@ -90,6 +90,7 @@ use tutti_dsp::FftFloat;
 
 use crate::fork::PendingExport;
 use crate::format::Sealed;
+use sealed::{FileOptions, Landing, MainShape};
 
 /// The span of the project a bounce renders, in the unit the caller thinks in.
 ///
@@ -217,9 +218,104 @@ pub struct FileMainOutput {
 pub struct BufferMainOutput;
 
 mod sealed {
-    pub trait Sealed {}
-    impl Sealed for super::FileMainOutput {}
-    impl Sealed for super::BufferMainOutput {}
+    use super::{
+        BufferKey, BufferMainOutput, BufferTarget, ChannelLayout, ChannelTopology, FileKey,
+        FileMainOutput, FileTarget, Float, Gain, Output, Outputs, Resample,
+    };
+
+    /// What every file of a bounce shares.
+    #[derive(Debug)]
+    pub struct FileOptions {
+        pub(super) resample: Option<Resample>,
+        pub(super) replace: bool,
+        pub(super) normalize: Option<Gain>,
+    }
+
+    /// What a main output is built from: the bounce's figures that a file or a
+    /// buffer main output turns into its target.
+    #[derive(Debug)]
+    pub struct MainShape {
+        pub channels: ChannelLayout,
+        pub topology: Option<ChannelTopology>,
+        pub options: FileOptions,
+    }
+
+    /// Where a target lands, borrowed: the part of it the bounce's checks read.
+    #[derive(Debug)]
+    pub enum Landing<'a> {
+        File(&'a FileTarget),
+        Buffers(&'a BufferTarget),
+    }
+
+    /// The kind's part that touches the pipeline: its target, its key, and the
+    /// result it takes out of the finished render by that key.
+    pub trait Sealed: Sized {
+        /// What the main output becomes: a `FileTarget` or a `BufferTarget`.
+        type Target: Send + 'static;
+        /// The key the main output was added under.
+        type Key: Send + 'static;
+
+        /// The main output's target from the bounce's figures.
+        fn target(self, shape: MainShape) -> Self::Target;
+        /// What `target` lands as.
+        fn landing(target: &Self::Target) -> Landing<'_>;
+        /// Adds the main output to the render.
+        fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<Self::Target, F>) -> Self::Key;
+        /// The key of the main output's file, when it is one: the gain
+        /// [`StemGain::Shared`](super::StemGain::Shared) follows.
+        fn file_key(key: &Self::Key) -> Option<&FileKey>;
+    }
+
+    impl Sealed for FileMainOutput {
+        type Target = tutti_export::FileTarget;
+        type Key = FileKey;
+
+        fn target(self, shape: MainShape) -> Self::Target {
+            let encoding = tutti_codec::Encoding::new(self.format);
+            let encoding = match shape.topology {
+                Some(topology) => encoding.channels(tutti_buffers::ChannelSet::from(topology)),
+                None => encoding.width(shape.channels),
+            };
+            super::file_target(self.path, encoding, 0, &shape.options)
+        }
+
+        fn landing(target: &Self::Target) -> Landing<'_> {
+            Landing::File(target)
+        }
+
+        fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<Self::Target, F>) -> FileKey {
+            outputs.file(output)
+        }
+
+        fn file_key(key: &FileKey) -> Option<&FileKey> {
+            Some(key)
+        }
+    }
+
+    impl Sealed for BufferMainOutput {
+        type Target = tutti_export::BufferTarget;
+        type Key = BufferKey;
+
+        fn target(self, shape: MainShape) -> Self::Target {
+            let planes = tutti_export::BufferTarget::new(shape.channels);
+            match shape.topology {
+                Some(topology) => planes.topology(topology),
+                None => planes,
+            }
+        }
+
+        fn landing(target: &Self::Target) -> Landing<'_> {
+            Landing::Buffers(target)
+        }
+
+        fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<Self::Target, F>) -> BufferKey {
+            outputs.buffers(output)
+        }
+
+        fn file_key(_: &BufferKey) -> Option<&FileKey> {
+            None
+        }
+    }
 }
 
 /// Where a started bounce's main output goes: [`FileMainOutput`] or [`BufferMainOutput`]
@@ -230,44 +326,24 @@ pub trait MainOutputKind: sealed::Sealed + Sized + 'static {
     /// What the main output is once rendered.
     type Result<F: Float>: std::fmt::Debug + Send;
 
-    /// The file main output, or `None` for memory.
+    /// The main output's result, moved out of the finished render.
     #[doc(hidden)]
-    fn file(self) -> Option<FileMainOutput>;
-
-    /// The main output's result out of what the pipeline produced for it.
-    #[doc(hidden)]
-    fn result<F: Float>(produced: Produced<F>) -> Self::Result<F>;
+    fn take<F: Float>(done: &mut Done<F>, key: &Self::Key) -> Result<Self::Result<F>, DoneError>;
 }
 
 impl MainOutputKind for FileMainOutput {
     type Result<F: Float> = Written;
 
-    fn file(self) -> Option<FileMainOutput> {
-        Some(self)
-    }
-
-    fn result<F: Float>(produced: Produced<F>) -> Written {
-        match produced {
-            Produced::File(written) => written,
-            // The main output's target was built from this kind alone.
-            other => unreachable!("a file main output produces a file, not {other:?}"),
-        }
+    fn take<F: Float>(done: &mut Done<F>, key: &FileKey) -> Result<Written, DoneError> {
+        done.take_file(key)
     }
 }
 
 impl MainOutputKind for BufferMainOutput {
     type Result<F: Float> = Rendered<F>;
 
-    fn file(self) -> Option<FileMainOutput> {
-        None
-    }
-
-    fn result<F: Float>(produced: Produced<F>) -> Rendered<F> {
-        match produced {
-            Produced::Buffers(rendered) => rendered,
-            // The main output's target was built from this kind alone.
-            other => unreachable!("a buffer main output produces planes, not {other:?}"),
-        }
+    fn take<F: Float>(done: &mut Done<F>, key: &BufferKey) -> Result<Rendered<F>, DoneError> {
+        done.take_buffers(key)
     }
 }
 
@@ -720,7 +796,7 @@ impl<N> From<Stem<N, BufferStem>> for AnyStem<N> {
 
 impl<N> Stem<N, BufferStem> {
     /// `node`'s output into memory ([`Bounced::stems`] is
-    /// [`Produced::Buffers`]), one plane per channel, at the render's rate:
+    /// [`StemKey::Buffers`]), one plane per channel, at the render's rate:
     /// nothing is encoded, resampled, dithered or normalized, as for
     /// [`Bounce::main_output_buffers`]. [`file`](Self::file) writes it to a file
     /// instead.
@@ -848,14 +924,30 @@ pub enum StemGain {
     Each(Normalize),
 }
 
+/// Where a stem's result is read from: the key it was rendered under, by kind.
+///
+/// The kind is the stem's own choice ([`Stem::new`] for planes, a path for a
+/// file), so a bounce's stems are a list of both.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum StemKey {
+    /// A file stem: read its [`Written`] with [`Done::file`].
+    File(FileKey),
+    /// A stem in memory: read its [`Rendered`] with [`Done::buffers`].
+    Buffers(BufferKey),
+}
+
 /// What a finished bounce produced: the main output's result, which is what the
 /// bounce's main output kind says it is ([`Written`] for [`FileMainOutput`],
-/// [`Rendered`] for [`BufferMainOutput`]), and one [`Produced`] per stem in the
+/// [`Rendered`] for [`BufferMainOutput`]), and the stems' results, read from
+/// [`stem_results`](Self::stem_results) by the [`StemKey`] each stem has, in the
 /// order the bounce named them.
 #[derive(Debug)]
 pub struct Bounced<M: MainOutputKind, F: Float = f32> {
     main_output: M::Result<F>,
-    stems: Vec<Produced<F>>,
+    /// The render's results, the main output's moved out.
+    done: Done<F>,
+    stems: Vec<StemKey>,
 }
 
 impl<M: MainOutputKind, F: Float> Bounced<M, F> {
@@ -865,13 +957,12 @@ impl<M: MainOutputKind, F: Float> Bounced<M, F> {
         &self.main_output
     }
 
-    /// The stems' results, in the order the bounce named them. Borrowed, so a
-    /// stem is read in place; [`into_parts`](Self::into_parts) owns them.
+    /// The key of each stem, in the order the bounce named them.
     ///
     /// ```no_run
-    /// # use tutti_session::{Bounce, Session, Stem};
+    /// # use tutti_session::{Bounce, Session, Stem, StemKey};
     /// # use tutti_graph::NodeKey;
-    /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
+    /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let rendered = session
     ///     .bounce(
     ///         Bounce::new()
@@ -882,15 +973,21 @@ impl<M: MainOutputKind, F: Float> Bounced<M, F> {
     ///     .await;
     /// let done = session.apply(rendered)?;
     /// // Neither call consumes `done`.
-    /// let planes = done.stems()[0].buffers().map(|r| r.channels());
-    /// let on_disk = done.stems()[0].file();
-    /// # let _ = (planes, on_disk);
+    /// let StemKey::Buffers(key) = &done.stems()[0] else { return Ok(()) };
+    /// let planes = done.stem_results().buffers(key)?.channels();
+    /// # let _ = planes;
     /// # Ok(())
     /// # }
     /// ```
     #[must_use]
-    pub fn stems(&self) -> &[Produced<F>] {
+    pub fn stems(&self) -> &[StemKey] {
         &self.stems
+    }
+
+    /// The stems' results, read by [`stems`](Self::stems)' keys.
+    #[must_use]
+    pub fn stem_results(&self) -> &Done<F> {
+        &self.done
     }
 
     /// The main output's result, owned.
@@ -899,22 +996,23 @@ impl<M: MainOutputKind, F: Float> Bounced<M, F> {
         self.main_output
     }
 
-    /// The main output's result and then each stem's, owned.
+    /// The main output's result, the stems' results and their keys, owned.
     #[must_use]
-    pub fn into_parts(self) -> (M::Result<F>, Vec<Produced<F>>) {
-        (self.main_output, self.stems)
+    pub fn into_parts(self) -> (M::Result<F>, Done<F>, Vec<StemKey>) {
+        (self.main_output, self.done, self.stems)
     }
 
-    /// The pipeline's outputs, the main output first.
-    fn new(produced: Vec<Produced<F>>) -> Self {
-        let mut produced = produced.into_iter();
-        let main_output = produced
-            .next()
-            .expect("a bounce renders its main output as output 0");
-        Self {
-            main_output: M::result(main_output),
-            stems: produced.collect(),
-        }
+    /// The pipeline's results, with the main output's taken out by its key.
+    fn new(
+        mut done: Done<F>,
+        main: &<M as sealed::Sealed>::Key,
+        stems: Vec<StemKey>,
+    ) -> Result<Self, DoneError> {
+        Ok(Self {
+            main_output: M::take(&mut done, main)?,
+            done,
+            stems,
+        })
     }
 }
 
@@ -1133,17 +1231,10 @@ fn file_target(
     let to = ToFile::new(path);
     let to = if options.replace { to.replace() } else { to };
     let file = FileTarget::new(encoding, to);
-    match options.normalize {
+    match options.normalize.clone() {
         Some(normalize) => file.normalize(normalize),
         None => file,
     }
-}
-
-/// What every file of a bounce shares.
-struct FileOptions {
-    resample: Option<Resample>,
-    replace: bool,
-    normalize: Option<NormalizeSpec>,
 }
 
 impl From<tutti_export::RenderError> for BounceError {
@@ -1482,7 +1573,7 @@ pub struct BounceJob<M: MainOutputKind, F: FftFloat = f32> {
     edit: Option<ToMain<PrepareEdit<F>>>,
     ctx: OfflineTransport,
     clock: Arc<dyn RenderClock>,
-    main_output: Target,
+    main_output: M::Target,
     /// What each stem taps and where it goes, in order.
     stems: Vec<StemTap>,
     figures: Figures,
@@ -1531,15 +1622,20 @@ impl<M: MainOutputKind, F: FftFloat> BounceJob<M, F> {
             kind: _,
         } = self;
         let token = Held { cut, _token: token };
-        // The band the render leaves for the session's steps depends on the
-        // targets alone: the readers do not exist until the taps are open.
-        let targets: Vec<Target> = std::iter::once(main_output.clone())
-            .chain(stems.iter().map(|stem| stem.target.clone()))
-            .collect();
         let record = &mut |p: &Progress| handle.record(p);
         let mut control = Control::new(&handle.cancel).on_progress(record);
         // The gather was the first step, made when the job was.
-        control.preparing(&targets, 1, PREPARING_STEPS);
+        // The band the render leaves for the session's steps depends on the
+        // files alone: planes in memory never normalize.
+        let files = || {
+            std::iter::once(M::landing(&main_output))
+                .chain(stems.iter().map(|stem| stem.target.landing()))
+                .filter_map(|landing| match landing {
+                    Landing::File(file) => Some(file),
+                    Landing::Buffers(_) => None,
+                })
+        };
+        control.preparing(files(), 1, PREPARING_STEPS);
         if handle.stop_requested() {
             // Cancelled before it began: nothing is built, and what the job
             // holds goes back to the main thread.
@@ -1553,7 +1649,7 @@ impl<M: MainOutputKind, F: FftFloat> BounceJob<M, F> {
                 return BounceRendered::failed(e.into(), None, token);
             }
         };
-        control.preparing(&targets, 2, PREPARING_STEPS);
+        control.preparing(files(), 2, PREPARING_STEPS);
         if handle.stop_requested() {
             // Cancelled while the fork was building (a plugin's server
             // launches here, half a second or more).
@@ -1573,7 +1669,7 @@ impl<M: MainOutputKind, F: FftFloat> BounceJob<M, F> {
                 return BounceRendered::failed(e.into(), Some(pair.erase()), token);
             }
         };
-        control.preparing(&targets, 3, PREPARING_STEPS);
+        control.preparing(files(), 3, PREPARING_STEPS);
         // A fork's editor holds whatever the edit left, uncommitted: send
         // it, and apply it here so the render's first block runs it.
         if let Err(e) = pair.commit() {
@@ -1598,7 +1694,7 @@ impl<M: MainOutputKind, F: FftFloat> BounceJob<M, F> {
             // Not reached: the pair was just checked.
             Err(e) => return BounceRendered::failed(e.into(), None, token),
         };
-        control.preparing(&targets, 4, PREPARING_STEPS);
+        control.preparing(files(), 4, PREPARING_STEPS);
         if handle.stop_requested() {
             return BounceRendered::cancelled(Some(graph.erase()), token);
         }
@@ -1608,18 +1704,38 @@ impl<M: MainOutputKind, F: FftFloat> BounceJob<M, F> {
             Ok(job) => job,
             Err(e) => return BounceRendered::failed(e, Some(graph.erase()), token),
         };
-        let outputs = std::iter::once(Output::main_output(main_output))
-            .chain(
-                readers
-                    .into_iter()
-                    .zip(stems)
-                    .map(|(reader, stem)| Output::tap(reader, stem.placement, stem.target)),
-            )
-            .collect();
+        let mut outputs = Outputs::new();
+        let main_key = M::add(&mut outputs, Output::main_output(main_output));
+        let mut stem_keys = Vec::with_capacity(stems.len());
+        for (reader, stem) in readers.into_iter().zip(stems) {
+            stem_keys.push(match stem.target {
+                StemTarget::File { target, shared } => {
+                    let target = if shared {
+                        // Only a file main output is normalized, which is what
+                        // the start checked a shared gain against.
+                        let Some(main) = M::file_key(&main_key) else {
+                            return BounceRendered::failed(
+                                BounceConfigError::SharedGainWithoutMainOutput.into(),
+                                Some(graph.erase()),
+                                token,
+                            );
+                        };
+                        target.normalize(Gain::Of(main.clone()))
+                    } else {
+                        target
+                    };
+                    StemKey::File(outputs.file(Output::tap(reader, stem.placement, target)))
+                }
+                StemTarget::Buffers(target) => {
+                    StemKey::Buffers(outputs.buffers(Output::tap(reader, stem.placement, target)))
+                }
+            });
+        }
         let result = tutti_export::render(&mut graph, &job, clock.as_ref(), outputs, &mut control)
             .map_err(BounceError::from)
             .and_then(|outcome| match outcome {
-                Outcome::Finished(produced) => Ok(Bounced::new(produced)),
+                Outcome::Finished(done) => Bounced::new(done, &main_key, stem_keys)
+                    .map_err(|e| BounceError::from(tutti_export::RenderError::from(e))),
                 Outcome::Cancelled => Err(BounceError::Cancelled),
             });
         BounceRendered {
@@ -1736,7 +1852,28 @@ struct StemTap {
     /// The node's output ports, one lane each.
     ports: Vec<u16>,
     placement: Placement,
-    target: Target,
+    target: StemTarget,
+}
+
+/// What a stem becomes, of the kind its [`Stem`] chose.
+#[derive(Debug)]
+enum StemTarget {
+    /// A file; `shared` when it takes the main output's gain, which is known
+    /// once the main output has its key.
+    File {
+        target: FileTarget,
+        shared: bool,
+    },
+    Buffers(BufferTarget),
+}
+
+impl StemTarget {
+    fn landing(&self) -> Landing<'_> {
+        match self {
+            Self::File { target, .. } => Landing::File(target),
+            Self::Buffers(target) => Landing::Buffers(target),
+        }
+    }
 }
 
 /// Opens one plan tap per stem on the fork's editor, aligned to the outputs'
@@ -2022,29 +2159,15 @@ where
         let (start, length) = span(range, looped, &map, rate)?;
 
         let channels = channels.unwrap_or_else(|| ChannelLayout::clamped(outputs));
-        let target: Target = match main_output.file() {
-            Some(FileMainOutput { path, format }) => {
-                let encoding = Encoding::new(format);
-                let encoding = match file_topology {
-                    Some(topology) => encoding.channels(ChannelSet::from(topology)),
-                    None => encoding.width(channels),
-                };
-                let options = FileOptions {
-                    resample,
-                    replace,
-                    normalize: normalize.map(NormalizeSpec::own),
-                };
-                file_target(path, encoding, 0, &options).into()
-            }
-            None => {
-                let planes = BufferTarget::new(channels);
-                match file_topology {
-                    Some(topology) => planes.topology(topology),
-                    None => planes,
-                }
-                .into()
-            }
-        };
+        let target = main_output.target(MainShape {
+            channels,
+            topology: file_topology,
+            options: FileOptions {
+                resample,
+                replace,
+                normalize: normalize.map(Gain::Own),
+            },
+        });
         // The stems: what each taps and where it goes, refused by name before
         // anything is forked. The main output is output 0, which `Shared` reads.
         let mut taps = Vec::with_capacity(stems.len());
@@ -2079,25 +2202,26 @@ where
                 None => Placement::of_width(lanes),
             };
             let layout = layout.unwrap_or(lanes);
-            let target: Target = match kind {
+            let target = match kind {
                 StemTo::File(FileStem { path, format, gain }) => {
-                    let gain = match gain {
-                        StemGain::None => None,
-                        StemGain::Each(n) => Some(NormalizeSpec::own(n)),
-                        StemGain::Shared => Some(NormalizeSpec::from_output(
-                            normalize.ok_or(BounceConfigError::SharedGainWithoutMainOutput)?,
-                            0,
-                        )),
-                    };
+                    let shared = gain == StemGain::Shared;
+                    if shared && normalize.is_none() {
+                        return Err(BounceConfigError::SharedGainWithoutMainOutput.into());
+                    }
                     let options = FileOptions {
                         resample,
                         replace,
-                        normalize: gain,
+                        normalize: match gain {
+                            StemGain::Each(n) => Some(Gain::Own(n)),
+                            StemGain::None | StemGain::Shared => None,
+                        },
                     };
                     // The main output is output 0.
-                    file_target(path, Encoding::new(format).width(layout), i + 1, &options).into()
+                    let target =
+                        file_target(path, Encoding::new(format).width(layout), i + 1, &options);
+                    StemTarget::File { target, shared }
                 }
-                StemTo::Buffers => BufferTarget::new(layout).into(),
+                StemTo::Buffers => StemTarget::Buffers(BufferTarget::new(layout)),
             };
             taps.push(StemTap {
                 node,
@@ -2107,12 +2231,15 @@ where
             });
         }
         // Two files at one path would each rename over the other.
-        let all = || std::iter::once(&target).chain(taps.iter().map(|stem| &stem.target));
+        let all = || {
+            std::iter::once(M::landing(&target))
+                .chain(taps.iter().map(|stem| stem.target.landing()))
+        };
         for (i, one) in all().enumerate() {
-            if let Target::File(file) = one
+            if let Landing::File(file) = one
                 && all()
                     .take(i)
-                    .any(|t| matches!(t, Target::File(f) if f.path() == file.path()))
+                    .any(|t| matches!(t, Landing::File(f) if f.path() == file.path()))
             {
                 return Err(BounceConfigError::DuplicatePath(file.path().to_path_buf()).into());
             }
@@ -2120,8 +2247,8 @@ where
         // What a span past the frame limit would be too large to hold: the
         // first target kept in memory.
         let held_in_memory = all().find_map(|t| match t {
-            Target::Buffers(b) => Some(b.channels()),
-            _ => None,
+            Landing::Buffers(b) => Some(b.channels()),
+            Landing::File(_) => None,
         });
         let figures = Figures {
             rate,

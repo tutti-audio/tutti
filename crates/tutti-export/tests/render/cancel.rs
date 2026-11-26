@@ -18,8 +18,8 @@ use tutti_codec::IntPcm;
 use tutti_codec::Resample;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
-    CancelToken, Control, FileTarget, GRAPH_MAX_BLOCK, Normalize, NormalizeSpec, Outcome, Output,
-    Produced, Progress, RenderGraph, Setup, Stage, Written, render,
+    CancelToken, Control, FileKey, FileTarget, GRAPH_MAX_BLOCK, Gain, Normalize, Outcome, Output,
+    Outputs, Progress, RenderGraph, Setup, Stage, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
@@ -87,7 +87,7 @@ struct Run {
 
 /// What a render of several outputs reported, and what it returned.
 struct RunMany {
-    outcome: Outcome<Vec<Produced>>,
+    outcome: Outcome<Vec<Written>>,
     seen: Vec<Progress>,
 }
 
@@ -120,7 +120,9 @@ fn run_many(
         }
     };
     let mut control = Control::new(&token).on_progress(&mut report);
-    let outputs: Vec<Output> = paths
+    let mut first: Option<FileKey> = None;
+    let mut outputs = Outputs::new();
+    let keys: Vec<FileKey> = paths
         .iter()
         .enumerate()
         .map(|(i, path)| {
@@ -135,17 +137,16 @@ fn run_many(
                 };
                 FileTarget::new(encoding, ToFile::new(path).replace())
             };
-            let spec = normalize.map(|n| {
-                if i == 0 {
-                    NormalizeSpec::own(n)
-                } else {
-                    NormalizeSpec::from_output(n, 0)
-                }
+            let gain = normalize.map(|n| match &first {
+                None => Gain::Own(n),
+                Some(main) => Gain::Of(main.clone()),
             });
-            Output::main_output(match spec {
-                Some(spec) => target.normalize(spec),
+            let key = outputs.file(Output::main_output(match gain {
+                Some(gain) => target.normalize(gain),
                 None => target,
-            })
+            }));
+            first.get_or_insert_with(|| key.clone());
+            key
         })
         .collect();
     let outcome = render(
@@ -155,7 +156,12 @@ fn run_many(
         outputs,
         &mut control,
     )
-    .expect("a cancelled or finished render is not an error");
+    .expect("a cancelled or finished render is not an error")
+    .map(|done| {
+        keys.iter()
+            .map(|key| done.file(key).expect("a key of these outputs").clone())
+            .collect()
+    });
     RunMany { outcome, seen }
 }
 
@@ -170,7 +176,7 @@ fn run(
 ) -> Run {
     let RunMany { outcome, seen } = run_many(config, normalize, &[path], cancel_at);
     Run {
-        outcome: outcome.map(|mut produced| produced.remove(0).into_file().expect("a file output")),
+        outcome: outcome.map(|mut files| files.remove(0)),
         seen,
     }
 }

@@ -25,7 +25,7 @@ use tutti_codec::IntPcm;
 use tutti_codec::{Encoding, FlacLevel, Format, Pcm, Resample, ToFile};
 use tutti_dsp::DitherShape;
 use tutti_export::{
-    Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph, Setup, render_one,
+    Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph, Setup, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -142,7 +142,7 @@ impl Case {
         };
         let target = FileTarget::new(encoding, ToFile::new(path).replace());
         match normalize {
-            Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
+            Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,
         }
     }
@@ -174,16 +174,18 @@ fn main() -> tutti_export::Result<()> {
     let mut count = 0usize;
     let mut write =
         |name: String, mut graph: RenderGraph, cfg: &Case| -> tutti_export::Result<()> {
-            let w = render_one(
+            let mut outputs = Outputs::new();
+            let file = outputs.file(Output::main_output(cfg.file_target(dir.join(&name), None)));
+            let done = render(
                 &mut graph,
                 &cfg.job(),
                 &tutti_timeline::FrozenClock,
-                Output::main_output(cfg.file_target(dir.join(&name), None)),
+                outputs,
                 &mut Control::none(),
             )?
             .into_finished()
-            .and_then(tutti_export::Produced::into_file)
             .expect("nothing cancels a control with no token");
+            let w = done.file(&file).expect("a key of these outputs");
             println!("wrote {name} ({} bytes)", w.bytes);
             count += 1;
             Ok(())
