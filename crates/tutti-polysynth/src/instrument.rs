@@ -79,7 +79,7 @@ tutti_graph::declare_params!([V: InstrumentVoice] NoteInstrument<V>,
     required { voice: C, rules: VoiceConfig }
     params { Volume => gain: Amplitude { whole } = Amplitude::UNITY }
     options { group: MidiGroup = MidiGroup::FIRST, device: SysexDeviceId = SysexDeviceId::DEFAULT }
-});
+} without_node_config);
 
 /// A polyphonic instrument of `V`'s voices, played by MIDI.
 ///

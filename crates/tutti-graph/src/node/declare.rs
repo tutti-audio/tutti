@@ -17,9 +17,10 @@ use tutti_rt::{Param, ParamCell};
 use tutti_units::{
     Amplitude, Azimuth, Balance, Bipolar, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Drive,
     Elevation, Feedback, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Pan, Q,
-    Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
+    Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr, UnitParam,
 };
 
+use crate::node::IntoNode;
 use crate::node::controls::{DeclaredUnit, ParamSet, Params};
 use crate::node::io::Io;
 use crate::node::param::{MAX_PARAM_PORTS, ParamInput, ParamPorts};
@@ -201,6 +202,76 @@ impl<U: Scalar> ParamEntry for U {
 impl<U: Scalar> ParamEntry for Option<U> {
     type Cell = Option<Param<U>>;
 }
+
+/// What `NodeConfig::initials` and `same_structure` read of one `params` entry
+/// of the cells form: the initial values it gives, and whether it gives any.
+///
+/// Hidden: `declare_params!` names it for the entry's value (`U`, `Option<U>`
+/// or `[U; N]`).
+#[doc(hidden)]
+pub trait Initial: Copy {
+    /// Appends each initial value this entry gives, at the address of `kind`
+    /// and its index.
+    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>);
+
+    /// Whether the node has the param at all: an `Option` entry with no value
+    /// has no port, so it is structure.
+    fn present(self) -> bool {
+        true
+    }
+}
+
+impl<U: Scalar> Initial for U {
+    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
+        out.push((UnitAddr::first(kind), self.to_cell()));
+    }
+}
+
+impl<U: Scalar> Initial for Option<U> {
+    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
+        if let Some(value) = self {
+            value.extend(kind, out);
+        }
+    }
+
+    fn present(self) -> bool {
+        self.is_some()
+    }
+}
+
+impl<U: Scalar, const N: usize> Initial for [U; N] {
+    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
+        for (index, value) in self.into_iter().enumerate() {
+            // The macro's `N` is a kind's index count, at most a byte.
+            out.push((UnitAddr::new(kind, index as u8), value.to_cell()));
+        }
+    }
+}
+
+/// A node `Self` the config `C` makes at the float `F`: `From<C>`, and a node the
+/// graph runs. Naming `F` keeps the cells form's `NodeConfig` from resting on a
+/// constant where-clause, which a node with no `From<C>` (a test's) would make an
+/// error instead of leaving the config without a `NodeConfig`.
+#[doc(hidden)]
+pub trait BuiltFrom<C, F: Float>: IntoNode<F> + Send + 'static {
+    /// The node `config` makes.
+    fn built_from(config: C) -> Self;
+}
+
+impl<C, F: Float, N: IntoNode<F> + Send + 'static + From<C>> BuiltFrom<C, F> for N {
+    fn built_from(config: C) -> Self {
+        Self::from(config)
+    }
+}
+
+/// A type that is `PartialEq`, for a float `F`: the bound the cells form puts on
+/// a `required` or `options` field. Naming `F` keeps the bound from being a
+/// constant where-clause, which a field that is not `PartialEq` would make an
+/// error instead of leaving the config without a `NodeConfig`.
+#[doc(hidden)]
+pub trait CompareIn<F>: PartialEq {}
+
+impl<F, T: PartialEq> CompareIn<F> for T {}
 
 /// A cell a declaration names, whose value is in `U`: what makes the unit a
 /// declaration states agree with the cell's own type. Implemented for a
@@ -441,7 +512,7 @@ pub fn input<'a, F: Float>(
 ///
 /// `declare_params!([generics] Type, n { rows })`, where `n` names the node in
 /// the rows' cell expressions. Each row is `Kind => Unit = cell`, a
-/// [`UnitParam`](tutti_units::UnitParam) kind, the unit its value is in, and
+/// [`UnitParam`] kind, the unit its value is in, and
 /// the cell: a `&Param<Unit>`, a `&Arc<AtomicF64>` for a `bool` switch, or an
 /// `Option` of either for a param the node has only sometimes. The rows are
 /// the node's ports in this order, and its set in this order.
@@ -610,7 +681,14 @@ pub fn input<'a, F: Float>(
 ///   initial value;
 /// - the params' ports, [`ParamSet`] and [`HasParam`] impls the rows form writes;
 /// - [`ParamNode`](crate::ParamNode) (a fork detaches the cells and resets the node), and
-///   [`IntoNode`](crate::IntoNode), whose controls are the node's [`ParamSet`].
+///   [`IntoNode`], whose controls are the node's [`ParamSet`];
+/// - [`NodeConfig`](crate::NodeConfig) for the config, with the node as its
+///   `Node` (its `From<Config>` builds it): the `required` and `options` fields
+///   and whether each `Option` param is given are its structure, so each
+///   `required` and `options` type must be `PartialEq`, or the config has no
+///   `NodeConfig`. A config that does not name its node (generic over what
+///   the node is generic over) ends the macro call with `without_node_config`,
+///   and has none.
 ///
 /// The node's `Node` impl forwards to the declaration: `shape` takes
 /// `self.declared_ports()` ([`Shape::param_ports`](crate::Shape::param_ports)) and `param_base` answers
@@ -624,7 +702,7 @@ pub fn input<'a, F: Float>(
 /// use tutti_units::{Amplitude, Hz, UnitParam};
 ///
 /// #[derive(Clone)]
-/// struct Tone<F: Float> {
+/// pub struct Tone<F: Float> {
 ///     cells: ToneCells,
 ///     float: std::marker::PhantomData<fn() -> F>,
 /// }
@@ -674,7 +752,7 @@ pub fn input<'a, F: Float>(
 /// use tutti_units::{Hz, UnitParam};
 ///
 /// #[derive(Clone)]
-/// struct Table<F: Float> {
+/// pub struct Table<F: Float> {
 ///     table: Arc<[F]>,
 ///     seed: u64,
 ///     cells: TableCells<F>,
@@ -814,7 +892,7 @@ macro_rules! declare_params {
         $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
         $(settings { $($sname:ident $(@ $skind:ty)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
         $(published { $($pubtoks:tt)* })?
-    }) => {
+    } $($skip:ident)?) => {
         $crate::declare_params!(@pub {
             [$($g)*] [$($g)*] $ty,
             [$(#[$cattr])*] $cfg [$($($cn : $cb,)+)?] [$($($cn,)+)?],
@@ -822,6 +900,7 @@ macro_rules! declare_params {
             [$($($req : $rty,)*)?]
             [$($($oname : $oty = $odefault,)+)?]
             [$($($sname [$($skind)?] : $sty = $sdefault_value,)+)?]
+            [$($skip)?]
         } { $($($ptoks)*)? } [] [] @ $($($pubtoks)*)?);
     };
 
@@ -910,6 +989,7 @@ macro_rules! declare_params {
         [$($req:ident : $rty:ty,)*]
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
         [$($sname:ident [$($skind:ty)?] : $sty:ty = $sdefault:expr,)*]
+        $skip:tt
     } [$(
         [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$($flag:ident)?] [$default:expr]]
     )*]) => {
@@ -1047,6 +1127,12 @@ macro_rules! declare_params {
         $crate::declare_params!(@munch [$($g)*] $ty, n, [];
             $($mode $kind => $field $([$count])? : $row [$($flag)?],)*);
 
+        $crate::declare_params!(@config $skip [$($g)*] [$($cd)*] {
+            $ty, $cfg [$($cu)*],
+            [$($req : $rty,)*] [$($oname : $oty,)*]
+            [$($kind $field,)*]
+        });
+
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
         where
             $ty: $crate::Node<__LaneF> + Clone,
@@ -1103,6 +1189,64 @@ macro_rules! declare_params {
                     );
                 )*
                 parts
+            }
+        }
+    };
+
+    // The `NodeConfig` of a cells-form config. A node with a config that does
+    // not name it (`without_node_config`) has none written. A non-generic node
+    // builds at any float; a generic node whose config is not generic builds at
+    // the node's own float; otherwise the config's generics name the node's.
+    (@config [without_node_config] $g:tt $cd:tt $body:tt) => {};
+    (@config [] [] [$($cd:tt)*] $body:tt) => {
+        $crate::declare_params!(@config_impl [__LaneF: $crate::__private::Float, $($cd)*]
+            __LaneF $body);
+    };
+    (@config [] [$f:ident : $($b:tt)+] [] $body:tt) => {
+        $crate::declare_params!(@config_impl [$f: $($b)+] $f $body);
+    };
+    (@config [] [$($g:tt)+] [$($cd:tt)+] $body:tt) => {
+        $crate::declare_params!(@config_impl [__LaneF: $crate::__private::Float, $($cd)+]
+            __LaneF $body);
+    };
+    (@config_impl [$($ig:tt)*] $float:ident {
+        $ty:ty, $cfg:ident [$($cu:tt)*],
+        [$($req:ident : $rty:ty,)*] [$($oname:ident : $oty:ty,)*]
+        [$($kind:ident $field:ident,)*]
+    }) => {
+        impl<$($ig)*> $crate::NodeConfig<$float> for $cfg<$($cu)*>
+        where
+            $ty: $crate::__private::BuiltFrom<$cfg<$($cu)*>, $float>,
+            $cfg<$($cu)*>: Clone + Send + 'static,
+            $($rty: $crate::__private::CompareIn<$float>,)*
+            $($oty: $crate::__private::CompareIn<$float>,)*
+        {
+            type Node = $ty;
+
+            fn build(&self) -> $ty {
+                <$ty as $crate::__private::BuiltFrom<Self, $float>>::built_from(
+                    ::core::clone::Clone::clone(self),
+                )
+            }
+
+            #[allow(unused_variables)]
+            fn same_structure(&self, other: &Self) -> bool {
+                true
+                    $(&& self.$req == other.$req)*
+                    $(&& self.$oname == other.$oname)*
+                    $(&& $crate::__private::Initial::present(self.$field)
+                        == $crate::__private::Initial::present(other.$field))*
+            }
+
+            #[allow(unused_mut)]
+            fn initials(&self) -> ::std::vec::Vec<($crate::__private::UnitAddr, f64)> {
+                let mut initials = ::std::vec::Vec::new();
+                $($crate::__private::Initial::extend(
+                    self.$field,
+                    $crate::__private::UnitParam::$kind,
+                    &mut initials,
+                );)*
+                initials
             }
         }
     };

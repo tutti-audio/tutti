@@ -3,6 +3,10 @@
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
 )]
+#![allow(
+    unreachable_pub,
+    reason = "a node declared with the cells form is the `Node` of its pub config, so it is pub"
+)]
 
 /// An allocation inside an `RtScope` aborts the running test.
 #[global_allocator]
@@ -13,6 +17,7 @@ mod base_smoothing;
 mod declared_cells;
 mod declared_cells_config;
 mod declared_cells_entries;
+mod declared_node_config;
 mod declared_published;
 mod declared_reads;
 mod declared_settings;

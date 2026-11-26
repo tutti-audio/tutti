@@ -27,7 +27,7 @@ impl PublishedKind for ChangesKind {
 /// A node with a published value that starts at its default and one that
 /// starts at a stated value.
 #[derive(Clone)]
-struct Holder {
+pub struct Holder {
     cells: HolderCells,
 }
 
