@@ -72,6 +72,7 @@ enum modulation::SourceError
 enum modulation::state::Problem
 enum modulation::state::SourceName
 enum modulation::state::TargetName
+enum patch::PatchError
 enum peer::PeerError
 enum peer::PeerEvent
 enum peer::Presence
@@ -541,6 +542,11 @@ fn modulation::state::ModState::problems
 fn modulation::state::ModState::resyncs_dropped
 fn modulation::state::ModState::source_node
 fn modulation::state::Problem::route
+fn patch::NodeDecl::fade
+fn patch::NodeDecl::new
+fn patch::NodeDecl::unfaded
+fn patch::Session::key
+fn patch::Session::patch
 fn peer::Presence::cause
 fn peer::Presence::is_live
 fn peer_state::OtherPeer::expected
@@ -970,6 +976,10 @@ struct modulation::RouteSpec
 struct modulation::Scale
 struct modulation::SourceInfo
 struct modulation::state::ModState
+struct patch::Declarations
+struct patch::NoSuchKey
+struct patch::NodeDecl
+struct patch::Patched
 struct peer::PeerResourceId
 struct peer_state::OtherPeer
 struct peer_state::PeerState
@@ -1088,6 +1098,8 @@ trait key::Wire
 trait key::sealed::Sealed
 trait modulation::Ranged
 trait modulation::ranged::Sealed
+trait patch::IntoPatch
+trait patch::sealed::Sealed
 trait peer::Peer
 trait peer::Resource
 trait peer::sealed::Sealed

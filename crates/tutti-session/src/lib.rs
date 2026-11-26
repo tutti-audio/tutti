@@ -142,6 +142,7 @@ mod midi_record;
 mod midi_sink;
 mod modulation;
 mod params;
+mod patch;
 mod peer;
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 mod peer_state;
@@ -317,6 +318,7 @@ use hang::HangDetector;
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
+pub use patch::{Declarations, IntoPatch, NoSuchKey, NodeDecl, PatchError, Patched};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]

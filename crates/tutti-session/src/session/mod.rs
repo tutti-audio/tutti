@@ -105,6 +105,8 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// so a stream stops before the session's own state drops.
     pub(crate) running: C::Running,
     pub(crate) graph: Graph<C::Float>,
+    /// The declarations of the last [`patch`](Self::patch), by app key.
+    pub(crate) declared: crate::patch::Kept<K, C::Float>,
     /// The source of the ids of the session's resources; a clock switch carries it over.
     #[cfg_attr(
         not(any(feature = "plugin", feature = "midi", feature = "device")),
@@ -241,6 +243,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             _early_work,
             running: old_running,
             graph,
+            declared,
             resource_ids,
             transport,
             output,
@@ -261,6 +264,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 _early_work,
                 running,
                 graph,
+                declared,
                 resource_ids,
                 transport,
                 output,
