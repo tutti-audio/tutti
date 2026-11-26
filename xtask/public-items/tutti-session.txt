@@ -546,8 +546,6 @@ fn modulation::state::Problem::route
 fn patch::NodeDecl::fade
 fn patch::NodeDecl::new
 fn patch::NodeDecl::unfaded
-fn patch::Session::key
-fn patch::Session::patch
 fn peer::Presence::cause
 fn peer::Presence::is_live
 fn peer_state::OtherPeer::expected
@@ -693,6 +691,8 @@ fn session::Session::render
 fn session::Session::render_frame
 fn session::Session::render_frame_at
 fn session::Session::stream_spec
+fn session::declared::Session::key
+fn session::declared::Session::patch
 fn session::main_output::Session::declare_main_output_topology
 fn session::main_output::Session::main_output_topology
 fn session::main_output::Session::main_output_topology_status
@@ -979,7 +979,7 @@ struct modulation::SourceInfo
 struct modulation::state::ModState
 struct patch::Declarations
 struct patch::NodeDecl
-struct patch::Patched
+struct patch::Sealed
 struct peer::PeerResourceId
 struct peer_state::OtherPeer
 struct peer_state::PeerState
@@ -1018,6 +1018,7 @@ struct recovery::RecoveryPolicy
 struct sampler::OpenStream
 struct sampler::OpenedStream
 struct session::Session
+struct session::declared::Patched
 struct session::parts::midi::MidiNodes
 struct session::phases::PhaseCx
 struct switch::ClockError
@@ -1099,7 +1100,7 @@ trait key::sealed::Sealed
 trait modulation::Ranged
 trait modulation::ranged::Sealed
 trait patch::IntoPatch
-trait patch::sealed::Sealed
+trait patch::PatchTarget
 trait peer::Peer
 trait peer::Resource
 trait peer::sealed::Sealed

@@ -8,8 +8,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Fade, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_rt::atomic_word;
 use tutti_session::{
-    ChangedBy, Declarations, DetachedSession, KeyError, NodeDecl, PatchError, ReplaceRefused,
-    Session,
+    ChangedBy, Declarations, DetachedSession, Graph, KeyError, NodeDecl, PatchError,
+    ReplaceRefused, Session,
 };
 use tutti_units::{Hz, SampleRate, Samples, SyncSetting};
 
@@ -258,7 +258,9 @@ fn a_node_added_by_the_graph_survives_a_patch() {
     let by_hand = s.graph().add(Tone::from(tone())).erase();
     declare(&mut s, tone());
 
-    let patched = s.patch(Declarations::<&'static str>::default()).unwrap();
+    let patched = s
+        .patch(Declarations::<&'static str, Graph>::default())
+        .unwrap();
 
     assert_eq!(patched.removed, ["a"]);
     assert!(s.graph_ref().contains(by_hand));
@@ -288,7 +290,7 @@ fn a_duplicate_key_is_a_patch_error_naming_it() {
 #[test]
 fn every_container_declares_its_parts() {
     let mut s = session();
-    let mut extended = Declarations::<&'static str>::default();
+    let mut extended = Declarations::<&'static str, Graph>::default();
     extended.extend([NodeDecl::new("extended", tone())]);
     let patched = s.patch((
         NodeDecl::new("tuple", tone()),
@@ -299,7 +301,7 @@ fn every_container_declares_its_parts() {
         ["collected"]
             .into_iter()
             .map(|k| NodeDecl::new(k, tone()))
-            .collect::<Declarations<_>>(),
+            .collect::<Declarations<_, _>>(),
         extended,
     ));
     patched.unwrap();

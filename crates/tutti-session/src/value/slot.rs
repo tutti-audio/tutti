@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey, PublishedKind, SettingCell};
+use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey, SettingCell};
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
@@ -937,76 +937,72 @@ fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
 /// kind is one the session knows (each kind here has the value type its
 /// session target holds): a node that publishes another kind has nothing that
 /// can address its value, and is left out.
+#[cfg_attr(
+    not(any(feature = "midi", feature = "sampler")),
+    allow(unused_variables, reason = "no kind is addressed without a feature")
+)]
 pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
-    #[cfg_attr(
-        not(any(feature = "midi", feature = "sampler")),
-        allow(dead_code, reason = "no kind is addressed without a feature")
-    )]
-    struct Cell<'a>(NodeKey, &'a ErasedPublished);
-    impl KindVisitor for Cell<'_> {
-        type Out = (SlotId, Erased);
-
-        fn kind<K: PublishedKind>(&mut self, id: fn(NodeKey) -> SlotId) -> Option<Self::Out> {
-            let cell = self.1.cell::<K>()?;
-            #[cfg(any(feature = "midi", feature = "sampler"))]
-            return Some((id(self.0), node_cell(cell)));
-            #[cfg(not(any(feature = "midi", feature = "sampler")))]
-            {
-                let _ = (cell, id);
-                None
-            }
+    published_kinds!(K, id => {
+        let cell = entry.cell::<K>()?;
+        #[cfg(any(feature = "midi", feature = "sampler"))]
+        return Some((id(node), node_cell(cell)));
+        #[cfg(not(any(feature = "midi", feature = "sampler")))]
+        {
+            let _ = (cell, id, node);
+            None
         }
-    }
-    visit_kinds(&mut Cell(node, entry))
+    })
 }
 
-/// What is asked of each published kind the session addresses.
-#[cfg_attr(
-    not(any(feature = "midi", feature = "sampler")),
-    allow(dead_code, reason = "no kind is addressed without a feature")
-)]
-pub(crate) trait KindVisitor {
-    type Out;
-
-    /// The answer for the kind `K`, whose value is addressed as the slot `id`
-    /// makes of a node; `None` when the visitor's subject is not of that kind.
-    fn kind<K: PublishedKind>(&mut self, id: fn(NodeKey) -> SlotId) -> Option<Self::Out>;
+/// The first `Some` that `$body` answers for a published kind the session
+/// addresses, with `$kind` the kind's type and `$id` the function that makes
+/// its slot of a node: the one list of those kinds. A node that publishes
+/// another kind has nothing that can address its value, and the session
+/// leaves it out.
+macro_rules! published_kinds {
+    ($kind:ident, $id:ident => $body:expr) => {{
+        #[allow(unused_mut, reason = "no kind is addressed without a feature")]
+        let mut answer = None;
+        #[cfg(feature = "midi")]
+        {
+            answer = answer.or_else(|| {
+                type $kind = tutti_midi_runtime::ClipEventsKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::ClipEvents;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_midi_runtime::HarmonyChangesKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Harmony;
+                (|| $body)()
+            });
+        }
+        #[cfg(feature = "sampler")]
+        {
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::WindowKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Window;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::LoopingKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Looping;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::DirectionKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Direction;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::SpeedKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Speed;
+                (|| $body)()
+            });
+        }
+        answer
+    }};
 }
-
-/// The first answer of `visitor` over the published kinds the session
-/// addresses: the one list of them. A node that publishes another kind has
-/// nothing that can address its value, and the session leaves it out.
-#[cfg_attr(
-    not(any(feature = "midi", feature = "sampler")),
-    allow(unused_variables, unused_mut)
-)]
-pub(crate) fn visit_kinds<V: KindVisitor>(visitor: &mut V) -> Option<V::Out> {
-    #[cfg(feature = "midi")]
-    {
-        if let Some(out) = visitor.kind::<tutti_midi_runtime::ClipEventsKind>(SlotId::ClipEvents) {
-            return Some(out);
-        }
-        if let Some(out) = visitor.kind::<tutti_midi_runtime::HarmonyChangesKind>(SlotId::Harmony) {
-            return Some(out);
-        }
-    }
-    #[cfg(feature = "sampler")]
-    {
-        if let Some(out) = visitor.kind::<tutti_sampler::WindowKind>(SlotId::Window) {
-            return Some(out);
-        }
-        if let Some(out) = visitor.kind::<tutti_sampler::LoopingKind>(SlotId::Looping) {
-            return Some(out);
-        }
-        if let Some(out) = visitor.kind::<tutti_sampler::DirectionKind>(SlotId::Direction) {
-            return Some(out);
-        }
-        if let Some(out) = visitor.kind::<tutti_sampler::SpeedKind>(SlotId::Speed) {
-            return Some(out);
-        }
-    }
-    None
-}
+pub(super) use published_kinds;
 
 /// The slot a node's setting cell is registered as under `node`.
 pub(crate) fn setting_of(node: NodeKey, entry: &ErasedSetting) -> (SlotId, Erased) {
