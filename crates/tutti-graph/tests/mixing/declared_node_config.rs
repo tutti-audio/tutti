@@ -1,15 +1,16 @@
 //! The `NodeConfig` the cells form of `declare_params!` writes: what is
 //! structure (`required`, `options`, whether an optional param is given) and
 //! what is a value (a param's or a setting's initial), the initials by
-//! address, the node `build` makes, and the identity an `Asset` compares by.
+//! address, the node `build` makes, the host's values a build can take, and the
+//! identity an `Asset` compares by.
 
 use std::sync::{Arc, OnceLock};
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Asset, Cx, IntoNode, Io, Node, NodeConfig, Prepare, Shape, Status, declare_params,
+    Asset, Cx, HostValues, IntoNode, Io, Node, NodeConfig, Prepare, Shape, Status, declare_params,
 };
-use tutti_rt::atomic_word;
+use tutti_rt::{Publisher, atomic_word};
 use tutti_units::{Amplitude, Db, Hz, SettingKind, SyncSetting, UnitAddr, UnitParam};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,7 +37,7 @@ declare_params!([] Voiced, VoicedConfig, VoicedCells {
         Volume => volume: Option<Amplitude> = None,
     }
     options { seed: u64 = 0 }
-    settings { mode @ SyncSetting: Mode = Mode::Off }
+    settings { mode @ SyncSetting: Mode = Mode::Off, shape: Mode = Mode::Off }
 });
 
 impl From<VoicedConfig> for Voiced {
@@ -149,7 +150,7 @@ fn a_built_node_starts_its_params_at_the_initials() {
     let config = config()
         .cutoff(Hz::new(440.0))
         .volume(Some(Amplitude::new(0.25)));
-    let (_node, controls) = config.build().into_node();
+    let (_node, controls) = config.build(&HostValues::new()).into_node();
     let initials = config.initials();
     assert_eq!(initials.params().len(), 4);
     assert_eq!(controls.params().count(), initials.params().len());
@@ -162,9 +163,52 @@ fn a_built_node_starts_its_params_at_the_initials() {
 #[test]
 fn a_built_node_starts_its_setting_at_the_initial() {
     let config = config().mode(Mode::On);
-    let node = config.build();
+    let node = config.build(&HostValues::new());
     let settings = IntoNode::<f32>::into_parts(node).settings;
     assert_eq!(settings.len(), 1);
     assert_eq!(settings[0].kind(), SettingKind::Sync);
     assert_eq!(settings[0].load::<Mode>(), Some(Mode::On));
+}
+
+/// A setting with no kind has no address, so a change cannot be written to a
+/// running node: it is structure. A kinded setting stays a value.
+#[test]
+fn a_setting_with_no_kind_is_structure() {
+    assert!(!config().same_structure(&config().shape(Mode::On)));
+    assert!(
+        config()
+            .shape(Mode::On)
+            .same_structure(&config().shape(Mode::On))
+    );
+    assert!(config().same_structure(&config().mode(Mode::On)));
+    // It has no address, so the initials list only the kinded one.
+    assert_eq!(config().shape(Mode::On).initials().settings().len(), 1);
+}
+
+/// A host's value reaches a reader only when provided, and a reader made from
+/// the set lends what the host publishes afterwards.
+#[test]
+fn a_host_value_is_read_through_a_reader_registered_at_build() {
+    let none = HostValues::new();
+    assert!(none.reader::<u32>().is_none());
+
+    let cell = Publisher::new(1_u32);
+    let host = HostValues::new().provide(&cell);
+    let mut reader = host.reader::<u32>().expect("provided");
+    assert_eq!(*reader.lend(), 1);
+    cell.publish(7);
+    assert_eq!(*reader.lend(), 7);
+    assert!(host.reader::<u64>().is_none());
+}
+
+/// The set is keyed by the value's type: two provided types each read their own.
+#[test]
+fn host_values_of_two_types_do_not_collide() {
+    let narrow = Publisher::new(3_u32);
+    let wide = Publisher::new(9_u64);
+    let host = HostValues::new().provide(&narrow).provide(&wide);
+    let mut a = host.reader::<u32>().expect("u32 provided");
+    let mut b = host.reader::<u64>().expect("u64 provided");
+    assert_eq!(*a.lend(), 3);
+    assert_eq!(*b.lend(), 9);
 }
