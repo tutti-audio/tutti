@@ -764,3 +764,133 @@ fn an_event_feedback_wire_closes_an_event_loop() {
     let source = tutti_graph::EventOutputPort::new(pass_node(&s), 0);
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [source]);
 }
+
+/// The edges the graph holds into `node`'s input 0, faded out or not.
+fn edges_into(s: &Session, node: tutti_graph::NodeKey) -> usize {
+    let at = tutti_graph::InputPort::new(node, 0);
+    let testing = s.graph_ref().testing();
+    testing.topology().edges.get(&at).map_or(0, Vec::len)
+}
+
+/// **A patch that turns a wire around is valid, and cuts the old edge**: the
+/// compile counts an edge that is only fading out, so `a -> b` left to fade
+/// beside the new `b -> a` would be a cycle the commit refuses. The old edge
+/// goes at once, the new one is live, and the next update commits.
+#[test]
+fn turning_a_wire_around_cuts_the_old_edge_and_commits() {
+    let mut s = session();
+    let nodes = || (NodeDecl::new("a", pass()), NodeDecl::new("b", pass()));
+    s.patch((nodes(), Mention::new("a").connect(Mention::new("b"))))
+        .unwrap();
+    let _ = s.update();
+    let node = |s: &Session, key| s.key::<PassConfig>(&key).unwrap().erase();
+    let (a, b) = (node(&s, "a"), node(&s, "b"));
+    assert_eq!(edges_into(&s, b), 1);
+
+    s.patch((nodes(), Mention::new("b").connect(Mention::new("a"))))
+        .unwrap();
+
+    assert_eq!(edges_into(&s, b), 0, "the old edge is cut, not fading");
+    let events = s.update();
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, tutti_session::SessionEvent::CommitRefused(_))),
+        "{events:?}"
+    );
+    assert_eq!(
+        s.graph_ref().sources(InputPort::new(a, 0)).unwrap(),
+        [OutputPort::new(b, 0)]
+    );
+}
+
+/// **Swapping which wire of a loop is the feedback one is valid**: `a -> b`
+/// direct and `b -> a` fed back, then `a -> b` fed back and `b -> a` direct.
+/// The old direct edge, fading, would close a cycle with the new direct one,
+/// so it is cut.
+#[test]
+fn swapping_the_feedback_wire_of_a_loop_cuts_the_old_direct_edge_and_commits() {
+    let mut s = looped();
+    let patch = |forward_delayed: bool| {
+        let forward = Mention::new("a").connect(Mention::new("b"));
+        let back = Mention::new("b").connect(Mention::new("a"));
+        let delayed = Samples::new(DELAY);
+        let (forward, back) = if forward_delayed {
+            (forward.feedback(delayed), back)
+        } else {
+            (forward, back.feedback(delayed))
+        };
+        (
+            NodeDecl::new("a", pass()),
+            NodeDecl::new("b", pass()),
+            forward,
+            back,
+        )
+    };
+    s.patch(patch(false)).unwrap();
+    let _ = s.update();
+
+    s.patch(patch(true)).unwrap();
+
+    let events = s.update();
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, tutti_session::SessionEvent::CommitRefused(_))),
+        "{events:?}"
+    );
+}
+
+/// **A removed feedback wire fades out**, like a direct one: its echo decays
+/// along the declick instead of cutting. The loop echoes a unit impulse at
+/// frame 0 into frame `DELAY`; the wire is removed before the first frame
+/// is rendered, so frame `j` of the render is frame `j` of the fade, and the
+/// echo at `DELAY` is weighted `1 - s((DELAY + 1) / 241)`, `s` the declick's
+/// smootherstep (240 frames at 48 kHz), rendered a frame at a time. The next echo is past the fade: none.
+#[test]
+fn a_removed_feedback_wire_fades_its_echo_out() {
+    const SPAN: usize = 240;
+    let smooth = |j: usize| {
+        let x = (j + 1) as f64 / (SPAN + 1) as f64;
+        x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
+    };
+    let mut s = looped();
+    let patch = |feedback: Option<bool>| {
+        (
+            NodeDecl::new("echo", EchoConfig::new(ChannelLayout::MONO)),
+            NodeDecl::new("pass", pass()),
+            Mention::new("echo").connect(Mention::new("pass")).unfaded(),
+            feedback.map(|unfaded| {
+                let wire = Mention::new("pass")
+                    .connect(Mention::new("echo"))
+                    .feedback(Samples::new(DELAY));
+                if unfaded { wire.unfaded() } else { wire }
+            }),
+            Mention::new("pass").connect(MainOutput).unfaded(),
+        )
+    };
+    // Made with no fade in, declared again with the fade out it will leave by.
+    s.patch(patch(Some(true))).unwrap();
+    s.patch(patch(Some(false))).unwrap();
+    let _ = s.update();
+
+    s.patch(patch(None)).unwrap();
+    let _ = s.update();
+
+    let out: Vec<f32> = (0..3 * DELAY)
+        .map(|_| {
+            let mut frame = [f32::NAN];
+            s.render(&mut InterleavedMut::new(&mut frame, ChannelLayout::MONO).unwrap());
+            frame[0]
+        })
+        .collect();
+    assert_eq!(out[0], 1.0);
+    let want = 1.0 - smooth(DELAY);
+    assert!(
+        (f64::from(out[DELAY]) - want).abs() < 1e-6,
+        "{} against {want}",
+        out[DELAY]
+    );
+    assert!(out[DELAY] > 0.0 && out[DELAY] < 1.0);
+    assert_eq!(out[2 * DELAY], 0.0, "the next echo is past the fade");
+}

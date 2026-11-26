@@ -10,18 +10,21 @@ use std::fmt;
 use thiserror::Error;
 use tutti_buffers::Float;
 use tutti_graph::{
-    BusOutputPort, Edge, GraphSpec, HostValues, Initials, IntoNode, NodeConfig, NodeKey, NodeSpec,
-    PortSink, PortSource, Shape, Shapes,
+    BusOutputPort, CycleEdge, Edge, EdgeId, GraphSpec, HostValues, Initials, IntoNode, NodeConfig,
+    NodeKey, NodeSpec, PortSink, PortSource, Shape, Shapes,
 };
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
+use crate::key::BusEnd;
 use crate::patch::{
     Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireEnds,
     WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
-use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
+use crate::{
+    AnyAssign, AppKey, BusInputPort, Clock, ConnectError, Graph, Key, ReplaceRefused, Session,
+};
 
 mod wire;
 use wire::{KeptWire, Ports, Resolved};
@@ -262,6 +265,14 @@ fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
         .retain(|feed| !bus_gone(&feed.source));
 }
 
+/// The edges leaving the graph that would close a cycle with the patch's
+/// wiring: cut at the patch, not faded.
+#[derive(Default)]
+struct Cuts {
+    edges: Vec<EdgeId>,
+    buses: Vec<(BusOutputPort, BusInputPort)>,
+}
+
 /// The assignments of what `new` gives that `old` did not give or gave
 /// another value, to the node at `node`, of the node type `owner`.
 fn declared_writes<F: Float>(
@@ -361,10 +372,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .check_wires(&planned, &wires)
             .and_then(|()| self.check_feedback(&planned, &wires, &kept))
             .and_then(|()| self.check_acyclic(&planned, &wires, &kept));
-        if let Err(refused) = checked {
-            self.declared = kept;
-            return Err(refused);
-        }
+        let cuts = match checked {
+            Ok(cuts) => cuts,
+            Err(refused) => {
+                self.declared = kept;
+                return Err(refused);
+            }
+        };
         let mut patched = Patched {
             rebuilt: Vec::new(),
             unconverged: Vec::new(),
@@ -373,6 +387,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             dormant: Vec::new(),
         };
         self.unwire(&kept, &wires);
+        // What would close a cycle beside the new wiring goes at once, not
+        // over a fade.
+        self.graph.cut_edges(&cuts.edges);
+        for &(from, to) in &cuts.buses {
+            self.graph.remove_bus_edge(from, to, true);
+        }
         let gone: Vec<K> = kept
             .nodes
             .keys()
@@ -563,21 +583,25 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         Ok(())
     }
 
-    /// Refuses a wire that closes a cycle the graph would not compile: the
-    /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle)) over its wiring, less the
-    /// edges this patch takes out, plus the declared wires. A feedback edge is
-    /// cut by it.
+    /// Refuses a wire that closes a cycle the graph would not compile, and
+    /// names the edges leaving the graph that must be cut for it not to: the
+    /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle))
+    /// over its whole wiring, the edges it only fades out included (the compile
+    /// counts them), plus the declared wires. A feedback edge is cut by the
+    /// search. An edge that leaves (dropped by this patch, or still fading)
+    /// and closes a cycle is cut; a cycle left through live wires is the
+    /// patch's.
     fn check_acyclic(
         &self,
         planned: &Planned<K, C::Float>,
         wires: &BTreeMap<WireId<K>, KeptWire>,
         kept: &Kept<K, C::Float>,
-    ) -> Result<(), PatchError<K>> {
+    ) -> Result<Cuts, PatchError<K>> {
         let pending = Some(&planned.shapes);
-        let mut spec = self.graph.live_spec();
+        let mut spec = self.graph.whole_spec();
         // The nodes this patch takes out are not in the graph it makes, nor
         // are the edges into or out of them, hand-made ones included.
-        let leaving: BTreeSet<NodeKey> = kept
+        let gone: BTreeSet<NodeKey> = kept
             .nodes
             .iter()
             .filter(|(key, _)| !planned.at.contains_key(*key))
@@ -590,34 +614,97 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     .filter_map(|p| kept.nodes.get(&p.key).map(|stored| stored.node)),
             )
             .collect();
-        forget_nodes(&mut spec, &leaving);
+        forget_nodes(&mut spec, &gone);
         for (&node, shape) in &planned.shapes {
             let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
             spec.topology.nodes.insert(node, declared);
         }
+        let (mut leaving, mut leaving_buses) = self.graph.fading_edges();
         for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
             let held = [Some(id.source()), id.sink()]
                 .into_iter()
                 .flatten()
                 .all(|key| kept.nodes.contains_key(key));
-            if held {
-                Resolved::of(id, |key| kept.nodes[key].node).in_spec(
-                    &mut spec,
-                    &self.graph,
-                    None,
-                    false,
-                );
+            if !held {
+                continue;
+            }
+            let resolved = Resolved::of(id, |key| kept.nodes[key].node);
+            match resolved {
+                // An event edge is never faded: it goes at once.
+                Resolved::Event(..) => {
+                    resolved.in_spec(&mut spec, &self.graph, None, false);
+                }
+                Resolved::Bus(from, to) => {
+                    leaving_buses.insert((from, to));
+                }
+                Resolved::Channel(..) | Resolved::Main(..) => {
+                    for ports in Ports::of(resolved, &self.graph, None) {
+                        if let Ports::Audio(edge) = ports
+                            && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
+                        {
+                            leaving.insert(edge);
+                        }
+                    }
+                }
             }
         }
         let named: Vec<_> = wires
             .keys()
             .map(|id| {
                 let resolved = Resolved::of(id, |key| planned.at[key]);
+                // A declared wire is not leaving, whatever the graph fades.
+                for ports in Ports::of(resolved, &self.graph, pending) {
+                    if let Ports::Audio(edge) = ports
+                        && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
+                    {
+                        leaving.remove(&edge);
+                    }
+                }
+                if let Resolved::Bus(from, to) = resolved {
+                    leaving_buses.remove(&(from, to));
+                }
                 (id, resolved.in_spec(&mut spec, &self.graph, pending, true))
             })
             .collect();
-        let Some(cycle) = spec.cycle() else {
-            return Ok(());
+        let mut cuts = Cuts::default();
+        let cycle = loop {
+            let Some(cycle) = spec.cycle() else {
+                break None;
+            };
+            let audio = cycle.iter().find_map(|edge| match edge {
+                CycleEdge::Audio(at) => leaving
+                    .iter()
+                    .find(|id| id.sink == PortSink::Port(*at))
+                    .copied(),
+                _ => None,
+            });
+            if let Some(id) = audio {
+                leaving.remove(&id);
+                if let PortSink::Port(at) = id.sink {
+                    spec.disconnect(at, id.from);
+                }
+                cuts.edges.push(id);
+                continue;
+            }
+            let bus = cycle.iter().find_map(|edge| match edge {
+                CycleEdge::Bus { at, from } => leaving_buses
+                    .iter()
+                    .find(|(f, t)| f == from && t.0 == BusEnd::Node(*at))
+                    .copied(),
+                _ => None,
+            });
+            if let Some((from, to)) = bus {
+                leaving_buses.remove(&(from, to));
+                if let BusEnd::Node(at) = to.0 {
+                    spec.disconnect_bus(from, at);
+                }
+                cuts.buses.push((from, to));
+                continue;
+            }
+            break Some(cycle);
+        };
+        let Some(cycle) = cycle else {
+            return Ok(cuts);
         };
         // Only a cycle through a declared wire is the patch's; any other the
         // commit reports.
@@ -628,7 +715,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             Some((id, _)) => Err(PatchError::Cycle {
                 ends: id.ends.clone(),
             }),
-            None => Ok(()),
+            None => Ok(cuts),
         }
     }
 
