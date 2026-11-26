@@ -49,7 +49,7 @@ impl<W: Write + Seek> Encode for Encoder<W> {
 /// What a file of `encoding` is written as, from a source of `source` channels at
 /// `source_rate`.
 pub(crate) fn spec_of(encoding: &Encoding, source: &ChannelSet, source_rate: SampleRate) -> Spec {
-    let channels = encoding.channel_set().copied().unwrap_or(*source);
+    let channels = encoding.channel_set().unwrap_or(*source);
     Spec::of_channels(encoding.format(), channels, encoding.rate(source_rate))
 }
 
@@ -73,7 +73,7 @@ impl<F: FftFloat> Stages<F> {
         source: &ChannelSet,
         source_rate: SampleRate,
     ) -> Result<Self> {
-        let dst = encoding.channel_set().copied().unwrap_or(*source);
+        let dst = encoding.channel_set().unwrap_or(*source);
         let layout = dst.width();
         let converter = match encoding.resampling() {
             Some(resample) => resample.converter(layout, source_rate)?,

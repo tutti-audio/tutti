@@ -1,7 +1,7 @@
 //! [`Encoding`]: what happens to audio on its way into a file.
 
 use crate::{Format, Resample};
-use tutti_buffers::ChannelSet;
+use tutti_buffers::{ChannelLayout, ChannelSet, Placement};
 use tutti_dsp::DitherNoise;
 use tutti_units::SampleRate;
 
@@ -38,7 +38,7 @@ use tutti_units::SampleRate;
 #[must_use = "an encoding does nothing until a `write`, `encode` or `Chain` takes it"]
 pub struct Encoding {
     format: Format,
-    channels: Option<ChannelSet>,
+    channels: Channels,
     resample: Option<Resample>,
     seed: u64,
 }
@@ -49,17 +49,28 @@ impl Encoding {
     pub fn new(format: Format) -> Self {
         Self {
             format,
-            channels: None,
+            channels: Channels::Source,
             resample: None,
             seed: DitherNoise::DEFAULT_SEED,
         }
     }
 
     /// Writes `channels`, folded from the source's by [`tutti_buffers::Fold::to_channels`]
-    /// (a width it cannot place is an error, never a dropped channel). Without it the file
-    /// has the source's channels.
+    /// (a width it cannot place is an error, never a dropped channel). Without it or
+    /// [`width`](Self::width) the file has the source's channels. Replaces a `width` named
+    /// before it.
     pub fn channels(mut self, channels: ChannelSet) -> Self {
-        self.channels = Some(channels);
+        self.channels = Channels::Stated(channels);
+        self
+    }
+
+    /// Writes `width` channels in the default order for that width
+    /// ([`ChannelSet::default_for`]), folded from the source's as
+    /// [`channels`](Self::channels) folds. The caller states a count, not speakers, so the
+    /// file's [`placement`](Self::placement) is [`Placement::Default`]. Replaces `channels`
+    /// named before it.
+    pub fn width(mut self, width: ChannelLayout) -> Self {
+        self.channels = Channels::Width(width);
         self
     }
 
@@ -85,10 +96,26 @@ impl Encoding {
         self.format
     }
 
-    /// The channels the file holds, when stated: `None` is the source's.
+    /// The channels the file holds, when named by [`channels`](Self::channels) or
+    /// [`width`](Self::width): `None` is the source's.
     #[must_use]
-    pub fn channel_set(&self) -> Option<&ChannelSet> {
-        self.channels.as_ref()
+    pub fn channel_set(&self) -> Option<ChannelSet> {
+        match self.channels {
+            Channels::Source => None,
+            Channels::Width(width) => Some(ChannelSet::default_for(width)),
+            Channels::Stated(set) => Some(set),
+        }
+    }
+
+    /// [`Placement::Stated`] when [`channels`](Self::channels) named the speakers, else
+    /// [`Placement::Default`]: a [`width`](Self::width) is a count, and the source's channels
+    /// are taken in the default order for their width.
+    #[must_use]
+    pub fn placement(&self) -> Placement {
+        match self.channels {
+            Channels::Stated(_) => Placement::Stated,
+            Channels::Source | Channels::Width(_) => Placement::Default,
+        }
     }
 
     /// The resample, when there is one.
@@ -108,4 +135,13 @@ impl Encoding {
     pub fn rate(&self, source: SampleRate) -> SampleRate {
         self.resample.map_or(source, |r| r.target_rate)
     }
+}
+
+/// The channels an [`Encoding`] writes: the source's, a count in its default order, or a
+/// stated set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Channels {
+    Source,
+    Width(ChannelLayout),
+    Stated(ChannelSet),
 }

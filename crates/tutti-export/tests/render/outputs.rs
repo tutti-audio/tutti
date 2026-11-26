@@ -919,6 +919,11 @@ fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
         ToFile::new(dir.path().join("a.wav")),
     );
     assert_eq!(placement(unstated), tutti_buffers::Placement::Default);
+    let counted = FileTarget::new(
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))).width(ChannelLayout::STEREO),
+        ToFile::new(dir.path().join("c.wav")),
+    );
+    assert_eq!(placement(counted), tutti_buffers::Placement::Default);
     let stated = FileTarget::new(
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
             .channels(ChannelSet::from(Bed::Surround51.topology())),

@@ -1115,20 +1115,17 @@ pub enum BounceError {
     Stale,
 }
 
-/// The file of output number `index` of the bounce: `format` over `channels`, with the bounce's
+/// The file of output number `index` of the bounce: `encoding` (its format and channels), with the bounce's
 /// resample, normalize and replace, each only when set. The outputs are summed later (the stems
 /// and the master), so each is dithered with the seed [`SplitMix64::mix`] of its index, never one
 /// seed: two files with one noise sequence would add it coherently.
 fn file_target(
     path: PathBuf,
-    format: Format,
-    channels: ChannelSet,
+    encoding: Encoding,
     index: usize,
     options: &FileOptions,
 ) -> FileTarget {
-    let encoding = Encoding::new(format)
-        .channels(channels)
-        .dither_seed(SplitMix64::mix(index as u64));
+    let encoding = encoding.dither_seed(SplitMix64::mix(index as u64));
     let encoding = match options.resample {
         Some(resample) => encoding.resample(resample),
         None => encoding,
@@ -2027,14 +2024,17 @@ where
         let channels = channels.unwrap_or_else(|| ChannelLayout::clamped(outputs));
         let target: Target = match main_output.file() {
             Some(FileMainOutput { path, format }) => {
-                let set = file_topology
-                    .map_or_else(|| ChannelSet::default_for(channels), ChannelSet::from);
+                let encoding = Encoding::new(format);
+                let encoding = match file_topology {
+                    Some(topology) => encoding.channels(ChannelSet::from(topology)),
+                    None => encoding.width(channels),
+                };
                 let options = FileOptions {
                     resample,
                     replace,
                     normalize: normalize.map(NormalizeSpec::own),
                 };
-                file_target(path, format, set, 0, &options).into()
+                file_target(path, encoding, 0, &options).into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
@@ -2095,14 +2095,7 @@ where
                         normalize: gain,
                     };
                     // The main output is output 0.
-                    file_target(
-                        path,
-                        format,
-                        ChannelSet::default_for(layout),
-                        i + 1,
-                        &options,
-                    )
-                    .into()
+                    file_target(path, Encoding::new(format).width(layout), i + 1, &options).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
             };

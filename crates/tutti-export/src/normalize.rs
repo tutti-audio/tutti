@@ -45,7 +45,8 @@ use crate::output::FileTarget;
 /// active reads -70 LUFS.
 ///
 /// The placement is the file's [`channels`](tutti_codec::Encoding::channels). A
-/// file that states none is taken to be [`ChannelTopology::default_for`] for its
+/// file that states none (a [`width`](tutti_codec::Encoding::width), or the
+/// source's channels) is taken to be [`ChannelTopology::default_for`] for its
 /// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
 /// [`Placement::Default`](tutti_buffers::Placement::Default). Any other width
 /// has no default layout, so a `Lufs` output of it is refused when the

@@ -232,7 +232,7 @@ fn check_outputs<F: Float>(outputs: &[Output<F>], main_output: &ChannelSet) -> R
 fn channels_of<F: Float>(output: &Output<F>, main_output: &ChannelSet) -> ChannelSet {
     let stated = match output.target() {
         Target::Buffers(b) => Some(b.width.channel_set()),
-        Target::File(f) => f.encoding().channel_set().copied(),
+        Target::File(f) => f.encoding().channel_set(),
     };
     stated.unwrap_or_else(|| match output.feed() {
         crate::Feed::MainOutput => *main_output,
@@ -255,12 +255,7 @@ fn open_lanes<F: FftFloat>(
         let set = channels_of(&output, main_output);
         let placement = match output.target() {
             Target::Buffers(b) => b.width.placement(),
-            // Stated when the encoding names its channels, whatever they are: the default
-            // layout is what a file that names none is taken to have.
-            Target::File(f) if f.encoding().channel_set().is_some() => {
-                tutti_buffers::Placement::Stated
-            }
-            Target::File(_) => tutti_buffers::Placement::Default,
+            Target::File(f) => f.encoding().placement(),
         };
         let (feed, target) = output.into_parts();
         let layout = set.width();
