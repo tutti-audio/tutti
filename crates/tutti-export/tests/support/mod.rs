@@ -100,7 +100,8 @@ impl ExportConfig {
         path: impl Into<PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        let target = FileTarget::new(path, self.encode.format, self.encode.channels);
+        // A test renders over its scratch path again and again.
+        let target = FileTarget::new(path, self.encode.format, self.encode.channels).replace();
         let target = match &self.encode.topology {
             Some(topology) => target.topology(*topology),
             None => target,

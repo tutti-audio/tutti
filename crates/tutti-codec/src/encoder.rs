@@ -331,6 +331,19 @@ impl<'a> EncoderOptions<'a> {
         self
     }
 
+    /// What is refused before any sink exists: a spec the format cannot write, and a
+    /// [`planned`](Self::planned) length past its limit.
+    fn check(&self) -> Result<()> {
+        let spec = self.spec;
+        spec.channels()?;
+        match (self.planned, spec.format().max_frames(spec.layout())) {
+            (Some(frames), Some(limit_frames)) if frames.get() as u64 > limit_frames => {
+                Err(EncodeError::WavTooLarge { limit_frames })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Starts the file in `sink`, writing its header.
     ///
     /// # Errors
@@ -342,13 +355,7 @@ impl<'a> EncoderOptions<'a> {
     /// when the sink fails on the header.
     pub fn wrap<W: Write + Seek>(self, sink: W) -> Result<Encoder<W>> {
         let spec = self.spec;
-        spec.channels()?;
-        if let Some(frames) = self.planned
-            && let Some(limit_frames) = spec.format().max_frames(spec.layout())
-            && frames.get() as u64 > limit_frames
-        {
-            return Err(EncodeError::WavTooLarge { limit_frames });
-        }
+        self.check()?;
         let mut inner = Inner::open(spec, sink)?;
         if let Some(frames) = self.limit_frames {
             inner.limit_frames(frames);
@@ -377,8 +384,9 @@ impl<'a> EncoderOptions<'a> {
     pub fn create(self, path: impl AsRef<Path>) -> Result<FileEncoder> {
         let path = path.as_ref();
         let spec = self.spec;
-        // Before a file exists, so a spec the format cannot write leaves nothing behind.
-        spec.channels()?;
+        // Before a file exists, so a spec the format cannot write, or a length it cannot
+        // hold, touches nothing.
+        self.check()?;
         let exists = || EncodeError::Exists {
             path: path.to_path_buf(),
         };

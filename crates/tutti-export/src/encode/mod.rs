@@ -24,12 +24,11 @@ use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
 use crate::{RenderError, Written};
 use std::path::Path;
 use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, SinkFailed, convert};
-use tutti_codec::{FileEncoder, FinalizedFile, Spec};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, Sink, convert};
+use tutti_codec::{EncoderOptions, EncoderSink, FileEncoder, FinalizedFile, Spec};
 use tutti_dsp::{
     FftFloat, StreamingResampler, StreamingResamplerConfig, needs_resampling, resampled_frames,
 };
-use tutti_platform::Staged;
 use tutti_rt::SplitMix64;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
@@ -66,13 +65,15 @@ pub(crate) fn open_file<F: FftFloat>(
 ) -> Result<Chain<F>> {
     let spec = spec(target, source_rate);
     let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
-    let staged = Staged::new(target.path());
-    let staged = if target.refuses_existing() {
-        staged.create_new()
+    let options = EncoderOptions::new(&spec)
+        .planned(planned)
+        .dither_seed(seed);
+    let options = if target.replaces_existing() {
+        options.replace()
     } else {
-        staged
+        options
     };
-    let encoder = FileEncoder::create_planned(&spec, staged, planned)?.dither_seed(seed);
+    let encoder = options.create(target.path())?;
     Chain::new(target, source_rate, encoder)
 }
 
@@ -136,56 +137,6 @@ pub(crate) fn written(
         measured: None,
         placement,
         spill_left: None,
-    }
-}
-
-/// The encoder, taking blocks in the format `S` the file's type is reached from: it
-/// quantizes an integer file itself.
-///
-/// The first codec error is kept here for [`Chain`] to return with its detail.
-struct EncoderSink<S> {
-    encoder: FileEncoder,
-    layout: ChannelLayout,
-    /// Frames the encoder accepted, which is what the file holds.
-    frames: Samples,
-    error: Option<RenderError>,
-    format: std::marker::PhantomData<S>,
-}
-
-impl<S: Sample> EncoderSink<S> {
-    fn new(encoder: FileEncoder, layout: ChannelLayout) -> Self {
-        Self {
-            encoder,
-            layout,
-            frames: Samples::new(0),
-            error: None,
-            format: std::marker::PhantomData,
-        }
-    }
-
-    fn write(&mut self, block: Interleaved<'_, S>) -> std::result::Result<(), SinkFailed> {
-        if self.error.is_some() {
-            return Err(SinkFailed);
-        }
-        if block.layout() != self.layout {
-            self.error = Some(RenderError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "a block of another width than the encoder's",
-            )));
-            return Err(SinkFailed);
-        }
-        self.encoder.write(block).map_err(|e| {
-            self.error = Some(RenderError::from(e));
-            SinkFailed
-        })?;
-        self.frames += block.frames();
-        Ok(())
-    }
-
-    /// The encoder, the values its quantize stage clipped and the frames it was given.
-    fn into_parts(self) -> (FileEncoder, u64, Samples) {
-        let clipped = self.encoder.clipped();
-        (self.encoder, clipped, self.frames)
     }
 }
 
@@ -262,7 +213,7 @@ impl<F: FftFloat> Chain<F> {
         let resampler = resampler_for(target, source_rate, layout)?;
         Ok(Self {
             layout,
-            sink: EncoderSink::new(encoder, layout),
+            sink: EncoderSink::new(encoder),
             staging: Vec::new(),
             gain: None,
             resampler,
@@ -320,14 +271,18 @@ impl<F: FftFloat> Chain<F> {
     /// The encoder, to finish it, how many values clipped on the way and how
     /// many frames it was given.
     fn into_encoder(self) -> (FileEncoder, u64, Samples) {
-        self.sink.into_parts()
+        let frames = self.sink.frames();
+        let encoder = self.sink.into_encoder();
+        let clipped = encoder.clipped();
+        (encoder, clipped, frames)
     }
 }
 
 fn failure_of<F: Float>(sink: &mut EncoderSink<F>) -> RenderError {
-    sink.error
-        .take()
-        .unwrap_or_else(|| RenderError::from(std::io::Error::other("the encoder refused a write")))
+    sink.take_error().map_or_else(
+        || RenderError::from(std::io::Error::other("the encoder refused a write")),
+        RenderError::from,
+    )
 }
 
 /// Interleave the resampler's output planes, apply the gain, hand them on, and

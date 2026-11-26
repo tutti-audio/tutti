@@ -122,7 +122,7 @@ pub struct FileTarget {
     pub(crate) width: Width,
     pub(crate) resample: Option<Resample>,
     pub(crate) normalize: Option<NormalizeSpec>,
-    create_new: bool,
+    replace: bool,
 }
 
 impl FileTarget {
@@ -136,7 +136,7 @@ impl FileTarget {
             width: Width::Count(channels),
             resample: None,
             normalize: None,
-            create_new: false,
+            replace: false,
         }
     }
 
@@ -175,21 +175,22 @@ impl FileTarget {
         self
     }
 
-    /// Refuses a path that already exists instead of replacing it. The file is
-    /// still written beside the path; the refusal is the commit's, which fails
-    /// with a [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists`, leaves
-    /// what is at the path alone and keeps the complete file at the error's
-    /// `kept` path for the caller.
+    /// Replaces a path that already exists instead of refusing it. A target refuses an
+    /// existing path by default, with [`tutti_codec::EncodeError::Exists`] before anything is
+    /// rendered into the file. The file is written beside the path, so a path that appears
+    /// before the commit is refused there, with a [`tutti_codec::EncodeError::Commit`] of kind
+    /// `AlreadyExists` that leaves what is at the path alone and keeps the complete file at the
+    /// error's `kept` path for the caller.
     #[must_use]
-    pub fn create_new(mut self) -> Self {
-        self.create_new = true;
+    pub fn replace(mut self) -> Self {
+        self.replace = true;
         self
     }
 
-    /// Whether an existing path is refused ([`create_new`](Self::create_new)).
+    /// Whether an existing path is replaced ([`replace`](Self::replace)).
     #[must_use]
-    pub(crate) fn refuses_existing(&self) -> bool {
-        self.create_new
+    pub(crate) fn replaces_existing(&self) -> bool {
+        self.replace
     }
 
     /// Where the file lands.
