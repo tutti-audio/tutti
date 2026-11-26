@@ -252,7 +252,7 @@ pub(crate) trait OpenPorts {
 }
 
 /// What `future` resolved to when polled once, or `None` while it is pending.
-#[cfg(feature = "midi-hardware")]
+#[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
 pub(crate) fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
     use std::task::{Context, Poll, Waker};
     match std::pin::pin!(future).poll(&mut Context::from_waker(Waker::noop())) {

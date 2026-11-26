@@ -170,19 +170,30 @@ impl Sinks {
     /// ([`Record::catch_up`]), and counts in the sink's `refused` the events the
     /// link did not take.
     pub(crate) fn catch_up(&mut self, joined: &Joined) {
-        let retiring = self.retiring.iter_mut().map(|going| &mut going.going);
-        let Some(port) = self
-            .ports
-            .iter_mut()
-            .chain(retiring)
-            .find(|port| port.node == joined.sink())
-        else {
+        let Some(port) = self.port_mut(joined.sink()) else {
             return;
         };
         let setup = port.record.catch_up();
         if !joined.send(&setup) {
             port.losses.refused(setup.len() as u64);
         }
+    }
+
+    /// Counts in the sink at `node` `n` events a network sent for it that the
+    /// link did not take.
+    pub(crate) fn refuse(&mut self, node: NodeKey, n: u64) {
+        if let Some(port) = self.port_mut(node) {
+            port.losses.refused(n);
+        }
+    }
+
+    /// The port of the sink at `node`, retiring or not.
+    fn port_mut(&mut self, node: NodeKey) -> Option<&mut SinkPort> {
+        let retiring = self.retiring.iter_mut().map(|going| &mut going.going);
+        self.ports
+            .iter_mut()
+            .chain(retiring)
+            .find(|port| port.node == node)
     }
 
     /// Each sink's tap on one scale of frames, the rate it was opened at: where
