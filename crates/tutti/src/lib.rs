@@ -205,7 +205,8 @@ pub use tutti_session::{
     Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo,
     PluginInstance, PluginOp, PluginPresets, PortCounts, PresetStartError, RestoreState,
     RestoreStateInProcess, RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState,
-    SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess, StateStartError, SwapPluginError,
+    SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess, Saved, StateStartError,
+    SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
