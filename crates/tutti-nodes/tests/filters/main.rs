@@ -8,6 +8,7 @@ mod delay_echoes;
 mod envelope_filter;
 mod filter_block_independence;
 mod filter_responses;
+mod graph_smoothing;
 mod ladder_crossover_node;
 mod non_finite_constructors;
 mod non_finite_controls;

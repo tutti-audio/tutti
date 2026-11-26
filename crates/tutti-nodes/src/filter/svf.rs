@@ -454,19 +454,16 @@ mod tests {
 
     // ── Per-block reads ──────────────────────────────────────────────────────
 
-    /// A cutoff written between blocks ramps on the stream clock: the render is the
-    /// same at every block length, the ramp is still under way one 64-frame block in
-    /// (a design between the two cutoffs), and it has arrived [`GAIN_RAMP`] after the
-    /// block it was first seen in (5 ms, 240 frames at 48 kHz; 512 frames are rendered).
+    /// A cutoff written between blocks is heard from the next block, renders the same at
+    /// every block length, and arrives at the new design's gain (512 frames are rendered).
+    /// The graph ramps the cell on the port; read straight, the cell lands whole.
     ///
     /// (A write *during* a block cannot be staged in a single-threaded test —
     /// the control thread writes between callbacks — so "between blocks" is the
     /// observable form of "not before the next block".)
-    ///
-    /// [`GAIN_RAMP`]: tutti_dsp::GAIN_RAMP
     #[test]
-    fn a_cutoff_written_between_blocks_ramps_on_the_stream() {
-        use crate::test_support::{assert_cell_ramps, render_change, sine};
+    fn a_cutoff_written_between_blocks_is_heard_from_the_next_block() {
+        use crate::test_support::{assert_block_free, render_change, sine};
         // 1.5 kHz: two whole periods in a 64-frame block, so a block's RMS is exact.
         let x = sine(1_500.0, 48_000.0, 64 + 512);
         let make = || {
@@ -480,7 +477,7 @@ mod tests {
             assert!(n.param_set().set(UnitParam::Cutoff, 6_000.0));
         };
         let (before, after) = ([&x[..64], &x[..64]], [&x[64..], &x[64..]]);
-        let mut node = assert_cell_ramps(make, change, &before, &after, "svf cutoff");
+        let mut node = assert_block_free(make, change, &before, &after, "svf cutoff");
         // Arrived: a block later the tone is at the 6 kHz low-pass's gain, about 1.
         let arrived = rms(&drive_block(&mut node, &before)[0]);
         let mut start = prepared(make());
@@ -497,10 +494,7 @@ mod tests {
             (low - lp_rms(1_500.0, 400.0, 0.707)).abs() < 0.01,
             "before {low}"
         );
-        assert!(
-            low < mid && mid < 0.95 * arrived,
-            "under way after 64 frames: {low} < {mid} < {arrived}"
-        );
+        assert!(low < mid, "heard on the first block: {low} < {mid}");
     }
 
     /// The RMS of a unit sine at `hz` through a low-pass at `fc` and `q`, 48 kHz: the
@@ -510,42 +504,6 @@ mod tests {
             / libm::tan(core::f64::consts::PI * fc / 48_000.0);
         let gain = 1.0 / libm::sqrt((1.0 - u * u).powi(2) + (u / q).powi(2));
         gain * core::f64::consts::FRAC_1_SQRT_2
-    }
-
-    /// A clone starts with its cells at rest: a clone of a node whose cutoff ramp is in
-    /// flight renders its first block at the cell's cutoff, not at where the source's ramp
-    /// stands on the source's clock.
-    #[test]
-    fn a_clone_of_a_node_mid_ramp_starts_at_rest() {
-        use crate::test_support::sine;
-        let rate = SampleRate::SR_48K;
-        let mut node = tutti_graph::contract::prepared(
-            SvfFilterNode::<f32>::from(
-                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
-                    .freq(Hz::new(400.0))
-                    .q(Q::new(0.707)),
-            ),
-            rate,
-            64,
-        );
-        let x = sine(1_500.0, 48_000.0, 64);
-        let block = |n: &mut SvfFilterNode<f32>| {
-            rms(&drive(n, rate, Planes::new(&[&x]).unwrap(), &[]).remove(0))
-        };
-        block(&mut node);
-        assert!(node.param_set().set(UnitParam::Cutoff, 6_000.0));
-        let source = block(&mut node);
-        let arrived = lp_rms(1_500.0, 6_000.0, 0.707);
-        assert!(
-            source < 0.8 * arrived,
-            "the source is under way: {source} vs {arrived}"
-        );
-        let mut clone = node.clone();
-        let first = block(&mut clone);
-        assert!(
-            first > 0.85 * arrived,
-            "the clone arrived: {first} vs {arrived}"
-        );
     }
 
     /// A NaN Q at construction is read as the Butterworth Q, not as 0, which
