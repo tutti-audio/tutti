@@ -62,13 +62,14 @@
 //!   and a NAK of data would invite one back.
 //! - Process Inquiry as Responder (§9): a device that declares
 //!   [`CiCategories::PROCESS_INQUIRY`] answers an Inquiry: Process Inquiry Capabilities with
-//!   MIDI Message Report supported (§9.3, Table 42), and an Inquiry: MIDI Message Report with
-//!   the form of a device with no MIDI state to report: a Reply whose three bitmaps are empty,
-//!   which §9.6 has a Responder do for each kind it cannot provide, and the End, on the Device ID
-//!   of the Inquiry (§9.6, §9.8). Asked of a Channel, it answers with a NAK, Status `0x03`
-//!   (§9.5: the Channel is not in use on the device, as none is). A device that does not declare
-//!   the category NAKs both inquiries with Status `0x01`, message not supported. A Reply or an
-//!   End is the Initiator's to read ([`ProcessInitiator`](super::ProcessInitiator)) and is ignored here.
+//!   MIDI Message Report supported (§9.3, Table 42). An Inquiry: MIDI Message Report is not
+//!   answered here: the device holds no MIDI state, so it is the caller's to report, and
+//!   [`CiAction::ReportAsked`] hands it the asker, the Message Data Control and the scope.
+//!   A Channel Device ID is never refused as not in use (§9.5): an inquiry reaches the device
+//!   on the Group it runs on, which is a Group of its Function Block, so every Channel the
+//!   Device ID can name is one of the block's. A device that does not declare the category NAKs
+//!   both inquiries with Status `0x01`, message not supported. A Reply or an End is the
+//!   Initiator's to read ([`ProcessInitiator`](super::ProcessInitiator)) and is ignored here.
 //! - Endpoint Inquiry as Initiator (§5.7): once, for each found peer that declared
 //!   a Function Block, status `0x00`. The reply sets the peer's Product Instance Id
 //!   ([`CiAction::Updated`]); a NAK from it leaves it `None`. No retry and no timeout:
@@ -92,8 +93,7 @@ use tutti_ump::{DeviceIdentity, MpeZoneSet};
 use super::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
     DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, NakStatus, PeCiMessage,
-    PeMessageKind, ProcessFeatures, ProfileOffer, ReplyData, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
-    nak_message,
+    PeMessageKind, ProcessFeatures, ProfileOffer, ReplyData, SUB_ID2_ENDPOINT_INQUIRY, nak_message,
 };
 use crate::action::CiAction;
 use crate::profile_responder::ProfileResponder;
@@ -350,33 +350,21 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                 }
             }
             CiMessage::MessageReportInquiry {
-                source, to, scope, ..
+                source,
+                to,
+                control,
+                scope,
+                ..
             } => {
                 if *to == self.muid {
-                    match (self.process_refusal(message), scope.address()) {
-                        (Some(refusal), _) => actions.push(refusal),
-                        // Tutti has no Channel in use (§9.5).
-                        (None, address @ CiDeviceId::Channel(_)) => {
-                            actions.push(self.nak(
-                                address,
-                                *source,
-                                message.sub_id2(),
-                                NakStatus::NotInUse,
-                            ));
-                        }
-                        (None, address) => {
-                            actions.push(CiAction::Send(CiMessage::MessageReportReply {
-                                source: self.muid,
-                                ci_version: CI_VERSION,
-                                to: *source,
-                                scope: ReportScope::none(address),
-                            }));
-                            actions.push(CiAction::Send(CiMessage::MessageReportEnd {
-                                header: self.header_on(address),
-                                to: *source,
-                            }));
-                        }
-                    }
+                    actions.push(
+                        self.process_refusal(message)
+                            .unwrap_or(CiAction::ReportAsked {
+                                peer: *source,
+                                control: *control,
+                                scope: *scope,
+                            }),
+                    );
                 }
             }
             // A Property Exchange Responder is not the Management core's: a device
