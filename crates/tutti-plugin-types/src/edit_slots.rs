@@ -26,7 +26,10 @@
 
 use std::sync::Arc;
 
-use tutti_rt::{Generation, SeqSlotsReader, SeqSlotsWriter, seq_slots};
+use tutti_rt::{
+    Generation, GenerationPublisher, GenerationWatch, SeqSlotsReader, SeqSlotsWriter,
+    generation_watch, seq_slots,
+};
 use tutti_units::{Normalized, ParamId};
 
 /// A write to a parameter the activation did not declare.
@@ -36,6 +39,12 @@ pub struct UnknownParam(pub ParamId);
 
 /// The slots for `ids`, as the control side's writer and the audio side's
 /// reader. A repeated id is one slot.
+///
+/// The applied pair ([`EditWriter::has_applied`], [`EditReader::applied`]) is
+/// made here, with the slots: a writer's generation counts from 0 again for
+/// each new set, and a publisher keeps only the latest generation it stored, so
+/// a publisher kept from an earlier set would never reach the new writer's
+/// marks. A new set of slots is always a new pair.
 #[must_use]
 pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditReader) {
     let mut ids: Vec<ParamId> = ids.into_iter().collect();
@@ -47,12 +56,18 @@ pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditRe
     // range-checked type cannot be. Every value came from a `Normalized`, and
     // the reader makes one again.
     let (writer, reader) = seq_slots::<f64>(ids.len());
+    let (publisher, watch) = generation_watch();
     (
         EditWriter {
             ids: Arc::clone(&ids),
             slots: writer,
+            applied: watch,
         },
-        EditReader { ids, slots: reader },
+        EditReader {
+            ids,
+            slots: reader,
+            applied: publisher,
+        },
     )
 }
 
@@ -61,6 +76,8 @@ pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditRe
 pub struct EditWriter {
     ids: Arc<[ParamId]>,
     slots: SeqSlotsWriter<f64>,
+    /// What the holder of the reader has published as applied.
+    applied: GenerationWatch,
 }
 
 impl EditWriter {
@@ -84,6 +101,16 @@ impl EditWriter {
         self.slots.written()
     }
 
+    /// Whether the writes up to `mark` (a [`written`](Self::written) taken at
+    /// the write) have been applied: the reader's holder called
+    /// [`EditReader::applied`] after the target's own call that took them
+    /// returned. A write a reset made stale counts once a drain has passed it.
+    /// Exact while the two are less than 2^31 writes apart.
+    #[must_use]
+    pub fn has_applied(&self, mark: Generation) -> bool {
+        self.applied.get().has_reached(mark)
+    }
+
     /// Makes every write made so far stale: a state or a preset load replaced
     /// the values they were written against.
     ///
@@ -103,6 +130,8 @@ impl EditWriter {
 pub struct EditReader {
     ids: Arc<[ParamId]>,
     slots: SeqSlotsReader<f64>,
+    /// Tells the writer what the target has applied.
+    applied: GenerationPublisher,
 }
 
 impl EditReader {
@@ -127,6 +156,15 @@ impl EditReader {
             // must not panic.
             apply(ids[slot], Normalized::clamped(value), epoch);
         });
+    }
+
+    /// Publishes that the target applied what the drains so far collected:
+    /// [`EditWriter::has_applied`] then holds for each write they covered.
+    /// Called by the holder after the target's own call that took the values
+    /// has returned, never at drain time; a call that never reached the
+    /// target leaves the values to the next one. Wait-free.
+    pub fn applied(&mut self) {
+        self.applied.publish(self.slots.swept());
     }
 
     /// The generation of the last drain no write overlapped: once it
@@ -233,6 +271,35 @@ mod tests {
             Err(UnknownParam(id(9)))
         );
         assert!(drained(&mut reader).is_empty());
+    }
+
+    /// **A write is applied only once the reader's holder says its target's call
+    /// returned**: not before any block, not after a drain whose call has not
+    /// returned, and then it is, for that write and the ones before it but not
+    /// one made after.
+    #[test]
+    fn a_write_is_applied_after_the_targets_call_returns() {
+        let (mut writer, mut reader) = edit_slots([id(1), id(2)]);
+        writer.write(id(1), Normalized::of(0.25)).unwrap();
+        let mark = writer.written();
+        assert!(!writer.has_applied(mark), "no block has run");
+
+        assert_eq!(drained(&mut reader), [(id(1), 0.25)]);
+        assert!(
+            !writer.has_applied(mark),
+            "the drain took it; the target's call has not returned"
+        );
+
+        writer.write(id(2), Normalized::of(0.5)).unwrap();
+        let later = writer.written();
+        reader.applied();
+        assert!(writer.has_applied(mark), "the call that took it returned");
+        assert!(!writer.has_applied(later), "a write after the drain is not");
+
+        assert_eq!(drained(&mut reader), [(id(2), 0.5)]);
+        assert!(!writer.has_applied(later), "not until its own call returns");
+        reader.applied();
+        assert!(writer.has_applied(later));
     }
 
     /// **A drain allocates nothing**, with every slot written (the crate's test

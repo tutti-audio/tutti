@@ -694,8 +694,6 @@ pub struct FakeProcessor {
     shell: Arc<ActivationShell>,
     shared: Arc<Shared>,
     drain: EditReader,
-    /// Tells the Controller what the drain took.
-    publisher: tutti_rt::GenerationPublisher,
     /// Frames of the voice still to sound (`FakePlugin::ring_out`).
     sounding: usize,
 }
@@ -707,8 +705,6 @@ pub struct FakeController {
     shared: Arc<Shared>,
     descriptor: PluginDescriptor,
     sink: EditWriter,
-    /// What the Processor has taken of `sink`.
-    delivered: tutti_rt::GenerationWatch,
     values: Vec<(ParamId, Normalized)>,
 }
 
@@ -1010,7 +1006,7 @@ fake_control!(
     },
     |_, _| {},
     |this| Some(this.sink.written()),
-    |this, upto| this.delivered.get().has_reached(upto)
+    |this, upto| this.sink.has_applied(upto)
 );
 
 impl Loaded for FakeLoaded {
@@ -1062,13 +1058,11 @@ impl Loaded for FakeLoaded {
         }
         let shell = Arc::new(ActivationShell);
         let (sink, drain) = edit_slots(shared.declared().into_iter().map(|(id, _)| id));
-        let (publisher, delivered) = tutti_rt::generation_watch();
         Ok((
             FakeProcessor {
                 shell: shell.clone(),
                 shared: shared.clone(),
                 drain,
-                publisher,
                 sounding: 0,
             },
             FakeController {
@@ -1076,7 +1070,6 @@ impl Loaded for FakeLoaded {
                 shared,
                 descriptor: self.descriptor,
                 sink,
-                delivered,
                 values: self.values,
             },
         ))
@@ -1168,7 +1161,7 @@ impl Processor for FakeProcessor {
         .fetch_add(1, Ordering::Relaxed);
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.publisher.publish(self.drain.swept());
+        self.drain.applied();
         if self.shared.process_fails.load(Ordering::Relaxed) {
             return Err(PluginError::Block("the fake fails its blocks"));
         }
@@ -1225,7 +1218,7 @@ impl Processor for FakeProcessor {
         let log = &self.shared.log;
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.publisher.publish(self.drain.swept());
+        self.drain.applied();
         log.push(Call::FlushParameters(changes.queues.len()));
         Ok(())
     }
