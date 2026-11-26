@@ -166,6 +166,54 @@ fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
     assert_eq!(got, [4_194_305.0 / scale]);
 }
 
+/// A stage that runs for an `i32` wave keeps every bit of it: a stereo wave whose samples
+/// need all 31 magnitude bits, written with the same speakers in the other order (a fold at
+/// unity gain, so a stage runs), reads back with the channels swapped and `n / 2^31` exactly
+/// in a 64-bit float file, whose step is below an `i32`'s. A stage in `f32` would round each
+/// value to 24 bits. (The codec writes no 32-bit integer file: `IntDepth` is 16 or 24.)
+#[cfg(all(feature = "encode-wav", decode))]
+#[test]
+fn an_i32_wave_keeps_its_low_bits_through_a_stage() {
+    use crate::{Pcm, read_wave};
+    use tutti_buffers::{ChannelSet, ChannelTopology, Speaker};
+    let frames = 64usize;
+    let left: Vec<i32> = (0..frames as i32).map(|i| 0x4000_0001 + 3 * i).collect();
+    let right: Vec<i32> = (0..frames as i32).map(|i| -0x2000_0007 - 5 * i).collect();
+    let mut wave = Wave::<i32>::with_topology(
+        ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap(),
+        SampleRate::SR_48K,
+    );
+    for (l, r) in left.iter().zip(&right) {
+        wave.append(Interleaved::new(&[*l, *r], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let swapped =
+        ChannelSet::from(ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).unwrap());
+    let encoding = Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))).channels(swapped);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("swapped.wav");
+    write(&wave, &encoding, &ToFile::new(&path)).unwrap();
+    for back in [
+        read_wave::<f64>(&path).unwrap(),
+        read_wave::<f64>(encode(&wave, &encoding).unwrap()).unwrap(),
+    ] {
+        let exact = |plane: &[i32]| -> Vec<f64> {
+            plane
+                .iter()
+                .map(|&n| f64::from(n) / 2_147_483_648.0)
+                .collect()
+        };
+        assert_eq!(
+            back.channel(0).iter().copied().collect::<Vec<_>>(),
+            exact(&right)
+        );
+        assert_eq!(
+            back.channel(1).iter().copied().collect::<Vec<_>>(),
+            exact(&left)
+        );
+    }
+}
+
 /// A path is refused when something is at it, leaving the old bytes and no temporary,
 /// written when nothing is, and replaced when `replace` says so.
 #[test]

@@ -21,11 +21,9 @@ fn fill_sequential<S: Sample>(file: &mut FileIn<S>, buf: &mut [S]) -> Result<Sam
 /// Write `wave` as a 16-bit WAV named `name` and return its path.
 ///
 /// `Wave` has no writer (the engine's file sink is `EncoderSink`, which needs an encode feature), so this uses
-/// `hound` directly. The directory is per process, and nextest runs each
-/// test in its own, so no two tests share a file.
-fn save_wav16(wave: &Wave, name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("tutti_codec_file_in_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+/// `hound` directly. `dir` is the test's own temporary directory, removed when
+/// the test ends.
+fn save_wav16(dir: &std::path::Path, wave: &Wave, name: &str) -> std::path::PathBuf {
     let path = dir.join(name);
     let spec = hound::WavSpec {
         channels: wave.channels() as u16,
@@ -47,7 +45,7 @@ fn save_wav16(wave: &Wave, name: &str) -> std::path::PathBuf {
 /// Write a scratch WAV for one test. `tag` must be unique per caller:
 /// tests run in parallel, and a shared filename means one test reads the
 /// file while another is still writing it.
-fn write_test_wav(frames: usize, tag: &str) -> std::path::PathBuf {
+fn write_test_wav(dir: &std::path::Path, frames: usize, tag: &str) -> std::path::PathBuf {
     let sample_rate = 44100.0;
     let mut wave = Wave::new(2, SampleRate::of(sample_rate));
     for i in 0..frames {
@@ -57,7 +55,11 @@ fn write_test_wav(frames: usize, tag: &str) -> std::path::PathBuf {
         wave.append(Interleaved::new(&[l, r], ChannelLayout::STEREO).unwrap())
             .unwrap();
     }
-    save_wav16(&wave, &format!("tutti_stream_decoder_{tag}_{frames}.wav"))
+    save_wav16(
+        dir,
+        &wave,
+        &format!("tutti_stream_decoder_{tag}_{frames}.wav"),
+    )
 }
 
 fn loaded_stereo(path: &std::path::Path) -> Vec<[f32; 2]> {
@@ -69,8 +71,9 @@ fn loaded_stereo(path: &std::path::Path) -> Vec<[f32; 2]> {
 
 #[test]
 fn full_sequential_read_matches_full_load() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 20_000usize;
-    let path = write_test_wav(frames, "sequential");
+    let path = write_test_wav(dir.path(), frames, "sequential");
     let expected = loaded_stereo(&path);
 
     let mut dec = FileIn::<f32>::open(&path).expect("open");
@@ -102,8 +105,9 @@ fn full_sequential_read_matches_full_load() {
 
 #[test]
 fn seek_then_poll_matches_slice() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 20_000usize;
-    let path = write_test_wav(frames, "seek");
+    let path = write_test_wav(dir.path(), frames, "seek");
     let expected = loaded_stereo(&path);
 
     let mut dec = FileIn::<f32>::open(&path).expect("open");
@@ -132,8 +136,9 @@ fn seek_then_poll_matches_slice() {
 
 #[test]
 fn poll_past_eof_returns_short_count() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 5_000usize;
-    let path = write_test_wav(frames, "eof");
+    let path = write_test_wav(dir.path(), frames, "eof");
     let expected = loaded_stereo(&path);
 
     let mut dec = FileIn::<f32>::open(&path).expect("open");
@@ -174,10 +179,8 @@ fn asset(name: &str) -> std::path::PathBuf {
 }
 
 /// The repo's `name` fixture cut to its first `keep` fraction.
-fn truncated_asset(name: &str, keep: f64) -> std::path::PathBuf {
+fn truncated_asset(dir: &std::path::Path, name: &str, keep: f64) -> std::path::PathBuf {
     let bytes = std::fs::read(asset(name)).expect("fixture");
-    let dir = std::env::temp_dir().join(format!("tutti_codec_file_in_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join(format!("cut_{name}"));
     std::fs::write(&path, &bytes[..(bytes.len() as f64 * keep) as usize]).expect("write");
     path
@@ -202,7 +205,8 @@ fn drain(dec: &mut FileIn) -> usize {
 /// them and keeps reporting it, and a seek clears it.
 #[test]
 fn a_truncated_flac_is_a_fault_not_a_clean_end() {
-    let path = truncated_asset("stereo.flac", 0.9);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = truncated_asset(dir.path(), "stereo.flac", 0.9);
     let mut dec = FileIn::<f32>::open(&path).expect("a cut file still opens");
     let total = dec.total_frames().expect("flac reports a length").get();
     let mut buf = vec![0.0f32; 1024 * usize::from(dec.layout().count())];
@@ -233,17 +237,22 @@ fn a_truncated_flac_is_a_fault_not_a_clean_end() {
 /// page to open.
 #[test]
 fn a_file_without_an_exact_count_reads_clean() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let mut padded = std::fs::read(asset("stereo.mp3")).expect("fixture");
     padded.extend_from_slice(&[0; 4096]);
-    let dir = std::env::temp_dir().join(format!("tutti_codec_file_in_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let padded_path = dir.join("padded.mp3");
+    let padded_path = dir.path().join("padded.mp3");
     std::fs::write(&padded_path, padded).expect("write");
 
     let cases = [
-        ("trimmed mp3", truncated_asset("stereo.mp3", 0.9)),
+        (
+            "trimmed mp3",
+            truncated_asset(dir.path(), "stereo.mp3", 0.9),
+        ),
         ("padded mp3", padded_path),
-        ("trimmed wav", truncated_asset("stereo_s16.wav", 0.9)),
+        (
+            "trimmed wav",
+            truncated_asset(dir.path(), "stereo_s16.wav", 0.9),
+        ),
         ("whole ogg", asset("stereo.ogg")),
     ];
     for (what, path) in cases {
@@ -299,7 +308,8 @@ impl symphonia::core::formats::FormatReader for FailAfter {
 /// returns the same frames then `Failed`, and `error()` holds the cause.
 #[test]
 fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
-    let path = write_test_wav(20_000, "inject");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_test_wav(dir.path(), 20_000, "inject");
     let open = |left| {
         let mut dec = FileIn::<f32>::open(&path).expect("open");
         let reader = std::mem::replace(
@@ -361,6 +371,7 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
 /// `tests/io/file_in_pump.rs`.)
 #[test]
 fn a_decode_fault_reads_as_failed_through_the_trait() {
+    let dir = tempfile::tempdir().expect("temp dir");
     fn frames_then_stop<I: Source<Sample = f32>>(src: &mut I) -> (usize, Stop) {
         let mut buf = vec![0.0f32; 1024 * usize::from(src.layout().count())];
         let mut frames = 0;
@@ -372,7 +383,7 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
         }
     }
 
-    let cut = truncated_asset("stereo.flac", 0.9);
+    let cut = truncated_asset(dir.path(), "stereo.flac", 0.9);
     let mut dec = FileIn::<f32>::open(&cut).expect("a cut file still opens");
     let total = dec.total_frames().expect("flac reports a length").get();
     let (frames, stop) = frames_then_stop(&mut dec);
@@ -395,7 +406,8 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
 /// A finished file has no error to report.
 #[test]
 fn a_clean_end_of_file_has_no_error() {
-    let path = write_test_wav(3_000, "clean_end");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_test_wav(dir.path(), 3_000, "clean_end");
     let mut dec = FileIn::<f32>::open(&path).expect("open");
     let mut buf = vec![0.0f32; 4096 * 2];
     let end = loop {
@@ -412,7 +424,12 @@ fn a_clean_end_of_file_has_no_error() {
 /// Write an N-channel scratch WAV where channel `c` of frame `i` carries a
 /// value encoding both, so a wrong-channel or wrong-frame read is a wrong
 /// number rather than a plausible one.
-fn write_indexed_wav(channels: usize, frames: usize, tag: &str) -> std::path::PathBuf {
+fn write_indexed_wav(
+    dir: &std::path::Path,
+    channels: usize,
+    frames: usize,
+    tag: &str,
+) -> std::path::PathBuf {
     let sample_rate = 44100.0;
     let mut wave = Wave::zero(
         channels,
@@ -425,6 +442,7 @@ fn write_indexed_wav(channels: usize, frames: usize, tag: &str) -> std::path::Pa
         }
     }
     save_wav16(
+        dir,
         &wave,
         &format!("tutti_stream_indexed_{tag}_{channels}x{frames}.wav"),
     )
@@ -436,8 +454,9 @@ fn write_indexed_wav(channels: usize, frames: usize, tag: &str) -> std::path::Pa
 /// had ever been wider.
 #[test]
 fn interleaved_read_delivers_every_channel() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 128;
-    let path = write_indexed_wav(6, frames, "every_channel");
+    let path = write_indexed_wav(dir.path(), 6, frames, "every_channel");
     let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout(), ChannelLayout::from(6u16));
 
@@ -466,8 +485,9 @@ fn interleaved_read_delivers_every_channel() {
 /// channels for the rest of the stream.
 #[test]
 fn interleaved_read_stays_frame_aligned_across_packets() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 4096;
-    let path = write_indexed_wav(6, frames, "packet_boundary");
+    let path = write_indexed_wav(dir.path(), 6, frames, "packet_boundary");
     let mut decoder = FileIn::<f32>::open(&path).expect("open");
 
     // Read in small odd-sized chunks so reads land mid-packet repeatedly.
@@ -502,6 +522,7 @@ fn interleaved_read_stays_frame_aligned_across_packets() {
 /// fold, no truncation.
 #[test]
 fn pull_delivers_the_files_own_width() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 64;
     let sample_rate = 44100.0;
     // 5.1 order L R C LFE Ls Rs — centre only.
@@ -513,7 +534,7 @@ fn pull_delivers_the_files_own_width() {
     for i in 0..frames {
         wave.set(2, i, 0.5);
     }
-    let path = save_wav16(&wave, "tutti_stream_centre_only.wav");
+    let path = save_wav16(dir.path(), &wave, "tutti_stream_centre_only.wav");
 
     let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout().count(), 6u16, "the trait reports the file");
@@ -541,6 +562,7 @@ fn pull_delivers_the_files_own_width() {
 /// **A mono file stays one channel wide.** It is not duplicated to stereo.
 #[test]
 fn a_mono_file_is_not_widened() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 64;
     let sample_rate = 44100.0;
     let mut wave = Wave::zero(
@@ -553,7 +575,7 @@ fn a_mono_file_is_not_widened() {
     for i in 0..frames {
         wave.set(0, i, i as f32 / frames as f32);
     }
-    let path = save_wav16(&wave, "tutti_stream_mono_native.wav");
+    let path = save_wav16(dir.path(), &wave, "tutti_stream_mono_native.wav");
 
     let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout(), ChannelLayout::MONO, "no widening");
@@ -575,6 +597,7 @@ fn a_mono_file_is_not_widened() {
 /// for it, as the impl docs describe.
 #[test]
 fn a_caller_can_still_fold_to_stereo_itself() {
+    let dir = tempfile::tempdir().expect("temp dir");
     let frames = 64;
     let sample_rate = 44100.0;
     let mut wave = Wave::zero(
@@ -585,7 +608,7 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     for i in 0..frames {
         wave.set(2, i, 0.5); // centre only, as above
     }
-    let path = save_wav16(&wave, "tutti_stream_caller_fold.wav");
+    let path = save_wav16(dir.path(), &wave, "tutti_stream_caller_fold.wav");
 
     let mut decoder = FileIn::<f32>::open(&path).expect("open");
     let ch = decoder.layout().count() as usize;
@@ -621,7 +644,8 @@ fn a_caller_can_still_fold_to_stereo_itself() {
 /// and the view keeps what it held.
 #[test]
 fn a_view_of_another_width_is_refused_and_untouched() {
-    let path = write_test_wav(64, "width_refused");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_test_wav(dir.path(), 64, "width_refused");
     for view in [ChannelLayout::MONO, ChannelLayout::from_count(3)] {
         let mut file = FileIn::<i16>::open(&path).expect("open");
         let mut buf = [7i16; 12];
