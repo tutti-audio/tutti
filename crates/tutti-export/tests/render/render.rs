@@ -1130,9 +1130,8 @@ fn an_unnamed_main_output_width_exports_at_that_width() {
     }
 }
 
-/// The same widths through the in-memory path and back out, so `write_buffers`
-/// and `render_to_buffers` are covered too — all three entry points went through
-/// the same rejecting dispatch.
+/// The same widths through the in-memory path and back out through
+/// `tutti_codec::write`: a buffer render of an odd width writes and reads back.
 #[test]
 fn an_odd_width_round_trips_through_buffers() {
     use support::write_rendered;
