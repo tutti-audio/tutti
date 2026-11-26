@@ -8,7 +8,6 @@
 
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
-use tutti_graph::{fold_to_channels, fold_to_topology_with};
 use tutti_units::Amplitude;
 
 /// The device channel each channel of what is heard goes to.
@@ -144,11 +143,15 @@ impl Routing {
         let device_width = device.width();
         let heard = self.monitor.as_ref().unwrap_or(main_output);
         let to_heard = match &self.monitor {
-            Some(monitor) => Some(fold_to_topology_with(main_output, monitor, self.levels)?),
+            Some(monitor) => Some(
+                Fold::to_channels(main_output, &ChannelSet::from(*monitor))
+                    .levels(self.levels)
+                    .build()?,
+            ),
             None => None,
         };
         let to_device = match self.map.targets() {
-            None => fold_to_channels(heard, device, FoldLevels::default())?,
+            None => Fold::to_channels(heard, device).build()?,
             Some(to) => {
                 if to.len() != usize::from(heard.width().count()) {
                     return Err(RoutingError::MapWidth {

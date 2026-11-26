@@ -2875,7 +2875,7 @@ impl<F: Float> Graph<F> {
     ///   must be the same width. A bus into the main output may be narrower than it:
     ///   it is placed by speaker, on the topology the main output was declared with,
     ///   else on the engine's order for the main output's width
-    ///   ([`fold_to_width`](tutti_graph::fold_to_width)), so a mono source
+    ///   ([`Fold::to_channels`](tutti_buffers::Fold::to_channels)), so a mono source
     ///   feeds both channels of a stereo main output at gain 1.0. A placement that
     ///   would weight a channel (a centre into a main output with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
@@ -3539,7 +3539,7 @@ impl<F: Float> Graph<F> {
 
     /// Whether `main_output` can be a main output, and be placed on `device` when there is
     /// one: not empty (a topology is never wider than the engine renders), and every
-    /// channel has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
+    /// channel has a place on the device ([`Fold::to_channels`](tutti_buffers::Fold::to_channels)).
     pub(crate) fn check_main_output(
         main_output: &tutti_buffers::ChannelTopology,
         device: Option<&tutti_buffers::ChannelSet>,
@@ -3549,11 +3549,7 @@ impl<F: Float> Graph<F> {
             return Err(BufferError::ZeroWidth.into());
         }
         if let Some(device) = device {
-            tutti_graph::fold_to_channels::<f32>(
-                main_output,
-                device,
-                tutti_buffers::FoldLevels::default(),
-            )?;
+            tutti_buffers::Fold::<f32>::to_channels(main_output, device).build()?;
         }
         Ok(())
     }
