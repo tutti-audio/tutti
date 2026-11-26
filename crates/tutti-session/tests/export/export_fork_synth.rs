@@ -11,8 +11,6 @@ use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_session::MainOutput;
 
-use tutti_export::Produced;
-
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -22,7 +20,7 @@ use tutti_midi_runtime::TimedMidiEvent;
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::BufferMainOutput;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem,
+    Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem, StemKey,
 };
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
@@ -68,11 +66,11 @@ fn render_stem(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMainOutput>,
 ) -> Vec<Vec<f32>> {
-    let (_, mut stems) = bounced(session, bounce)
+    let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
-    match stems.pop() {
-        Some(Produced::Buffers(rendered)) if stems.is_empty() => rendered.into_planes(),
+    match keys.as_slice() {
+        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").into_planes(),
         other => panic!("expected one stem held in memory, got {other:?}"),
     }
 }

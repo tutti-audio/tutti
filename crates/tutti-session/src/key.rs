@@ -461,7 +461,7 @@ impl Wire for ChannelWire {
         to: InputPort,
         hard: bool,
     ) -> Result<bool, ConnectError> {
-        graph.check_wire(from, to)?;
+        graph.check_wire(None, from, to)?;
         Ok(graph.remove_edge(from, to, hard))
     }
     fn harden<F: Float>(
@@ -484,7 +484,7 @@ impl Wire for MainBusWire {
         from: NodeKey,
         to: MainSink,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        let wires = graph.main_wires(from, to)?;
+        let wires = graph.main_wires(None, from, to)?;
         let mut edges = Vec::with_capacity(wires.len());
         for (out, input) in wires {
             let added = graph.add_edge(out, input)?;
@@ -498,7 +498,7 @@ impl Wire for MainBusWire {
         to: MainSink,
         hard: bool,
     ) -> Result<bool, ConnectError> {
-        let wires = match graph.main_wires(from, to) {
+        let wires = match graph.main_wires(None, from, to) {
             Ok(wires) => wires,
             // A main bus that is not wired (no bus there, another width) has
             // no edge to take out; a node that is not there is a mistake.
@@ -540,7 +540,7 @@ impl Wire for BusWire {
         to: BusInputPort,
         hard: bool,
     ) -> Result<bool, ConnectError> {
-        graph.check_bus_nodes(from, to)?;
+        graph.check_bus_nodes(None, from, to)?;
         Ok(graph.remove_bus_edge(from, to, hard))
     }
     fn harden<F: Float>(
@@ -570,7 +570,7 @@ impl Wire for EventWire {
         to: EventInputPort,
         _hard: bool,
     ) -> Result<bool, ConnectError> {
-        graph.check_event_wire(from, to)?;
+        graph.check_event_wire(None, from, to)?;
         Ok(graph.remove_event_edge(from, to))
     }
     fn harden<F: Float>(
@@ -616,7 +616,7 @@ pub trait Fanin: Sealed + Copy {
 impl Fanin for InputPort {
     type Source = OutputPort;
     fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<OutputPort>, ConnectError> {
-        graph.check_in(self)?;
+        graph.check_in(None, self)?;
         Ok(graph.channel_sources(self))
     }
     fn set_sources<F: Float>(
@@ -632,7 +632,7 @@ impl Fanin for InputPort {
 impl Fanin for EventInputPort {
     type Source = EventOutputPort;
     fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<EventOutputPort>, ConnectError> {
-        graph.check_event_in(self)?;
+        graph.check_event_in(None, self)?;
         Ok(graph.event_sources_of(self))
     }
     fn set_sources<F: Float>(

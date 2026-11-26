@@ -78,7 +78,7 @@ use crate::output::FileTarget;
 /// target already under the limit is unchanged. [`Written::clipped_samples`]
 /// counts what is clamped all the same, and [`Written::gain`] is the gain to
 /// the lowered target. An output that takes another's gain
-/// ([`GainSource::FromOutput`](crate::GainSource::FromOutput)) keeps that
+/// ([`Gain::Of`](crate::Gain::Of)) keeps that
 /// output's headroom, not its own.
 ///
 /// # Quiet audio

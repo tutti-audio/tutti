@@ -1,8 +1,8 @@
 //! What a render writes, and where each output reads from.
 //!
 //! One render pass feeds a list of [`Output`]s. An output is a [`Feed`] (the
-//! audio it reads: the graph's outputs, or a plan tap) and a [`Target`] (what
-//! it becomes: a file, or planes in memory). Every type has private fields, a
+//! audio it reads: the graph's outputs, or a plan tap) and a target (what
+//! it becomes: a [`FileTarget`], or a [`BufferTarget`] of planes in memory). Every type has private fields, a
 //! constructor and getters, and none has a default for a rate, a format or a
 //! duration.
 
@@ -13,63 +13,20 @@ use tutti_buffers::{Float, FoldError};
 use tutti_codec::{Encoding, ToFile};
 use tutti_graph::TapReader;
 
+use crate::FileKey;
 use crate::normalize::Normalize;
-use crate::{Rendered, Written};
 
-/// Where the gain of a normalizing output comes from ([`NormalizeSpec`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a file output is normalized, and whose reading sets its gain.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub enum GainSource {
-    /// This output is measured, and its own reading chooses the gain.
-    Own,
-    /// The output at this index (in the list given to [`render`](crate::render()))
-    /// is measured and this one takes its gain, so the two keep their
-    /// balance (stems that still sum to the main output). The index must name
-    /// another output that normalizes by [`Own`](Self::Own).
-    FromOutput(usize),
-}
-
-/// How a file output is normalized: a policy, and whose reading it follows.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NormalizeSpec {
-    mode: Normalize,
-    gain: GainSource,
-}
-
-impl NormalizeSpec {
-    /// Measures this output and normalizes it by `mode`.
-    #[must_use]
-    pub fn own(mode: Normalize) -> Self {
-        Self {
-            mode,
-            gain: GainSource::Own,
-        }
-    }
-
-    /// Applies the gain measured on the output at `index`.
-    ///
-    /// `mode` is not consulted for the gain (the measured output's is); it is
-    /// the policy this output would have been given on its own, and is kept so
-    /// the spec states what the file was asked to be.
-    #[must_use]
-    pub fn from_output(mode: Normalize, index: usize) -> Self {
-        Self {
-            mode,
-            gain: GainSource::FromOutput(index),
-        }
-    }
-
-    /// The normalize policy.
-    #[must_use]
-    pub(crate) fn mode(&self) -> Normalize {
-        self.mode
-    }
-
-    /// Whose reading the gain comes from.
-    #[must_use]
-    pub(crate) fn gain(&self) -> GainSource {
-        self.gain
-    }
+pub enum Gain {
+    /// This output is measured, and its own reading chooses the gain by the policy.
+    Own(Normalize),
+    /// The file output `FileKey` names is measured and this one takes its gain, so the two
+    /// keep their balance (stems that still sum to the main output). The key must name
+    /// another output of the same [`Outputs`](crate::Outputs) that normalizes by
+    /// [`Own`](Self::Own).
+    Of(FileKey),
 }
 
 /// The width of a target, stated once: a bare count of channels, or the
@@ -122,7 +79,7 @@ impl Width {
 pub struct FileTarget {
     encoding: Encoding,
     to: ToFile,
-    pub(crate) normalize: Option<NormalizeSpec>,
+    pub(crate) normalize: Option<Gain>,
 }
 
 impl FileTarget {
@@ -137,7 +94,7 @@ impl FileTarget {
         }
     }
 
-    /// Normalizes this output ([`NormalizeSpec`]); without it the output is
+    /// Normalizes this output ([`Gain`]); without it the output is
     /// written as rendered.
     ///
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
@@ -147,7 +104,7 @@ impl FileTarget {
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
     #[must_use]
-    pub fn normalize(mut self, normalize: NormalizeSpec) -> Self {
+    pub fn normalize(mut self, normalize: Gain) -> Self {
         self.normalize = Some(normalize);
         self
     }
@@ -169,7 +126,7 @@ impl FileTarget {
 
 /// Planes in memory: an output rendered at the render's rate, not resampled
 /// and not dithered (they are not an output a listener hears), returned as a
-/// [`Rendered`].
+/// [`Rendered`](crate::Rendered).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BufferTarget {
     pub(crate) width: Width,
@@ -192,32 +149,20 @@ impl BufferTarget {
         self
     }
 
+    /// The channels the planes stand for.
+    pub(crate) fn channel_set(&self) -> ChannelSet {
+        self.width.channel_set()
+    }
+
+    /// Whether the speakers are stated or the default layout for the width.
+    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
+        self.width.placement()
+    }
+
     /// The planes' width.
     #[must_use]
     pub fn channels(&self) -> ChannelLayout {
         self.width.layout()
-    }
-}
-
-/// What an output becomes.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum Target {
-    /// A file.
-    File(FileTarget),
-    /// Planes in memory.
-    Buffers(BufferTarget),
-}
-
-impl From<FileTarget> for Target {
-    fn from(target: FileTarget) -> Self {
-        Self::File(target)
-    }
-}
-
-impl From<BufferTarget> for Target {
-    fn from(target: BufferTarget) -> Self {
-        Self::Buffers(target)
     }
 }
 
@@ -288,30 +233,32 @@ pub enum Feed<F: Float = f32> {
     },
 }
 
-/// One thing a render writes: the [`Feed`] it reads and the [`Target`] it
-/// becomes.
+/// One thing a render writes: the [`Feed`] it reads and the target it
+/// becomes, a [`FileTarget`] or a [`BufferTarget`]. It is added to
+/// [`Outputs`](crate::Outputs) by its kind, which hands back the key its result
+/// is read by.
 #[derive(Debug)]
-pub struct Output<F: Float = f32> {
+pub struct Output<T, F: Float = f32> {
     feed: Feed<F>,
-    target: Target,
+    target: T,
 }
 
-impl<F: Float> Output<F> {
+impl<T, F: Float> Output<T, F> {
     /// The graph's outputs, into `target`.
     #[must_use]
-    pub fn main_output(target: impl Into<Target>) -> Self {
+    pub fn main_output(target: T) -> Self {
         Self {
             feed: Feed::MainOutput,
-            target: target.into(),
+            target,
         }
     }
 
     /// What `reader` taps, placed as `lanes`, into `target`.
     #[must_use]
-    pub fn tap(reader: TapReader<F>, lanes: Placement, target: impl Into<Target>) -> Self {
+    pub fn tap(reader: TapReader<F>, lanes: Placement, target: T) -> Self {
         Self {
             feed: Feed::Tap { reader, lanes },
-            target: target.into(),
+            target,
         }
     }
 
@@ -323,72 +270,12 @@ impl<F: Float> Output<F> {
 
     /// What this output becomes.
     #[must_use]
-    pub fn target(&self) -> &Target {
+    pub fn target(&self) -> &T {
         &self.target
     }
 
-    pub(crate) fn into_parts(self) -> (Feed<F>, Target) {
+    pub(crate) fn into_parts(self) -> (Feed<F>, T) {
         (self.feed, self.target)
-    }
-}
-
-/// What one [`Output`] produced, in the order the outputs were given.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum Produced<F: Float = f32> {
-    /// From a [`Target::File`].
-    File(Written),
-    /// From a [`Target::Buffers`].
-    Buffers(Rendered<F>),
-}
-
-impl<F: Float> Produced<F> {
-    /// The file, or `None` for planes.
-    ///
-    /// ```
-    /// # use tutti_export::{Produced, Rendered};
-    /// # use tutti_units::SampleRate;
-    /// let all = vec![Produced::Buffers(
-    ///     Rendered::new(vec![vec![0.0; 4]], SampleRate::SR_48K, 0)?,
-    /// )];
-    /// // Borrowed, so an output in a list is read in place.
-    /// assert!(all[0].file().is_none());
-    /// assert_eq!(all[0].buffers().map(Rendered::channels), Some(1));
-    /// # Ok::<(), tutti_export::RenderedError>(())
-    /// ```
-    #[must_use]
-    pub fn file(&self) -> Option<&Written> {
-        match self {
-            Self::File(written) => Some(written),
-            Self::Buffers(_) => None,
-        }
-    }
-
-    /// The planes, or `None` for a file.
-    #[must_use]
-    pub fn buffers(&self) -> Option<&Rendered<F>> {
-        match self {
-            Self::Buffers(rendered) => Some(rendered),
-            Self::File(_) => None,
-        }
-    }
-
-    /// The file, owned, or `None` for planes.
-    #[must_use]
-    pub fn into_file(self) -> Option<Written> {
-        match self {
-            Self::File(written) => Some(written),
-            Self::Buffers(_) => None,
-        }
-    }
-
-    /// The planes, owned, or `None` for a file.
-    #[must_use]
-    pub fn into_buffers(self) -> Option<Rendered<F>> {
-        match self {
-            Self::Buffers(rendered) => Some(rendered),
-            Self::File(_) => None,
-        }
     }
 }
 
@@ -408,15 +295,17 @@ pub enum TargetError {
         /// The placement's width.
         placement: ChannelLayout,
     },
-    /// A [`GainSource::FromOutput`] that names this output, an output past
-    /// the list, or one that does not measure itself.
+    /// A [`Gain::Of`] that names an output that does not measure itself.
     #[error(
         "the gain is to come from output {index}, which is not another output that measures itself"
     )]
     GainSource {
-        /// The index it names.
+        /// The position of the output it names.
         index: usize,
     },
+    /// A [`Gain::Of`] key that another [`Outputs`](crate::Outputs) made.
+    #[error("the gain is to come from a key of another Outputs")]
+    ForeignGain,
     /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
     /// is weighted by each speaker's placement, and a file with no stated
     /// topology is taken to be [`ChannelTopology::default_for`] for its width, which

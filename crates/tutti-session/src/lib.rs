@@ -181,6 +181,8 @@ mod transport_handle;
     feature = "export"
 ))]
 mod unblocked;
+mod wire_ends;
+pub use wire_ends::{Chain, Connected, InputEnd, Mention, OutputEnd, WireEnd, WireStart};
 mod value;
 #[cfg(feature = "device")]
 mod watch;
@@ -196,7 +198,7 @@ pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
     BounceRendered, BounceTail, Bounced, Bouncing, BufferMainOutput, BufferStem, ExportClock,
     FileMainOutput, FileStem, MainOutputKind, NoMainOutput, PrepareEdit, PreparedGraph, Range,
-    Stem, StemGain,
+    Stem, StemGain, StemKey,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
@@ -319,7 +321,7 @@ use hang::HangDetector;
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
-pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchError, PatchTarget};
+pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, WireEnds};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
@@ -340,7 +342,8 @@ pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, Samp
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::{
-    AppKey, MainOutputTopologyStatus, PHASES, Patched, Phase, PhaseCx, Session, SessionEvent,
+    AppKey, MainOutputTopologyStatus, PHASES, PatchError, Patched, Phase, PhaseCx, Session,
+    SessionEvent,
 };
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 pub use signal_windows::windows_from_signal;
@@ -359,7 +362,8 @@ pub use tutti_dsp::DitherShape;
 pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
-    EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Stage, Written,
+    BufferKey, Done, DoneError, EventLossPolicy, FileKey, Normalize, Outcome, Progress, Rendered,
+    Stage, Written,
 };
 pub use tutti_graph::{
     BusError, BusOutputPort, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,

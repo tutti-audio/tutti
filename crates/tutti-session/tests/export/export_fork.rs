@@ -22,7 +22,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::ThreadId;
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
-use tutti_export::Produced;
 use tutti_fixtures::block_on;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -36,7 +35,7 @@ use tutti_rt::Param;
 use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InputPort,
-    MainOutput, OutputPort, PreparedGraph, Range, Session, Stem,
+    MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemKey,
 };
 use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
@@ -94,13 +93,12 @@ fn render_stems(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMainOutput>,
 ) -> Vec<Vec<Vec<f32>>> {
-    let (_, stems) = bounced(session, bounce)
+    let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
-    stems
-        .into_iter()
-        .map(|p| match p {
-            Produced::Buffers(rendered) => rendered.into_planes(),
+    keys.iter()
+        .map(|key| match key {
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").into_planes(),
             other => panic!("expected rendered buffers, got {other:?}"),
         })
         .collect()
@@ -163,9 +161,7 @@ fn chain(session: &mut DetachedSession) -> NodeKey {
 /// both the filter, of which a mono stem is the first). A fork starts reset,
 /// which is what a fresh graph is.
 fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
-    use tutti_export::{
-        BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup, render_one,
-    };
+    use tutti_export::{BufferTarget, Control, Job, Output, Outputs, RenderGraph, Setup, render};
     use tutti_graph::GraphBuilder;
     use tutti_timeline::FrozenClock;
     let render = |main_output: bool| {
@@ -184,7 +180,11 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         let mut graph =
             RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
         let rate = SampleRate::of(RATE);
-        render_one(
+        let mut outputs = Outputs::new();
+        let planes = outputs.buffers(Output::main_output(BufferTarget::new(
+            ChannelLayout::STEREO,
+        )));
+        render(
             &mut graph,
             &Job::new(
                 rate,
@@ -194,13 +194,14 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
             )
             .expect("a render"),
             &FrozenClock,
-            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
+            outputs,
             &mut Control::none(),
         )
         .expect("renders")
         .into_finished()
-        .and_then(Produced::into_buffers)
         .expect("nothing cancels a control with no token")
+        .take_buffers(&planes)
+        .expect("a key of these outputs")
         .into_planes()
     };
     (render(true), render(false))

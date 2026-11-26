@@ -225,10 +225,11 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, Declarations, InputPort, IntoPatch, Key,
-    KeyError, MainOutput, NoSuchNode, NodeDecl, Offline, OfflineSession, OutputPort, PatchError,
-    PatchTarget, Patched, Playhead, RealTime, Session, SessionBuilder, SessionEvent, SessionFloat,
-    SystemClock, SystemSession, TransportHandle, Workers,
+    AppKey, BlockDates, Chain, ChannelEdge, Clock, ConnectError, Connected, Declarations, InputEnd,
+    InputPort, IntoPatch, Key, KeyError, MainOutput, Mention, NoSuchNode, NodeDecl, Offline,
+    OfflineSession, OutputEnd, OutputPort, PatchError, PatchTarget, Patched, Playhead, RealTime,
+    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    TransportHandle, WireEnd, WireEnds, WireStart, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -543,7 +544,8 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
+        ConfigError, DoneError, JobError, RenderError, Rendered, RenderedError, TargetError,
+        Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,
@@ -584,10 +586,10 @@ pub mod session {
     pub use tutti_session::SamplerError;
     #[cfg(feature = "export")]
     pub use tutti_session::{
-        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
-        BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
-        MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
-        Progress, Stage,
+        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing, BufferKey,
+        BufferMainOutput, BufferStem, Done, EventLossPolicy, ExportClock, FileKey, FileMainOutput,
+        FileStem, MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph,
+        Progress, Stage, StemKey,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
