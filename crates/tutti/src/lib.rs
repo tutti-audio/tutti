@@ -586,7 +586,7 @@ pub mod session {
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
         BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
         MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
-        Progress, Resample, Stage,
+        Progress, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{

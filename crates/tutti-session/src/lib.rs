@@ -352,8 +352,6 @@ pub use take::{
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
 pub use transport_handle::TransportHandle;
-#[cfg(feature = "export")]
-pub use tutti_codec::Resample;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
