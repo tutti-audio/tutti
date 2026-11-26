@@ -43,6 +43,7 @@ fn tone() -> Result<Session, tutti::Error> {
 /// The first two seconds of the session, in stereo.
 fn two_seconds() -> Bounce {
     Bounce::new()
+        .replace() // overwrite the file a previous run wrote
         .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
         .channels(ChannelLayout::STEREO) // left and right
 }

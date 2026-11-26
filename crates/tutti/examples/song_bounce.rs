@@ -118,8 +118,10 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
 
     // Eight beats, to a 24-bit WAV.
     let path = dir.join("song.wav");
+    // `replace`: a second run overwrites the file the first one wrote.
     let rendering = s.bounce(
         Bounce::new()
+            .replace()
             .range(Beat::new(0.0)..Beat::new(8.0))
             .main_output(&path, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
     )?;
