@@ -35,7 +35,7 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
     /// The cells form's `build` has no use for it.
     fn build(&self, host: &HostValues) -> Self::Node;
 
-    /// Whether `other` makes the same node but for its declared param values:
+    /// Whether `other` makes the same node but for its values (params and kinded settings):
     /// `false` means a new node, `true` means the running node stays and the
     /// differing [`initials`](Self::initials) are written to it.
     fn same_structure(&self, other: &Self) -> bool;
