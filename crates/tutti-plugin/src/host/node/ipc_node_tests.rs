@@ -701,31 +701,3 @@ fn a_served_forks_wait_is_its_nodes_prepare_and_nothing_else() {
     fork.unit.node.prepare(&prepare(RenderMode::Realtime));
     assert!(!fork.wait.armed(), "and a realtime one disarms it");
 }
-
-/// **A served read or save after a write waits for the server's answer through
-/// the same settle every plugin uses**: the first poll asks for the flush and
-/// is `Pending`, and the answer makes a later one `Ready`.
-#[test]
-fn a_served_settle_is_pending_until_the_flush_is_answered() {
-    use std::task::Poll;
-    use tutti_plugin_host::MainThreadControl;
-    use tutti_plugin_types::AnyThread;
-    let (ipc, _record, _threads) = served(rig());
-    let controller = ipc.controller();
-    let main = tutti_fixtures::main_thread();
-    assert_eq!(
-        AnyThread::set_parameter_value(
-            &controller,
-            ParamId::new(PARAMS[0]),
-            tutti_units::Normalized::of(0.5)
-        ),
-        Ok(())
-    );
-    let mut pending = controller.writes();
-    assert_eq!(controller.settle(main, &mut pending), Poll::Pending);
-    tutti_fixtures::wait_until(
-        "the flush's answer",
-        std::time::Duration::from_secs(30),
-        || controller.settle(main, &mut pending).is_ready(),
-    );
-}

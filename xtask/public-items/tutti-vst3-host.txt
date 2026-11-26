@@ -105,7 +105,6 @@ fn host::processor::ProcessorAny::is_f64
 fn host::processor::ProcessorAny::is_processing
 fn host::processor::ProcessorAny::render
 fn host::processor::ProcessorAny::take_edits
-fn host::processor::Vst3Processor::edits_dropped
 fn host::processor::Vst3Processor::event_text_dropped
 fn host::processor::Vst3Processor::events_dropped
 fn host::processor::Vst3Processor::flush_changes

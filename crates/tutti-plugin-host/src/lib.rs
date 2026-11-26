@@ -45,9 +45,7 @@ mod wakeups;
 #[cfg(test)]
 mod walk_tests;
 
-pub use control_handle::{
-    InstanceId, MainThreadControl, PendingWrites, PluginHandle, PluginStatus,
-};
+pub use control_handle::{InstanceId, MainThreadControl, PluginHandle, PluginStatus};
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use fork_state::ForkState;
 pub use in_process_erased::{

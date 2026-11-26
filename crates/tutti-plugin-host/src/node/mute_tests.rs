@@ -395,32 +395,3 @@ fn a_host_write_wakes_a_parked_node() {
     rig.block();
     assert!(rig.processed() > before, "the write called the parked node");
 }
-
-/// **A settle waiting for the Processor's block wakes the node that runs it.**
-/// A value the plugin's Controller queued for its Processor leaves the settle
-/// `Pending`; the executor parked the node, and the wake the settle raises
-/// calls it, so its next block takes the value.
-#[test]
-fn a_pending_settle_wakes_a_parked_node() {
-    let mut rig = Rig::new();
-    rig.rest();
-    let id = ParamId::new(1);
-    let mut instance = rig.inner.lock();
-    let control = instance.control().expect("alive");
-    control
-        .set_parameter(main_thread(), id, tutti_units::Normalized::of(0.5))
-        .expect("a declared parameter");
-    assert!(
-        rig.post
-            .settle(main_thread(), control, &mut rig.post.pending())
-            .is_pending()
-    );
-    drop(instance);
-    rig.block();
-    assert!(
-        rig.fake
-            .calls()
-            .contains(&Call::Edit(id, tutti_units::Normalized::of(0.5))),
-        "the woken node's block took the Controller's value"
-    );
-}

@@ -56,7 +56,7 @@ pub(crate) enum Arrival {
         node: NodeKey,
         token: Arc<()>,
         asked: Instant,
-        state: Result<Vec<u8>, StateError>,
+        state: Result<tutti_plugin_types::PluginState, StateError>,
     },
 }
 
@@ -115,7 +115,7 @@ impl Post {
         node: NodeKey,
         token: Arc<()>,
         asked: Instant,
-        state: Result<Vec<u8>, StateError>,
+        state: Result<tutti_plugin_types::PluginState, StateError>,
     ) {
         let _ = self.0.send(Arrival::Snapshot {
             node,

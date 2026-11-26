@@ -269,8 +269,11 @@ pub(crate) mod tests {
                 ParameterInfo::new(ID, "bypass").with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
             ]))
         }
-        fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::Answer::ready(self.read())
+        fn parameter_value(
+            &self,
+            _id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
+            tutti_plugin_types::Answer::ready(self.read().map(tutti_plugin_types::PluginValue::new))
         }
         /// The way an in-process backend reads it: the plugin's own value, at
         /// once.
@@ -319,7 +322,7 @@ pub(crate) mod tests {
         fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self, _: StateUse) -> Result<Vec<u8>, StateError> {
+        fn save_state(&self, _: StateUse) -> Result<tutti_plugin_types::PluginState, StateError> {
             Err(StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: RenderMode) -> bool {
