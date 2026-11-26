@@ -48,6 +48,9 @@ pub enum SlotId {
     /// The session's MPE mode.
     #[cfg(feature = "midi")]
     MpeMode,
+    /// The MPE 1.1 zones of one Group of a MIDI output port's device.
+    #[cfg(feature = "midi-hardware")]
+    Mpe11((NodeKey, tutti_ump::MidiGroup)),
     /// The events a MIDI clip node plays.
     #[cfg(feature = "midi")]
     ClipEvents(NodeKey),
@@ -112,6 +115,8 @@ impl SlotId {
             Self::MidiPolicy => false,
             #[cfg(feature = "midi")]
             Self::OutputLatency => false,
+            #[cfg(feature = "midi-hardware")]
+            Self::Mpe11(_) => false,
             #[cfg(feature = "plugin")]
             Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
             #[cfg(feature = "plugin")]
@@ -153,6 +158,8 @@ impl SlotId {
             | Self::Looping(node)
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
+            #[cfg(feature = "midi-hardware")]
+            Self::Mpe11((node, _)) => Some(node),
             #[cfg(feature = "plugin")]
             Self::PluginAutomationMode(node)
             | Self::PluginTrackInfo(node)
@@ -719,6 +726,39 @@ slot_target!(
     tutti_midi_protocol::MpeMode,
     SlotId::MpeMode
 );
+
+#[cfg(feature = "midi-hardware")]
+keyed_slot_target!(
+    /// The MPE 1.1 (M1-100) zones an app chooses for one Group of a MIDI output
+    /// port's device, as `Mpe11Target::of(output.node(), group)` names them:
+    /// `Some` sends the Configuration Message of each zone and then MPE to it,
+    /// `None` ends the zones (a Configuration Message with no Member Channels).
+    /// It is the alternate translation M2-104 D.4.2 allows for a device that
+    /// has no MPE Profile: an MPE Profile the device enables takes precedence
+    /// while it is enabled, and the zones here are used again after it ends.
+    ///
+    /// A write lands in the next [`Session::update`](crate::Session::update).
+    /// The value is kept across an unplug and a replug of the port: the device
+    /// that returns is sent the zones in force. A read answers the value last
+    /// written, `None` before any. The target exists while the node is a MIDI
+    /// output port of the session ([`MidiOutput::node`](crate::MidiOutput::node));
+    /// a call that names any other node, or a port that has left, fails with
+    /// `NoSuchTarget`.
+    Mpe11Target,
+    Option<tutti_midi_protocol::Mpe11Zones>,
+    (NodeKey, tutti_ump::MidiGroup),
+    Mpe11
+);
+
+#[cfg(feature = "midi-hardware")]
+impl Mpe11Target {
+    /// The zones of `group` of the device output port at `node`
+    /// ([`MidiOutput::node`](crate::MidiOutput::node)).
+    #[must_use]
+    pub fn of(node: impl Into<NodeKey>, group: tutti_ump::MidiGroup) -> Self {
+        Self::new((node.into(), group))
+    }
+}
 
 /// A setting held in one atomic word ([`AtomicWord`]): the click's
 /// [`MetronomeMode`], as `session.click().mode()` names it, or a node's, as its
