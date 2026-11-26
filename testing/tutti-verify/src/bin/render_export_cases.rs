@@ -119,7 +119,6 @@ struct Case {
     format: Format,
     channels: ChannelLayout,
     resample: Option<Resample>,
-    dither: Option<tutti_dsp::DitherShape>,
 }
 
 impl Case {
@@ -127,29 +126,12 @@ impl Case {
         self.job
     }
 
-    /// The format with this case's dither on its integer type (a float type has none).
-    fn quantized(&self) -> Format {
-        let int = |pcm: IntPcm| match self.dither {
-            Some(shape) => pcm.dither(shape),
-            None => pcm.no_dither(),
-        };
-        match self.format {
-            Format::Wav(Pcm::Int(pcm)) => Format::Wav(Pcm::Int(int(pcm))),
-            Format::Aiff(Pcm::Int(pcm)) => Format::Aiff(Pcm::Int(int(pcm))),
-            Format::Flac { pcm, level } => Format::Flac {
-                pcm: int(pcm),
-                level,
-            },
-            float => float,
-        }
-    }
-
     fn file_target(
         &self,
         path: impl Into<std::path::PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        let target = FileTarget::new(path, self.quantized(), self.channels);
+        let target = FileTarget::new(path, self.format, self.channels);
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,
@@ -174,7 +156,6 @@ fn base(format: Format, channels: ChannelLayout) -> Case {
         format,
         channels,
         resample: None,
-        dither: None,
     }
 }
 
@@ -229,8 +210,8 @@ fn main() -> tutti_export::Result<()> {
     // there is no such file to ask for.
     for ext in ["wav", "flac", "aiff"] {
         for (depth, tag) in [
-            (Pcm::Int(IntPcm::new(IntDepth::Int16)), "i16"),
-            (Pcm::Int(IntPcm::new(IntDepth::Int24)), "i24"),
+            (Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()), "i16"),
+            (Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()), "i24"),
             (Pcm::Float(FloatWidth::F32), "f32"),
         ] {
             let Some(fmt) = container(ext, depth) else {
@@ -252,7 +233,7 @@ fn main() -> tutti_export::Result<()> {
     // truncation disagree (0.7 x 32767 = 22936.9).
     for (level, tag) in [(0.7f32, "p70"), (-0.7, "n70")] {
         for ext in ["wav", "flac", "aiff"] {
-            let fmt = container(ext, Pcm::Int(IntPcm::new(IntDepth::Int16)))
+            let fmt = container(ext, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()))
                 .expect("every container holds 16 bits");
             write(
                 format!("dc_{tag}_{ext}_i16.{ext}"),
@@ -272,11 +253,12 @@ fn main() -> tutti_export::Result<()> {
         (Some(DitherShape::Rectangular), "rect"),
         (Some(DitherShape::Triangular), "tri"),
     ] {
-        let mut cfg = base(
-            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
-            ChannelLayout::STEREO,
-        );
-        cfg.dither = mode;
+        let pcm = IntPcm::new(IntDepth::Int16);
+        let pcm = match mode {
+            Some(shape) => pcm.dither(shape),
+            None => pcm.no_dither(),
+        };
+        let cfg = base(Format::Wav(Pcm::Int(pcm)), ChannelLayout::STEREO);
         write(format!("dither_{tag}.wav"), dc_graph(0.25), &cfg)?;
     }
 

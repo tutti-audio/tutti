@@ -112,7 +112,6 @@ fn config(format: Format) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither: None,
         ..Default::default()
     }
 }
@@ -186,8 +185,8 @@ fn flac_and_wav_agree_sample_for_sample() {
     let d = tempfile::tempdir().unwrap();
 
     for bit_depth in [
-        Pcm::Int(IntPcm::new(IntDepth::Int16)),
-        Pcm::Int(IntPcm::new(IntDepth::Int24)),
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
     ] {
         for level in [0.0f32, 0.3, -0.3, 0.7] {
             let wav = d.path().join(format!("a_{bit_depth:?}_{level}.wav"));
@@ -250,8 +249,8 @@ fn aiff_and_wav_agree_sample_for_sample() {
     let d = tempfile::tempdir().unwrap();
 
     for bit_depth in [
-        Pcm::Int(IntPcm::new(IntDepth::Int16)),
-        Pcm::Int(IntPcm::new(IntDepth::Int24)),
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
     ] {
         for level in [0.3f32, -0.7] {
             let wav = d.path().join(format!("b_{bit_depth:?}_{level}.wav"));
@@ -306,7 +305,9 @@ fn the_flac_compression_level_changes_the_size_not_the_samples() {
     let wav = d.path().join("s.wav");
     render_to_file(
         sine_graph(1_000.0),
-        &config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+        &config(Format::Wav(Pcm::Int(
+            IntPcm::new(IntDepth::Int16).no_dither(),
+        ))),
         &FrozenClock,
         &wav,
     )
@@ -325,7 +326,7 @@ fn the_flac_compression_level_changes_the_size_not_the_samples() {
         render_to_file(
             sine_graph(1_000.0),
             &config(flac_format_at(
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
+                Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
                 level,
             )),
             &FrozenClock,
@@ -413,8 +414,14 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
             built(g)
         };
         for (bit_depth, scale) in [
-            (Pcm::Int(IntPcm::new(IntDepth::Int16)), 32_768.0f32),
-            (Pcm::Int(IntPcm::new(IntDepth::Int24)), 8_388_608.0),
+            (
+                Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+                32_768.0f32,
+            ),
+            (
+                Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+                8_388_608.0,
+            ),
         ] {
             for frames in [1usize, 15, 63, 64, 4095, 4096, 4097, 3 * 4096 + 17] {
                 let cfg = |format| ExportConfig {
@@ -429,7 +436,6 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
                         channels: layout,
                         topology: None,
                     },
-                    dither: None,
                     ..Default::default()
                 };
                 let tag = format!("w{width}_{bit_depth:?}_{frames}");

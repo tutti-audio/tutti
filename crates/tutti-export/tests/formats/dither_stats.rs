@@ -61,7 +61,7 @@ fn dc_graph(level: f32) -> RenderGraph {
     built(g)
 }
 
-fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
+fn config(bit_depth: Pcm) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: tutti_units::SampleRate::of(SR),
@@ -73,7 +73,6 @@ fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither,
         ..Default::default()
     }
 }
@@ -86,7 +85,10 @@ fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
 fn render_i16(dither: Option<DitherShape>, level: f32, path: &std::path::Path) -> Vec<i32> {
     render_to_file(
         dc_graph(level),
-        &config(dither, Pcm::Int(IntPcm::new(IntDepth::Int16))),
+        &config(Pcm::Int(match dither {
+            Some(shape) => IntPcm::new(IntDepth::Int16).dither(shape),
+            None => IntPcm::new(IntDepth::Int16).no_dither(),
+        })),
         &FrozenClock,
         path,
     )
@@ -313,10 +315,7 @@ fn noise_scales_with_the_target_bit_depth() {
 
     render_to_file(
         dc_graph(level),
-        &config(
-            Some(DitherShape::Triangular),
-            Pcm::Int(IntPcm::new(IntDepth::Int24)),
-        ),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int24))),
         &FrozenClock,
         &path,
     )

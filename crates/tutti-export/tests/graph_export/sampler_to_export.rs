@@ -57,7 +57,6 @@ use tutti_buffers::Wave;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
-use tutti_dsp::DitherShape;
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
@@ -151,8 +150,6 @@ fn config(format: Format) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        // Float32 never dithers anyway; stated so the intent is on the page.
-        dither: None,
         ..Default::default()
     }
 }
@@ -383,8 +380,7 @@ fn a_sampler_render_survives_integer_quantization() {
     let (graph, clock) = voice_graph(1.0, 1200.0);
     let path = d.path().join("int16.wav");
 
-    let mut cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
-    cfg.dither = Some(DitherShape::Triangular); // the default a real export uses
+    let cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
 
     render_to_file(graph, &cfg, clock.as_ref(), &path).unwrap();
 

@@ -33,7 +33,6 @@ use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
-use tutti_dsp::DitherShape;
 use tutti_export::{
     GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup, TailPolicy,
 };
@@ -66,7 +65,6 @@ fn config(bit_depth: Pcm, channels: ChannelLayout) -> ExportConfig {
             channels,
             topology: None,
         },
-        dither: None,
         ..Default::default()
     }
 }
@@ -357,11 +355,10 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
 /// level's code (8 192.3) within the dither's two codes and average onto it.
 #[test]
 fn a_dithered_export_writes_its_dithered_render() {
-    let mut cfg = config(
+    let cfg = config(
         Pcm::Int(IntPcm::new(IntDepth::Int16)),
         ChannelLayout::STEREO,
     );
-    cfg.dither = Some(DitherShape::Triangular);
     let level = 0.25 + 0.3 / 32_768.0;
     let bytes = same_file(
         || dc(level),

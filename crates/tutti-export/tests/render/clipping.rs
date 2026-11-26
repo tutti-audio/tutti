@@ -19,7 +19,17 @@ use tutti_units::{Db, Hz, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn config(pcm: Pcm, dither: Option<DitherShape>) -> ExportConfig {
+/// An integer type of `depth`, dithered with `dither` (none for `None`) and noise-shaped when `shaped`.
+fn int(depth: IntDepth, dither: Option<DitherShape>, shaped: bool) -> Pcm {
+    let pcm = IntPcm::new(depth);
+    let pcm = match dither {
+        Some(shape) => pcm.dither(shape),
+        None => pcm.no_dither(),
+    };
+    Pcm::Int(if shaped { pcm.noise_shaping() } else { pcm })
+}
+
+fn config(pcm: Pcm) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
@@ -31,7 +41,6 @@ fn config(pcm: Pcm, dither: Option<DitherShape>) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither,
         ..Default::default()
     }
 }
@@ -70,7 +79,7 @@ fn the_samples_the_quantizer_clamps_are_counted() {
 
     let over = render_to_file(
         dc(1.2),
-        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+        &config(int(IntDepth::Int16, None, false)),
         &FrozenClock,
         &path,
     )
@@ -79,7 +88,7 @@ fn the_samples_the_quantizer_clamps_are_counted() {
 
     let at = render_to_file(
         dc(1.0),
-        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+        &config(int(IntDepth::Int16, None, false)),
         &FrozenClock,
         &path,
     )
@@ -88,7 +97,7 @@ fn the_samples_the_quantizer_clamps_are_counted() {
 
     let top = render_to_file(
         dc(32_767.0 / 32_768.0),
-        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+        &config(int(IntDepth::Int16, None, false)),
         &FrozenClock,
         &path,
     )
@@ -97,7 +106,7 @@ fn the_samples_the_quantizer_clamps_are_counted() {
 
     let float = render_to_file(
         dc(1.2),
-        &config(Pcm::Float(FloatWidth::F32), None),
+        &config(Pcm::Float(FloatWidth::F32)),
         &FrozenClock,
         &path,
     )
@@ -125,18 +134,16 @@ fn max_code(path: &std::path::Path) -> i64 {
 fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("zero.wav");
-    for (pcm, bits) in [
-        (Pcm::Int(IntPcm::new(IntDepth::Int16)), 16u32),
-        (Pcm::Int(IntPcm::new(IntDepth::Int24)), 24),
-    ] {
+    for (depth, bits) in [(IntDepth::Int16, 16u32), (IntDepth::Int24, 24)] {
         for (dither, lsbs) in [
             (None, 1.0f64),
             (Some(DitherShape::Rectangular), 1.5),
             (Some(DitherShape::Triangular), 2.0),
         ] {
+            let pcm = int(depth, dither, false);
             let written = render_normalized_to_file(
                 quarter_rate_sine(),
-                &config(pcm, dither),
+                &config(pcm),
                 &FrozenClock,
                 Normalize::peak(Db::new(0.0)),
                 &path,
@@ -178,7 +185,7 @@ fn an_infinity_is_a_clip_and_a_nan_is_not() {
     ] {
         let written = render_to_file(
             dc(value),
-            &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None),
+            &config(int(IntDepth::Int16, None, false)),
             &FrozenClock,
             &path,
         )
@@ -196,17 +203,14 @@ fn a_shaped_zero_dbtp_export_leaves_the_feedback_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("shaped.wav");
     let gain = tutti_dsp::NoiseShaping::new(RATE).feedback_gain().get();
-    for (pcm, bits) in [
-        (Pcm::Int(IntPcm::new(IntDepth::Int16)), 16u32),
-        (Pcm::Int(IntPcm::new(IntDepth::Int24)), 24),
-    ] {
+    for (depth, bits) in [(IntDepth::Int16, 16u32), (IntDepth::Int24, 24)] {
         for (dither, peak) in [
             (None, 0.0),
             (Some(DitherShape::Rectangular), 0.5),
             (Some(DitherShape::Triangular), 1.0),
         ] {
-            let mut cfg = config(pcm, dither);
-            cfg.noise_shaping = true;
+            let pcm = int(depth, dither, true);
+            let cfg = config(pcm);
             let written = render_normalized_to_file(
                 quarter_rate_sine(),
                 &cfg,

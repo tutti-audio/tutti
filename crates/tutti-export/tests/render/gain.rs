@@ -11,7 +11,6 @@ use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
-use tutti_dsp::DitherShape;
 use tutti_export::{Normalize, RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
@@ -21,7 +20,7 @@ use tutti_units::{Db, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn config(pcm: Pcm, dither: Option<DitherShape>, seconds: f64) -> ExportConfig {
+fn config(pcm: Pcm, seconds: f64) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
@@ -33,7 +32,6 @@ fn config(pcm: Pcm, dither: Option<DitherShape>, seconds: f64) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither,
         ..Default::default()
     }
 }
@@ -57,11 +55,7 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
     for target in [-6.0f64, -3.0] {
         let written = render_normalized_to_file(
             sine(Hz::new(RATE.get() / 4.0)),
-            &config(
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
-                Some(DitherShape::Triangular),
-                0.1,
-            ),
+            &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), 0.1),
             &FrozenClock,
             Normalize::peak(Db::new(target)),
             &path,
@@ -75,7 +69,7 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
 
     let plain = render_to_file(
         sine(Hz::new(1_000.0)),
-        &config(Pcm::Int(IntPcm::new(IntDepth::Int16)), None, 0.1),
+        &config(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()), 0.1),
         &FrozenClock,
         &path,
     )
@@ -95,7 +89,7 @@ fn a_loudness_normalized_export_reports_the_gain_to_its_target() {
     let path = dir.path().join("lufs.wav");
     let written = render_normalized_to_file(
         sine(Hz::new(1_000.0)),
-        &config(Pcm::Float(FloatWidth::F32), None, 3.0),
+        &config(Pcm::Float(FloatWidth::F32), 3.0),
         &FrozenClock,
         Normalize::lufs(Db::new(-23.0)),
         &path,

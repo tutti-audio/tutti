@@ -44,11 +44,14 @@ fn config(noise_shaping: bool) -> ExportConfig {
             ..Default::default()
         },
         encode: EncodeConfig {
-            format: Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+            format: Format::Wav(Pcm::Int(if noise_shaping {
+                IntPcm::new(IntDepth::Int16).noise_shaping()
+            } else {
+                IntPcm::new(IntDepth::Int16)
+            })),
             channels: ChannelLayout::MONO,
             topology: None,
         },
-        noise_shaping,
         ..Default::default()
     }
 }
