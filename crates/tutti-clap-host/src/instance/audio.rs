@@ -397,7 +397,7 @@ impl ClapProcessor {
         } = &mut *self.scratch;
         let flushed = self.audio_side.params_flush(&*input_events, output_events);
         if flushed {
-            self.published.publish(self.drain.swept());
+            self.drain.publish_applied();
             // What the plugin said while it took them (its own edits and
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
@@ -442,7 +442,7 @@ impl ClapProcessor {
         // The plugin has the values the drain took once its call returned: a
         // call that never reached the plugin leaves them to the next one.
         if matches!(outcome, Ok(_) | Err(ProcessError::PluginReturnedError)) {
-            self.published.publish(self.drain.swept());
+            self.drain.publish_applied();
         }
 
         let status = match outcome {

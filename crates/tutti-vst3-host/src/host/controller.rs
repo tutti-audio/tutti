@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use tutti_plugin_types::MainThreadMarker;
 
-use tutti_rt::{DrainMark, DrainWatch};
+use tutti_rt::Generation;
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
@@ -60,11 +60,9 @@ pub struct Vst3Controller {
     /// The writes to the Processor: one slot per declared parameter.
     edits: EditWriter,
     /// What the Controller handed the Processor, latest per parameter, until a
-    /// block has surely taken it: what a save must add, because the
-    /// component's stream does not hold it yet.
+    /// block has applied it: what a save must add, because the component's
+    /// stream does not hold it yet.
     handed: Vec<Handed>,
-    /// Reads the Processor's drain count.
-    watch: DrainWatch,
     /// The plugin's `outputParameterChanges`, the last value of each parameter
     /// per block, applied to the controller on a tick
     /// ([`flush_edits`](Control::flush_edits)).
@@ -82,25 +80,8 @@ pub struct Vst3Controller {
 struct Handed {
     id: ParamId,
     value: Normalized,
-    /// The drain count read after the write entered its slot.
-    sent_at: DrainMark,
-}
-
-impl Handed {
-    /// Whether the write has left the ring for the plugin's `process`: two
-    /// drains have begun since it entered (`tutti_rt::DrainWatch::two_since`
-    /// says why two). That is the ring read, not the plugin's word that it took
-    /// the point. A drain that overflows `pending` (more than the reserve's
-    /// distinct parameters in one drain, which only a burst from a
-    /// parameter-rich plugin can reach) drops the point and counts it in
-    /// `edits_dropped`, and the entry goes with the rest: that write is then in
-    /// no save. A bus bind that fails after the drain would lose its points
-    /// too, but it fails only on a sample-width mismatch, which a typed
-    /// Processor cannot have; a `process` that fails was handed the points
-    /// first.
-    fn is_drained(&self, watch: &DrainWatch) -> bool {
-        watch.two_since(self.sent_at)
-    }
+    /// The generation of the write ([`EditWriter::written`] after it).
+    sent_at: Generation,
 }
 
 impl std::fmt::Debug for Vst3Controller {
@@ -117,7 +98,6 @@ impl Vst3Controller {
         shell: Arc<Shell>,
         edits: EditWriter,
         handed: Vec<Handed>,
-        watch: DrainWatch,
         reports: ReportDrain,
     ) -> Self {
         Self {
@@ -125,7 +105,6 @@ impl Vst3Controller {
             shell,
             edits,
             handed,
-            watch,
             reports,
             processor_edits: Vec::new(),
             processor_edits_dropped: 0,
@@ -168,7 +147,7 @@ impl Vst3Controller {
         // this call, so the slot exists.
         let written = self.edits.write(id, value);
         debug_assert!(written.is_ok(), "{written:?}");
-        let sent_at = self.watch.mark();
+        let sent_at = self.edits.written();
         self.hand(id, value, sent_at);
     }
 
@@ -201,7 +180,7 @@ impl Vst3Controller {
 
     /// Records the write as handed to the Processor, replacing an earlier one
     /// to the same parameter.
-    fn hand(&mut self, id: ParamId, value: Normalized, sent_at: DrainMark) {
+    fn hand(&mut self, id: ParamId, value: Normalized, sent_at: Generation) {
         let handed = Handed { id, value, sent_at };
         match self.handed.iter_mut().find(|h| h.id == id) {
             Some(slot) => *slot = handed,
@@ -209,11 +188,13 @@ impl Vst3Controller {
         }
     }
 
-    /// The writes handed to the Processor that no block has surely taken yet,
-    /// and so are in no component stream. Forgets the ones that have been.
+    /// The writes handed to the Processor that no block has applied yet, and
+    /// so are in no component stream. Forgets the ones that have been. A write
+    /// the Processor dropped on its way (a drain past `pending`'s room, counted
+    /// in `edits_dropped`) is forgotten with them: it is in no save.
     fn undrained(&mut self) -> Vec<(ParamId, Normalized)> {
-        let watch = &self.watch;
-        self.handed.retain(|h| !h.is_drained(watch));
+        let edits = &self.edits;
+        self.handed.retain(|h| !edits.has_applied(h.sent_at));
         self.handed.iter().map(|h| (h.id, h.value)).collect()
     }
 
@@ -453,20 +434,24 @@ impl Vst3Loaded {
         let shell = Arc::new(Shell::new());
         // One slot per declared parameter: the list changes only across a
         // reactivation, so the table cannot go stale while this activation lasts.
-        let (sink, drain) = tutti_plugin_types::edit_slots(declared.iter().map(|&(id, _)| id));
+        let (mut sink, drain) = tutti_plugin_types::edit_slots(declared.iter().map(|&(id, _)| id));
         let (reports_in, reports_out) = tutti_plugin_types::reports(REPORT_CAPACITY);
-        let (beat, watch) = tutti_rt::drain_clock();
-        // The Processor takes the carried writes the plugin declares; the
-        // Controller keeps a record of what it holds.
-        let handed = carried
-            .iter()
-            .filter(|&&(id, _)| ParamWriteError::check_sorted(id, &declared).is_ok())
-            .map(|&(id, value)| Handed {
-                id,
-                value,
-                sent_at: watch.mark(),
-            })
-            .collect();
+        // The carried writes the plugin declares go through the slots like any
+        // write, so the first block takes them and the Controller's record of
+        // them is told apart by generation; the rest are refused and counted.
+        let mut handed = Vec::new();
+        let mut refused = 0u64;
+        for &(id, value) in &carried {
+            if ParamWriteError::check_sorted(id, &declared).is_err() {
+                refused += 1;
+            } else if sink.write(id, value).is_ok() {
+                let sent_at = sink.written();
+                match handed.iter_mut().find(|h: &&mut Handed| h.id == id) {
+                    Some(slot) => *slot = Handed { id, value, sent_at },
+                    None => handed.push(Handed { id, value, sent_at }),
+                }
+            }
+        }
         let processor = Vst3Processor::new(ProcessorParts {
             shell: shell.clone(),
             audio,
@@ -474,13 +459,12 @@ impl Vst3Loaded {
             context_requirements,
             drain,
             reports: reports_in,
-            beat,
-            carried,
+            refused,
             declared: Arc::clone(&declared),
         });
         Ok((
             processor,
-            Vst3Controller::new(loaded, shell, sink, handed, watch, reports_out),
+            Vst3Controller::new(loaded, shell, sink, handed, reports_out),
         ))
     }
 

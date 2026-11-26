@@ -83,10 +83,6 @@ fn dirty_set::DirtySet::index
 fn dirty_set::DirtySet::new
 fn dirty_set::DirtySet::set
 fn dirty_set::DirtySet::take
-fn drain_clock::DrainBeat::begin
-fn drain_clock::DrainWatch::mark
-fn drain_clock::DrainWatch::two_since
-fn drain_clock::drain_clock
 fn exclusive::Exclusive::get_mut
 fn exclusive::Exclusive::into_inner
 fn exclusive::Exclusive::new
@@ -306,9 +302,6 @@ struct claim_lock::ClaimGuard
 struct dirty_set::DirtyIndex
 struct dirty_set::DirtySet
 struct dirty_set::Taken
-struct drain_clock::DrainBeat
-struct drain_clock::DrainMark
-struct drain_clock::DrainWatch
 struct exclusive::Exclusive
 struct fault_latch::FaultLatch
 struct gauge::Counter
