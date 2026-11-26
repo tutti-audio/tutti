@@ -232,13 +232,10 @@ fn quantize_chunk<I: Sample, W: Write + Seek>(
 }
 
 /// How an [`Encoder`] or a [`FileEncoder`] is made: the spec, then the options, then the sink
-/// it finishes in, [`wrap`](Self::wrap) for any `Write + Seek` or [`create`](Self::create) for
-/// a path.
+/// it finishes in: [`wrap`](Self::wrap) for any `Write + Seek`, or [`file`](Self::file) for a
+/// path, whose [`FileOptions`] hold what only a file has.
 ///
-/// An existing file at the path is refused by default ([`EncodeError::Exists`]) and replaced
-/// with [`replace`](Self::replace); a file is staged beside its path and put in place when whole
-/// by default, and written at its path from the start with [`in_place`](Self::in_place). An
-/// option is fixed when the encoder is made, so none can change mid-file.
+/// An option is fixed when the encoder is made, so none can change mid-file.
 ///
 /// ```
 /// # #[cfg(feature = "encode-wav")] {
@@ -252,55 +249,35 @@ fn quantize_chunk<I: Sample, W: Write + Seek>(
 /// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
 /// let mut encoder = EncoderOptions::new(&spec)
 ///     .dither_seed(7)
-///     .create(dir.path().join("tone.wav"))?;
+///     .file(dir.path().join("tone.wav"))
+///     .create()?;
 /// encoder.write(Interleaved::new(&[0.5f32, -0.5, 0.25, -0.25], ChannelLayout::STEREO)?)?;
 /// encoder.finish()?;
-/// let again = EncoderOptions::new(&spec).create(dir.path().join("tone.wav"));
+/// let again = EncoderOptions::new(&spec).file(dir.path().join("tone.wav")).create();
 /// assert!(matches!(again, Err(tutti_codec::EncodeError::Exists { .. })));
 /// # Ok(())
 /// # }
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-#[must_use = "options make nothing until `create` or `wrap`"]
+#[must_use = "options make nothing until `wrap` or `file(..).create()`"]
 pub struct EncoderOptions<'a> {
     spec: &'a Spec,
     seed: u64,
-    limit_frames: Option<u64>,
+    limit_frames: Option<Samples>,
     planned: Option<Samples>,
-    replace: bool,
-    in_place: bool,
 }
 
 impl<'a> EncoderOptions<'a> {
-    /// Options for a file of `spec`: the dither of [`DitherNoise::DEFAULT_SEED`], no length
-    /// stated, an existing file refused, a file staged.
+    /// Options for a file of `spec`: the dither of [`DitherNoise::DEFAULT_SEED`], and no
+    /// length stated.
     pub fn new(spec: &'a Spec) -> Self {
         Self {
             spec,
             seed: DitherNoise::DEFAULT_SEED,
             limit_frames: None,
             planned: None,
-            replace: false,
-            in_place: false,
         }
-    }
-
-    /// Replaces a file that exists at the path instead of refusing it (on Windows too, and a
-    /// symlink at the path is replaced rather than written through; the new file has the
-    /// default permissions). In place, the file is truncated at once. [`create`](Self::create)
-    /// only: a sink given to [`wrap`](Self::wrap) is the caller's.
-    pub fn replace(mut self) -> Self {
-        self.replace = true;
-        self
-    }
-
-    /// Writes the file at its path from the start, not beside it. A recording cut short by a
-    /// fault or a crash is then there to keep, and a dropped encoder patches a WAV's or AIFF's
-    /// header to the frames written. [`create`](Self::create) only.
-    pub fn in_place(mut self) -> Self {
-        self.in_place = true;
-        self
     }
 
     /// The noise sequence an integer file's dither draws from (a float file has no dither and
@@ -323,10 +300,10 @@ impl<'a> EncoderOptions<'a> {
         self
     }
 
-    /// Lowers the number of frames a WAV file may hold to `frames`; it never raises the limit
+    /// Lowers the frames a WAV file may hold to `frames`; it never raises the limit
     /// the format's 32-bit sizes set, and other formats are unbounded. For a caller that
     /// records into a space it knows.
-    pub fn limit_frames(mut self, frames: u64) -> Self {
+    pub fn limit_frames(mut self, frames: Samples) -> Self {
         self.limit_frames = Some(frames);
         self
     }
@@ -358,7 +335,8 @@ impl<'a> EncoderOptions<'a> {
         self.check()?;
         let mut inner = Inner::open(spec, sink)?;
         if let Some(frames) = self.limit_frames {
-            inner.limit_frames(frames);
+            // The writers count frames in `u64`, their format's own width.
+            inner.limit_frames(frames.get() as u64);
         }
         Ok(Encoder {
             inner,
@@ -371,29 +349,78 @@ impl<'a> EncoderOptions<'a> {
         })
     }
 
-    /// Starts a file at `path`: staged beside it, or in place.
+    /// Goes on to a file at `path`, whose [`FileOptions`] say what happens to what is there
+    /// and where the bytes go.
+    pub fn file(self, path: impl AsRef<Path>) -> FileOptions<'a> {
+        FileOptions {
+            options: self,
+            path: path.as_ref().to_path_buf(),
+            replace: false,
+            in_place: false,
+        }
+    }
+}
+
+/// The options of a file at a path ([`EncoderOptions::file`]): an existing file is refused by
+/// default ([`EncodeError::Exists`]) and replaced with [`replace`](Self::replace); the file is
+/// staged beside its path and put in place when whole by default, and written at its path from
+/// the start with [`in_place`](Self::in_place). Neither means anything for a sink the caller
+/// owns, so neither is an option of [`EncoderOptions::wrap`].
+#[derive(Debug, Clone)]
+#[must_use = "options make nothing until `create`"]
+pub struct FileOptions<'a> {
+    options: EncoderOptions<'a>,
+    path: PathBuf,
+    replace: bool,
+    in_place: bool,
+}
+
+impl FileOptions<'_> {
+    /// Replaces a file that exists at the path instead of refusing it (on Windows too, and a
+    /// symlink at the path is replaced rather than written through; the new file has the
+    /// default permissions). In place, the file is truncated at once.
+    pub fn replace(mut self) -> Self {
+        self.replace = true;
+        self
+    }
+
+    /// Writes the file at its path from the start, not beside it. A recording cut short by a
+    /// fault or a crash is then there to keep, and a dropped encoder patches a WAV's or AIFF's
+    /// header to the frames written.
+    pub fn in_place(mut self) -> Self {
+        self.in_place = true;
+        self
+    }
+
+    /// Starts the file: staged beside its path, or in place.
     ///
     /// # Errors
     ///
-    /// [`EncodeError::Exists`] when something is at `path` and [`replace`](Self::replace) was
-    /// not called, with nothing written. Staged, that is a fast check, and the commit is the
-    /// authority: a file that appears in between is refused at the commit
+    /// [`EncodeError::Exists`] when something is at the path and [`replace`](Self::replace)
+    /// was not called, with nothing written. Staged, that is a fast check, and the commit is
+    /// the authority: a file that appears in between is refused at the commit
     /// ([`EncodeError::Commit`] of kind `AlreadyExists`), keeping the finished file. In place,
     /// the open is the authority. [`EncodeError::Io`] when the file cannot be created; the
-    /// errors of [`wrap`](Self::wrap) otherwise.
-    pub fn create(self, path: impl AsRef<Path>) -> Result<FileEncoder> {
-        let path = path.as_ref();
-        let spec = self.spec;
+    /// errors of [`EncoderOptions::wrap`] otherwise.
+    pub fn create(self) -> Result<FileEncoder> {
+        let Self {
+            options,
+            path,
+            replace,
+            in_place,
+        } = self;
+        let path = path.as_path();
+        let spec = options.spec;
         // Before a file exists, so a spec the format cannot write, or a length it cannot
         // hold, touches nothing.
-        self.check()?;
+        options.check()?;
         let exists = || EncodeError::Exists {
             path: path.to_path_buf(),
         };
-        let (sink, keep, at) = if self.in_place {
+        let (sink, keep, at) = if in_place {
             let mut open = OpenOptions::new();
             open.write(true);
-            if self.replace {
+            if replace {
                 open.create(true).truncate(true);
             } else {
                 open.create_new(true);
@@ -408,15 +435,11 @@ impl<'a> EncoderOptions<'a> {
             (FileSink::InPlace(file), None, path.to_path_buf())
         } else {
             // A dangling symlink is something at the path too.
-            if !self.replace && std::fs::symlink_metadata(path).is_ok() {
+            if !replace && std::fs::symlink_metadata(path).is_ok() {
                 return Err(exists());
             }
             let staged = Staged::new(path);
-            let staged = if self.replace {
-                staged
-            } else {
-                staged.create_new()
-            };
+            let staged = if replace { staged } else { staged.create_new() };
             // Created before the header is written: a failure from here on drops
             // the file, which removes the temporary.
             let file = staged.open()?;
@@ -424,8 +447,8 @@ impl<'a> EncoderOptions<'a> {
             let temp = file.temp().to_path_buf();
             (FileSink::Staged(file), Some(keep), temp)
         };
-        let created = self.in_place && !self.replace;
-        match self.wrap(BufWriter::new(sink)) {
+        let created = in_place && !replace;
+        match options.wrap(BufWriter::new(sink)) {
             Ok(encoder) => Ok(FileEncoder {
                 encoder,
                 keep,
@@ -512,7 +535,7 @@ impl<W: Write + Seek> Encoder<W> {
     }
 }
 
-/// An encoder that writes a file to a path, built by [`EncoderOptions::create`].
+/// An encoder that writes a file to a path, built by [`FileOptions::create`].
 ///
 /// - **Staged**, the default: the file is written to a temporary beside the path and put in
 ///   place by [`finish`](Self::finish) (synced and closed first), so the path holds either what
@@ -521,7 +544,7 @@ impl<W: Write + Seek> Encoder<W> {
 ///   commit that fails keeps the file. The commit is the encoder's own, so a file is never put
 ///   in place while its sink is open, and never left uncommitted by a caller that kept the
 ///   sink.
-/// - **In place** ([`EncoderOptions::in_place`]): the file is at its path from the start,
+/// - **In place** ([`FileOptions::in_place`]): the file is at its path from the start,
 ///   `finish` closes and flushes it, and [`FinalizedFile::commit`] only syncs. A failed take
 ///   and a dropped encoder keep the file, and a dropped one patches a WAV's or AIFF's header to
 ///   the frames written.
@@ -777,7 +800,7 @@ impl std::fmt::Debug for FinalizedFile {
 
 impl FinalizedFile {
     /// Syncs the file and moves it onto its path (replacing what is there, if the encoder was
-    /// made with [`EncoderOptions::replace`]). A file in place is already at its path, so
+    /// made with [`FileOptions::replace`]). A file in place is already at its path, so
     /// this only syncs it.
     ///
     /// # Errors

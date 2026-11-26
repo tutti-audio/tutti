@@ -60,7 +60,7 @@ pub enum EncodeError {
     },
 
     /// Something is already at the path and the encoder was not made with
-    /// [`replace`](crate::EncoderOptions::replace); nothing was written.
+    /// [`replace`](crate::FileOptions::replace); nothing was written.
     #[error("{} already exists", path.display())]
     Exists {
         /// The path.

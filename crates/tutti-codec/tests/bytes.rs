@@ -341,7 +341,7 @@ fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
     let samples = input(usize::from(channels), frames);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("written");
-    let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
     encoder
         .write(Interleaved::new(&samples, layout).unwrap())
         .unwrap();

@@ -20,19 +20,19 @@ fn sink_limited(
     path: &std::path::Path,
     channels: u16,
     pcm: Pcm,
-    limit: Option<u64>,
+    limit: Option<Samples>,
 ) -> EncoderSink {
     let spec = Spec::of_channels(
         Format::Wav(pcm),
         ChannelSet::default_for(ChannelLayout::from(channels)),
         SampleRate::SR_48K,
     );
-    let options = EncoderOptions::new(&spec).in_place();
+    let options = EncoderOptions::new(&spec);
     let options = match limit {
         Some(frames) => options.limit_frames(frames),
         None => options,
     };
-    EncoderSink::new(options.create(path).expect("sink opens"))
+    EncoderSink::new(options.file(path).in_place().create().expect("sink opens"))
 }
 
 /// A finite in-memory [`Source`]: hands out its frames in bounded chunks,
@@ -512,7 +512,7 @@ fn frames_buffered_at_the_fault_are_written_first() {
 fn a_failed_sink_fails_the_take() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("full.wav");
-    let wav = sink_limited(&path, 2, Pcm::Float(FloatWidth::F32), Some(4));
+    let wav = sink_limited(&path, 2, Pcm::Float(FloatWidth::F32), Some(Samples::new(4)));
     let mut pump_loop = PumpLoop::new(
         DyingMic {
             queued: frames(10),

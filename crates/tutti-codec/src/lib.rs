@@ -12,15 +12,15 @@
 //! - `Spec` is what a file is written as: the format, the speakers (the topology,
 //!   which is also the width) and the rate. `Spec::of_channels` takes a
 //!   `ChannelSet`, and `ChannelSet::default_for` states the engine's order for a bare width.
-//! - `EncoderOptions::new(&spec)` is how a file is begun: chained options (`replace`,
-//!   `in_place`, `dither_seed`, `planned`, `limit_frames`), then `wrap(sink)` for an `Encoder` over
-//!   any `Write + Seek`, or `create(path)` for a `FileEncoder`. An `Encoder` has a fallible
-//!   `write(block)` and `finish()`. A `FileEncoder` is staged by default: it writes beside the
-//!   path and moves the file into place on `finish` (which returns `()`: the file is synced and
-//!   closed first, so nothing holds it open); dropping it first removes the file, and so does
-//!   `finish` after a failed `write`. With `in_place` it writes the path from the start, and a
-//!   recording cut short is kept. An existing file at the path is refused
-//!   (`EncodeError::Exists`) unless `replace` is set.
+//! - `EncoderOptions::new(&spec)` is how a file is begun: chained options (`dither_seed`,
+//!   `planned`, `limit_frames`), then `wrap(sink)` for an `Encoder` over any `Write + Seek`, or
+//!   `file(path)` for the `FileOptions` of a file (`replace`, `in_place`) and `create()` for a
+//!   `FileEncoder`. An `Encoder` has a fallible `write(block)` and `finish()`. A `FileEncoder`
+//!   is staged by default: it writes beside the path and moves the file into place on `finish`
+//!   (which returns `()`: the file is synced and closed first, so nothing holds it open);
+//!   dropping it first removes the file, and so does `finish` after a failed `write`. With
+//!   `in_place` it writes the path from the start, and a recording cut short is kept. An
+//!   existing file at the path is refused (`EncodeError::Exists`) unless `replace` is set.
 //! - `EncoderSink` is the file sink, `FileIn`'s mirror: a `Sink` over a `FileEncoder`, for any
 //!   `Format` the build can write. It keeps the first write error (later writes are skipped and
 //!   return `SinkFailed`), and `finalize` is `FileEncoder::finish_keeping`, so a recording cut
@@ -96,7 +96,9 @@ mod writer;
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, EncoderOptions, FileEncoder, FinalizedFile, Kept, Unfinished};
+pub use encoder::{
+    Encoder, EncoderOptions, FileEncoder, FileOptions, FinalizedFile, Kept, Unfinished,
+};
 pub use encoder_sink::EncoderSink;
 pub use error::{Codec, EncodeError, Result, SpecError};
 pub use format::{FlacLevel, Format};

@@ -490,8 +490,9 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     let spec = mic.file_spec(Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)));
     let mut sink = tutti_codec::EncoderSink::new(
         tutti_codec::EncoderOptions::new(&spec)
+            .file(&path)
             .in_place()
-            .create(&path)
+            .create()
             .unwrap(),
     );
 

@@ -1144,11 +1144,9 @@ fn open_target<F: Float>(
             replace,
         }) => {
             let spec = Spec::of_channels(format, ChannelSet::default_for(layout), rate);
-            let options = EncoderOptions::new(&spec).dither_seed(seed);
+            let options = EncoderOptions::new(&spec).dither_seed(seed).file(&path);
             let options = if replace { options.replace() } else { options };
-            let encoder = options
-                .create(&path)
-                .map_err(|e| TakeError::Open(Arc::new(e)))?;
+            let encoder = options.create().map_err(|e| TakeError::Open(Arc::new(e)))?;
             let file: Box<dyn DynSink<F>> = Box::new(EncoderSink::<F>::new(encoder));
             Ok((file, Some(path)))
         }

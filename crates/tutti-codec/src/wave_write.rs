@@ -64,7 +64,7 @@ pub fn write_wave<'a, S: Sample>(
     let spec = Spec::of_channels(format, wave.channel_set(), wave.sample_rate());
     let options = EncoderOptions::new(&spec).planned(wave.len());
     match dest.into() {
-        Destination::Path(staged) => write_file(wave, options.create(staged.target())?),
+        Destination::Path(staged) => write_file(wave, options.file(staged.target()).create()?),
         Destination::Writer(writer) => {
             // A borrowed writer need not seek: the file is encoded into an owned
             // cursor and handed over whole.

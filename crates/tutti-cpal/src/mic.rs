@@ -503,7 +503,7 @@ impl<F: Float> MicIn<F> {
     /// # use tutti_buffers::FloatWidth;
     /// # fn capture(mic: &tutti_cpal::MicIn) -> tutti_codec::Result<()> {
     /// let spec = mic.file_spec(Format::Wav(Pcm::Float(FloatWidth::F32)));
-    /// let sink = EncoderSink::<f32>::new(EncoderOptions::new(&spec).in_place().create("take.wav")?);
+    /// let sink = EncoderSink::<f32>::new(EncoderOptions::new(&spec).file("take.wav").in_place().create()?);
     /// # Ok(()) }
     /// ```
     ///

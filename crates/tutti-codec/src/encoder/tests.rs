@@ -84,7 +84,11 @@ fn a_file_appears_at_its_path_only_when_finished() {
         let path = dir.path().join(format!("take.{ext}"));
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).replace().create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec)
+            .file(&path)
+            .replace()
+            .create()
+            .unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
@@ -115,7 +119,11 @@ fn a_dropped_encoder_removes_its_file_and_leaves_the_path_alone() {
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
 
-        let mut dropped = EncoderOptions::new(&spec).replace().create(&path).unwrap();
+        let mut dropped = EncoderOptions::new(&spec)
+            .file(&path)
+            .replace()
+            .create()
+            .unwrap();
         dropped
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
@@ -136,7 +144,7 @@ fn a_refused_block_leaves_nothing_behind_once_dropped() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
         let err = encoder
             .write(Interleaved::new(&saw(1, 100), ChannelLayout::MONO).unwrap())
             .expect_err("a mono block is not stereo");
@@ -165,7 +173,8 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
         let path = dir.path().join(format!("take.{ext}"));
         let zero_width = spec(format, 0);
         let err = EncoderOptions::new(&zero_width)
-            .create(&path)
+            .file(&path)
+            .create()
             .expect_err("no channels");
         assert!(
             matches!(err, EncodeError::Spec(SpecError::ZeroChannels)),
@@ -173,7 +182,8 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
         );
         let zero_rate = at_rate(format, 0.4);
         let err = EncoderOptions::new(&zero_rate)
-            .create(&path)
+            .file(&path)
+            .create()
             .expect_err("no rate");
         assert!(
             matches!(err, EncodeError::Spec(SpecError::SampleRate(_))),
@@ -301,7 +311,11 @@ fn finish_after_a_failed_write_returns_the_first_error_and_puts_nothing_in_place
         let path = dir.path().join(format!("take.{ext}"));
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).replace().create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec)
+            .file(&path)
+            .replace()
+            .create()
+            .unwrap();
         let first = encoder
             .write(Interleaved::new(&saw(1, 100), ChannelLayout::MONO).unwrap())
             .expect_err("a mono block is not stereo");
@@ -328,8 +342,9 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
 
     let err = EncoderOptions::new(&spec)
         .planned(Samples::new(limit as usize + 1))
+        .file(&path)
         .replace()
-        .create(&path)
+        .create()
         .map(drop)
         .expect_err("one frame past the limit");
     assert!(
@@ -341,8 +356,9 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
 
     EncoderOptions::new(&spec)
         .planned(Samples::new(limit as usize))
+        .file(&path)
         .replace()
-        .create(&path)
+        .create()
         .expect("the limit itself fits");
 }
 
@@ -356,7 +372,7 @@ fn a_plain_sink_keeps_its_prefix_after_a_failed_write() {
         2,
     );
     let mut encoder = EncoderOptions::new(&spec)
-        .limit_frames(6)
+        .limit_frames(Samples::new(6))
         .wrap(Cursor::new(Vec::new()))
         .unwrap();
     assert!(
@@ -431,7 +447,11 @@ fn a_finalized_file_waits_for_its_commit() {
         let spec = spec(format, 2);
 
         let write = |path: &std::path::Path| {
-            let mut encoder = EncoderOptions::new(&spec).replace().create(path).unwrap();
+            let mut encoder = EncoderOptions::new(&spec)
+                .file(path)
+                .replace()
+                .create()
+                .unwrap();
             encoder
                 .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
                 .unwrap();
@@ -471,14 +491,14 @@ fn an_existing_path_is_refused_unless_replaced() {
             std::fs::write(&path, b"previous").unwrap();
             let spec = spec(format, 2);
             let options = || {
-                let options = EncoderOptions::new(&spec);
+                let options = EncoderOptions::new(&spec).file(&path);
                 if in_place {
                     options.in_place()
                 } else {
                     options
                 }
             };
-            let err = options().create(&path).map(drop).expect_err("it exists");
+            let err = options().create().map(drop).expect_err("it exists");
             assert!(
                 matches!(&err, EncodeError::Exists { path: p } if *p == path),
                 "{ext} in_place={in_place}: {err}"
@@ -486,7 +506,7 @@ fn an_existing_path_is_refused_unless_replaced() {
             assert_eq!(std::fs::read(&path).unwrap(), b"previous", "{ext}");
             assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
 
-            let mut encoder = options().replace().create(&path).unwrap();
+            let mut encoder = options().replace().create().unwrap();
             encoder
                 .write(Interleaved::new(&saw(2, 500), spec.layout()).unwrap())
                 .unwrap();
@@ -506,7 +526,7 @@ fn a_staged_commit_that_loses_a_race_keeps_its_file() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 2_000), spec.layout()).unwrap())
             .unwrap();
@@ -530,7 +550,11 @@ fn an_in_place_file_is_at_its_path_during_the_write() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).in_place().create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec)
+            .file(&path)
+            .in_place()
+            .create()
+            .unwrap();
         assert!(path.exists(), "{ext}: there from the start");
         assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
         encoder
@@ -551,7 +575,11 @@ fn an_in_place_failure_is_kept_at_the_path() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
     let spec = spec(Format::Wav(crate::Pcm::Float(FloatWidth::F32)), 2);
-    let mut encoder = EncoderOptions::new(&spec).in_place().create(&path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec)
+        .file(&path)
+        .in_place()
+        .create()
+        .unwrap();
     encoder
         .write(Interleaved::new(&saw(2, 3_000), spec.layout()).unwrap())
         .unwrap();
@@ -583,7 +611,11 @@ fn a_dropped_in_place_encoder_leaves_a_wav_whose_header_describes_the_frames() {
         Format::Wav(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
         2,
     );
-    let mut encoder = EncoderOptions::new(&spec).in_place().create(&path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec)
+        .file(&path)
+        .in_place()
+        .create()
+        .unwrap();
     encoder
         .write(Interleaved::new(&[0.25f32; 20], spec.layout()).unwrap())
         .unwrap();
@@ -603,8 +635,9 @@ fn a_spec_that_cannot_be_written_creates_no_in_place_file() {
             SampleRate::SR_44K1,
         );
         EncoderOptions::new(&zero)
+            .file(&path)
             .in_place()
-            .create(&path)
+            .create()
             .map(drop)
             .expect_err("no channels");
         assert!(listing(dir.path()).is_empty(), "{ext}");
@@ -620,7 +653,7 @@ fn a_commit_that_cannot_rename_keeps_the_file() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
@@ -664,7 +697,7 @@ fn kept_unfinished_of(
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take");
     let spec = spec(format, 2);
-    let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
     encoder
         .write(Interleaved::new(&samples, spec.layout()).unwrap())
         .unwrap();
@@ -763,7 +796,7 @@ fn a_failed_encoder_finishes_keeping_the_frames_written_before_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take");
     let spec = spec(Format::Wav(crate::Pcm::Float(FloatWidth::F32)), 2);
-    let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
     encoder
         .write(Interleaved::new(&saw(2, 3_000), spec.layout()).unwrap())
         .unwrap();
@@ -795,7 +828,7 @@ fn finish_keeping_a_whole_file_commits_it_and_leaves_no_temporary() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
+        let mut encoder = EncoderOptions::new(&spec).file(&path).create().unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 2_000), spec.layout()).unwrap())
             .unwrap();

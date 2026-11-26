@@ -49,7 +49,7 @@ use crate::error::EncodeError;
 /// let dir = tempfile::tempdir()?;
 /// let pcm = Pcm::Int(IntPcm::new(IntDepth::Int24));
 /// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
-/// let mut out = EncoderSink::<f32>::new(EncoderOptions::new(&spec).in_place().create(dir.path().join("tone.wav"))?);
+/// let mut out = EncoderSink::<f32>::new(EncoderOptions::new(&spec).file(dir.path().join("tone.wav")).in_place().create()?);
 /// let frames = [0.5, -0.5, 0.25, -0.25]; // two stereo frames
 /// out.write(Interleaved::new(&frames, ChannelLayout::STEREO)?).expect("the write lands");
 /// out.finalize()?;

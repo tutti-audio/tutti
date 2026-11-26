@@ -67,13 +67,14 @@ pub(crate) fn open_file<F: FftFloat>(
     let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
     let options = EncoderOptions::new(&spec)
         .planned(planned)
-        .dither_seed(seed);
+        .dither_seed(seed)
+        .file(target.path());
     let options = if target.replaces_existing() {
         options.replace()
     } else {
         options
     };
-    let encoder = options.create(target.path())?;
+    let encoder = options.create()?;
     Chain::new(target, source_rate, encoder)
 }
 

@@ -162,8 +162,9 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
     );
     let sink = EncoderSink::new(
         EncoderOptions::new(&spec)
+            .file(&path)
             .in_place()
-            .create(&path)
+            .create()
             .expect("sink opens"),
     );
 
@@ -241,8 +242,9 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
     );
     let sink = EncoderSink::new(
         EncoderOptions::new(&spec)
+            .file(&path)
             .in_place()
-            .create(&path)
+            .create()
             .expect("sink opens"),
     );
 
@@ -295,8 +297,9 @@ fn a_gap_in_a_take_is_counted_and_the_file_closes_up_over_it() {
     );
     let sink = EncoderSink::new(
         EncoderOptions::new(&spec)
+            .file(&path)
             .in_place()
-            .create(&path)
+            .create()
             .expect("sink opens"),
     );
     let mut pump = PumpLoop::new(src, sink, Samples::new(1024)).expect("pairs");

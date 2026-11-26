@@ -21,14 +21,16 @@ fn write_samples(sink: &mut EncoderSink, samples: &[f32]) -> std::result::Result
 fn sink_of(
     spec: &Spec,
     path: impl AsRef<Path>,
-    limit: Option<u64>,
+    limit: Option<Samples>,
 ) -> std::io::Result<EncoderSink> {
-    let options = EncoderOptions::new(spec).in_place().replace();
+    let options = EncoderOptions::new(spec);
     let options = match limit {
         Some(frames) => options.limit_frames(frames),
         None => options,
     };
-    Ok(EncoderSink::new(options.create(path)?))
+    Ok(EncoderSink::new(
+        options.file(path).in_place().replace().create()?,
+    ))
 }
 
 /// A WAV sink at `rate` and `channels` wide.
@@ -47,7 +49,7 @@ fn wav_limited(
     rate: f64,
     channels: impl Into<ChannelLayout>,
     pcm: Pcm,
-    limit: Option<u64>,
+    limit: Option<Samples>,
 ) -> std::io::Result<EncoderSink> {
     sink_of(
         &Spec::of_channels(
@@ -188,7 +190,7 @@ fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
         48_000.0,
         2u16,
         Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
-        Some(2),
+        Some(Samples::new(2)),
     )
     .expect("create");
 
@@ -376,7 +378,7 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
         48_000.0,
         6u16,
         Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
-        Some(3),
+        Some(Samples::new(3)),
     )
     .unwrap();
     // Eight frames, in two writes, the limit falling in the first.
@@ -409,8 +411,14 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
 fn a_take_that_ends_at_the_limit_is_clean() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("exact.wav");
-    let mut sink =
-        wav_limited(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32), Some(4)).unwrap();
+    let mut sink = wav_limited(
+        &path,
+        48_000.0,
+        2u16,
+        Pcm::Float(FloatWidth::F32),
+        Some(Samples::new(4)),
+    )
+    .unwrap();
     write_samples(&mut sink, &[0.1; 8]).unwrap();
     sink.finalize().expect("exactly the limit is fine");
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 8);

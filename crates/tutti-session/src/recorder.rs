@@ -201,7 +201,7 @@ pub enum PumpPass {
 /// let pcm = Pcm::Float(FloatWidth::F32);
 /// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
 /// // In place, so a recording cut short is there to keep.
-/// let file = EncoderOptions::new(&spec).in_place().create(dir.path().join("take.wav")).expect("file opens");
+/// let file = EncoderOptions::new(&spec).file(dir.path().join("take.wav")).in_place().create().expect("file opens");
 /// let sink = EncoderSink::<f32>::new(file);
 ///
 /// // `new` checks the widths agree, before a frame moves.
