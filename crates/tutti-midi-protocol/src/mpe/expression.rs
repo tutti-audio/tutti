@@ -19,7 +19,7 @@ use tutti_ump::{CCNumber, ControlValue, Rpn, U7, Voice2};
 ///     .form(ControllerSupport::Bipolar, ControlValue::MAX)
 ///     .unwrap();
 /// assert_eq!(
-///     MpeExpression::unipolar(full),
+///     MpeExpression::to_control_change(full),
 ///     Voice2::ChannelPressure(ControlValue::new(0xFFFF_FFFE))
 /// );
 /// ```
@@ -118,7 +118,7 @@ impl MpeExpression {
     /// `voice` as the Control Change form of the control it carries bipolar,
     /// or as it is when it carries none.
     #[must_use]
-    pub fn unipolar(voice: Voice2) -> Voice2 {
+    pub fn to_control_change(voice: Voice2) -> Voice2 {
         match voice {
             Voice2::Registered { .. } => {
                 Self::read(voice).map_or(voice, |(control, value)| control.control_change(value))

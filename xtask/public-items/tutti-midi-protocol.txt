@@ -80,7 +80,7 @@ fn midi2_translator::Midi2Translator::reset
 fn midi2_translator::Midi2Translator::reset_group
 fn midi2_translator::Midi2Translator::translate
 fn mpe::expression::MpeExpression::form
-fn mpe::expression::MpeExpression::unipolar
+fn mpe::expression::MpeExpression::to_control_change
 fn mpe::profile::ChannelResponse::from_data
 fn mpe::profile::ChannelResponse::to_data
 fn mpe::profile::MpeFeatures::from_data

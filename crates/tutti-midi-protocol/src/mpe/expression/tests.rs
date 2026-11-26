@@ -4,10 +4,9 @@ fn rc(expression: MpeExpression, data: u32) -> Voice2 {
     Voice2::registered(expression.bipolar_rpn(), ControlValue::new(data))
 }
 
-/// Spec: m2-120/4.9#4
-///
 /// M2-120 Table 9: the bipolar controllers are the Registered Controllers
 /// 0x20/0x20 and 0x20/0x21, and nothing else reads as one.
+/// Spec: m2-120/4.9#4
 #[test]
 fn the_bipolar_controllers_are_registered_controllers_0x20_0x20_and_0x20_0x21() {
     let address = |e: MpeExpression| (e.bipolar_rpn().bank().get(), e.bipolar_rpn().index().get());
@@ -25,11 +24,10 @@ fn the_bipolar_controllers_are_registered_controllers_0x20_0x20_and_0x20_0x21() 
     assert_eq!(MpeExpression::of_rpn(Rpn::PITCH_BEND_SENSITIVITY), None);
 }
 
-/// Spec: m2-120/4.9#4
-///
 /// Section 4.9: a property that is not bipolar is sent as the upper half of
 /// the range, centred at 0x8000_0000: Channel Pressure at rest is the centre
 /// and at full is the top; Control Change 74 is centred already.
+/// Spec: m2-120/4.9#4
 #[test]
 fn pressure_is_the_upper_half_and_the_third_dimension_is_as_it_is() {
     let pressure = MpeExpression::Pressure;
@@ -68,26 +66,25 @@ fn a_bipolar_pressure_below_the_centre_is_zero() {
     assert_eq!(read(0xFFFF_FFFF), at(0xFFFF_FFFE));
 }
 
-/// Spec: m2-120/4.4#5, m2-120/4.5#6
-///
 /// A bipolar controller is read as the control it replaces, and either form is
 /// read as its control.
+/// Spec: m2-120/4.4#5, m2-120/4.5#6
 #[test]
-fn both_forms_read_as_their_control_and_unipolar_makes_the_control_change_form() {
+fn both_forms_read_as_their_control_and_convert_to_the_control_change_form() {
     let value = ControlValue::new(0x1234_5678);
     for control in [MpeExpression::Pressure, MpeExpression::ThirdDimension] {
         let form = control.control_change(value);
         assert_eq!(MpeExpression::read(form), Some((control, value)));
-        assert_eq!(MpeExpression::unipolar(form), form);
+        assert_eq!(MpeExpression::to_control_change(form), form);
         let bipolar = control.bipolar(value);
         let (_, read) = MpeExpression::read(bipolar).unwrap();
         assert_eq!(
-            MpeExpression::unipolar(bipolar),
+            MpeExpression::to_control_change(bipolar),
             control.control_change(read)
         );
     }
     let other = Voice2::registered(Rpn::PITCH_BEND_SENSITIVITY, value);
-    assert_eq!(MpeExpression::unipolar(other), other);
+    assert_eq!(MpeExpression::to_control_change(other), other);
     assert_eq!(MpeExpression::read(other), None);
 }
 

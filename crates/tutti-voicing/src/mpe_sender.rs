@@ -144,7 +144,7 @@ impl MpeSender {
         };
         let sources = &mut self.sources[address.group.index()];
         let source = &mut sources[address.channel.index()];
-        let meant = meant.map(|voice| MpeExpression::unipolar(source.absolute(voice)));
+        let meant = meant.map(|voice| MpeExpression::to_control_change(source.absolute(voice)));
         if let Some(voice) = meant {
             source.observe(voice);
         }
@@ -433,15 +433,15 @@ impl Zoned {
         // or set of features does not stop its notes (section 3.3).
         let span = |zones: &ProfileZones, channel| zones.zone_of(channel).map(ProfileZone::span);
         let changed = |channel| span(&had, channel) != span(&zones, channel);
-        let features =
-            |zones: &ProfileZones, channel| zones.zone_of(channel).map(ProfileZone::features);
         while self.end(|n| changed(n.source)).is_some() {}
         for channel in MidiChannel::all() {
             if changed(channel) {
                 self.ranges[channel.index()] = None;
                 self.members[channel.index()] = Member::IDLE;
-            } else if features(&had, channel) != features(&zones, channel) {
-                // The receiver takes other forms: what it holds is told again in them.
+            } else if had.zone_of(channel) != zones.zone_of(channel) {
+                // Another range or other forms: the zone's notes are told again in
+                // them at its next event.
+                self.ranges[channel.index()] = None;
                 self.members[channel.index()].forget();
             }
             let range = sources[channel.index()].note_range;
@@ -502,7 +502,11 @@ impl Zoned {
         if !self.notes.iter().any(told) {
             return;
         }
+        let held = self.ranges[zone.manager().index()];
         let range = self.fit_range(zone, sources, send);
+        // A range the receiver did not hold moves every note of the zone.
+        let moved = held != Some(range);
+        let told = |note: &Note| told(note) || (moved && zones.zone_of(note.source) == Some(zone));
         for note in &self.notes {
             if told(note) {
                 let expression = note.expression(&sources[note.source.index()], range);

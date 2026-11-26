@@ -962,9 +962,9 @@ impl MpeTranslator {
         // The Profile's bipolar Registered Controllers (M2-120 section 4.8) are
         // Channel Pressure and Control Change 74 on the Manager and every
         // Member (section 4.9): what follows reads them as those.
-        let unipolar = MpeExpression::unipolar(voice);
-        let (event, voice) = if zone.rules == Rules::Profile && unipolar != voice {
-            (&message(address, event.0, unipolar), unipolar)
+        let control_change = MpeExpression::to_control_change(voice);
+        let (event, voice) = if zone.rules == Rules::Profile && control_change != voice {
+            (&message(address, event.0, control_change), control_change)
         } else {
             (event, voice)
         };

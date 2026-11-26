@@ -340,6 +340,33 @@ fn a_value_told_before_the_note_on_is_sent_ahead_of_it() {
     );
 }
 
+/// **A zone whose range changes keeps its notes and tells each of them its
+/// bend over the new range**: the range goes to the Manager with the next
+/// event, and a note that event does not touch is told again too (section 3.5).
+#[test]
+fn a_new_range_tells_every_note_of_the_zone_its_bend() {
+    let mut s = started(3);
+    feed(&mut s, 2, bend_range(12));
+    feed(&mut s, 2, note_on(60)); // Ch3
+    feed(&mut s, 0, note_on(64)); // Ch4
+    let sent = feed(&mut s, 2, bend(0xFFFF_FFFF));
+    assert_bend(&sent, 2, bend_of(12.0, 48.0));
+    let wider = ProfileZone::new(
+        zone(0, 3).span(),
+        PitchBendSensitivity::from_semitones(U7::of(96)),
+    );
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(wider)));
+    // Only the Ch4 note is touched; the Ch3 note's octave is half as far now.
+    let sent = feed(&mut s, 0, note_pressure(64, CENTER));
+    assert!(sent.contains(&(0, bend_range(96))), "{sent:?}");
+    let ch3: Vec<_> = sent
+        .iter()
+        .filter(|(at, v)| *at == 2 && matches!(v, Voice2::PitchBend(_)))
+        .copied()
+        .collect();
+    assert_bend(&ch3, 2, bend_of(12.0, 96.0));
+}
+
 /// **A source channel's Pitch Bend bends its notes and no other channel's**: an
 /// octave up over its own range of 12 is a quarter of the zone's 48, on the
 /// Members of that channel's notes; it is not sent on the Manager, whose bend
@@ -882,18 +909,19 @@ fn a_sources_bipolar_controllers_are_its_pressure_and_third_dimension() {
 /// **A features answer or another range does not stop the notes**: the receiver
 /// resets only when a zone's channels change (section 3.3), so the note is still
 /// ended on its Member, and the next value goes in the form now declared.
-/// Spec: m2-120/3.3#1
 #[test]
 fn a_features_answer_keeps_the_notes_and_the_next_value_takes_its_form() {
     let mut s = sender(1);
     feed(&mut s, 0, note_on(60));
     let declared = ProfileZones::single(zone(0, 1).mpe_features(bipolar()));
     s.set_profile(MidiGroup::FIRST, Some(declared));
-    // The values the Member holds in the Control Change forms are told again in
-    // the forms the receiver declared, though none of them changed.
+    // The zone is told again: its range on the Manager, and the values the
+    // Member holds in the Control Change forms in the forms the receiver
+    // declared, though none of them changed.
     assert_eq!(
         feed(&mut s, 0, pressure(0)),
         [
+            (0, bend_range(48)),
             (1, bend(CENTER)),
             (1, bipolar_rc(0x21, CENTER)),
             (1, bipolar_rc(0x20, CENTER)),
