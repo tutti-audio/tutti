@@ -727,3 +727,30 @@ fn a_refusal_the_table_already_holds_never_blocks_a_zone_that_is_clear() {
     let actions = responder.on_message(own(), &set_on(channel(12), 2, ProfileId::MPE));
     assert_eq!(reports(&actions)[0].0, ProfileState::Enabled);
 }
+
+#[test]
+fn a_channel_entry_needs_at_least_one_channel_but_a_group_entry_has_none() {
+    let zero = ProfileChannels::of(0);
+    let offer = |address, entry| ProfileOffer::try_from(vec![(address, piano(), entry)]);
+    // The count is the Manager plus Members: 0 on a Channel is neither a maximum nor an
+    // enabled count.
+    assert_eq!(
+        offer(channel(0), ProfileOfferEntry::new(zero)),
+        Err(OfferError::NoChannels)
+    );
+    assert_eq!(
+        offer(
+            channel(0),
+            ProfileOfferEntry::new(ProfileChannels::of(2)).enabled(zero)
+        ),
+        Err(OfferError::NoChannels)
+    );
+    assert!(
+        offer(
+            CiDeviceId::Group,
+            ProfileOfferEntry::new(zero).enabled(zero)
+        )
+        .is_ok()
+    );
+    assert!(offer(channel(0), one().enabled(ProfileChannels::of(1))).is_ok());
+}
