@@ -36,7 +36,7 @@ impl ParamBounds {
     /// range table and the shared [`ParameterInfo`](tutti_plugin_types::ParameterInfo)
     /// both come from.
     pub(crate) fn of(min: f32, max: f32) -> Self {
-        // `AudioUnitParameterInfo` carries the bounds as `f32`; they widen
+        // `AudioUnitParameterInfo` carries the bounds as `Float32`; they widen
         // here, once, into the quantity the rest of the host works in.
         Self {
             min: f64::from(min),
@@ -52,7 +52,7 @@ impl ParamBounds {
         PlainMap::Linear(LinearRange::new(self.min, self.max))
     }
 
-    /// The `f32` word `AudioUnitSetParameter` takes for the position
+    /// The `Float32` word `AudioUnitSetParameter` takes for the position
     /// `value`: AU's parameter word is `f32`, so this is the one place a value
     /// narrows on its way to the unit.
     pub(crate) fn word(self, value: Normalized) -> f32 {
@@ -62,14 +62,14 @@ impl ParamBounds {
 
 /// **This is AU's own conversion, and it is linear.** An AU has no normalized
 /// value (`AudioUnitGetParameter` and `AudioUnitSetParameter` speak plain
-/// `f32` only), so the position is the host's, over the declared span. The
+/// `Float32` only), so the position is the host's, over the declared span. The
 /// display-curve flags (`DisplayLogarithmic`, ..., `AudioUnitProperties.h`) are
 /// *display scales*: the header gives them no formula, so they stay
 /// `DisplayCurve` hints for a UI and do not bend this mapping. The one curve the
 /// platform defines is `AUParameterValueFromLinear` (`AudioUnitUtilities.h`),
 /// keyed on the unit, which this crate does not call.
 impl ParamMapping for ParamBounds {
-    /// Maps a position onto `[min, max]`, narrowed to the `f32` that
+    /// Maps a position onto `[min, max]`, narrowed to the `Float32` that
     /// `AudioUnitSetParameter` takes (and widened back, so the value is the one
     /// the unit is given: [`ParamBounds::word`] is the same narrowing). A range
     /// with no span yields `min` when finite and `0.0` otherwise
@@ -327,7 +327,7 @@ mod tests {
         }
     }
 
-    /// The unit reporting the `f32` narrowing of a position the host wrote
+    /// The unit reporting the `Float32` narrowing of a position the host wrote
     /// (one that differs from it only below `f32` precision) is an echo, however
     /// often it does, so the control side drops it and the `f64` written stays
     /// the value.

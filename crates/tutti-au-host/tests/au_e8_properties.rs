@@ -12,7 +12,7 @@
 //! * `PresentationLatency`: **0 of 39 accept it.** Every one answers
 //!   `kAudioUnitErr_InvalidProperty` (-10879), and the refusal survives every
 //!   spelling tried — input scope and output scope and global, before and after
-//!   `AudioUnitInitialize`, at `f64` and at `f32` width.
+//!   `AudioUnitInitialize`, at `Float64` and at `Float32` width.
 //!   `AudioUnitGetPropertyInfo` likewise reports the property absent rather than
 //!   present-but-unwritable, so the refusal is honest: these units do not
 //!   implement it, they are not rejecting a malformed write.
@@ -69,7 +69,7 @@ const ERR_INVALID_PROPERTY: i32 = -10879;
 
 /// The seconds the host writes arrive at the AU unchanged.
 ///
-/// The value that matters most on this path is a `f64`
+/// The value that matters most on this path is a `Float64`
 /// count of *seconds*, and the host holds it as [`Seconds`]. A writer that
 /// converted to samples, or that wrote the `f32` bit pattern into an `f64`
 /// slot, would still return `noErr` — the probe refuses any width but 8 bytes,

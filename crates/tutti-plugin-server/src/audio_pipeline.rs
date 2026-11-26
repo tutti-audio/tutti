@@ -1236,7 +1236,7 @@ mod tests {
         assert_alloc_free_at(FloatWidth::F32);
     }
 
-    /// The `f64` scratch path builds its tables without allocating either.
+    /// The `Float64` scratch path builds its tables without allocating either.
     #[test]
     fn process_is_alloc_free_at_float64() {
         assert_alloc_free_at(FloatWidth::F64);

@@ -1,7 +1,7 @@
 //! Does a *runtime* change to latency, tail or the parameter list reach a host
 //! that is watching for it?
 //!
-//! Latency and tail are `f64` **seconds** properties an AU may rewrite at
+//! Latency and tail are `Float64` **seconds** properties an AU may rewrite at
 //! any time. A linear-phase EQ switching modes, an oversampling toggle, a reverb
 //! whose decay is turned up — each moves a figure a host read once at load and
 //! then compensates or sizes a bounce from forever. The parameter list is the
