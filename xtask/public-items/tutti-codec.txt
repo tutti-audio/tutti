@@ -62,10 +62,12 @@ fn encoding::Encoding::channels
 fn encoding::Encoding::dither_seed
 fn encoding::Encoding::format
 fn encoding::Encoding::new
+fn encoding::Encoding::placement
 fn encoding::Encoding::rate
 fn encoding::Encoding::resample
 fn encoding::Encoding::resampling
 fn encoding::Encoding::seed
+fn encoding::Encoding::width
 fn format::Format::from_extension
 fn format::Format::from_path
 fn format::Format::int_pcm
