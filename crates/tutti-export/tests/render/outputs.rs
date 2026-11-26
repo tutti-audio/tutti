@@ -1016,8 +1016,12 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
 #[test]
 fn a_peak_output_with_a_default_layout_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
-    let target = file_of(&dir.path().join("p.wav"), 6)
-        .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
+    // The encoding names no channels: the file has the graph's, the default 5.1.
+    let target = FileTarget::new(
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
+        ToFile::new(dir.path().join("p.wav")),
+    )
+    .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
     let written = render(
         &mut tone(6),
         &job(48_000),
