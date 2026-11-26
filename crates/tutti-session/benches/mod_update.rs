@@ -5,13 +5,13 @@
 //! The scene, for each `n`: a chain of `n` `SvfFilterNode`s into the
 //! output, one LFO per filter routed into its cutoff (a range on each), and
 //! one follower of the first filter routed into the last one's cutoff (so
-//! the reconcile's cycle check has an edge to walk). Each size settles (its
+//! the cycle check has an edge to walk). Each size settles (its
 //! lanes and the follower placed), then `UPDATES` updates are timed. The
 //! `bare` row is the same chain with nothing declared: the floor the rest
 //! of the update costs. The `changing` row is the modulated scene with one
 //! range edit on the first filter's cutoff before every update (the edit is
 //! outside the timing; the update that follows it is timed), so the apply is
-//! never skipped: what the memo costs when it never pays.
+//! never skipped: what an apply costs when the declarations changed.
 //!
 //! A percentile harness, not criterion: the figure is a mean and a p99 per
 //! update, printed. Run it with

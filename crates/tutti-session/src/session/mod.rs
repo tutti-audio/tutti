@@ -379,7 +379,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// and each hosted plugin's meter. Beside it, the cells the session
     /// publishes to itself: the project meter (and
     /// every slot following it), the transport's tempo map, the modulation lanes (inserted by the
-    /// reconciler, not through `add`), the hardware inlets' clock and an
+    /// modulation apply, not through `add`), the hardware inlets' clock and an
     /// offline engine's output folds, and the loop and direction cells of the streams it opened.
     pub(crate) fn reclaim(&mut self) -> usize {
         let mut pinned = self.graph.reclaim();

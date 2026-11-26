@@ -3,7 +3,7 @@
 //! inside `assert_no_alloc`; a primitive that runs on several threads runs
 //! every participant inside it, helpers included.
 
-use tutti_rt::{AudioThreadCell, CappedVec, Claim, LastOut, Party, RenderGate, RtVec};
+use tutti_rt::{AudioThreadCell, CappedVec, Claim, RenderGate, RtVec};
 
 /// `RtVec` reached through `&self`, as `tutti-midi-hardware`'s drain holds it:
 /// behind an `AudioThreadCell`.
@@ -436,28 +436,24 @@ fn ring_is_allocation_free() {
     }
 }
 
-/// `RenderGate::enter` (admitted and refused), `Claim::try_claim` (granted and
-/// refused) and `LastOut::leave` neither allocate nor free, with their guards' drops.
+/// `RenderGate::enter` (admitted and refused) and `Claim::try_claim` (granted,
+/// with a deref of its value, and refused) neither allocate nor free, with their
+/// guards' drops.
 #[test]
-fn gate_claim_and_last_out_audio_paths_neither_allocate_nor_free() {
+fn gate_and_claim_audio_paths_neither_allocate_nor_free() {
     let gate = RenderGate::new();
     gate.begin_open().expect("closed").finish();
-    let claim = Claim::new();
+    let claim = Claim::new(0u32);
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..10_000 {
             let render = gate.enter().expect("open");
             drop(render);
-            let held = claim.try_claim().expect("free");
+            let mut held = claim.try_claim().expect("free");
+            *held += 1;
             assert!(claim.try_claim().is_none());
             drop(held);
         }
     });
     gate.close().expect("open").finish();
     assert_no_alloc::assert_no_alloc(|| assert!(gate.enter().is_none()));
-
-    let out = LastOut::new(7u32);
-    assert_no_alloc::assert_no_alloc(|| {
-        assert_eq!(out.leave(Party::A), None);
-        assert_eq!(out.leave(Party::B), Some(7));
-    });
 }

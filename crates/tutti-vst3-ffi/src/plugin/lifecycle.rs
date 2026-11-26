@@ -198,20 +198,36 @@ impl Parts {
     ///
     /// [`Vst3Error::Busy`] while an [`AudioSide`] exists; otherwise the plugin's
     /// refusal, after which a failed activation leaves the plugin inactive.
+    ///
+    /// After host code panicked while holding the plugin, deactivating
+    /// (`active == false`) still stops and deactivates it, once, and ends the
+    /// instance: every later control call answers [`Vst3Error::NotInitialized`].
+    /// Activating, and every other control call, answers [`Vst3Error::Poisoned`].
     pub fn set_active(&mut self, main: MainThreadMarker, active: bool) -> Result<(), Vst3Error> {
         let _scope = self.scoped(main);
-        let mut state = self.shared.lock_for_control()?;
+        let mut live = match self.shared.lock_for_control() {
+            Ok(live) => live,
+            Err(Vst3Error::Poisoned) if !active => {
+                self.shared.deactivate(&self.component);
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
         // SAFETY: a plain call on a live component, under the claim, with no
         // audio half out.
         let result = check(unsafe { self.component.setActive(u8::from(active)) });
         // Deactivating is recorded whatever the plugin answers: there is no
         // third state to recover to, and teardown must not retry it.
         if result.is_ok() || !active {
-            state.active = active;
+            // Recorded before anything else runs, so a panic below leaves an
+            // activated plugin to be deactivated.
+            self.shared.record_activation(&mut live, active);
+        }
+        if result.is_ok() && active {
             // The layout `process` holds the bound buses to is read now, from
             // the plugin as it stands once active (it may settle its buses
             // only then), and forgotten on deactivation.
-            state.buses = (active && result.is_ok()).then(|| Arrangement {
+            live.state.buses = Some(Arrangement {
                 inputs: self.audio_bus_channels(main, BusDirection::Input).into(),
                 outputs: self.audio_bus_channels(main, BusDirection::Output).into(),
             });
@@ -222,7 +238,7 @@ impl Parts {
     /// Whether `set_active(true)` succeeded and `set_active(false)` has not.
     #[must_use]
     pub fn is_active(&self) -> bool {
-        self.shared.lock().active
+        self.shared.is_active()
     }
 
     /// `IAudioProcessor::setProcessing`, from the main thread, at activation.
@@ -264,28 +280,9 @@ impl Parts {
 
 impl Drop for Parts {
     fn drop(&mut self) {
-        // Retire first: the audio half refuses every later block, and this waits
-        // out one in flight. The state is cleared under the lock, so an audio
-        // thread that gets the lock later finds neither an active nor a set-up
-        // plugin (and `retired`, checked again under the lock).
         // Where an editor is open this runs on the main thread: `Plugin`'s drop hands
         // the whole value there otherwise.
-        let shared = self.shared.clone();
-        let (state, was_active) = shared.teardown();
-        // A plugin dropped while activated (its halves were never rejoined)
-        // stops and deactivates first: `terminate` is for an inactive component.
-        if was_active {
-            // SAFETY: plain calls on live interfaces; the claim is held, so the
-            // audio half is not inside `process`.
-            unsafe {
-                self.processor.setProcessing(0);
-                let _ = self.component.setActive(0);
-            }
-        }
-        // The claim is not needed past this point: every audio-half entry
-        // refuses on `retired`, which it checks under the lock, and the rest is
-        // control-side teardown that must not hold it.
-        drop(state);
+        self.shared.deactivate(&self.component);
         // Drop has no token and may run on any thread: the editor is detached
         // only on the thread the plugin was made on (`release_editor`).
         let here = self.home.here();

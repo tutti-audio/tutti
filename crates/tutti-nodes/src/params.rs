@@ -2,9 +2,9 @@
 //!
 //! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
 //! `Controls` and the `f64` cells. [`Params`] is the one reader over it,
-//! with one rule for every control: the control signal's value at
-//! the solve frame when a control signal drives it, else a ramp from the controls last
-//! designed to the cell's value, each read through [`LastGood`]. Sanitising
+//! with one rule for every control: the value its port carries at the solve frame when
+//! the port delivers frames (a control signal, or the graph's ramp of a moved cell),
+//! else the cell, each read through [`LastGood`]. Sanitising
 //! (floors, clamps, whole-set validation) is the design's, never the reader's.
 //!
 //! A control the kernel reads **per frame** is [`ControlRead::Fast`]: the
@@ -17,9 +17,8 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
-use tutti_dsp::{GAIN_RAMP, Ramp};
 use tutti_graph::{DeclaredUnit, ErasedSetting, Io, MAX_PARAM_PORTS, ParamSetBuilder};
-use tutti_units::{SampleRate, UnitAddr};
+use tutti_units::UnitAddr;
 
 use crate::kernel::MAX_SIGNALS;
 use crate::last_good::LastGood;
@@ -50,8 +49,9 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// [`flatten`](Self::flatten).
     fn assemble(&self, v: &[f64]) -> Self::Controls;
 
-    /// How the reader takes control `k` (`k < addrs().len()`): whether it ramps, lands
-    /// whole or is read per frame, and which values it accepts. [`Control::RAMP`] by
+    /// How the reader takes control `k` (`k < addrs().len()`): whether the graph ramps a
+    /// moved cell, lands it whole or the kernel reads it per frame, and which values it
+    /// accepts. [`Control::RAMP`] by
     /// default; `control_set!` writes it from each row's flags, so a control is
     /// declared once.
     fn control(&self, _k: usize) -> Control {
@@ -100,15 +100,16 @@ impl ControlSet for NoControls {
     fn assemble(&self, _: &[f64]) {}
 }
 
-/// How the reader takes a control from its cell and its port.
+/// How a control reaches the kernel from its cell and its port.
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub enum ControlRead {
-    /// A moved cell ramps on the stream clock over [`GAIN_RAMP`], from where the
-    /// control stood on the first frame of the block that first sees the write, or its
-    /// port is read at the solve frame when a control signal drives it.
+    /// The graph ramps a moved cell on its port
+    /// ([`ParamInput::Smoothing`](tutti_graph::ParamInput::Smoothing)), and the reader
+    /// takes the port's value at the solve frame whenever the port delivers frames.
     Ramp,
-    /// As [`Ramp`](Self::Ramp), but a moved cell lands whole: a control whose ramp
-    /// is the kernel's own (a detector's) is not ramped by the reader.
+    /// As [`Ramp`](Self::Ramp), but the graph lands a moved cell whole
+    /// ([`ParamPorts::whole`](tutti_graph::ParamPorts::whole)): a control whose ramp is the
+    /// kernel's own (a detector's, a makeup's) is not ramped twice.
     Whole,
     /// Read **per frame** by the kernel, from its port, into a
     /// [`ControlSignals`](crate::ControlSignals) control signal (the fast controls fill the control signals in row order).
@@ -159,7 +160,7 @@ pub enum Ring {
 }
 
 impl Control {
-    /// A control that ramps and accepts finite values: a row with no flags.
+    /// A control the graph ramps, accepting finite values: a row with no flags.
     pub const RAMP: Self = Self {
         read: ControlRead::Ramp,
         valid: ControlValid::Finite,
@@ -377,43 +378,6 @@ macro_rules! control_set {
     (@has $set:ident; $kind:ident [$ix:tt] => $unit:ty) => {};
 }
 
-/// Where in a block a node reads its controls.
-#[derive(Clone, Copy, Debug)]
-pub struct At {
-    /// The stream frame the block begins on, what a cell's ramp is counted on.
-    pub position: u64,
-    /// The frame of the block to read at.
-    pub frame: usize,
-    /// The rate the node runs at, for a control that is only valid against it.
-    pub rate: SampleRate,
-}
-
-/// A [`ControlRead::Ramp`] cell's ramp on the stream clock: from where the control
-/// stood to the cell's value, over the frames from `start`.
-#[derive(Clone, Copy, Debug)]
-struct CellRamp {
-    ramp: Ramp<f64>,
-    /// The stream frame of the ramp's first frame, which reads step 1.
-    start: u64,
-}
-
-impl CellRamp {
-    /// At rest on `value` at stream frame `start`.
-    fn new(value: f64, start: u64) -> Self {
-        Self {
-            ramp: Ramp::new(value),
-            start,
-        }
-    }
-
-    /// The control's value at stream frame `position`.
-    fn at(&self, position: u64) -> f64 {
-        let i = position.saturating_sub(self.start);
-        self.ramp
-            .at(u32::try_from(i).map_or(u32::MAX, |i| i.saturating_add(1)))
-    }
-}
-
 /// The cells of a [`ControlSet`] and how a block reads them.
 #[derive(Clone, Debug)]
 pub struct Params<S: ControlSet> {
@@ -428,13 +392,6 @@ pub struct Params<S: ControlSet> {
     fast: [usize; MAX_SIGNALS],
     /// How many of `fast` are filled.
     fast_len: usize,
-    /// Each [`ControlRead::Ramp`] cell's ramp on the stream clock.
-    ramps: [CellRamp; MAX_CONTROLS],
-    /// A ramp's length in frames: [`GAIN_RAMP`] at the prepared rate, or none.
-    ramp: usize,
-    /// Whether the ramps have a value to start from: not after a prepare or a reset,
-    /// when a cell lands whole.
-    primed: bool,
 }
 
 impl<S: ControlSet> Params<S> {
@@ -476,58 +433,7 @@ impl<S: ControlSet> Params<S> {
             controls,
             fast,
             fast_len,
-            ramps: [CellRamp::new(0.0, 0); MAX_CONTROLS],
-            ramp: 1,
-            primed: false,
         }
-    }
-
-    /// Takes the rate a cell's ramp is measured at, and whether a moved cell ramps
-    /// at all: a kernel that ramps its own coefficients between block
-    /// designs lands it whole. Every cell lands whole on the next
-    /// block, as after [`land`](Self::land).
-    pub(crate) fn retune(&mut self, rate: SampleRate, ramps: bool) {
-        self.ramp = if ramps {
-            GAIN_RAMP.to_samples(rate).get().max(1)
-        } else {
-            1
-        };
-        self.land();
-    }
-
-    /// Back to no ramp: every cell lands whole on the next block (a prepare, a reset).
-    pub(crate) fn land(&mut self) {
-        self.primed = false;
-    }
-
-    /// The block beginning at stream frame `position`: each [`ControlRead::Ramp`]
-    /// cell's value, read once for the block, and a ramp started from where the control
-    /// stands to it if it moved. A ramp is on the stream clock, so it is the same
-    /// whatever the blocks: it starts on the first frame of the block the write is first
-    /// seen in, and arrives [`GAIN_RAMP`] later.
-    pub(crate) fn begin(&mut self, position: u64) {
-        for k in 0..self.cells.len() {
-            let control = self.controls[k];
-            if control.read != ControlRead::Ramp {
-                continue;
-            }
-            let x = self.cells[k].load(Relaxed);
-            let to = self.good[k].read_if(x, control.accepts(x));
-            let ramp = &mut self.ramps[k];
-            if !self.primed {
-                *ramp = CellRamp::new(to, position);
-            } else if to.to_bits() != ramp.ramp.target().to_bits() {
-                // Where it stood on the frame before this block, the last one rendered.
-                let from = ramp.at(position.saturating_sub(1));
-                let mut arriving = Ramp::new(from);
-                arriving.retarget_in(to, u32::try_from(self.ramp).unwrap_or(u32::MAX));
-                *ramp = CellRamp {
-                    ramp: arriving,
-                    start: position,
-                };
-            }
-        }
-        self.primed = true;
     }
 
     /// Whether a control signal drives a control the tail reads ([`Control::ring`] is not
@@ -592,35 +498,22 @@ impl<S: ControlSet> Params<S> {
         self.cells.get(k).map(|c| c.load(Acquire))
     }
 
-    /// The controls at `at.frame`: each cell, or the value its port carries when the
-    /// graph modulates it, read through [`LastGood`] so a value the control refuses
-    /// ([`Control::accepts`]: non-finite by default) reads as unchanged. A
-    /// [`ControlRead::Ramp`] cell is its ramp at that frame ([`begin`](Self::begin)),
-    /// a [`ControlRead::Fast`] control is its cell whatever its port carries, and a
-    /// [`ControlRead::Whole`] one is its cell.
-    pub(crate) fn read<G: Float>(&mut self, io: &Io<'_, G>, at: At) -> S::Controls {
+    /// The controls at block frame `frame`: the value a control's port carries there when
+    /// the port delivers frames (a control signal, or the graph's ramp of a moved
+    /// [`ControlRead::Ramp`] cell), else its cell, read through [`LastGood`] so a value
+    /// the control refuses ([`Control::accepts`]: non-finite by default) reads as
+    /// unchanged. A [`ControlRead::Fast`] control is its cell whatever its port carries.
+    pub(crate) fn read<G: Float>(&mut self, io: &Io<'_, G>, frame: usize) -> S::Controls {
         let n = self.cells.len();
         let mut value = [0.0f64; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
             let control = self.controls[k];
-            let signal = match control.read {
+            let port = match control.read {
                 ControlRead::Fast => None,
                 ControlRead::Ramp | ControlRead::Whole => io.param(k).frames(),
             };
-            *v = match (signal, control.read) {
-                (Some(signal), _) => {
-                    let x = signal[at.frame];
-                    self.good[k].read_if(x, control.accepts(x))
-                }
-                (None, ControlRead::Ramp) => {
-                    debug_assert!(self.primed, "a block reads its ramps after `begin`");
-                    self.ramps[k].at(at.position + at.frame as u64)
-                }
-                (None, _) => {
-                    let x = self.cells[k].load(Relaxed);
-                    self.good[k].read_if(x, control.accepts(x))
-                }
-            };
+            let x = port.map_or_else(|| self.cells[k].load(Relaxed), |frames| frames[frame]);
+            *v = self.good[k].read_if(x, control.accepts(x));
         }
         self.set.assemble(&value[..n])
     }
@@ -682,61 +575,7 @@ impl<S: ControlSet> Params<S> {
 mod tests {
     use super::*;
 
-    /// A ramp of `n` frames from `from` to `to` begun at stream frame `start`, as
-    /// [`Params::begin`] builds it.
-    fn retargeted(from: f64, to: f64, n: u32, start: u64) -> CellRamp {
-        let mut ramp = Ramp::new(from);
-        ramp.retarget_in(to, n);
-        CellRamp { ramp, start }
-    }
-
-    /// Frame `i` of an `n`-frame ramp is `from + (to - from) * (i + 1) / n`, and the
-    /// last frame is `to` to the bit, whatever the arithmetic rounds to.
-    #[test]
-    fn a_cell_ramp_is_linear_and_lands_on_its_target_bits() {
-        for (from, to, n) in [(0.7f64, 0.2f64, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
-            let g = retargeted(from, to, n, 1_000);
-            for i in 0..n - 1 {
-                let want = from + (to - from) * f64::from(i + 1) / f64::from(n);
-                let got = g.at(1_000 + u64::from(i));
-                assert!(
-                    (got - want).abs() < 1e-12,
-                    "{from} -> {to}: frame {i}: {got} vs {want}"
-                );
-            }
-            assert_eq!(
-                g.at(1_000 + u64::from(n) - 1).to_bits(),
-                to.to_bits(),
-                "{from} -> {to} over {n}: the last frame"
-            );
-            assert_eq!(
-                g.at(1_000 + u64::from(n)).to_bits(),
-                to.to_bits(),
-                "held after"
-            );
-        }
-    }
-
-    /// A one-frame ramp is the new value on its first frame.
-    #[test]
-    fn a_one_frame_cell_ramp_is_the_new_value() {
-        assert_eq!(retargeted(3.0, 9.0, 1, 5).at(5), 9.0);
-    }
-
-    /// A retarget mid-ramp starts from the value of the frame before it: the first
-    /// frame of the new ramp is one step on from there.
-    #[test]
-    fn a_cell_ramp_retargeted_mid_flight_continues_from_its_value() {
-        let first = retargeted(0.0, 1.0, 100, 0);
-        let before = first.at(39);
-        let second = retargeted(before, 0.25, 50, 40);
-        let step = (0.25 - before) / 50.0;
-        let got = second.at(40);
-        assert!((got - (before + step)).abs() < 1e-12, "{got}");
-        assert_eq!(second.at(40 + 49).to_bits(), 0.25f64.to_bits());
-    }
-
-    /// A set of one ramped control.
+    /// A set of one control.
     #[derive(Clone, Debug)]
     struct One;
 
@@ -758,73 +597,6 @@ mod tests {
         }
         fn assemble(&self, v: &[f64]) -> f64 {
             v[0]
-        }
-    }
-
-    /// The ramp length of the stream test, in frames.
-    const N: u64 = 1_000;
-    /// A write lands before these stream frames: a multiple of every block length the
-    /// split test uses, the second inside the first's ramp.
-    const FIRST: u64 = 448;
-    const SECOND: u64 = 896;
-    const TOTAL: u64 = 3_136;
-
-    /// A cell at 0 written to 1 before frame [`FIRST`] and to 0.25 before [`SECOND`],
-    /// read per frame through [`Params::begin`] in blocks of `block` frames.
-    fn stream(block: u64) -> Vec<f64> {
-        let mut params = Params::new(One, &0.0);
-        params.retune(SampleRate::SR_48K, true);
-        params.ramp = N as usize;
-        let mut out = Vec::new();
-        let mut position = 0;
-        while position < TOTAL {
-            match position {
-                FIRST => params.cells[0].store(1.0, Relaxed),
-                SECOND => params.cells[0].store(0.25, Relaxed),
-                _ => {}
-            }
-            params.begin(position);
-            for i in 0..block {
-                out.push(params.ramps[0].at(position + i));
-            }
-            position += block;
-        }
-        out
-    }
-
-    /// The first write ramps `0 -> 1` over [`N`] frames from the first frame of its
-    /// block; the second, mid-ramp, starts from the first ramp's value on the frame
-    /// before its block and takes one step of the new distance on its first frame, and
-    /// lands on the target's bits on its last. Expected values are the line
-    /// `from + (to - from) * k / n` in `f64`.
-    #[test]
-    fn a_cell_written_mid_ramp_continues_from_its_value_through_begin() {
-        let got = stream(64);
-        let line = |from: f64, to: f64, k: u64| from + (to - from) * k as f64 / N as f64;
-        let near = |frame: u64, want: f64| {
-            let got = got[frame as usize];
-            assert!((got - want).abs() < 1e-12, "frame {frame}: {got} vs {want}");
-        };
-        near(FIRST - 1, 0.0);
-        near(FIRST, line(0.0, 1.0, 1));
-        near(SECOND - 1, line(0.0, 1.0, SECOND - FIRST));
-        let mid = line(0.0, 1.0, SECOND - FIRST);
-        near(SECOND, line(mid, 0.25, 1));
-        near(SECOND + 499, line(mid, 0.25, 500));
-        assert_eq!(got[(SECOND + N - 1) as usize].to_bits(), 0.25f64.to_bits());
-        assert_eq!(got[TOTAL as usize - 1].to_bits(), 0.25f64.to_bits());
-    }
-
-    /// The same writes read in blocks of 1, 7 and 64 frames give the same value on every
-    /// frame, bit for bit: a ramp is on the stream clock, not the block's.
-    #[test]
-    fn a_cell_ramp_is_the_same_whatever_the_blocks() {
-        let whole = stream(64);
-        for block in [1, 7] {
-            let got = stream(block);
-            for (f, (g, w)) in got.iter().zip(&whole).enumerate() {
-                assert_eq!(g.to_bits(), w.to_bits(), "block {block}, frame {f}");
-            }
         }
     }
 

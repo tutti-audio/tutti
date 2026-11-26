@@ -217,10 +217,10 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, LoopTarget,
-    MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, OutputPolicyTarget,
-    ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
-    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
+    DepthKey, DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead,
+    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable,
+    OutputPolicyTarget, ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget,
+    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -353,22 +353,22 @@ pub mod nodes {
             DirectionSet, DistanceKernel, DistanceSet, DistortionKernel, DistortionSet,
             DynamicEqControls, DynamicEqKernel, DynamicEqSet, EarlyReflectionsKernel,
             EnvelopeFilterControls, EnvelopeFilterKernel, EnvelopeFilterSet, EqControls, EqKernel,
-            FdnControls, FdnKernel, FdnKind, FdnNodeControls, FdnSet, Feed, FmKernel, FmSet,
+            FdnControls, FdnKernel, FdnKind, FdnNodeControls, FdnSet, FmKernel, FmSet,
             FreeverbControls, FreeverbKernel, FreeverbSet, FreezeControls, FrequencyShifterKernel,
             FrequencyShifterSet, GateControls, GateKernel, GateSet, GraphicEqControls,
             GraphicEqKernel, GraphicEqSet, HasControl, HysteresisControls, HysteresisKernel,
             HysteresisSet, KarplusStrongKernel, KarplusStrongSet, Kernel, KernelConfig, KernelNode,
             LadderControls, LadderKernel, LadderSet, LevellerControls, LevellerKernel, LevellerSet,
             LimiterControls, LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel,
-            ModDelaySet, ModHost, ModalBankKernel, ModalBankSet, MultibandControls, NoControls,
+            ModDelaySet, ModalBankKernel, ModalBankSet, MultibandControls, NoControls,
             PhaserControls, PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet,
-            PlateControls, PlateKernel, PlateSet, ReconcileError, Ring, RingModControls,
-            RingModKernel, RingModSet, ShimmerControls, ShimmerSet, SpringControls,
-            SpringReverbKernel, SpringReverbSet, StereoWidthKernel, StereoWidthSet, SvfControls,
-            SvfKernel, SvfSet, TiltFilterControls, TiltFilterKernel, TiltFilterSet,
-            TransientControls, TransientShaperKernel, TransientShaperSet, TremoloControls,
-            TremoloKernel, TremoloSet, TubeStageControls, TubeStageKernel, TubeStageSet,
-            WaveguideStringKernel, WaveguideStringSet, WidthControls,
+            PlateControls, PlateKernel, PlateSet, Ring, RingModControls, RingModKernel, RingModSet,
+            ShimmerControls, ShimmerSet, SpringControls, SpringReverbKernel, SpringReverbSet,
+            StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet, TiltFilterControls,
+            TiltFilterKernel, TiltFilterSet, TransientControls, TransientShaperKernel,
+            TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet, TubeStageControls,
+            TubeStageKernel, TubeStageSet, WaveguideStringKernel, WaveguideStringSet,
+            WidthControls,
         };
     }
 }
@@ -617,9 +617,9 @@ pub mod session {
     ))]
     pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
-        AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
-        ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
-        RouteInfo, Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
+        AutomationTake, MixRef, ModRouteId, ModSourceId, ModState, ModTarget, Mods, ModsView,
+        NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError, RouteInfo,
+        Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{

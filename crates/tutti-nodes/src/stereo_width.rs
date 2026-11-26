@@ -136,7 +136,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{assert_cell_ramps, drive_block, prepared};
+    use crate::test_support::{assert_block_free, drive_block, prepared};
     use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
 
@@ -159,7 +159,7 @@ mod tests {
         }
     }
 
-    /// A cell written between blocks ramps on the stream clock whatever the blocks, and
+    /// A cell written between blocks ramps in the bank the same whatever the blocks, and
     /// lands on the formula: a side-only pair `(1, -1)` reads `w` on the left, `-w` on the
     /// right, and `0.25` after the ramp.
     #[test]
@@ -169,7 +169,7 @@ mod tests {
             |n: &StereoWidthNode<f32>| assert!(n.param_set().set(UnitParam::StereoWidth, 0.25));
         let (l, r) = (vec![1.0f32; 64], vec![-1.0f32; 64]);
         let (la, ra) = (vec![1.0f32; 600], vec![-1.0f32; 600]);
-        assert_cell_ramps(make, change, &[&l, &r], &[&la, &ra], "width");
+        assert_block_free(make, change, &[&l, &r], &[&la, &ra], "width");
         let (_, out) = crate::test_support::render_change(make, change, &[&l, &r], &[&la, &ra], 64);
         assert!(out[0][599] == 0.25 && out[1][599] == -0.25);
         assert!(out[0][0] < 1.0 && out[0][0] > 0.9, "starts down the line");

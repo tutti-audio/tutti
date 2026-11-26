@@ -2,7 +2,7 @@
 
 use tutti_ump::{Message, Midi1Bytes, Ump, Voice1, Voice2};
 
-/// The Default Translation; see [`Midi1Translator::with_mode`](crate::Midi1Translator::with_mode) for the alternates.
+/// The Default Translation; [`Midi1Translator`](crate::Midi1Translator) is it with the choices it leaves open.
 ///
 /// The MIDI 1.0 messages `message` stands for, in the order to send them:
 /// none when it has no MIDI 1.0 form, three for a MIDI 2.0 Program Change with

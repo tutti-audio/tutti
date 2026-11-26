@@ -24,8 +24,9 @@ use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, Endpoint, EndpointId, MidiDeviceId, OsChange, OsDevice,
     PortDirection, Resolved,
 };
+use tutti_midi_protocol::ProfileZones;
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
-use tutti_ump::StreamConfig;
+use tutti_ump::{MidiGroup, StreamConfig};
 
 use crate::backend;
 use crate::capability::{OsEndpoint, described, legacy};
@@ -677,11 +678,14 @@ impl OpenInput {
 /// Channel Voice as it is; one in the MIDI 1.0 Protocol (and a MIDI 1.0 port) is
 /// never sent type `0x4`, and its MIDI 2.0 messages go through one `Midi1Translator`
 /// for this output (a Registered Controller as Control Changes 101, 100, 6 and
-/// 38); and JR Timestamps go only to a device whose configuration receives them.
+/// 38); a Group whose device has the MPE Profile enabled is sent MPE (M2-120), a
+/// note on a Member Channel of its own; and JR Timestamps go only to a device whose
+/// configuration receives them.
 /// The configuration is the OS's description of the device until
 /// [`set_config`](Self::set_config) says what a negotiation settled
-/// ([`follow`](Self::follow) takes it from a
-/// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
+/// ([`MidiSession::follow`](crate::MidiSession::follow) takes it from a
+/// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages
+/// pass in every form.
 pub struct OpenOutput {
     /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
     /// started it. Declared first: it ends before the sink drops. A drop on a thread
@@ -793,16 +797,9 @@ impl OpenOutput {
         }
     }
 
-    /// Follows what a [`MidiSession::poll`](crate::MidiSession::poll) reported:
-    /// a settled or changed Stream of this output's device is its
-    /// [`set_config`](Self::set_config), and any other report, or another
-    /// device's, changes nothing.
-    pub fn follow(&mut self, polled: &crate::Polled) {
-        if let crate::Polled::Stream(id, stream) = polled
-            && *id == self.info.id
-        {
-            self.set_config(stream.config());
-        }
+    /// Sends as MPE to `zones` of `group` from now on.
+    pub(crate) fn set_mpe_zones(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
+        self.wire.set_profile(group, zones);
     }
 }
 

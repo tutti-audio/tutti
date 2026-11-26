@@ -30,8 +30,7 @@ atomic_float = "1.1"
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 # The modulation compiler and its vocabulary (`ControlProgram`, `Curve`,
-# `LfoShape`, `compile`): the control lane evaluates its programs, and the
-# reconcile (`Modulation`) calls the compiler.
+# `LfoShape`): the control lane evaluates its programs.
 tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
 
 # The algorithms every node adapts.

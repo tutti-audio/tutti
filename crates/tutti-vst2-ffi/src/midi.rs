@@ -158,10 +158,10 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 /// stream that has sent nothing before it: per-note pitch bend, per-note
 /// controllers and management (no MIDI-1 analogue), a Program Change with a
 /// bank (three messages) and an RPN or NRPN (four). [`MidiSendBuffer`] sends all
-/// of them, through a [`Midi1Translator`] that keeps the stream's state.
+/// of them, through a [`Midi1Translator`].
 pub fn from_midi(event: &WireMidi) -> Option<crate::api::MidiEvent> {
     let mut messages = [[0u8; 3]; MAX_MESSAGES];
-    match midi1_messages(&mut Midi1Translator::new(), event.ump, &mut messages) {
+    match midi1_messages(Midi1Translator::new(), event.ump, &mut messages) {
         1 => Some(midi_event(event.offset, messages[0], true)),
         _ => None,
     }
@@ -175,7 +175,7 @@ const MAX_MESSAGES: usize = 4;
 /// `out`; how many. None when it has no MIDI 1.0 form (a per-note controller, a
 /// relative controller) or does not decode.
 fn midi1_messages(
-    midi1_translator: &mut Midi1Translator,
+    midi1_translator: Midi1Translator,
     ump: Ump,
     out: &mut [[u8; 3]; MAX_MESSAGES],
 ) -> usize {
@@ -452,7 +452,7 @@ impl MidiSendBuffer {
             // and all of them fit or none is staged (a bank is not sent
             // without its program).
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
-            let n = midi1_messages(&mut self.midi1_translator, *ev, &mut messages);
+            let n = midi1_messages(self.midi1_translator, *ev, &mut messages);
             if self.order.remaining() < n {
                 self.events_dropped.add(n as u64);
                 continue;
@@ -571,12 +571,11 @@ impl MidiSendBuffer {
     }
 
     /// The plugin was reset: drops a SysEx message open across the reset
-    /// (counted in [`sysex_dropped`](Self::sysex_dropped)) and resets the MIDI 1.0 translator.
+    /// (counted in [`sysex_dropped`](Self::sysex_dropped)).
     /// Never allocates.
     pub fn reset_midi(&mut self) {
         self.sysex.reset();
         self.count_sysex_drops();
-        self.midi1_translator.reset();
     }
 
     /// Channel voice messages dropped since this buffer was made because they
@@ -1431,59 +1430,6 @@ mod tests {
         );
         buf.reset_midi();
         assert_eq!(staged_bytes(&mut buf, &[rpn(12 << 25)]).len(), 4);
-    }
-
-    /// **A refused message leaves an MPE note's member channel as it was**: the
-    /// The MIDI 1.0 translator's note allocation survives a message past the room, so the
-    /// note's per-note bend still goes to its channel (M2-104 D.2.8).
-    #[test]
-    fn a_refused_message_keeps_an_mpe_notes_channel() {
-        use tutti_midi_protocol::{
-            MemberCount, Mpe11Zone, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
-        };
-        use tutti_ump::{
-            Address, Attribute, BendValue, ControlValue, ExtremeValues, Message, NoteNumber,
-            NoteVelocity, Voice2,
-        };
-        let zone = Mpe11Zone::lower(
-            MemberCount::of(2),
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .layout();
-        // Room for the note, the bend and one more: the RPN's four do not fit.
-        let mut buf = MidiSendBuffer::new();
-        buf.midi1_translator = Midi1Translator::with_mode(TranslationMode {
-            extremes: ExtremeValues::Scaled,
-            per_note: PerNoteTranslation::Mpe(zone),
-        });
-        let address = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
-        let note = NoteNumber::of(60);
-        let ump = |voice| at(0, Message::midi2(address, voice).into());
-        let midi = [
-            ump(Voice2::NoteOn {
-                note,
-                velocity: NoteVelocity::new(0x8000),
-                attribute: Attribute::None,
-            }),
-            ump(Voice2::registered(
-                tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
-                ControlValue::new(12 << 25),
-            )),
-            ump(Voice2::PerNotePitchBend {
-                note,
-                value: BendValue::new(0x8000_0000),
-            }),
-        ];
-        // The block holds fillers first, so three slots are left for the note, the RPN and
-        // the bend: the RPN's four are refused.
-        let mut events = filler(MIDI_STACK_CAPACITY - 3, 1);
-        events.extend(midi);
-        let staged = staged_bytes(&mut buf, &events);
-        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
-        assert_eq!(staged[..2], [vec![0x91, 60, 0x40], vec![0xE1, 0x00, 0x40]]);
-        assert_eq!(staged.len(), MIDI_STACK_CAPACITY - 1);
-        assert_eq!(buf.events_dropped().get(), 4);
     }
 
     /// **A banked Program Change is three messages every time** (M2-104

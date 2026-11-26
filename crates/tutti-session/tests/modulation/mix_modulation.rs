@@ -13,14 +13,13 @@
 use crate::common::render;
 use crate::offline::offline;
 use tutti_buffers::ChannelLayout;
-use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_nodes::ReconcileError;
+use tutti_graph::{Cx, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    InputPort, Key, MainOutput, MixRef, ModRefusal, ModTarget, OutputPort, ParamRef, PassError,
-    Problem, RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
+    InputPort, Key, MainOutput, MixRef, ModTarget, OutputPort, ParamRef, PassError, Problem,
+    Replacement, RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
 };
-use tutti_units::{Bipolar, Mix, UnitParam};
+use tutti_units::{Bipolar, Mix, Samples, UnitParam};
 
 const BLOCK: usize = 128;
 /// The constant source's level.
@@ -266,21 +265,53 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
-    let target = m.key(mix);
     for _ in 0..6 {
         let _ = s.update();
     }
     assert_eq!(
         s.mod_state().problems().next(),
-        Some(&Problem::Refused {
-            cause: ModRefusal::Apply(ReconcileError::Unplaced {
-                target,
-                error: PassError::Unplaced {
-                    inputs: 1,
-                    outputs: 2
-                },
-            }),
-            at: Some(TargetName::Own(mix.into())),
+        Some(&Problem::Unplaced {
+            target: TargetName::Own(mix.into()),
+            error: PassError::Unplaced {
+                inputs: 1,
+                outputs: 2
+            },
         })
     );
+}
+
+/// **A node replaced under a mix route keeps its mix modulated.** The lane is
+/// bound to the cells of the unit it drives, so a replace rebuilds it: with the base
+/// left at `0.25` and a macro of `0.5` at depth `0.5` over `0..=1`, the blend is
+/// the one at `0.5` before and after, as the first figure of the route.
+#[test]
+fn a_replaced_node_keeps_its_mix_route() {
+    let mut s = offline();
+    let node = rig(&mut s);
+    settle(&mut s);
+    s.set(node.mix().to(Mix::new(0.25))).expect("a node");
+    let mix = MixRef::of(node);
+    let mut m = s.mods_mut();
+    m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
+    let source = m.macro_(0.5);
+    m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
+        .unwrap();
+    settle(&mut s);
+    figure(&mut s, 0.5, "before the replace");
+    let lane = s.mod_state().lane(mix.key()).expect("a lane").0;
+
+    s.graph()
+        .replace(
+            node,
+            Replacement::new(ForkByClone(Halve)).fade(Fade::new(Samples::ZERO)),
+        )
+        .expect("the replace is accepted");
+    s.set(node.mix().to(Mix::new(0.25))).expect("a node");
+    settle(&mut s);
+    assert_ne!(
+        s.mod_state().lane(mix.key()).expect("a lane").0,
+        lane,
+        "the lane was rebuilt on the new unit"
+    );
+    figure(&mut s, 0.5, "after the replace");
 }

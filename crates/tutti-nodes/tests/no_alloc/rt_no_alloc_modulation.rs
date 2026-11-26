@@ -957,56 +957,75 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
     }
 }
 
-/// **An `apply` that republishes allocates nothing on the audio thread.**
-/// A saw into a low-pass SVF; `tutti_nodes::Modulation` puts a 2 Hz LFO on
-/// its cutoff and a follower of the saw on its Q. Between gated blocks a
-/// depth edit is applied (on the control thread, outside the gate): each
-/// republishes the LFO's lane and sends no plan, and the blocks after each
-/// one read the new program inside the gate. (That the lane adopts it, the
-/// render moving with the depth, is `modulation_reconcile.rs`' depth test;
-/// a single-threaded gate pins only the reader's path.)
+/// **A republished program allocates nothing on the audio thread.** A saw
+/// into a low-pass SVF; a lane running a 2 Hz LFO's program drives its cutoff.
+/// Between gated blocks the LFO's rate is edited, recompiled against the last
+/// compile and published to the lane (on the control thread, outside the gate):
+/// each publish sends no plan, and the blocks after it read the new program
+/// inside the gate. (That the lane adopts it, the render moving with it, is the
+/// session's modulation suite; a single-threaded gate pins only the reader's
+/// path.)
 #[test]
-fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
+fn a_republished_program_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::NodeKey;
+    use tutti_graph::TransportPosition;
     use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
-    use tutti_graph::{Editor, ForkByClone, Prepare, TransportPosition};
+    use tutti_graph::{Editor, EventOutputPort, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
         Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, Source as ModSource,
-        SourceKey, TargetDecl, TargetKey, Waveform,
+        SourceKey, TargetDecl, TargetKey, Waveform, compile,
     };
+    use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
     use tutti_nodes::testing::Osc;
-    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType};
-    use tutti_units::{
-        Beat, Bipolar, Bpm, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
-    };
+    use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+    use tutti_units::{Beat, Bipolar, Bpm, Hz, ParamAddr, PhaseIncrement, Q, Samples, UnitParam};
 
-    struct Host {
-        filter: NodeKey,
-        saw: NodeKey,
-    }
-    impl ModHost for Host {
-        fn node(&self, _: u64) -> Option<NodeKey> {
-            Some(self.filter)
-        }
-        fn feed(&self, _: SourceKey) -> Option<Feed> {
-            Some(Feed::Audio(self.saw))
-        }
-    }
-    let at = |p| TargetKey::param(1, ParamAddr::Unit(p));
-    let route = |s: u64, p, depth: f64| RouteDecl {
-        source: SourceKey(s),
-        to: at(p),
-        depth: tutti_rt::Param::new(Bipolar::of(depth)),
-        polarity: Polarity::Bipolar,
-        curve: Law::Linear,
-        scale: None,
+    let cutoff = TargetKey::param(1, ParamAddr::Unit(UnitParam::Cutoff));
+    let routes = [(
+        RouteKey(1),
+        RouteDecl {
+            source: SourceKey(1),
+            to: cutoff,
+            depth: tutti_rt::Param::new(Bipolar::of(0.2)),
+            polarity: Polarity::Bipolar,
+            curve: Law::Linear,
+            scale: None,
+        },
+    )];
+    let targets = [(
+        cutoff,
+        TargetDecl {
+            min: 100.0,
+            max: 4_000.0,
+            automation: None,
+        },
+    )];
+    let lfo = |rate: f64| {
+        [(
+            SourceKey(1),
+            ModSource::Lfo {
+                wave: Waveform::Shape {
+                    shape: tutti_modulation::LfoShape::Sine,
+                    seed: 0,
+                },
+                clock: LayerClock::Seconds {
+                    rate: Hz::new(rate),
+                    phase: PhaseIncrement::new(0.0),
+                    anchor: None,
+                },
+            },
+        )]
     };
 
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(128)),
     ));
-    let (saw, filter) = (NodeKey(1 << 48), NodeKey((1 << 48) + 1));
+    let (saw, filter, lane) = (
+        NodeKey(1 << 48),
+        NodeKey((1 << 48) + 1),
+        NodeKey((1 << 48) + 2),
+    );
     ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz::new(110.0))));
     let params = ed
         .insert(
@@ -1026,99 +1045,66 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     .unwrap();
     ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
         .unwrap();
-    ed.commit().expect("commits");
-    let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
-    let mut out = vec![0.0f32; 128];
-    exec.process(128, &transport, &[], &mut [&mut out[..]]);
-    ed.collect();
-
-    let host = Host { filter, saw };
-    let cell = |at: tutti_graph::ParamIn| params.cell(at.param);
-    let mirror = |_: NodeKey, _: tutti_units::ParamId| None;
-    let lfo = |rate: f64| {
-        (
-            SourceKey(1),
-            ModSource::Lfo {
-                wave: Waveform::Shape {
-                    shape: tutti_modulation::LfoShape::Sine,
-                    seed: 0,
-                },
-                clock: LayerClock::Seconds {
-                    rate: Hz::new(rate),
-                    phase: PhaseIncrement::new(0.0),
-                    anchor: None,
-                },
-            },
-        )
-    };
-    let mut sources = [
-        lfo(2.0),
-        (
-            SourceKey(2),
-            ModSource::Follower {
-                attack: Seconds::new(0.001),
-                release: Seconds::new(0.05),
-            },
-        ),
-    ];
-    let routes = [
-        (RouteKey(1), route(1, UnitParam::Cutoff, 0.2)),
-        (RouteKey(2), route(2, UnitParam::Q, 0.3)),
-    ];
-    let targets = [
-        (
-            at(UnitParam::Cutoff),
-            TargetDecl {
-                min: 100.0,
-                max: 4_000.0,
-                automation: None,
-            },
-        ),
-        (
-            at(UnitParam::Q),
-            TargetDecl {
-                min: 0.5,
-                max: 4.0,
-                automation: None,
-            },
-        ),
-    ];
-    let mut m = Modulation::new();
+    let sources = lfo(2.0);
     let decl = Declarations {
         sources: &sources,
         routes: &routes,
         targets: &targets,
     };
-    assert!(
-        m.apply(&decl, &mut ed, &host, &cell, &mirror)
-            .expect("applies")
-            .commit
-    );
-    m.commit(&mut ed).expect("commits");
-    // Warm-up outside the gate: the commit lands, the connects' declick
-    // runs out.
+    let mut compiled =
+        compile(&decl, None, ed.play_reading(), ed.prepare().sample_rate()).expect("compiles");
+    let at = ParamIn {
+        node: filter,
+        param: UnitParam::Cutoff.into(),
+    };
+    ed.set_param_range(at, ParamRange::new(100.0, 4_000.0).expect("a range"))
+        .expect("the filter's cutoff");
+    let range = ed.param_range_cell(at).expect("its range cell");
+    let controls = ed
+        .insert(
+            lane,
+            "control-lane",
+            ControlLaneNode::from(
+                UnitLaneConfig::new(at.param, compiled.programs[&cutoff].clone())
+                    .knob(params.cell(at.param).expect("the cutoff has a cell"))
+                    .range(range),
+            ),
+        )
+        .controls;
+    ed.connect_param(at, EventOutputPort::new(lane, 0))
+        .expect("the lane drives the cutoff");
+    ed.commit().expect("commits");
+    let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
+    let mut out = vec![0.0f32; 128];
+    // Warm-up outside the gate: the commit lands, the connects' declick runs
+    // out.
     for _ in 0..8 {
         exec.process(128, &transport, &[], &mut [&mut out[..]]);
         ed.collect();
     }
     let mut sounded = false;
     for i in 0..40 {
-        sources[0] = lfo(if i % 2 == 0 { 3.0 } else { 2.0 });
+        let sources = lfo(if i % 2 == 0 { 3.0 } else { 2.0 });
         let decl = Declarations {
             sources: &sources,
             routes: &routes,
             targets: &targets,
         };
-        let applied = m
-            .apply(&decl, &mut ed, &host, &cell, &mirror)
-            .expect("applies");
-        assert!(!applied.commit, "a rate edit sends no plan");
-        assert_eq!(applied.republished.len(), 1, "the LFO's lane republished");
+        compiled = compile(
+            &decl,
+            Some(&compiled),
+            ed.play_reading(),
+            ed.prepare().sample_rate(),
+        )
+        .expect("compiles");
+        let program = compiled.programs[&cutoff].clone();
+        assert_ne!(*controls.program(), program, "a rate edit is a new program");
+        controls.publish(program);
         for _ in 0..4 {
             exec.process(128, &transport, &[], &mut [&mut out[..]]);
         }
-        // The next `apply`'s publish frees the retired program, here on the
-        // control thread.
+        // The next publish frees the retired program, here on the control
+        // thread.
         ed.collect();
         sounded |= out.iter().any(|x| x.abs() > 1e-3);
     }

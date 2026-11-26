@@ -109,7 +109,6 @@ fn live::transform_node::MpeTransformControls::losses
 fn live::transform_node::MpeTransformNode::new
 fn mpe_features::ask_mpe_features
 fn mpe_features::mpe_features
-fn mpe_zones::mpe_zones
 fn outbound::active_sensing::ActiveSensingSender::deadline
 fn outbound::active_sensing::ActiveSensingSender::group
 fn outbound::active_sensing::ActiveSensingSender::new

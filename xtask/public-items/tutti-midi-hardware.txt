@@ -51,7 +51,6 @@ fn devices::OpenInput::name
 fn devices::OpenInput::port
 fn devices::OpenOutput::active_sensing
 fn devices::OpenOutput::config
-fn devices::OpenOutput::follow
 fn devices::OpenOutput::id
 fn devices::OpenOutput::is_alive
 fn devices::OpenOutput::losses
@@ -123,12 +122,14 @@ fn session::MidiSession::deadline
 fn session::MidiSession::devices
 fn session::MidiSession::disconnect_all_inputs
 fn session::MidiSession::disconnect_input
+fn session::MidiSession::follow
 fn session::MidiSession::input_fault
 fn session::MidiSession::inputs
 fn session::MidiSession::instance_id
 fn session::MidiSession::is_any_input_connected
 fn session::MidiSession::is_input_connected
 fn session::MidiSession::learned
+fn session::MidiSession::mpe_zones
 fn session::MidiSession::open
 fn session::MidiSession::open_over
 fn session::MidiSession::outputs

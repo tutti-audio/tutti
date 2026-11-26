@@ -260,12 +260,10 @@ impl LaneControls {
     /// Frees the programs the lane has let go of since its last publish (one
     /// a block still held when [`publish`](Self::publish) replaced it),
     /// without publishing; returns how many are still held. Control thread,
-    /// every tick of its owner (the [`Modulation`](crate::Modulation)
-    /// reconciler's [`reclaim`](crate::Modulation::reclaim)); with nothing
-    /// retired it is a lock and a length check. Not public: a lane's owner
-    /// sweeps it through the reconciler, and a foreign lane's through
-    /// [`ForeignLaneControls::reclaim`], which frees its ranges too.
-    pub(crate) fn reclaim(&self) -> usize {
+    /// every tick of its owner; with nothing retired it is a lock and a
+    /// length check. A foreign lane's owner sweeps through
+    /// [`ForeignLaneControls::reclaim`] instead, which frees its ranges too.
+    pub fn reclaim(&self) -> usize {
         self.0.program.reclaim()
     }
 
@@ -1386,8 +1384,8 @@ impl<F: Float, K: LaneKind> IntoNode<F> for ControlLaneNode<K> {
             source: self.source.clone(),
         };
         // The lane's cells, so a lane added to a session graph is swept like
-        // any node's; the reconciler inserts through an `Editor`, which
-        // discards the reclaimer, and sweeps its lanes itself.
+        // any node's; the session inserts its lanes through an `Editor`, which
+        // discards the reclaimer, and sweeps them itself.
         let cells = LaneCells::<K> {
             program: self.shared.program.clone(),
             source: self.source.clone(),

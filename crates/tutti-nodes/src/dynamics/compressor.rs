@@ -158,7 +158,7 @@ control_set! {
     Ratio => CompressionRatio = ratio { whole },
     Attack => Seconds = attack { whole },
     Release => Seconds = release { whole },
-    // The makeup ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
+    // The makeup ramps in the bank, over `GAIN_RAMP`: the graph must not ramp it
     // across the block as well. It is addressed as `GainDb`.
     GainDb => Db = makeup { whole },
     // The filter's coefficients ramp in the bank, over one grid period.

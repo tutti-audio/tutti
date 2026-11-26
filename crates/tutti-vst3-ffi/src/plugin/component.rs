@@ -150,9 +150,9 @@ impl Parts {
         outputs: &mut [SpeakerArrangement],
     ) -> Result<(), Vst3Error> {
         let _scope = self.scoped(main);
-        let mut state = self.shared.lock_for_control()?;
-        state.setup = None;
-        state.buses = None;
+        let mut live = self.shared.lock_for_control()?;
+        live.state.setup = None;
+        live.state.buses = None;
         // SAFETY: each pointer is valid for the length passed beside it, for
         // the call, and the claim is held with no audio half out.
         check(unsafe {
@@ -215,13 +215,13 @@ impl Parts {
         mut setup: ProcessSetup,
     ) -> Result<(), Vst3Error> {
         let _scope = self.scoped(main);
-        let mut state = self.shared.lock_for_control()?;
-        state.setup = None;
+        let mut live = self.shared.lock_for_control()?;
+        live.state.setup = None;
         // SAFETY: `setup` is a valid in-parameter for the call, and the claim is
         // held with no audio half out.
         let result = check(unsafe { self.processor.setupProcessing(&mut setup) });
         if result.is_ok() {
-            state.setup = Some(Setup {
+            live.state.setup = Some(Setup {
                 symbolic_size: setup.symbolicSampleSize,
                 max_block: usize::try_from(setup.maxSamplesPerBlock).unwrap_or(0),
             });

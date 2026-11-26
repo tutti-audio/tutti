@@ -1034,7 +1034,6 @@ impl InputEventList {
         self.sends = [NoteSend::CLAP_ONLY; MidiGroup::COUNT as usize];
         self.sends[..ports.len()].copy_from_slice(ports);
         self.notes = Self::per_note_state(span);
-        self.midi1_translator.reset();
         Ok(())
     }
 
@@ -1137,14 +1136,11 @@ impl InputEventList {
         self.sysex.reset();
     }
 
-    /// The plugin is being reset: it has forgotten its notes and its MIDI 1.0
-    /// state. Drops what was held per note (every value, every note that still
-    /// responds, every bend sensitivity), resets the MIDI 1.0 translator, and
-    /// drops the open SysEx ([`reset_sysex`](Self::reset_sysex)). Never
-    /// allocates.
+    /// The plugin is being reset: it has forgotten its notes. Drops what was held per note (every value, every note that still
+    /// responds, every bend sensitivity) and drops the open SysEx
+    /// ([`reset_sysex`](Self::reset_sysex)). Never allocates.
     pub fn reset_midi(&mut self) {
         self.notes.clear();
-        self.midi1_translator.reset();
         self.sysex.reset();
     }
 
@@ -2754,80 +2750,6 @@ mod tests {
             assert_eq!(list.len(), converted);
             assert_eq!(list.midi_dropped(), 0);
         }
-    }
-
-    /// **A refused message leaves an MPE note's member channel as it was**: the
-    /// MIDI 1.0 translator's note allocation survives a message the list has no port for,
-    /// so the note's per-note bend still goes to its channel (M2-104 D.2.8).
-    #[test]
-    fn a_refused_message_keeps_an_mpe_notes_channel() {
-        use tutti_midi_protocol::{
-            MemberCount, Mpe11Zone, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
-        };
-        use tutti_ump::{
-            Attribute, BendValue, ControlValue, ExtremeValues, NoteNumber, NoteVelocity,
-        };
-        let zone = Mpe11Zone::lower(
-            MemberCount::of(2),
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .layout();
-        let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
-        list.midi1_translator = Midi1Translator::with_mode(TranslationMode {
-            extremes: ExtremeValues::Scaled,
-            per_note: PerNoteTranslation::Mpe(zone),
-        });
-        let address = Address::new(tutti_ump::MidiGroup::FIRST, tutti_ump::MidiChannel::FIRST);
-        let note = NoteNumber::of(60);
-        list.add_bytes(
-            0,
-            address,
-            Message::midi2(
-                address,
-                Voice2::NoteOn {
-                    note,
-                    velocity: NoteVelocity::new(0x8000),
-                    attribute: Attribute::None,
-                },
-            ),
-        );
-        // The port takes no MIDI: the RPN is refused whole.
-        list.sends[0] = NoteSend::CLAP_ONLY;
-        list.add_bytes(
-            0,
-            address,
-            Message::midi2(
-                address,
-                Voice2::registered(
-                    tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
-                    ControlValue::new(12 << 25),
-                ),
-            ),
-        );
-        list.sends[0] = NoteSend::CLAP_AND_MIDI;
-        list.add_bytes(
-            0,
-            address,
-            Message::midi2(
-                address,
-                Voice2::PerNotePitchBend {
-                    note,
-                    value: BendValue::new(0x8000_0000),
-                },
-            ),
-        );
-        let bytes: Vec<[u8; 3]> = list
-            .events
-            .iter()
-            .filter_map(|e| match e {
-                ClapEvent::Midi(m) => Some(m.data),
-                _ => None,
-            })
-            .collect();
-        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
-        assert_eq!(bytes, [[0x91, 60, 0x40], [0xE1, 0x00, 0x40]]);
     }
 
     /// **The plugin-output path converts without allocating**: every MIDI 1.0

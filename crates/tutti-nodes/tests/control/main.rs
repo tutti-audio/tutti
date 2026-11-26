@@ -1,4 +1,4 @@
-//! Control lanes, modulation sources and the reconciler.
+//! Control lanes and modulation sources.
 
 /// An allocation inside an `RtScope` aborts the running test.
 #[global_allocator]
@@ -10,6 +10,5 @@ mod control_lane;
 mod corners;
 mod graph_param_mod;
 mod live_controls_reach_the_node;
-mod modulation_reconcile;
 mod param_set_routes;
 mod signal_sources;

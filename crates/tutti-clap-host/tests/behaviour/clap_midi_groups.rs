@@ -2,7 +2,7 @@
 //! (M2-104 sections 2.1.2 and 7.4, Appendices C.3 and D.2): a Group is a note
 //! port, a note has an id of its own, per-note values told before a Note On
 //! are its initial values, and an RPN or NRPN is Control Changes through the
-//! stateful `Midi1Translator`. Every expectation is the spec's figure, written out.
+//! `Midi1Translator`. Every expectation is the spec's figure, written out.
 
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,

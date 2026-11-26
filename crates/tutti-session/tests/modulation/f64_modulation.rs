@@ -63,3 +63,55 @@ fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
         assert_eq!(x, FINE * 1.25, "frame {frame}");
     }
 }
+
+/// **A declared range reaches the port's cell at `f64`.** The gain's base is 1
+/// and the range is `1 + 2^-30..=2`, a lower bound `f32` rounds to 1. A macro
+/// of 0 leaves the lane at the base, below the range, so the port clamps to
+/// the lower bound: the render is `FINE * (1 + 2^-30)` bit for bit in every
+/// frame past the lane's start. An `f32`-rounded bound would render `FINE`.
+#[test]
+fn a_declared_range_reaches_the_ports_cell_at_f64() {
+    let lo = 1.0 + 1.0 / 1_073_741_824.0;
+    assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
+    assert_ne!(FINE * lo, FINE, "the figures differ at f64");
+    let mut s = Session::builder()
+        .float::<f64>()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("an f64 session builds");
+    let dc = s.graph().add(ForkByClone(Dc(FINE)));
+    let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
+    s.graph()
+        .connect(OutputPort::new(dc, 0), gain.input(0))
+        .unwrap()
+        .unfaded();
+    s.graph()
+        .connect(OutputPort::new(gain, 0), MainOutput::channel(0))
+        .unwrap()
+        .unfaded();
+
+    let target = ParamRef::unit(gain.erase(), UnitParam::Volume);
+    let mut m = s.mods_mut();
+    m.range_raw(target, lo, 2.0).unwrap();
+    let source = m.macro_(0.0);
+    m.route(RouteSpec::new(source, target, Bipolar::of(0.25)))
+        .unwrap();
+    for _ in 0..6 {
+        let _ = s.update();
+    }
+    assert_eq!(
+        s.mod_state().problems().next(),
+        None,
+        "the declarations apply"
+    );
+
+    let mut heard = Vec::new();
+    let mut block = vec![0.0f64; BLOCK * 2];
+    for _ in 0..12 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        heard.extend(block.chunks(2).map(|frame| frame[0]));
+    }
+    for (frame, &x) in heard.iter().enumerate().skip(512) {
+        assert_eq!(x, FINE * lo, "frame {frame}");
+    }
+}

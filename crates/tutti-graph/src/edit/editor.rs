@@ -507,7 +507,7 @@ impl<F: Float> Editor<F> {
     /// shapes and generations, the plan sent last ([`base`](Self::base)),
     /// a param range or its cells, the [`Prepare`]. Equal revisions mean
     /// none of those changed in between, so a control-side pass that is a
-    /// function of them (the modulation reconcile) may skip its work. It
+    /// function of them (the session's modulation apply) may skip its work. It
     /// may move with nothing changed, never the other way round. It does
     /// not cover [`play_reading`](Self::play_reading), which the audio
     /// thread moves.
