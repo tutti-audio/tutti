@@ -117,8 +117,7 @@ pub enum RenderError {
     /// from when the render began (or, for a graph that had a commit
     /// installed since its last render, from that render's end) to the end of
     /// that block: events that never arrived, not a note-off that was
-    /// refused and sent again. [`write_buffers`](crate::write_buffers) raises
-    /// it too, for planes whose render lost events.
+    /// refused and sent again.
     #[error("Export failed: the graph dropped {count} events during the render")]
     EventsDropped {
         /// How many.
@@ -273,6 +272,8 @@ impl From<tutti_codec::EncodeError> for RenderError {
     fn from(error: tutti_codec::EncodeError) -> Self {
         match error {
             tutti_codec::EncodeError::Io(e) => Self::Io(e),
+            tutti_codec::EncodeError::Buffer(e) => Self::Buffer(e),
+            tutti_codec::EncodeError::Resample(e) => Self::Resample(e),
             other => Self::Encode(other),
         }
     }

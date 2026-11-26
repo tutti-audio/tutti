@@ -18,18 +18,18 @@
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_export_cases -- <outdir>`
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
-use tutti_codec::{FlacLevel, Format, Pcm};
+use tutti_codec::{Encoding, FlacLevel, Format, Pcm, Resample, ToFile};
 use tutti_dsp::DitherShape;
 use tutti_export::{
-    Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph, Resample, Setup,
-    render_one,
+    Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph, Setup, render_one,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
+use tutti_rt::SplitMix64;
 use tutti_units::Amplitude;
 use tutti_units::Hz;
 use tutti_units::{Samples, Seconds};
@@ -131,12 +131,16 @@ impl Case {
         path: impl Into<std::path::PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        // `replace`: a rerun overwrites the cases an earlier run wrote.
-        let target = FileTarget::new(path, self.format, self.channels).replace();
-        let target = match self.resample {
-            Some(resample) => target.resample(resample),
-            None => target,
+        // `replace`: a rerun overwrites the cases an earlier run wrote. Each case renders one
+        // output, number 0.
+        let encoding = Encoding::new(self.format)
+            .channels(ChannelSet::default_for(self.channels))
+            .dither_seed(SplitMix64::mix(0));
+        let encoding = match self.resample {
+            Some(resample) => encoding.resample(resample),
+            None => encoding,
         };
+        let target = FileTarget::new(encoding, ToFile::new(path).replace());
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
             None => target,
@@ -299,7 +303,7 @@ fn main() -> tutti_export::Result<()> {
 
     // Every chunk-size preset at one ratio, so a preset that degrades the
     // conversion is visible rather than assumed equivalent.
-    for (i, chunk) in tutti_export::ChunkSize::PRESETS.iter().enumerate() {
+    for (i, chunk) in tutti_codec::ChunkSize::PRESETS.iter().enumerate() {
         let mut cfg = base(
             Format::Wav(Pcm::Float(FloatWidth::F32)),
             ChannelLayout::STEREO,

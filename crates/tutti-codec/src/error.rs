@@ -26,6 +26,14 @@ pub enum EncodeError {
     #[error(transparent)]
     Buffer(#[from] tutti_buffers::BufferError),
 
+    /// The source's channels have no place in the encoding's: the fold refused them.
+    #[error("the channels cannot be placed in the file's: {0}")]
+    Fold(#[from] tutti_buffers::FoldError),
+
+    /// The resampler could not be built or fed.
+    #[error(transparent)]
+    Resample(#[from] tutti_dsp::ResampleError),
+
     /// A [`Spec`](crate::Spec) the format cannot be written for.
     #[error("Invalid spec: {0}")]
     Spec(#[from] SpecError),
@@ -85,6 +93,8 @@ impl EncodeError {
             Self::Io(e) => Self::Io(io::Error::new(e.kind(), e.to_string())),
             Self::Commit(e) => Self::Commit(e.clone()),
             Self::Buffer(e) => Self::Buffer(*e),
+            Self::Fold(e) => Self::Fold(*e),
+            Self::Resample(e) => Self::Resample(*e),
             Self::Spec(e) => Self::Spec(e.clone()),
             Self::UnknownExtension { extension } => Self::UnknownExtension {
                 extension: extension.clone(),

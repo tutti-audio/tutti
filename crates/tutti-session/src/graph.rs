@@ -3422,7 +3422,11 @@ impl<F: Float> Graph<F> {
             return Err(BufferError::ZeroWidth.into());
         }
         if let Some(device) = device {
-            tutti_buffers::Fold::<f32>::to_channels(main_output, device).build()?;
+            tutti_buffers::Fold::<f32>::to_channels(
+                &tutti_buffers::ChannelSet::from(*main_output),
+                device,
+            )
+            .build()?;
         }
         Ok(())
     }

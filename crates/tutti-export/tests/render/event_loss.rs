@@ -7,7 +7,7 @@
 //! all.
 
 use crate::support;
-use crate::support::{ExportConfig, RenderConfig, write_buffers};
+use crate::support::{ExportConfig, RenderConfig};
 
 use support::{render_buffers_under, render_file_under, render_to_buffers, render_to_file};
 use tutti_buffers::ChannelLayout;
@@ -201,29 +201,4 @@ fn a_render_that_lost_events_replaces_nothing() {
     assert_ne!(std::fs::read(&path).unwrap(), before);
     assert_eq!(leftovers(), vec!["out.wav".to_string()]);
     std::fs::remove_dir_all(&dir).unwrap();
-}
-
-/// Planes that carry a loss are judged by the config they are written with:
-/// `Fail` refuses them and leaves the file alone, `Allow` writes them and
-/// reports the count.
-#[test]
-fn write_buffers_applies_the_event_loss_policy() {
-    let rendered =
-        render_to_buffers(graph(), &config(EventLossPolicy::Allow), &FrozenClock).expect("allowed");
-    assert_eq!(rendered.dropped_events(), 12);
-
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("out.wav");
-    std::fs::write(&path, b"old").unwrap();
-    let err = write_buffers(&rendered, &config(EventLossPolicy::Fail), &path)
-        .expect_err("the planes lost events");
-    assert!(
-        matches!(err, RenderError::EventsDropped { count: 12 }),
-        "{err:?}"
-    );
-    assert_eq!(std::fs::read(&path).unwrap(), b"old");
-
-    let written =
-        write_buffers(&rendered, &config(EventLossPolicy::Allow), &path).expect("allowed");
-    assert_eq!(written.dropped_events, 12);
 }

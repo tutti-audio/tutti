@@ -3647,6 +3647,7 @@ dependencies = [
  "tutti-midi-protocol",
  "tutti-nodes",
  "tutti-polysynth",
+ "tutti-rt",
  "tutti-sampler",
  "tutti-timeline",
  "tutti-ump",

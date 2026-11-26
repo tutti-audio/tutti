@@ -11,8 +11,8 @@
 //!
 //! - An `Output` is a `Feed` (the graph's outputs, or a plan tap, `Feed::Tap`, read
 //!   after every block and placed by a `Placement`) and a `Target`: a file
-//!   (`FileTarget`: path, format, width, speaker order, resample,
-//!   normalize) or planes in memory (`BufferTarget`, returned as a `Rendered`).
+//!   (`FileTarget`: a `tutti_codec::Encoding`, a `ToFile` and the normalize) or planes in
+//!   memory (`BufferTarget`, returned as a `Rendered`).
 //!   `render` returns one `Produced` per output, in order; `render_one` is the
 //!   helper for a render of one.
 //! - A file output that does not normalize **streams**: each block goes through
@@ -27,8 +27,8 @@
 //!   have been checked. A render that fails or is cancelled leaves every path as it
 //!   was. The renames are the one step that is not undone: if one fails after others
 //!   succeeded the error is `RenderError::NotCommitted`, which names the files in place.
-//! - `write_buffers` encodes planes a caller already holds into the `FileTarget`
-//!   that describes the file.
+//! - Planes a caller already holds are written with `tutti_codec::write`, which takes the
+//!   same `Encoding` (a `Rendered` converts into a `Wave`).
 //!
 //! `Control` is how a host watches and stops the render: a `CancelToken` that is
 //! checked (before every block, between stages, during the measurement and the
@@ -91,7 +91,8 @@
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
 //! use tutti_buffers::ChannelLayout;
-//! use tutti_codec::{FlacLevel, Format, IntDepth, IntPcm, Pcm};
+//! use tutti_codec::{Encoding, FlacLevel, Format, IntDepth, IntPcm, Pcm, ToFile};
+//! use tutti_rt::SplitMix64;
 //! use tutti_graph::GraphBuilder;
 //! use tutti_nodes::testing::Osc;
 //!
@@ -133,14 +134,13 @@
 //!     &FrozenClock,
 //!     vec![
 //!         Output::main_output(FileTarget::new(
-//!             dir.path().join("main_output.flac"),
-//!             Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard },
-//!             ChannelLayout::STEREO,
+//!             Encoding::new(Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard }),
+//!             ToFile::new(dir.path().join("main_output.flac")),
 //!         )),
 //!         Output::main_output(FileTarget::new(
-//!             dir.path().join("main_output.wav"),
-//!             Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
-//!             ChannelLayout::STEREO,
+//!             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+//!                 .dither_seed(SplitMix64::mix(1)),
+//!             ToFile::new(dir.path().join("main_output.wav")),
 //!         )),
 //!     ],
 //!     &mut Control::none(),
@@ -165,7 +165,7 @@
 //!
 //! For a gain that is logged, gated, or derived some other way, compose the steps
 //! directly: render into a `BufferTarget`, take `Normalize::gain_for_rendered`,
-//! apply it with `Rendered::apply_gain`, and write with `write_buffers`.
+//! apply it with `Rendered::apply_gain`, and write with `tutti_codec::write`.
 //!
 //! ## Features
 //!
@@ -174,7 +174,8 @@
 //! crate), and a `Format` variant exists only with its feature.
 //!
 //! Resampling (`tutti_dsp::StreamingResampler`, an FFT resampler on
-//! `tutti_dsp::RealFft`) is an algorithm in `tutti-dsp`; this crate calls it. Resampling is
+//! `tutti_dsp::RealFft`) is an algorithm in `tutti-dsp`; `tutti_codec::Chain` calls it, and a
+//! normalizing output's measurement runs the same `tutti_codec::Converter`. Resampling is
 //! unconditional: it is not a codec, so it is not gated.
 //!
 //! A render is written from any `tutti_dsp::FftFloat` (`Rendered<F>`, `f32` by default). A float
@@ -188,7 +189,6 @@ mod error;
 pub use error::{ConfigError, RenderError, Result, Unmeasured};
 
 mod control;
-use control::Weights;
 pub use control::{CancelToken, Control, Outcome, Progress, Stage};
 
 mod job;
@@ -203,9 +203,6 @@ pub use output::{
     TargetError,
 };
 
-mod resample;
-pub use resample::Resample;
-
 mod normalize;
 pub use normalize::Normalize;
 
@@ -216,21 +213,16 @@ mod spill;
 mod graph;
 pub use graph::{GRAPH_MAX_BLOCK, RenderGraph, RtLogSink, Setup};
 
-pub(crate) mod encode;
-pub(crate) mod process;
 pub(crate) mod render;
 
-pub use process::ChunkSize;
-
 use std::path::PathBuf;
-use tutti_buffers::ChannelLayout;
 use tutti_dsp::FftFloat;
 use tutti_measure::Loudness;
 use tutti_timeline::RenderClock;
 use tutti_units::{Db, Samples};
 
 /// A file an export wrote, from a file [`Output`] of [`render()`]
-/// ([`Produced::File`]) or [`write_buffers`].
+/// ([`Produced::File`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Written {
     /// Where it was written: the `path` the entry point was given.
@@ -278,7 +270,8 @@ pub struct Written {
     /// [`gain`](Self::gain) is still its peak normalization.
     pub measured: Option<Loudness>,
     /// Whether the file's channels were placed by the output
-    /// ([`FileTarget::topology`]: [`Stated`](tutti_buffers::Placement::Stated))
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels) named speakers other than the default:
+    /// [`Stated`](tutti_buffers::Placement::Stated))
     /// or taken to be the engine's order for the width
     /// ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for):
     /// [`Default`](tutti_buffers::Placement::Default)). A `Lufs` normalize
@@ -288,19 +281,6 @@ pub struct Written {
     /// removing it failed: it is left beside [`path`](Self::path) for the
     /// caller to delete. `None` when there was none or it is gone.
     pub spill_left: Option<PathBuf>,
-}
-
-/// The frame width an export config asks for, as the interleave stride.
-///
-/// The one place a [`ChannelLayout`] becomes the `usize` stride the render and
-/// the encoders use, and zero is the only rejected width. That the check is
-/// a bound rather than a list of enumerated widths is what lets a 3- or 5-wide
-/// main output export at all: nothing here is generic over the count.
-fn frame_width(layout: ChannelLayout) -> Result<usize> {
-    match layout.count() {
-        0 => Err(RenderError::UnsupportedChannels),
-        n => Ok(n as usize),
-    }
 }
 
 /// Renders `graph` once into every one of `outputs`, and writes or returns
@@ -404,74 +384,4 @@ pub fn render_one<F: FftFloat>(
 /// What a render of one output produced.
 fn the_one<F: FftFloat>(mut produced: Vec<Produced<F>>) -> Produced<F> {
     produced.pop().expect("one output produces one result")
-}
-
-/// Writes already-rendered audio into the file `target` describes.
-///
-/// With a [`BufferTarget`] output and [`Rendered::apply_gain`] this makes
-/// measure-then-apply possible by hand: render to planes, measure
-/// ([`Normalize::gain_for_rendered`]), apply a gain, write.
-///
-/// The target is honoured as-is, its `channels` and `topology` included:
-/// planes of another width than `target.channels()` are folded onto it the
-/// way a graph's outputs are (the engine's order for the plane width, the
-/// target's topology for the file; a 5.1 render written as stereo carries its
-/// centre and surrounds at -3 dB), and planes of the file's own width are
-/// written as they are. The frames already exist and carry their own rate
-/// ([`Rendered::sample_rate`]), but the target's resample still applies, so a
-/// caller can convert on the way out. Dither is applied here, at the real
-/// depth and after any resample, which is the only point where one LSB is
-/// known. `on_event_loss` judges the planes' own count of lost events
-/// ([`Rendered::dropped_events`]) before anything is written.
-///
-/// The target's normalize is refused: the planes are not measured here, so a
-/// gain is applied to them first ([`Rendered::apply_gain`]).
-///
-/// # Errors
-///
-/// [`RenderError::UnsupportedChannels`] for a zero-channel target;
-/// [`RenderError::Target`] with [`TargetError::NormalizeOfPlanes`] for a target that
-/// asks to normalize; [`RenderError::InvalidConfig`] ([`ConfigError::Placement`]) for
-/// a plane width the fold cannot place onto the file's (a channel is never
-/// dropped to make it fit); [`RenderError::EventsDropped`] under
-/// [`EventLossPolicy::Fail`]; [`RenderError::Resample`] or [`RenderError::Encode`] from the
-/// resample and encode stages.
-pub fn write_buffers<F: FftFloat>(
-    rendered: &Rendered<F>,
-    target: &FileTarget,
-    on_event_loss: EventLossPolicy,
-) -> Result<Written> {
-    frame_width(target.channels())?;
-    if target.normalize.is_some() {
-        return Err(RenderError::Target {
-            output: 0,
-            why: TargetError::NormalizeOfPlanes,
-        });
-    }
-    // No render stage: the write is the whole of it, in the bands a
-    // normalized render gives its write.
-    let mut control = Control::none();
-    control.weigh(Weights::Normalized);
-    // The planes carry the events their render lost: judged by the policy,
-    // before anything is written.
-    render::check_loss(on_event_loss, rendered.dropped_events())?;
-    let Outcome::Finished(chain) = encode::write_planes(rendered, target, &mut control)? else {
-        unreachable!("a control with no token is never cancelled");
-    };
-    let files = vec![render::outputs::PendingFile {
-        index: 0,
-        path: target.path().to_path_buf(),
-        chain,
-    }];
-    let Outcome::Finished(mut landed) = render::outputs::finalize_files(files, &mut control)?
-    else {
-        unreachable!("a control with no token is never cancelled");
-    };
-    let (_, path, file) = landed.remove(0);
-    Ok(encode::written(
-        &path,
-        file,
-        rendered.dropped_events(),
-        target.placement(),
-    ))
 }

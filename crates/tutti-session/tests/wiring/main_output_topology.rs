@@ -287,6 +287,46 @@ fn an_export_is_placed_from_the_declaration() {
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
+/// A bounced file's placement is stated only when the bounce names its speakers: a file of a
+/// channel count is the default layout for that count and reads `Default`, one given a
+/// `file_topology` reads `Stated`.
+#[cfg(feature = "export")]
+#[test]
+fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
+    use crate::bounced::bounced;
+    use tutti_buffers::FloatWidth;
+    use tutti_codec::{Format, Pcm};
+    use tutti_session::{Bounce, BounceTail, Range};
+    let dir = tempfile::tempdir().expect("dir");
+    let placement = |name: &str, topology: Option<ChannelTopology>| {
+        let mut session = Session::builder().build_detached(RATE).unwrap();
+        feed(&mut session, &[0.1, 0.2]);
+        let bounce = Bounce::new()
+            .range(Range::Seconds(
+                tutti_units::Seconds::new(0.0),
+                tutti_units::Seconds::new(0.01),
+            ))
+            .main_output(
+                dir.path().join(name),
+                Format::Wav(Pcm::Float(FloatWidth::F32)),
+            )
+            .tail(BounceTail::None);
+        let bounce = match topology {
+            Some(topology) => bounce.file_topology(topology),
+            None => bounce.channels(ChannelLayout::STEREO),
+        };
+        bounced(&mut session, bounce)
+            .expect("renders")
+            .into_main_output()
+            .placement
+    };
+    assert_eq!(placement("count.wav", None), Placement::Default);
+    assert_eq!(
+        placement("named.wav", Some(tutti_buffers::Bed::Stereo.topology())),
+        Placement::Stated
+    );
+}
+
 /// The device's placement is stated or the default layout, and the session says which: a
 /// device with nothing stated is the engine's order for its width and reads
 /// `Default`; one the build was told about reads `Stated`, with the topology it

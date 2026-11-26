@@ -1156,7 +1156,13 @@ fn takes_armed_together_do_not_share_dither_noise() {
         .session
         .record(Record::new(&rig.input, int16(b.clone())))
         .expect("armed");
-    rig.steps_until(started);
+    // Both pumps place their first frame before either is finished: one started is not the
+    // other, whose pump the tick thread wakes on its own.
+    rig.steps_until(|events| {
+        let started =
+            |e: &&SessionEvent| matches!(e, SessionEvent::Take(TakeEvent::Started { .. }));
+        events.iter().filter(started).count() == 2
+    });
     for _ in 0..16 {
         rig.step(BLOCK);
     }

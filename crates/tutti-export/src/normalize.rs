@@ -26,7 +26,6 @@ use crate::Unmeasured;
 #[cfg(doc)]
 use crate::Written;
 use crate::control::{Control, Outcome, Stage, Weights};
-use crate::encode::output_rate;
 use crate::output::FileTarget;
 
 /// A gain chosen by measuring the rendered signal.
@@ -45,8 +44,9 @@ use crate::output::FileTarget;
 /// LFE adds no loudness (its peak still counts). A 5.1 mix with only the LFE
 /// active reads -70 LUFS.
 ///
-/// The placement is the file's [`topology`](crate::FileTarget::topology). A
-/// file that states none is taken to be [`ChannelTopology::default_for`] for its
+/// The placement is the file's [`channels`](tutti_codec::Encoding::channels). A
+/// file that states none (a [`width`](tutti_codec::Encoding::width), or the
+/// source's channels) is taken to be [`ChannelTopology::default_for`] for its
 /// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
 /// [`Placement::Default`](tutti_buffers::Placement::Default). Any other width
 /// has no default layout, so a `Lufs` output of it is refused when the
@@ -276,7 +276,7 @@ fn finished<T>(outcome: Outcome<T>) -> T {
 /// `render_rate` is the rate the file's frames are rendered at; the shaping filter
 /// is designed for the file's, after any resample.
 fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> {
-    let pcm = target.format().int_pcm()?;
+    let pcm = target.encoding().format().int_pcm()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = pcm.depth().lsb().get();
     let dither_peak = match pcm.dither_shape() {
@@ -288,7 +288,7 @@ fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> 
     // recorded error is at most the dither plus half a step of rounding, and the
     // filter passes at most `feedback_gain` times that.
     let feedback_peak = if pcm.is_noise_shaped() {
-        let rate = output_rate(target, render_rate);
+        let rate = target.encoding().rate(render_rate);
         NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
     } else {
         0.0

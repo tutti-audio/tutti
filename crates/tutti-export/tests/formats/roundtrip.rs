@@ -349,7 +349,7 @@ fn a_resampled_export_preserves_the_signal_not_just_the_frame_count() {
         let mut cfg = config(Format::Wav(Pcm::Int(
             IntPcm::new(IntDepth::Int24).no_dither(),
         )));
-        cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
+        cfg.resample = Some(tutti_codec::Resample::to(tutti_units::SampleRate::of(
             target,
         )));
         cfg.render.duration_seconds = Seconds::new(0.25);
@@ -396,9 +396,7 @@ fn written_frames_is_what_the_file_holds() {
         )));
         cfg.render.duration_seconds = Seconds::new(0.25);
         if let Some(rate) = target {
-            cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
-                rate,
-            )));
+            cfg.resample = Some(tutti_codec::Resample::to(tutti_units::SampleRate::of(rate)));
         }
 
         let written = render_to_file(dc_graph(0.4), &cfg, &FrozenClock, &path).unwrap();

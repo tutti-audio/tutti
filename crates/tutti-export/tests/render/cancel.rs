@@ -8,14 +8,18 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
+use tutti_buffers::ChannelSet;
+use tutti_codec::Encoding;
+use tutti_codec::ToFile;
 
 use support::{render_buffers_under, render_file_under, render_to_file};
 use tutti_buffers::ChannelLayout;
 use tutti_codec::IntPcm;
+use tutti_codec::Resample;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     CancelToken, Control, FileTarget, GRAPH_MAX_BLOCK, Normalize, NormalizeSpec, Outcome, Output,
-    Produced, Progress, RenderGraph, Resample, Setup, Stage, Written, render,
+    Produced, Progress, RenderGraph, Setup, Stage, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
@@ -123,12 +127,13 @@ fn run_many(
             let target = if i == 0 {
                 config.file_target(path, None)
             } else {
-                let target =
-                    FileTarget::new(path, second_format(), ChannelLayout::STEREO).replace();
-                match config.resample {
-                    Some(resample) => target.resample(resample),
-                    None => target,
-                }
+                let encoding = Encoding::new(second_format())
+                    .channels(ChannelSet::default_for(ChannelLayout::STEREO));
+                let encoding = match config.resample {
+                    Some(resample) => encoding.resample(resample),
+                    None => encoding,
+                };
+                FileTarget::new(encoding, ToFile::new(path).replace())
             };
             let spec = normalize.map(|n| {
                 if i == 0 {

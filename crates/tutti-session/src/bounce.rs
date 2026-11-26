@@ -69,15 +69,15 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_codec::Format;
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
+use tutti_codec::{Encoding, Format, Resample, ToFile};
 use tutti_export::{
     BufferTarget, CancelToken, Control, EventLossPolicy, FileTarget, GRAPH_MAX_BLOCK, Job,
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
-    Resample, TailPolicy, Target, Written,
+    TailPolicy, Target, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
-use tutti_rt::Mutex;
+use tutti_rt::{Mutex, SplitMix64};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
@@ -1115,25 +1115,35 @@ pub enum BounceError {
     Stale,
 }
 
-/// `file` with the bounce's resample and normalize, each only when set.
-fn file_options(
-    file: FileTarget,
-    resample: Option<Resample>,
-    normalize: Option<NormalizeSpec>,
+/// The file of output number `index` of the bounce: `encoding` (its format and channels), with the bounce's
+/// resample, normalize and replace, each only when set. The outputs are summed later (the stems
+/// and the master), so each is dithered with the seed [`SplitMix64::mix`] of its index, never one
+/// seed: two files with one noise sequence would add it coherently.
+fn file_target(
+    path: PathBuf,
+    encoding: Encoding,
+    index: usize,
+    options: &FileOptions,
 ) -> FileTarget {
-    let file = match resample {
-        Some(resample) => file.resample(resample),
-        None => file,
+    let encoding = encoding.dither_seed(SplitMix64::mix(index as u64));
+    let encoding = match options.resample {
+        Some(resample) => encoding.resample(resample),
+        None => encoding,
     };
-    match normalize {
+    let to = ToFile::new(path);
+    let to = if options.replace { to.replace() } else { to };
+    let file = FileTarget::new(encoding, to);
+    match options.normalize {
         Some(normalize) => file.normalize(normalize),
         None => file,
     }
 }
 
-/// `file`, replacing an existing path when the bounce asks for it.
-fn replacing(file: FileTarget, replace: bool) -> FileTarget {
-    if replace { file.replace() } else { file }
+/// What every file of a bounce shares.
+struct FileOptions {
+    resample: Option<Resample>,
+    replace: bool,
+    normalize: Option<NormalizeSpec>,
 }
 
 impl From<tutti_export::RenderError> for BounceError {
@@ -2014,13 +2024,17 @@ where
         let channels = channels.unwrap_or_else(|| ChannelLayout::clamped(outputs));
         let target: Target = match main_output.file() {
             Some(FileMainOutput { path, format }) => {
-                let file = FileTarget::new(path, format, channels);
-                let file = match file_topology {
-                    Some(topology) => file.topology(topology),
-                    None => file,
+                let encoding = Encoding::new(format);
+                let encoding = match file_topology {
+                    Some(topology) => encoding.channels(ChannelSet::from(topology)),
+                    None => encoding.width(channels),
                 };
-                let file = file_options(file, resample, normalize.map(NormalizeSpec::own));
-                replacing(file, replace).into()
+                let options = FileOptions {
+                    resample,
+                    replace,
+                    normalize: normalize.map(NormalizeSpec::own),
+                };
+                file_target(path, encoding, 0, &options).into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
@@ -2034,7 +2048,7 @@ where
         // The stems: what each taps and where it goes, refused by name before
         // anything is forked. The main output is output 0, which `Shared` reads.
         let mut taps = Vec::with_capacity(stems.len());
-        for stem in stems {
+        for (i, stem) in stems.into_iter().enumerate() {
             let Stem {
                 node,
                 channels: tapped,
@@ -2075,8 +2089,13 @@ where
                             0,
                         )),
                     };
-                    let file = file_options(FileTarget::new(path, format, layout), resample, gain);
-                    replacing(file, replace).into()
+                    let options = FileOptions {
+                        resample,
+                        replace,
+                        normalize: gain,
+                    };
+                    // The main output is output 0.
+                    file_target(path, Encoding::new(format).width(layout), i + 1, &options).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
             };

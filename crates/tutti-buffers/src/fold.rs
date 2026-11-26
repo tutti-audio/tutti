@@ -673,7 +673,8 @@ impl<F: Float> Fold<F> {
     ///   wide or high speaker) is [`FoldError::Unnamed`], whatever the
     ///   destination: nothing can be said about where it goes;
     /// - a source whose channels are all [`Unassigned`](Speaker::Unassigned) is
-    ///   independent buses, and an ambisonic source is not speaker feeds: channel
+    ///   independent buses, and an ambisonic source, or one past
+    ///   [`MAX_CHANNELS`](crate::MAX_CHANNELS) (which has no topology), is not speaker feeds: channel
     ///   `i` stays channel `i` ([`by_index`](Self::by_index)). A wider
     ///   destination is zero-filled and a narrower one is an error, never a
     ///   matrix. A caller that reads a bare count in the engine's order says so
@@ -693,7 +694,7 @@ impl<F: Float> Fold<F> {
     ///
     /// As [`between`](Self::between) and [`by_index`](Self::by_index), and
     /// [`FoldError::Unnamed`] as above.
-    pub fn to_channels<'a>(src: &'a ChannelTopology, dst: &'a ChannelSet) -> FoldSpec<'a, F> {
+    pub fn to_channels<'a>(src: &'a ChannelSet, dst: &'a ChannelSet) -> FoldSpec<'a, F> {
         FoldSpec::to_channels(src, dst)
     }
 

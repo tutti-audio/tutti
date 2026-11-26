@@ -302,7 +302,7 @@ fn a_stereo_main_output_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
     let fold = tutti_buffers::Fold::to_channels(
-        &tutti_buffers::ChannelTopology::default_for(stereo).unwrap(),
+        &tutti_buffers::ChannelSet::default_for(stereo),
         &tutti_buffers::ChannelSet::default_for(stereo),
     )
     .build()

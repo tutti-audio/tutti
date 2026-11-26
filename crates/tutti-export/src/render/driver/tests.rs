@@ -261,54 +261,6 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
     );
 }
 
-/// A plane set narrower than the requested width zero-fills the tail —
-/// and does so on EVERY block, not just the first. The write pass reuses one
-/// buffer, so a `PlaneSource` that skipped the missing channels would leak
-/// the previous block's samples into them.
-#[test]
-fn plane_source_zero_fills_a_missing_channel_every_block() {
-    let planes = vec![vec![1.0f32; 64]];
-    let mut src = PlaneSource::new(&planes, None);
-    let mut out = vec![9.9f32; 4 * 4];
-    let quad = ChannelLayout::from(4u16);
-    assert_eq!(
-        src.fill(InterleavedMut::new(&mut out, quad).unwrap())
-            .unwrap(),
-        4
-    );
-    for f in out.as_chunks::<4>().0 {
-        assert_eq!(f, &[1.0, 0.0, 0.0, 0.0]);
-    }
-    // Second pull into the same dirty buffer.
-    out.fill(9.9);
-    assert_eq!(
-        src.fill(InterleavedMut::new(&mut out, quad).unwrap())
-            .unwrap(),
-        4
-    );
-    for f in out.as_chunks::<4>().0 {
-        assert_eq!(f, &[1.0, 0.0, 0.0, 0.0]);
-    }
-}
-
-/// A render with more planes than the file has channels writes the first
-/// planes and never the extra ones.
-#[test]
-fn plane_source_leaves_out_planes_past_the_file_width() {
-    let planes = vec![vec![1.0f32; 8], vec![2.0f32; 8], vec![3.0f32; 8]];
-    let mut src = PlaneSource::new(&planes, None);
-    let mut out = vec![9.9f32; 2 * 4];
-    let stereo = ChannelLayout::from(2u16);
-    assert_eq!(
-        src.fill(InterleavedMut::new(&mut out, stereo).unwrap())
-            .unwrap(),
-        4
-    );
-    for f in out.as_chunks::<2>().0 {
-        assert_eq!(f, &[1.0, 2.0]);
-    }
-}
-
 /// A recovery of a refusal from before the render does not mask a loss in it:
 /// one refusal owed at the start, then one new refusal and one recovery (the
 /// older one, as the clip sends owed note-offs first): one event is lost. The

@@ -17,7 +17,6 @@
 crates/tutti-buffers/src/fold.rs  1  migrating: foundation
 crates/tutti-buffers/src/fold/ambisonic.rs  1  migrating: foundation
 crates/tutti-export/src/control.rs  5  migrating: foundation
-crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation
 crates/tutti-export/src/rendered.rs  1  migrating: foundation
 crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)

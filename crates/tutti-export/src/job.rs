@@ -16,8 +16,7 @@ use tutti_units::{SampleRate, Samples};
 pub enum EventLossPolicy {
     /// The render stops at the first block that dropped an event with
     /// [`RenderError::EventsDropped`](crate::RenderError::EventsDropped), and a file it
-    /// wrote is removed. [`write_buffers`](crate::write_buffers) applies it to
-    /// the planes' own count.
+    /// wrote is removed.
     #[default]
     Fail,
     /// The render succeeds and says how many events were dropped

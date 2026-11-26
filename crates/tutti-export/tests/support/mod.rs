@@ -15,13 +15,11 @@
 
 use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
-
-use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_codec::{Format, Pcm};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Wave};
+use tutti_codec::{Encoding, Format, Landed, Pcm, Resample, ToFile};
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
-    Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, TailPolicy, Written,
-    render_one,
+    Output, Produced, RenderGraph, Rendered, Result, Setup, TailPolicy, Written, render_one,
 };
 use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
@@ -93,6 +91,20 @@ impl ExportConfig {
             .event_loss(r.on_event_loss))
     }
 
+    /// What the config writes: the format and the channels (the topology when stated, else the
+    /// engine's order for the width), resampled when it says so.
+    pub(crate) fn encoding(&self) -> Encoding {
+        let channels = match &self.encode.topology {
+            Some(topology) => ChannelSet::from(*topology),
+            None => ChannelSet::default_for(self.encode.channels),
+        };
+        let encoding = Encoding::new(self.encode.format).channels(channels);
+        match self.resample {
+            Some(resample) => encoding.resample(resample),
+            None => encoding,
+        }
+    }
+
     /// The file at `path`, normalized by `normalize` (measured on this
     /// output) when given.
     pub(crate) fn file_target(
@@ -101,15 +113,7 @@ impl ExportConfig {
         normalize: Option<Normalize>,
     ) -> FileTarget {
         // A test renders over its scratch path again and again.
-        let target = FileTarget::new(path, self.encode.format, self.encode.channels).replace();
-        let target = match &self.encode.topology {
-            Some(topology) => target.topology(*topology),
-            None => target,
-        };
-        let target = match self.resample {
-            Some(resample) => target.resample(resample),
-            None => target,
-        };
+        let target = FileTarget::new(self.encoding(), ToFile::new(path).replace());
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
             None => target,
@@ -130,16 +134,17 @@ impl ExportConfig {
     }
 }
 
-/// [`tutti_export::write_buffers`] into the file `config` describes at `path`.
-pub(crate) fn write_buffers(
+/// `rendered`, written by [`tutti_codec::write`] as the file `config` describes at `path`.
+pub(crate) fn write_rendered(
     rendered: &Rendered,
     config: &ExportConfig,
     path: impl AsRef<Path>,
-) -> Result<Written> {
-    tutti_export::write_buffers(
-        rendered,
-        &config.file_target(path.as_ref(), None),
-        config.render.on_event_loss,
+) -> tutti_codec::Result<Landed> {
+    let wave = Wave::from(rendered.clone());
+    tutti_codec::write(
+        &wave,
+        &config.encoding(),
+        &ToFile::new(path.as_ref()).replace(),
     )
 }
 

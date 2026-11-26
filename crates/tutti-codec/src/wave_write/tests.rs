@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
 use crate::FlacLevel;
+use crate::{Encoding, Format, ToFile};
 use crate::{IntDepth, IntPcm};
 use tutti_buffers::FloatWidth;
 #[cfg(all(feature = "encode-wav", decode))]
@@ -38,8 +39,11 @@ fn a_wave_wider_than_a_topology_has_none_and_round_trips() {
         wave.append(Interleaved::new(&frame, wave.layout()).unwrap())
             .unwrap();
     }
-    let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
+    let bytes = encode(
+        &wave,
+        &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
+    )
+    .unwrap();
     let back = read_wave::<f32>(bytes).unwrap();
     assert_eq!(back, wave);
     assert_eq!((back.layout().count(), back.topology()), (17, None));
@@ -83,7 +87,7 @@ fn a_written_wave_reads_back_as_itself() {
         // Past one write chunk, so the chunking is exercised too.
         let wave = ramp_wave(topology, 44_100.0, 20_000);
         let path = dir.path().join(name);
-        write_wave(&wave, &path, format).unwrap();
+        write(&wave, &Encoding::new(format), &ToFile::new(&path)).unwrap();
         let back = read_wave::<f32>(&path).unwrap();
         assert_eq!(back.sample_rate(), wave.sample_rate(), "{name}: rate");
         assert_eq!(back.topology(), wave.topology(), "{name}: topology");
@@ -115,12 +119,8 @@ fn an_integer_wave_writes_the_integers_it_holds() {
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ints.wav");
-    write_wave(
-        &wave,
-        &path,
-        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
-    )
-    .unwrap();
+    let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    write(&wave, &Encoding::new(format), &ToFile::new(&path)).unwrap();
     let back = read_wave::<i16>(&path).unwrap();
     assert!(back.channel(0).iter().eq(&samples));
 }
@@ -133,8 +133,11 @@ fn an_f64_wave_writes_as_float64_bit_for_bit() {
     use crate::{Pcm, read_wave};
     let samples = [0.1f64, 1.0 + 2f64.powi(-40), -0.3];
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
-    let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F64))).unwrap();
+    let bytes = encode(
+        &wave,
+        &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))),
+    )
+    .unwrap();
     let back = read_wave::<f64>(bytes).unwrap();
     let got: Vec<u64> = back.channel(0).iter().map(|x| x.to_bits()).collect();
     let want: Vec<u64> = samples.iter().map(|x| x.to_bits()).collect();
@@ -151,11 +154,11 @@ fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
     let scale = 8_388_608.0; // 2^23
     let x = (4_194_304.5 + 2f64.powi(-10)) / scale;
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[x]));
-    let mut bytes = Vec::new();
-    write_wave(
+    let bytes = encode(
         &wave,
-        &mut bytes,
-        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
+        &Encoding::new(Format::Wav(Pcm::Int(
+            IntPcm::new(IntDepth::Int24).no_dither(),
+        ))),
     )
     .unwrap();
     let back = read_wave::<f64>(bytes).unwrap();
@@ -163,16 +166,17 @@ fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
     assert_eq!(got, [4_194_305.0 / scale]);
 }
 
-/// A path destination refuses an existing file with `Exists`, leaving the old bytes and no
-/// temporary, and writes a path with nothing at it.
+/// A path is refused when something is at it, leaving the old bytes and no temporary,
+/// written when nothing is, and replaced when `replace` says so.
 #[test]
-fn a_path_refuses_an_existing_file_and_writes_a_new_one() {
+fn a_path_refuses_an_existing_file_unless_it_replaces() {
     use crate::{EncodeError, Pcm};
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[0.5f32; 8]));
+    let encoding = Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
     std::fs::write(&path, b"old").unwrap();
-    let refused = write_wave(&wave, &path, Format::Wav(Pcm::Float(FloatWidth::F32)));
+    let refused = write(&wave, &encoding, &ToFile::new(&path));
     assert!(
         matches!(&refused, Err(EncodeError::Exists { path: p }) if *p == path),
         "an existing file is refused: {refused:?}"
@@ -180,24 +184,13 @@ fn a_path_refuses_an_existing_file_and_writes_a_new_one() {
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 
+    write(&wave, &encoding, &ToFile::new(&path).replace()).unwrap();
+    assert_eq!(&std::fs::read(&path).unwrap()[..4], b"RIFF");
+
     let fresh = dir.path().join("fresh.wav");
-    write_wave(&wave, &fresh, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
+    write(&wave, &encoding, &ToFile::new(&fresh)).unwrap();
     assert_eq!(&std::fs::read(&fresh).unwrap()[..4], b"RIFF");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
-}
-
-/// A writer that only appends: no `Seek`, and not a `Vec`.
-struct AppendOnly(Vec<u8>);
-
-impl std::io::Write for AppendOnly {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 /// A wave of 20 001 16-bit samples: past one write chunk, an odd length.
@@ -210,41 +203,6 @@ fn long_int_wave() -> (Vec<i16>, Wave<i16>) {
     (samples, wave)
 }
 
-/// A 16-bit integer wave written to memory as 16-bit WAV reads back as the
-/// same integers: no scaling is in the path, so the round trip is exact.
-#[cfg(all(feature = "encode-wav", decode))]
-#[test]
-fn an_integer_wave_written_to_a_vec_reads_back_exactly() {
-    use crate::{Pcm, read_wave};
-    let (_, wave) = long_int_wave();
-    let mut bytes = vec![0xAAu8];
-    write_wave(
-        &wave,
-        &mut bytes,
-        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
-    )
-    .unwrap();
-    assert_eq!(bytes[0], 0xAA, "a Vec is appended to");
-    let back = read_wave::<i16>(bytes[1..].to_vec()).unwrap();
-    assert_eq!(back, wave);
-}
-
-/// The same round trip through a writer that cannot seek.
-#[cfg(all(feature = "encode-wav", decode))]
-#[test]
-fn an_integer_wave_written_to_a_non_seek_writer_reads_back_exactly() {
-    use crate::{Pcm, read_wave};
-    let (_, wave) = long_int_wave();
-    let mut sink = AppendOnly(Vec::new());
-    write_wave(
-        &wave,
-        &mut sink,
-        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
-    )
-    .unwrap();
-    assert_eq!(read_wave::<i16>(sink.0).unwrap(), wave);
-}
-
 /// A wave written as WAV and read back is equal to the original: the same
 /// samples, rate and speakers are the same wave, whether the original's
 /// topology was stated or the default layout for its channel count.
@@ -254,19 +212,12 @@ fn a_wave_written_as_wav_reads_back_equal() {
     use crate::{Pcm, read_wave};
     let (_, mono) = long_int_wave();
     let stereo = ramp_wave(tutti_buffers::Bed::Stereo.topology(), 44_100.0, 500);
-    let mut bytes = Vec::new();
-    write_wave(
-        &mono,
-        &mut bytes,
-        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
-    )
-    .unwrap();
+    let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    let bytes = encode(&mono, &Encoding::new(format)).unwrap();
     assert_eq!(read_wave::<i16>(bytes).unwrap(), mono);
-    let mut bytes = Vec::new();
-    write_wave(
+    let bytes = encode(
         &stereo,
-        &mut bytes,
-        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
     )
     .unwrap();
     assert_eq!(read_wave::<f32>(bytes).unwrap(), stereo);

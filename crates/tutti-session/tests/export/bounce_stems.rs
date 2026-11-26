@@ -17,8 +17,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
+use tutti_codec::Resample;
 use tutti_codec::{Format, Pcm};
-use tutti_export::{Normalize, Produced, RenderError, Resample, TargetError};
+use tutti_export::{Normalize, Produced, RenderError, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
