@@ -1824,7 +1824,7 @@ fn an_mpe11_write_for_a_node_that_is_not_an_output_fails_at_the_call() {
     let _ = s.update();
     let synth = device(&mut s, "Synth");
     let keys = input(&mut s, &synth);
-    let clip = s.graph().add(MidiClipNode::new([]));
+    let clip = s.graph().add(MidiClipNode::from(MidiClipConfig::default()));
     for node in [keys.node(), clip.erase()] {
         let target = Mpe11Target::of(node, MidiGroup::FIRST);
         assert_eq!(
