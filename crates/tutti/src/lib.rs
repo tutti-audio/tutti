@@ -192,7 +192,9 @@ pub use tutti_plugin::catalog::ResolvedHosting;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
+pub use tutti_plugin_types::{
+    PluginFailure, PluginRef, PluginState, PresetError, PresetId, StateUse,
+};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::PluginParams;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]

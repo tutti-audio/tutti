@@ -35,7 +35,7 @@
 //!
 //! The writes the plugin's edit controller has not heard of wait in a list,
 //! which a main-thread job tells the controller
-//! ([`Control::inform_controller`]): one value per parameter, the newest.
+//! ([`Control::inform_controller`](tutti_plugin_types::Control::inform_controller)): one value per parameter, the newest.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
