@@ -631,13 +631,30 @@ fn a_hosts_endpoint_notifications_equal_its_txt_and_its_invitation_reply() {
     peer.send(&[discovery()]);
     peer.barrier(2);
     let _ = s.update();
+    // A bounded read: a Host that does not answer fails the test, not hangs it.
+    peer.socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let mut heard = Vec::new();
-    while heard.len() < 3 {
-        heard.push(peer.next_event(|e| match e {
-            Event::Ump { packet, .. } => Some(*packet),
-            _ => None,
-        }));
+    let guard = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < guard {
+        while let Some(event) = peer.client.poll_event() {
+            if let Event::Ump { packet, .. } = event {
+                heard.push(packet);
+            }
+        }
+        let mut buffer = [0u8; 2048];
+        if heard.len() >= 3 {
+            break;
+        }
+        let Ok((len, _)) = peer.socket.recv_from(&mut buffer) else {
+            break;
+        };
+        peer.client
+            .on_message(peer.host, &buffer[..len], Instant::now());
+        peer.flush();
     }
+    assert_eq!(heard.len(), 3, "the Host answered the discovery: {heard:?}");
 
     let (name, instance, info) = answered(&heard);
     assert!(info, "an Endpoint Info Notification answers a discovery");

@@ -24,7 +24,7 @@ use tutti_midi_runtime::{
 };
 use tutti_platform::{Executor, Instant};
 use tutti_rt::Mutex;
-use tutti_ump::{DeviceIdentity, Ump};
+use tutti_ump::Ump;
 use tutti_units::Losses;
 
 use crate::graph::Graph;
@@ -104,7 +104,6 @@ impl<E: Role> Wire for NetworkLink<E> {
 #[must_use = "a request opens nothing until it is given to `Midi::open_network_client`"]
 pub struct OpenClient {
     identity: EndpointIdentity,
-    device: Option<DeviceIdentity>,
     host: SocketAddr,
     credentials: Credentials,
     config: SessionConfig,
@@ -116,7 +115,6 @@ impl OpenClient {
     pub fn new(identity: EndpointIdentity, host: SocketAddr) -> Self {
         Self {
             identity,
-            device: None,
             host,
             credentials: Credentials::none(),
             config: SessionConfig::default(),
@@ -132,14 +130,6 @@ impl OpenClient {
             .find(|address| address.is_ipv4())
             .or_else(|| host.addresses.first())
             .map(|&address| Self::new(identity, address))
-    }
-
-    /// The Device Identity the Endpoint answers a peer's Endpoint Discovery with
-    /// (M2-104 §7.1.3); with none, that part of a discovery goes unanswered. The
-    /// name and the Product Instance Id it answers with are `identity`'s.
-    pub const fn device(mut self, device: DeviceIdentity) -> Self {
-        self.device = Some(device);
-        self
     }
 
     /// What the Client answers a Host's authentication challenge with.
@@ -161,7 +151,6 @@ impl OpenClient {
 #[must_use = "a request opens nothing until it is given to `Midi::open_network_host`"]
 pub struct OpenHost {
     identity: EndpointIdentity,
-    device: Option<DeviceIdentity>,
     port: u16,
     admission: Admission,
     max_sessions: Option<NonZeroUsize>,
@@ -175,20 +164,11 @@ impl OpenHost {
     pub fn new(identity: EndpointIdentity, port: u16) -> Self {
         Self {
             identity,
-            device: None,
             port,
             admission: Admission::Open,
             max_sessions: None,
             config: SessionConfig::default(),
         }
-    }
-
-    /// The Device Identity the Endpoint answers a peer's Endpoint Discovery with
-    /// (M2-104 §7.1.3); with none, that part of a discovery goes unanswered. The
-    /// name and the Product Instance Id it answers with are `identity`'s.
-    pub const fn device(mut self, device: DeviceIdentity) -> Self {
-        self.device = Some(device);
-        self
     }
 
     /// How an Invitation is admitted: with [`Admission::Confirm`] each one is
@@ -485,36 +465,23 @@ impl MidiNetwork<Host> {
     }
 }
 
-/// What the Endpoint of a network is, for every peer it answers: what the app
-/// opened it as.
-#[derive(Clone, Copy)]
-struct Local {
-    /// The name and Product Instance Id the TXT record and the Invitation carry.
-    identity: EndpointIdentity,
-    device: Option<DeviceIdentity>,
-}
+/// A network is UMP and MIDI 2.0 alone: the Session carries no MIDI 1.0
+/// Protocol, and JR Timestamps are not a Stream configuration here.
+const SUPPORTS: Supports = Supports::of(Capabilities {
+    midi1: false,
+    midi2: true,
+    rx_jr: false,
+    tx_jr: false,
+});
 
-impl Local {
-    /// A network is UMP and MIDI 2.0 alone: the Session carries no MIDI 1.0
-    /// Protocol, and JR Timestamps are not a Stream configuration here.
-    const SUPPORTS: Supports = Supports::of(Capabilities {
-        midi1: false,
-        midi2: true,
-        rx_jr: false,
-        tx_jr: false,
-    });
-
-    /// The Endpoint a peer's Stream requests are answered as, over the Groups
-    /// the session's inputs hear.
-    fn endpoint(&self, groups: tutti_ump::GroupSpan) -> Endpoint {
-        let endpoint = Endpoint::local(Self::SUPPORTS, groups)
-            .named(*self.identity.name())
-            .instanced(*self.identity.instance_id());
-        match self.device {
-            Some(device) => endpoint.identified(device),
-            None => endpoint,
-        }
-    }
+/// The Endpoint a peer's Stream requests are answered as: the name and Product
+/// Instance Id the TXT record and the Invitation carry, over the Groups the
+/// session's inputs hear. It has no Device Identity, so it sends no Device
+/// Identity Notification.
+fn endpoint(identity: &EndpointIdentity, groups: tutti_ump::GroupSpan) -> Endpoint {
+    Endpoint::local(SUPPORTS, groups)
+        .named(*identity.name())
+        .instanced(*identity.instance_id())
 }
 
 /// One peer's input as the session keeps it.
@@ -540,7 +507,8 @@ struct Net {
     /// caught up from.
     sink: NodeKey,
     claim: Held<NetShared>,
-    local: Local,
+    /// What the Endpoint of each peer is named and identified as.
+    identity: EndpointIdentity,
     entries: Vec<Entry>,
     /// The peers established since the last [`Networks::take_joined`].
     joined: Vec<Joined>,
@@ -769,7 +737,7 @@ impl Net {
                             Networks::retire(retiring, graph, old);
                         }
                     }
-                    let endpoint = self.local.endpoint(cx.layout.groups());
+                    let endpoint = endpoint(&self.identity, cx.layout.groups());
                     let entry = Entry::open(graph, cx, peer, remote, endpoint);
                     let mut peers = shared.peers.lock();
                     peers.retain(|known| known.addr != peer && known.identity != remote);
@@ -871,11 +839,8 @@ impl<F: Float> crate::Midi<'_, F> {
         request: OpenClient,
     ) -> Result<MidiNetwork<Client>, MidiError> {
         let executor = self.executor.upgrade().ok_or(MidiError::NetworkShutDown)?;
-        let local = Local {
-            identity: request.identity,
-            device: request.device,
-        };
-        Ok(self.adopt(request.spawn(&executor)?, local))
+        let identity = request.identity;
+        Ok(self.adopt(request.spawn(&executor)?, identity))
     }
 
     /// Opens the Host `request`: binds its socket and returns at once. It listens;
@@ -886,15 +851,16 @@ impl<F: Float> crate::Midi<'_, F> {
     /// As [`open_network_client`](Self::open_network_client).
     pub fn open_network_host(&mut self, request: OpenHost) -> Result<MidiNetwork<Host>, MidiError> {
         let executor = self.executor.upgrade().ok_or(MidiError::NetworkShutDown)?;
-        let local = Local {
-            identity: request.identity,
-            device: request.device,
-        };
-        Ok(self.adopt(request.spawn(&executor)?, local))
+        let identity = request.identity;
+        Ok(self.adopt(request.spawn(&executor)?, identity))
     }
 
     /// The session holds `link` and answers with its handle.
-    fn adopt<E: Role>(&mut self, link: NetworkLink<E>, local: Local) -> MidiNetwork<E> {
+    fn adopt<E: Role>(
+        &mut self,
+        link: NetworkLink<E>,
+        identity: EndpointIdentity,
+    ) -> MidiNetwork<E> {
         let shared = Arc::new(NetShared {
             link: Box::new(link),
             peers: Mutex::new(Vec::new()),
@@ -906,7 +872,7 @@ impl<F: Float> crate::Midi<'_, F> {
             shared,
             sink: sink.node(),
             claim: held,
-            local,
+            identity,
             entries: Vec::new(),
             joined: Vec::new(),
             refused: 0,
