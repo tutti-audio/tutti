@@ -543,7 +543,8 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
+        ConfigError, DoneError, JobError, RenderError, Rendered, RenderedError, TargetError,
+        Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,
@@ -585,9 +586,9 @@ pub mod session {
     #[cfg(feature = "export")]
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing, BufferKey,
-        BufferMainOutput, BufferStem, Done, DoneError, EventLossPolicy, ExportClock, FileKey,
-        FileMainOutput, FileStem, MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit,
-        PreparedGraph, Progress, Stage, StemKey,
+        BufferMainOutput, BufferStem, Done, EventLossPolicy, ExportClock, FileKey, FileMainOutput,
+        FileStem, MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph,
+        Progress, Stage, StemKey,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
