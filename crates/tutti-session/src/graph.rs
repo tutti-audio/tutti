@@ -75,19 +75,21 @@ mod observe;
 mod phases;
 #[cfg(feature = "testing")]
 mod testing;
+mod wiring;
 
 pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
+pub(crate) use wiring::Pending;
 
 use crate::key::{
-    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, Outlet, Removal,
-    SetSources, Wire,
+    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, Outlet, Removal, SetSources,
+    Wire,
 };
 use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
     ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key,
-    MainOutput, NoSuchNode, OutputPort, RemoveError, SetRateError,
+    NoSuchNode, OutputPort, RemoveError, SetRateError,
 };
 
 /// The largest block a device's graph is prepared for.
@@ -931,7 +933,16 @@ impl<F: Float> Graph<F> {
         &mut self,
         node: N,
     ) -> Key<N> {
-        let (key, placed) = self.place(node);
+        self.add_split(NodeKey::fresh(), Split::of(node))
+    }
+
+    /// A node already split, placed at `id` (a key no node holds).
+    pub(crate) fn add_split<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(
+        &mut self,
+        id: NodeKey,
+        split: Split<N, F>,
+    ) -> Key<N> {
+        let (key, placed) = self.place(id, split);
         self.address::<N>(key.erase(), placed, &Outgoing::default());
         key
     }
@@ -987,23 +998,32 @@ impl<F: Float> Graph<F> {
         (band < controls.bands()).then(|| controls.gain_reduction_db(band))
     }
 
-    /// Puts `node` in the editor under a fresh key, with nothing addressed and
-    /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
-    /// are not an [`add`](Self::add) node (a bound plugin).
-    pub(crate) fn place<N: IntoNode<F>>(&mut self, node: N) -> (Key<N>, Kept<N::Controls>) {
-        let id = NodeKey::fresh();
-        let (unit, placed) = Self::split(node);
+    /// Puts `split` in the editor under `id`, with nothing addressed and
+    /// nothing to sweep: [`add`](Self::add)'s first half.
+    pub(crate) fn place<N: IntoNode<F>>(
+        &mut self,
+        id: NodeKey,
+        split: Split<N, F>,
+    ) -> (Key<N>, Kept<N::Controls>) {
+        let Split { parts, placed } = split;
         // A fresh key has no wiring recorded, so nothing is unwired.
-        self.editor.insert(id, N::kind(), unit);
+        self.editor.insert(id, N::kind(), parts);
         self.nodes.insert(id, Entry { controls: None });
         self.note_pass(id);
         self.edited = true;
         (Key::new(id), placed)
     }
+}
 
-    /// `node` split into the unit the editor places and what the session
-    /// keeps of it.
-    fn split<N: IntoNode<F>>(node: N) -> (NodeParts<(), F>, Kept<N::Controls>) {
+/// A node split into the unit the editor places and what the session keeps of
+/// it, so its shape is known before it is placed.
+pub(crate) struct Split<N: IntoNode<F>, F: Float> {
+    parts: NodeParts<(), F>,
+    placed: Kept<N::Controls>,
+}
+
+impl<N: IntoNode<F>, F: Float> Split<N, F> {
+    pub(crate) fn of(node: N) -> Self {
         let NodeParts {
             node,
             controls,
@@ -1013,16 +1033,20 @@ impl<F: Float> Graph<F> {
             published,
             settings,
         } = node.into_parts();
-        (
-            NodeParts::new(node, (), fork, None),
-            Kept {
+        Self {
+            parts: NodeParts::new(node, (), fork, None),
+            placed: Kept {
                 controls,
                 params,
                 reclaimer,
                 published,
                 settings,
             },
-        )
+        }
+    }
+
+    pub(crate) fn shape(&self) -> tutti_graph::Shape {
+        self.parts.node.shape()
     }
 }
 
@@ -1583,15 +1607,27 @@ impl<F: Float> Graph<F> {
     where
         N: IntoNode<F, Controls: Send + 'static> + Send + 'static,
     {
-        let node = node.into();
         let Replacement { incoming, fade } = replacement;
+        self.replace_split(node.into(), Split::of(incoming), fade)
+    }
+
+    /// [`replace`](Self::replace) of a node already split.
+    pub(crate) fn replace_split<N>(
+        &mut self,
+        node: NodeKey,
+        split: Split<N, F>,
+        fade: Option<Fade>,
+    ) -> Result<Key<N>, ReplaceRefused>
+    where
+        N: IntoNode<F, Controls: Send + 'static> + Send + 'static,
+    {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(ReplaceRefused::Poisoned(cause.to_owned()));
         }
         if !self.nodes.contains_key(&node) {
             return Err(ReplaceRefused::NoSuchNode(node));
         }
-        let (parts, placed) = Self::split(incoming);
+        let Split { parts, placed } = split;
         let unit = Unit::<N, F> {
             parts,
             node: std::marker::PhantomData,
@@ -1708,7 +1744,7 @@ impl<F: Float> Graph<F> {
             // over a swap the session made itself.
             #[cfg(feature = "plugin")]
             OnShape::Cut => {
-                let (parts, placed) = Self::split(incoming);
+                let Split { parts, placed } = Split::of(incoming);
                 let fits = self.editor.fade_fits(node, &parts.node.shape()) == Some(true);
                 let unit = Unit::<N, F> {
                     parts,
@@ -1978,41 +2014,6 @@ impl<F: Float> Graph<F> {
         self.shape_of(node.into()).map(|s| usize::from(s.event_in))
     }
 
-    /// Whether `port` names an event output the graph has.
-    fn check_event_out(&self, port: EventOutputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node()) {
-            return Err(ConnectError::NoSuchNode(port.node()));
-        }
-        let fits = self
-            .shape(port.node())
-            .is_some_and(|s| port.port() < s.event_out);
-        fits.then_some(()).ok_or(ConnectError::NoSuchEventOut(port))
-    }
-
-    /// Whether `port` names an event input the graph has.
-    pub(crate) fn check_event_in(&self, port: EventInputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node()) {
-            return Err(ConnectError::NoSuchNode(port.node()));
-        }
-        let fits = self
-            .shape(port.node())
-            .is_some_and(|s| port.port() < s.event_in);
-        fits.then_some(()).ok_or(ConnectError::NoSuchEventIn(port))
-    }
-
-    pub(crate) fn check_event_wire(
-        &self,
-        from: EventOutputPort,
-        to: EventInputPort,
-    ) -> Result<(), ConnectError> {
-        self.check_event_out(from)?;
-        self.check_event_in(to)?;
-        if from.node() == to.node() {
-            return Err(ConnectError::Itself(from.node()));
-        }
-        Ok(())
-    }
-
     /// Adds the event edge `from -> to`: whether it was new. Events are
     /// never faded. An edge a feed ([`set_feed`](Self::set_feed)) put there
     /// becomes the caller's: it stays when the feed drops it.
@@ -2021,7 +2022,7 @@ impl<F: Float> Graph<F> {
         from: EventOutputPort,
         to: EventInputPort,
     ) -> Result<bool, ConnectError> {
-        self.check_event_wire(from, to)?;
+        self.check_event_wire(None, from, to)?;
         let held = self
             .editor
             .spec()
@@ -2119,9 +2120,9 @@ impl<F: Float> Graph<F> {
         to: EventInputPort,
         sources: &[EventOutputPort],
     ) -> Result<(), ConnectError> {
-        self.check_event_in(to)?;
+        self.check_event_in(None, to)?;
         for &from in sources {
-            self.check_event_wire(from, to)?;
+            self.check_event_wire(None, from, to)?;
         }
         let sink = to.node();
         let port = to.port();
@@ -2330,7 +2331,7 @@ impl<F: Float> Graph<F> {
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutputPort> {
         self.fed_sources(sink)
             .into_iter()
-            .filter(|s| self.check_event_out(*s).is_ok())
+            .filter(|s| self.check_event_out(None, *s).is_ok())
             .collect()
     }
 
@@ -2608,40 +2609,6 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    pub(crate) fn check_out(&self, port: OutputPort) -> Result<(), ConnectError> {
-        let node = port.node();
-        if !self.contains(node) {
-            return Err(ConnectError::NoSuchNode(node));
-        }
-        (port.index() < self.node_outputs(node)?)
-            .then_some(())
-            .ok_or(ConnectError::NoSuchOutPort(port))
-    }
-
-    pub(crate) fn check_in(&self, port: InputPort) -> Result<(), ConnectError> {
-        let fits = match port.end() {
-            InEnd::Node(node, index) => {
-                if !self.contains(node) {
-                    return Err(ConnectError::NoSuchNode(node));
-                }
-                index < self.node_inputs(node)?
-            }
-            InEnd::Output(index) => index < self.outputs(),
-        };
-        fits.then_some(()).ok_or(ConnectError::NoSuchInPort(port))
-    }
-
-    /// Checks one wire from `from` into `to`: both ends exist, and a node does
-    /// not feed itself.
-    pub(crate) fn check_wire(&self, from: OutputPort, to: InputPort) -> Result<(), ConnectError> {
-        self.check_out(from)?;
-        self.check_in(to)?;
-        match (from.node(), to.node()) {
-            (a, Some(b)) if a == b => Err(ConnectError::Itself(a)),
-            _ => Ok(()),
-        }
-    }
-
     /// Adds the edge `from -> to`: whether it was new (the graph is marked
     /// edited only then). A new edge **fades in** over
     /// [`DECLICK`](tutti_graph::DECLICK), and an edge that
@@ -2652,7 +2619,7 @@ impl<F: Float> Graph<F> {
         from: OutputPort,
         to: InputPort,
     ) -> Result<bool, ConnectError> {
-        self.check_wire(from, to)?;
+        self.check_wire(None, from, to)?;
         let id = Self::edge_id(ChannelEdge::new(from, to)).expect("checked: the ports fit");
         let leaving = self.fading_out(id);
         let added = self
@@ -2837,11 +2804,11 @@ impl<F: Float> Graph<F> {
     ) -> Result<Vec<EdgeId>, ConnectError> {
         let mut want: Vec<(PortSource, OutputPort)> = Vec::new();
         for port in from {
-            self.check_wire(port, to)?;
+            self.check_wire(None, port, to)?;
             let source = Self::raw_source(port).ok_or(ConnectError::NoSuchOutPort(port))?;
             want.push((source, port));
         }
-        self.check_in(to)?;
+        self.check_in(None, to)?;
         if matches!(to.end(), InEnd::Node(..)) && Self::raw_in(to).is_none() {
             return Err(ConnectError::NoSuchInPort(to));
         }
@@ -2882,8 +2849,8 @@ impl<F: Float> Graph<F> {
     /// What the two ends are says what is connected:
     ///
     /// - an [`OutputPort`] into an [`InputPort`]: **one channel**
-    ///   ([`MainOutput::channel`] is the main output's channel);
-    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`MainOutput`]: **a main
+    ///   ([`MainOutput::channel`](crate::MainOutput::channel) is the main output's channel);
+    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`MainOutput`](crate::MainOutput): **a main
     ///   bus**, channel `c` of the source into channel `c` of the sink. The two
     ///   must be the same width. A bus into the main output may be narrower than it:
     ///   it is placed by speaker, on the topology the main output was declared with,
@@ -2893,7 +2860,7 @@ impl<F: Float> Graph<F> {
     ///   would weight a channel (a centre into a main output with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
     /// - a [`BusOutputPort`] into a [`BusInputPort`] (`key.bus_output(i)`,
-    ///   `key.bus_input(i)`) or into [`MainOutput`]: **a bus edge**, a fold between two
+    ///   `key.bus_input(i)`) or into [`MainOutput`](crate::MainOutput): **a bus edge**, a fold between two
     ///   declared topologies, lowered at the commit to one weighted lane per
     ///   contribution (`Fold::contributions`) and summed with any other source
     ///   of the sink's ports. Into the main output it folds to the topology the main output
@@ -3048,110 +3015,6 @@ impl<F: Float> Graph<F> {
                 .map(|f| f.source)
                 .collect()
         }))
-    }
-
-    /// Whether the nodes a bus edge names are in the graph.
-    pub(crate) fn check_bus_nodes(
-        &self,
-        from: BusOutputPort,
-        to: BusInputPort,
-    ) -> Result<(), ConnectError> {
-        if let BusOutputPort::Node(bus) = from
-            && !self.contains(bus.node())
-        {
-            return Err(ConnectError::NoSuchNode(bus.node()));
-        }
-        if let BusEnd::Node(bus) = to.0
-            && !self.contains(bus.node())
-        {
-            return Err(ConnectError::NoSuchNode(bus.node()));
-        }
-        Ok(())
-    }
-
-    /// The `(output port, input port)` pairs that connect `from`'s main
-    /// output to `to`'s main input (or the main output's outputs), checked.
-    pub(crate) fn main_wires(
-        &self,
-        from: NodeKey,
-        to: MainSink,
-    ) -> Result<Vec<(OutputPort, InputPort)>, ConnectError> {
-        let (_, out_buses) = self.node_buses(from)?;
-        let main = |buses: &Buses, node| {
-            let (index, bus) = buses.main_bus().ok_or(ConnectError::NoMainBus(node))?;
-            let first = buses
-                .first_port(index)
-                .ok_or(ConnectError::NoMainBus(node))?;
-            Ok::<_, ConnectError>((first, bus.width()))
-        };
-        let (out_first, out_width) = main(&out_buses, from)?;
-        let out_topology = out_buses
-            .main_bus()
-            .map(|(_, bus)| bus.topology)
-            .ok_or(ConnectError::NoMainBus(from))?;
-        match to {
-            MainSink::Node(to) => {
-                if from == to {
-                    return Err(ConnectError::Itself(from));
-                }
-                let (in_buses, _) = self.node_buses(to)?;
-                let (in_first, in_width) = main(&in_buses, to)?;
-                if out_width != in_width {
-                    return Err(ConnectError::Width {
-                        from,
-                        from_width: out_width,
-                        to,
-                        to_width: in_width,
-                    });
-                }
-                Ok((0..out_width)
-                    .map(|c| {
-                        (
-                            OutputPort::new(from, out_first + c),
-                            InputPort::new(to, in_first + c),
-                        )
-                    })
-                    .collect())
-            }
-            MainSink::MainOutput => {
-                let main_output_width = self.outputs();
-                if out_width > main_output_width {
-                    return Err(ConnectError::MainOutputNarrow {
-                        from,
-                        from_width: out_width,
-                        main_output_width,
-                    });
-                }
-                if out_width == main_output_width {
-                    return Ok((0..out_width)
-                        .map(|c| (OutputPort::new(from, out_first + c), MainOutput::channel(c)))
-                        .collect());
-                }
-                // A narrower bus is placed on the main output by speaker: the main
-                // output's declared topology. A bus that names no speaker is
-                // read in the engine's order for its width.
-                let source = out_topology;
-                let placed = if source.is_unassigned() {
-                    tutti_buffers::ChannelTopology::default_for(source.width())
-                        .expect("a bus is at most MAX_CHANNELS wide")
-                } else {
-                    source
-                };
-                let fold =
-                    tutti_buffers::Fold::<f32>::between(&placed, self.main_output_topology())
-                        .map_err(|cause| ConnectError::MainOutputFold { from, cause })?;
-                let mut wires = Vec::new();
-                for c in 0..main_output_width {
-                    for (k, weight) in fold.contributions(c) {
-                        if weight != 1.0 {
-                            return Err(ConnectError::MainOutputWeighted { from });
-                        }
-                        wires.push((OutputPort::new(from, out_first + k), MainOutput::channel(c)));
-                    }
-                }
-                Ok(wires)
-            }
-        }
     }
 
     /// Gives `edge` a gain lane at `gain`: the declaration of a weighted

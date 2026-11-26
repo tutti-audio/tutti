@@ -13,7 +13,7 @@ mod taps;
 mod tests;
 mod transport;
 
-pub use declared::Patched;
+pub use declared::{PatchError, Patched};
 pub use event::SessionEvent;
 pub use main_output::MainOutputTopologyStatus;
 #[cfg(feature = "midi")]

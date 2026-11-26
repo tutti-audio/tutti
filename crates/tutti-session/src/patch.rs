@@ -1,6 +1,8 @@
 //! The declarations of a patch: the nodes an app declares by its own keys.
 //!
 //! - [`NodeDecl`] names one node: an app key and the config it is built from.
+//! - [`Mention`], [`Chain`] and [`Connected`] are the wires between declared
+//!   nodes, made by `connect` on a [`WireStart`].
 //! - [`Declarations`] is the declarations of one
 //!   [`Session::patch`](crate::Session::patch) call, and [`IntoPatch`] is
 //!   everything that can be part of one: a declaration, a tuple, array, `Vec`
@@ -14,8 +16,13 @@ use std::any::{Any, TypeId};
 use std::fmt;
 
 use thiserror::Error;
-use tutti_graph::{Fade, HostValues, Initials, NodeKey};
+use tutti_graph::{Fade, HostValues, Initials, NodeKey, Shape};
 use tutti_units::Samples;
+
+pub(crate) mod wire;
+
+pub use wire::{Chain, Connected, InputEnd, Mention, OutputEnd, WireEnd, WireStart};
+pub(crate) use wire::{InPort, OutPort, WireDecl};
 
 /// How a declaration is swapped or removed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -56,6 +63,12 @@ impl<K, C> NodeDecl<K, C> {
         }
     }
 
+    /// The key the node is declared under.
+    #[must_use]
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
     /// Swaps the node over `fade` instead of the declick, when a patch changes
     /// its structure. A removal always uses the graph's declick: only
     /// [`unfaded`](Self::unfaded) cuts it.
@@ -88,6 +101,13 @@ pub trait PatchTarget {
     type Refused;
 }
 
+/// A node built from a declaration and not yet placed: the target's own node
+/// value, erased, and the shape its wires are checked against.
+pub(crate) struct Built {
+    pub(crate) node: Box<dyn Any + Send>,
+    pub(crate) shape: Shape,
+}
+
 /// That a [`PatchTarget`] places nodes built from the config `C`, at the float the
 /// target runs at, and reads `C` at that float.
 pub(crate) trait Place<C>: PatchTarget {
@@ -97,17 +117,15 @@ pub(crate) trait Place<C>: PatchTarget {
     fn initials(config: &C) -> Initials;
     /// Whether `a` and `b` make the same node but for their values.
     fn same_structure(a: &C, b: &C) -> bool;
-    /// The node `config` builds, added unwired.
-    fn add(&mut self, config: &C, host: &HostValues) -> NodeKey;
-    /// The node at `key`, swapped for one built from `config` over `fade`
-    /// (`None` is the target's default declick).
-    fn swap(
-        &mut self,
-        key: NodeKey,
-        config: &C,
-        host: &HostValues,
-        fade: Option<Fade>,
-    ) -> Result<(), Self::Refused>;
+    /// The node `config` builds, and its shape.
+    fn build(config: &C, host: &HostValues) -> Built;
+    /// `built`, a node of `build`, added unwired under `id`, a key no node
+    /// holds.
+    fn add(&mut self, id: NodeKey, built: Built);
+    /// The node at `key`, swapped for `built` over `fade` (`None` is the
+    /// target's default declick).
+    fn swap(&mut self, key: NodeKey, built: Built, fade: Option<Fade>)
+    -> Result<(), Self::Refused>;
 }
 
 /// A config held erased: what a reconcile asks of it, over its target.
@@ -121,13 +139,15 @@ pub(crate) trait Declared<G: PatchTarget>: Send {
     /// for its values. `false` for a config of another type.
     fn same_structure(&self, other: &dyn Declared<G>) -> bool;
     fn initials(&self) -> Initials;
-    /// The node, placed in `target`.
-    fn add(&self, target: &mut G, host: &HostValues) -> NodeKey;
-    /// The node at `node`, swapped for one built from this config.
+    /// The node this config makes, built once.
+    fn build(&self, host: &HostValues) -> Built;
+    /// `built`, this config's node, placed in `target` under `id`.
+    fn add(&self, target: &mut G, id: NodeKey, built: Built);
+    /// The node at `node`, swapped for `built`, this config's node.
     fn replace(
         &self,
         target: &mut G,
-        host: &HostValues,
+        built: Built,
         node: NodeKey,
         fading: Fading,
     ) -> Result<(), G::Refused>;
@@ -163,14 +183,18 @@ where
         G::initials(&self.0)
     }
 
-    fn add(&self, target: &mut G, host: &HostValues) -> NodeKey {
-        target.add(&self.0, host)
+    fn build(&self, host: &HostValues) -> Built {
+        G::build(&self.0, host)
+    }
+
+    fn add(&self, target: &mut G, id: NodeKey, built: Built) {
+        target.add(id, built);
     }
 
     fn replace(
         &self,
         target: &mut G,
-        host: &HostValues,
+        built: Built,
         node: NodeKey,
         fading: Fading,
     ) -> Result<(), G::Refused> {
@@ -179,7 +203,7 @@ where
             Fading::Over(fade) => Some(fade),
             Fading::Cut => Some(Fade::new(Samples::ZERO)),
         };
-        target.swap(node, &self.0, host, fade)
+        target.swap(node, built, fade)
     }
 }
 
@@ -197,11 +221,15 @@ pub(crate) struct Declaration<G: PatchTarget> {
 #[must_use = "declarations do nothing until `Session::patch` takes them"]
 pub struct Declarations<K, G: PatchTarget> {
     pub(crate) nodes: Vec<(K, Declaration<G>)>,
+    pub(crate) wires: Vec<WireDecl<K>>,
 }
 
 impl<K, G: PatchTarget> Default for Declarations<K, G> {
     fn default() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            wires: Vec::new(),
+        }
     }
 }
 
@@ -277,6 +305,7 @@ where
 impl<K, G: PatchTarget> IntoPatch<K, G> for Declarations<K, G> {
     fn add_to(self, patch: &mut Declarations<K, G>, _: Sealed) {
         patch.nodes.extend(self.nodes);
+        patch.wires.extend(self.wires);
     }
 }
 
@@ -329,19 +358,6 @@ tuple! {
     (P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14)
     (P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15)
     (P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16)
-}
-
-/// Why [`Session::patch`](crate::Session::patch) took nothing. Nothing is
-/// changed.
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
-#[non_exhaustive]
-pub enum PatchError<K> {
-    /// The key is declared twice in one patch.
-    #[error("{0:?} is declared twice in one patch")]
-    DuplicateKey(K),
-    /// The key's config gives an initial value that is NaN or infinite.
-    #[error("{0:?} declares an initial value that is not finite")]
-    NotFinite(K),
 }
 
 /// Why [`Session::key`](crate::Session::key) found no node.
