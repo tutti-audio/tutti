@@ -150,6 +150,11 @@ pub enum OfferError {
         /// Its maximum.
         max: ProfileChannels,
     },
+    /// A Channel entry has a maximum of no Channels, or is enabled with none: on a
+    /// Channel the count is the Manager plus Members, at least 1, and `0` means the
+    /// width of a Group or Function Block (§7.8, §7.10).
+    #[error("a Profile on a Channel uses at least 1 Channel")]
+    NoChannels,
     /// The entry enables the MPE Profile with a count that makes no zone: fewer
     /// than two Channels, or running past Channel 16 (M2-120 §3.1).
     #[error("the MPE Profile enabled with that many Channels from that Channel is no zone")]
@@ -176,6 +181,12 @@ impl ProfileOffer {
         entry: ProfileOfferEntry,
     ) -> Result<(), OfferError> {
         let entry = entry.normalised(address);
+        if matches!(address, CiDeviceId::Channel(_))
+            && (entry.max.is_by_address()
+                || entry.enabled.is_some_and(ProfileChannels::is_by_address))
+        {
+            return Err(OfferError::NoChannels);
+        }
         if let Some(enabled) = entry.enabled {
             if enabled > entry.max {
                 return Err(OfferError::OverMaximum {
@@ -229,7 +240,8 @@ impl TryFrom<Vec<(CiDeviceId, ProfileId, ProfileOfferEntry)>> for ProfileOffer {
     ///
     /// # Errors
     ///
-    /// [`OfferError::OverMaximum`] for an entry enabled with more Channels than its
+    /// [`OfferError::NoChannels`] for a Channel entry with no Channels as its maximum
+    /// or enabled count; [`OfferError::OverMaximum`] for an entry enabled with more Channels than its
     /// maximum (M2-102 §2.5.1: m2-102/2.5.1#4); [`OfferError::NoMpeZone`] for an
     /// enabled MPE entry that makes no zone, and [`OfferError::MpeOverlap`] for one
     /// whose zone shares a Channel with an MPE entry the offer already enables
