@@ -84,7 +84,7 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
 fn a_watch_that_reached_a_write_shows_it_applied() {
     loom::model(|| {
         let (mut writer, mut reader) = seq_slots::<u32>(1);
-        let (publisher, watch) = generation_watch();
+        let (mut publisher, watch) = generation_watch();
         let applied = Arc::new(loom::sync::atomic::AtomicU32::new(0));
         writer.write(0, 7);
         let reader_applied = Arc::clone(&applied);
