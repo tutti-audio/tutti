@@ -347,13 +347,6 @@ impl Member {
         brightness: None,
     };
 
-    /// Takes the receiver to hold none of the channel's values.
-    const fn forget(&mut self) {
-        self.bend = None;
-        self.pressure = None;
-        self.brightness = None;
-    }
-
     /// Sends what of `expression` the channel does not hold yet, in the forms
     /// `features` says the receiver takes: what it does not use is not sent, and
     /// not held either.
@@ -442,7 +435,10 @@ impl Zoned {
                 // Another range or other forms: the zone's notes are told again in
                 // them at its next event.
                 self.ranges[channel.index()] = None;
-                self.members[channel.index()].forget();
+                let member = &mut self.members[channel.index()];
+                member.bend = None;
+                member.pressure = None;
+                member.brightness = None;
             }
             let range = sources[channel.index()].note_range;
             let value = ControlValue::new(range.to_rpn_bits());
@@ -455,7 +451,9 @@ impl Zoned {
     fn resend(&mut self) {
         self.ranges = [None; CHANNELS];
         for member in &mut self.members {
-            member.forget();
+            member.bend = None;
+            member.pressure = None;
+            member.brightness = None;
         }
     }
 

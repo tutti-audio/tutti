@@ -468,6 +468,15 @@ fn eight_profile_zones_fill_the_channels_and_a_ninth_is_refused() {
     }
 }
 
+/// Taking a zone out is by its master; the last one out leaves no set.
+#[test]
+fn removing_the_last_zone_leaves_no_set() {
+    let both = ProfileZones::single(pzone(0, 4)).with(pzone(8, 4)).unwrap();
+    assert_eq!(both.without(ch(0)), Some(ProfileZones::single(pzone(8, 4))));
+    assert_eq!(both.without(ch(5)), Some(both), "no zone is managed there");
+    assert_eq!(both.without(ch(0)).and_then(|s| s.without(ch(8))), None);
+}
+
 /// Both kinds keep a response for the members: the Profile's Channel Response,
 /// and the mode an MPE 1.1 zone starts in.
 #[test]
