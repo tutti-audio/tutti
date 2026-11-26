@@ -27,6 +27,7 @@ const diode_clipper::DiodeClipperControls::MIN_CUTOFF
 const distance::DISTANCE_GLIDE
 const distance::DistanceControls::DEFAULT
 const distance::ReferenceDistance::DEFAULT
+const dither::DitherNoise::DEFAULT_SEED
 const dynamics::brickwall::BrickwallControls::DEFAULT
 const dynamics::compressor::CompressorControls::DEFAULT
 const dynamics::dynamic_eq::DynamicEqControls::DEFAULT
@@ -389,14 +390,13 @@ fn distance::DistanceSpec::reference_distance
 fn distance::DistanceSpec::speed
 fn dither::DitherNoise::new
 fn dither::DitherNoise::process
+fn dither::DitherNoise::with_seed
+fn dither::quantizer::Quantizer::new
+fn dither::quantizer::Quantizer::quantize
+fn dither::quantizer::Quantizer::shaped
 fn dither::shaping::NoiseShaping::feedback_gain
 fn dither::shaping::NoiseShaping::new
 fn dither::shaping::NoiseShaping::order
-fn dither::sink::DitherSink::clipped
-fn dither::sink::DitherSink::get_mut
-fn dither::sink::DitherSink::into_inner
-fn dither::sink::DitherSink::new
-fn dither::sink::DitherSink::shaped
 fn dynamics::brickwall::BrickwallBank::new
 fn dynamics::brickwall::BrickwallBank::process
 fn dynamics::brickwall::BrickwallBank::retarget
@@ -1128,8 +1128,8 @@ struct distance::Distance
 struct distance::DistanceControls
 struct distance::DistanceSpec
 struct dither::DitherNoise
+struct dither::quantizer::Quantizer
 struct dither::shaping::NoiseShaping
-struct dither::sink::DitherSink
 struct dynamics::brickwall::BrickwallBank
 struct dynamics::brickwall::BrickwallControls
 struct dynamics::brickwall::BrickwallSignals

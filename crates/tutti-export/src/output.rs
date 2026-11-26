@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
 use tutti_codec::Format;
-use tutti_dsp::DitherShape;
 use tutti_graph::TapReader;
 
 use crate::Resample;
@@ -110,7 +109,8 @@ impl Width {
 }
 
 /// A file one output is written to: where, in what format and width, and how
-/// it is converted on the way (rate, dither, normalize).
+/// it is converted on the way (rate, normalize). An integer format's dither and noise shaping
+/// are those of its `tutti_codec::IntPcm`.
 ///
 /// A format and width the encoder cannot take, and a topology the fold cannot
 /// place the channels into, are refused when the render starts (the file's rate is not known
@@ -121,16 +121,13 @@ pub struct FileTarget {
     format: Format,
     pub(crate) width: Width,
     pub(crate) resample: Option<Resample>,
-    pub(crate) dither: Option<DitherShape>,
-    pub(crate) noise_shaping: bool,
     pub(crate) normalize: Option<NormalizeSpec>,
     create_new: bool,
 }
 
 impl FileTarget {
     /// A file at `path` of `format`, `channels` wide, at the render's rate,
-    /// with triangular dither (it applies only to an integer width) and no
-    /// normalize.
+    /// and no normalize.
     #[must_use]
     pub fn new(path: impl Into<PathBuf>, format: Format, channels: ChannelLayout) -> Self {
         Self {
@@ -138,8 +135,6 @@ impl FileTarget {
             format,
             width: Width::Count(channels),
             resample: None,
-            dither: Some(DitherShape::Triangular),
-            noise_shaping: false,
             normalize: None,
             create_new: false,
         }
@@ -160,38 +155,6 @@ impl FileTarget {
     #[must_use]
     pub fn resample(mut self, resample: Resample) -> Self {
         self.resample = Some(resample);
-        self
-    }
-
-    /// The noise added when an integer width is quantized: triangular unless
-    /// this or [`no_dither`](Self::no_dither) says otherwise. A format with no
-    /// integer width (`Pcm::Float32`) ignores it.
-    #[must_use]
-    pub fn dither(mut self, shape: DitherShape) -> Self {
-        self.dither = Some(shape);
-        self
-    }
-
-    /// No dither when an integer width is quantized: the rounding error is
-    /// left as it falls. A format with no integer width ignores it.
-    #[must_use]
-    pub fn no_dither(mut self) -> Self {
-        self.dither = None;
-        self
-    }
-
-    /// Shapes the quantization error of an integer width
-    /// ([`tutti_dsp::NoiseShaping`], designed for the file's rate): the error
-    /// moves to where hearing is least sensitive, and a normalizing output keeps
-    /// more headroom for it. Off unless this says so; a format with no integer
-    /// width ignores it.
-    ///
-    /// It is independent of the dither: with [`no_dither`](Self::no_dither) the
-    /// rounding error alone is fed back and shaped, and the shaping of the
-    /// triangular default shapes the dithered error.
-    #[must_use]
-    pub fn noise_shaping(mut self) -> Self {
-        self.noise_shaping = true;
         self
     }
 

@@ -1,4 +1,7 @@
 use super::*;
+use tutti_buffers::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_measure::Loudness;
 
 fn reading(lufs: f64, true_peak: f64) -> Loudness {
@@ -62,12 +65,19 @@ mod headroom {
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
-    fn config(pcm: Pcm, dither: Option<DitherShape>) -> FileTarget {
-        let target = FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO);
-        match dither {
-            Some(shape) => target.dither(shape),
-            None => target.no_dither(),
-        }
+    fn config(pcm: Pcm) -> FileTarget {
+        FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO)
+    }
+
+    /// An integer type of `depth`, dithered with `dither` (none for `None`) and noise-shaped
+    /// when `shaped`.
+    fn int(depth: IntDepth, dither: Option<DitherShape>, shaped: bool) -> Pcm {
+        let pcm = IntPcm::new(depth);
+        let pcm = match dither {
+            Some(shape) => pcm.dither(shape),
+            None => pcm.no_dither(),
+        };
+        Pcm::Int(if shaped { pcm.noise_shaping() } else { pcm })
     }
 
     /// dBFS of `1 - lsbs / 2^(bits - 1)`: `lsbs` LSBs below full scale.
@@ -80,13 +90,14 @@ mod headroom {
     /// triangular.
     #[test]
     fn an_integer_format_keeps_an_lsb_and_its_dither_below_full_scale() {
-        for (pcm, bits) in [(Pcm::Int16, 16), (Pcm::Int24, 24)] {
+        for (depth, bits) in [(IntDepth::Int16, 16), (IntDepth::Int24, 24)] {
             for (dither, lsbs) in [
                 (None, 1.0),
                 (Some(DitherShape::Rectangular), 1.5),
                 (Some(DitherShape::Triangular), 2.0),
             ] {
-                let got = headroom_ceiling(&config(pcm, dither), RATE).expect("quantizes");
+                let pcm = int(depth, dither, false);
+                let got = headroom_ceiling(&config(pcm), RATE).expect("quantizes");
                 let want = below_full_scale(bits, lsbs);
                 assert!(
                     (got.get() - want).abs() < 1e-12,
@@ -106,8 +117,8 @@ mod headroom {
             (Some(DitherShape::Rectangular), 1.0),
             (Some(DitherShape::Triangular), 1.5),
         ] {
-            let plain = config(Pcm::Int16, shape);
-            let shaped = plain.clone().noise_shaping();
+            let plain = config(int(IntDepth::Int16, shape, false));
+            let shaped = config(int(IntDepth::Int16, shape, true));
             let gain = NoiseShaping::new(RATE).feedback_gain().get();
             let lsbs = 0.5 + error_lsbs + gain * error_lsbs;
             let got = headroom_ceiling(&shaped, RATE).expect("quantizes");
@@ -117,8 +128,7 @@ mod headroom {
             );
             assert!(got < headroom_ceiling(&plain, RATE).unwrap(), "{shape:?}");
         }
-        let resampled = config(Pcm::Int16, Some(DitherShape::Triangular))
-            .noise_shaping()
+        let resampled = config(int(IntDepth::Int16, Some(DitherShape::Triangular), true))
             .resample(crate::Resample::to(SampleRate::SR_96K));
         let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain().get();
         let lsbs = 2.0 + want * 1.5;
@@ -131,7 +141,7 @@ mod headroom {
     /// does not quantize has no limit.
     #[test]
     fn a_target_above_the_limit_is_pulled_to_it() {
-        let int16 = config(Pcm::Int16, Some(DitherShape::Triangular));
+        let int16 = config(int(IntDepth::Int16, Some(DitherShape::Triangular), false));
         let limit = Db::new(below_full_scale(16, 2.0));
         let near = |a: Db, b: Db| (a.get() - b.get()).abs() < 1e-12;
 
@@ -159,7 +169,7 @@ mod headroom {
             "the default -1 dBTP ceiling is under the limit"
         );
 
-        let float = config(Pcm::Float32, Some(DitherShape::Triangular));
+        let float = config(Pcm::Float(FloatWidth::F32));
         assert_eq!(
             Normalize::peak(Db::new(0.0)).within(&float, RATE),
             Normalize::peak(Db::new(0.0))

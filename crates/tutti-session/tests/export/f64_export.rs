@@ -3,6 +3,7 @@
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
@@ -70,7 +71,7 @@ fn an_f64_bounce_to_a_float64_file_reads_back_exactly() {
         &mut session(),
         Bounce::new()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
-            .main_output(&path, Format::Wav(Pcm::Float64))
+            .main_output(&path, Format::Wav(Pcm::Float(FloatWidth::F64)))
             .tail(BounceTail::None),
     )
     .expect("the f64 bounce runs");

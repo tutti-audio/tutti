@@ -479,6 +479,11 @@ pub(super) const ALLOW: &[Allow] = &[
         "Apple SDK types and functions (`NSView`, `UInt32`, `MIDIPacketNext`, `AudioUnitRender`, `CA_REALTIME_API`)",
     ),
     (
+        &["crates/tutti-au-", "crates/tutti-plugin-server/"],
+        |s| matches!(s, "Float32" | "Float64"),
+        "Apple AudioUnit C types (`Float32`, `Float64`)",
+    ),
+    (
         &[
             "crates/tutti-vst2-",
             "testing/tutti-vst2-",

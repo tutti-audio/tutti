@@ -1,14 +1,16 @@
 use super::*;
+use crate::IntPcm;
 use crate::SpecError;
 use crate::test_sink::Full;
 use crate::writer::FormatWriter;
 use std::io::Cursor;
+use tutti_buffers::ChannelSet;
 use tutti_units::SampleRate;
 
 fn spec(channels: u16, pcm: Pcm) -> Spec {
-    Spec::of_width(
+    Spec::of_channels(
         crate::Format::Wav(pcm),
-        ChannelLayout::from(channels),
+        ChannelSet::default_for(ChannelLayout::from(channels)),
         SampleRate::SR_48K,
     )
 }
@@ -48,7 +50,10 @@ fn u32_at(b: &[u8], at: usize) -> u32 {
 /// by field, with the sizes back-patched to the frames written.
 #[test]
 fn a_stereo_16_bit_file_has_the_plain_44_byte_header() {
-    let bytes = write_all(&spec(2, Pcm::Int16), &ramp(2, 5));
+    let bytes = write_all(
+        &spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+        &ramp(2, 5),
+    );
     assert_eq!(&bytes[0..4], b"RIFF");
     assert_eq!(u32_at(&bytes, 4), 36 + 5 * 4, "RIFF size");
     assert_eq!(&bytes[8..16], b"WAVEfmt ");
@@ -69,10 +74,25 @@ fn a_stereo_16_bit_file_has_the_plain_44_byte_header() {
 #[test]
 fn wider_or_deeper_files_are_extensible_with_their_mask_and_subformat() {
     for (channels, pcm, mask, float) in [
-        (6u16, Pcm::Int24, 0x60Fu32, false),
-        (2, Pcm::Int24, 0x3, false),
-        (1, Pcm::Float32, 0x4, true),
-        (4, Pcm::Int16, 0x33, false),
+        (
+            6u16,
+            Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            0x60Fu32,
+            false,
+        ),
+        (
+            2,
+            Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            0x3,
+            false,
+        ),
+        (1, Pcm::Float(FloatWidth::F32), 0x4, true),
+        (
+            4,
+            Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            0x33,
+            false,
+        ),
     ] {
         let bytes = write_all(&spec(channels, pcm), &ramp(channels, 3));
         let bits = pcm.bits();
@@ -102,7 +122,11 @@ fn wider_or_deeper_files_are_extensible_with_their_mask_and_subformat() {
 #[test]
 fn an_independent_reader_recovers_the_samples_at_every_width() {
     for channels in [1u16, 2, 3, 6] {
-        for pcm in [Pcm::Int16, Pcm::Int24, Pcm::Float32] {
+        for pcm in [
+            Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            Pcm::Float(FloatWidth::F32),
+        ] {
             let samples = ramp(channels, 10);
             let bytes = write_all(&spec(channels, pcm), &samples);
             let mut reader = hound::WavReader::new(Cursor::new(bytes)).unwrap();
@@ -111,7 +135,7 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
             assert_eq!(reader.spec().bits_per_sample, pcm.bits());
             assert_eq!(reader.len() as usize, samples.len());
             match pcm {
-                Pcm::Float32 => {
+                Pcm::Float(FloatWidth::F32) => {
                     let got: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap()).collect();
                     assert_eq!(got, samples, "{channels} {pcm:?}");
                 }
@@ -119,7 +143,7 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
                     let got: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
                     let want: Vec<i32> = samples
                         .iter()
-                        .map(|&s| pcm.int_depth().expect("an integer width").quantize(s))
+                        .map(|&s| pcm.int_pcm().expect("an integer type").depth().quantize(s))
                         .collect();
                     assert_eq!(got, want, "{channels} {pcm:?}");
                 }
@@ -132,18 +156,24 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
 #[test]
 fn a_topology_sets_the_mask() {
     let quad = Spec::new(
-        crate::Format::Wav(Pcm::Int24),
+        crate::Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
         tutti_buffers::Bed::Quad.topology(),
         SampleRate::SR_48K,
     );
     assert_eq!(u32_at(&write_all(&quad, &ramp(4, 2)), 40), 0x33);
     assert_eq!(
-        u32_at(&write_all(&spec(4, Pcm::Int24), &ramp(4, 2)), 40),
+        u32_at(
+            &write_all(
+                &spec(4, Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
+                &ramp(4, 2)
+            ),
+            40
+        ),
         0x33,
         "a bare 4 is the default quad"
     );
     let discrete = Spec::new(
-        crate::Format::Wav(Pcm::Int24),
+        crate::Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
         tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::QUAD).unwrap(),
         SampleRate::SR_48K,
     );
@@ -159,14 +189,18 @@ fn a_topology_sets_the_mask() {
 #[test]
 fn a_rate_no_header_holds_is_refused() {
     for rate in [0.4, 1e10, 4_294_967_296.0] {
-        let s = Spec::of_width(
-            crate::Format::Wav(Pcm::Int16),
-            ChannelLayout::STEREO,
+        let s = Spec::of_channels(
+            crate::Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+            ChannelSet::default_for(ChannelLayout::STEREO),
             SampleRate::of(rate),
         );
-        let err = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new()))
-            .err()
-            .unwrap_or_else(|| panic!("{rate} Hz was accepted"));
+        let err = WavWriter::create(
+            &s,
+            Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            Cursor::new(Vec::new()),
+        )
+        .err()
+        .unwrap_or_else(|| panic!("{rate} Hz was accepted"));
         assert!(
             matches!(err, EncodeError::Spec(SpecError::SampleRate(_))),
             "{rate}: {err}"
@@ -179,8 +213,13 @@ fn a_rate_no_header_holds_is_refused() {
 /// is clean and the next frame is the failure.
 #[test]
 fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
-    let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
+    let s = spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    let mut w = WavWriter::create(
+        &s,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Cursor::new(Vec::new()),
+    )
+    .unwrap();
     w.limit_frames(5);
     let block = ramp(2, 3);
     w.write(Interleaved::new(&block, s.layout()).unwrap())
@@ -196,7 +235,12 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
     );
 
     // The block that crosses it is written up to the limit.
-    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(
+        &s,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Cursor::new(Vec::new()),
+    )
+    .unwrap();
     w.limit_frames(5);
     let eight = ramp(2, 8);
     let err = w
@@ -219,8 +263,13 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
 /// A limit above the format's own is ignored: the limit only comes down.
 #[test]
 fn the_limit_only_comes_down() {
-    let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
+    let s = spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    let mut w = WavWriter::create(
+        &s,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Cursor::new(Vec::new()),
+    )
+    .unwrap();
     let real = w.max_frames;
     w.limit_frames(u64::MAX);
     assert_eq!(w.max_frames, real);
@@ -235,10 +284,25 @@ fn the_limit_only_comes_down() {
 #[test]
 fn the_frame_limit_fits_both_32_bit_sizes() {
     for (n, pcm, frames, frame_bytes) in [
-        (1u16, Pcm::Int16, 2_147_483_617u64, 2u64),
-        (2, Pcm::Int24, 715_827_872, 6),
-        (6, Pcm::Float32, 178_956_968, 24),
-        (8, Pcm::Int24, 178_956_968, 24),
+        (
+            1u16,
+            Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            2_147_483_617u64,
+            2u64,
+        ),
+        (
+            2,
+            Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            715_827_872,
+            6,
+        ),
+        (6, Pcm::Float(FloatWidth::F32), 178_956_968, 24),
+        (
+            8,
+            Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+            178_956_968,
+            24,
+        ),
     ] {
         let layout = ChannelLayout::from(n);
         assert_eq!(max_data_frames(layout, pcm), frames, "{n} {pcm:?}");
@@ -259,8 +323,13 @@ fn the_frame_limit_fits_both_32_bit_sizes() {
 /// The sink takes the header and 6 whole frames of 4 bytes, no more.
 #[test]
 fn a_full_disk_mid_take_fails_the_write_that_hit_it() {
-    let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Pcm::Int16, Full::holding(44 + 6 * 4)).unwrap();
+    let s = spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    let mut w = WavWriter::create(
+        &s,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Full::holding(44 + 6 * 4),
+    )
+    .unwrap();
     w.write(Interleaved::new(&ramp(2, 4), s.layout()).unwrap())
         .unwrap();
     let err = w
@@ -284,10 +353,15 @@ fn a_full_disk_mid_take_fails_the_write_that_hit_it() {
 /// The reader is `hound`, independent of the writer.
 #[test]
 fn a_dropped_writer_leaves_a_readable_file() {
-    let s = spec(2, Pcm::Int16);
+    let s = spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
     let mut sink = Cursor::new(Vec::new());
     {
-        let mut w = WavWriter::create(&s, Pcm::Int16, &mut sink).unwrap();
+        let mut w = WavWriter::create(
+            &s,
+            Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+            &mut sink,
+        )
+        .unwrap();
         w.write(Interleaved::new(&ramp(2, 7), s.layout()).unwrap())
             .unwrap();
     }
@@ -298,8 +372,13 @@ fn a_dropped_writer_leaves_a_readable_file() {
 /// A finished writer's drop does not patch twice or touch the returned sink.
 #[test]
 fn a_finished_writer_hands_back_its_sink_untouched_by_drop() {
-    let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
+    let s = spec(2, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
+    let mut w = WavWriter::create(
+        &s,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Cursor::new(Vec::new()),
+    )
+    .unwrap();
     w.write(Interleaved::new(&ramp(2, 7), s.layout()).unwrap())
         .unwrap();
     let bytes = w.finish().unwrap().into_inner();

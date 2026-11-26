@@ -12,6 +12,8 @@
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, render_to_file};
 use core::f64::consts::PI;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
@@ -42,11 +44,14 @@ fn config(noise_shaping: bool) -> ExportConfig {
             ..Default::default()
         },
         encode: EncodeConfig {
-            format: Format::Wav(Pcm::Int16),
+            format: Format::Wav(Pcm::Int(if noise_shaping {
+                IntPcm::new(IntDepth::Int16).noise_shaping()
+            } else {
+                IntPcm::new(IntDepth::Int16)
+            })),
             channels: ChannelLayout::MONO,
             topology: None,
         },
-        noise_shaping,
         ..Default::default()
     }
 }

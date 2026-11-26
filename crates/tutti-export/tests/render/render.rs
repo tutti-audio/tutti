@@ -16,6 +16,8 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
+use tutti_buffers::FloatWidth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{Control, Normalize, Progress, RenderGraph, Resample, Setup, Stage, TailPolicy};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
@@ -50,7 +52,7 @@ fn dc(rate: SampleRate) -> RenderGraph {
 /// FLAC at 24 bit and the default level.
 fn flac() -> Format {
     Format::Flac {
-        depth: IntDepth::Int24,
+        pcm: IntPcm::new(IntDepth::Int24),
         level: FlacLevel::default(),
     }
 }
@@ -75,9 +77,9 @@ fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
 fn all_three_formats_export() {
     let d = tempfile::tempdir().unwrap();
     for (f, ext) in [
-        (Format::Wav(Pcm::Int24), "wav"),
+        (Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))), "wav"),
         (flac(), "flac"),
-        (Format::Aiff(Pcm::Int24), "aiff"),
+        (Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24))), "aiff"),
     ] {
         let p = d.path().join(format!("a.{ext}"));
         let r = render_to_file(
@@ -108,7 +110,10 @@ fn upmix_does_not_panic_and_leaves_extras_silent() {
     g.pipe_output(id);
     render_to_file(
         built(g, RATE),
-        &config(Format::Wav(Pcm::Float32), ChannelLayout::QUAD),
+        &config(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::QUAD,
+        ),
         &FrozenClock,
         &p,
     )
@@ -162,7 +167,10 @@ fn the_clock_advances_by_exactly_the_frames_rendered() {
     let clock = Arc::new(CountingClock(AtomicUsize::new(0)));
     let out = render_to_buffers(
         dc(RATE),
-        &config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO),
+        &config(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        ),
         clock.as_ref(),
     )
     .unwrap();
@@ -180,7 +188,10 @@ fn the_clock_advances_by_exactly_the_frames_rendered() {
 /// output is still the requested length — not short by the trim.
 #[test]
 fn a_latency_trim_preserves_the_output_length() {
-    let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut s = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     let untrimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     s.render.latency = tutti_units::Samples::new(512);
@@ -202,7 +213,10 @@ fn a_latency_trim_preserves_the_output_length() {
 /// untailed length.
 #[test]
 fn a_tail_lengthens_the_output_by_exactly_the_tail() {
-    let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut s = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     let untailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     let tail = tutti_units::Samples::new(4096);
@@ -427,7 +441,10 @@ fn a_stateless_node_reports_no_tail_rather_than_an_unknown_one() {
 fn buffers_report_their_own_shape() {
     let out = render_to_buffers(
         dc(RATE),
-        &config(Format::Wav(Pcm::Float32), ChannelLayout::QUAD),
+        &config(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::QUAD,
+        ),
         &FrozenClock,
     )
     .unwrap();
@@ -446,7 +463,10 @@ fn a_caller_can_compose_normalization() {
 
     // Longer than R128's 400 ms gating block, or the meter reports nothing
     // passed the gate and there is no loudness to normalize toward.
-    let mut long = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut long = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     long.render.duration_seconds = Seconds::new(2.0);
     let mut out = render_to_buffers(dc(RATE), &long, &FrozenClock).unwrap();
 
@@ -504,7 +524,10 @@ fn a_caller_can_compose_normalization() {
 fn a_resample_request_reaches_the_file() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("r.wav");
-    let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut s = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     s.render.duration_seconds = Seconds::new(1.0);
     s.resample = Some(Resample::to(SampleRate::SR_48K));
 
@@ -531,16 +554,19 @@ fn a_resample_request_reaches_the_file() {
 #[test]
 fn normalized_audio_can_be_written_to_every_format() {
     let d = tempfile::tempdir().unwrap();
-    let mut s = config(Format::Wav(Pcm::Int24), ChannelLayout::STEREO);
+    let mut s = config(
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))),
+        ChannelLayout::STEREO,
+    );
     s.render.duration_seconds = Seconds::new(1.0);
 
     let mut audio = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
     audio.apply_gain(tutti_units::Db::new(-6.0));
 
     for (format, ext) in [
-        (Format::Wav(Pcm::Int24), "wav"),
+        (Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))), "wav"),
         (flac(), "flac"),
-        (Format::Aiff(Pcm::Int24), "aiff"),
+        (Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24))), "aiff"),
     ] {
         s.encode.format = format;
         let p = d.path().join(format!("n.{ext}"));
@@ -572,7 +598,10 @@ fn normalized_audio_can_be_written_to_every_format() {
 #[test]
 fn a_resample_reaches_every_format_not_just_wav() {
     let d = tempfile::tempdir().unwrap();
-    let mut s = config(Format::Wav(Pcm::Int24), ChannelLayout::STEREO);
+    let mut s = config(
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))),
+        ChannelLayout::STEREO,
+    );
     s.render.duration_seconds = Seconds::new(1.0); // 44100 frames in, 48000 expected out
     s.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
 
@@ -612,7 +641,10 @@ fn write_buffers_resamples_from_the_frames_own_rate() {
     let d = tempfile::tempdir().unwrap();
 
     // Render at 96k...
-    let mut render_cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut render_cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     render_cfg.render.sample_rate = tutti_units::SampleRate::SR_96K;
     render_cfg.render.duration_seconds = Seconds::new(1.0);
     let audio =
@@ -621,7 +653,10 @@ fn write_buffers_resamples_from_the_frames_own_rate() {
 
     // ...then write with a config whose `render` half is left at its DEFAULT
     // 44100 — the case the doc tells a caller is fine to ignore.
-    let mut write_cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut write_cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     write_cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
     assert_eq!(
         write_cfg.render.sample_rate.get(),
@@ -664,7 +699,10 @@ fn normalized_export_lifts_the_level_toward_the_target() {
 
     let d = tempfile::tempdir().unwrap();
     // Longer than R128's 400 ms gating block, or nothing passes the gate.
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     cfg.render.duration_seconds = Seconds::new(2.0);
 
     let plain = d.path().join("plain.wav");
@@ -706,7 +744,10 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
     use tutti_units::Db;
 
     let d = tempfile::tempdir().unwrap();
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     cfg.render.duration_seconds = Seconds::new(2.0);
 
     let path = d.path().join("peak.wav");
@@ -792,7 +833,10 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
 
     let d = tempfile::tempdir().unwrap();
     // 0.2 s — half the 400 ms gating block.
-    let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     assert!(
         cfg.render.duration_seconds < Seconds::new(0.4),
         "this test is only meaningful under the gating block"
@@ -862,7 +906,10 @@ fn surround_normalizes_rather_than_falling_back_to_peak() {
     let id = g.add(Const::frame(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]));
     g.pipe_output(id);
 
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(6u16));
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::from(6u16),
+    );
     cfg.render.duration_seconds = Seconds::new(2.0);
 
     let path = d.path().join("surround.wav");
@@ -922,8 +969,10 @@ fn normalizing_silence_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("silence.wav");
 
-    let mut cfg = config(Format::Wav(Pcm::Int16), ChannelLayout::STEREO);
-    cfg.dither = Some(tutti_dsp::DitherShape::Triangular);
+    let cfg = config(
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+        ChannelLayout::STEREO,
+    );
 
     for (normalize, want) in [
         (Normalize::peak(Db::new(-1.0)), Unmeasured::Silent),
@@ -990,7 +1039,10 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("resampled.wav");
 
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
 
     render_normalized_to_file(
@@ -1037,7 +1089,10 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     let path = dir.path().join("unmeasurable.wav");
 
     // R128 accepts 16 Hz - 2.8 MHz; 4 MHz is outside it.
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::STEREO,
+    );
     cfg.render.sample_rate = tutti_units::SampleRate::of(4_000_000.0);
     cfg.render.duration_seconds = Seconds::new(0.0005);
 
@@ -1087,7 +1142,7 @@ fn an_unnamed_main_output_width_exports_at_that_width() {
         let p = d.path().join(format!("w{width}.wav"));
         render_to_file(
             built(g, RATE),
-            &config(Format::Wav(Pcm::Float32), layout),
+            &config(Format::Wav(Pcm::Float(FloatWidth::F32)), layout),
             &FrozenClock,
             &p,
         )
@@ -1139,7 +1194,7 @@ fn an_odd_width_round_trips_through_buffers() {
             g.connect_output(id, 0, c);
         }
 
-        let cfg = config(Format::Wav(Pcm::Float32), layout);
+        let cfg = config(Format::Wav(Pcm::Float(FloatWidth::F32)), layout);
         let rendered = render_to_buffers(built(g, RATE), &cfg, &FrozenClock)
             .unwrap_or_else(|e| panic!("width {width}: render_to_buffers failed: {e}"));
         assert_eq!(rendered.channels(), width as usize);
@@ -1165,7 +1220,10 @@ fn an_odd_width_survives_a_resample() {
         g.connect_output(id, 0, c);
     }
 
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(width));
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::from(width),
+    );
     cfg.resample = Some(Resample::to(SampleRate::SR_48K));
 
     let p = d.path().join("resampled5.wav");
@@ -1201,7 +1259,10 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
     let p = d.path().join("zero.wav");
     let err = render_to_file(
         dc(RATE),
-        &config(Format::Wav(Pcm::Float32), ChannelLayout::EMPTY),
+        &config(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::EMPTY,
+        ),
         &FrozenClock,
         &p,
     )
@@ -1228,7 +1289,10 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
     for width in [1u16, 2, 3, 4] {
         let err = render_to_buffers(
             five(),
-            &config(Format::Wav(Pcm::Float32), ChannelLayout::from(width)),
+            &config(
+                Format::Wav(Pcm::Float(FloatWidth::F32)),
+                ChannelLayout::from(width),
+            ),
             &FrozenClock,
         );
         assert!(
@@ -1245,7 +1309,10 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
     for width in [5u16, 6, 8] {
         let ok = render_to_buffers(
             five(),
-            &config(Format::Wav(Pcm::Float32), ChannelLayout::from(width)),
+            &config(
+                Format::Wav(Pcm::Float(FloatWidth::F32)),
+                ChannelLayout::from(width),
+            ),
             &FrozenClock,
         );
         assert!(ok.is_ok(), "five into {width}");
@@ -1266,7 +1333,10 @@ fn four_buses(main_output: Option<ChannelTopology>) -> RenderGraph {
 
 /// The first frame of every plane of a render.
 fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::RenderError> {
-    let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(width));
+    let cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::from(width),
+    );
     let out = render_to_buffers(graph, &cfg, &FrozenClock)?;
     Ok(out.planes().iter().map(|p| p[0]).collect())
 }
@@ -1347,8 +1417,10 @@ fn silence_planes_carry_no_dither() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(Const::frame(&[0.0, 0.0]));
     g.pipe_output(id);
-    let mut cfg = config(Format::Wav(Pcm::Int16), ChannelLayout::STEREO);
-    cfg.dither = Some(tutti_dsp::DitherShape::Triangular);
+    let cfg = config(
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+        ChannelLayout::STEREO,
+    );
     let out = render_to_buffers(built(g, RATE), &cfg, &FrozenClock).unwrap();
     assert!(out.frames().get() > 0);
     assert!(out.planes().iter().flatten().all(|s| s.to_bits() == 0));
@@ -1460,7 +1532,10 @@ impl Node for Burst {
 
 /// The frames of `graph`'s 0.2 s render (8,820 at 44.1 kHz) with `tail`.
 fn tailed_frames(graph: RenderGraph, tail: TailPolicy) -> usize {
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::MONO,
+    );
     cfg.render.tail = tail;
     render_to_buffers(graph, &cfg, &FrozenClock)
         .unwrap()
@@ -1613,7 +1688,10 @@ fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
     let graph = built(g, RATE);
     assert_eq!(graph.reported_latency(), Samples::new(DELAY));
 
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::MONO,
+    );
     cfg.render.latency = graph.reported_latency();
     cfg.render.tail = reported(9_000);
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
@@ -1754,7 +1832,10 @@ fn a_node_that_never_rests_spends_the_ceiling_and_no_more() {
 #[test]
 fn the_passes_of_a_normalized_export_agree_on_the_reported_length() {
     let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(frames_tail(100)))]);
-    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    let mut cfg = config(
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+        ChannelLayout::MONO,
+    );
     cfg.render.tail = reported(4_000);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("n.wav");

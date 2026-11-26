@@ -1,5 +1,7 @@
 use super::*;
 use crate::{Job, Resample, TailPolicy};
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 
 /// What these tests vary: a 1 kHz, eight-frame render into a WAV of `pcm`.
@@ -56,13 +58,13 @@ fn config(channels: u16, pcm: Pcm) -> Case {
 #[test]
 fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     let dir = tempfile::tempdir().unwrap();
-    let config = config(1, Pcm::Int16);
+    let config = config(1, Pcm::Int(IntPcm::new(IntDepth::Int16)));
     let frames = Samples::new(1 << 32);
     let plan = RenderPlan::of_frames(frames);
     let rate = config.rate;
     let path = dir.path().join("keep.wav");
     std::fs::write(&path, b"sentinel").unwrap();
-    let err = open_file::<f32>(&config.target(&path), &plan, rate)
+    let err = open_file::<f32>(&config.target(&path), &plan, rate, 0)
         .map(drop)
         .expect_err("2^32 mono 16-bit frames do not fit a WAV file");
     assert!(
@@ -86,15 +88,15 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
 fn the_limit_is_judged_at_the_output_rate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.wav");
-    let mut config = config(1, Pcm::Int16);
+    let mut config = config(1, Pcm::Int(IntPcm::new(IntDepth::Int16)));
     let frames = Samples::new((1 << 31) - 1_000);
     let plan = RenderPlan::of_frames(frames);
     let rate = config.rate;
-    open_file::<f32>(&config.target(&path), &plan, rate)
+    open_file::<f32>(&config.target(&path), &plan, rate, 0)
         .map(drop)
         .expect("2^31 - 1000 mono 16-bit frames fit");
     config.resample = Some(Resample::to(SampleRate::of(2_000.0)));
-    let err = open_file::<f32>(&config.target(&path), &plan, rate)
+    let err = open_file::<f32>(&config.target(&path), &plan, rate, 0)
         .map(drop)
         .expect_err("twice the frames do not");
     assert!(
@@ -126,11 +128,11 @@ fn the_topology_reaches_the_file() {
         ),
         (6, None, 0x60F),
     ] {
-        let mut cfg = config(channels, Pcm::Int24);
+        let mut cfg = config(channels, Pcm::Int(IntPcm::new(IntDepth::Int24)));
         cfg.topology = topology;
         let path = dir.path().join(format!("m{channels}_{mask}.wav"));
         let layout = ChannelLayout::from(channels);
-        let mut chain = open_file::<f32>(&cfg.target(&path), &cfg.plan(), cfg.rate).unwrap();
+        let mut chain = open_file::<f32>(&cfg.target(&path), &cfg.plan(), cfg.rate, 0).unwrap();
         chain
             .block(Interleaved::new(&vec![0.5f32; 8 * usize::from(channels)], layout).unwrap())
             .unwrap();

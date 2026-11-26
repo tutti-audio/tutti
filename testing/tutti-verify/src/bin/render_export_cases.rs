@@ -19,6 +19,9 @@
 //! Run: `cargo run --release -p tutti-verify --bin render_export_cases -- <outdir>`
 
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
@@ -101,8 +104,8 @@ fn container(ext: &str, depth: Pcm) -> Option<Format> {
     match ext {
         "wav" => Some(Format::Wav(depth)),
         "aiff" => Some(Format::Aiff(depth)),
-        "flac" => depth.int_depth().map(|depth| Format::Flac {
-            depth,
+        "flac" => depth.int_pcm().map(|pcm| Format::Flac {
+            pcm,
             level: FlacLevel::default(),
         }),
         _ => None,
@@ -116,7 +119,6 @@ struct Case {
     format: Format,
     channels: ChannelLayout,
     resample: Option<Resample>,
-    dither: Option<tutti_dsp::DitherShape>,
 }
 
 impl Case {
@@ -133,10 +135,6 @@ impl Case {
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,
-        };
-        let target = match self.dither {
-            Some(shape) => target.dither(shape),
-            None => target.no_dither(),
         };
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
@@ -158,7 +156,6 @@ fn base(format: Format, channels: ChannelLayout) -> Case {
         format,
         channels,
         resample: None,
-        dither: None,
     }
 }
 
@@ -196,7 +193,10 @@ fn main() -> tutti_export::Result<()> {
     write(
         "dry.wav".into(),
         tone_graph(),
-        &base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO),
+        &base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        ),
     )?;
 
     // ---- format x depth --------------------------------------------------
@@ -210,9 +210,9 @@ fn main() -> tutti_export::Result<()> {
     // there is no such file to ask for.
     for ext in ["wav", "flac", "aiff"] {
         for (depth, tag) in [
-            (Pcm::Int16, "i16"),
-            (Pcm::Int24, "i24"),
-            (Pcm::Float32, "f32"),
+            (Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()), "i16"),
+            (Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()), "i24"),
+            (Pcm::Float(FloatWidth::F32), "f32"),
         ] {
             let Some(fmt) = container(ext, depth) else {
                 continue;
@@ -233,7 +233,8 @@ fn main() -> tutti_export::Result<()> {
     // truncation disagree (0.7 x 32767 = 22936.9).
     for (level, tag) in [(0.7f32, "p70"), (-0.7, "n70")] {
         for ext in ["wav", "flac", "aiff"] {
-            let fmt = container(ext, Pcm::Int16).expect("every container holds 16 bits");
+            let fmt = container(ext, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()))
+                .expect("every container holds 16 bits");
             write(
                 format!("dc_{tag}_{ext}_i16.{ext}"),
                 dc_graph(level),
@@ -252,8 +253,12 @@ fn main() -> tutti_export::Result<()> {
         (Some(DitherShape::Rectangular), "rect"),
         (Some(DitherShape::Triangular), "tri"),
     ] {
-        let mut cfg = base(Format::Wav(Pcm::Int16), ChannelLayout::STEREO);
-        cfg.dither = mode;
+        let pcm = IntPcm::new(IntDepth::Int16);
+        let pcm = match mode {
+            Some(shape) => pcm.dither(shape),
+            None => pcm.no_dither(),
+        };
+        let cfg = base(Format::Wav(Pcm::Int(pcm)), ChannelLayout::STEREO);
         write(format!("dither_{tag}.wav"), dc_graph(0.25), &cfg)?;
     }
 
@@ -268,7 +273,10 @@ fn main() -> tutti_export::Result<()> {
         (96_000.0, "96k"),
         (22_050.0, "22k05"),
     ] {
-        let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+        let mut cfg = base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        );
         cfg.resample = Some(Resample::to(tutti_units::SampleRate::of(target)));
         write(format!("resample_{tag}.wav"), tone_graph(), &cfg)?;
     }
@@ -276,7 +284,10 @@ fn main() -> tutti_export::Result<()> {
     // The anti-alias case. 18 kHz downsampled to 22.05 k is above the new
     // Nyquist and must be attenuated, not folded down to ~4 kHz.
     {
-        let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+        let mut cfg = base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        );
         cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_22K05));
         write(
             "resample_alias_22k05.wav".into(),
@@ -288,7 +299,10 @@ fn main() -> tutti_export::Result<()> {
     // Every chunk-size preset at one ratio, so a preset that degrades the
     // conversion is visible rather than assumed equivalent.
     for (i, chunk) in tutti_export::ChunkSize::PRESETS.iter().enumerate() {
-        let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
+        let mut cfg = base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::STEREO,
+        );
         cfg.resample = Some(Resample {
             target_rate: tutti_units::SampleRate::SR_44K1,
             chunk: *chunk,
@@ -304,17 +318,26 @@ fn main() -> tutti_export::Result<()> {
     write(
         "chan_mono.wav".into(),
         mono_graph(),
-        &base(Format::Wav(Pcm::Float32), ChannelLayout::MONO),
+        &base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::MONO,
+        ),
     )?;
     write(
         "chan_mono_to_quad.wav".into(),
         mono_graph(),
-        &base(Format::Wav(Pcm::Float32), ChannelLayout::QUAD),
+        &base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::QUAD,
+        ),
     )?;
     write(
         "chan_stereo_to_51.wav".into(),
         tone_graph(),
-        &base(Format::Wav(Pcm::Float32), ChannelLayout::from(6u16)),
+        &base(
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            ChannelLayout::from(6u16),
+        ),
     )?;
 
     println!("\n{count} cases written to {}", dir.display());

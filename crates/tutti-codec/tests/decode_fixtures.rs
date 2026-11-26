@@ -13,8 +13,11 @@
 
 use std::path::PathBuf;
 
+use tutti_buffers::FloatWidth;
 use tutti_buffers::Wave;
 use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FileIn, read_wave, read_wave_metadata};
 use tutti_platform::Asset;
 use tutti_units::Samples;
@@ -627,7 +630,11 @@ fn an_aiff_written_reads_back_exactly_at_each_depth() {
     }
 
     let int16 = [i16::MIN, -12_345, -1, 0, 1, 12_345, i16::MAX];
-    round_trip(&int16, Pcm::Int16, SampleFormat::I16);
+    round_trip(
+        &int16,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        SampleFormat::I16,
+    );
     let int24 = [
         I24::MIN,
         I24::of(-1_234_567),
@@ -637,7 +644,11 @@ fn an_aiff_written_reads_back_exactly_at_each_depth() {
         I24::of(1_234_567),
         I24::MAX,
     ];
-    round_trip(&int24, Pcm::Int24, SampleFormat::I24);
+    round_trip(
+        &int24,
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+        SampleFormat::I24,
+    );
     let float = [-1.0f32, -0.5, -1.0e-7, 0.0, 1.0e-7, 0.123_456_79, 1.0];
-    round_trip(&float, Pcm::Float32, SampleFormat::F32);
+    round_trip(&float, Pcm::Float(FloatWidth::F32), SampleFormat::F32);
 }

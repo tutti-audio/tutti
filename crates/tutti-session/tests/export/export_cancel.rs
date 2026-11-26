@@ -10,6 +10,8 @@ use tutti_fixtures::block_on;
 use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
@@ -74,7 +76,7 @@ fn rig(at: usize) -> Rig {
 }
 
 /// The format every file of these bounces is written as.
-const FORMAT: Format = Format::Wav(Pcm::Int16);
+const FORMAT: Format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)));
 
 /// A bounce of `BLOCKS` graph blocks: stereo, nothing trimmed and no tail
 /// (the node reports an unbounded one), on a frozen clock.

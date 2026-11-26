@@ -17,6 +17,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_file_under, render_normalized_to_file, render_to_buffers, render_to_file};
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     CancelToken, Control, GRAPH_MAX_BLOCK, Normalize, Progress, RenderError, RenderGraph,
@@ -106,7 +107,7 @@ fn config() -> ExportConfig {
             ..Default::default()
         },
         encode: EncodeConfig {
-            format: Format::Wav(Pcm::Float32),
+            format: Format::Wav(Pcm::Float(FloatWidth::F32)),
             channels: ChannelLayout::STEREO,
             topology: None,
         },

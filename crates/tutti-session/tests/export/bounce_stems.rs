@@ -14,6 +14,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{Normalize, Produced, RenderError, Resample, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
@@ -81,7 +84,7 @@ fn read_wav(path: &Path) -> (Vec<Vec<f32>>, usize) {
 }
 
 fn float_wav() -> Format {
-    Format::Wav(Pcm::Float32)
+    Format::Wav(Pcm::Float(FloatWidth::F32))
 }
 
 /// A source that is silent for `LATE` frames and then 1.0, and declares `LATE`
@@ -337,7 +340,10 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     let done = bounced(
         &mut session,
         base(0.25)
-            .main_output(&main_output, Format::Wav(Pcm::Int16))
+            .main_output(
+                &main_output,
+                Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+            )
             .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
             .stem_with(Stem::new(node.erase()).file(&stem, float_wav())),
     )

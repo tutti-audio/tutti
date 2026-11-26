@@ -6,12 +6,12 @@
 //! ## What is here
 //!
 //! - `Format` names the container and carries only the settings it accepts:
-//!   `Wav(Pcm)`, `Aiff(Pcm)` and `Flac { depth: IntDepth, level: FlacLevel }`. FLAC at float is not
+//!   `Wav(Pcm)`, `Aiff(Pcm)` and `Flac { pcm: IntPcm, level: FlacLevel }`. FLAC at float is not
 //!   expressible. Each variant exists only with its feature (`encode-wav`, `encode-aiff`,
 //!   `encode-flac`), none on by default.
 //! - `Spec` is what a file is written as: the format, the speakers (the topology,
-//!   which is also the width) and the rate. `Spec::of_width` takes a width and
-//!   states the engine's order for it.
+//!   which is also the width) and the rate. `Spec::of_channels` takes a
+//!   `ChannelSet`, and `ChannelSet::default_for` states the engine's order for a bare width.
 //! - `Encoder` is `create(spec, sink)`, a fallible `write(block)` and `finish()`.
 //!   `FileEncoder::create` writes beside the path and moves the file into place
 //!   on `finish` (which returns `()`: the file is synced and closed first, so
@@ -39,14 +39,16 @@
 //!   signature or an error. `can_decode` and `decodable_extensions` say what this
 //!   build reads. Each `decode-*` feature (`decode-wav`, `decode-flac`,
 //!   `decode-aiff`, `decode-mp3`, `decode-ogg`) pulls exactly one container.
-//! - `Pcm` and `IntDepth` are the sample widths a file holds. An encoder takes a block
-//!   in any `tutti_buffers::Sample` format and converts it by that trait's rule, the
-//!   one conversion every container shares.
+//! - `Pcm` is the sample type a file holds: `Int(IntPcm)`, a depth (`IntDepth`) with the dither
+//!   and noise shaping that bring a block down to it, or `Float(tutti_buffers::FloatWidth)`, which has none. An
+//!   encoder takes a block in any `tutti_buffers::Sample` format and converts it by that
+//!   trait's rule, the one conversion every container shares, dithering an integer file where
+//!   resolution drops (`tutti_dsp::Quantizer`).
 //!
 //! ## What this crate does not own
 //!
 //! The pipeline in front of the encoder: pulling blocks from a render or a live
-//! source, resampling and dithering. An encoder takes blocks already at the rate
+//! source, and resampling. An encoder takes blocks already at the rate
 //! and width the `Spec` states, and nothing here stops a caller from handing it
 //! others. `tutti-export` is the offline pipeline and
 //! `FileOut` the live one; both write through this crate, so a bounced
@@ -99,7 +101,7 @@ pub use encoder::{Encoder, FileEncoder, FinalizedFile, Kept, Unfinished};
 pub use error::{Codec, EncodeError, Result, SpecError};
 pub use file_out::FileOut;
 pub use format::{FlacLevel, Format};
-pub use pcm::{IntDepth, Pcm};
+pub use pcm::{IntDepth, IntPcm, Pcm};
 pub use spec::Spec;
 #[cfg(encode)]
 pub use wave_write::write_wave;

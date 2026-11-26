@@ -1,16 +1,23 @@
 //! The cases every [`FormatWriter`] must pass. A new format is one more
 //! `contract!` line and inherits all of them.
 
+use crate::IntDepth;
+use crate::IntPcm;
 use crate::test_sink::{Flaky, Full};
 use crate::writer::FormatWriter;
 use crate::{Format, Result, Spec};
 use std::io::{BufWriter, Cursor, Seek, Write};
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::Interleaved;
 use tutti_units::SampleRate;
 
 fn spec(format: Format) -> Spec {
-    Spec::of_width(format, ChannelLayout::STEREO, SampleRate::SR_44K1)
+    Spec::of_channels(
+        format,
+        ChannelSet::default_for(ChannelLayout::STEREO),
+        SampleRate::SR_44K1,
+    )
 }
 
 /// `frames` stereo frames of a sawtooth under a hash: exact in binary and not
@@ -172,24 +179,32 @@ macro_rules! contract {
 #[cfg(feature = "encode-wav")]
 contract!(
     wav,
-    Format::Wav(crate::Pcm::Int24),
+    Format::Wav(crate::Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
     true,
-    |spec: &Spec, sink| crate::wav::WavWriter::create(spec, crate::Pcm::Int24, sink)
+    |spec: &Spec, sink| crate::wav::WavWriter::create(
+        spec,
+        crate::Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+        sink
+    )
 );
 
 #[cfg(feature = "encode-aiff")]
 contract!(
     aiff,
-    Format::Aiff(crate::Pcm::Int16),
+    Format::Aiff(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
     true,
-    |spec: &Spec, sink| crate::aiff::AiffWriter::create(spec, crate::Pcm::Int16, sink)
+    |spec: &Spec, sink| crate::aiff::AiffWriter::create(
+        spec,
+        crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        sink
+    )
 );
 
 #[cfg(feature = "encode-flac")]
 contract!(
     flac,
     Format::Flac {
-        depth: crate::IntDepth::Int16,
+        pcm: crate::IntPcm::new(crate::IntDepth::Int16).no_dither(),
         level: crate::FlacLevel::Standard
     },
     false,

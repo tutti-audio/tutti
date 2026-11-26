@@ -10,12 +10,12 @@
 //! [`Sample`] every format shares.
 
 use crate::error::{Codec, EncodeError, Result, SpecError};
-use crate::pcm::Pcm;
+use crate::pcm::{IntDepth, Pcm};
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use aifc::{AifcWriteInfo, AifcWriter, FileFormat, SampleFormat};
 use std::io::{Read, Seek, SeekFrom, Write};
-use tutti_buffers::{I24, Interleaved, Sample};
+use tutti_buffers::{FloatWidth, I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
 pub(crate) struct AiffWriter<W: Write + Seek> {
@@ -47,8 +47,8 @@ impl<W: Write + Seek> AiffWriter<W> {
             // so the container follows the width rather than the other way
             // round.
             file_format: match pcm {
-                Pcm::Float32 | Pcm::Float64 => FileFormat::Aifc,
-                _ => FileFormat::Aiff,
+                Pcm::Float(_) => FileFormat::Aifc,
+                Pcm::Int(_) => FileFormat::Aiff,
             },
             channels: i16::try_from(channels).map_err(|_| SpecError::TooManyChannels {
                 channels,
@@ -57,10 +57,12 @@ impl<W: Write + Seek> AiffWriter<W> {
             // The extended float the header states, written exactly.
             sample_rate,
             sample_format: match pcm {
-                Pcm::Int16 => SampleFormat::I16,
-                Pcm::Int24 => SampleFormat::I24,
-                Pcm::Float32 => SampleFormat::F32,
-                Pcm::Float64 => SampleFormat::F64,
+                Pcm::Int(pcm) => match pcm.depth() {
+                    IntDepth::Int16 => SampleFormat::I16,
+                    IntDepth::Int24 => SampleFormat::I24,
+                },
+                Pcm::Float(FloatWidth::F32) => SampleFormat::F32,
+                Pcm::Float(FloatWidth::F64) => SampleFormat::F64,
             },
         };
         let writer = AifcWriter::new(sink, &info)
@@ -84,25 +86,27 @@ impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
         // already has.
         let buf = block.samples();
         match self.pcm {
-            Pcm::Int16 => {
-                self.shorts.clear();
-                self.shorts
-                    .extend(buf.iter().map(|&s| s.convert_to::<i16>()));
-                self.writer.write_samples_i16(&self.shorts)
-            }
-            Pcm::Int24 => {
-                self.ints.clear();
-                self.ints
-                    .extend(buf.iter().map(|&s| s.convert_to::<I24>().get()));
-                self.writer.write_samples_i24(&self.ints)
-            }
-            Pcm::Float32 => {
+            Pcm::Int(pcm) => match pcm.depth() {
+                IntDepth::Int16 => {
+                    self.shorts.clear();
+                    self.shorts
+                        .extend(buf.iter().map(|&s| s.convert_to::<i16>()));
+                    self.writer.write_samples_i16(&self.shorts)
+                }
+                IntDepth::Int24 => {
+                    self.ints.clear();
+                    self.ints
+                        .extend(buf.iter().map(|&s| s.convert_to::<I24>().get()));
+                    self.writer.write_samples_i24(&self.ints)
+                }
+            },
+            Pcm::Float(FloatWidth::F32) => {
                 self.floats.clear();
                 self.floats
                     .extend(buf.iter().map(|&s| s.convert_to::<f32>()));
                 self.writer.write_samples_f32(&self.floats)
             }
-            Pcm::Float64 => {
+            Pcm::Float(FloatWidth::F64) => {
                 self.doubles.clear();
                 self.doubles
                     .extend(buf.iter().map(|&s| s.convert_to::<f64>()));

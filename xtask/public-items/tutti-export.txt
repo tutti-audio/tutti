@@ -59,10 +59,7 @@ fn output::BufferTarget::channels
 fn output::BufferTarget::new
 fn output::BufferTarget::topology
 fn output::FileTarget::create_new
-fn output::FileTarget::dither
 fn output::FileTarget::new
-fn output::FileTarget::no_dither
-fn output::FileTarget::noise_shaping
 fn output::FileTarget::normalize
 fn output::FileTarget::path
 fn output::FileTarget::resample

@@ -26,8 +26,9 @@ const WRITE_CHUNK: usize = 8192;
 ///   so it needs no `Seek` and never holds a partial file from an encode error.
 ///   The file is held in memory once, whatever the writer.
 ///
-/// Nothing is resampled, dithered or normalized: the samples go as they are, and
-/// an integer width quantizes them with the format's own rounding.
+/// Nothing is resampled or normalized: the samples go as they are. An integer type
+/// quantizes them as its [`IntPcm`](crate::IntPcm) says (dithered by default, rounded to the
+/// nearest step with `no_dither`).
 ///
 /// # Errors
 ///
@@ -42,6 +43,7 @@ const WRITE_CHUNK: usize = 8192;
 /// ```
 /// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
 /// use tutti_buffers::Mono;
+/// use tutti_buffers::FloatWidth;
 /// use tutti_codec::{Format, Pcm, read_wave, write_wave};
 /// use tutti_units::SampleRate;
 /// use tutti_buffers::Wave;
@@ -49,7 +51,7 @@ const WRITE_CHUNK: usize = 8192;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, 0.75]));
 /// let mut bytes = Vec::new();
-/// write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float32))?;
+/// write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F32)))?;
 /// assert_eq!(read_wave::<f32>(bytes)?, wave);
 /// # Ok(())
 /// # }

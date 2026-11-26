@@ -7,6 +7,8 @@ use std::io::Cursor;
     feature = "encode-aiff"
 ))]
 use std::io::{Seek, Write};
+use tutti_buffers::ChannelSet;
+use tutti_buffers::FloatWidth;
 use tutti_units::SampleRate;
 
 /// Every format this build writes, at 16 bits where it has a width, with the
@@ -16,14 +18,20 @@ fn formats() -> Vec<(&'static str, Format)> {
     #[allow(unused_mut)]
     let mut all: Vec<(&'static str, Format)> = Vec::new();
     #[cfg(feature = "encode-wav")]
-    all.push(("wav", Format::Wav(crate::Pcm::Int16)));
+    all.push((
+        "wav",
+        Format::Wav(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    ));
     #[cfg(feature = "encode-aiff")]
-    all.push(("aiff", Format::Aiff(crate::Pcm::Int16)));
+    all.push((
+        "aiff",
+        Format::Aiff(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    ));
     #[cfg(feature = "encode-flac")]
     all.push((
         "flac",
         Format::Flac {
-            depth: crate::IntDepth::Int16,
+            pcm: crate::IntPcm::new(crate::IntDepth::Int16).no_dither(),
             level: crate::FlacLevel::default(),
         },
     ));
@@ -31,11 +39,19 @@ fn formats() -> Vec<(&'static str, Format)> {
 }
 
 fn spec(format: Format, channels: u16) -> Spec {
-    Spec::of_width(format, ChannelLayout::from(channels), SampleRate::SR_44K1)
+    Spec::of_channels(
+        format,
+        ChannelSet::default_for(ChannelLayout::from(channels)),
+        SampleRate::SR_44K1,
+    )
 }
 
 fn at_rate(format: Format, rate: f64) -> Spec {
-    Spec::of_width(format, ChannelLayout::STEREO, SampleRate::of(rate))
+    Spec::of_channels(
+        format,
+        ChannelSet::default_for(ChannelLayout::STEREO),
+        SampleRate::of(rate),
+    )
 }
 
 /// `frames` frames of a sawtooth under a hash, exact in binary and not
@@ -206,7 +222,10 @@ fn a_fractional_rate_is_refused_where_the_header_is_whole_hz_and_exact_in_aiff()
 fn a_width_past_the_containers_header_is_refused() {
     #[cfg(feature = "encode-aiff")]
     {
-        let s = spec(Format::Aiff(crate::Pcm::Int16), 40_000);
+        let s = spec(
+            Format::Aiff(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+            40_000,
+        );
         let err = Encoder::create(&s, Cursor::new(Vec::new())).expect_err("past i16");
         assert!(
             matches!(
@@ -296,7 +315,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
     std::fs::write(&path, b"previous").unwrap();
-    let format = Format::Wav(crate::Pcm::Int16);
+    let format = Format::Wav(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
     let spec = spec(format, 2);
     let limit = format.max_frames(spec.layout()).unwrap();
 
@@ -319,7 +338,10 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
 #[cfg(feature = "encode-wav")]
 #[test]
 fn a_plain_sink_keeps_its_prefix_after_a_failed_write() {
-    let spec = spec(Format::Wav(crate::Pcm::Int16), 2);
+    let spec = spec(
+        Format::Wav(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+        2,
+    );
     let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new()))
         .unwrap()
         .limit_frames(6);
@@ -495,7 +517,7 @@ fn kept_unfinished_of(
 #[cfg(all(feature = "encode-wav", feature = "decode-wav"))]
 #[test]
 fn a_wav_kept_unfinished_holds_exactly_the_frames_written() {
-    let format = Format::Wav(crate::Pcm::Float32);
+    let format = Format::Wav(crate::Pcm::Float(FloatWidth::F32));
     let (dir, kept, samples, path) = kept_unfinished(format, 5_000);
     assert!(kept.header_describes_frames);
     assert!(!path.exists(), "the path is untouched");
@@ -530,7 +552,7 @@ fn a_wav_kept_unfinished_holds_exactly_the_frames_written() {
 #[cfg(feature = "encode-aiff")]
 #[test]
 fn an_aiff_kept_unfinished_holds_exactly_the_frames_written() {
-    let format = Format::Aiff(crate::Pcm::Float32);
+    let format = Format::Aiff(crate::Pcm::Float(FloatWidth::F32));
     let (_dir, kept, samples, path) = kept_unfinished(format, 5_000);
     assert!(kept.header_describes_frames);
     assert!(!path.exists(), "the path is untouched");
@@ -571,7 +593,7 @@ fn an_aiff_kept_unfinished_holds_exactly_the_frames_written() {
 fn a_failed_encoder_finishes_keeping_the_frames_written_before_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take");
-    let spec = spec(Format::Wav(crate::Pcm::Float32), 2);
+    let spec = spec(Format::Wav(crate::Pcm::Float(FloatWidth::F32)), 2);
     let mut encoder = FileEncoder::create(&spec, &path).unwrap();
     encoder
         .write(Interleaved::new(&saw(2, 3_000), spec.layout()).unwrap())
@@ -621,7 +643,7 @@ fn finish_keeping_a_whole_file_commits_it_and_leaves_no_temporary() {
 #[cfg(feature = "encode-aiff")]
 #[test]
 fn an_integer_aiff_kept_unfinished_holds_exactly_the_frames_written() {
-    let format = Format::Aiff(crate::Pcm::Int16);
+    let format = Format::Aiff(crate::Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
     let codes: Vec<i16> = (0..10_000)
         .map(|i| (i * 7 % 2_000 - 1_000) as i16)
         .collect();
@@ -658,4 +680,192 @@ fn an_integer_aiff_kept_unfinished_holds_exactly_the_frames_written() {
     patch_header(&spec, &mut file).unwrap();
     drop(file);
     assert_eq!(read(&kept.path), (aifc::FileFormat::Aiff, 5_000, codes));
+}
+
+/// The encoder's dither and rounding, through a mono 16-bit or 24-bit WAV.
+#[cfg(feature = "encode-wav")]
+mod quantize {
+    use super::*;
+    use tutti_buffers::I24;
+    use tutti_units::{Amplitude, Hz};
+
+    const LSB16: f64 = 1.0 / 32768.0;
+    const N: usize = 1 << 18;
+
+    fn mono(depth: IntDepth, int: impl FnOnce(IntPcm) -> IntPcm) -> Spec {
+        Spec::of_channels(
+            Format::Wav(crate::Pcm::Int(int(IntPcm::new(depth)))),
+            ChannelSet::default_for(ChannelLayout::MONO),
+            SampleRate::SR_48K,
+        )
+    }
+
+    /// The file `spec` holds for `blocks`, seeded with `seed`, as its 16-bit samples.
+    fn written16<S: Sample>(spec: &Spec, seed: u64, blocks: &[&[S]]) -> (Vec<i16>, u64) {
+        let mut encoder = Encoder::create(spec, Cursor::new(Vec::new()))
+            .unwrap()
+            .dither_seed(seed);
+        for block in blocks {
+            encoder
+                .write(Interleaved::new(block, ChannelLayout::MONO).unwrap())
+                .unwrap();
+        }
+        let clipped = encoder.clipped();
+        let bytes = encoder.finish().unwrap().into_inner();
+        let samples = bytes[44..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        (samples, clipped)
+    }
+
+    /// The 24-bit samples of the file `spec` holds for `block`.
+    fn written24(spec: &Spec, block: &[f32]) -> Vec<i32> {
+        let mut encoder = Encoder::create(spec, Cursor::new(Vec::new())).unwrap();
+        encoder
+            .write(Interleaved::new(block, ChannelLayout::MONO).unwrap())
+            .unwrap();
+        let bytes = encoder.finish().unwrap().into_inner();
+        bytes[68..]
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], 0]) << 8 >> 8)
+            .collect()
+    }
+
+    fn quiet_sine() -> Vec<f32> {
+        tutti_fixtures::signal::sine(
+            Hz::new(997.0),
+            Amplitude::new(1e-5), // -100 dBFS, a third of an LSB
+            SampleRate::SR_48K,
+            Samples::new(N),
+        )
+    }
+
+    /// A TPDF dither of one LSB adds `lsb² / 6` to the rounding's `lsb² / 12`, and the error is
+    /// white and independent of a signal this small, so its variance is `lsb² / 4` (Lipshitz,
+    /// Wannamaker and Vanderkooy, JAES 1992). The sample variance of `N` values of a bounded
+    /// error has standard deviation under `σ² sqrt(2 / N)`; the bound is `1.5 sqrt(2 ln N)` of
+    /// that.
+    #[test]
+    fn a_minus_100_dbfs_sine_at_16_bits_has_the_tpdf_error_variance() {
+        let input = quiet_sine();
+        let (got, clipped) = written16(&mono(IntDepth::Int16, |p| p), 7, &[&input]);
+        assert_eq!(clipped, 0);
+        let error: Vec<f64> = got
+            .iter()
+            .zip(&input)
+            .map(|(&y, &x)| (f64::from(y) * LSB16 - f64::from(x)) / LSB16)
+            .collect();
+        let n = N as f64;
+        let sigma2 = 1.0 / 6.0 + 1.0 / 12.0;
+        let factor = 1.5 * (2.0 * n.ln()).sqrt();
+        let mean = error.iter().sum::<f64>() / n;
+        let var = error.iter().map(|e| (e - mean) * (e - mean)).sum::<f64>() / n;
+        assert!(mean.abs() < factor * (sigma2 / n).sqrt(), "mean {mean}");
+        assert!(
+            (var - sigma2).abs() < factor * sigma2 * (2.0 / n).sqrt(),
+            "variance {var} vs {sigma2}"
+        );
+    }
+
+    /// Without dither the error is the deterministic rounding: each value is the file type's
+    /// own conversion of the input, which a third of an LSB rounds to silence.
+    #[test]
+    fn without_dither_the_error_is_the_rounding_of_convert() {
+        let input = quiet_sine();
+        let (got, _) = written16(&mono(IntDepth::Int16, IntPcm::no_dither), 7, &[&input]);
+        let want: Vec<i16> = input.iter().map(|&x| x.convert_to::<i16>()).collect();
+        assert_eq!(got, want);
+        assert!(got.iter().all(|&y| y == 0));
+    }
+
+    /// 24-bit values held as `f32` sit on the 24-bit grid: written undithered they are
+    /// bit-exact, and dithering them is what loses that.
+    #[test]
+    fn on_grid_floats_into_24_bits_are_bit_exact_without_dither() {
+        let ints: Vec<i32> = (0..4096)
+            .map(|i| (i * 2039) % 16_000_000 - 8_000_000)
+            .collect();
+        let floats: Vec<f32> = ints
+            .iter()
+            .map(|&v| I24::of(v).convert_to::<f32>())
+            .collect();
+        let exact = written24(&mono(IntDepth::Int24, IntPcm::no_dither), &floats);
+        assert_eq!(exact, ints);
+        let dithered = written24(&mono(IntDepth::Int24, |p| p), &floats);
+        assert_ne!(dithered, ints, "dither of one LSB moves some value");
+    }
+
+    /// An `i32` block into 16 bits drops resolution, so it is dithered: a value off the 16-bit
+    /// grid is no longer its plain rounding, and stays within the dither and rounding of one and
+    /// a half LSB of it. An `i16` block into 16 bits drops none: bit-exact, dither on.
+    #[test]
+    fn a_wider_integer_into_a_narrower_one_is_dithered_and_an_equal_one_is_exact() {
+        let wide: Vec<i32> = (0..4096)
+            .map(|i| (i * 40_009) % 2_000_000_000 - 1_000_000_000)
+            .collect();
+        let (got, _) = written16(&mono(IntDepth::Int16, |p| p), 3, &[&wide]);
+        let plain: Vec<i16> = wide.iter().map(|&x| x.convert_to::<i16>()).collect();
+        assert_ne!(got, plain);
+        for (&g, &p) in got.iter().zip(&plain) {
+            assert!((i32::from(g) - i32::from(p)).abs() <= 2, "{g} vs {p}");
+        }
+        let same: Vec<i16> = (0..4096)
+            .map(|i| ((i * 31) % 65_536 - 32_768) as i16)
+            .collect();
+        let (got, _) = written16(&mono(IntDepth::Int16, |p| p), 3, &[&same]);
+        assert_eq!(got, same);
+    }
+
+    /// One seed gives one file; two seeds give two noise sequences whose correlation is at the
+    /// noise floor: for `n` independent values of variance `σ²` the sample correlation has
+    /// standard deviation `1 / sqrt(n)`, and the bound is five of them.
+    #[test]
+    fn a_seed_picks_the_noise() {
+        let silence = vec![0.0f32; N];
+        let spec = mono(IntDepth::Int16, |p| p);
+        let (a, _) = written16(&spec, 1, &[&silence]);
+        let (again, _) = written16(&spec, 1, &[&silence]);
+        let (b, _) = written16(&spec, 2, &[&silence]);
+        assert_eq!(a, again);
+        let n = N as f64;
+        let dot: f64 = a
+            .iter()
+            .zip(&b)
+            .map(|(&x, &y)| f64::from(x) * f64::from(y))
+            .sum();
+        let power = |s: &[i16]| s.iter().map(|&x| f64::from(x) * f64::from(x)).sum::<f64>();
+        let correlation = dot / (power(&a) * power(&b)).sqrt();
+        assert!(
+            correlation.abs() < 5.0 / n.sqrt(),
+            "correlation {correlation}"
+        );
+    }
+
+    /// The noise continues across writes: blocks cut anywhere give the file of one block.
+    #[test]
+    fn the_noise_does_not_depend_on_how_the_blocks_are_cut() {
+        let input = quiet_sine();
+        let spec = mono(IntDepth::Int16, |p| p);
+        let (whole, _) = written16(&spec, 5, &[&input]);
+        let (cut, _) = written16(
+            &spec,
+            5,
+            &[&input[..700], &input[700..3000], &input[3000..]],
+        );
+        assert_eq!(whole, cut);
+    }
+
+    /// A block at 2.0 into 16 bits clips every sample, and the encoder counts each.
+    #[test]
+    fn a_block_past_full_scale_counts_every_sample_it_clipped() {
+        let loud = vec![2.0f32; 3000];
+        let (got, clipped) = written16(&mono(IntDepth::Int16, |p| p), 1, &[&loud]);
+        assert_eq!(clipped, 3000);
+        assert!(got.iter().all(|&y| y == i16::MAX));
+    }
 }

@@ -496,6 +496,12 @@ impl<F: Float> MicIn<F> {
     /// sink fed by a 48 kHz mic writes a valid WAV that plays six times too
     /// slow. Building the sink here rules that out.
     ///
+    /// The file is dithered as `format`'s [`Pcm`](tutti_codec::Pcm) says: a capture into an
+    /// integer file gets triangular dither by default. A capture whose floats already sit on
+    /// the file's grid (a 24-bit converter into a 24-bit file) gains about one LSB of noise it
+    /// did not need and loses bit-transparency; an `IntPcm` with
+    /// [`no_dither`](tutti_codec::IntPcm::no_dither) keeps it bit-exact.
+    ///
     /// # Errors
     ///
     /// Whatever [`FileOut::new`] reports: the format cannot be written at
@@ -511,7 +517,11 @@ impl<F: Float> MicIn<F> {
         // `PumpLoop::new` refuses, and this helper exists to be the pairing
         // that always passes.
         FileOut::new(
-            &Spec::of_width(format, Source::layout(self), self.sample_rate()),
+            &Spec::of_channels(
+                format,
+                ChannelSet::default_for(Source::layout(self)),
+                self.sample_rate(),
+            ),
             file,
         )
     }

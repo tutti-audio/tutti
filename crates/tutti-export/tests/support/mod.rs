@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::{Format, Pcm};
-use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
     Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, TailPolicy, Written,
@@ -69,25 +68,11 @@ impl Default for EncodeConfig {
 }
 
 /// One render and one file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct ExportConfig {
     pub render: RenderConfig,
     pub encode: EncodeConfig,
     pub resample: Option<Resample>,
-    pub dither: Option<DitherShape>,
-    pub noise_shaping: bool,
-}
-
-impl Default for ExportConfig {
-    fn default() -> Self {
-        Self {
-            render: RenderConfig::default(),
-            encode: EncodeConfig::default(),
-            resample: None,
-            dither: Some(DitherShape::Triangular),
-            noise_shaping: false,
-        }
-    }
 }
 
 impl ExportConfig {
@@ -123,15 +108,6 @@ impl ExportConfig {
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,
-        };
-        let target = match self.dither {
-            Some(shape) => target.dither(shape),
-            None => target.no_dither(),
-        };
-        let target = if self.noise_shaping {
-            target.noise_shaping()
-        } else {
-            target
         };
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),

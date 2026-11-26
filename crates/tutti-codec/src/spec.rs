@@ -12,8 +12,8 @@ use tutti_units::SampleRate;
 /// [`layout`](Self::layout), and its [`topology`](Self::topology) says which
 /// speaker each file channel feeds when the width has one (at most
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels); a wider file has none.
-/// The fields are private (a [`new`](Self::new), [`of_width`](Self::of_width),
-/// [`of_channels`](Self::of_channels) and getters), and the format
+/// The fields are private (a [`new`](Self::new), [`of_channels`](Self::of_channels)
+/// and getters), and the format
 /// carries its own settings, so nothing here is read by a format that cannot use
 /// it, except the topology, which WAV (the speaker mask) reads; the other formats
 /// ignore it.
@@ -25,7 +25,7 @@ use tutti_units::SampleRate;
 /// # use tutti_units::SampleRate;
 /// # use tutti_buffers::ChannelTopology;
 /// let _ = Spec {
-///     format: Format::Wav(Pcm::Int16),
+///     format: Format::Wav(Pcm::default()),
 ///     topology: tutti_buffers::Bed::Quad.topology(),
 ///     rate: SampleRate::SR_48K,
 /// };
@@ -54,16 +54,6 @@ impl Spec {
             channels,
             rate,
         }
-    }
-
-    /// A file of `layout` at `rate` whose speakers are what a bare width is
-    /// taken to mean ([`ChannelSet::default_for`]: mono, stereo, quad, 5.1, 7.1
-    /// and 7.1.4 named, unassigned channels for every other width, and no
-    /// topology past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). A caller
-    /// that knows better passes its own topology to [`new`](Self::new).
-    #[must_use]
-    pub fn of_width(format: Format, layout: ChannelLayout, rate: SampleRate) -> Self {
-        Self::of_channels(format, ChannelSet::default_for(layout), rate)
     }
 
     /// The container and its settings.

@@ -9,6 +9,7 @@
 use crate::support::{EncodeConfig, ExportConfig, write_buffers};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{ChannelTopology, Speaker};
 use tutti_codec::{Format, Pcm};
 use tutti_export::{ConfigError, RenderError, Rendered};
@@ -26,7 +27,7 @@ fn rendered(values: &[f32]) -> Rendered {
 fn config(channels: ChannelLayout, topology: Option<ChannelTopology>) -> ExportConfig {
     ExportConfig {
         encode: EncodeConfig {
-            format: Format::Wav(Pcm::Float32),
+            format: Format::Wav(Pcm::Float(FloatWidth::F32)),
             channels,
             topology,
         },

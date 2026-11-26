@@ -46,6 +46,8 @@ use tutti_units::Seconds;
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
@@ -89,7 +91,7 @@ fn sine_graph(freq: f64) -> RenderGraph {
 /// FLAC at an integer `pcm` width and `level`.
 fn flac_format_at(pcm: Pcm, level: FlacLevel) -> Format {
     Format::Flac {
-        depth: pcm.int_depth().expect("FLAC holds integer widths only"),
+        pcm: pcm.int_pcm().expect("FLAC holds integer widths only"),
         level,
     }
 }
@@ -110,7 +112,6 @@ fn config(format: Format) -> ExportConfig {
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither: None,
         ..Default::default()
     }
 }
@@ -183,7 +184,10 @@ fn decode(path: &std::path::Path, ext: &str) -> (u32, usize, Vec<f32>) {
 fn flac_and_wav_agree_sample_for_sample() {
     let d = tempfile::tempdir().unwrap();
 
-    for bit_depth in [Pcm::Int16, Pcm::Int24] {
+    for bit_depth in [
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+    ] {
         for level in [0.0f32, 0.3, -0.3, 0.7] {
             let wav = d.path().join(format!("a_{bit_depth:?}_{level}.wav"));
             let flac = d.path().join(format!("a_{bit_depth:?}_{level}.flac"));
@@ -221,8 +225,8 @@ fn flac_and_wav_agree_sample_for_sample() {
             // the export README documents), so any tolerance wide enough to
             // absorb the decoder's own normalization is also wide enough to
             // swallow the bug. Quantize both back to integers and compare those.
-            let scale = match bit_depth {
-                Pcm::Int16 => 32_768.0f32,
+            let scale = match bit_depth.int_pcm().map(IntPcm::depth) {
+                Some(IntDepth::Int16) => 32_768.0f32,
                 _ => 8_388_608.0f32,
             };
             let q = |s: f32| (s * scale).round() as i64;
@@ -244,7 +248,10 @@ fn flac_and_wav_agree_sample_for_sample() {
 fn aiff_and_wav_agree_sample_for_sample() {
     let d = tempfile::tempdir().unwrap();
 
-    for bit_depth in [Pcm::Int16, Pcm::Int24] {
+    for bit_depth in [
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+    ] {
         for level in [0.3f32, -0.7] {
             let wav = d.path().join(format!("b_{bit_depth:?}_{level}.wav"));
             let aiff = d.path().join(format!("b_{bit_depth:?}_{level}.aiff"));
@@ -268,8 +275,8 @@ fn aiff_and_wav_agree_sample_for_sample() {
             let n = std::cmp::Ord::min(ws.len(), as_.len());
             assert!(n > 1000, "{bit_depth:?} @ {level}: too little audio");
             // Integer comparison, for the reason given in the FLAC case.
-            let scale = match bit_depth {
-                Pcm::Int16 => 32_768.0f32,
+            let scale = match bit_depth.int_pcm().map(IntPcm::depth) {
+                Some(IntDepth::Int16) => 32_768.0f32,
                 _ => 8_388_608.0f32,
             };
             let q = |s: f32| (s * scale).round() as i64;
@@ -298,7 +305,9 @@ fn the_flac_compression_level_changes_the_size_not_the_samples() {
     let wav = d.path().join("s.wav");
     render_to_file(
         sine_graph(1_000.0),
-        &config(Format::Wav(Pcm::Int16)),
+        &config(Format::Wav(Pcm::Int(
+            IntPcm::new(IntDepth::Int16).no_dither(),
+        ))),
         &FrozenClock,
         &wav,
     )
@@ -316,7 +325,10 @@ fn the_flac_compression_level_changes_the_size_not_the_samples() {
         let flac = d.path().join(format!("s{level:?}.flac"));
         render_to_file(
             sine_graph(1_000.0),
-            &config(flac_format_at(Pcm::Int16, level)),
+            &config(flac_format_at(
+                Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+                level,
+            )),
             &FrozenClock,
             &flac,
         )
@@ -401,7 +413,16 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
             g.pipe_output(id);
             built(g)
         };
-        for (bit_depth, scale) in [(Pcm::Int16, 32_768.0f32), (Pcm::Int24, 8_388_608.0)] {
+        for (bit_depth, scale) in [
+            (
+                Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+                32_768.0f32,
+            ),
+            (
+                Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+                8_388_608.0,
+            ),
+        ] {
             for frames in [1usize, 15, 63, 64, 4095, 4096, 4097, 3 * 4096 + 17] {
                 let cfg = |format| ExportConfig {
                     render: RenderConfig {
@@ -415,7 +436,6 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
                         channels: layout,
                         topology: None,
                     },
-                    dither: None,
                     ..Default::default()
                 };
                 let tag = format!("w{width}_{bit_depth:?}_{frames}");

@@ -72,7 +72,7 @@
 //! | `tutti::graph` | what a node author names: `Node`, `Shape`, `Io`, `Prepare`, `Env`, `ForkByClone`, `Unforkable`, `declare_params!` | always |
 //! | `tutti::session` | the session's host plumbing: phases, recovery, main-thread plugin sessions, handles and errors a host reads | `session` |
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
-//! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
+//! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntPcm`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
 //! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo, beats, chords, key, alignment | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
@@ -576,8 +576,6 @@ pub mod session {
 
     #[cfg(feature = "export")]
     pub use tutti_dsp::FftFloat;
-    #[cfg(any(feature = "record", feature = "export"))]
-    pub use tutti_session::DitherShape;
     #[cfg(feature = "sampler")]
     pub use tutti_session::SamplerError;
     #[cfg(feature = "export")]
@@ -628,16 +626,14 @@ pub mod session {
         Backoff, DeviceLatency, DevicePolicy, DeviceRestart, DeviceRestarted, DeviceWatch, Follow,
         FollowEvent, RestartError, RestartOutcome,
     };
-    #[cfg(feature = "record")]
-    pub use tutti_session::{
-        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
-    };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
         PluginPorts, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure,
         RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
+    #[cfg(feature = "record")]
+    pub use tutti_session::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 }
@@ -655,8 +651,9 @@ pub mod codec {
     ))]
     pub use tutti_codec::write_wave;
     pub use tutti_codec::{Codec, EncodeError, Kept, Unfinished};
+    // The noise shape an `IntPcm` names.
     pub use tutti_codec::{
-        DecodeError, FlacLevel, IntDepth, Spec, SpecError, can_decode, decodable_extensions,
+        DecodeError, FlacLevel, IntDepth, IntPcm, Spec, SpecError, can_decode, decodable_extensions,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -666,6 +663,7 @@ pub mod codec {
         feature = "decode-ogg"
     ))]
     pub use tutti_codec::{WaveMetadata, read_wave, read_wave_metadata};
+    pub use tutti_dsp::DitherShape;
 }
 
 /// Sample playback (`tutti-sampler`): voices and their loops, the placement
