@@ -18,9 +18,11 @@
 //! These are values: the state that drives a zone from incoming MIDI (which
 //! member channel holds which note) belongs to the receiver.
 
+mod expression;
 mod profile;
 mod zone;
 
+pub use expression::MpeExpression;
 pub use profile::{ChannelResponse, ControllerSupport, MpeFeatures, PitchBendSupport};
 pub use zone::InvalidMpeZones;
 #[cfg(feature = "serde")]

@@ -21,13 +21,16 @@
 //! module: it never sends that inquiry, so a count above it is the app's to
 //! avoid, and the peer's Disabled Report is how a refusal arrives.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tutti_midi_ci::{
     CiDeviceId, ProfileChange, ProfileChannels, ProfileEntry, ProfileId, ProfileRequest,
     ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
-use tutti_midi_protocol::{ChannelResponse, PitchBendSensitivity, ProfileZones};
+use tutti_midi_protocol::{
+    ChannelResponse, MpeFeatures, PitchBendSensitivity, ProfileZone, ProfileZones,
+};
 use tutti_ump::{MidiChannel, MpeOverlap};
 
 use crate::peer::{PeerRef, PeerRequestError};
@@ -290,6 +293,8 @@ pub struct PeerProfiles {
     pub(crate) at: PeerRef,
     pub(crate) known: bool,
     pub(crate) table: ProfileTable,
+    /// The features the peer declared for the MPE zone whose Manager is the Channel.
+    pub(crate) features: BTreeMap<MidiChannel, MpeFeatures>,
 }
 
 impl PeerProfiles {
@@ -315,17 +320,29 @@ impl PeerProfiles {
 
     /// The zones of the MPE Profile (M2-120) the peer has enabled, lowest
     /// Manager first: one per Channel it lists the Profile enabled on, with the
-    /// Number of Channels its Enabled Report gave. A Profile enabled without
-    /// a count (a Version 1 peer sends none), or with one that makes no zone
-    /// (fewer than two Channels, or past Channel 16), is not a zone, and a
-    /// zone sharing a Channel with a lower one is left out (section 3.4);
-    /// [`refused_mpe_zones`](Self::refused_mpe_zones) lists those.
+    /// Number of Channels its Enabled Report gave, and the features it declared
+    /// for it ([`ProfileZone::features`]; the default until it answers). A
+    /// Profile enabled without a count (a Version 1 peer sends none), or with
+    /// one that makes no zone (fewer than two Channels, or past Channel 16), is
+    /// not a zone, and a zone sharing a Channel with a lower one is left out
+    /// (section 3.4); [`refused_mpe_zones`](Self::refused_mpe_zones) lists those.
     #[must_use]
     pub fn mpe_zones(&self) -> Option<ProfileZones> {
-        self.table
+        zones_of(self.zones())
+    }
+
+    /// The zones [`mpe_zones`](Self::mpe_zones) reads, each with its features.
+    pub(crate) fn zones(&self) -> impl Iterator<Item = ProfileZone> + '_ {
+        let spans = self
+            .table
             .mpe_zones()
             .zones
-            .map(|set| ProfileZones::new(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
+            .map_or_else(Vec::new, |set| set.zones().collect());
+        spans.into_iter().map(|span| {
+            let zone = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT);
+            let features = self.features.get(&span.manager()).copied();
+            zone.mpe_features(features.unwrap_or_default())
+        })
     }
 
     /// The zones the peer enabled that [`mpe_zones`](Self::mpe_zones) leaves
@@ -360,6 +377,15 @@ impl PeerProfiles {
             })
         })
     }
+}
+
+/// The zones of `zones` as a set: one that shares a Channel with an earlier one
+/// is left out (M2-120 section 3.4).
+pub(crate) fn zones_of(zones: impl Iterator<Item = ProfileZone>) -> Option<ProfileZones> {
+    zones.fold(None, |all, zone| match all {
+        Some(held) => Some(held.with(zone).unwrap_or(held)),
+        None => Some(ProfileZones::single(zone)),
+    })
 }
 
 /// A snapshot of every peer's Profiles on one input.
@@ -403,6 +429,17 @@ pub enum ProfilesChange {
     /// [`mpe_zones`](PeerProfiles::mpe_zones): it is left out, and this says why.
     /// Sent after the change that enabled it.
     MpeZoneRefused(MpeOverlap),
+    /// The peer answered the inquiry for the optional features of the MPE
+    /// Profile on the zone whose Manager is `manager` (M2-120 section 3.7): the
+    /// features, which the zone's [`mpe_zones`](PeerProfiles::mpe_zones) now
+    /// carries, or `None` for a NAK, no answer in time or data that is not a
+    /// defined set of them, which leaves the zone at the default features.
+    MpeFeatures {
+        /// The zone's Manager Channel.
+        manager: MidiChannel,
+        /// What the receiver declared.
+        features: Option<MpeFeatures>,
+    },
     /// The peer is gone (lost, or MIDI-CI ended): its Profiles and the
     /// Initiator that kept them went with it.
     Dropped,
