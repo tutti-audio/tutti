@@ -696,7 +696,7 @@ impl Negotiation {
             Self::Ump(ump) => {
                 let changes = ump.ci_output.poll(now, heard, identity, store, offer);
                 let stream = ump.poll_stream(now, heard);
-                let granted = ump.answer(heard, presented);
+                let granted = ump.answer(heard, presented, &changes.muid_changed);
                 Stepped::of(granted.or(stream), changes)
             }
             Self::Midi1Port(port) => {
@@ -777,7 +777,15 @@ impl UmpNegotiation {
     /// afterwards only to turn off JR Timestamps the input did not ask for,
     /// naming the Protocol in force; so answering a request starts none, and a
     /// later request of the session's cannot undo a grant.
-    fn answer(&mut self, heard: &Heard<'_>, presented: Option<Presented>) -> Option<DeviceStream> {
+    ///
+    /// A MIDI-CI Device of `muid_changed` that changed its MUID tells the
+    /// peer our Function Block's Info again, unasked (M2-101 §3.3.1).
+    fn answer(
+        &mut self,
+        heard: &Heard<'_>,
+        presented: Option<Presented>,
+        muid_changed: &[MidiGroup],
+    ) -> Option<DeviceStream> {
         let announce = self.rebuild(presented);
         let answering = self.answering.as_mut()?;
         let mut replies: Vec<Ump> = Vec::new();
@@ -817,6 +825,20 @@ impl UmpNegotiation {
                     }),
                     &mut replies,
                 );
+            }
+        }
+        // A changed MUID announces our Function Block (M2-101 §3.3.1): the
+        // block of the answering Endpoint that spans the device's Group. A
+        // Group outside our span has no block, and sends nothing.
+        for &group in muid_changed {
+            let block = answering.endpoint.function_blocks().find(|block| {
+                let first = block.first_group().get();
+                (first..first + block.groups().get()).contains(&group.get())
+            });
+            if let Some(block) = block {
+                replies.push(Ump::from(Message::Stream(Stream::FunctionBlockInfo(
+                    block.info(),
+                ))));
             }
         }
         let mut granted = None;
