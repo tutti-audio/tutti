@@ -29,7 +29,8 @@ pub enum Answer {
         outcome: ProfileOutcome,
     },
     /// A switch was not sent: the peer was lost between the request and the
-    /// poll that would have sent it.
+    /// poll that would have sent it, or the peer declared a maximum that the
+    /// switch asks more Channels than (M2-102 §2.5.1) in that time.
     SwitchLost {
         /// What was asked.
         request: ProfileRequest,

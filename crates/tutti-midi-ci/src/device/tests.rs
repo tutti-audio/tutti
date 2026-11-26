@@ -952,11 +952,12 @@ fn an_offered_profile_is_answered_and_a_peers_switch_is_told_to_the_caller() {
     use super::super::{ProfileChannels, ProfileOffer, ProfileOfferEntry};
     let channel = CiDeviceId::Channel(tutti_ump::MidiChannel::of(2));
     let (mut device, _, now) = device([OURS]);
-    let offer = ProfileOffer::default().with(
+    let offer = ProfileOffer::try_from(vec![(
         channel,
         piano(),
         ProfileOfferEntry::new(ProfileChannels::of(1)),
-    );
+    )])
+    .unwrap();
     let added = device.offer_profiles(&offer);
     let [CiMessage::ProfileAdded { header, profile }] = sent(&added)[..] else {
         panic!("an Added Report, got {added:?}");

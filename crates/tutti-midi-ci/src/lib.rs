@@ -152,7 +152,7 @@ pub use profile::{
     StandardProfile,
 };
 pub use profile_details::ProfileDetails;
-pub use profile_responder::{ProfileOffer, ProfileOfferEntry};
+pub use profile_responder::{OfferError, ProfileOffer, ProfileOfferEntry};
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;

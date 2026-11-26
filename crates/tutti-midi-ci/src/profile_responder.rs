@@ -21,18 +21,24 @@
 //!   shares a Channel with another enabled zone, or is no zone (M2-120 §3.4).
 //!   A switch that changed the Profile is a [`CiAction::ProfileSwitched`].
 //! - Profile Details Inquiry (§2.5.1): the Registered Target Data `Number of MIDI
-//!   Channels` is the Channels in use and the entry's maximum; any other target is a NAK.
+//!   Channels` is the Channels in use and the entry's maximum. M2-102 defines no other
+//!   Registered target and leaves Profile Specific ones to the Profile's own specification,
+//!   and says nothing of a target not defined: it is answered with a generic NAK (Status
+//!   `0x00`) carrying the Profile Id.
 //! - A new offer ([`offer`](ProfileResponder::offer)) is diffed entry by entry, keyed by
 //!   address and Profile. An entry whose fields changed takes the app's value and drops a peer's
 //!   switch of it; an entry left equal keeps the switch. A new entry is Added (§7.4) and, if
 //!   enabled, Enabled at once; one gone is Disabled if it was enabled, then Removed (§7.5).
 //!   A change of an entry that changes its state or Channels is Reported as
-//!   Enabled or Disabled.
+//!   Enabled or Disabled. An entry disabled by the app keeps the Channels it last used (at
+//!   most its maximum), as a peer's Set Profile Off does.
+//! - An offer cannot hold an invalid entry ([`ProfileOffer::try_from`]): a count above the maximum,
+//!   an MPE zone that is no zone or overlaps another enabled one.
 
 use std::collections::BTreeMap;
 use std::vec::Vec;
 
-use tutti_ump::{MpeChannels, MpeZoneSet, MpeZoneSpan};
+use tutti_ump::{MidiChannel, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan};
 
 use super::{
     CI_VERSION, ChannelsDetail, CiAction, CiDeviceId, CiHeader, CiMessage, InquiryTarget, Muid,
@@ -89,16 +95,38 @@ impl ProfileOfferEntry {
         }
     }
 
-    /// The table entry of this entry at `address`: a Group or Function Block has no count.
-    fn applied(&self, address: CiDeviceId) -> ProfileEntry {
-        let count = self.enabled.unwrap_or(self.max);
+    /// The entry at `address`: a Group or Function Block has no count, so its
+    /// maximum and count are the width of the address and carry no other value.
+    fn normalised(self, address: CiDeviceId) -> Self {
+        Self {
+            enabled: self.enabled.map(|count| counted(address, count)),
+            max: counted(address, self.max),
+            ..self
+        }
+    }
+
+    /// The table entry of this entry; `idle` is the Channels a disabled entry last
+    /// used, if it had been enabled.
+    fn applied(&self, idle: Option<ProfileChannels>) -> ProfileEntry {
+        let count = self
+            .enabled
+            .or_else(|| idle.map(|last| last.min(self.max)))
+            .unwrap_or(self.max);
         ProfileEntry::new(
             self.enabled
                 .map_or(ProfileState::Disabled, |_| ProfileState::Enabled),
-            Some(counted(address, count)),
-            Some(counted(address, self.max)),
+            Some(count),
+            Some(self.max),
         )
     }
+}
+
+/// The zone of the MPE Profile enabled on `manager` for `count` Channels, if it is one.
+fn mpe_zone(manager: MidiChannel, count: ProfileChannels) -> Option<MpeZoneSpan> {
+    u8::try_from(count.get())
+        .ok()
+        .and_then(MpeChannels::new)
+        .and_then(|channels| MpeZoneSpan::new(manager, channels))
 }
 
 /// `count` as the Number of Channels of `address`: 0 for a Group or Function Block.
@@ -107,6 +135,29 @@ const fn counted(address: CiDeviceId, count: ProfileChannels) -> ProfileChannels
         CiDeviceId::Channel(_) => count,
         CiDeviceId::Group | CiDeviceId::FunctionBlock => ProfileChannels::BY_ADDRESS,
     }
+}
+
+/// Why an entry cannot be part of a [`ProfileOffer`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum OfferError {
+    /// The entry is enabled with more Channels than its maximum: a Responder never
+    /// reports a count above its declared maximum (M2-102 §2.5.1).
+    #[error("{enabled:?} Channels in use, past the declared maximum {max:?}")]
+    OverMaximum {
+        /// The Channels the entry is enabled with.
+        enabled: ProfileChannels,
+        /// Its maximum.
+        max: ProfileChannels,
+    },
+    /// The entry enables the MPE Profile with a count that makes no zone: fewer
+    /// than two Channels, or running past Channel 16 (M2-120 §3.1).
+    #[error("the MPE Profile enabled with that many Channels from that Channel is no zone")]
+    NoMpeZone,
+    /// The entry enables an MPE zone that shares a Channel with one the offer
+    /// already enables (M2-120 §3.4).
+    #[error(transparent)]
+    MpeOverlap(#[from] MpeOverlap),
 }
 
 /// The Profiles a device offers, each at a Channel, the Group or the Function
@@ -118,16 +169,42 @@ pub struct ProfileOffer {
 }
 
 impl ProfileOffer {
-    /// The offer with `entry` for `profile` at `address`, replacing one there.
-    #[must_use]
-    pub fn with(
-        mut self,
+    fn insert(
+        &mut self,
         address: CiDeviceId,
         profile: ProfileId,
         entry: ProfileOfferEntry,
-    ) -> Self {
+    ) -> Result<(), OfferError> {
+        let entry = entry.normalised(address);
+        if let Some(enabled) = entry.enabled {
+            if enabled > entry.max {
+                return Err(OfferError::OverMaximum {
+                    enabled,
+                    max: entry.max,
+                });
+            }
+            if let (ProfileId::MPE, CiDeviceId::Channel(manager)) = (profile, address) {
+                let zone = mpe_zone(manager, enabled).ok_or(OfferError::NoMpeZone)?;
+                let held = self
+                    .entries
+                    .iter()
+                    .filter(|(key, _)| **key != (address, profile))
+                    .filter_map(|(&(at, id), other)| match (id, at, other.enabled) {
+                        (ProfileId::MPE, CiDeviceId::Channel(m), Some(count)) => mpe_zone(m, count),
+                        _ => None,
+                    })
+                    .fold(None::<MpeZoneSet>, |set, held| {
+                        Some(set.map_or(MpeZoneSet::single(held), |set| {
+                            set.with(held).unwrap_or(set)
+                        }))
+                    });
+                if let Some(held) = held {
+                    held.with(zone)?;
+                }
+            }
+        }
         self.entries.insert((address, profile), entry);
-        self
+        Ok(())
     }
 
     fn get(&self, address: CiDeviceId, profile: ProfileId) -> Option<&ProfileOfferEntry> {
@@ -138,6 +215,33 @@ impl ProfileOffer {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+}
+
+impl TryFrom<Vec<(CiDeviceId, ProfileId, ProfileOfferEntry)>> for ProfileOffer {
+    type Error = OfferError;
+
+    /// The offer of `entries`, each an entry for a Profile at an address; a later one
+    /// replaces an earlier one for the same Profile and address. A Group or Function
+    /// Block has no Channel count: its entry's maximum and count become the width of
+    /// the address (`0`), so entries that differ only in a count that means nothing
+    /// there are equal.
+    ///
+    /// # Errors
+    ///
+    /// [`OfferError::OverMaximum`] for an entry enabled with more Channels than its
+    /// maximum (M2-102 §2.5.1: m2-102/2.5.1#4); [`OfferError::NoMpeZone`] for an
+    /// enabled MPE entry that makes no zone, and [`OfferError::MpeOverlap`] for one
+    /// whose zone shares a Channel with an MPE entry the offer already enables
+    /// (M2-120 §3.4: m2-120/3.4#1).
+    fn try_from(
+        entries: Vec<(CiDeviceId, ProfileId, ProfileOfferEntry)>,
+    ) -> Result<Self, OfferError> {
+        let mut offer = Self::default();
+        for (address, profile, entry) in entries {
+            offer.insert(address, profile, entry)?;
+        }
+        Ok(offer)
     }
 }
 
@@ -215,7 +319,7 @@ impl ProfileResponder {
                 continue;
             }
             let kept = self.table.get(address, profile).copied();
-            let applied = entry.applied(address);
+            let applied = entry.applied(kept.and_then(|k| k.channels()));
             self.table.set(address, profile, applied);
             if was.is_none() {
                 actions.push(CiAction::Send(CiMessage::ProfileAdded {
@@ -404,11 +508,7 @@ impl ProfileResponder {
         let (ProfileId::MPE, CiDeviceId::Channel(manager)) = (profile, address) else {
             return false;
         };
-        let zone = u8::try_from(count.get())
-            .ok()
-            .and_then(MpeChannels::new)
-            .and_then(|channels| MpeZoneSpan::new(manager, channels));
-        if zone.is_none() {
+        if mpe_zone(manager, count).is_none() {
             return true;
         }
         let mut tentative = self.table.clone();
@@ -417,7 +517,12 @@ impl ProfileResponder {
             profile,
             ProfileEntry::new(ProfileState::Enabled, Some(count), None),
         );
-        !tentative.mpe_zones().refused.is_empty()
+        // Only a refusal of this manager's zone blocks it.
+        tentative
+            .mpe_zones()
+            .refused
+            .iter()
+            .any(|o| o.held.manager() == manager || o.added.manager() == manager)
     }
 
     fn details(

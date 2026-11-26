@@ -1306,7 +1306,15 @@ impl Member {
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
-            Err(ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. }) => {}
+            Err(ProfileRequestError::AlreadyAsking) => {}
+            // The peer's declared maximum arrived between the app's request and
+            // the poll that sends it: the switch is not sent, and says so.
+            Err(ProfileRequestError::OverMaximum { .. }) => changes.answers.push((
+                self.peer_id(switch.at.peer().muid),
+                Answer::SwitchLost {
+                    request: switch.request(),
+                },
+            )),
         }
     }
 
@@ -1396,12 +1404,10 @@ impl Member {
             let Some(initiator) = self.initiators.get_mut(&muid) else {
                 return;
             };
-            match ask_mpe_features(initiator, manager, now) {
-                Ok(asked) => self.carry_out(muid, asked, now, sends, changes),
-                // The answer to the one in flight is what the session waits for.
-                Err(
-                    ProfileRequestError::AlreadyAsking | ProfileRequestError::OverMaximum { .. },
-                ) => {}
+            // An inquiry asks no count, so its one refusal is the inquiry already in
+            // flight, whose answer is what the session waits for.
+            if let Ok(asked) = ask_mpe_features(initiator, manager, now) {
+                self.carry_out(muid, asked, now, sends, changes);
             }
         }
     }
