@@ -10,6 +10,7 @@ mod common;
 mod articulation;
 mod bipolar;
 mod by_value;
+mod channel_state;
 mod constructors;
 mod fields;
 mod flex_setup;

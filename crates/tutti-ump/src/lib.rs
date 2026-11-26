@@ -90,6 +90,7 @@ extern crate alloc;
 mod articulation;
 mod bend_value;
 mod cc_number;
+mod channel_state;
 mod ci_version;
 mod control_value;
 mod decode;
@@ -134,6 +135,7 @@ pub use articulation::{
 };
 pub use bend_value::BendValue;
 pub use cc_number::{CCNumber, CCNumberOutOfRange};
+pub use channel_state::{ChannelEffect, ChannelState, ParameterKind};
 pub use ci_version::{CiVersion, NotAVersion};
 pub use control_value::ControlValue;
 pub use field::{

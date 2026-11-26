@@ -109,6 +109,9 @@ enum articulation::CustomClassification
 enum articulation::NoteEnding
 enum articulation::StringAssignment
 enum articulation::Stroke
+enum channel_state::ChannelEffect
+enum channel_state::ChannelState
+enum channel_state::ParameterKind
 enum flex_text::FlexTextStep
 enum flex_write::EntryError
 enum flex_write::FlexTextError
@@ -189,6 +192,9 @@ fn bend_value::BendValue::new
 fn bend_value::BendValue::to_u14
 fn cc_number::CCNumber::is_ignored_in_midi2
 fn cc_number::CCNumber::lsb
+fn channel_state::ChannelEffect::ends_notes
+fn channel_state::ChannelEffect::of_midi1
+fn channel_state::ChannelEffect::of_midi2
 fn control_value::ControlValue::from_normalized
 fn control_value::ControlValue::from_registered
 fn control_value::ControlValue::get
