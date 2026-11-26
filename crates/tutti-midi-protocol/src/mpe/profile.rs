@@ -100,7 +100,25 @@ pub struct MpeFeatures {
     pub third_dimension: ControllerSupport,
 }
 
+impl Default for MpeFeatures {
+    /// What a receiver that did not answer is taken to support: Pitch Bend,
+    /// and Channel Pressure and the Third Dimension of Control in their
+    /// Control Change forms (M2-120 section 4.8: MPE uses these three by
+    /// default), and no Channel Response notification.
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 impl MpeFeatures {
+    /// [`Default::default`], for a `const` context.
+    pub(crate) const DEFAULT: Self = Self {
+        channel_response_notification: false,
+        pitch_bend: PitchBendSupport::Supported,
+        channel_pressure: ControllerSupport::ControlChange,
+        third_dimension: ControllerSupport::ControlChange,
+    };
+
     /// The Inquiry Target of the Optional Features Details message.
     pub const INQUIRY_TARGET: u8 = 0x01;
 
