@@ -1,6 +1,6 @@
 //! One render pass, N outputs.
 //!
-//! The graph is rendered once. Every block goes to each [`Output`]'s lane: the
+//! The graph is rendered once. Every block goes to each output's lane: the
 //! lane reads its feed (the graph's planes, or a tap's lanes drained from its
 //! ring), folds it onto its target's layout, and hands the gated frames to its
 //! sink. A streamed file output goes through its [`Chain`] (resample, dither,

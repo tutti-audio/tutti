@@ -187,7 +187,7 @@ pub enum RenderError {
     },
 
     /// A result was read from the finished render by a key it has none for
-    /// ([`DoneError`]): for a caller that reads results on its own caller's behalf.
+    /// ([`DoneError`](crate::DoneError)): for a caller that reads results on its own caller's behalf.
     #[error("Export result unavailable: {0}")]
     Key(#[from] crate::DoneError),
 
