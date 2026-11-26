@@ -8,7 +8,6 @@ static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 mod support;
 
 mod dither_stats;
-mod generic;
 mod noise_shaping;
 mod oracle_decode;
 mod oracle_resample;

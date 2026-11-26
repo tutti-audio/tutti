@@ -10,9 +10,12 @@
 //!
 //! Run: `cargo run --example export -- <outdir>`
 
+use tutti_buffers::ChannelSet;
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
+use tutti_codec::Encoding;
 use tutti_codec::IntPcm;
+use tutti_codec::ToFile;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Produced,
@@ -87,7 +90,10 @@ fn main() -> tutti_export::Result<()> {
     // a required argument precisely so a silent render is not something you can
     // get by forgetting one.
     // `replace` on every file here: a second run overwrites what the first one wrote.
-    let target = FileTarget::new(dir.join("tone.flac"), flac, ChannelLayout::STEREO).replace();
+    let target = FileTarget::new(
+        Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ToFile::new(dir.join("tone.flac")).replace(),
+    );
     let written = render_one(
         &mut tone(),
         &job,
@@ -111,14 +117,10 @@ fn main() -> tutti_export::Result<()> {
     ]
     .into_iter()
     .map(|(format, ext)| {
-        Output::main_output(
-            FileTarget::new(
-                dir.join(format!("tone.{ext}")),
-                format,
-                ChannelLayout::STEREO,
-            )
-            .replace(),
-        )
+        Output::main_output(FileTarget::new(
+            Encoding::new(format).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new(dir.join(format!("tone.{ext}"))).replace(),
+        ))
     })
     .collect();
     let produced = render(
@@ -151,14 +153,15 @@ fn main() -> tutti_export::Result<()> {
     .into_finished()
     .and_then(Produced::into_buffers)
     .expect("nothing cancels a control with no token");
+    let frames = quad.frames().get();
     let peaks: Vec<f32> = quad
-        .planes()
+        .into_planes()
         .iter()
         .map(|p| p.iter().fold(0.0f32, |a, &b| a.max(b.abs())))
         .collect();
     println!(
         "mono -> quad: {} frames, per-channel peaks {peaks:?}",
-        quad.frames().get()
+        frames
     );
 
     // ---- 4. normalization ------------------------------------------------
@@ -170,11 +173,9 @@ fn main() -> tutti_export::Result<()> {
     //
     // −14 LUFS with a −1 dBTP ceiling — the usual streaming target.
     let normalized = FileTarget::new(
-        dir.join("tone-normalized.flac"),
-        flac,
-        ChannelLayout::STEREO,
+        Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ToFile::new(dir.join("tone-normalized.flac")).replace(),
     )
-    .replace()
     .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0))));
     let written = render_one(
         &mut tone(),

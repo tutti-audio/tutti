@@ -1,7 +1,10 @@
 use super::*;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
+use tutti_codec::Encoding;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
+use tutti_codec::ToFile;
 use tutti_measure::Loudness;
 
 fn reading(lufs: f64, true_peak: f64) -> Loudness {
@@ -66,7 +69,11 @@ mod headroom {
     const RATE: SampleRate = SampleRate::SR_48K;
 
     fn config(pcm: Pcm) -> FileTarget {
-        FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO)
+        FileTarget::new(
+            Encoding::new(Format::Wav(pcm))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new("unused.wav"),
+        )
     }
 
     /// An integer type of `depth`, dithered with `dither` (none for `None`) and noise-shaped
@@ -128,8 +135,15 @@ mod headroom {
             );
             assert!(got < headroom_ceiling(&plain, RATE).unwrap(), "{shape:?}");
         }
-        let resampled = config(int(IntDepth::Int16, Some(DitherShape::Triangular), true))
-            .resample(crate::Resample::to(SampleRate::SR_96K));
+        let resampled = FileTarget::new(
+            Encoding::new(Format::Wav(int(
+                IntDepth::Int16,
+                Some(DitherShape::Triangular),
+                true,
+            )))
+            .resample(tutti_codec::Resample::to(SampleRate::SR_96K)),
+            ToFile::new("unused.wav"),
+        );
         let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain().get();
         let lsbs = 2.0 + want * 1.5;
         let got = headroom_ceiling(&resampled, RATE).unwrap();

@@ -9,7 +9,7 @@ use tutti_units::{SampleRate, Samples};
 ///
 /// Returned by a [`BufferTarget`](crate::BufferTarget) output of
 /// [`render`](crate::render()) ([`Produced::Buffers`](crate::Produced::Buffers)); written with
-/// [`write_buffers`](crate::write_buffers). Planes rather than a
+/// `tutti_codec::write` (it converts into a `Wave`). Planes rather than a
 /// `(left, right)` pair, so a surround render keeps every channel.
 ///
 /// The fields are private: a `Rendered` is built by a render or by
@@ -250,9 +250,11 @@ impl<F: Float> From<Rendered<F>> for Wave<F> {
     /// Infallible: a `Rendered` has at least one channel, no more than a
     /// layout holds, and planes of one length, which is what a `Wave` is.
     fn from(rendered: Rendered<F>) -> Self {
-        let planes = Planes::from_vecs(&rendered.planes)
-            .expect("a render has at least one plane, all of one length");
-        Wave::from_planes(rendered.sample_rate, planes)
+        let rate = rendered.sample_rate;
+        let planes = rendered.into_planes();
+        let planes =
+            Planes::from_vecs(&planes).expect("a render has at least one plane, all of one length");
+        Wave::from_planes(rate, planes)
     }
 }
 

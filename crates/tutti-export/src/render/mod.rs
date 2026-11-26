@@ -8,15 +8,13 @@
 //!   (measure, write, finalize).
 //!
 //! There is no sink type here. The pipeline owns the pull (see
-//! [`crate::encode`]) and hands each block to a `tutti_codec::Encoder`, which
+//! `tutti_codec::Chain`) and hands each block to a `tutti_codec::Encoder`, which
 //! only writes what it is given.
 
 pub(crate) mod driver;
 pub(crate) mod outputs;
 pub(crate) mod plan;
 pub(crate) mod sink;
-pub(crate) use driver::{
-    FileChannels, PlaneSource, REPLAY_BLOCK, Replay, check_loss, drive, with_source,
-};
+pub(crate) use driver::{FileChannels, REPLAY_BLOCK, Replay, check_loss, drive, with_source};
 pub(crate) use plan::RenderPlan;
 pub(crate) use sink::BlockCursor;

@@ -6,7 +6,7 @@
 //! level, a lookahead's frames, a direct time-domain convolution, the tone a
 //! dry voice reads, the speakers a VBAP source on a speaker lands in), and
 //! the export's own invariants where it does not (a file is its planes
-//! through `write_buffers`; a width is the quad render folded by the ITU
+//! through `tutti_codec::write`; a width is the quad render folded by the ITU
 //! matrix; a trimmed render is the untrimmed one shifted by the trim; a
 //! fork of a graph renders the fresh graph).
 //!
@@ -22,7 +22,7 @@
 //! seeded generator.
 
 use crate::support;
-use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
+use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_rendered};
 use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Interleaved, MaxBlock, Mono};
 
 use std::sync::Arc;
@@ -32,9 +32,9 @@ use crate::support::{render_normalized_to_file, render_to_buffers, render_to_fil
 use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
-use tutti_codec::{Format, Pcm};
+use tutti_codec::{Format, Pcm, Resample};
 use tutti_export::{
-    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup, TailPolicy,
+    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Setup, TailPolicy,
 };
 use tutti_fixtures::signal::amplitude_at;
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -245,7 +245,7 @@ fn assert_audible(planes: &[Vec<f32>]) {
 }
 
 /// A file written through `write` from one graph, and the planes of another
-/// built the same way written through `write_buffers` after `prepare`: the
+/// built the same way written through `tutti_codec::write` after `prepare`: the
 /// export writes what it renders, so the two are byte-identical. Returns the
 /// file.
 fn same_file(
@@ -258,7 +258,7 @@ fn same_file(
     let (pf, pb) = (d.path().join("file.wav"), d.path().join("buffers.wav"));
     write(built(graph()), &pf).expect("the graph writes");
     let planes = prepare(buffers(built(graph()), config)).expect("prepares");
-    write_buffers(&planes, config, &pb).expect("its planes write");
+    write_rendered(&planes, config, &pb).expect("its planes write");
     let (a, b) = (std::fs::read(&pf).unwrap(), std::fs::read(&pb).unwrap());
     assert_eq!(a.len(), b.len(), "the two files differ in length");
     assert!(a == b, "the file is not its planes");
@@ -297,7 +297,7 @@ fn a_sine_renders_its_closed_form() {
 }
 
 /// The resample case (48 k → 44.1 k), to a file: the file is the render's
-/// planes through the same conversion and encoder (`write_buffers`), byte
+/// planes through the same conversion and encoder (`write_rendered`), byte
 /// for byte, at 44.1 kHz. The resampler's carry makes its output independent
 /// of the block partition; `oracle_resample.rs` holds the conversion to first
 /// principles, and the analytic figures it must satisfy (frequency, level, DC,
@@ -322,7 +322,7 @@ fn a_resampled_export_writes_its_render() {
 
 /// The dBTP case: a peak-normalized export (render, measure, gain, write)
 /// is its render normalized and written (`Normalize::gain_for_rendered`,
-/// then `write_buffers`), byte for byte; its sample peak sits at the
+/// then `write_rendered`), byte for byte; its sample peak sits at the
 /// -1 dBTP target or just under it (the true peak, between samples, is
 /// what reaches -1 dB).
 #[test]
@@ -351,7 +351,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
 
 /// The dither case: triangular dither to 16 bits, on a DC level between two
 /// codes, so every sample is perturbed. The file is its planes dithered and
-/// written (`write_buffers`), byte for byte; its samples scatter around the
+/// written (`write_rendered`), byte for byte; its samples scatter around the
 /// level's code (8 192.3) within the dither's two codes and average onto it.
 #[test]
 fn a_dithered_export_writes_its_dithered_render() {

@@ -8,7 +8,7 @@ use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
 use tutti_units::Amplitude;
 
 fn to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, FoldError> {
-    Fold::to_channels(src, &ChannelSet::default_for(dst)).build()
+    Fold::to_channels(&ChannelSet::from(*src), &ChannelSet::default_for(dst)).build()
 }
 
 const M: f32 = <f32 as Float>::MINUS_3_DB;
@@ -165,7 +165,7 @@ fn a_level_that_is_not_a_gain_is_refused_even_by_index() {
         let set = ChannelSet::default_for(dst);
         assert!(
             matches!(
-                Fold::<f32>::to_channels(&smpte(2), &set)
+                Fold::<f32>::to_channels(&ChannelSet::from(smpte(2)), &set)
                     .levels(levels)
                     .build(),
                 Err(FoldError::NotAGain { .. })
@@ -191,4 +191,50 @@ fn an_ambisonic_source_goes_by_index() {
         to_width(&foa, width(2)),
         Err(FoldError::Unplaced { .. })
     ));
+}
+
+/// `smpte(n)` with its first two speakers swapped: the same speakers in another order.
+fn swapped_front(n: u16) -> ChannelTopology {
+    let mut speakers = smpte(n).positions().unwrap().to_vec();
+    speakers.swap(0, 1);
+    ChannelTopology::new(speakers).unwrap()
+}
+
+/// Two sets of one width in different orders are folded by speaker, not copied: a 5.1 whose
+/// front pair is swapped, into the default 5.1, moves channel 0 to 1 and 1 to 0 and leaves the
+/// rest where they are.
+#[test]
+fn a_same_width_reorder_moves_the_channels() {
+    let fold = Fold::<f32>::to_channels(
+        &ChannelSet::from(swapped_front(6)),
+        &ChannelSet::default_for(width(6)),
+    )
+    .build()
+    .unwrap();
+    assert!(!fold.is_identity());
+    let src: Vec<f32> = (1..=6).map(|c| c as f32).collect();
+    let mut out = vec![0.0f32; 6];
+    fold.frame(&src, &mut out);
+    assert_eq!(out, [2.0, 1.0, 3.0, 4.0, 5.0, 6.0]);
+}
+
+/// A source with no topology (past `MAX_CHANNELS`) is channels by index: into a destination as
+/// wide or wider, the channels stay where they are and the rest is zero; into a named
+/// destination that is narrower it is `Unplaced`, never a truncation.
+#[test]
+fn a_source_with_no_topology_goes_by_index() {
+    let wide_set = ChannelSet::unassigned(width(24));
+    assert!(wide_set.topology().is_none());
+    let wider = ChannelSet::unassigned(width(30));
+    let fold = Fold::<f32>::to_channels(&wide_set, &wider).build().unwrap();
+    let src: Vec<f32> = (1..=24).map(|c| c as f32).collect();
+    let mut out = vec![9.0f32; 30];
+    fold.frame(&src, &mut out);
+    assert_eq!(&out[..24], &src[..]);
+    assert!(out[24..].iter().all(|&s| s == 0.0));
+    let narrowed = Fold::<f32>::to_channels(&wide_set, &ChannelSet::default_for(width(2))).build();
+    assert!(
+        matches!(narrowed, Err(FoldError::Unplaced { .. })),
+        "{narrowed:?}"
+    );
 }

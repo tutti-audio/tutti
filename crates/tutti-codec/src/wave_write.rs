@@ -1,85 +1,134 @@
 //! Writing a [`Wave`] as a file.
 
-use crate::{Encoder, EncoderOptions, FileEncoder, Format, Result, Spec};
-use std::io::{Cursor, Seek, Write};
-use tutti_buffers::{Interleaved, InterleavedMut, Sample, Wave, interleave};
-use tutti_platform::Destination;
+//! Writing a [`Wave`] as a file, or into memory, through an [`Encoding`].
+
+use crate::chain::{Stages, options_of, spec_of};
+use crate::{Chain, Encoding, Landed, Result, ToFile};
+use std::io::Cursor;
+use tutti_buffers::{Interleaved, InterleavedMut, Sample, SampleFormat, Wave, interleave};
+use tutti_dsp::FftFloat;
 use tutti_units::Samples;
 
-/// Frames written to the encoder at a time by [`write_wave`].
+/// Frames written to the chain at a time by [`write()`] and [`encode()`].
 const WRITE_CHUNK: usize = 8192;
 
-/// Writes `wave` as a file of `format` to `dest`, at its own rate and with its
-/// own topology (the speaker mask of a WAV).
+/// Writes `wave` as a file of `encoding` to `to`: folded onto the encoding's channels,
+/// resampled, quantized and put in place, as a [`Chain`] does it for a stream.
 ///
-/// - A path is written beside itself and renamed over it when whole, as a staged
-///   [`FileEncoder`] does, so a failure leaves what was at the path as it was. An
-///   existing file is refused with [`EncodeError::Exists`](crate::EncodeError::Exists), and
-///   nothing is written; a file that appears before the commit is refused there
+/// - The file is written beside its path and renamed over it when whole, so a failure leaves
+///   what was at the path as it was. An existing file is refused with
+///   [`EncodeError::Exists`](crate::EncodeError::Exists), and nothing is written, unless
+///   [`ToFile::replace`] says so; a file that appears before the commit is refused there
 ///   ([`EncodeError::Commit`](crate::EncodeError::Commit) of kind
 ///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists)), keeping the complete file at the
-///   error's `kept` path, the caller's to move or delete. The destination's
-///   [`create_new`](Destination::create_new) says what this already does.
-/// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
-///   to) is encoded into memory first and then handed over in one `write_all`,
-///   so it needs no `Seek` and never holds a partial file from an encode error.
-///   The file is held in memory once, whatever the writer.
-///
-/// Nothing is resampled or normalized: the samples go as they are. An integer type
-/// quantizes them as its [`IntPcm`](crate::IntPcm) says (dithered by default, rounded to the
-/// nearest step with `no_dither`).
+///   error's `kept` path, the caller's to move or delete.
+/// - The wave's own rate and speakers are the source's: without
+///   [`Encoding::channels`] the file has the wave's channels (the speaker mask of a WAV), and
+///   without [`Encoding::resample`] its rate.
+/// - An integer type quantizes as its [`IntPcm`](crate::IntPcm) says (dithered by default,
+///   rounded to the nearest step with `no_dither`), from the wave's own format: a block that
+///   needs no fold, resample or gain reaches the encoder unconverted. The stages run in `f64`
+///   for a wave of `f64` and in `f32` for any other.
 ///
 /// # Errors
 ///
 /// [`EncodeError::Spec`](crate::EncodeError::Spec) for a wave the format cannot hold (no
 /// channels, a rate no header states, a width past the format's limit),
 /// [`EncodeError::WavTooLarge`](crate::EncodeError::WavTooLarge) for a WAV too long for its
-/// 32-bit sizes, [`EncodeError::Io`](crate::EncodeError::Io) when the writer fails, and the
-/// encoder's other errors.
+/// 32-bit sizes, [`EncodeError::Fold`](crate::EncodeError::Fold) for channels the fold cannot
+/// place (a channel is never dropped to make a width fit),
+/// [`EncodeError::Resample`](crate::EncodeError::Resample), and the encoder's other errors.
 ///
 /// # Examples
 ///
 /// ```
 /// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
-/// use tutti_buffers::Mono;
-/// use tutti_buffers::FloatWidth;
-/// use tutti_codec::{Format, Pcm, read_wave, write_wave};
+/// use tutti_buffers::{FloatWidth, Mono, Wave};
+/// use tutti_codec::{Encoding, Format, Pcm, ToFile, read_wave, write};
 /// use tutti_units::SampleRate;
-/// use tutti_buffers::Wave;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, 0.75]));
-/// let mut bytes = Vec::new();
-/// write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F32)))?;
+/// let dir = tempfile::tempdir()?;
+/// let path = dir.path().join("ramp.wav");
+/// write(&wave, &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))), &ToFile::new(&path))?;
+/// assert_eq!(read_wave::<f32>(&path)?, wave);
+/// # Ok(())
+/// # }
+/// # }
+/// ```
+pub fn write<S: Sample>(wave: &Wave<S>, encoding: &Encoding, to: &ToFile) -> Result<Landed> {
+    if S::FORMAT == SampleFormat::F64 {
+        write_in::<f64, S>(wave, encoding, to)
+    } else {
+        write_in::<f32, S>(wave, encoding, to)
+    }
+}
+
+fn write_in<F: FftFloat, S: Sample>(
+    wave: &Wave<S>,
+    encoding: &Encoding,
+    to: &ToFile,
+) -> Result<Landed> {
+    let mut chain = Chain::<F>::new(
+        encoding,
+        to,
+        &wave.channel_set(),
+        wave.sample_rate(),
+        wave.len(),
+    )?;
+    feed(wave, |block| chain.block(block))?;
+    chain.finalize()?.commit()
+}
+
+/// Encodes `wave` into memory as a file of `encoding`: the bytes [`write()`] puts at a path,
+/// through the same stages.
+///
+/// # Errors
+///
+/// As [`write()`], less the path's: nothing is refused for existing and nothing is committed.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
+/// use tutti_buffers::{FloatWidth, Mono, Wave};
+/// use tutti_codec::{Encoding, Format, Pcm, encode, read_wave};
+/// use tutti_units::SampleRate;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, 0.75]));
+/// let bytes = encode(&wave, &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))))?;
 /// assert_eq!(read_wave::<f32>(bytes)?, wave);
 /// # Ok(())
 /// # }
 /// # }
 /// ```
-pub fn write_wave<'a, S: Sample>(
-    wave: &Wave<S>,
-    dest: impl Into<Destination<'a>>,
-    format: Format,
-) -> Result<()> {
-    let spec = Spec::of_channels(format, wave.channel_set(), wave.sample_rate());
-    let options = EncoderOptions::new(&spec).planned(wave.len());
-    match dest.into() {
-        Destination::Path(staged) => write_file(wave, options.file(staged.target()).create()?),
-        Destination::Writer(writer) => {
-            // A borrowed writer need not seek: the file is encoded into an owned
-            // cursor and handed over whole.
-            let file = write_all(wave, options.wrap(Cursor::new(Vec::new()))?)?;
-            writer.write_all(file.get_ref())?;
-            Ok(())
-        }
+pub fn encode<S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Result<Vec<u8>> {
+    if S::FORMAT == SampleFormat::F64 {
+        encode_in::<f64, S>(wave, encoding)
+    } else {
+        encode_in::<f32, S>(wave, encoding)
     }
 }
 
-/// Feeds `wave` to `write` in chunks of its own sample format: the encoder
+fn encode_in<F: FftFloat, S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Result<Vec<u8>> {
+    let source = wave.channel_set();
+    let rate = wave.sample_rate();
+    let mut stages = Stages::<F>::new(encoding, &source, rate)?;
+    let spec = spec_of(encoding, &source, rate);
+    let mut encoder =
+        options_of(&spec, encoding, rate, wave.len()).wrap(Cursor::new(Vec::new()))?;
+    feed(wave, |block| stages.block(block, &mut encoder))?;
+    stages.flush(&mut encoder)?;
+    Ok(encoder.finish()?.into_inner())
+}
+
+/// Feeds `wave` to `block` in chunks of its own sample format: the encoder
 /// converts each sample once, from what the wave holds to what the file holds.
 fn feed<S: Sample>(
     wave: &Wave<S>,
-    mut write: impl FnMut(Interleaved<'_, S>) -> Result<()>,
+    mut block: impl FnMut(Interleaved<'_, S>) -> Result<()>,
 ) -> Result<()> {
     let layout = wave.layout();
     let mut rest = wave.planes();
@@ -89,22 +138,10 @@ fn feed<S: Sample>(
         let len = layout.interleaved_len(head.frames());
         let mut out = InterleavedMut::new(&mut chunk[..len], layout)?;
         interleave(head, out.reborrow())?;
-        write(out.as_interleaved())?;
+        block(out.as_interleaved())?;
         rest = tail;
     }
     Ok(())
-}
-
-/// Feeds `wave` to a plain-sink `encoder` and finishes it.
-fn write_all<S: Sample, W: Write + Seek>(wave: &Wave<S>, mut encoder: Encoder<W>) -> Result<W> {
-    feed(wave, |block| encoder.write(block))?;
-    encoder.finish()
-}
-
-/// Feeds `wave` to a file `encoder` and finishes it, putting the file in place.
-fn write_file<S: Sample>(wave: &Wave<S>, mut encoder: FileEncoder) -> Result<()> {
-    feed(wave, |block| encoder.write(block))?;
-    encoder.finish()
 }
 
 #[cfg(all(test, feature = "encode-wav", decode))]

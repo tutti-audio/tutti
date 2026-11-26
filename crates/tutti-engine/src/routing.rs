@@ -144,14 +144,14 @@ impl Routing {
         let heard = self.monitor.as_ref().unwrap_or(main_output);
         let to_heard = match &self.monitor {
             Some(monitor) => Some(
-                Fold::to_channels(main_output, &ChannelSet::from(*monitor))
+                Fold::to_channels(&ChannelSet::from(*main_output), &ChannelSet::from(*monitor))
                     .levels(self.levels)
                     .build()?,
             ),
             None => None,
         };
         let to_device = match self.map.targets() {
-            None => Fold::to_channels(heard, device).build()?,
+            None => Fold::to_channels(&ChannelSet::from(*heard), device).build()?,
             Some(to) => {
                 if to.len() != usize::from(heard.width().count()) {
                     return Err(RoutingError::MapWidth {

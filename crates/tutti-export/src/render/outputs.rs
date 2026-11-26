@@ -15,25 +15,22 @@
 use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
+use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut};
+use tutti_codec::{Chain, Converter, Landed};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
-use tutti_rt::SplitMix64;
 use tutti_timeline::RenderClock;
 use tutti_units::{Db, SampleRate, Samples};
 
 use crate::control::{Control, Outcome, Stage, Weights};
-use crate::encode::{
-    Chain, Landed, Resampler, open_file, output_rate, replay_through, resampler_for, written,
-};
 use crate::normalize::{Measurer, Normalize, Reading, chunk_frames};
 use crate::output::{FileTarget, GainSource, NormalizeSpec, Output, Produced, Target, TargetError};
 use crate::render::{
     FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
 };
 use crate::spill::{Spill, SpillBudget};
-use crate::{ConfigError, Job, RenderError, RenderGraph, Rendered, Result, Unmeasured};
+use crate::{ConfigError, Job, RenderError, RenderGraph, Rendered, Result, Unmeasured, Written};
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
 /// is drained into.
@@ -46,6 +43,8 @@ struct TapFeed<F: Float> {
 /// decides the gain.
 struct Waiting<F: Float> {
     target: FileTarget,
+    /// The channels of the file: what the spill holds.
+    channels: ChannelSet,
     spill: Spill<F>,
     spec: NormalizeSpec,
 }
@@ -93,10 +92,10 @@ pub(crate) fn render_outputs<F: FftFloat>(
     control: &mut Control<'_>,
     spill_budget: usize,
 ) -> Result<Outcome<Vec<Produced<F>>>> {
-    check_outputs(&outputs)?;
     control.weigh(Weights::of(outputs.iter().map(Output::target)));
     let plan = RenderPlan::of(job);
     let (done, _lost) = with_source(graph, job.rate(), clock, |src| {
+        check_outputs(&outputs, src.main_output())?;
         let mut lanes = open_lanes(
             outputs,
             job,
@@ -164,17 +163,18 @@ pub(crate) fn render_outputs<F: FftFloat>(
 /// What the outputs are refused for before any of them is opened: no outputs, a
 /// zero width, a tap that is not as wide as its placement, a gain taken from an
 /// output that does not measure, and two files with one path.
-fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
+fn check_outputs<F: Float>(outputs: &[Output<F>], main_output: &ChannelSet) -> Result<()> {
     if outputs.is_empty() {
         return Err(RenderError::NoOutputs);
     }
     for (i, output) in outputs.iter().enumerate() {
         let target_error = |why| RenderError::Target { output: i, why };
-        let (width, file) = match output.target() {
-            Target::File(f) => (f.channels(), Some(f)),
-            Target::Buffers(b) => (b.channels(), None),
+        let channels = channels_of(output, main_output);
+        let file = match output.target() {
+            Target::File(f) => Some(f),
+            Target::Buffers(_) => None,
         };
-        if width.count() == 0 {
+        if channels.width().count() == 0 {
             return Err(RenderError::UnsupportedChannels);
         }
         if let crate::Feed::Tap { reader, lanes } = output.feed()
@@ -192,7 +192,7 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
         {
             // Loudness is weighted by placement: refused here, not after the render.
             // A width with no topology has no placement.
-            let placed = file.channel_set().topology().is_some_and(|topology| {
+            let placed = channels.topology().is_some_and(|topology| {
                 tutti_measure::Measure::<f32>::measure(
                     &tutti_measure::LoudnessConfig::new(*topology),
                     tutti_units::SampleRate::SR_48K,
@@ -201,7 +201,7 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
             });
             if !placed {
                 return Err(target_error(TargetError::UnplacedLoudness {
-                    channels: file.channels(),
+                    channels: channels.width(),
                 }));
             }
         }
@@ -228,6 +228,18 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
     Ok(())
 }
 
+/// The channels of `output`'s target: the file's, when it states them, else the feed's.
+fn channels_of<F: Float>(output: &Output<F>, main_output: &ChannelSet) -> ChannelSet {
+    let stated = match output.target() {
+        Target::Buffers(b) => Some(b.width.channel_set()),
+        Target::File(f) => f.encoding().channel_set(),
+    };
+    stated.unwrap_or_else(|| match output.feed() {
+        crate::Feed::MainOutput => *main_output,
+        crate::Feed::Tap { lanes, .. } => lanes.channel_set(),
+    })
+}
+
 /// Opens every output: its fold, its file (refused before it is touched when
 /// the format cannot hold the render) or its planes.
 fn open_lanes<F: FftFloat>(
@@ -240,22 +252,20 @@ fn open_lanes<F: FftFloat>(
 ) -> Result<Vec<Lane<F>>> {
     let mut lanes = Vec::with_capacity(outputs.len());
     for (i, output) in outputs.into_iter().enumerate() {
-        let (feed, target) = output.into_parts();
-        let (set, placement) = match &target {
-            Target::File(f) => (f.channel_set(), f.placement()),
-            Target::Buffers(b) => (b.width.channel_set(), b.width.placement()),
+        let set = channels_of(&output, main_output);
+        let placement = match output.target() {
+            Target::Buffers(b) => b.width.placement(),
+            Target::File(f) => f.encoding().placement(),
         };
+        let (feed, target) = output.into_parts();
         let layout = set.width();
         let channels = FileChannels { channels: set };
         let (fold, tap) = match feed {
             crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
                 let width = lanes.layout();
-                let placed = lanes
-                    .topology()
-                    .map_or_else(|| ChannelSet::default_for(width), |t| ChannelSet::from(*t));
                 let fold = channels
-                    .fold_from(usize::from(width.count()), &placed)
+                    .fold_from(usize::from(width.count()), &lanes.channel_set())
                     .map_err(|e| match e {
                         RenderError::InvalidConfig(ConfigError::Placement(why)) => {
                             RenderError::Target {
@@ -271,11 +281,14 @@ fn open_lanes<F: FftFloat>(
         };
         let (sink, path) = match target {
             Target::File(file) => {
-                let chain = Box::new(open_file(
-                    &file,
-                    plan,
+                // The blocks the chain is given are folded onto the file's channels by the
+                // lane, which also holds them for a normalize: its source is the file's.
+                let chain = Box::new(Chain::new(
+                    file.encoding(),
+                    file.to_file(),
+                    &set,
                     job.rate(),
-                    SplitMix64::mix(i as u64),
+                    plan.output_length,
                 )?);
                 let path = file.path().to_path_buf();
                 match file.normalize {
@@ -285,6 +298,7 @@ fn open_lanes<F: FftFloat>(
                             chain,
                             waiting: Box::new(Waiting {
                                 spill: Spill::new(layout, &path),
+                                channels: set,
                                 target: file,
                                 spec,
                             }),
@@ -443,7 +457,7 @@ fn finish<F: FftFloat>(
                 unreachable!("listed as waiting");
             };
             chain.set_gain(chosen[i].expect("chosen above").gain);
-            let block = if waiting.target.resample.is_some() {
+            let block = if waiting.target.encoding().resampling().is_some() {
                 chunk_frames(rate).get()
             } else {
                 REPLAY_BLOCK
@@ -540,20 +554,22 @@ fn measure<F: FftFloat>(
     total: Samples,
     control: &mut Control<'_>,
 ) -> Result<Outcome<(Reading, Samples)>> {
-    let out_rate = output_rate(&waiting.target, rate);
+    let out_rate = waiting.target.encoding().rate(rate);
     let unmeasurable = |reason: Unmeasured| RenderError::Unmeasurable {
         output: Some(output),
         channels: layout,
         sample_rate: out_rate,
         reason,
     };
-    let channels = waiting.target.channel_set();
-    let topology = channels
+    let topology = waiting
+        .channels
         .topology()
         .ok_or_else(|| unmeasurable(Unmeasured::Placement))?;
     let mut measurer = Measurer::new(out_rate, topology, normalize).map_err(unmeasurable)?;
-    let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, layout)?;
-    let mut staging: Vec<F> = Vec::new();
+    let mut converter: Option<Converter<F>> = match waiting.target.encoding().resampling() {
+        Some(resample) => resample.converter(layout, rate)?,
+        None => None,
+    };
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
     let mut block = vec![F::ZERO; layout.interleaved_len(Samples::new(chunk))];
@@ -567,12 +583,10 @@ fn measure<F: FftFloat>(
             break;
         }
         let frames = block.as_interleaved().slice(Samples::ZERO..Samples::new(n));
-        match resampler.as_mut() {
-            Some((rs, planes, out)) => {
-                crate::planar::split(frames, planes)?;
-                rs.push(Planes::from_vecs(planes)?, out)?;
-                feed_planes(&mut measurer, out, &mut staging, layout)?;
-            }
+        match converter.as_mut() {
+            Some(converter) => converter.push(frames, |out| {
+                measurer.feed_interleaved(out.as_interleaved())
+            })?,
             None => measurer.feed_interleaved(frames)?,
         }
         done += Samples::new(n);
@@ -580,28 +594,69 @@ fn measure<F: FftFloat>(
     }
     // The loop above ends on a read that found nothing left, after its check
     // at the top: a cancel on the last chunk's reading is seen there.
-    if let Some((rs, _, out)) = resampler.as_mut() {
-        rs.finish(out)?;
-        feed_planes(&mut measurer, out, &mut staging, layout)?;
+    if let Some(converter) = converter.as_mut() {
+        converter.finish(|out| measurer.feed_interleaved(out.as_interleaved()))?;
     }
     let reading = measurer.finish();
     reading.check().map_err(unmeasurable)?;
     Ok(Outcome::Finished((reading, done)))
 }
 
-/// Interleaves what the converter produced into the meter, and clears it.
-fn feed_planes<F: Float>(
-    measurer: &mut Measurer,
-    out: &mut [Vec<F>],
-    staging: &mut Vec<F>,
-    layout: ChannelLayout,
-) -> Result<()> {
-    crate::planar::join(out, staging, layout)?;
-    measurer.feed_interleaved(Interleaved::new(staging, layout)?)?;
-    for p in out.iter_mut() {
-        p.clear();
+/// What a landed file is, for the caller: its size on disk, `0` if it cannot
+/// be stat'd.
+fn written(
+    path: &std::path::Path,
+    landed: Landed,
+    dropped_events: u64,
+    placement: tutti_buffers::Placement,
+) -> Written {
+    Written {
+        path: path.to_path_buf(),
+        bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        frames: landed.frames(),
+        dropped_events,
+        clipped_samples: landed.clipped(),
+        gain: None,
+        measured: None,
+        placement,
+        spill_left: None,
     }
-    Ok(())
+}
+
+/// Reads `replay` back through `chain`: the write pass of a normalized output
+/// (a second writer per format is how a crate ends up with a whole-signal
+/// encoder that works and a streaming one that does not).
+///
+/// `block_frames` is how many frames one read takes, and `done` of `total`
+/// frames of `stage` were already spent in the pass (by the outputs before
+/// this one). The token is checked before every block. A cancelled pass is
+/// [`Outcome::Cancelled`].
+fn replay_through<F: FftFloat>(
+    replay: &mut dyn Replay<F>,
+    chain: &mut Chain<F>,
+    block_frames: usize,
+    stage: Stage,
+    done: Samples,
+    total: Samples,
+    control: &mut Control<'_>,
+) -> Result<Outcome<Samples>> {
+    let layout = chain.layout();
+    let mut block = vec![F::ZERO; layout.interleaved_len(Samples::new(block_frames.max(1)))];
+    let mut block = InterleavedMut::new(&mut block, layout)?;
+    let mut at = done.get();
+    loop {
+        if control.is_cancelled() {
+            return Ok(Outcome::Cancelled);
+        }
+        let n = replay.fill(block.reborrow())?;
+        if n == 0 {
+            break;
+        }
+        chain.block(block.as_interleaved().slice(Samples::ZERO..Samples::new(n)))?;
+        at += n;
+        control.advance(stage, Samples::new(at), total);
+    }
+    Ok(Outcome::Finished(Samples::new(at)))
 }
 
 /// A file output whose frames are all written: its chain, to be finalized.

@@ -587,7 +587,7 @@ pub mod session {
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
         BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
         MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
-        Progress, Resample, Stage,
+        Progress, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
@@ -648,13 +648,13 @@ pub mod session {
 /// `codec`.
 #[cfg(feature = "codec")]
 pub mod codec {
+    pub use tutti_codec::{Codec, EncodeError, Kept, Unfinished};
     #[cfg(any(
         feature = "encode-wav",
         feature = "encode-flac",
         feature = "encode-aiff"
     ))]
-    pub use tutti_codec::write_wave;
-    pub use tutti_codec::{Codec, EncodeError, Kept, Unfinished};
+    pub use tutti_codec::{Converter, Encoding, Landed, Resample, ToFile, encode, write};
     // The noise shape an `IntPcm` names.
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, IntPcm, Spec, SpecError, can_decode, decodable_extensions,

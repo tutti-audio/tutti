@@ -618,13 +618,12 @@ fn a_stream_over_bytes_reads_the_frames_the_path_stream_reads() {
 #[test]
 fn an_aiff_written_reads_back_exactly_at_each_depth() {
     use tutti_buffers::{I24, Mono, Sample, SampleFormat};
-    use tutti_codec::{Format, Pcm, write_wave};
+    use tutti_codec::{Encoding, Format, Pcm, encode};
     use tutti_units::SampleRate;
 
     fn round_trip<S: Sample + std::fmt::Debug>(samples: &[S], pcm: Pcm, format: SampleFormat) {
         let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(samples));
-        let mut bytes = Vec::new();
-        write_wave(&wave, &mut bytes, Format::Aiff(pcm)).unwrap();
+        let bytes = encode(&wave, &Encoding::new(Format::Aiff(pcm))).unwrap();
         assert_eq!(read_wave_metadata(bytes.clone()).unwrap().format, format);
         assert_eq!(read_wave::<S>(bytes).unwrap(), wave, "{pcm:?}");
     }
