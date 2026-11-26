@@ -226,9 +226,9 @@ mod sealed {
     /// What every file of a bounce shares.
     #[derive(Debug)]
     pub struct FileOptions {
-        pub resample: Option<Resample>,
-        pub replace: bool,
-        pub normalize: Option<Gain>,
+        pub(super) resample: Option<Resample>,
+        pub(super) replace: bool,
+        pub(super) normalize: Option<Gain>,
     }
 
     /// What a main output is built from: the bounce's figures that a file or a
