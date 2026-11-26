@@ -851,21 +851,25 @@ fn a_song_position_past_the_field_is_not_sent_and_is_counted_refused() {
     assert_eq!(rig.controls.losses().refused, 0);
 }
 
-/// **A sync config's structure is its Group**: the node's clock and Machine
-/// Control state are the Group's, so another Group is another node, while the
-/// messages are a setting written to the running one. The one setting has no
-/// address, so no initial value is listed, and the built node starts with the
-/// messages given.
+/// **A sync config's structure is its Group and its messages**: the node's
+/// clock and Machine Control state are the Group's, so another Group is another
+/// node, and the messages are a setting with no address, which nothing writes
+/// to a running node, so other messages are another node too. No initial value
+/// is listed, and the built node starts with the messages given.
 #[test]
-fn a_sync_config_is_structured_by_its_group_and_builds_with_its_messages() {
+fn a_sync_config_is_structured_by_its_group_and_messages() {
     use tutti_graph::{Initials, IntoNode, NodeConfig};
     let base = SyncOutConfig::new(G);
     assert!(!NodeConfig::<f32>::same_structure(
         &base,
         &SyncOutConfig::new(MidiGroup::masked(2))
     ));
-    assert!(NodeConfig::<f32>::same_structure(
+    assert!(!NodeConfig::<f32>::same_structure(
         &base,
+        &SyncOutConfig::new(G).sending(clock())
+    ));
+    assert!(NodeConfig::<f32>::same_structure(
+        &base.sending(clock()),
         &SyncOutConfig::new(G).sending(clock())
     ));
     assert_eq!(NodeConfig::<f32>::initials(&base), Initials::new());

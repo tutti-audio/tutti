@@ -256,7 +256,8 @@ impl HarmonyNode {
 /// What a [`HarmonyNode`] is made from: the lanes it sends from its first
 /// block. The lanes are a published value a session replaces
 /// (`harmony.changes()`), so the config has no structure: any two make the same
-/// node, and differing lanes are a write to the running one.
+/// node, and a running node's lanes are replaced through
+/// [`HarmonyControls::set`].
 #[derive(Clone, Debug, Default)]
 pub struct HarmonyConfig {
     changes: Arc<HarmonyChanges>,

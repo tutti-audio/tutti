@@ -777,7 +777,8 @@ impl MidiClipNode {
 /// What a [`MidiClipNode`] is made from: the clip it plays from its first
 /// block. The clip, its header included, is a published value a session
 /// replaces (`clip.events()`), so the config has no structure: any two make the
-/// same node, and a differing clip is a write to the running one.
+/// same node, and a running node's clip is replaced through
+/// [`MidiClipControls::set`].
 #[derive(Clone, Debug, Default)]
 pub struct MidiClipConfig {
     events: Arc<ClipEvents>,

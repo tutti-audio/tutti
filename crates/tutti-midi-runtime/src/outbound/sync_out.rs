@@ -139,7 +139,10 @@ impl SyncOut {
 /// What a [`SyncOut`] is made from: the [`MidiGroup`] it sends on and what it
 /// sends from its first block. The Group is structure (the node's clock and
 /// Machine Control state are the Group's), so a config on another Group makes
-/// another node; the messages are a setting, written to the running node.
+/// another node. The messages are a setting with no
+/// [`SettingKind`](tutti_units::SettingKind), so nothing writes them to a
+/// running node: a config with other messages makes another node too. A running
+/// node's messages change live through [`SyncOutControls::messages`].
 ///
 /// ```
 /// use tutti_graph::IntoNode as _;
@@ -165,9 +168,8 @@ pub struct SyncOutConfig {
 }
 
 impl SyncOutConfig {
-    /// A node that sends on `group`, sending nothing until
-    /// [`messages`](SyncOutControls::messages) is set, placing events at the
-    /// graph's rate once prepared.
+    /// The config of a node on `group` that sends no message
+    /// ([`SyncMessages::OFF`]).
     #[must_use]
     pub fn new(group: MidiGroup) -> Self {
         Self {
@@ -209,9 +211,9 @@ impl<F: Float> NodeConfig<F> for SyncOutConfig {
         SyncOut::from(*self)
     }
 
-    /// The Group is the structure; `messages` is a setting.
+    /// The Group and the messages: nothing writes either to a running node.
     fn same_structure(&self, other: &Self) -> bool {
-        self.group == other.group
+        self.group == other.group && self.settings.messages == other.settings.messages
     }
 
     /// None: the one setting, `messages`, has no [`SettingKind`](tutti_units::SettingKind).
