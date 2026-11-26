@@ -42,10 +42,14 @@ struct NodeParams {
     lanes: Vec<(UnitAddr, EffectiveCell)>,
 }
 
-/// The params a node had when a replace took its key: what the incoming
-/// node's params are seeded from ([`ValueTable::address`]).
+/// The params and slots a node had when a replace took its key: what the
+/// incoming node's are seeded from ([`ValueTable::address`],
+/// [`ValueTable::provide_node`]).
 #[derive(Default, Debug)]
-pub(crate) struct Outgoing(Option<NodeParams>);
+pub(crate) struct Outgoing {
+    params: Option<NodeParams>,
+    slots: BTreeMap<SlotId, slot::Erased>,
+}
 
 /// The key-to-cell table, behind the value lock.
 #[derive(Default, Debug)]
@@ -254,7 +258,7 @@ impl ValueTable {
             .collect();
         let old = {
             let mut params = self.params.lock();
-            if let Some(from) = &outgoing.0 {
+            if let Some(from) = &outgoing.params {
                 for &(addr, declared) in &seeds {
                     seed_from(from, &set, addr, declared);
                 }
@@ -276,10 +280,13 @@ impl ValueTable {
     /// failed leaves the node it did not replace its params, seeds and lanes.
     /// Control thread.
     pub(crate) fn reinstate(&self, node: NodeKey, outgoing: Outgoing) {
-        if let Some(params) = outgoing.0 {
-            let old = self.params.lock().nodes.insert(node, params);
-            drop(old);
-        }
+        let Outgoing { params, slots } = outgoing;
+        let old = {
+            let mut table = self.params.lock();
+            table.slots.extend(slots);
+            params.and_then(|params| table.nodes.insert(node, params))
+        };
+        drop(old);
     }
 
     /// Binds the delivered-value cells `cell` names to `node`'s params, as
@@ -354,22 +361,28 @@ impl ValueTable {
     }
 
     /// Registers the published values and settings of `node`, from what its
-    /// parts said of it. Control thread.
+    /// parts said of it, each seeded from the `outgoing` node's slot of the
+    /// same id as its params are ([`address`](Self::address)): the outgoing
+    /// value carries over unless the declaration's initial changed. Control
+    /// thread.
     pub(crate) fn provide_node(
         &self,
         node: NodeKey,
         published: &[ErasedPublished],
         settings: &[ErasedSetting],
+        outgoing: &Outgoing,
     ) {
         let mut params = self.params.lock();
-        params.slots.extend(
-            published
-                .iter()
-                .filter_map(|entry| slot::slot_of(node, entry)),
-        );
-        params
-            .slots
-            .extend(settings.iter().map(|entry| slot::setting_of(node, entry)));
+        let slots = published
+            .iter()
+            .filter_map(|entry| slot::slot_of(node, entry))
+            .chain(settings.iter().map(|entry| slot::setting_of(node, entry)));
+        for (id, slot) in slots {
+            if let Some(old) = outgoing.slots.get(&id) {
+                slot.seed_from(old);
+            }
+            params.slots.insert(id, slot);
+        }
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
@@ -545,7 +558,7 @@ impl ValueTable {
         drop(self.take(node, SlotId::node));
     }
 
-    /// [`retire`](Self::retire), handing back the params the node had, for
+    /// [`retire`](Self::retire), handing back the params and slots the node had, for
     /// the node that replaces it to be seeded from
     /// ([`address`](Self::address)). The slots that outlive the instance
     /// ([`SlotId::instance_node`]) stay. Control thread.
@@ -562,14 +575,19 @@ impl ValueTable {
             #[cfg(not(feature = "plugin"))]
             let plugin = ();
             let gone = params.nodes.remove(&node);
-            let slots: Vec<_> = params
+            let slots = params
                 .slots
                 .extract_if(.., |id, _| owner(*id) == Some(node))
                 .collect();
             (gone, slots, plugin)
         };
-        drop((slots, plugin));
-        Outgoing(gone)
+        // Without the `plugin` feature there is nothing to drop.
+        #[cfg_attr(not(feature = "plugin"), allow(dropping_copy_types))]
+        drop(plugin);
+        Outgoing {
+            params: gone,
+            slots,
+        }
     }
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.
