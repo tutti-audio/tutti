@@ -5,7 +5,7 @@
 use crate::chain::{Stages, options_of, spec_of};
 use crate::{Chain, Encoding, Landed, Result, ToFile};
 use std::io::Cursor;
-use tutti_buffers::{Interleaved, InterleavedMut, Sample, SampleFormat, Wave, interleave};
+use tutti_buffers::{FloatWidth, Interleaved, InterleavedMut, Sample, Wave, interleave};
 use tutti_dsp::FftFloat;
 use tutti_units::Samples;
 
@@ -28,7 +28,8 @@ const WRITE_CHUNK: usize = 8192;
 /// - An integer type quantizes as its [`IntPcm`](crate::IntPcm) says (dithered by default,
 ///   rounded to the nearest step with `no_dither`), from the wave's own format: a block that
 ///   needs no fold, resample or gain reaches the encoder unconverted. The stages run in `f64`
-///   for a wave of `f64` and in `f32` for any other.
+///   when the wave's samples carry more significant bits than an `f32` does (`i32` and `f64`),
+///   and in `f32` for any other, so no sample loses a bit it holds.
 ///
 /// # Errors
 ///
@@ -58,7 +59,7 @@ const WRITE_CHUNK: usize = 8192;
 /// # }
 /// ```
 pub fn write<S: Sample>(wave: &Wave<S>, encoding: &Encoding, to: &ToFile) -> Result<Landed> {
-    if S::FORMAT == SampleFormat::F64 {
+    if stages_in_f64::<S>() {
         write_in::<f64, S>(wave, encoding, to)
     } else {
         write_in::<f32, S>(wave, encoding, to)
@@ -105,7 +106,7 @@ fn write_in<F: FftFloat, S: Sample>(
 /// # }
 /// ```
 pub fn encode<S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Result<Vec<u8>> {
-    if S::FORMAT == SampleFormat::F64 {
+    if stages_in_f64::<S>() {
         encode_in::<f64, S>(wave, encoding)
     } else {
         encode_in::<f32, S>(wave, encoding)
@@ -122,6 +123,18 @@ fn encode_in<F: FftFloat, S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Res
     feed(wave, |block| stages.block(block, &mut encoder))?;
     stages.flush(&mut encoder)?;
     Ok(encoder.finish()?.into_inner())
+}
+
+/// Whether the stages of a wave of `S` run in `f64`: its samples carry more significant bits
+/// than `f32`'s mantissa holds, so an `f32` stage would round them. An integer format carries
+/// its bit width; a float carries its mantissa.
+fn stages_in_f64<S: Sample>() -> bool {
+    let significant = match FloatWidth::try_from(S::FORMAT) {
+        Ok(FloatWidth::F32) => f32::MANTISSA_DIGITS,
+        Ok(FloatWidth::F64) => f64::MANTISSA_DIGITS,
+        Err(_) => S::BITS,
+    };
+    significant > f32::MANTISSA_DIGITS
 }
 
 /// Feeds `wave` to `block` in chunks of its own sample format: the encoder

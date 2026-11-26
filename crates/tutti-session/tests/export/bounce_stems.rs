@@ -19,12 +19,13 @@ use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::Resample;
 use tutti_codec::{Format, Pcm};
-use tutti_export::{Normalize, Produced, RenderError, TargetError};
+use tutti_export::{Normalize, RenderError, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
     ExportClock, InputPort, MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain,
+    StemKey,
 };
 use tutti_session::{Bounced, BufferMainOutput, MainOutputKind};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
@@ -56,10 +57,10 @@ fn bounce(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
 
 /// The planes of every target a finished bounce produced, main output first.
 fn planes(out: Result<Bounced<BufferMainOutput>, BounceError>) -> Vec<Vec<Vec<f32>>> {
-    let (main_output, stems) = out.expect("the bounce renders").into_parts();
+    let (main_output, mut done, keys) = out.expect("the bounce renders").into_parts();
     std::iter::once(main_output.into_planes())
-        .chain(stems.into_iter().map(|p| match p {
-            Produced::Buffers(rendered) => rendered.into_planes(),
+        .chain(keys.iter().map(|key| match key {
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").into_planes(),
             other => panic!("expected planes, got {other:?}"),
         }))
         .collect()
@@ -413,10 +414,10 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
                 ),
         )
         .expect("renders");
-        let (main_output, stems) = done.into_parts();
+        let (main_output, done, keys) = done.into_parts();
         let gains: Vec<Option<Db>> = std::iter::once(main_output.gain)
-            .chain(stems.into_iter().map(|p| match p {
-                Produced::File(written) => written.gain,
+            .chain(keys.iter().map(|key| match key {
+                StemKey::File(key) => done.file(key).expect("its own key").gain,
                 other => panic!("expected a file, got {other:?}"),
             }))
             .collect();

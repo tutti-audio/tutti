@@ -16,7 +16,6 @@ use tutti_session::MainOutput;
 use std::sync::Arc;
 
 use support::clap_probe;
-use tutti_export::Produced;
 
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{ScopedEnv, midi};
@@ -30,7 +29,7 @@ use tutti_plugin_types::PluginRef;
 use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InputPort,
-    OutputPort, Range, Session, Stem,
+    OutputPort, Range, Session, Stem, StemKey,
 };
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::MidiChannel;
@@ -81,9 +80,11 @@ fn stem_planes(
 ) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
         Ok(out) => {
-            let (_, mut stems) = out.into_parts();
-            match stems.pop() {
-                Some(Produced::Buffers(rendered)) if stems.is_empty() => rendered.into_planes(),
+            let (_, mut done, keys) = out.into_parts();
+            match keys.as_slice() {
+                [StemKey::Buffers(key)] => {
+                    done.take_buffers(key).expect("its own key").into_planes()
+                }
                 other => panic!("expected one stem held in memory, got {other:?}"),
             }
         }

@@ -10,18 +10,19 @@
 //! `Job`, a list of `Output`s and a `Control`:
 //!
 //! - An `Output` is a `Feed` (the graph's outputs, or a plan tap, `Feed::Tap`, read
-//!   after every block and placed by a `Placement`) and a `Target`: a file
+//!   after every block and placed by a `Placement`) and a target: a file
 //!   (`FileTarget`: a `tutti_codec::Encoding`, a `ToFile` and the normalize) or planes in
 //!   memory (`BufferTarget`, returned as a `Rendered`).
-//!   `render` returns one `Produced` per output, in order; `render_one` is the
-//!   helper for a render of one.
+//!   `Outputs` holds them by kind: `Outputs::file` and `Outputs::buffers` each return the key
+//!   (`FileKey`, `BufferKey`) its result is read by, from the `Done` that `render` returns
+//!   (`Done::file`, `Done::buffers`).
 //! - A file output that does not normalize **streams**: each block goes through
 //!   its resample, dither and encoder as it arrives and no PCM is held.
 //! - A file output that normalizes keeps what the graph rendered for it (in memory
 //!   up to 512 MiB across the render, then in a temporary file beside its
 //!   target), measures it at the file's rate, and writes it again with the gain.
 //!   The graph is never rendered twice. An output can take another's gain
-//!   (`NormalizeSpec::from_output`), so a set of stems keeps the main output's balance.
+//!   (`Gain::Of`), so a set of stems keeps the main output's balance.
 //! - Every file is written to a temporary beside its path and put in place at the
 //!   end, after every output has been finalized and the fork and the event loss
 //!   have been checked. A render that fails or is cancelled leaves every path as it
@@ -89,7 +90,7 @@
 //! ```rust
 //! use tutti_timeline::FrozenClock;
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
-//! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
+//! use tutti_export::{render, BufferTarget, Control, FileTarget, Job, Output, Outputs, RenderGraph, Setup, TailPolicy};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_codec::{Encoding, FlacLevel, Format, IntDepth, IntPcm, Pcm, ToFile};
 //! use tutti_rt::SplitMix64;
@@ -111,45 +112,37 @@
 //!
 //! // To buffers: planar, one `Vec` per channel, and `frames()` is FRAMES per
 //! // plane rather than the total sample count.
-//! let rendered = render_one(
-//!     &mut tone(),
-//!     &job,
-//!     &FrozenClock,
-//!     Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-//!     &mut Control::none(),
-//! )
-//! .expect("a 0.5 s stereo render")
-//! .into_finished()
-//! .and_then(Produced::into_buffers)
-//! .expect("nothing cancels it");
+//! let mut outputs = Outputs::new();
+//! let planes = outputs.buffers(Output::main_output(BufferTarget::new(ChannelLayout::STEREO)));
+//! let done = render(&mut tone(), &job, &FrozenClock, outputs, &mut Control::none())
+//!     .expect("a 0.5 s stereo render")
+//!     .into_finished()
+//!     .expect("nothing cancels it");
+//! let rendered = done.buffers(&planes).expect("a key of these outputs");
 //! assert_eq!(rendered.channels(), 2);
 //! assert_eq!(rendered.frames().get(), 24_000);
 //!
 //! // Or straight to files, which streams — no PCM is held whole. One pass can
 //! // write several, each in its own format.
 //! let dir = tempfile::tempdir().expect("temp dir");
-//! let produced = render(
-//!     &mut tone(),
-//!     &job,
-//!     &FrozenClock,
-//!     vec![
-//!         Output::main_output(FileTarget::new(
-//!             Encoding::new(Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard }),
-//!             ToFile::new(dir.path().join("main_output.flac")),
-//!         )),
-//!         Output::main_output(FileTarget::new(
-//!             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
-//!                 .dither_seed(SplitMix64::mix(1)),
-//!             ToFile::new(dir.path().join("main_output.wav")),
-//!         )),
-//!     ],
-//!     &mut Control::none(),
-//! )
-//! .expect("flac and wav encode")
-//! .into_finished()
-//! .expect("nothing cancels it");
-//! for output in produced {
-//!     let written = output.into_file().expect("a file output");
+//! let mut outputs = Outputs::new();
+//! let files = [
+//!     outputs.file(Output::main_output(FileTarget::new(
+//!         Encoding::new(Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard }),
+//!         ToFile::new(dir.path().join("main_output.flac")),
+//!     ))),
+//!     outputs.file(Output::main_output(FileTarget::new(
+//!         Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+//!             .dither_seed(SplitMix64::mix(1)),
+//!         ToFile::new(dir.path().join("main_output.wav")),
+//!     ))),
+//! ];
+//! let done = render(&mut tone(), &job, &FrozenClock, outputs, &mut Control::none())
+//!     .expect("flac and wav encode")
+//!     .into_finished()
+//!     .expect("nothing cancels it");
+//! for key in &files {
+//!     let written = done.file(key).expect("a key of these outputs");
 //!     assert!(written.bytes > 0, "a finalized export reports its size on disk");
 //! }
 //! ```
@@ -198,10 +191,10 @@ mod rendered;
 pub use rendered::{Rendered, RenderedError};
 
 mod output;
-pub use output::{
-    BufferTarget, Feed, FileTarget, GainSource, NormalizeSpec, Output, Placement, Produced, Target,
-    TargetError,
-};
+pub use output::{BufferTarget, Feed, FileTarget, Gain, Output, Placement, TargetError};
+
+mod outputs;
+pub use outputs::{BufferKey, Done, DoneError, FileKey, Outputs};
 
 mod normalize;
 pub use normalize::Normalize;
@@ -222,7 +215,7 @@ use tutti_timeline::RenderClock;
 use tutti_units::{Db, Samples};
 
 /// A file an export wrote, from a file [`Output`] of [`render()`]
-/// ([`Produced::File`]).
+/// ([`Done::file`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Written {
     /// Where it was written: the `path` the entry point was given.
@@ -253,7 +246,7 @@ pub struct Written {
     /// against the target or ceiling after an integer format's headroom was
     /// taken off it, so for [`Normalize::Peak`] it is
     /// `target - measured.true_peak` of that lowered target. An output that
-    /// took another's gain ([`GainSource::FromOutput`]) reports that gain, the
+    /// took another's gain ([`Gain::Of`]) reports that gain, the
     /// same figure the output it followed reports.
     pub gain: Option<Db>,
     /// What a normalizing output read from the audio before it applied
@@ -284,17 +277,17 @@ pub struct Written {
 }
 
 /// Renders `graph` once into every one of `outputs`, and writes or returns
-/// what each becomes ([`Produced`], in the order given).
+/// what each becomes ([`Done`], read by the key each output was added under).
 ///
 /// One pass: the graph is stepped once per block however many outputs there
 /// are, and each output reads its [`Feed`] (the graph's outputs, or a plan tap)
-/// folds it onto its [`Target`]'s layout, and writes it. An output that does
+/// folds it onto its target's layout, and writes it. An output that does
 /// not normalize is streamed through its resample, dither and encoder as the
 /// blocks arrive and holds no PCM; one that does keeps its audio (in memory up
 /// to 512 MiB across the render, past it in a temporary file beside its
 /// target, removed afterwards), is measured at its file's rate and written
 /// again with the gain, and the graph is never rendered twice. An output that
-/// takes another's gain ([`GainSource::FromOutput`]) is written with it, so a
+/// takes another's gain ([`Gain::Of`]) is written with it, so a
 /// set of stems keeps the main output's balance.
 ///
 /// The render is the `job`'s: its rate (the graph must be prepared at it:
@@ -332,7 +325,8 @@ pub struct Written {
 /// a target of no channels; [`RenderError::Target`] for an output that cannot be
 /// rendered as given ([`TargetError`]: a tap whose lanes are not as wide as
 /// its placement or cannot be placed on the target, a gain taken from an
-/// output that does not measure, two outputs with one path);
+/// output that does not measure or from another [`Outputs`], two outputs with
+/// one path);
 /// [`RenderError::InvalidConfig`] if the graph was prepared at another rate or its
 /// editor does not feed its executor, or the graph's channels cannot be placed
 /// on a target's ([`ConfigError::Placement`]); an encoder's refusal of a format
@@ -352,9 +346,9 @@ pub fn render<F: FftFloat>(
     graph: &mut RenderGraph<F>,
     job: &Job,
     clock: &dyn RenderClock,
-    outputs: Vec<Output<F>>,
+    outputs: Outputs<F>,
     control: &mut Control<'_>,
-) -> Result<Outcome<Vec<Produced<F>>>> {
+) -> Result<Outcome<Done<F>>> {
     render::outputs::render_outputs(
         graph,
         job,
@@ -363,25 +357,4 @@ pub fn render<F: FftFloat>(
         control,
         spill::SPILL_MEMORY_BYTES,
     )
-}
-
-/// [`render()`] for the one output: the helper that keeps `vec![output]` out of
-/// the call of a render with one target.
-///
-/// # Errors
-///
-/// As [`render()`].
-pub fn render_one<F: FftFloat>(
-    graph: &mut RenderGraph<F>,
-    job: &Job,
-    clock: &dyn RenderClock,
-    output: Output<F>,
-    control: &mut Control<'_>,
-) -> Result<Outcome<Produced<F>>> {
-    Ok(render(graph, job, clock, vec![output], control)?.map(the_one))
-}
-
-/// What a render of one output produced.
-fn the_one<F: FftFloat>(mut produced: Vec<Produced<F>>) -> Produced<F> {
-    produced.pop().expect("one output produces one result")
 }

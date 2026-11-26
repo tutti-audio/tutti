@@ -18,11 +18,11 @@ use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_export::Produced;
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, MainOutput, PeerState, Range, Session, Stem,
+    StemKey,
 };
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
@@ -96,10 +96,15 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         .tail(BounceTail::None)
         .stem_with(Stem::new(node.erase()));
     let planes = match bounced(&mut session, bounce) {
-        Ok(out) => match out.into_parts().1.pop() {
-            Some(Produced::Buffers(rendered)) => rendered.into_planes(),
-            other => panic!("expected one stem held in memory, got {other:?}"),
-        },
+        Ok(out) => {
+            let (_, mut done, keys) = out.into_parts();
+            match keys.as_slice() {
+                [StemKey::Buffers(key)] => {
+                    done.take_buffers(key).expect("its own key").into_planes()
+                }
+                other => panic!("expected one stem held in memory, got {other:?}"),
+            }
+        }
         Err(e) => panic!("the bounce failed: {e:?}"),
     };
     // Notes mode renders the held key (60) on channel 0.

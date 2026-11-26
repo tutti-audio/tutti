@@ -168,31 +168,30 @@ fn a_token_is_shared_and_none_never_cancels() {
 /// normalized figures read 0.025 and 0.05.
 #[test]
 fn preparing_reports_steps_in_the_band_the_render_leaves() {
-    use crate::{BufferTarget, FileTarget, Normalize, NormalizeSpec, Output};
+    use crate::{FileTarget, Gain, Normalize};
     use tutti_buffers::ChannelLayout;
     use tutti_codec::{Format, Pcm};
     use tutti_units::Db;
-    let streaming = [Output::<f32>::main_output(BufferTarget::new(
-        ChannelLayout::STEREO,
-    ))];
-    let normalized = [Output::main_output(
+    let file = || {
         FileTarget::new(
             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
             ToFile::new("n.wav"),
         )
-        .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-1.0)))),
-    )];
-    for (outputs, steps, end) in [
-        (&streaming, [(2u32, 0.025f32), (4, 0.05)], 0.05f32),
-        (&normalized, [(2, 0.015), (4, 0.03)], 0.03),
+    };
+    // Planes in memory never normalize, so a render of them alone has no file to report.
+    let streaming: [FileTarget; 0] = [];
+    let normalized = [file().normalize(Gain::Own(Normalize::peak(Db::new(-1.0))))];
+    for (files, steps, end) in [
+        (&streaming[..], [(2u32, 0.025f32), (4, 0.05)], 0.05f32),
+        (&normalized[..], [(2, 0.015), (4, 0.03)], 0.03),
     ] {
         let mut seen = Vec::new();
         let mut record = |p: &Progress| seen.push(*p);
         let token = CancelToken::new();
         let mut control = Control::new(&token).on_progress(&mut record);
         for (done, _) in steps {
-            control.preparing(outputs.iter().map(Output::target), done, 4);
+            control.preparing(files, done, 4);
         }
         control.begin(Stage::Rendering, Some(Samples::new(10)));
         for (p, (_, want)) in seen.iter().zip(steps) {

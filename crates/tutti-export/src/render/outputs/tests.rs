@@ -1,7 +1,7 @@
 use super::*;
 use crate::Setup;
 use crate::spill::SPILL_MEMORY_BYTES;
-use crate::{BufferTarget, Normalize, NormalizeSpec, Progress, TailPolicy};
+use crate::{BufferTarget, Gain, Normalize, Output, Progress, TailPolicy};
 use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
 use tutti_codec::Encoding;
@@ -56,29 +56,25 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
             .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
         ToFile::new(&path),
     )
-    .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))));
-    let produced = render_outputs(
+    .normalize(Gain::Own(Normalize::peak(Db::new(-6.0))));
+    let mut outputs = Outputs::new();
+    let file = outputs.file(Output::main_output(target));
+    let buffers = outputs.buffers(Output::main_output(BufferTarget::new(
+        ChannelLayout::STEREO,
+    )));
+    let done = render_outputs(
         &mut graph(),
         &job,
         &FrozenClock,
-        vec![
-            Output::main_output(target),
-            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-        ],
+        outputs,
         &mut control,
         budget,
     )
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let mut produced = produced.into_iter();
-    let written = produced.next().unwrap().into_file().unwrap();
-    let planes = produced
-        .next()
-        .unwrap()
-        .into_buffers()
-        .unwrap()
-        .into_planes();
+    let written = done.file(&file).unwrap().clone();
+    let planes = done.buffers(&buffers).unwrap().planes().to_vec();
     (written, planes, seen_spill)
 }
 
@@ -143,14 +139,16 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
     )
     .unwrap();
     let target = || {
-        Output::main_output(
+        let mut outputs = Outputs::new();
+        outputs.file(Output::main_output(
             crate::FileTarget::new(
                 Encoding::new(tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)))
                     .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
                 ToFile::new(&path),
             )
-            .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
-        )
+            .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
+        ));
+        outputs
     };
 
     let token = crate::CancelToken::new();
@@ -165,7 +163,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
         &mut graph(),
         &job,
         &FrozenClock,
-        vec![target()],
+        target(),
         &mut Control::new(&token).on_progress(&mut cancel_in_writing),
         0,
     )
@@ -185,7 +183,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
         &mut silent,
         &job,
         &FrozenClock,
-        vec![target()],
+        target(),
         &mut Control::none(),
         0,
     )
