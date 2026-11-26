@@ -605,6 +605,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a live command on an open output: the device's UMP Stream negotiation settled a new Protocol and the output follows it in place",
     ),
     ty(
+        "crates/tutti-midi-hardware/src/devices.rs",
+        "OpenOutput::set_mpe11",
+        SETTER,
+        "a live command on an open output: the app's MPE 1.1 zones change while events flow, and the Configuration Messages that say so are queued now",
+    ),
+    ty(
         "crates/tutti-midi-hardware/src/port/manager.rs",
         "HardwareMidiInputs::set_input_timing",
         SETTER,
@@ -843,6 +849,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "MpeTranslator::set_profile",
         SETTER,
         "a live command on a running translator: a Profile change stops and resets the channels that leave MPE and sends the events that say so",
+    ),
+    ty(
+        "crates/tutti-voicing/src/mpe_sender.rs",
+        "MpeSender::set_mpe11",
+        SETTER,
+        "a live command on a running sender: the app's MPE 1.1 zones change, the Configuration Messages that say so are sent at once, and the notes of a zone that changed are forgotten because the receiver ended them",
     ),
     ty(
         "crates/tutti-voicing/src/mpe_sender.rs",

@@ -2,6 +2,14 @@ use super::*;
 use crate::{ControllerSupport, PitchBendSupport};
 use tutti_ump::{MpeChannels, NoteNumber, NoteVelocity, U7, Voice2};
 
+/// The MPE Configuration Message of `zone` in the first Group.
+fn mcm_of(zone: Mpe11Zone) -> Ump {
+    let zones = Some(Mpe11Zones::single(zone));
+    Mpe11Zones::configuration(None, zones, MidiGroup::FIRST)
+        .next()
+        .unwrap()
+}
+
 const MASTER: PitchBendSensitivity = PitchBendSensitivity::MPE_MASTER_DEFAULT;
 const MEMBER: PitchBendSensitivity = PitchBendSensitivity::MPE_MEMBER_DEFAULT;
 
@@ -261,7 +269,7 @@ fn an_mcm_round_trips_and_zero_disables() {
     for z in [MpeZone::Lower, MpeZone::Upper] {
         for n in 1..=15 {
             assert_eq!(
-                Mpe11Zone::from_mcm(&zone(z, n).to_mcm()),
+                Mpe11Zone::from_mcm(&mcm_of(zone(z, n))),
                 Some(Mcm::Configure {
                     zone: z,
                     members: MemberCount::of(n)
@@ -272,12 +280,19 @@ fn an_mcm_round_trips_and_zero_disables() {
     // Word values from RP-053 / M2-104 section 7.4.7: Registered Controller
     // bank 0 index 6 on the master channel, the count in the top 7 bits.
     assert_eq!(
-        zone(MpeZone::Lower, 7).to_mcm(),
+        mcm_of(zone(MpeZone::Lower, 7)),
         Ump([0x4020_0006, 7 << 25, 0, 0])
     );
     assert_eq!(
-        zone(MpeZone::Upper, 4).to_mcm(),
+        mcm_of(zone(MpeZone::Upper, 4)),
         Ump([0x402F_0006, 4 << 25, 0, 0])
+    );
+    // The message names its Group, and a zone that goes has a count of 0.
+    let group = MidiGroup::new(5).unwrap();
+    let upper = Mpe11Zones::single(zone(MpeZone::Upper, 4));
+    assert_eq!(
+        Mpe11Zones::configuration(Some(upper), None, group).collect::<Vec<_>>(),
+        [Ump([0x452F_0006, 0, 0, 0])]
     );
     // Zero members: the zone is disabled, not a zone.
     let off = registered(ch(0), Rpn::MPE_CONFIGURATION, 0);

@@ -879,6 +879,36 @@ fn the_sink_follows_the_protocol_the_output_is_in() {
     assert_eq!(*told.lock(), [Protocol::Midi2, Protocol::Midi1]);
 }
 
+/// **An MPE 1.1 zone the app chose is queued as its MPE Configuration Message**
+/// (M1-100 section 2.2.1) on the device's sink, in its Protocol, and a zone that
+/// goes is one with no Member Channels.
+#[test]
+fn an_mpe11_zone_is_queued_as_its_configuration_message() {
+    use tutti_midi_protocol::{MemberCount, Mpe11Zone, Mpe11Zones, PitchBendSensitivity};
+    use tutti_ump::{MidiGroup, Ump};
+    let (devices, mut events, fake) = fake();
+    fake.plug(endpoint(1, "Synth"), PortDirection::Output);
+    wake(&mut events);
+    let mut out = devices
+        .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
+        .unwrap();
+    let zone = Mpe11Zone::lower(
+        MemberCount::of(7),
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+    );
+    out.set_mpe11(MidiGroup::FIRST, Some(Mpe11Zones::single(zone)));
+    out.set_mpe11(MidiGroup::FIRST, None);
+    let sent = fake.take_sent(EndpointId::from_raw(1));
+    assert_eq!(
+        sent,
+        [
+            Ump([0x4020_0006, 7 << 25, 0, 0]),
+            Ump([0x4020_0006, 0, 0, 0])
+        ]
+    );
+}
+
 /// **`for event in &events` takes what `pending` would**, oldest first, and
 /// leaves nothing queued: the same queue is read, not a copy.
 #[test]

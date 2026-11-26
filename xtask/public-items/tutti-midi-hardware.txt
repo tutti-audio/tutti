@@ -59,6 +59,7 @@ fn devices::OpenOutput::pending
 fn devices::OpenOutput::queue
 fn devices::OpenOutput::queue_timed
 fn devices::OpenOutput::set_config
+fn devices::OpenOutput::set_mpe11
 fn error::MidiThread::name
 fn peer::PeerRef::device
 fn peer::PeerRef::peer

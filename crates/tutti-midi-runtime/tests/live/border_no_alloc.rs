@@ -320,19 +320,17 @@ fn the_mpe_expression_paths_process_without_allocating() {
 fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
     use tutti_midi_protocol::{MemberCount, Mpe11Zone, PitchBendSensitivity};
     let message = if upper {
-        Mpe11Zone::upper(
+        midi::mcm(Mpe11Zone::upper(
             MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm()
+        ))
     } else {
-        Mpe11Zone::lower(
+        midi::mcm(Mpe11Zone::lower(
             MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm()
+        ))
     };
     device.push(frame_of(block, 0), message).unwrap();
 }

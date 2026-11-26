@@ -71,6 +71,49 @@ pub enum Mcm {
     },
 }
 
+impl Mcm {
+    /// The zone the message addresses and its member count: `0` disables it.
+    fn zone_and_count(self) -> (MpeZone, u8) {
+        match self {
+            Self::Configure { zone, members } => (zone, members.get()),
+            Self::Disable { zone } => (zone, 0),
+        }
+    }
+
+    /// The message that takes a receiver whose `zone` has `had` Member Channels
+    /// (none: no zone) to `want`, if there is one.
+    fn between(zone: MpeZone, had: Option<MemberCount>, want: Option<MemberCount>) -> Option<Self> {
+        match (had, want) {
+            (had, Some(members)) if had != Some(members) => Some(Self::Configure { zone, members }),
+            (Some(_), None) => Some(Self::Disable { zone }),
+            _ => None,
+        }
+    }
+
+    /// The message as a MIDI 2.0 Registered Controller (RPN), address
+    /// [`Rpn::MPE_CONFIGURATION`], on the addressed zone's *master* channel
+    /// (Ch1 lower / Ch16 upper, which is how a receiver knows the zone) in
+    /// `group`: the data is the member count, `0` for [`Disable`](Self::Disable).
+    ///
+    /// The 7-bit member count sits in the top 7 bits of the 32-bit data field
+    /// (MSB-aligned, the spec's 7 to 32 convention) so it round-trips exactly.
+    fn to_ump(self, group: MidiGroup) -> Ump {
+        let (zone, members) = self.zone_and_count();
+        Message::Midi2(
+            Address {
+                group,
+                channel: zone.master_channel(),
+            },
+            Voice2::Registered {
+                bank: Rpn::MPE_CONFIGURATION.bank(),
+                index: Rpn::MPE_CONFIGURATION.index(),
+                value: ControlValue::new(u32::from(members) << 25),
+            },
+        )
+        .into()
+    }
+}
+
 /// Where a zone's channels sit: its master (MPE 1.1's Master, the Profile's
 /// Manager) and the member channels beside it, which are the part of a zone
 /// that every kind shares. The master is the channel directly below the
@@ -234,19 +277,10 @@ impl MpeLayout {
 /// One MPE 1.1 zone (RP-053 / M1-100): a side, which fixes the master at
 /// channel 1 or 16 and the way the members count, a bend range for the master
 /// and one for the members, a member count and a response. It is what an MPE
-/// Configuration Message declares ([`to_mcm`](Self::to_mcm),
-/// [`from_mcm`](Self::from_mcm)).
+/// Configuration Message declares ([`Mpe11Zones::configuration`], [`from_mcm`](Self::from_mcm)).
 ///
 /// The MIDI-CI MPE Profile's zone is a [`ProfileZone`], which has no
-/// Configuration Message:
-///
-/// ```compile_fail,E0599
-/// use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
-/// use tutti_ump::{MidiChannel, MpeChannels, MpeZoneSpan};
-///
-/// let span = MpeZoneSpan::new(MidiChannel::of(5), MpeChannels::of(4)).unwrap();
-/// let _ = ProfileZone::new(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT).to_mcm();
-/// ```
+/// Configuration Message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mpe11Zone {
@@ -391,30 +425,6 @@ impl Mpe11Zone {
                 self.member_count,
             ),
         }
-    }
-
-    /// Encodes this zone as an **MPE Configuration Message** (MCM): a MIDI 2.0
-    /// Registered Controller (RPN) on the zone's *master* channel, address
-    /// [`Rpn::MPE_CONFIGURATION`], data = member count. Per RP-053 / M2-104, the
-    /// master channel (Ch1 lower / Ch16 upper) is what a receiver reads to know
-    /// which zone is being configured.
-    ///
-    /// The 7-bit member count sits in the top 7 bits of the 32-bit data field
-    /// (MSB-aligned, the spec's 7 to 32 convention) so it round-trips exactly.
-    #[must_use]
-    pub fn to_mcm(&self) -> Ump {
-        Message::Midi2(
-            Address {
-                group: MidiGroup::FIRST,
-                channel: self.master_channel(),
-            },
-            Voice2::Registered {
-                bank: Rpn::MPE_CONFIGURATION.bank(),
-                index: Rpn::MPE_CONFIGURATION.index(),
-                value: ControlValue::new(u32::from(self.member_count.get()) << 25),
-            },
-        )
-        .into()
     }
 
     /// Decodes an MCM into the zone it addresses and what it asks, if `ump` is
@@ -682,6 +692,37 @@ impl Mpe11Zones {
                 ..self
             },
         })
+    }
+
+    /// The MPE Configuration Messages (M1-100 section 2.2.1) in `group` that take
+    /// a receiver configured with the zones `had` to `want`, the lower zone's
+    /// first: one for each zone `want` has with Member Channels `had` has not,
+    /// and one with no Member Channels for each zone `had` has and `want`
+    /// has not. A zone that stays as it is, whatever its ranges and response,
+    /// is no message, since the message has neither.
+    ///
+    /// The message is a MIDI 2.0 Registered Controller (RPN), address
+    /// [`Rpn::MPE_CONFIGURATION`], on the zone's *master* channel (Ch1 lower /
+    /// Ch16 upper, which is how a receiver knows the zone): the data is the
+    /// member count, in the top 7 bits of the 32-bit field (MSB-aligned, the
+    /// spec's 7 to 32 convention) so it round-trips with
+    /// [`Mpe11Zone::from_mcm`].
+    pub fn configuration(
+        had: Option<Self>,
+        want: Option<Self>,
+        group: MidiGroup,
+    ) -> impl Iterator<Item = Ump> {
+        [MpeZone::Lower, MpeZone::Upper]
+            .into_iter()
+            .filter_map(move |side| {
+                let (had, want) = (Self::members_on(had, side), Self::members_on(want, side));
+                Mcm::between(side, had, want).map(|mcm| mcm.to_ump(group))
+            })
+    }
+
+    /// How many Member Channels the zone of `zones` on `side` has, if it has one.
+    fn members_on(zones: Option<Self>, side: MpeZone) -> Option<MemberCount> {
+        zones?.on(side).map(Mpe11Zone::member_count)
     }
 
     /// The set without its zone on `side`, or `None` when that was the only
