@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, Editor, EventKind, EventLoss, Executor, InEvents, Io, Node, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_ump::{MidiChannel, Ump};
 use tutti_units::{Bpm, SampleRate, Samples};
 
@@ -126,7 +126,11 @@ fn rig(events: impl IntoIterator<Item = TimedMidiEvent>, max: usize) -> Rig {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(max)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     let tally = tutti_fixtures::Shared::default();
     ed.insert(NodeKey(2), "sink", Unforkable(Sink(tally.clone())));
     connect(&mut ed, 1, 2);
@@ -289,7 +293,7 @@ fn port_capacity(mut node: impl tutti_graph::Node<f32>, block: usize) -> Option<
 ///   2,048 holds them), capped at 8,192.
 #[test]
 fn the_port_follows_the_block() {
-    use tutti_midi_runtime::{HarmonyChanges, HarmonyNode, MidiInputNode};
+    use tutti_midi_runtime::{HarmonyConfig, HarmonyNode, MidiInputNode};
     for (block, want) in [
         (1usize, 256u32),
         (64, 256),
@@ -299,7 +303,7 @@ fn the_port_follows_the_block() {
         (16_384, 8_192),
         (1 << 20, 8_192),
     ] {
-        let got = port_capacity(MidiClipNode::new([]), block);
+        let got = port_capacity(MidiClipNode::from(MidiClipConfig::default()), block);
         assert_eq!(got, Some(want), "clip node, block {block}");
     }
     for (block, want) in [(64usize, 512u32), (4096, 512), (8192, 1024), (16_384, 2048)] {
@@ -307,7 +311,7 @@ fn the_port_follows_the_block() {
         assert_eq!(got, Some(want), "input node, block {block}");
     }
     for (block, want) in [(64usize, 256u32), (1024, 2048), (16_384, 8_192)] {
-        let got = port_capacity(HarmonyNode::new(HarmonyChanges::default()), block);
+        let got = port_capacity(HarmonyNode::from(HarmonyConfig::default()), block);
         assert_eq!(got, Some(want), "harmony node, block {block}");
     }
 }

@@ -30,7 +30,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
-use tutti_midi_runtime::{SyncMessages, SyncOut};
+use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{AfterLocate, FadeOut, MotionCommand, Transport};
 use tutti_ump::{Message, System, U14};
@@ -151,11 +151,13 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     ed.insert(
         NodeKey(1),
         "clock",
-        SyncOut::new(tutti_ump::MidiGroup::FIRST).sending(SyncMessages {
-            clock: true,
-            mtc,
-            ..SyncMessages::OFF
-        }),
+        SyncOut::from(
+            SyncOutConfig::new(tutti_ump::MidiGroup::FIRST).sending(SyncMessages {
+                clock: true,
+                mtc,
+                ..SyncMessages::OFF
+            }),
+        ),
     );
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");

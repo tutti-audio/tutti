@@ -214,7 +214,7 @@ pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, JrClock, JrStream, MIDI_OUT_EVENT_CAPACITY,
     MachineControlSender, MidiOutNode, NoTimeCode, SYNC_OUT_EVENT_CAPACITY, SyncMessages, SyncOut,
-    SyncOutControls,
+    SyncOutConfig, SyncOutControls,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,
@@ -222,8 +222,8 @@ pub use output_plan::{
 };
 pub use schedule::{
     CLIP_EVENT_DENSITY, ClipEvents, ClipEventsKind, ClipNote, HARMONY_EVENT_DENSITY,
-    HarmonyChanges, HarmonyChangesError, HarmonyChangesKind, HarmonyControls, HarmonyNode,
-    MidiClipControls, MidiClipNode, TimedHarmony, TimedMidiEvent,
+    HarmonyChanges, HarmonyChangesError, HarmonyChangesKind, HarmonyConfig, HarmonyControls,
+    HarmonyNode, MidiClipConfig, MidiClipControls, MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
     BeatClockEvent, BeatClockFollower, ClockEvent, ClockTransportState, MachineControlEvent,

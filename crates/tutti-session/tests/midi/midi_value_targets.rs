@@ -12,7 +12,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, EventKind, Fade, Harmony, IntoNode, Io, Node, NodeParts, Prepare, Shape};
 use tutti_graph::{ForkByClone, Status};
 use tutti_midi_runtime::{
-    ClipEvents, HarmonyChanges, HarmonyNode, MidiClipNode, TimedHarmony, TimedMidiEvent,
+    ClipEvents, HarmonyChanges, HarmonyConfig, HarmonyNode, MidiClipConfig, MidiClipNode,
+    TimedHarmony, TimedMidiEvent,
 };
 use tutti_session::{Feeder, Replacement, Session, ValueErrorKind};
 use tutti_ump::NoteKeyEvent;
@@ -220,7 +221,7 @@ fn harmony_session() -> (
     let mut s = offline();
     let seen = tutti_fixtures::Record::new();
     let tap = s.graph().add(HarmonyTap(seen.clone()));
-    let harmony = s.graph().add(HarmonyNode::new(HarmonyChanges::default()));
+    let harmony = s.graph().add(HarmonyNode::from(HarmonyConfig::default()));
     s.graph()
         .set_feed(tap, Feeder::Declared, vec![harmony.event_output(0)])
         .unwrap();
@@ -333,7 +334,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
         )
         .expect("the sink takes MIDI");
     let clip = s.midi().clip(note_sink).expect("the clip");
-    let harmony = s.graph().add(HarmonyNode::new(HarmonyChanges::default()));
+    let harmony = s.graph().add(HarmonyNode::from(HarmonyConfig::default()));
     s.graph()
         .set_feed(chord_sink, Feeder::Declared, vec![harmony.event_output(0)])
         .unwrap();
@@ -376,12 +377,11 @@ fn blocks_adopting_written_values_do_not_allocate() {
 fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_feed(synth, Feeder::Declared, vec![clip.event_output(0)])
         .unwrap();
@@ -389,7 +389,8 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     s.graph()
         .replace(
             clip,
-            Replacement::new(MidiClipNode::new([])).fade(Fade::new(Samples::new(0))),
+            Replacement::new(MidiClipNode::from(MidiClipConfig::default()))
+                .fade(Fade::new(Samples::new(0))),
         )
         .expect("the clip is there");
     let _ = s.update();
@@ -453,12 +454,11 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
 #[test]
 fn a_pending_clip_write_to_a_removed_node_is_freed() {
     let mut s = offline();
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
+        )));
     let _ = s.update();
     let written = Arc::new(clip_of(note(
         64,

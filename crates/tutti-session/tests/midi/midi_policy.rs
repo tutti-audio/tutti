@@ -17,7 +17,7 @@ use tutti_midi_device::{
 };
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_hardware::{MidiHardwareConfig, ProfilesChange};
-use tutti_midi_runtime::MidiClipNode;
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode};
 use tutti_session::Peer as _;
 use tutti_session::{
     EventInputPort, MidiEvent, MidiPolicy, MidiPolicyError, PHASES, PhaseCx, Session, SessionEvent,
@@ -464,12 +464,11 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         })]
     );
 
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the port's node takes events");

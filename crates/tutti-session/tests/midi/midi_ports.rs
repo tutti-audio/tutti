@@ -12,7 +12,7 @@ use tutti_graph::NodeKey;
 use tutti_midi_device::{Capabilities, DeviceInfo, Endpoint, EndpointId, PortDirection, Supports};
 use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
-use tutti_midi_runtime::MidiClipNode;
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode};
 use tutti_session::{
     EventInputPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PeerEvent,
     PortCause, Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
@@ -1049,12 +1049,11 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     let out = output(&mut s, &synth);
     assert_eq!(out.presence(), Presence::Live);
 
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the port's node takes events");
@@ -1128,7 +1127,7 @@ fn clip_into_synth() -> (Session, FakeCounters, MidiOutput) {
     let _ = s.update();
     let synth = device(&mut s, "Synth");
     let out = output(&mut s, &synth);
-    let clip = s.graph().add(MidiClipNode::new([]));
+    let clip = s.graph().add(MidiClipNode::from(MidiClipConfig::default()));
     s.set(clip.events().to(headed_clip())).expect("sets");
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
@@ -1359,12 +1358,11 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     });
     assert!(first.iter().all(is_active_sensing), "{first:?}");
     // The node's sources are replaced, and no update runs while it goes on.
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the port's node takes events");

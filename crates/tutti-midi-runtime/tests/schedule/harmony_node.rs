@@ -18,7 +18,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
-    HarmonyChanges, HarmonyChangesError, HarmonyControls, HarmonyNode, TimedHarmony,
+    HarmonyChanges, HarmonyChangesError, HarmonyConfig, HarmonyControls, HarmonyNode, TimedHarmony,
 };
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -117,7 +117,10 @@ fn lanes() -> Vec<TimedHarmony> {
 /// at 0, G at 10 000, F/A at 24 000, A minor at 30 000; nothing re-stated.
 #[test]
 fn changes_land_on_their_frames_and_are_sent_once() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, _c, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     for b in 0..64 {
         block(&mut exec, 512, rolling(b * 512));
     }
@@ -138,7 +141,10 @@ fn changes_land_on_their_frames_and_are_sent_once() {
 /// sends G and C major at 0, then F/A on its frame.
 #[test]
 fn a_start_mid_lane_restates_the_context() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, _c, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     for b in 0..10 {
         block(&mut exec, 512, rolling(20_000 + b * 512));
     }
@@ -152,7 +158,10 @@ fn a_start_mid_lane_restates_the_context() {
 /// in force at the seek, sent on its frame (the executor's 1 536).
 #[test]
 fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, _c, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     block(&mut exec, 512, rolling(0));
     block(
         &mut exec,
@@ -170,7 +179,10 @@ fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
 /// frames in: at the wrap (loop start, beat 0.5) G and C major are in force.
 #[test]
 fn a_loop_wrap_restates_the_context_at_the_wrap() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, _c, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     let lp = Some(LoopRange::new(Beat::new(0.5), Beat::new(1.5)).expect("a loop"));
     block(
         &mut exec,
@@ -198,7 +210,10 @@ fn a_loop_pass_restates_only_what_changed() {
     const SIXTY_FOURTH: u64 = 375;
     let lanes = || vec![at(0, C), at(0, C_MAJOR), at(12_000, G)];
     let render = |start: u64, end: u64| {
-        let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 2_048);
+        let (_ed, mut exec, _c, seen) = rig(
+            HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+            2_048,
+        );
         let lp = Some(LoopRange::new(beat_of(start), beat_of(end)).expect("a loop"));
         block(
             &mut exec,
@@ -236,7 +251,10 @@ fn a_loop_pass_restates_only_what_changed() {
 #[test]
 fn a_change_on_the_loops_start_is_each_passs_context() {
     let lanes = vec![at(0, F_OVER_A), at(12_000, C), at(12_200, G)];
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes)), 2_048);
+    let (_ed, mut exec, _c, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes))),
+        2_048,
+    );
     let lp = Some(LoopRange::new(beat_of(12_000), beat_of(12_375)).expect("a loop"));
     block(
         &mut exec,
@@ -253,7 +271,10 @@ fn a_change_on_the_loops_start_is_each_passs_context() {
 /// **New lanes re-state from the next block; the same lanes cut nothing.**
 #[test]
 fn replaced_lanes_restate_and_the_same_lanes_do_not() {
-    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, controls, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     block(&mut exec, 512, rolling(0));
     // The same changes, sorted by beat as they were.
     publish(&controls, lanes());
@@ -269,7 +290,10 @@ fn replaced_lanes_restate_and_the_same_lanes_do_not() {
 /// blocks restate once.**
 #[test]
 fn a_restate_follows_a_publish_and_only_a_publish() {
-    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (_ed, mut exec, controls, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     block(&mut exec, 512, rolling(0));
     block(&mut exec, 512, rolling(512));
     block(&mut exec, 512, rolling(1_024));
@@ -285,7 +309,10 @@ fn a_restate_follows_a_publish_and_only_a_publish() {
 /// lanes replaced: the fork re-states C and C major on its first block.
 #[test]
 fn a_fork_sends_the_lanes_as_they_stood() {
-    let (live, _exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
+    let (live, _exec, controls, seen) = rig(
+        HarmonyNode::from(HarmonyConfig::default().changes(changes(lanes()))),
+        512,
+    );
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live.fork(ForkTarget::MainOutput, prepare).expect("forks");
     publish(&controls, [at(0, G)]);
@@ -339,4 +366,28 @@ fn a_chord_and_a_scale_at_one_beat_are_both_kept_in_beat_order() {
     let beats: Vec<_> = lanes.as_slice().iter().map(|c| c.beat).collect();
     assert_eq!(beats, [beat_of(0), beat_of(24_000), beat_of(24_000)]);
     assert_eq!(lanes.len(), 3);
+}
+
+/// **A harmony config has no structure: the lanes are a published value.** Any
+/// two configs make the same node, so other lanes keep the running node (they
+/// are a write to it). The config lists no initial value (the lanes are no param
+/// or setting), and builds a node that sends its lanes.
+#[test]
+fn a_harmony_config_has_no_structure_and_builds_a_node_sending_its_lanes() {
+    use tutti_graph::{Initials, IntoNode, NodeConfig};
+    let one = HarmonyConfig::default().changes(changes([at(0, C)]));
+    let other = HarmonyConfig::default().changes(changes([at(24_000, G), at(0, C_MAJOR)]));
+    assert!(NodeConfig::<f32>::same_structure(&one, &other));
+    assert!(NodeConfig::<f32>::same_structure(
+        &one,
+        &HarmonyConfig::default()
+    ));
+    assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
+    let node = NodeConfig::<f32>::build(&other);
+    let controls = IntoNode::<f32>::into_parts(node).controls;
+    assert_eq!(controls.len(), 2);
+    assert_eq!(
+        *controls.current(),
+        changes([at(24_000, G), at(0, C_MAJOR)])
+    );
 }

@@ -15,7 +15,7 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition};
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_ump::{MidiChannel, Ump};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -77,7 +77,11 @@ fn rig(events: Vec<TimedMidiEvent>) -> Executor {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(BLOCK)),
     ));
-    editor.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    editor.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter(events))),
+    );
     editor.commit().expect("commits");
     exec
 }

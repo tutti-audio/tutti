@@ -17,7 +17,7 @@ use tutti_graph::{
     Renderer, TransportPosition,
 };
 
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
@@ -50,7 +50,9 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
     ed.insert(
         NodeKey(1),
         "clip",
-        MidiClipNode::new([TimedMidiEvent::new(beat, on).unwrap()]),
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([
+            TimedMidiEvent::new(beat, on).unwrap(),
+        ]))),
     );
     ed.insert(NodeKey(2), "font", unit);
     ed.connect_events(

@@ -14,7 +14,7 @@ use tutti_graph::{
     TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_modulation::{
     Amount, ControlProgram, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity,
     Waveform,
@@ -114,7 +114,11 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         ),
     )
     .unwrap();
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(MidiClipConfig::default().events(ClipEvents::from_iter([note]))),
+    );
     let params = ed.insert(SYNTH, "synth", synth).controls;
     ed.connect_events(
         EventInputPort::new(SYNTH, 0),

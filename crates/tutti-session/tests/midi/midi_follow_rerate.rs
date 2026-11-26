@@ -15,7 +15,7 @@ use tutti_graph::Fade;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::SysexDeviceId;
-use tutti_midi_runtime::MidiClipNode;
+use tutti_midi_runtime::{MidiClipConfig, MidiClipNode};
 use tutti_session::{
     ClockKind, FollowClock, FollowMachineControl, FollowTempo, MidiEvent, Replacement, Session,
     SessionEvent,
@@ -218,7 +218,8 @@ fn a_follower_whose_input_is_replaced_does_not_end() {
         s.graph()
             .replace(
                 input,
-                Replacement::new(MidiClipNode::new([])).fade(Fade::new(Samples::new(0))),
+                Replacement::new(MidiClipNode::from(MidiClipConfig::default()))
+                    .fade(Fade::new(Samples::new(0))),
             )
             .expect("the input is there");
         let mut all = update_events(&mut s);
