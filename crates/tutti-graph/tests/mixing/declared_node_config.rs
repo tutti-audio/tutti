@@ -65,7 +65,7 @@ impl Node for Voiced {
 /// One table every `config()` shares, so two of them hold the same asset.
 fn config() -> VoicedConfig {
     static TABLE: OnceLock<Asset<Vec<f32>>> = OnceLock::new();
-    let table = TABLE.get_or_init(|| Asset::from(vec![0.5_f32]));
+    let table = TABLE.get_or_init(|| Asset::new(vec![0.5_f32]));
     VoicedConfig::new(ChannelLayout::MONO, table.clone())
 }
 
@@ -89,7 +89,7 @@ fn a_required_change_is_structure() {
     let base = config();
     let wider = VoicedConfig::new(ChannelLayout::STEREO, base.table.clone());
     assert!(!base.same_structure(&wider));
-    let other_table = VoicedConfig::new(ChannelLayout::MONO, Asset::from(vec![0.5_f32]));
+    let other_table = VoicedConfig::new(ChannelLayout::MONO, Asset::new(vec![0.5_f32]));
     assert!(!base.same_structure(&other_table));
 }
 
@@ -113,7 +113,7 @@ fn giving_or_withdrawing_an_optional_param_is_structure() {
 /// content is equal.
 #[test]
 fn an_asset_is_equal_by_identity() {
-    let asset = Asset::from(vec![1.0_f32, 2.0]);
+    let asset = Asset::new(vec![1.0_f32, 2.0]);
     assert_eq!(asset, asset.clone());
     let twin = Asset::from(Arc::new(vec![1.0_f32, 2.0]));
     assert_eq!(*asset, *twin);

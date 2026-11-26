@@ -43,6 +43,10 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
 ///
 /// A param left out has no value (an `Option` param given none). A setting with
 /// no kind has no address, so it is not listed.
+///
+/// Listed in declaration order, and two lists of one config type compare in that
+/// order: a hand-written [`NodeConfig::initials`] lists its params and settings in
+/// one fixed order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Initials {
     params: Vec<(UnitAddr, f64)>,
@@ -50,6 +54,28 @@ pub struct Initials {
 }
 
 impl Initials {
+    /// No initial values: a config adds its own with [`param`](Self::param) and
+    /// [`setting`](Self::setting).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Also `raw`, in the unit's raw, as the initial value of the param at `addr`.
+    #[must_use]
+    pub fn param(mut self, addr: UnitAddr, raw: f64) -> Self {
+        self.params.push((addr, raw));
+        self
+    }
+
+    /// Also `word` ([`AtomicWord::to_word`](tutti_rt::AtomicWord::to_word) of the
+    /// value) as the initial value of the setting of `kind`.
+    #[must_use]
+    pub fn setting(mut self, kind: SettingKind, word: u64) -> Self {
+        self.settings.push((kind, word));
+        self
+    }
+
     /// The params' initial raws, in declaration order.
     #[must_use]
     pub fn params(&self) -> &[(UnitAddr, f64)] {
@@ -64,11 +90,6 @@ impl Initials {
     }
 }
 
-/// What `declare_params!` writes `NodeConfig::initials` with.
-pub fn initials(params: Vec<(UnitAddr, f64)>, settings: Vec<(SettingKind, u64)>) -> Initials {
-    Initials { params, settings }
-}
-
 /// A shared resource a config holds (a wavetable, a wave, an impulse response),
 /// equal to another only when it is the same one.
 ///
@@ -77,10 +98,18 @@ pub fn initials(params: Vec<(UnitAddr, f64)>, settings: Vec<(SettingKind, u64)>)
 /// resource on every patch, and a resource loaded again is a new asset whose
 /// equal content is no reason to keep the node built from the old one.
 ///
-/// It dereferences to the resource, and is made from an `Arc` or from the value.
+/// It dereferences to the resource. It is made from an `Arc` (`From`), which keeps
+/// that allocation's identity, or by [`Asset::new`], which is a new identity.
 pub struct Asset<T>(Arc<T>);
 
 impl<T> Asset<T> {
+    /// `value` as a new asset, equal to no other: two assets made from equal values
+    /// are two identities, so a config given each makes a new node.
+    #[must_use]
+    pub fn new(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+
     /// The shared resource, for an algorithm that takes an `Arc`.
     #[must_use]
     pub fn arc(&self) -> &Arc<T> {
@@ -119,11 +148,5 @@ impl<T> Deref for Asset<T> {
 impl<T> From<Arc<T>> for Asset<T> {
     fn from(arc: Arc<T>) -> Self {
         Self(arc)
-    }
-}
-
-impl<T> From<T> for Asset<T> {
-    fn from(value: T) -> Self {
-        Self(Arc::new(value))
     }
 }

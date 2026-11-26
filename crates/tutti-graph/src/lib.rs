@@ -788,7 +788,6 @@ pub use tutti_units::PlayReading;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::node::config::initials;
     pub use crate::node::declare::{
         BuiltFrom, Cells, CompareIn, Initial, OwnedCell, ParamEntry, Row, Visit, base, input,
         ports, row, set,

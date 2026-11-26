@@ -659,9 +659,12 @@ fn node::bus::Buses::with
 fn node::bus::InBus::width
 fn node::bus::OutBus::width
 fn node::config::Asset::arc
+fn node::config::Asset::new
+fn node::config::Initials::new
+fn node::config::Initials::param
 fn node::config::Initials::params
+fn node::config::Initials::setting
 fn node::config::Initials::settings
-fn node::config::initials
 fn node::controls::DeclaredUnit::of
 fn node::controls::DeclaredUnit::value
 fn node::controls::ParamFork::fork_node

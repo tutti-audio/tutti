@@ -210,9 +210,9 @@ impl<U: Scalar> ParamEntry for Option<U> {
 /// or `[U; N]`).
 #[doc(hidden)]
 pub trait Initial: Copy {
-    /// Appends each initial value this entry gives, at the address of `kind`
+    /// Adds each initial value this entry gives, at the address of `kind`
     /// and its index.
-    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>);
+    fn extend(self, kind: UnitParam, initials: crate::Initials) -> crate::Initials;
 
     /// Whether the node has the param at all: an `Option` entry with no value
     /// has no port, so it is structure.
@@ -222,15 +222,16 @@ pub trait Initial: Copy {
 }
 
 impl<U: Scalar> Initial for U {
-    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
-        out.push((UnitAddr::first(kind), self.to_cell()));
+    fn extend(self, kind: UnitParam, initials: crate::Initials) -> crate::Initials {
+        initials.param(UnitAddr::first(kind), self.to_cell())
     }
 }
 
 impl<U: Scalar> Initial for Option<U> {
-    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
-        if let Some(value) = self {
-            value.extend(kind, out);
+    fn extend(self, kind: UnitParam, initials: crate::Initials) -> crate::Initials {
+        match self {
+            Some(value) => value.extend(kind, initials),
+            None => initials,
         }
     }
 
@@ -240,11 +241,13 @@ impl<U: Scalar> Initial for Option<U> {
 }
 
 impl<U: Scalar, const N: usize> Initial for [U; N] {
-    fn extend(self, kind: UnitParam, out: &mut Vec<(UnitAddr, f64)>) {
-        for (index, value) in self.into_iter().enumerate() {
-            // The macro's `N` is a kind's index count, at most a byte.
-            out.push((UnitAddr::new(kind, index as u8), value.to_cell()));
-        }
+    fn extend(self, kind: UnitParam, initials: crate::Initials) -> crate::Initials {
+        self.into_iter()
+            .enumerate()
+            .fold(initials, |initials, (index, value)| {
+                // The macro's `N` is a kind's index count, at most a byte.
+                initials.param(UnitAddr::new(kind, index as u8), value.to_cell())
+            })
     }
 }
 
@@ -1232,21 +1235,19 @@ macro_rules! declare_params {
                         == $crate::__private::Initial::present(other.$field))*
             }
 
-            #[allow(unused_mut)]
+            #[allow(clippy::let_and_return)]
             fn initials(&self) -> $crate::Initials {
-                let mut params = ::std::vec::Vec::new();
-                $($crate::__private::Initial::extend(
+                let initials = $crate::Initials::new();
+                $(let initials = $crate::__private::Initial::extend(
                     self.$field,
                     $crate::__private::UnitParam::$kind,
-                    &mut params,
+                    initials,
                 );)*
-                #[allow(unused_mut)]
-                let mut settings = ::std::vec::Vec::new();
-                $($(settings.push((
+                $($(let initials = initials.setting(
                     <$skind as $crate::__private::Setting>::KIND,
                     $crate::__private::AtomicWord::to_word(self.$sname),
-                ));)?)*
-                $crate::__private::initials(params, settings)
+                );)?)*
+                initials
             }
         }
     };
