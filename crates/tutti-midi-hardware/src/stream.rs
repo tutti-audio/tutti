@@ -79,7 +79,7 @@ use tutti_graph::Offset;
 use tutti_midi_ci::{ProfileOffer, ResourceStore};
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
-    IdentityInquiry, InquiryAction, Learned, Supports,
+    FunctionBlock, IdentityInquiry, InquiryAction, Learned, Supports,
 };
 use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
@@ -696,7 +696,7 @@ impl Negotiation {
             Self::Ump(ump) => {
                 let changes = ump.ci_output.poll(now, heard, identity, store, offer);
                 let stream = ump.poll_stream(now, heard);
-                let granted = ump.answer(heard, presented);
+                let granted = ump.answer(heard, presented, &changes.muid_changed);
                 Stepped::of(granted.or(stream), changes)
             }
             Self::Midi1Port(port) => {
@@ -777,7 +777,15 @@ impl UmpNegotiation {
     /// afterwards only to turn off JR Timestamps the input did not ask for,
     /// naming the Protocol in force; so answering a request starts none, and a
     /// later request of the session's cannot undo a grant.
-    fn answer(&mut self, heard: &Heard<'_>, presented: Option<Presented>) -> Option<DeviceStream> {
+    ///
+    /// A MIDI-CI Device of `muid_changed` that changed its MUID tells the
+    /// device its Function Block's Info again, unasked (M2-101 §3.3.1).
+    fn answer(
+        &mut self,
+        heard: &Heard<'_>,
+        presented: Option<Presented>,
+        muid_changed: &[MidiGroup],
+    ) -> Option<DeviceStream> {
         let announce = self.rebuild(presented);
         let answering = self.answering.as_mut()?;
         let mut replies: Vec<Ump> = Vec::new();
@@ -810,6 +818,26 @@ impl UmpNegotiation {
                 let _ = answering.endpoint.reply(
                     Message::Stream(Stream::FunctionBlockDiscovery {
                         block: BlockSelect::All,
+                        filter: BlockFilter {
+                            info: true,
+                            name: false,
+                        },
+                    }),
+                    &mut replies,
+                );
+            }
+        }
+        // A changed MUID announces its Function Block (M2-101 §3.3.1): the
+        // block that spans the device's Group, as a discovery of it would.
+        for &group in muid_changed {
+            let block = answering.endpoint.function_blocks().find(|block| {
+                let first = block.first_group().get();
+                (first..first + block.groups().get()).contains(&group.get())
+            });
+            if let Some(id) = block.map(FunctionBlock::id) {
+                let _ = answering.endpoint.reply(
+                    Message::Stream(Stream::FunctionBlockDiscovery {
+                        block: BlockSelect::One(id),
                         filter: BlockFilter {
                             info: true,
                             name: false,
