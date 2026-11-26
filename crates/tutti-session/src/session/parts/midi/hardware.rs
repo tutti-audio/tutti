@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tutti_platform::Instant;
 
 use tutti_buffers::Float;
-use tutti_midi_ci::ResourceStore;
+use tutti_midi_ci::{ProfileOffer, ResourceStore};
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
 
@@ -38,6 +38,8 @@ pub(crate) struct Hardware {
     policy: Arc<Cell<MidiPolicy>>,
     /// The store the layer serves now, as the policy held it.
     served: Option<Arc<ResourceStore>>,
+    /// The Profiles the layer offers now, as the policy held them.
+    offered: ProfileOffer,
 }
 
 impl Hardware {
@@ -56,6 +58,7 @@ impl Hardware {
                 io,
                 policy,
                 served: None,
+                offered: ProfileOffer::default(),
             },
             state,
         )
@@ -101,10 +104,13 @@ impl Hardware {
         state.midi_input_phase(self.link(), graph, now, out)
     }
 
-    /// Makes the layer present the policy's identity and serve its store. The
-    /// policy is cloned once per poll, an `Arc` clone on the control side, and
-    /// the store is handed to the layer only when it is not the one served:
-    /// `None` serves the empty store.
+    /// Makes the layer present the policy's identity, serve its store and offer
+    /// its Profiles. The policy is cloned once per poll on the control side (an
+    /// `Arc` clone for the store, a copy of the offer's entries), the store is
+    /// handed to the layer only when it is not the one served (`None` serves the
+    /// empty store), and the offer only when it differs by content from the one
+    /// offered. A peer's switch of a Profile never comes back here: the policy is
+    /// the app's alone.
     fn apply_policy(&mut self, nodes: Option<&MidiNodes>) {
         let policy = self.policy.current();
         let groups = nodes
@@ -113,16 +119,26 @@ impl Hardware {
         let wanted = policy
             .identity
             .map(|identity: MidiIdentity| Presented { identity, groups });
+        let serve = !crate::midi_hardware::same_store(&policy.properties, &self.served);
+        let offer = policy.profiles != self.offered;
         let Some(mut io) = self.locked() else {
             return;
         };
         if io.presented() != wanted {
             io.present(wanted);
         }
-        if !crate::midi_hardware::same_store(&policy.properties, &self.served) {
+        if serve {
             io.serve_properties(policy.properties.as_deref().cloned().unwrap_or_default());
-            drop(io);
+        }
+        if offer {
+            io.offer_profiles(policy.profiles.clone());
+        }
+        drop(io);
+        if serve {
             self.served = policy.properties;
+        }
+        if offer {
+            self.offered = policy.profiles;
         }
     }
 

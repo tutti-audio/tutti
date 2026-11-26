@@ -255,7 +255,7 @@ pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedPeer, ListedProfile, ListedResource, PeFailure, ProfilePeer,
     ReportPeer, RequestReport, ResourcePeer, RestorePeerState, SavePeerState, SetProperty,
-    Subscribe, Subscription, SubscriptionCause, SwitchProfile, WholeProfile,
+    Subscribe, Subscription, SubscriptionCause, SwitchProfile, SwitchRefusal, WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{

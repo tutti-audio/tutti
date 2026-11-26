@@ -131,6 +131,7 @@ fn session::MidiSession::is_any_input_connected
 fn session::MidiSession::is_input_connected
 fn session::MidiSession::learned
 fn session::MidiSession::mpe_zones
+fn session::MidiSession::offer_profiles
 fn session::MidiSession::open
 fn session::MidiSession::open_over
 fn session::MidiSession::outputs
@@ -140,6 +141,7 @@ fn session::MidiSession::present
 fn session::MidiSession::presented
 fn session::MidiSession::profiles
 fn session::MidiSession::property_peers
+fn session::MidiSession::received_mpe_zones
 fn session::MidiSession::report
 fn session::MidiSession::report_peers
 fn session::MidiSession::saved

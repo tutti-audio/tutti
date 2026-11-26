@@ -258,7 +258,7 @@ fn a_request_on_a_gone_port_ends_by_why_it_is_gone() {
         polled(
             link.reply::<tutti_midi_ci::ProfileState, tutti_midi_ci::Nak, _>(
                 (),
-                |_, ()| true,
+                |_, ()| Ok(()),
                 |(), _| unreachable!("the port is gone: nothing is queued"),
             ),
         )

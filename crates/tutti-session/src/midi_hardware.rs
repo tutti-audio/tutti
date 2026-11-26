@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use tutti_buffers::Float;
-use tutti_midi_ci::ResourceStore;
+use tutti_midi_ci::{ProfileOffer, ResourceStore};
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_device::MidiIdentity;
 
@@ -46,6 +46,18 @@ use crate::midi::Midi;
 /// [`MidiSession::served_properties`](tutti_midi_hardware::MidiSession::served_properties)
 /// reads, not the store in the policy.
 ///
+/// `profiles` is the Profiles the MIDI-CI Devices offer as Profile Configuration
+/// Responders (M2-101 §7, M2-102 §2.4 to §2.7) on the same ports; the empty
+/// [`ProfileOffer`], the default, offers none. It is plain data compared by
+/// content: a change is applied entry by entry, so an entry left as it was keeps
+/// what a peer switched, and one the app changed takes the app's value and
+/// drops the peer's switch ([`MidiSession::offer_profiles`](tutti_midi_hardware::MidiSession::offer_profiles)).
+/// A peer's Set Profile On or Off is answered at once and reaches the app as a
+/// [`ProfilesChange::Switched`](tutti_midi_hardware::ProfilesChange::Switched); it never
+/// rewrites the policy. To force its own value back after a peer switched an entry,
+/// the app changes that entry (any field) or toggles
+/// [`fixed`](tutti_midi_ci::ProfileOfferEntry::fixed).
+///
 /// A change applies in the next [`Session::update`](crate::Session::update):
 /// the MIDI-CI Devices of the old identity send Invalidate MUID for their MUIDs
 /// and the new identity starts Discovery under fresh ones; a change of the name
@@ -53,7 +65,7 @@ use crate::midi::Midi;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use tutti_midi_ci::ResourceStore;
+/// use tutti_midi_ci::{ProfileOffer, ResourceStore};
 /// use tutti_ump::EndpointName;
 /// use tutti_midi_device::MidiIdentity;
 /// use tutti_session::MidiPolicy;
@@ -75,11 +87,14 @@ use crate::midi::Midi;
 ///     }),
 ///     // The Resources peers can Get and Set; `ResourceStore::default()` has none.
 ///     properties: Some(Arc::new(ResourceStore::default())),
+///     // The Profiles peers can switch; the empty offer has none.
+///     profiles: ProfileOffer::default(),
 /// };
 /// assert!(policy.identity.is_some());
 /// assert_eq!(policy.clone(), policy);
 /// assert_eq!(MidiPolicy::default().identity, None);
 /// assert!(MidiPolicy::default().properties.is_none());
+/// assert!(MidiPolicy::default().profiles.is_empty());
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct MidiPolicy {
@@ -87,11 +102,15 @@ pub struct MidiPolicy {
     pub identity: Option<MidiIdentity>,
     /// The Resources the session serves; `None` serves none.
     pub properties: Option<Arc<ResourceStore>>,
+    /// The Profiles the session offers; empty offers none.
+    pub profiles: ProfileOffer,
 }
 
 impl PartialEq for MidiPolicy {
     fn eq(&self, other: &Self) -> bool {
-        self.identity == other.identity && same_store(&self.properties, &other.properties)
+        self.identity == other.identity
+            && same_store(&self.properties, &other.properties)
+            && self.profiles == other.profiles
     }
 }
 
@@ -111,7 +130,7 @@ impl Eq for MidiPolicy {}
 #[non_exhaustive]
 pub enum MidiPolicyError {
     /// The session has no OS MIDI layer, so there is no device to present an
-    /// identity to or serve Resources on.
+    /// identity to or serve Resources and Profiles on.
     #[error(transparent)]
     NoHardware(#[from] crate::NoHardware),
 }
@@ -124,11 +143,13 @@ impl Policy for MidiPolicy {
     }
 }
 
-/// The cell of the session's MIDI policy: an identity or a store is refused
-/// when the session has no OS MIDI layer (`attached` is false).
+/// The cell of the session's MIDI policy: an identity, a store or an offer of
+/// Profiles is refused when the session has no OS MIDI layer (`attached` is false).
 pub(crate) fn policy_cell(attached: bool) -> std::sync::Arc<crate::value::Cell<MidiPolicy>> {
     crate::value::Cell::new(MidiPolicy::default(), move |policy| {
-        if (policy.identity.is_some() || policy.properties.is_some()) && !attached {
+        let serves =
+            policy.identity.is_some() || policy.properties.is_some() || !policy.profiles.is_empty();
+        if serves && !attached {
             return Err(MidiPolicyError::from(crate::NoHardware).into());
         }
         Ok(())

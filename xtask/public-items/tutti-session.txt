@@ -49,6 +49,7 @@ enum loaded::LoadError
 enum midi::Stamping
 enum midi_ci::ListedProfile
 enum midi_ci::PeFailure
+enum midi_ci::SwitchRefusal
 enum midi_ci::subscription::SubscriptionCause
 enum midi_event::MidiEvent
 enum midi_follow::ClockKind

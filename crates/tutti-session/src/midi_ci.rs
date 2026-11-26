@@ -41,7 +41,7 @@ use tutti_midi_ci::{
 use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::{
     Answer, ChannelCount, ChannelSwitcher as ListedChannel, CiPeerInfo, PeerId, PeerProfiles,
-    ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
+    ProfileError, ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_rt::Mutex;
@@ -66,8 +66,27 @@ peer_future!(
     /// A peer's Profile switch in flight: it resolves to the state the peer's
     /// Enabled or Disabled Report says the Profile is in. A Profile the peer could
     /// not enable resolves to [`ProfileState::Disabled`], not to an error.
-    SwitchProfile => ProfileState, Nak, "a switch is answered only when it is awaited"
+    SwitchProfile => ProfileState, SwitchRefusal, "a switch is answered only when it is awaited"
 );
+
+/// Why a Profile switch was refused: by the peer's NAK, or by the session for asking
+/// more Channels than the peer declared as the Profile's maximum (M2-102 §2.5.1),
+/// which sends nothing.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SwitchRefusal {
+    /// The peer NAKed the request.
+    #[error("the peer NAKed the switch: {0:?}")]
+    Nak(Nak),
+    /// The switch asks for more Channels than the peer declared.
+    #[error("{} Channels asked for, past the declared maximum {}", .requested.get(), .max.get())]
+    OverMaximum {
+        /// The Channels asked for.
+        requested: tutti_midi_ci::ProfileChannels,
+        /// The most the peer declared.
+        max: tutti_midi_ci::ProfileChannels,
+    },
+}
 
 peer_future!(
     /// A MIDI Message Report the peer sent, in flight: it resolves at the peer's
@@ -165,12 +184,12 @@ impl PortLink {
     fn reply<T, E, R>(
         &self,
         request: R,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), PeerError<E>>,
         make: impl FnOnce(R, ReplySender<T, E>) -> InputRequest,
     ) -> PeerReply<T, E> {
         let (sender, asked) = PeerReply::new();
         if let Err((sender, why)) = self.queue(request, sender, lists, make) {
-            resolve(sender, Err(why.error()));
+            resolve(sender, Err(why));
         }
         asked
     }
@@ -180,7 +199,7 @@ impl PortLink {
     pub(crate) fn send<R>(
         &self,
         request: R,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), Shut>,
         make: impl FnOnce(R, ()) -> InputRequest,
     ) {
         // A refused request has no answer to hand back: nothing waits for it.
@@ -189,18 +208,18 @@ impl PortLink {
 
     /// Queues `request` with its `reply`, or hands the reply back with why the
     /// port could not take it.
-    fn queue<R, L>(
+    fn queue<R, L, X: From<Shut>>(
         &self,
         request: R,
         reply: L,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), X>,
         make: impl FnOnce(R, L) -> InputRequest,
-    ) -> Result<(), (L, Shut)> {
+    ) -> Result<(), (L, X)> {
         match self.shared.upgrade() {
             // The port is gone: released when every handle was dropped and the
             // session took it out, disconnected when the session itself ended.
-            None if self.session.strong_count() > 0 => Err((reply, Shut::Released)),
-            None => Err((reply, Shut::Away)),
+            None if self.session.strong_count() > 0 => Err((reply, Shut::Released.into())),
+            None => Err((reply, Shut::Away.into())),
             Some(shared) => shared.push(request, reply, lists, make),
         }
     }
@@ -469,7 +488,14 @@ impl WholeProfile {
 fn send_switch(link: &PortLink, switch: tutti_midi_hardware::ProfileSwitch) -> SwitchProfile {
     SwitchProfile::new(link.reply(
         switch,
-        |info, switch| switch.check(info.profile_tables()).is_ok(),
+        // A switch for more Channels than the peer declared is refused for that reason, as
+        // the driver refuses one the declaration overtook; any other failure is a Profile
+        // or peer the port no longer lists.
+        |info, switch| match switch.check(info.profile_tables()) {
+            Ok(()) => Ok(()),
+            Err(error @ ProfileError::OverMaximum { .. }) => Err(refused(error)),
+            Err(_) => Err(Shut::Away.into()),
+        },
         InputRequest::Profile,
     ))
 }
@@ -499,7 +525,7 @@ impl ReportPeer {
     pub fn request(&self, what: ReportRequest) -> RequestReport {
         RequestReport::new(self.link.reply(
             self.peer.ask(what),
-            |info, ask| ask.check(info.reporters()).is_ok(),
+            listed(|info, ask: &ReportAsk| ask.check(info.reporters()).is_ok()),
             InputRequest::Report,
         ))
     }
@@ -635,7 +661,7 @@ impl ListedResource {
             Ok(target) => self.link.reply(
                 self.peer
                     .ask(PropertyCall::Get(get(target).encoded(self.encoding()))),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Get,
             ),
             Err(refused) => not_sent(refused),
@@ -652,7 +678,7 @@ impl ListedResource {
                 self.peer.ask(PropertyCall::Subscribe(
                     ResourceGet::new(target).encoded(self.encoding()),
                 )),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Subscribe,
             ),
             Err(refused) => not_sent(refused),
@@ -680,7 +706,7 @@ impl ListedResource {
             Ok(set) => self.link.reply(
                 self.peer
                     .ask(PropertyCall::Set(set.encoded(self.encoding()))),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Set,
             ),
             Err(refused) => not_sent(refused),
@@ -726,6 +752,19 @@ pub(crate) fn at_peer<T: AtPeer>(handles: &[T], peer: PeerId) -> Option<&T> {
     handles.iter().find(|handle| handle.peer_id() == peer)
 }
 
+/// `lists`, which says whether the port's info still lists what a request names, as the
+/// check a request is queued under: a request whose peer or target is gone fails as the
+/// device being away.
+pub(crate) fn listed<R, X: From<Shut>>(
+    lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+) -> impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), X> {
+    move |info, request| {
+        lists(info, request)
+            .then_some(())
+            .ok_or_else(|| Shut::Away.into())
+    }
+}
+
 /// Whether the port's info still lists the peer of `ask`.
 pub(crate) fn listed_peer(info: &crate::MidiInputInfo, ask: &PropertyAsk) -> bool {
     info.property_peers()
@@ -763,7 +802,7 @@ struct Slot<R, T, E> {
 /// last request for its target, in flight or waiting, and resolves with its answer;
 /// one that follows a different request queues its own.
 pub(crate) struct Pending {
-    switches: Vec<Slot<ProfileSwitch, ProfileState, Nak>>,
+    switches: Vec<Slot<ProfileSwitch, ProfileState, SwitchRefusal>>,
     reports: Vec<Slot<ReportAsk, (), Nak>>,
     properties: Vec<PropertySlot>,
     /// The peers whose last call found them out of requests to take: their
@@ -884,7 +923,7 @@ impl Pending {
         &mut self,
         io: &mut tutti_midi_hardware::MidiSession,
         switch: ProfileSwitch,
-        reply: ReplySender<ProfileState, Nak>,
+        reply: ReplySender<ProfileState, SwitchRefusal>,
     ) {
         let key = (switch.at().peer(), switch_at(&switch.request()));
         let last = self
@@ -1095,6 +1134,9 @@ impl Pending {
             Answer::SwitchLost { request } => {
                 self.end_switch(peer, request, &Err(PeerError::Disconnected));
             }
+            Answer::SwitchRefused { request, error } => {
+                self.end_switch(peer, request, &Err(refused(*error)));
+            }
             Answer::Report(end) => self.end_report(peer, &reported(end)),
             Answer::ReportLost => self.end_report(peer, &Err(PeerError::Disconnected)),
             Answer::ReportUnsupported => self.end_report(peer, &Err(PeerError::Unsupported)),
@@ -1172,7 +1214,7 @@ impl Pending {
         &mut self,
         peer: PeerId,
         request: &ProfileRequest,
-        result: &Result<ProfileState, PeerError<Nak>>,
+        result: &Result<ProfileState, PeerError<SwitchRefusal>>,
     ) {
         let key = (peer, switch_at(request));
         let at = self
@@ -1358,13 +1400,26 @@ fn switch_at(request: &ProfileRequest) -> Option<(CiDeviceId, ProfileId)> {
     }
 }
 
-fn switched(outcome: &ProfileOutcome) -> Result<ProfileState, PeerError<Nak>> {
+fn switched(outcome: &ProfileOutcome) -> Result<ProfileState, PeerError<SwitchRefusal>> {
     match outcome {
         ProfileOutcome::Reported { state, .. } => Ok(*state),
-        ProfileOutcome::Refused(nak) => Err(PeerError::Refused(nak.clone())),
+        ProfileOutcome::Refused(nak) => Err(PeerError::Refused(SwitchRefusal::Nak(nak.clone()))),
         ProfileOutcome::TimedOut => Err(PeerError::TimedOut),
         // An answer that is not a switch's ends no switch.
         _ => Err(PeerError::Disconnected),
+    }
+}
+
+/// The refusal the app reads of a switch the driver refused, as a call refused for the same
+/// reason reads.
+fn refused(error: ProfileError) -> PeerError<SwitchRefusal> {
+    match error {
+        ProfileError::OverMaximum { requested, max } => {
+            PeerError::Refused(SwitchRefusal::OverMaximum { requested, max })
+        }
+        // The driver refuses a queued switch for nothing else, and the peer is gone for
+        // a request it cannot find.
+        _ => PeerError::Disconnected,
     }
 }
 

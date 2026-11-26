@@ -911,10 +911,11 @@ pub mod midi {
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DeviceBody, DiscoveryData, EnabledMpeZones, InquiryTarget,
         ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
-        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
-        ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
-        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
-        ReportScope, SpecificData, StandardProfile, SystemMessages,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, OfferError, ProcessError,
+        ProcessFeatures, ProfileChange, ProfileDataError, ProfileEntry, ProfileOffer,
+        ProfileOfferEntry, ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState,
+        ProfileTable, ReplyData, ReplyVersion2, ReportRequest, ReportScope, SpecificData,
+        StandardProfile, SystemMessages,
     };
     pub use tutti_midi_ci::{
         CountedVersion, NotCountedVersion, NotSetProfileOn, ProfileChannels, ProfileFormat,
@@ -1045,7 +1046,7 @@ pub mod midi {
     pub use tutti_session::{
         ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
+        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, SwitchRefusal, WholeProfile,
     };
     #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

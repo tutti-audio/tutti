@@ -76,7 +76,7 @@ use std::sync::Arc;
 use tutti_platform::Instant;
 
 use tutti_graph::Offset;
-use tutti_midi_ci::ResourceStore;
+use tutti_midi_ci::{ProfileOffer, ResourceStore};
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
     IdentityInquiry, InquiryAction, Learned, Supports,
@@ -85,8 +85,8 @@ use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
 use tutti_rt::CounterWriter;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, Message, MidiGroup, Protocol,
-    Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
+    BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, Message, MidiGroup, MpeZoneSpan,
+    Protocol, Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
 };
 use tutti_units::Losses;
 
@@ -466,8 +466,10 @@ impl CiOutput {
         heard: &Heard<'_>,
         identity: Option<DeviceIdentity>,
         store: &mut ResourceStore,
+        offer: &ProfileOffer,
     ) -> CiChanges {
-        self.ci.poll(now, heard, identity, store, &mut self.out)
+        self.ci
+            .poll(now, heard, identity, store, offer, &mut self.out)
     }
 
     /// The input is closing: MIDI-CI ends on the device's output (see
@@ -625,6 +627,13 @@ impl Negotiation {
             .map_or_else(Arc::default, |l| l.ci.profiles())
     }
 
+    /// The MPE Profile zones of `group` enabled, by the app's offer or a peer's
+    /// switch, on the Profiles this device's MIDI-CI devices offer.
+    pub(crate) fn offered_mpe_zones(&self, group: MidiGroup) -> Vec<MpeZoneSpan> {
+        self.ci_output()
+            .map_or_else(Vec::new, |l| l.ci.offered_mpe_zones(group))
+    }
+
     /// The MIDI-CI peers of this device that can be asked for a MIDI Message
     /// Report.
     pub(crate) fn report_peers(&self) -> process::Snapshot {
@@ -680,17 +689,18 @@ impl Negotiation {
         heard: &Heard<'_>,
         presented: Option<Presented>,
         store: &mut ResourceStore,
+        offer: &ProfileOffer,
     ) -> Stepped {
         let identity = presented.map(|p| p.identity.device);
         match self {
             Self::Ump(ump) => {
-                let changes = ump.ci_output.poll(now, heard, identity, store);
+                let changes = ump.ci_output.poll(now, heard, identity, store, offer);
                 let stream = ump.poll_stream(now, heard);
                 let granted = ump.answer(heard, presented);
                 Stepped::of(granted.or(stream), changes)
             }
             Self::Midi1Port(port) => {
-                let changes = port.ci_output.poll(now, heard, identity, store);
+                let changes = port.ci_output.poll(now, heard, identity, store, offer);
                 let stream = port.poll_inquiry(now, heard);
                 Stepped::of(stream, changes)
             }
