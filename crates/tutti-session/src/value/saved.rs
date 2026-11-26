@@ -19,7 +19,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Failure, IntoAssign, Stageable};
 use super::error::{SetRefusal, ValueError};
-use super::slot::{SlotCell, SlotId};
+use super::slot::{SettingWord, SlotCell, SlotId, published_kinds};
 use super::state::{Params, ValueState, Values};
 use super::target::{
     AnyAssign, AnyTarget, Assign, Target, TargetId,
@@ -300,6 +300,59 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Store for SlotValue<V> {
     fn store(cell: &Self::Cell, value: &V) {
         cell.store(value);
     }
+}
+
+/// The assignment of `raw` to the param at `addr` of `node` (of the node type
+/// `owner`), in the unit the node declares it in.
+pub(crate) fn declared_param(node: NodeKey, addr: UnitAddr, owner: TypeId, raw: f64) -> AnyAssign {
+    Assign {
+        target: CellParam { node, addr, owner },
+        value: CellValue(raw),
+    }
+    .erase()
+}
+
+/// The assignment of `word` to the setting of `kind` on `node`, whose cell holds
+/// the enum `of`.
+pub(crate) fn declared_setting(
+    node: NodeKey,
+    kind: tutti_units::SettingKind,
+    word: u64,
+    of: TypeId,
+) -> AnyAssign {
+    Assign {
+        target: SlotValue::<SettingWord> {
+            id: SlotId::Setting(node, kind),
+            value: PhantomData,
+        },
+        value: SettingWord::new(word, of),
+    }
+    .erase()
+}
+
+/// The assignment of `initial` to the published value of `node` of its kind:
+/// `None` when the session addresses no such kind.
+#[cfg_attr(
+    not(any(feature = "midi", feature = "sampler")),
+    allow(unused_variables, reason = "no kind is addressed without a feature")
+)]
+pub(crate) fn declared_published(
+    node: NodeKey,
+    initial: &tutti_graph::PublishedInitial,
+) -> Option<AnyAssign> {
+    published_kinds!(K, id => {
+        let value = initial.value::<K>()?;
+        Some(
+            Assign {
+                target: SlotValue::<<K as tutti_graph::PublishedKind>::Value> {
+                    id: id(node),
+                    value: PhantomData,
+                },
+                value,
+            }
+            .erase(),
+        )
+    })
 }
 
 /// The assignment of the value `cell` holds, a slot registered as `V`.
