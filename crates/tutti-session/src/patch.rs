@@ -20,7 +20,8 @@ use tutti_buffers::Float;
 use tutti_graph::{Fade, HostValues, Initials, IntoNode, NodeConfig, NodeKey};
 use tutti_units::Samples;
 
-use crate::{AppKey, Clock, Graph, Key, ReplaceRefused, Replacement, Session};
+use crate::value::{declared_param, declared_setting};
+use crate::{AnyAssign, AppKey, Clock, Graph, Key, ReplaceRefused, Replacement, Session};
 
 /// How a declaration is swapped or removed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -62,7 +63,8 @@ impl<K, C> NodeDecl<K, C> {
     }
 
     /// Swaps the node over `fade` instead of the declick, when a patch changes
-    /// its structure.
+    /// its structure. A removal always uses the graph's declick: only
+    /// [`unfaded`](Self::unfaded) cuts it.
     pub fn fade(mut self, fade: Fade) -> Self {
         self.fading = Fading::Over(fade);
         self
@@ -89,6 +91,8 @@ impl<K: fmt::Debug, C> fmt::Debug for NodeDecl<K, C> {
 trait Declared<F: Float>: Send {
     /// The config's own type.
     fn config_type(&self) -> TypeId;
+    /// The type of the node it builds: the owner its params are addressed under.
+    fn node_type(&self) -> TypeId;
     fn as_any(&self) -> &dyn Any;
     /// Whether `other`, a config of this one's type, makes the same node but
     /// for its values. `false` for a config of another type.
@@ -115,6 +119,10 @@ where
 {
     fn config_type(&self) -> TypeId {
         TypeId::of::<C>()
+    }
+
+    fn node_type(&self) -> TypeId {
+        TypeId::of::<C::Node>()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -315,13 +323,25 @@ pub enum PatchError<K> {
     /// The key is declared twice in one patch.
     #[error("{0:?} is declared twice in one patch")]
     DuplicateKey(K),
+    /// The key's config gives an initial value that is NaN or infinite.
+    #[error("{0:?} declares an initial value that is not finite")]
+    NotFinite(K),
 }
 
-/// A key no declared node of the asked config has: never declared, or declared
-/// with a config of another type, or the node left the graph.
+/// Why [`Session::key`](crate::Session::key) found no node.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
-#[error("no node of that config is declared under {0:?}")]
-pub struct NoSuchKey<K>(pub K);
+#[non_exhaustive]
+pub enum KeyError<K> {
+    /// No patch declared the key.
+    #[error("{0:?} is not declared")]
+    Undeclared(K),
+    /// The key is declared with a config of another type than the one asked.
+    #[error("{0:?} is declared with a config of another type")]
+    OtherConfig(K),
+    /// The key is declared, but its node was removed by hand.
+    #[error("{0:?} is declared, but its node was removed")]
+    Gone(K),
+}
 
 /// What [`Session::patch`](crate::Session::patch) did to nodes it had already
 /// declared. A key added for the first time is in none of the lists.
@@ -373,10 +393,9 @@ impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
 }
 
 impl<K: AppKey, F: Float> Kept<K, F> {
-    /// The node declared under `key` with a config of type `C`.
-    pub(crate) fn node_of<C: 'static>(&self, key: &K) -> Option<NodeKey> {
-        let stored = self.nodes.get(key)?;
-        (stored.declaration.config.config_type() == TypeId::of::<C>()).then_some(stored.node)
+    /// What the last patch declared under `key`.
+    fn get(&self, key: &K) -> Option<&Stored<F>> {
+        self.nodes.get(key)
     }
 
     /// Makes the session's graph match `patch`, in the order: nodes of the
@@ -392,6 +411,17 @@ impl<K: AppKey, F: Float> Kept<K, F> {
         let mut seen = BTreeSet::new();
         if let Some((key, _)) = patch.nodes.iter().find(|(key, _)| !seen.insert(key)) {
             return Err(PatchError::DuplicateKey(key.clone()));
+        }
+        let finite = |declaration: &Declaration<F>| {
+            declaration
+                .config
+                .initials()
+                .params()
+                .iter()
+                .all(|(_, raw)| raw.is_finite())
+        };
+        if let Some((key, _)) = patch.nodes.iter().find(|(_, d)| !finite(d)) {
+            return Err(PatchError::NotFinite(key.clone()));
         }
         let mut patched = Patched {
             rebuilt: Vec::new(),
@@ -412,9 +442,15 @@ impl<K: AppKey, F: Float> Kept<K, F> {
                 patched.removed.push(key);
             }
         }
+        let mut writes = Vec::new();
         for (key, declaration) in patch.nodes {
-            self.declare(key, declaration, session, host, &mut patched);
+            self.declare(key, declaration, session, host, &mut patched, &mut writes);
         }
+        // One call, one gesture: every changed initial lands in one batch.
+        session
+            .values
+            .set(writes)
+            .expect("an initial of a config's own node is addressed, finite and not refused");
         Ok(patched)
     }
 
@@ -426,6 +462,7 @@ impl<K: AppKey, F: Float> Kept<K, F> {
         session: &mut Session<K, C>,
         host: &HostValues,
         patched: &mut Patched<K>,
+        writes: &mut Vec<AnyAssign>,
     ) {
         let Some(old) = self.nodes.get_mut(&key) else {
             let node = declaration.config.add(&mut session.graph, host);
@@ -446,11 +483,19 @@ impl<K: AppKey, F: Float> Kept<K, F> {
                 &old.declaration.config.initials(),
                 &declaration.config.initials(),
             );
-            session.graph.write_declared(old.node, &changed);
+            declared_writes(&session.graph, old.node, new.node_type(), &changed, writes);
             old.declaration = declaration;
         } else {
             match new.replace(&mut session.graph, host, old.node, declaration.fading) {
                 Ok(()) => {
+                    // The old unit's live values seed the new one; an initial
+                    // this patch changed wins over them.
+                    let changed = changed_initials(
+                        &old.declaration.config.initials(),
+                        &declaration.config.initials(),
+                    );
+                    let owner = declaration.config.node_type();
+                    declared_writes(&session.graph, old.node, owner, &changed, writes);
                     patched.rebuilt.push(key);
                     old.declaration = declaration;
                 }
@@ -470,6 +515,28 @@ fn take_out<K: AppKey, C: Clock>(session: &mut Session<K, C>, stored: &Stored<C:
         let _ = removal.unfaded();
     }
     true
+}
+
+/// The assignments of `changed` to the node at `node`, of the node type `owner`.
+fn declared_writes<F: Float>(
+    graph: &Graph<F>,
+    node: NodeKey,
+    owner: TypeId,
+    changed: &Initials,
+    writes: &mut Vec<AnyAssign>,
+) {
+    writes.extend(
+        changed
+            .params()
+            .iter()
+            .map(|&(addr, raw)| declared_param(node, addr, owner, raw)),
+    );
+    for &(kind, word) in changed.settings() {
+        let of = graph
+            .setting_enum(node, kind)
+            .expect("a kinded initial names a setting the node holds");
+        writes.push(declared_setting(node, kind, word, of));
+    }
 }
 
 /// The initials in `new` that `old` did not give or gave another value.
@@ -501,8 +568,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// # Errors
     ///
-    /// [`PatchError::DuplicateKey`] when a key is declared twice in `patch`;
-    /// nothing changes.
+    /// [`PatchError::DuplicateKey`] when a key is declared twice in `patch`, and
+    /// [`PatchError::NotFinite`] when a config gives an initial that is NaN or
+    /// infinite; nothing changes.
     pub fn patch(
         &mut self,
         patch: impl IntoPatch<K, C::Float>,
@@ -521,14 +589,19 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// # Errors
     ///
-    /// [`NoSuchKey`] when no such node is declared under `key`, or it left the
-    /// graph.
-    pub fn key<Cfg: NodeConfig<C::Float>>(&self, key: &K) -> Result<Key<Cfg::Node>, NoSuchKey<K>> {
-        self.declared
-            .node_of::<Cfg>(key)
-            .filter(|node| self.graph.contains(*node))
-            .map(Key::new)
-            .ok_or_else(|| NoSuchKey(key.clone()))
+    /// [`KeyError`]: `Undeclared`, `OtherConfig` (declared with a config of
+    /// another type) or `Gone` (its node was removed by hand).
+    pub fn key<Cfg: NodeConfig<C::Float>>(&self, key: &K) -> Result<Key<Cfg::Node>, KeyError<K>> {
+        let Some(stored) = self.declared.get(key) else {
+            return Err(KeyError::Undeclared(key.clone()));
+        };
+        if stored.declaration.config.config_type() != TypeId::of::<Cfg>() {
+            return Err(KeyError::OtherConfig(key.clone()));
+        }
+        if !self.graph.contains(stored.node) {
+            return Err(KeyError::Gone(key.clone()));
+        }
+        Ok(Key::new(stored.node))
     }
 
     /// The values the session holds once for many nodes: what a node reads

@@ -1110,6 +1110,11 @@ pub struct SettingWord {
 }
 
 impl SettingWord {
+    /// `word` of the enum `of`.
+    pub(crate) fn new(word: u64, of: TypeId) -> Self {
+        Self { word, of }
+    }
+
     fn of<T: AtomicWord + 'static>(value: T) -> Self {
         Self {
             word: value.to_word(),

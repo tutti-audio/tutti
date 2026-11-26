@@ -936,23 +936,17 @@ impl<F: Float> Graph<F> {
         key
     }
 
-    /// Writes the initials a patch changed to the running node at `node`: each
-    /// param's raw to its cell, each kinded setting's word to its cell. A value
-    /// the node does not have, or that is not finite, is left; a later `set`
-    /// writes over it as it writes over any value.
-    pub(crate) fn write_declared(&self, node: NodeKey, changed: &tutti_graph::Initials) {
-        for &(addr, raw) in changed.params() {
-            if let Some(cell) = self.values.cell(node, addr).filter(|_| raw.is_finite()) {
-                cell.store(raw, std::sync::atomic::Ordering::Release);
-            }
-        }
-        let held = self.nodes.get(&node).and_then(|e| e.controls.as_ref());
-        for &(kind, word) in changed.settings() {
-            let setting = held.and_then(|h| h.settings.iter().find(|s| s.kind() == kind));
-            if let Some(setting) = setting {
-                let _ = setting.cell().store_word(word);
-            }
-        }
+    /// The enum the setting of `kind` on `node` holds, as its cell declares it.
+    pub(crate) fn setting_enum(
+        &self,
+        node: NodeKey,
+        kind: tutti_units::SettingKind,
+    ) -> Option<std::any::TypeId> {
+        let held = self.nodes.get(&node)?.controls.as_ref()?;
+        held.settings
+            .iter()
+            .find(|s| s.kind() == kind)
+            .map(tutti_graph::ErasedSetting::word)
     }
 
     /// The controls [`add`](Self::add) kept for the node at `key`; `None` when

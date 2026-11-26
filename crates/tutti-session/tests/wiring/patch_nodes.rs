@@ -7,7 +7,10 @@
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Fade, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_rt::atomic_word;
-use tutti_session::{Declarations, DetachedSession, NodeDecl, PatchError, ReplaceRefused, Session};
+use tutti_session::{
+    ChangedBy, Declarations, DetachedSession, KeyError, NodeDecl, PatchError, ReplaceRefused,
+    Session,
+};
 use tutti_units::{Hz, SampleRate, Samples, SyncSetting};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -303,4 +306,97 @@ fn every_container_declares_its_parts() {
     for key in ["tuple", "array", "vec", "some", "collected", "extended"] {
         assert!(s.key::<ToneConfig>(&key).is_ok(), "{key}");
     }
+}
+
+/// **A changed initial reaches a watcher as an app change**: the patch's write
+/// is told to the feed like a `set`, with the value it landed.
+#[test]
+fn a_changed_initial_is_seen_by_a_watcher() {
+    let mut s = session();
+    declare(&mut s, tone());
+    let key = s.key::<ToneConfig>(&"a").unwrap();
+    let mut watcher = s.watch(key.cutoff()).unwrap();
+    assert!(watcher.changes().unwrap().is_none());
+
+    declare(&mut s, tone().cutoff(Hz::new(2_000.0)));
+
+    let change = watcher
+        .changes()
+        .unwrap()
+        .expect("the patch moved the base");
+    assert_eq!(change.value, Hz::new(2_000.0));
+    assert_eq!(change.by, ChangedBy::App);
+}
+
+/// **One patch's changed initials are one gesture**, across keys.
+#[test]
+fn a_patchs_changed_initials_are_one_gesture() {
+    let mut s = session();
+    s.patch((NodeDecl::new("a", tone()), NodeDecl::new("b", tone())))
+        .unwrap();
+    let a = s.key::<ToneConfig>(&"a").unwrap();
+    let b = s.key::<ToneConfig>(&"b").unwrap();
+    let mut watcher = s.watch((a.cutoff(), b.cutoff())).unwrap();
+
+    s.patch((
+        NodeDecl::new("a", tone().cutoff(Hz::new(300.0))),
+        NodeDecl::new("b", tone().cutoff(Hz::new(400.0))),
+    ))
+    .unwrap();
+
+    let (a, b) = watcher.changes().unwrap();
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert_eq!((a.value, b.value), (Hz::new(300.0), Hz::new(400.0)));
+    assert_eq!(a.gesture.unwrap().id, b.gesture.unwrap().id);
+}
+
+/// **A rebuild takes an initial the patch changed, and keeps a set value
+/// otherwise**: structure and initial changed together read the new initial.
+#[test]
+fn a_rebuild_with_a_changed_initial_reads_the_new_initial() {
+    let mut s = session();
+    declare(&mut s, tone());
+    let key = s.key::<ToneConfig>(&"a").unwrap();
+    s.set(key.cutoff().to(Hz::new(800.0))).unwrap();
+    let _ = s.update();
+
+    let patched = declare(&mut s, tone().seed(7).cutoff(Hz::new(2_000.0)));
+
+    assert_eq!(patched.rebuilt, ["a"]);
+    assert_eq!(s.get(key.cutoff()).unwrap(), Hz::new(2_000.0));
+}
+
+/// **`key` names why it found no node**: undeclared, declared with another
+/// config, or its node removed by hand.
+#[test]
+fn a_key_error_names_its_cause() {
+    let mut s = session();
+    assert_eq!(
+        s.key::<ToneConfig>(&"a").unwrap_err(),
+        KeyError::Undeclared("a")
+    );
+    declare(&mut s, tone());
+    assert_eq!(
+        s.key::<HumConfig>(&"a").unwrap_err(),
+        KeyError::OtherConfig("a")
+    );
+    let key = s.key::<ToneConfig>(&"a").unwrap();
+    let _ = s.remove(key).unwrap();
+    assert_eq!(s.key::<ToneConfig>(&"a").unwrap_err(), KeyError::Gone("a"));
+}
+
+/// **An initial that is not finite is refused naming its key**, before
+/// anything changes.
+#[test]
+fn a_non_finite_initial_is_a_patch_error_naming_its_key() {
+    let mut s = session();
+    let nodes = s.graph_ref().node_count();
+
+    let refused = s.patch((
+        NodeDecl::new("ok", tone()),
+        NodeDecl::new("bad", tone().cutoff(Hz::new(f64::NAN))),
+    ));
+
+    assert_eq!(refused.unwrap_err(), PatchError::NotFinite("bad"));
+    assert_eq!(s.graph_ref().node_count(), nodes);
 }

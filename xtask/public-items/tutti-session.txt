@@ -72,6 +72,7 @@ enum modulation::SourceError
 enum modulation::state::Problem
 enum modulation::state::SourceName
 enum modulation::state::TargetName
+enum patch::KeyError
 enum patch::PatchError
 enum peer::PeerError
 enum peer::PeerEvent
@@ -977,7 +978,6 @@ struct modulation::Scale
 struct modulation::SourceInfo
 struct modulation::state::ModState
 struct patch::Declarations
-struct patch::NoSuchKey
 struct patch::NodeDecl
 struct patch::Patched
 struct peer::PeerResourceId
