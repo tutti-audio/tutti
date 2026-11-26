@@ -20,7 +20,8 @@ module-cycle tutti_dsp::reverb::fdn::design,tutti_dsp::reverb::fdn::kind
 module-cycle tutti_dsp::reverb::network::queries,tutti_dsp::reverb::network::response
 module-cycle tutti_dsp::sos::analog,tutti_dsp::sos::butterworth
 module-cycle tutti_engine::callback,tutti_engine::callback_frames,tutti_engine::stream
-module-cycle tutti_export::control,tutti_export::error,tutti_export::graph,tutti_export::normalize,tutti_export::output,tutti_export::planar,tutti_export::render,tutti_export::spill
+module-cycle tutti_export::control,tutti_export::error,tutti_export::normalize,tutti_export::output,tutti_export::outputs
+module-cycle tutti_export::render,tutti_export::spill
 module-cycle tutti_graph::compile,tutti_graph::edges,tutti_graph::edit,tutti_graph::event,tutti_graph::exec,tutti_graph::model,tutti_graph::node
 module-cycle tutti_graph::compile::carry,tutti_graph::compile::coarsen,tutti_graph::compile::colour,tutti_graph::compile::plan,tutti_graph::compile::program,tutti_graph::compile::timing,tutti_graph::compile::verify
 module-cycle tutti_graph::contract::drive,tutti_graph::contract::rig
@@ -89,7 +90,7 @@ tangle tutti_clap_ffi::library::Bundle,tutti_clap_ffi::plugin::Plugin
 tangle tutti_clap_host::instance::ClapLoaded,tutti_clap_host::instance::controller::ClapController,tutti_clap_host::instance::editor_instance::ClapEditor,tutti_clap_host::support::active::Active,tutti_clap_host::support::active::Clap
 tangle tutti_cpal::driver::TuttiDriver,tutti_cpal::output::AudioEngine
 tangle tutti_cpal::host::DeviceHost,tutti_cpal::host::jack::open
-tangle tutti_export::control::Control,tutti_export::control::Weights,tutti_export::normalize::Measurer,tutti_export::normalize::Normalize,tutti_export::normalize::headroom_ceiling,tutti_export::output::FileTarget,tutti_export::output::NormalizeSpec,tutti_export::output::Target
+tangle tutti_export::control::Control,tutti_export::control::Weights,tutti_export::normalize::Measurer,tutti_export::normalize::Normalize,tutti_export::normalize::headroom_ceiling,tutti_export::output::FileTarget,tutti_export::output::Gain
 tangle tutti_graph::edit::editor::Editor,tutti_graph::node::fork::ForkRemains,tutti_graph::node::fork::PendingFork,tutti_graph::testing::declare_outputs
 tangle tutti_graph::exec::history::EMPTY,tutti_graph::exec::history::NONE,tutti_graph::exec::history::Piece,tutti_graph::exec::history::TransportHistory,tutti_graph::exec::history::roll,tutti_graph::node::time::BeatCrossings,tutti_graph::node::time::Env,tutti_graph::node::time::TransportChange,tutti_graph::node::time::TransportChanges,tutti_graph::node::time::TransportPosition
 tangle tutti_graph::model::bus_edge::Lowering,tutti_graph::model::spec::GraphSpec
