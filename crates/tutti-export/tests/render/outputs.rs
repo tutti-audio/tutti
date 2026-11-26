@@ -115,7 +115,7 @@ fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
         Pcm::Int(int) => Pcm::Int(int.no_dither()),
         float => float,
     };
-    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO)
+    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).replace()
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
@@ -127,6 +127,7 @@ fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
         },
         ChannelLayout::STEREO,
     )
+    .replace()
 }
 
 fn planes(produced: Produced) -> Vec<Vec<f32>> {
@@ -878,6 +879,7 @@ fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
         Format::Wav(Pcm::Float(FloatWidth::F32)),
         ChannelLayout::from(width),
     )
+    .replace()
 }
 
 /// A file whose topology is not stated is taken to be the engine's order for

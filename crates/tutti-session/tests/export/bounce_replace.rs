@@ -1,5 +1,5 @@
-//! `Bounce::create_new`: a file that exists at a bounce's path is refused at the
-//! commit, and the bounce's whole file is kept beside it.
+//! `Bounce::replace`: a file that exists at a bounce's path is refused before anything is
+//! rendered, unless the bounce replaces it.
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
@@ -45,11 +45,10 @@ fn bounce() -> Bounce {
         .tail(BounceTail::None)
 }
 
-/// **A bounce with `create_new` onto an existing main output fails with an
-/// `AlreadyExists` commit, the path keeps its old bytes, and the kept file
-/// holds the bounce's frames**: the node's constant 0.5, `FRAMES` long.
+/// **A bounce onto an existing main output is refused with `Exists`, the path keeps its old
+/// bytes, and nothing is left beside it.**
 #[test]
-fn a_create_new_bounce_onto_an_existing_main_output_keeps_the_bounce_and_leaves_the_path() {
+fn a_bounce_onto_an_existing_main_output_is_refused_and_leaves_the_path() {
     let dir = tempfile::tempdir().unwrap();
     let main_output = dir.path().join("main_output.wav");
     std::fs::write(&main_output, b"old bytes").unwrap();
@@ -58,33 +57,27 @@ fn a_create_new_bounce_onto_an_existing_main_output_keeps_the_bounce_and_leaves_
     session.graph().connect(node, MainOutput).unwrap();
     let error = bounced(
         &mut session,
-        bounce().main_output(&main_output, float_wav()).create_new(),
+        bounce().main_output(&main_output, float_wav()),
     )
     .map(|_| ())
     .expect_err("the path exists");
-    let BounceError::Export(tutti_export::RenderError::Encode(tutti_codec::EncodeError::Commit(
-        commit,
-    ))) = &error
-    else {
-        panic!("not a commit failure: {error:?}");
-    };
-    assert_eq!(commit.kind(), std::io::ErrorKind::AlreadyExists);
-    assert_eq!(std::fs::read(&main_output).unwrap(), b"old bytes");
-    assert_eq!(
-        commit.kept().parent(),
-        main_output.parent(),
-        "kept beside it"
+    assert!(
+        matches!(
+            &error,
+            BounceError::Export(tutti_export::RenderError::Encode(
+                tutti_codec::EncodeError::Exists { path }
+            )) if *path == main_output
+        ),
+        "{error:?}"
     );
-    let planes = tutti_fixtures::signal::read_wav_f32(commit.kept());
-    assert!(planes.iter().all(|plane| plane.len() == FRAMES));
-    assert!(planes.iter().flatten().all(|&s| s == 0.5));
-    assert_eq!(names(&dir).len(), 2, "the path and the kept file only");
+    assert_eq!(std::fs::read(&main_output).unwrap(), b"old bytes");
+    assert_eq!(names(&dir), [std::ffi::OsString::from("main_output.wav")]);
 }
 
-/// **A bounce without `create_new` replaces what is at its path and leaves no
-/// temporary file beside it.**
+/// **A bounce with `replace` replaces what is at its path and leaves no temporary file
+/// beside it.**
 #[test]
-fn a_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside_it() {
+fn a_replacing_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let main_output = dir.path().join("main_output.wav");
     std::fs::write(&main_output, b"old bytes").unwrap();
@@ -93,7 +86,7 @@ fn a_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside_it() {
     session.graph().connect(node, MainOutput).unwrap();
     bounced(
         &mut session,
-        bounce().main_output(&main_output, float_wav()),
+        bounce().main_output(&main_output, float_wav()).replace(),
     )
     .expect("renders");
     let planes = tutti_fixtures::signal::read_wav_f32(&main_output);

@@ -118,7 +118,7 @@ fn the_limit_is_judged_at_the_output_rate() {
 #[test]
 fn the_topology_reaches_the_file() {
     let dir = tempfile::tempdir().unwrap();
-    for (channels, topology, mask) in [
+    for (case, (channels, topology, mask)) in [
         (4u16, Some(tutti_buffers::Bed::Quad.topology()), 0x33u32),
         (4, None, 0x33),
         (
@@ -127,10 +127,13 @@ fn the_topology_reaches_the_file() {
             0,
         ),
         (6, None, 0x60F),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut cfg = config(channels, Pcm::Int(IntPcm::new(IntDepth::Int24)));
         cfg.topology = topology;
-        let path = dir.path().join(format!("m{channels}_{mask}.wav"));
+        let path = dir.path().join(format!("m{case}.wav"));
         let layout = ChannelLayout::from(channels);
         let mut chain = open_file::<f32>(&cfg.target(&path), &cfg.plan(), cfg.rate, 0).unwrap();
         chain
@@ -148,4 +151,36 @@ fn the_topology_reaches_the_file() {
             8 * u32::from(channels)
         );
     }
+}
+
+/// A target refuses an existing path by default, before the path is touched, and replaces
+/// it once `replace` is said.
+#[test]
+fn a_target_refuses_an_existing_path_unless_it_replaces() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config(1, Pcm::Float(tutti_buffers::FloatWidth::F32));
+    let path = dir.path().join("out.wav");
+    std::fs::write(&path, b"sentinel").unwrap();
+
+    let err = open_file::<f32>(&config.target(&path), &config.plan(), config.rate, 0)
+        .map(drop)
+        .expect_err("the path exists");
+    assert!(
+        matches!(&err, RenderError::Encode(tutti_codec::EncodeError::Exists { path: p }) if *p == path),
+        "{err}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"sentinel");
+
+    let mut chain = open_file::<f32>(
+        &config.target(&path).replace(),
+        &config.plan(),
+        config.rate,
+        0,
+    )
+    .unwrap();
+    chain
+        .block(Interleaved::new(&[0.5f32; 8], ChannelLayout::MONO).unwrap())
+        .unwrap();
+    chain.finalize().unwrap().commit().unwrap();
+    assert!(std::fs::read(&path).unwrap().starts_with(b"RIFF"));
 }

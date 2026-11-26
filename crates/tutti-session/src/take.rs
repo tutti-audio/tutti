@@ -44,7 +44,6 @@
 //! silence the inlet played.
 
 use std::fmt;
-use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
 use tutti_rt::Mutex;
 
@@ -56,13 +55,12 @@ use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 use tutti_buffers::{
-    ChannelLayout, ChannelSet, Float, FloatWidth, Interleaved, InterleavedMut, Sample, Sink,
-    SinkFailed,
+    ChannelLayout, ChannelSet, Float, FloatWidth, Interleaved, InterleavedMut, Sink, SinkFailed,
 };
-use tutti_codec::{FileEncoder, Format, Spec};
+use tutti_codec::{EncoderOptions, EncoderSink, Format, Kept, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
-use tutti_platform::{Staged, StagedCommitError};
+use tutti_platform::StagedCommitError;
 use tutti_rt::{Bell, Listener, SplitMix64};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{Recording, TakeId};
@@ -188,7 +186,7 @@ pub struct Window {
 pub struct TakeFile {
     path: PathBuf,
     format: Format,
-    create_new: bool,
+    replace: bool,
 }
 
 impl TakeFile {
@@ -199,7 +197,7 @@ impl TakeFile {
         Self {
             path: path.into(),
             format,
-            create_new: false,
+            replace: false,
         }
     }
 
@@ -210,15 +208,16 @@ impl TakeFile {
         Self::new(path, Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)))
     }
 
-    /// Refuses a path that already exists instead of replacing it: the take
-    /// is still written beside the path, and the commit that finds the path
-    /// taken ends the take with [`TakeError::Commit`] of kind
-    /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). The path is left
-    /// alone and the whole take is kept at the error's
-    /// [`kept`](StagedCommitError::kept), the app's to move or delete.
+    /// Replaces a path that already exists instead of refusing it. A take refuses an existing
+    /// path by default, with [`TakeError::Open`] of [`tutti_codec::EncodeError::Exists`] when
+    /// it starts. The take is written beside the path, so a path that appears by the time it
+    /// ends fails the commit with [`TakeError::Commit`] of kind
+    /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists): the path is left alone and the
+    /// whole take is kept at the error's [`kept`](StagedCommitError::kept), the app's to move
+    /// or delete.
     #[must_use]
-    pub fn create_new(mut self) -> Self {
-        self.create_new = true;
+    pub fn replace(mut self) -> Self {
+        self.replace = true;
         self
     }
 }
@@ -695,8 +694,8 @@ pub enum TakeError {
     /// The file could not be created.
     #[error("the take's file could not be created: {0}")]
     Open(#[source] Arc<tutti_codec::EncodeError>),
-    /// The finished file could not be put in place (the path exists under
-    /// [`TakeFile::create_new`], or the file system refused the move). The
+    /// The finished file could not be put in place (a path appeared after the take was
+    /// armed, or the file system refused the move). The
     /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
     /// untouched; the file is the app's to move or delete.
     #[error(transparent)]
@@ -1142,21 +1141,13 @@ fn open_target<F: Float>(
         TargetKind::File(TakeFile {
             path,
             format,
-            create_new,
+            replace,
         }) => {
-            let staged = Staged::new(&path);
-            let staged = if create_new {
-                staged.create_new()
-            } else {
-                staged
-            };
-            let encoder = FileEncoder::create(
-                &Spec::of_channels(format, ChannelSet::default_for(layout), rate),
-                staged,
-            )
-            .map_err(|e| TakeError::Open(Arc::new(e)))?
-            .dither_seed(seed);
-            let file: Box<dyn DynSink<F>> = Box::new(StagedSink::<F>::new(encoder, layout));
+            let spec = Spec::of_channels(format, ChannelSet::default_for(layout), rate);
+            let options = EncoderOptions::new(&spec).dither_seed(seed).file(&path);
+            let options = if replace { options.replace() } else { options };
+            let encoder = options.create().map_err(|e| TakeError::Open(Arc::new(e)))?;
+            let file: Box<dyn DynSink<F>> = Box::new(EncoderSink::<F>::new(encoder));
             Ok((file, Some(path)))
         }
         TargetKind::Sink(sink) => {
@@ -1171,81 +1162,14 @@ fn open_target<F: Float>(
     }
 }
 
-/// A staged file as the [`Sink`] a take writes, of the floats `S` the take records: whole frames at the take's
-/// width, the encoder keeping the first write failure for
-/// [`finalize`](Sink::finalize), which closes the file and puts it in place.
-struct StagedSink<S> {
-    encoder: FileEncoder,
-    layout: ChannelLayout,
-    /// A write failed: later writes are refused, and the encoder reports the
-    /// first failure at [`finalize`](Sink::finalize), keeping the file.
-    failed: bool,
-    sample: PhantomData<fn(S)>,
-}
-
-impl<S> StagedSink<S> {
-    fn new(encoder: FileEncoder, layout: ChannelLayout) -> Self {
-        Self {
-            encoder,
-            layout,
-            failed: false,
-            sample: PhantomData,
-        }
-    }
-}
-
-/// How a [`StagedSink`] ended without its file in place.
-#[derive(Debug, Error)]
-enum StagedClosed {
-    /// The finished file could not be put in place; it is kept.
-    #[error(transparent)]
-    Commit(StagedCommitError),
-    /// A write or the close failed; the unfinished file is kept.
-    #[error("{source}")]
-    Failed {
-        #[source]
-        source: Arc<tutti_codec::EncodeError>,
-        unfinished: tutti_codec::Unfinished,
-    },
-}
-
-impl<S: Sample> Sink for StagedSink<S> {
-    type Sample = S;
-    type Error = StagedClosed;
-
-    fn layout(&self) -> ChannelLayout {
-        self.layout
-    }
-
-    fn write(&mut self, frames: Interleaved<'_, S>) -> Result<(), SinkFailed> {
-        if self.failed {
-            return Err(SinkFailed);
-        }
-        self.encoder.write(frames).map_err(|_| {
-            self.failed = true;
-            SinkFailed
-        })
-    }
-
-    fn finalize(self) -> Result<(), Self::Error> {
-        self.encoder.finish_keeping().map_err(|kept| match kept {
-            tutti_codec::Kept::Commit(commit) => StagedClosed::Commit(commit),
-            tutti_codec::Kept::Unfinished { source, unfinished } => StagedClosed::Failed {
-                source: Arc::new(source),
-                unfinished,
-            },
-        })
-    }
-}
-
 /// A sink's failure to finalize as the take's: a commit's is
 /// [`TakeError::Commit`], which names the file it kept.
 fn closing_failed(error: SinkClosed) -> TakeError {
-    match error.downcast_ref::<StagedClosed>() {
-        Some(StagedClosed::Commit(commit)) => TakeError::Commit(commit.clone()),
-        Some(StagedClosed::Failed { source, unfinished }) => TakeError::Sink {
-            source: Arc::clone(source) as SinkClosed,
+    match error.downcast_ref::<Kept>() {
+        Some(Kept::Commit(commit)) => TakeError::Commit(commit.clone()),
+        Some(Kept::Unfinished { unfinished, .. }) => TakeError::Sink {
             unfinished: Some(unfinished.clone()),
+            source: error,
         },
         None => TakeError::Sink {
             source: error,

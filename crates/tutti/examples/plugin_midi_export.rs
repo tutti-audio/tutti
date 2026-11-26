@@ -153,7 +153,10 @@ fn play_to_file(
     out: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
-        bounce.main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
+        // `replace`: a rerun overwrites the output of the last one.
+        bounce
+            .replace()
+            .main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
     })
 }
 
