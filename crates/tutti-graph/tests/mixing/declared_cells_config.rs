@@ -11,7 +11,7 @@ use tutti_units::{Hz, Mix, UnitParam};
 /// A node holding a table of the graph float, so its config and its cells
 /// are generic over it.
 #[derive(Clone)]
-struct Table<F: Float> {
+pub struct Table<F: Float> {
     table: Arc<[F]>,
     cells: TableCells<F>,
 }
@@ -61,7 +61,7 @@ fn a_config_generic_over_the_float_builds_at_both_widths_and_reads_back_its_para
 
 /// A node with `options`: plain values with a default, no param.
 #[derive(Clone)]
-struct Seeded {
+pub struct Seeded {
     seed: u64,
     voices: u8,
     cells: SeededCells,
@@ -122,7 +122,7 @@ fn an_option_is_not_a_param() {
 
 /// A config with a passed-through `#[derive(Copy, PartialEq)]`.
 #[derive(Clone)]
-struct Plain {
+pub struct Plain {
     cells: PlainCells,
 }
 

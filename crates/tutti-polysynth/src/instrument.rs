@@ -75,8 +75,8 @@ impl Patch for OneVoice {
 }
 
 tutti_graph::declare_params!([V: InstrumentVoice] NoteInstrument<V>,
-    InstrumentConfig<C: Clone>, InstrumentCells<C: Clone> {
-    required { voice: C, rules: VoiceConfig }
+    InstrumentConfig<V: InstrumentVoice>, InstrumentCells<V: InstrumentVoice> {
+    required { voice: V::Config, rules: VoiceConfig }
     params { Volume => gain: Amplitude { whole } = Amplitude::UNITY }
     options { group: MidiGroup = MidiGroup::FIRST, device: SysexDeviceId = SysexDeviceId::DEFAULT }
 });
@@ -108,7 +108,7 @@ tutti_graph::declare_params!([V: InstrumentVoice] NoteInstrument<V>,
 /// ```
 #[derive(Clone, Debug)]
 pub struct NoteInstrument<V: InstrumentVoice> {
-    cells: InstrumentCells<V::Config>,
+    cells: InstrumentCells<V>,
     voice: V::Config,
     rate: SampleRate,
     voices: VoiceTable<V>,
@@ -132,7 +132,7 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
 
     /// An instrument of `config.rules.polyphony` idle voices. Allocates.
     #[must_use]
-    pub fn new(config: InstrumentConfig<V::Config>) -> Self {
+    pub fn new(config: InstrumentConfig<V>) -> Self {
         let rate = Self::INITIAL_RATE;
         let voices = VoiceTable::new(config.rules, || V::new(&config.voice, rate));
         Self {

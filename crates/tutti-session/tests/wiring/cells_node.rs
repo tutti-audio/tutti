@@ -14,7 +14,7 @@ use tutti_units::{Amplitude, Beat, SampleRate};
 
 /// A source of its `level`, on one channel.
 #[derive(Clone)]
-struct Level {
+pub struct Level {
     cells: LevelCells,
 }
 
@@ -100,7 +100,7 @@ fn a_cells_node_forks_from_the_values_set() {
 
 /// A source of how many events its published `events` hold, on one channel.
 #[derive(Clone)]
-struct Count {
+pub struct Count {
     cells: CountCells,
 }
 
@@ -228,7 +228,7 @@ impl tutti_graph::PublishedKind for Unaddressed {
 /// A source of silence that publishes a value of a kind the session does not
 /// know.
 #[derive(Clone)]
-struct Silent {
+pub struct Silent {
     cells: SilentCells,
 }
 

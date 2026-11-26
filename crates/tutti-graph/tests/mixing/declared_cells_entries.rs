@@ -22,7 +22,7 @@ use tutti_units::{Amplitude, Db, Hz, Mix, Q, Samples, UnitAddr, UnitParam};
 
 /// Three outputs: the reads of `Cutoff`, `Q` and `Volume`.
 #[derive(Clone)]
-struct Sparse {
+pub struct Sparse {
     cells: SparseCells,
 }
 
@@ -242,7 +242,7 @@ enum Mode {
 atomic_word!(Mode { Off, Slow, Fast });
 
 #[derive(Clone)]
-struct Switched {
+pub struct Switched {
     cells: SwitchedCells,
 }
 
@@ -352,7 +352,7 @@ fn a_clone_shares_a_setting_and_a_fork_owns_it() {
 
 /// One declaration with a param and a setting.
 #[derive(Clone)]
-struct Mixed {
+pub struct Mixed {
     cells: MixedCells,
 }
 
@@ -426,7 +426,7 @@ fn a_param_and_a_setting_in_one_declaration_stay_apart() {
 
 /// A node with a required value and nothing else: no ports, an empty set.
 #[derive(Clone)]
-struct Lonely {
+pub struct Lonely {
     layout: ChannelLayout,
     cells: LonelyCells,
 }
