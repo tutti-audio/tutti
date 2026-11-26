@@ -309,6 +309,31 @@ fn a_width_it_cannot_place_is_an_error_not_a_drop() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
+/// Two sets of one width in different orders are folded by speaker: a 5.1 wave whose front pair
+/// is swapped, written into the default 5.1, reaches the file with the pair put right.
+#[test]
+fn a_same_width_reorder_reaches_the_file() {
+    let default = ChannelTopology::default_for(ChannelLayout::from(6u16)).unwrap();
+    let mut speakers = default.positions().unwrap().to_vec();
+    speakers.swap(0, 1);
+    let source = ChannelTopology::new(speakers).unwrap();
+    let planes = constants(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("reordered.wav");
+    let wave = Wave::with_topology(source, SampleRate::SR_48K);
+    let mut wave = wave;
+    wave.append_planes(Planes::from_vecs(&planes).unwrap())
+        .unwrap();
+    let encoding = Encoding::new(float_wav()).channels(ChannelSet::from(default));
+    write(&wave, &encoding, &ToFile::new(&path)).unwrap();
+    let samples: Vec<f32> = hound::WavReader::open(&path)
+        .unwrap()
+        .into_samples::<f32>()
+        .map(|s| s.unwrap())
+        .collect();
+    assert_eq!(&samples[..6], &[0.2, 0.1, 0.3, 0.4, 0.5, 0.6]);
+}
+
 /// Planes already at the file's width are written as they are, whatever the topology says.
 #[test]
 fn planes_at_the_files_width_are_written_unchanged() {

@@ -752,7 +752,8 @@ impl<F: Float> Place<F> {
         } else {
             *topology
         };
-        let fold = Fold::to_channels(&named, &ChannelSet::default_for(frame)).build()?;
+        let fold =
+            Fold::to_channels(&ChannelSet::from(named), &ChannelSet::default_for(frame)).build()?;
         Self::folded(fold, frame)
     }
 

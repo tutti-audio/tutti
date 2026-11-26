@@ -24,7 +24,7 @@ use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
-use tutti_buffers::{Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample};
 
 use tutti_graph::RtLogReaders;
 use tutti_timeline::RenderClock;
@@ -63,19 +63,9 @@ impl FileChannels {
                 rendered: graph,
             });
         }
-        // A main output past the widths a topology holds has none: its
-        // channels go by index.
-        let fold = match (main_output.topology(), self.channels.topology()) {
-            (Some(from), _) => Fold::to_channels(from, &self.channels).build(),
-            // A file that names no speaker takes the graph's channels by
-            // index, as it says; `between` never pads by a guess.
-            (None, Some(topology)) if !topology.is_unassigned() => Err(FoldError::Unassigned {
-                src: graph,
-                dst: topology.width(),
-            }),
-            (None, _) => Fold::by_index(graph, self.channels.width()),
-        };
-        fold.map_err(|e| ConfigError::Placement(e).into())
+        Fold::to_channels(main_output, &self.channels)
+            .build()
+            .map_err(|e| ConfigError::Placement(e).into())
     }
 }
 

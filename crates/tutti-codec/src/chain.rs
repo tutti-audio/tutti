@@ -6,7 +6,7 @@ use crate::{
 };
 use std::io::{Seek, Write};
 use tutti_buffers::{
-    ChannelLayout, ChannelSet, Float, Fold, FoldError, Interleaved, InterleavedMut, Sample, convert,
+    ChannelLayout, ChannelSet, Float, Fold, Interleaved, InterleavedMut, Sample, convert,
 };
 use tutti_dsp::{FftFloat, resampled_frames};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
@@ -175,24 +175,14 @@ fn scaled<F: Float>(
     to.write(block.as_interleaved())
 }
 
-/// The fold of `src`'s channels onto `dst`'s, as an output's is built (the engine's
-/// order for a source that states none, by index where either has no order), or `None`
-/// when they are as wide as each other and the block goes as it is.
+/// The fold of `src`'s channels onto `dst`'s, as an output's is built
+/// ([`Fold::to_channels`]), or `None` when they are the same channels and the block goes as
+/// it is.
 fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<Fold<F>>> {
-    if src.width() == dst.width() {
+    if src == dst {
         return Ok(None);
     }
-    let fold = match (src.topology(), dst.topology()) {
-        (Some(from), _) => Fold::to_channels(from, dst).build(),
-        // A file that names speakers takes a source that names none by index only
-        // when it names none either: `between` never pads by a guess.
-        (None, Some(topology)) if !topology.is_unassigned() => Err(FoldError::Unassigned {
-            src: src.width(),
-            dst: topology.width(),
-        }),
-        (None, _) => Fold::by_index(src.width(), dst.width()),
-    };
-    Ok(Some(fold?))
+    Ok(Some(Fold::to_channels(src, dst).build()?))
 }
 
 /// The streaming file pipeline: blocks of a source go through the [`Encoding`]'s stages
