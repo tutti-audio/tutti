@@ -123,10 +123,8 @@ fn mpe::zone::ProfileZone::new
 fn mpe::zone::ProfileZone::range
 fn mpe::zone::ProfileZone::response
 fn mpe::zone::ProfileZone::span
-fn mpe::zone::ProfileZones::new
 fn mpe::zone::ProfileZones::single
 fn mpe::zone::ProfileZones::with
-fn mpe::zone::ProfileZones::without
 fn mpe::zone::ProfileZones::zone_of
 fn mpe::zone::ProfileZones::zones
 fn per_note_management::PerNoteManager::before

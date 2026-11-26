@@ -347,6 +347,13 @@ impl Member {
         brightness: None,
     };
 
+    /// Takes the receiver to hold none of the channel's values.
+    const fn forget(&mut self) {
+        self.bend = None;
+        self.pressure = None;
+        self.brightness = None;
+    }
+
     /// Sends what of `expression` the channel does not hold yet, in the forms
     /// `features` says the receiver takes: what it does not use is not sent, and
     /// not held either.
@@ -426,11 +433,16 @@ impl Zoned {
         // or set of features does not stop its notes (section 3.3).
         let span = |zones: &ProfileZones, channel| zones.zone_of(channel).map(ProfileZone::span);
         let changed = |channel| span(&had, channel) != span(&zones, channel);
+        let features =
+            |zones: &ProfileZones, channel| zones.zone_of(channel).map(ProfileZone::features);
         while self.end(|n| changed(n.source)).is_some() {}
         for channel in MidiChannel::all() {
             if changed(channel) {
                 self.ranges[channel.index()] = None;
                 self.members[channel.index()] = Member::IDLE;
+            } else if features(&had, channel) != features(&zones, channel) {
+                // The receiver takes other forms: what it holds is told again in them.
+                self.members[channel.index()].forget();
             }
             let range = sources[channel.index()].note_range;
             let value = ControlValue::new(range.to_rpn_bits());
@@ -443,9 +455,7 @@ impl Zoned {
     fn resend(&mut self) {
         self.ranges = [None; CHANNELS];
         for member in &mut self.members {
-            member.bend = None;
-            member.pressure = None;
-            member.brightness = None;
+            member.forget();
         }
     }
 

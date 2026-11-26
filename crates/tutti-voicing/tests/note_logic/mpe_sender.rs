@@ -889,6 +889,16 @@ fn a_features_answer_keeps_the_notes_and_the_next_value_takes_its_form() {
     feed(&mut s, 0, note_on(60));
     let declared = ProfileZones::single(zone(0, 1).mpe_features(bipolar()));
     s.set_profile(MidiGroup::FIRST, Some(declared));
+    // The values the Member holds in the Control Change forms are told again in
+    // the forms the receiver declared, though none of them changed.
+    assert_eq!(
+        feed(&mut s, 0, pressure(0)),
+        [
+            (1, bend(CENTER)),
+            (1, bipolar_rc(0x21, CENTER)),
+            (1, bipolar_rc(0x20, CENTER)),
+        ]
+    );
     assert_eq!(
         feed(&mut s, 0, pressure(CENTER)),
         [(1, bipolar_rc(0x20, 0xC000_0000))]

@@ -776,13 +776,6 @@ impl ProfileZones {
         Self { zones }
     }
 
-    /// The zones of `set`, each at `range`, a polyphonic response.
-    #[must_use]
-    pub fn new(set: &MpeZoneSet, range: PitchBendSensitivity) -> Self {
-        // `set` holds zones that share no channel.
-        Self::sorted(set.zones().map(|span| ProfileZone::new(span, range)))
-    }
-
     /// The set with `zone` added, or `None` when it shares a channel with one
     /// of the zones held.
     #[must_use]
@@ -791,19 +784,6 @@ impl ProfileZones {
             return None;
         }
         Some(Self::sorted(self.zones().copied().chain([zone])))
-    }
-
-    /// The set without the zone whose Manager is `manager`, or `None` when that
-    /// was the last. A `manager` that names no zone leaves the set as it is.
-    #[must_use]
-    pub fn without(self, manager: MidiChannel) -> Option<Self> {
-        let mut rest = self
-            .zones()
-            .copied()
-            .filter(|zone| zone.manager() != manager)
-            .peekable();
-        rest.peek()?;
-        Some(Self::sorted(rest))
     }
 
     /// Builds the set of zones already known not to overlap, ordered by
