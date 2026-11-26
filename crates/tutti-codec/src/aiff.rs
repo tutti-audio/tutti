@@ -10,12 +10,12 @@
 //! [`Sample`] every format shares.
 
 use crate::error::{Codec, EncodeError, Result, SpecError};
-use crate::pcm::{FloatWidth, IntDepth, Pcm};
+use crate::pcm::{IntDepth, Pcm};
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use aifc::{AifcWriteInfo, AifcWriter, FileFormat, SampleFormat};
 use std::io::{Read, Seek, SeekFrom, Write};
-use tutti_buffers::{I24, Interleaved, Sample};
+use tutti_buffers::{FloatWidth, I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
 pub(crate) struct AiffWriter<W: Write + Seek> {

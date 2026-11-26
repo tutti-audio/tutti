@@ -29,7 +29,7 @@ use tutti_units::Seconds;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};

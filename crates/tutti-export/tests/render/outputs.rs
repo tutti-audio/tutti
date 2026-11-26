@@ -15,8 +15,8 @@ use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Bed, ChannelTopology};
-use tutti_codec::FloatWidth;
 use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{

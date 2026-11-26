@@ -17,7 +17,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_file_under, render_normalized_to_file, render_to_buffers, render_to_file};
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     CancelToken, Control, GRAPH_MAX_BLOCK, Normalize, Progress, RenderError, RenderGraph,

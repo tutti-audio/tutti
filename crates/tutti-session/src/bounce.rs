@@ -277,7 +277,7 @@ impl MainOutputKind for BufferMainOutput {
 ///
 /// ```no_run
 /// # use tutti_session::{Bounce, Range, Session};
-/// # use tutti_codec::{Format, Pcm};
+/// # use tutti_codec::{Format, IntDepth, IntPcm, Pcm};
 /// # use tutti_graph::NodeKey;
 /// # use tutti_units::Beat;
 /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {

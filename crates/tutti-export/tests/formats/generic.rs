@@ -6,7 +6,7 @@
 //! and the figure.
 
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};

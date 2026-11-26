@@ -7,7 +7,8 @@
 //! exported WAV, AIFF and FLAC agree on a sample.
 //!
 //! ```
-//! use tutti_codec::{FloatWidth, IntDepth, Pcm};
+//! use tutti_buffers::FloatWidth;
+//! use tutti_codec::{IntDepth, Pcm};
 //!
 //! assert_eq!(IntDepth::Int16.quantize(1.0f32), 32_767); // clips
 //! assert_eq!(IntDepth::Int16.quantize(-1.0f32), -32_768);
@@ -16,7 +17,7 @@
 //! assert_eq!(Pcm::Float(FloatWidth::F64).bits(), 64);
 //! ```
 
-use tutti_buffers::{I24, Sample};
+use tutti_buffers::{FloatWidth, I24, Sample};
 use tutti_dsp::DitherShape;
 use tutti_units::Amplitude;
 
@@ -158,15 +159,6 @@ impl IntPcm {
     }
 }
 
-/// A float PCM file's sample width. The samples are written as they are: nothing quantizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FloatWidth {
-    /// 32-bit float.
-    F32,
-    /// 64-bit float.
-    F64,
-}
-
 /// The sample type a PCM file holds.
 ///
 /// `Int` at 24 bits with triangular dither is the default, because that is what a file export
@@ -181,7 +173,8 @@ pub enum FloatWidth {
 /// The dither is an option of the integer type, so a float file cannot be given one:
 ///
 /// ```compile_fail,E0599
-/// use tutti_codec::{FloatWidth, Pcm};
+/// use tutti_buffers::FloatWidth;
+/// use tutti_codec::Pcm;
 /// use tutti_dsp::DitherShape;
 ///
 /// let _ = Pcm::Float(FloatWidth::F32).dither(DitherShape::Triangular);

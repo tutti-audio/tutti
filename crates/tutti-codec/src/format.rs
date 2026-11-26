@@ -20,7 +20,7 @@ pub enum Format {
     /// Uncompressed RIFF/WAVE at any [`Pcm`] width.
     #[cfg(feature = "encode-wav")]
     Wav(Pcm),
-    /// AIFF at an integer width; AIFF-C at `Float32`, since float samples are
+    /// AIFF at an integer width; AIFF-C at a float width, since float samples are
     /// an AIFF-C extension.
     #[cfg(feature = "encode-aiff")]
     Aiff(Pcm),

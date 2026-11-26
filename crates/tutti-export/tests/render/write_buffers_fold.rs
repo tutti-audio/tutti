@@ -9,8 +9,8 @@
 use crate::support::{EncodeConfig, ExportConfig, write_buffers};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{ChannelTopology, Speaker};
-use tutti_codec::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{ConfigError, RenderError, Rendered};
 use tutti_units::SampleRate;

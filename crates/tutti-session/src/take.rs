@@ -69,7 +69,7 @@ use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 use crate::transport_handle::When;
 use crate::{Input, Session, SessionEvent, Start, TakeLatency, TransportHandle, Trim};
 use tutti_buffers::ChannelSet;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;

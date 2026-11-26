@@ -44,7 +44,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::GraphBuilder;

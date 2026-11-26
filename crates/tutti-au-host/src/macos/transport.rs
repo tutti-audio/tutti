@@ -39,7 +39,7 @@ use tutti_units::Seconds;
 /// first would tell the caller a unit of unknown tail has none, and the bounce
 /// would truncate exactly the material the property was read to protect.
 pub(crate) fn tail_time(unit: &Unit) -> crate::error::Result<Seconds> {
-    // Apple's width is `Float64`, as `Seconds` is.
+    // Apple's width is `f64`, as `Seconds` is.
     let seconds: f64 = unit.get::<TailTime>(Scope::GLOBAL, Element::ZERO)?;
     Ok(Seconds::new(seconds))
 }
@@ -72,7 +72,7 @@ pub(crate) fn tail_time(unit: &Unit) -> crate::error::Result<Seconds> {
 ///
 /// # Why [`Seconds`] and not [`Samples`](tutti_units::Samples)
 ///
-/// Apple's width is `Float64` seconds and this value is never a buffer length —
+/// Apple's width is `f64` seconds and this value is never a buffer length —
 /// the host does not allocate against it and the AU does not index with it, it
 /// is only ever displayed or compared. Converting to samples here would round a
 /// quantity nobody counts in frames, and would bake in *this* instance's sample
@@ -89,7 +89,7 @@ pub(crate) fn tail_time(unit: &Unit) -> crate::error::Result<Seconds> {
 /// Measured on macOS 15.6 across all 39 instantiable registered units (35 Apple
 /// plus TDR Nova, TAL Reverb 4 and TAL-NoiseMaker): every one answers
 /// `kAudioUnitErr_InvalidProperty` (-10879), for both scopes, before and after
-/// `AudioUnitInitialize`, at both `Float64` and `Float32` width, and
+/// `AudioUnitInitialize`, at both `f64` and `f32` width, and
 /// `AudioUnitGetPropertyInfo` reports the property as absent rather than as
 /// present-but-unwritable. So no corpus unit can witness a success and the
 /// positive path is driven only by [the probe

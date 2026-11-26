@@ -5,8 +5,8 @@ use super::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::ChannelSet;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::Interleaved;
-use tutti_codec::FloatWidth;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_units::SampleRate;
 

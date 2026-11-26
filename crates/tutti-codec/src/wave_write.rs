@@ -43,7 +43,8 @@ const WRITE_CHUNK: usize = 8192;
 /// ```
 /// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
 /// use tutti_buffers::Mono;
-/// use tutti_codec::{FloatWidth, Format, Pcm, read_wave, write_wave};
+/// use tutti_buffers::FloatWidth;
+/// use tutti_codec::{Format, Pcm, read_wave, write_wave};
 /// use tutti_units::SampleRate;
 /// use tutti_buffers::Wave;
 ///

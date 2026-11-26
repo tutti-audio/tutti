@@ -17,10 +17,10 @@
 use std::io::Cursor;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::ChannelSet;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::Interleaved;
 #[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
 use tutti_codec::FileEncoder;
-use tutti_codec::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Encoder, Format, Spec};

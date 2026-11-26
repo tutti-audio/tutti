@@ -54,7 +54,7 @@ pub(crate) type BeatAndTempoProc =
     unsafe extern "C" fn(*mut c_void, *mut f64, *mut f64) -> OSStatus;
 
 /// `HostCallback_GetMusicalTimeLocation`. Note the mixed widths — the time
-/// signature numerator is `Float32` while the denominator is `UInt32`.
+/// signature numerator is `f32` while the denominator is `UInt32`.
 pub(crate) type MusicalTimeLocationProc =
     unsafe extern "C" fn(*mut c_void, *mut u32, *mut f32, *mut u32, *mut f64) -> OSStatus;
 
@@ -104,7 +104,7 @@ pub struct TransportState {
     /// Current beat position, as `f64` bits.
     beat_bits: AtomicU64,
     /// Sample position on the host timeline, as `f64` bits. Apple types this
-    /// `Float64`, so it is stored at that width rather than as an integer.
+    /// `f64`, so it is stored at that width rather than as an integer.
     sample_time_bits: AtomicU64,
     /// Beat at which the current measure's downbeat falls, as `f64` bits.
     measure_downbeat_bits: AtomicU64,
@@ -465,7 +465,7 @@ unsafe extern "C" fn beat_and_tempo_proc(
     let body = |state: &TransportState| {
         // SAFETY: the out-params are null or valid writable pointers, by this fn's `# Safety`.
         unsafe {
-            // Unit newtypes stop here: Apple declares both out-params `Float64`.
+            // Unit newtypes stop here: Apple declares both out-params `f64`.
             write_opt(out_beat, state.beat().get());
             write_opt(out_tempo, state.tempo_raw());
         }

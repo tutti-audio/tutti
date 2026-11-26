@@ -166,7 +166,7 @@ impl RenderScratch {
     /// scratch's input channel of the same index: the AU renders in f32, so a
     /// 64-bit caller is narrowed here, against scratch that already exists
     /// (AUv2 has no f64 render entry point: `AudioUnitRender` takes an
-    /// `AudioBufferList` of `Float32`). A plane past the scratch's channels is
+    /// `AudioBufferList` of `f32`). A plane past the scratch's channels is
     /// not staged, and a scratch channel the caller has no plane for keeps
     /// what it held.
     pub(crate) fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {

@@ -15,7 +15,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use tutti_buffers::Bed;
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_units::Azimuth;

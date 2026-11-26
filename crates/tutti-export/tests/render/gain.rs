@@ -5,9 +5,9 @@
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::{render_normalized_to_file, render_to_file};
+use tutti_buffers::FloatWidth;
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
-use tutti_codec::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};

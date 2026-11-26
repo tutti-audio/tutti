@@ -148,7 +148,8 @@ pub enum PumpPass {
 /// interchangeability is the reason the traits exist.
 ///
 /// ```
-/// use tutti_codec::{FileOut, FloatWidth, Format, Pcm, Spec};
+/// use tutti_buffers::FloatWidth;
+/// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 /// use tutti_session::{PumpLoop, PumpPass};
 /// use tutti_graph::{OutputPort, PortSource};

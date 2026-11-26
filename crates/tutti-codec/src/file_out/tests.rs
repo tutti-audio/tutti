@@ -1,5 +1,4 @@
 use super::*;
-use crate::FloatWidth;
 use crate::IntDepth;
 use crate::IntPcm;
 use crate::{EncodeError, Format, Pcm};
@@ -7,6 +6,7 @@ use hound::SampleFormat;
 use std::path::Path;
 use tutti_buffers::ChannelSet;
 use tutti_buffers::ChannelTopology;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Interleaved, Sink};
 
 /// One write of `samples`, viewed at the sink's own width.

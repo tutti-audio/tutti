@@ -86,7 +86,7 @@ const BLOCK: u32 = 512;
 /// Every effect that reports a tail must report the measured value.
 ///
 /// Exact values, not merely "non-zero" — see [`TAIL_EFFECTS`] for why: the
-/// failure mode is reading a neighbouring `Float64` global property (Latency is
+/// failure mode is reading a neighbouring `f64` global property (Latency is
 /// id 12, TailTime is 20), and a latency read also returns a plausible non-zero
 /// float. The pinned pairs disagree with the latency column wherever it matters.
 #[test]
@@ -105,7 +105,7 @@ fn effects_report_their_measured_tail_time() {
             tail.get()
         );
         // Relative tolerance: the table's figures are `f32` readings of the
-        // AU's `Float64` tail, so the small values (0.0046) cannot be compared
+        // AU's `f64` tail, so the small values (0.0046) cannot be compared
         // with the same absolute epsilon as the large ones (10.0).
         let expected = f64::from(*expected);
         let tolerance = (expected * 1e-4).max(1e-6);
@@ -176,7 +176,7 @@ fn a_unit_with_both_latency_and_tail_reports_them_separately() {
          tail-vs-latency contrast meaningful; re-measure if it moved"
     );
     let tail_samples = tail.to_samples_ceil(RATE);
-    // `ceil(0.2 * 48000) = 9600`: the AU's `Float64` 0.2 times 48000 is
+    // `ceil(0.2 * 48000) = 9600`: the AU's `f64` 0.2 times 48000 is
     // 9600.0 in f64. This read 9601 while `Seconds` was `f32`: the nearest
     // `f32` to 0.2 is 0.200000003, and 0.200000003 * 48000 = 9600.00014,
     // which ceils to 9601 (one frame of tail that was never asked for).

@@ -1,8 +1,8 @@
 use super::*;
-use crate::FloatWidth;
-use crate::IntPcm;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
-use crate::{FlacLevel, IntDepth};
+use crate::FlacLevel;
+use crate::{IntDepth, IntPcm};
+use tutti_buffers::FloatWidth;
 #[cfg(all(feature = "encode-wav", decode))]
 use tutti_buffers::{ChannelTopology, Interleaved};
 use tutti_units::SampleRate;

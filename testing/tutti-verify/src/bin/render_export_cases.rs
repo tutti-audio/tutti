@@ -19,7 +19,7 @@
 //! Run: `cargo run --release -p tutti-verify --bin render_export_cases -- <outdir>`
 
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, Pcm};

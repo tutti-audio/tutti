@@ -9,6 +9,7 @@ use tutti::measure::PeakConfig;
 use tutti::midi::MidiFile;
 use tutti::sampler::StreamStart;
 use tutti::session::{BackgroundWork, SamplerError};
+use tutti::types::FloatWidth;
 use tutti::{
     Bounce, ChannelLayout, Clip, Format, Interleaved, MainOutput, MaxBlock, Pcm, Range, SampleRate,
     Samples, Seconds, Session, Wave,

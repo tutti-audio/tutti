@@ -29,7 +29,7 @@ use std::sync::Arc;
 use tutti_units::Seconds;
 
 use crate::support::{render_normalized_to_file, render_to_buffers, render_to_file};
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};

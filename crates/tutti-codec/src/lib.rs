@@ -40,7 +40,7 @@
 //!   build reads. Each `decode-*` feature (`decode-wav`, `decode-flac`,
 //!   `decode-aiff`, `decode-mp3`, `decode-ogg`) pulls exactly one container.
 //! - `Pcm` is the sample type a file holds: `Int(IntPcm)`, a depth (`IntDepth`) with the dither
-//!   and noise shaping that bring a block down to it, or `Float(FloatWidth)`, which has none. An
+//!   and noise shaping that bring a block down to it, or `Float(tutti_buffers::FloatWidth)`, which has none. An
 //!   encoder takes a block in any `tutti_buffers::Sample` format and converts it by that
 //!   trait's rule, the one conversion every container shares, dithering an integer file where
 //!   resolution drops (`tutti_dsp::Quantizer`).
@@ -101,7 +101,7 @@ pub use encoder::{Encoder, FileEncoder, FinalizedFile, Kept, Unfinished};
 pub use error::{Codec, EncodeError, Result, SpecError};
 pub use file_out::FileOut;
 pub use format::{FlacLevel, Format};
-pub use pcm::{FloatWidth, IntDepth, IntPcm, Pcm};
+pub use pcm::{IntDepth, IntPcm, Pcm};
 pub use spec::Spec;
 #[cfg(encode)]
 pub use wave_write::write_wave;

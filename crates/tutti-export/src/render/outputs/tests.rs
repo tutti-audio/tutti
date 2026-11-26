@@ -2,7 +2,7 @@ use super::*;
 use crate::Setup;
 use crate::spill::SPILL_MEMORY_BYTES;
 use crate::{BufferTarget, Normalize, NormalizeSpec, Progress, TailPolicy};
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::Pcm;
 use tutti_graph::GraphBuilder;
 use tutti_timeline::FrozenClock;

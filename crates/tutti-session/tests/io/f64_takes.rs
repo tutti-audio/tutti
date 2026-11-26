@@ -21,7 +21,7 @@ use tutti_session::{
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::f64_device::f64_nodes::FINE;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 
 const BLOCK: usize = 256;
 

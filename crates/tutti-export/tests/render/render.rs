@@ -16,7 +16,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{Control, Normalize, Progress, RenderGraph, Resample, Setup, Stage, TailPolicy};

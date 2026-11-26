@@ -24,9 +24,9 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::ChannelSet;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Sink, Source};
-use tutti_codec::FloatWidth;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,

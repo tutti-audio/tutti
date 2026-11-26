@@ -3,8 +3,8 @@ use tutti_buffers::Planes;
 
 use tutti_platform::Instant;
 
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Interleaved, InterleavedMut, Sink};
-use tutti_codec::FloatWidth;
 use tutti_engine::{BackendErrorKind, STALL_GRACE};
 
 /// A device that supports `[min, max]` at `format`.

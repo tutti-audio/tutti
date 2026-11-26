@@ -1,7 +1,7 @@
 //! The properties that go stale after load, and the requests a change to one of
 //! them raises.
 //!
-//! Latency and tail are `Float64` **seconds** properties an AU may rewrite at
+//! Latency and tail are `f64` **seconds** properties an AU may rewrite at
 //! any time: a linear-phase EQ switching modes, an oversampling toggle, a reverb
 //! whose decay was turned up. Read once at load, they are a figure PDC keeps
 //! compensating and a bounce keeps sizing from long after the plugin stopped

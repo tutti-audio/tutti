@@ -13,9 +13,9 @@
 
 use std::path::PathBuf;
 
+use tutti_buffers::FloatWidth;
 use tutti_buffers::Wave;
 use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
-use tutti_codec::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{FileIn, read_wave, read_wave_metadata};

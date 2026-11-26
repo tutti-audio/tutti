@@ -69,8 +69,7 @@ tutti-export = { version = "0.0.1", path = "../tutti-export", default-features =
 # `DecodeError` (in `Error::Decode`, whatever decoders are on) and `Format`,
 # the file format a bounce names (`Bounce::format`). No codec feature.
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
-# `DitherSink`, the dither a recording opts into (the one an export uses), the
-# `DitherShape` a bounce names, and the `Lerp` and `SimdLanes` bounds of the
+# The `DitherShape` an `IntPcm` names, and the `Lerp` and `SimdLanes` bounds of the
 # General MIDI setup and the SoundFont unit in any float.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false, optional = true }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }

@@ -487,7 +487,7 @@ pub(crate) enum Misbehaviour {
     /// Reports [`LIED_LATENCY_SAMPLES`] from `kAudioUnitProperty_Latency`
     /// without ever applying it.
     LiesAboutLatency,
-    /// Reports a *negative* latency, which the property's `Float64` seconds
+    /// Reports a *negative* latency, which the property's `f64` seconds
     /// representation permits to be written but which cannot be honoured.
     ReportsNegativeLatency,
     /// Refuses `kAudioUnitProperty_Latency` outright with
@@ -1282,7 +1282,7 @@ unsafe extern "C" fn probe_set_property(
     guard(|| {
         let p = unsafe { probe_of(self_) };
         if id == sys::kAudioUnitProperty_PresentationLatency {
-            // Apple's header types this `Float64`, so a write of any other
+            // Apple's header types this `f64`, so a write of any other
             // width is refused rather than reinterpreted. That refusal is what
             // makes the host's choice of `f64` assertable: were the probe to
             // accept a short write it would also accept an `f32` one, and the

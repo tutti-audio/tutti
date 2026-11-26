@@ -3,7 +3,7 @@
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
-use tutti_codec::FloatWidth;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;

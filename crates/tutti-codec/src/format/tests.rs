@@ -1,6 +1,6 @@
 use super::*;
-use crate::FloatWidth;
 use crate::IntDepth;
+use tutti_buffers::FloatWidth;
 
 /// An extension names its format with the defaults, case and `aif` aside; an
 /// unknown one is named lowercased, and a missing one is `(none)`.

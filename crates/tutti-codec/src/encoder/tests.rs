@@ -1,5 +1,4 @@
 use super::*;
-use crate::FloatWidth;
 use crate::test_sink::Full;
 use crate::{EncodeError, SpecError};
 use std::io::Cursor;
@@ -9,6 +8,7 @@ use std::io::Cursor;
 ))]
 use std::io::{Seek, Write};
 use tutti_buffers::ChannelSet;
+use tutti_buffers::FloatWidth;
 use tutti_units::SampleRate;
 
 /// Every format this build writes, at 16 bits where it has a width, with the

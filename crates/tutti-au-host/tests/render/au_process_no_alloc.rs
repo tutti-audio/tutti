@@ -175,7 +175,7 @@ fn effect_render_does_not_allocate() {
 ///
 /// Every other case in this file drives `process`, and none of them touch f64.
 /// Nothing gates this path — sample width is the host pipeline's choice, so an
-/// AU on a `Float64` pipeline takes it on every block unconditionally.
+/// AU on a `f64` pipeline takes it on every block unconditionally.
 #[test]
 fn f64_effect_render_does_not_allocate() {
     let _lock = PLUGIN_LOAD_LOCK.lock();
