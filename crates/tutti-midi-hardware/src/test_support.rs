@@ -625,3 +625,25 @@ pub fn property_peer(
         resources: Arc::new(resources),
     }
 }
+
+/// A peer's request for a MIDI Message Report of the device's MIDI-CI Device on
+/// `group`, whose Function Block spans `groups`, for a test that holds no wire of
+/// its own.
+#[must_use]
+pub fn report_inquiry(
+    group: tutti_ump::MidiGroup,
+    groups: tutti_ump::GroupSpan,
+    own: tutti_midi_ci::Muid,
+    peer: tutti_midi_ci::Muid,
+    control: tutti_midi_ci::DataControl,
+    scope: tutti_midi_ci::ReportScope,
+) -> crate::ReportInquiry {
+    crate::ReportInquiry {
+        group,
+        groups,
+        own,
+        peer,
+        control,
+        scope,
+    }
+}

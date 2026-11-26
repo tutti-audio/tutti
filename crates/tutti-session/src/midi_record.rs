@@ -87,6 +87,9 @@
 //! [`catch_up`]: Record::catch_up
 //! [`take_lost`]: Record::take_lost
 
+#[cfg(feature = "midi-hardware")]
+mod report;
+
 use std::collections::{BTreeMap, VecDeque};
 
 use tutti_ump::{

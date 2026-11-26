@@ -37,11 +37,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tutti_graph::{EventTapReader, NodeKey};
-use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
+use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState, ReportScope};
 use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, OpenOutput, PeerProfiles,
-    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
+    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, ReportInquiry, Start, Started,
 };
 use tutti_midi_protocol::Mpe11Zones;
 use tutti_midi_runtime::{
@@ -1640,6 +1640,26 @@ impl Ports {
         edits
     }
 
+    /// Answers a peer's report inquiry on `device` from the held output port that has
+    /// it open, or, when none does or its device is away, as a device that declares
+    /// nothing ([`MidiSession::decline_report`]).
+    fn answer_report(&mut self, io: &mut MidiSession, device: &MidiDeviceId, ask: &ReportInquiry) {
+        let mut holders = self.outputs.iter_mut().filter(|port| {
+            port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
+        });
+        let holder = holders.next();
+        // A device has one output port (`open_output_port`).
+        let second = holders.next().is_some();
+        debug_assert!(!second, "two held output ports have one device open");
+        let unanswered = match holder {
+            Some(port) => port.answer_report(ask),
+            None => Some(*ask),
+        };
+        if let Some(ask) = unanswered {
+            io.decline_report(device, &ask);
+        }
+    }
+
     /// Whether a held output port has `device` open.
     fn holds_output(&self, device: &MidiDeviceId) -> bool {
         self.outputs.iter().any(|port| {
@@ -1728,10 +1748,8 @@ impl Ports {
                     }
                     device.clone()
                 }
-                // The report this session declares is the empty one of a device
-                // that declares nothing (M2-101 §9.6).
                 tutti_midi_hardware::Polled::ReportInquiry(device, ask) => {
-                    io.decline_report(device, ask);
+                    self.answer_report(io, device, ask);
                     continue;
                 }
                 // A kind of report this session does not know is not one.
@@ -1835,6 +1853,41 @@ impl OutputPort {
             .collect();
         let refused = out.send_frames(&events, None) as u64;
         self.losses.refused(refused);
+    }
+
+    /// Answers `ask` with the report of what the port has said: the Reply, the
+    /// messages and the End, as one batch on the open device, so nothing the port
+    /// drains lands between them (M2-101 §9.8.2), and what the device refuses is
+    /// counted. The ask comes back when the device is away: the caller answers it.
+    fn answer_report(&mut self, ask: &ReportInquiry) -> Option<ReportInquiry> {
+        let Some(out) = self.link.open_mut() else {
+            return Some(*ask);
+        };
+        let groups = match ask.scope() {
+            ReportScope::FunctionBlock { .. } => ask.groups().collect(),
+            _ => vec![ask.group()],
+        };
+        let report = self.record.report(ask.control(), ask.scope(), groups);
+        let frames = |message: tutti_midi_ci::CiMessage| {
+            message
+                .packets(ask.group())
+                .map(|packets| packets.map(|ump| (Frame::ZERO, ump)).collect::<Vec<_>>())
+        };
+        let (reply, end) = (frames(ask.reply(report.declared)), frames(ask.end()));
+        let mut refused = 0;
+        let mut events = Vec::new();
+        match reply {
+            Ok(packets) => events.extend(packets),
+            Err(_) => refused += 1,
+        }
+        events.extend(report.messages.into_iter().map(|ump| (Frame::ZERO, ump)));
+        match end {
+            Ok(packets) => events.extend(packets),
+            Err(_) => refused += 1,
+        }
+        refused += out.send_frames(&events, None) as u64;
+        self.losses.refused(refused);
+        None
     }
 
     /// Sends the open device the MPE 1.1 zones written since the last call; with
