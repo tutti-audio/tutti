@@ -652,4 +652,34 @@ mod node_midi_map {
             "the plugin holds {level}"
         );
     }
+
+    /// In process: a host write to the read-only parameter passes the call (the
+    /// slots hold every id the plugin lists), and the Processor refuses it when
+    /// the block takes it, so the handle's `refused_edits` reads 1 after one
+    /// block. A write refused at the call is not counted.
+    #[test]
+    fn an_in_process_vst3_node_counts_a_write_to_a_read_only_parameter_refused() {
+        use tutti_graph::contract::Direct;
+        let (client, handle) = tutti_plugin_host::load_client::<tutti_vst3_host::Vst3Loaded, f32>(
+            main_thread(),
+            &tutti_fixtures::pumped_work(),
+            &tutti_plugin_types::PluginRef::file(bundle_of(&vst3_module())),
+            SampleRate::SR_48K,
+        )
+        .expect("loads");
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
+        assert_eq!(handle.refused_edits(), 0);
+        handle
+            .send_parameter(
+                tutti_plugin_contract::spec::Param::Meter.id(),
+                tutti_units::Normalized::of(1.0),
+            )
+            .expect("the slots hold every listed id");
+        unit.block();
+        assert_eq!(handle.refused_edits(), 1);
+    }
 }

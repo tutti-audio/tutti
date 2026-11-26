@@ -75,6 +75,10 @@ pub struct Vst3Loaded {
     /// Writes a rejoin took from the halves that no block had delivered, for
     /// the next activation's first block.
     pub(super) carried: Vec<(ParamId, Normalized)>,
+    /// The writes the Processor refused when it took them (an undeclared or
+    /// read-only parameter), over the plugin's life: every activation's
+    /// Processor adds to it, and the Control reads it.
+    pub(super) refused: tutti_rt::Tally<u64>,
     /// What the plugin declared when it was activated, and what each parameter
     /// declares of its writability, sorted by id: the table the Processor drops
     /// writes against. `None` while inactive. A write is answered from it while

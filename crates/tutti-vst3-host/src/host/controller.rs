@@ -191,7 +191,7 @@ impl Vst3Controller {
     /// The writes handed to the Processor that no block has applied yet, and
     /// so are in no component stream. Forgets the ones that have been. A write
     /// the Processor dropped on its way (a drain past `pending`'s room, counted
-    /// in `edits_dropped`) is forgotten with them: it is in no save.
+    /// in the plugin's refused count) is forgotten with them: it is in no save.
     fn undrained(&mut self) -> Vec<(ParamId, Normalized)> {
         let edits = &self.edits;
         self.handed.retain(|h| !edits.has_applied(h.sent_at));
@@ -434,10 +434,10 @@ impl Vst3Loaded {
         // write, so the first block takes them and the Controller's record of
         // them is told apart by generation; the rest are refused and counted.
         let mut handed = Vec::new();
-        let mut refused = 0u64;
+        let refused = loaded.refused.writer();
         for &(id, value) in &carried {
             if ParamWriteError::check_sorted(id, &declared).is_err() {
-                refused += 1;
+                refused.add(1);
             } else if sink.write(id, value).is_ok() {
                 let sent_at = sink.written();
                 match handed.iter_mut().find(|h: &&mut Handed| h.id == id) {

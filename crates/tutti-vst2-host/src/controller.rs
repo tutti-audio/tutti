@@ -84,6 +84,11 @@ impl Vst2Controller {
 impl Wraps for Vst2Controller {
     type Plugin = Vst2Loaded;
 
+    /// None: nothing is queued to the Processor, so nothing waits for a block.
+    fn pending(&mut self) -> Vec<(tutti_units::ParamId, tutti_units::Normalized)> {
+        Vec::new()
+    }
+
     fn plugin(&self) -> &Vst2Loaded {
         self.loaded()
     }

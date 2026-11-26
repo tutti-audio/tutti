@@ -298,6 +298,12 @@ impl AuLoaded {
 }
 
 impl Control for AuLoaded {
+    /// None: an AU unit is written at the call; the writes its Processor marks
+    /// for a tick are its Controller's ([`Wraps::pending`]).
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
+    }
+
     fn info(&self) -> &PluginDescriptor {
         self.descriptor()
     }

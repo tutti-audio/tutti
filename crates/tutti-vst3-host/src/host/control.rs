@@ -404,6 +404,10 @@ impl Control for Vst3Loaded {
         self.read_state(main).map_err(plugin_error)
     }
 
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        self.refused.clone()
+    }
+
     /// The writes made while the plugin was not active, waiting for the next
     /// activation's first block.
     fn pending(&mut self) -> Vec<(ParamId, Normalized)> {

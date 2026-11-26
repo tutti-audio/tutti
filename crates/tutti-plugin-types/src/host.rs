@@ -163,6 +163,18 @@ pub trait Control: EditorWindow {
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
 
+    /// The writes the Processor refused when it took them from the host (a
+    /// parameter the activation did not declare, or declared read-only), as a
+    /// cumulative count over the plugin's life, across activations. The control
+    /// side reads it ([`Health::refused_edits`](crate::Health::refused_edits));
+    /// the Processor adds to it. A write refused at the call is not counted. The
+    /// default is a count that never moves, for a format whose Processor refuses
+    /// no write by itself: CLAP's refusals are the event list's own
+    /// (`input_events_refused`), and VST2 and AU write the plugin at the call.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
     /// The writes made through this `Control` that the saved state does not hold
     /// yet: the newest value of each parameter that a
     /// [`set_parameter`](Self::set_parameter), a load or a restored state handed
@@ -172,9 +184,13 @@ pub trait Control: EditorWindow {
     /// ([`PluginState`](crate::PluginState)); asked before
     /// [`save_state`](Self::save_state), so a write applied between the two is
     /// in both rather than in neither.
-    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
-        Vec::new()
-    }
+    ///
+    /// A format may instead apply what it holds, as its own tick would, and
+    /// then state none: AU's `NonRealTime` writes wait for a tick, so its answer
+    /// writes them to the unit and lists nothing. Every implementation states
+    /// its own: a format that writes the plugin at the call returns an empty
+    /// list, with its reason.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)>;
 
     /// Tells the plugin's edit controller of a value the host wrote and the
     /// Processor was handed another way (in the block's parameter changes), so
@@ -712,9 +728,7 @@ pub trait Wraps {
     /// What [`Control::pending`] adds to the plugin's own: the writes
     /// [`queue_write`](Self::queue_write) handed the Processor that no block has
     /// applied.
-    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
-        Vec::new()
-    }
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)>;
 
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
@@ -834,6 +848,10 @@ impl<W: Wraps> Control for W {
 
     fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         Wraps::inform_controller(self, main, id, value);
+    }
+
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        self.plugin().refused_edits()
     }
 
     /// The plugin's own pending writes, then the Processor's; the Processor's
@@ -1191,6 +1209,10 @@ mod tests {
 
     impl Wraps for Rig {
         type Plugin = FakeLoaded;
+
+        fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+            Vec::new()
+        }
 
         fn plugin(&self) -> &FakeLoaded {
             &self.plugin

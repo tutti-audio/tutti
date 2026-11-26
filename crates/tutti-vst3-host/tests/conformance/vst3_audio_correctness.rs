@@ -1512,6 +1512,43 @@ fn a_read_only_parameter_write_is_refused() {
     assert_eq!(Control::parameter(&loaded, main_thread(), id), before);
 }
 
+/// A block that names a read-only parameter is a write the Processor refuses:
+/// the plugin's count of refused writes (`Control::refused_edits`, what
+/// `Health::refused_edits` answers in process) reads 1 after the block, and a
+/// block that names a writable one adds nothing. A write refused at the call is
+/// not counted.
+#[test]
+fn a_block_naming_a_read_only_parameter_counts_one_refused_write() {
+    use tutti_plugin_types::Control;
+    let _guard = plugin_guard();
+    let loaded = Vst3Loaded::load(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        probe_path(),
+        LoadOptions::new(),
+    )
+    .expect("audio-probe loads");
+    let mut inst = loaded
+        .activate_at::<f32>(48_000.0, 64)
+        .map_err(|(_, e)| e)
+        .expect("the probe activates");
+    let refused = Control::refused_edits(inst.controller_mut());
+    assert_eq!(refused.get(), 0);
+    let read_only = ParamId::new(crate::conformance_support::K_PARAM_OBSERVED_PROCESS_MODE);
+    let mut params = ParameterChanges::reserved(1, 1);
+    params.add_change(read_only, at_frame(0), unit_value(1.0));
+    render(&mut inst, 64, &[], Some(&params), |_, _, _| 0.0);
+    assert_eq!(
+        refused.get(),
+        1,
+        "the read-only write was refused at the drain"
+    );
+    let mut writable = ParameterChanges::reserved(1, 1);
+    writable.add_change(param_address(PARAM_MODE), at_frame(0), unit_value(0.0));
+    render(&mut inst, 64, &[], Some(&writable), |_, _, _| 0.0);
+    assert_eq!(refused.get(), 1, "a writable parameter adds nothing");
+}
+
 // ── Writes to a plugin that is loaded and not active ─────────────────────────
 //
 // The probe is an `AudioEffect` with a separate `EditController`: a controller

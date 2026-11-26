@@ -111,6 +111,12 @@ impl Vst2Loaded {
 }
 
 impl Control for Vst2Loaded {
+    /// None: VST2 has no slots, and a write is applied to the plugin at the
+    /// call (the node's own record states what a block has not applied).
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
+    }
+
     fn info(&self) -> &PluginDescriptor {
         self.descriptor()
     }

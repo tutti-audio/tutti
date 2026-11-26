@@ -270,6 +270,12 @@ impl ClapLoaded {
 }
 
 impl Control for ClapLoaded {
+    /// None: a loaded CLAP plugin is written at the call (`params.flush`); the
+    /// writes the Processor holds are its Controller's ([`Wraps::pending`]).
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
+    }
+
     /// The editor is measured from the plugin on the first ask that holds a
     /// `MainThreadMarker` (`wiring`, or this one on the main thread); a thread that
     /// holds none before then gets the unmeasured descriptor

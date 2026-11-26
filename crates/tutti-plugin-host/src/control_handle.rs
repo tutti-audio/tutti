@@ -1166,6 +1166,10 @@ mod tests {
     }
 
     impl Control for FakePresets {
+        fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+            Vec::new()
+        }
+
         fn info(&self) -> &PluginDescriptor {
             unreachable!("the preset tests never ask")
         }

@@ -64,6 +64,9 @@ pub(crate) struct ControlBackend<L: InProcess> {
     pub(crate) reporting: Reporting,
     /// Whether the plugin is lost, and why: what the handle's health reads.
     pub(crate) lost: Arc<Lost>,
+    /// The writes the plugin's Processor refused when it took them
+    /// ([`Control::refused_edits`]), across activations.
+    pub(crate) refused: tutti_rt::Tally<u64>,
     /// The plugin's format name, for the refusal of an advisory the plugin
     /// does not take.
     pub(crate) format: &'static str,
@@ -467,12 +470,12 @@ impl<L: InProcess> Health for ControlBackend<L> {
         tutti_plugin_types::PipelineCounts::default()
     }
 
-    /// None: a host write is refused at the call
-    /// ([`set_parameter_value`](AnyThread::set_parameter_value)), and never
-    /// applied through the plugin's `Control` here, so the plugin has no refusal
-    /// to count.
+    /// What the Processor refused when it took the host's writes (an
+    /// undeclared or read-only parameter), read from the count it adds to. A
+    /// write refused at the call
+    /// ([`set_parameter_value`](AnyThread::set_parameter_value)) is not counted.
     fn refused_edits(&self) -> u64 {
-        0
+        self.refused.get()
     }
 
     fn terminate(&self, _reason: TerminationReason) {}

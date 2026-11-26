@@ -140,6 +140,10 @@ struct RecController {
 macro_rules! rec_control {
     ($ty:ty) => {
         impl Control for $ty {
+            fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+                Vec::new()
+            }
+
             fn info(&self) -> &PluginDescriptor {
                 &self.descriptor
             }

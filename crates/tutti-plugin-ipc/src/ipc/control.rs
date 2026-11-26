@@ -223,6 +223,13 @@ macro_rules! served_control {
         }
 
         impl Control for $ty {
+            /// None: the bridge flushes the host's writes before every request
+            /// and saves after them, so none is held back to state (P3b-2 states
+            /// the writes the server has not answered for).
+            fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+                Vec::new()
+            }
+
             fn info(&self) -> &PluginDescriptor {
                 &self.link.descriptor
             }
