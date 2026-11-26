@@ -2,8 +2,8 @@
 //! the spec. Channels are indices: Ch1 is 0.
 
 use tutti_midi_protocol::{
-    ControllerSupport, Midi1Translator, MpeFeatures, PitchBendSensitivity, PitchBendSupport,
-    ProfileZone, ProfileZones,
+    ControllerSupport, MemberCount, Midi1Translator, Mpe11Zone, Mpe11Zones, MpeFeatures,
+    PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
 };
 use tutti_ump::{
     Address, Attribute, Bank, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
@@ -938,4 +938,247 @@ fn a_features_answer_keeps_the_notes_and_the_next_value_takes_its_form() {
     );
     s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(wider)));
     assert_eq!(feed(&mut s, 0, note_off(60)), [(1, note_off(60))]);
+}
+
+/// An MPE 1.1 lower zone of `members` Members (the Master is Ch1) whose Members
+/// have `range` semitones.
+fn lower(members: u8, range: u8) -> Mpe11Zone {
+    Mpe11Zone::lower(
+        MemberCount::of(members),
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::from_semitones(U7::of(range)),
+    )
+}
+
+/// The upper zone (the Master is Ch16).
+fn upper(members: u8, range: u8) -> Mpe11Zone {
+    Mpe11Zone::upper(
+        MemberCount::of(members),
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::from_semitones(U7::of(range)),
+    )
+}
+
+fn one(zone: Mpe11Zone) -> Option<Mpe11Zones> {
+    Some(Mpe11Zones::single(zone))
+}
+
+/// What `sender` sends at once when its `group` is given `zones` of MPE 1.1.
+fn configure(sender: &mut MpeSender, group: MidiGroup, zones: Option<Mpe11Zones>) -> Vec<Ump> {
+    let mut out = Vec::new();
+    sender.set_mpe11(group, zones, |ump| out.push(ump));
+    out
+}
+
+/// The MPE Configuration Message of M1-100 section 2.2.1 as a UMP: Registered
+/// Controller 0/6 (M2-104 section 7.4.7) on `channel`, the count in the top
+/// 7 bits of the data.
+fn mcm(group: u32, channel: u32, members: u32) -> Ump {
+    Ump([
+        0x4020_0006 | (group << 24) | (channel << 16),
+        members << 25,
+        0,
+        0,
+    ])
+}
+
+/// A sender whose group 1 has one MPE 1.1 lower zone.
+fn sender11(members: u8, range: u8) -> MpeSender {
+    let mut sender = MpeSender::new();
+    configure(&mut sender, MidiGroup::FIRST, one(lower(members, range)));
+    sender
+}
+
+/// **An MPE 1.1 zone an app chose is one MPE Configuration Message on its
+/// Master**: Ch1 for the lower zone and Ch16 for the upper (M1-100 section
+/// 2.2.1), in the Group it is chosen for. A zone that is already configured is
+/// not sent again.
+/// Spec: m2-104/d.4.2#1
+#[test]
+fn an_mpe11_zone_is_one_mcm_on_its_master() {
+    let mut s = MpeSender::new();
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(7, 48))),
+        [mcm(0, 0, 7)]
+    );
+    let both = Mpe11Zones::single(lower(7, 48)).with(upper(5, 48));
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, both),
+        [mcm(0, 15, 5)],
+        "only the zone that starts"
+    );
+    let other = MidiGroup::new(3).unwrap();
+    assert_eq!(configure(&mut s, other, one(upper(4, 48))), [mcm(3, 15, 4)]);
+    assert_eq!(configure(&mut s, other, one(upper(4, 48))), []);
+}
+
+/// **A zone that goes is an MCM with no Member Channels** (section 2.2.1), a
+/// zone with other Member Channels is its new count, and a zone with another
+/// range only is nothing (the Members' range is not in an MCM).
+#[test]
+fn an_mpe11_zone_that_goes_is_an_mcm_of_no_members() {
+    let mut s = MpeSender::new();
+    let both = Mpe11Zones::single(lower(7, 48)).with(upper(5, 48));
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, both),
+        [mcm(0, 0, 7), mcm(0, 15, 5)]
+    );
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(7, 60))),
+        [mcm(0, 15, 0)]
+    );
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(4, 60))),
+        [mcm(0, 0, 4)]
+    );
+    assert_eq!(configure(&mut s, MidiGroup::FIRST, None), [mcm(0, 0, 0)]);
+    assert_eq!(configure(&mut s, MidiGroup::FIRST, None), []);
+}
+
+/// **A Member range other than the receiver's default is sent to every Member
+/// Channel of the zone**, not to the Master (section 2.2.5), before the first
+/// note.
+#[test]
+fn an_mpe11_member_range_goes_to_every_member_and_not_the_master() {
+    let mut s = sender11(3, 60);
+    assert_eq!(
+        feed(&mut s, 0, note_on(60)),
+        [
+            (1, bend_range(60)),
+            (2, bend_range(60)),
+            (3, bend_range(60)),
+            (1, bend(CENTER)),
+            (1, slide(CENTER)),
+            (1, pressure(0)),
+            (1, note_on(60)),
+        ]
+    );
+    // The range is not sent again to the next Member.
+    assert_eq!(
+        feed(&mut s, 0, note_on(62)),
+        [
+            (2, bend(CENTER)),
+            (2, slide(CENTER)),
+            (2, pressure(0)),
+            (2, note_on(62)),
+        ]
+    );
+}
+
+/// **Notes take the Members of an MPE 1.1 zone as they take those of a Profile
+/// zone of the same channels**: the Member idle longest, then the least loaded.
+#[test]
+fn notes_take_mpe11_members_as_a_profile_zone_does() {
+    let mut profile = sender(3);
+    let mut mpe11 = sender11(3, 48);
+    for s in [&mut profile, &mut mpe11] {
+        for (key, member) in [(60, 1), (64, 2)] {
+            let sent = feed(s, 0, note_on(key));
+            assert_eq!(notes(&sent), [(member, note_on(key))]);
+        }
+        assert_eq!(feed(s, 0, note_off(60)), [(1, note_off(60))]);
+        for (key, member) in [(67, 3), (71, 1), (74, 2)] {
+            let sent = feed(s, 0, note_on(key));
+            assert_eq!(notes(&sent), [(member, note_on(key))]);
+        }
+    }
+    // The upper zone's Members are the channels below its Master.
+    let mut s = MpeSender::new();
+    configure(&mut s, MidiGroup::FIRST, one(upper(2, 48)));
+    let played: Vec<u8> = [60, 64, 67]
+        .map(|key| notes(&feed(&mut s, 15, note_on(key)))[0].0)
+        .to_vec();
+    assert_eq!(played, [13, 14, 13]);
+}
+
+/// **MPE Profile zones take precedence on a Group**: while it has them the MPE
+/// 1.1 zones are held, with no message and no use; when they go the 1.1 zones
+/// apply, their Configuration Messages ahead of the next packet.
+#[test]
+fn profile_zones_take_precedence_over_mpe11_zones() {
+    let mut s = MpeSender::new();
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone(0, 2))));
+    assert_eq!(configure(&mut s, MidiGroup::FIRST, one(lower(3, 60))), []);
+    // The Profile's range, on its Manager, and its two Members.
+    let sent = feed(&mut s, 0, note_on(60));
+    assert_eq!(sent[0], (0, bend_range(48)));
+    assert_eq!(notes(&sent), [(1, note_on(60))]);
+    s.set_profile(MidiGroup::FIRST, None);
+    let sent = feed(&mut s, 0, note_on(62));
+    let configuration = Voice2::registered(Rpn::MPE_CONFIGURATION, ControlValue::new(3 << 25));
+    assert_eq!(sent[0], (0, configuration), "the MCM leads");
+    // The zone's Members take its range.
+    assert_eq!(sent[1], (1, bend_range(60)));
+    assert_eq!(notes(&sent), [(1, note_on(62))]);
+    assert_eq!(feed(&mut s, 0, note_off(62)), [(1, note_off(62))]);
+}
+
+/// **A zone whose Member Channels change ends its notes** (section 2.2.3), one
+/// that only has another range keeps them.
+#[test]
+fn an_mpe11_zone_with_other_channels_ends_its_notes() {
+    let mut s = sender11(3, 48);
+    feed(&mut s, 0, note_on(60));
+    assert_eq!(configure(&mut s, MidiGroup::FIRST, one(lower(3, 60))), []);
+    assert_eq!(feed(&mut s, 0, note_off(60)), [(1, note_off(60))]);
+    feed(&mut s, 0, note_on(60));
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(2, 60))),
+        [mcm(0, 0, 2)]
+    );
+    assert_eq!(feed(&mut s, 0, note_off(60)), []);
+}
+
+/// An MPE Configuration Message of `members` Member Channels, as fed back.
+fn mcm_voice(members: u32) -> Voice2 {
+    Voice2::registered(Rpn::MPE_CONFIGURATION, ControlValue::new(members << 25))
+}
+
+/// **A zone that goes is turned off before another one takes its channels**:
+/// going from an upper zone of 15 Members to a lower one of 15, the upper
+/// Master's message comes first, while Ch16 is still its own (M1-100 section
+/// 2.2.1: the most recent message takes precedence).
+#[test]
+fn a_zone_that_goes_is_turned_off_before_the_zone_that_takes_its_channels() {
+    let mut s = MpeSender::new();
+    configure(&mut s, MidiGroup::FIRST, one(upper(15, 48)));
+    assert_eq!(
+        configure(&mut s, MidiGroup::FIRST, one(lower(15, 48))),
+        [mcm(0, 15, 0), mcm(0, 0, 15)]
+    );
+}
+
+/// **Once MPE Profile zones went, each side is configured again**: the receiver
+/// left MPE 1.1 with the Profile, so the zone it had is sent once more, and
+/// the side with no zone a message of no Members, ahead of the next note.
+#[test]
+fn mpe11_zones_are_configured_again_after_a_profile() {
+    let mut s = sender11(3, 48);
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone(0, 2))));
+    s.set_profile(MidiGroup::FIRST, None);
+    let sent = feed(&mut s, 0, note_on(60));
+    assert_eq!(sent[..2], [(15, mcm_voice(0)), (0, mcm_voice(3))]);
+    assert_eq!(notes(&sent), [(1, note_on(60))]);
+    // Told once: the next note has no message.
+    assert_eq!(notes(&feed(&mut s, 0, note_on(62))), [(2, note_on(62))]);
+}
+
+/// **A Configuration Message the device refused is sent again**: every side is
+/// told what it is ahead of the next packet, and the notes of the zone are
+/// forgotten, since the receiver that takes the message ends them (section
+/// 2.2.3).
+#[test]
+fn a_refused_configuration_is_sent_again_ahead_of_the_next_packet() {
+    let mut s = sender11(3, 48);
+    feed(&mut s, 0, note_on(60));
+    s.resend_configuration(MidiGroup::FIRST);
+    let sent = feed(&mut s, 0, note_off(60));
+    assert_eq!(sent, [(15, mcm_voice(0)), (0, mcm_voice(3))]);
+    // A turned-off zone is told so again.
+    configure(&mut s, MidiGroup::FIRST, None);
+    s.resend_configuration(MidiGroup::FIRST);
+    assert_eq!(
+        feed(&mut s, 0, note_on(60)),
+        [(0, mcm_voice(0)), (15, mcm_voice(0)), (0, note_on(60))]
+    );
 }

@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::{Arc, MutexGuard, Weak};
 use std::task::{Context, Poll, Waker};
-use tutti_graph::UmpAt;
+use tutti_graph::{Offset, UmpAt};
 use tutti_platform::Executor;
 use tutti_rt::Mutex;
 use tutti_units::Losses;
@@ -24,7 +24,7 @@ use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, Endpoint, EndpointId, MidiDeviceId, OsChange, OsDevice,
     PortDirection, Resolved,
 };
-use tutti_midi_protocol::ProfileZones;
+use tutti_midi_protocol::{Mpe11Zones, ProfileZones};
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
 use tutti_ump::{MidiGroup, StreamConfig};
 
@@ -800,6 +800,28 @@ impl OpenOutput {
     /// Sends as MPE to `zones` of `group` from now on.
     pub(crate) fn set_mpe_zones(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
         self.wire.set_profile(group, zones);
+    }
+
+    /// Sends as MPE 1.1 (M1-100) to `zones` of `group` from now on, with no
+    /// MIDI-CI Profile: an alternate translation the app chose (M2-104 D.4.2).
+    /// The MPE Configuration Message of each zone that starts or changes, and
+    /// of each that goes (its Member Channels none), is queued now like any
+    /// event, and counted in [`losses`](Self::losses) when the device has no
+    /// room for it; then each zone is sent again ahead of the next event on
+    /// `group`. While the device has MPE Profile zones on `group` these are
+    /// held and not used. For a control thread: it allocates.
+    pub fn set_mpe11(&mut self, group: MidiGroup, zones: Option<Mpe11Zones>) {
+        let messages: Vec<UmpAt> = self
+            .wire
+            .set_mpe11(group, zones)
+            .into_iter()
+            .map(|ump| (Offset::ZERO, ump))
+            .collect();
+        // `queue` counts what the device did not take; the zones are sent
+        // again ahead of the next event on the Group.
+        if self.queue(&messages).packets() < messages.len() {
+            self.wire.resend_configuration(group);
+        }
     }
 }
 

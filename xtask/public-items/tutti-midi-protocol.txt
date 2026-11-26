@@ -97,8 +97,9 @@ fn mpe::zone::Mpe11Zone::new
 fn mpe::zone::Mpe11Zone::pitch_bend_range_for
 fn mpe::zone::Mpe11Zone::response
 fn mpe::zone::Mpe11Zone::side
-fn mpe::zone::Mpe11Zone::to_mcm
 fn mpe::zone::Mpe11Zone::upper
+fn mpe::zone::Mpe11Zones::configuration
+fn mpe::zone::Mpe11Zones::full_configuration
 fn mpe::zone::Mpe11Zones::on
 fn mpe::zone::Mpe11Zones::single
 fn mpe::zone::Mpe11Zones::with

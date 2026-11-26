@@ -22,6 +22,20 @@ use tutti_ump::{
 };
 use tutti_units::Semitones;
 
+/// The MPE Configuration Message of `zone` in the first Group.
+///
+/// # Panics
+///
+/// If a zone that starts is no message, which it never is.
+pub fn mcm(zone: Mpe11Zone) -> Ump {
+    let configured =
+        Mpe11Zones::configuration(None, Some(Mpe11Zones::single(zone)), MidiGroup::FIRST);
+    configured
+        .into_iter()
+        .next()
+        .expect("a zone starts with one message")
+}
+
 /// A Device Identity for a test endpoint: a 21-bit manufacturer id (`00 21 09`,
 /// M2-104 §7.10) with a family, model and revision of which every byte differs,
 /// so a swapped or shifted byte shows.

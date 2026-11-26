@@ -35,7 +35,7 @@
 //! when the device is opened, and what the UMP Stream negotiation settled
 //! (`MidiSession::poll`) after it.
 
-use tutti_midi_protocol::{Midi1Translator, ProfileZones};
+use tutti_midi_protocol::{Midi1Translator, Mpe11Zones, ProfileZones};
 use tutti_midi_runtime::{Outgoing, Taken};
 use tutti_ump::{
     Join, Message, MessageType, MidiGroup, Protocol, StreamConfig, Ump, Utility, parse_exact,
@@ -97,6 +97,19 @@ impl Wire {
     /// The device now has `zones` of the MPE Profile enabled on `group`.
     pub(crate) fn set_profile(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
         self.mpe.set_profile(group, zones);
+    }
+
+    /// The app chose `zones` of MPE 1.1 for `group`: the MPE Configuration
+    /// Messages that tell the device, to send before anything else.
+    pub(crate) fn set_mpe11(&mut self, group: MidiGroup, zones: Option<Mpe11Zones>) -> Vec<Ump> {
+        let mut messages = Vec::new();
+        self.mpe.set_mpe11(group, zones, |ump| messages.push(ump));
+        messages
+    }
+
+    /// The device may not hold the MPE 1.1 zones of `group` it was sent.
+    pub(crate) fn resend_configuration(&mut self, group: MidiGroup) {
+        self.mpe.resend_configuration(group);
     }
 
     /// Whether the device is in a Protocol that has no MIDI 2.0 Channel Voice:
