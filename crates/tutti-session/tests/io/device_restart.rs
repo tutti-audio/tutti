@@ -18,6 +18,9 @@ use tutti_session::{Error, InputPort, LiveSession, MainOutput, OutputPort, Repla
 use tutti_timeline::MotionCommand;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples};
 
+#[path = "../support/echo_node.rs"]
+mod echo_node;
+
 const OLD: f64 = 44_100.0;
 const NEW: f64 = 48_000.0;
 
@@ -248,6 +251,63 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
         None,
     )
     .expect("at a block the engine holds");
+    assert!(new.is_open());
+}
+
+/// **A block longer than a feedback delay is refused before the stream
+/// stops**: the old device plays on, and the host gets the graph's own reason,
+/// the edge and its delay. A block the delay holds goes through.
+#[test]
+fn a_restart_to_a_block_past_a_feedback_delay_is_refused_and_keeps_playing() {
+    use tutti_graph::{CommitError, CompileError};
+    use tutti_session::{Mention, NodeDecl, WireStart};
+
+    const DELAY: usize = 2_048;
+    let (mut s, old, _, _) = engine();
+    let mono = || echo_node::EchoConfig::new(ChannelLayout::MONO);
+    s.patch((
+        NodeDecl::new("a", mono()),
+        NodeDecl::new("b", mono()),
+        Mention::new("a").connect(Mention::new("b")),
+        Mention::new("b")
+            .connect(Mention::new("a"))
+            .feedback(Samples::new(DELAY)),
+    ))
+    .expect("a loop closed by a feedback wire");
+    let _ = s.update();
+
+    let (driver, new) = ManualStreamDriver::new();
+    let err = s
+        .restart_on(
+            spec_at(NEW),
+            driver,
+            Some(MaxBlock::of(Samples::new(DELAY + 1))),
+            None,
+        )
+        .expect_err("past the delay");
+    assert!(
+        matches!(
+            err.error(),
+            Error::Reprepare(CommitError::Compile(CompileError::FeedbackTooShort {
+                delay,
+                max_block,
+                ..
+            })) if *delay == Samples::new(DELAY) && *max_block == Samples::new(DELAY + 1)
+        ),
+        "{err}"
+    );
+    assert!(old.is_open() && !new.is_open(), "the old device plays on");
+    assert_eq!(s.device().spec().sample_rate, SampleRate::of(OLD));
+    assert!(play(&mut s, &old, 441, 10).iter().any(|&x| x != 0.0));
+
+    let (driver, new) = ManualStreamDriver::new();
+    s.restart_on(
+        spec_at(NEW),
+        driver,
+        Some(MaxBlock::of(Samples::new(DELAY))),
+        None,
+    )
+    .expect("at the delay itself");
     assert!(new.is_open());
 }
 

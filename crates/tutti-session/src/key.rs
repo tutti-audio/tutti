@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 
 use tutti_buffers::Float;
 use tutti_graph::{BusOutputPort, EdgeId, EventInputPort, EventOutputPort, NodeBus, NodeKey};
-use tutti_units::Gain;
+use tutti_units::{Gain, Samples};
 
 use crate::{ConnectError, DeclarationError, Graph};
 
@@ -336,6 +336,7 @@ pub trait Wire: Sealed {
         graph: &mut Graph<F>,
         from: Self::Out,
         to: Self::In,
+        delay: Option<Samples>,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError>;
     #[doc(hidden)]
     fn disconnect<F: Float>(
@@ -451,8 +452,9 @@ impl Wire for ChannelWire {
         graph: &mut Graph<F>,
         from: OutputPort,
         to: InputPort,
+        delay: Option<Samples>,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        let added = graph.add_edge(from, to)?;
+        let added = graph.add_edge(from, to, delay)?;
         Ok(vec![(ChannelEdge::new(from, to), added)])
     }
     fn disconnect<F: Float>(
@@ -483,11 +485,12 @@ impl Wire for MainBusWire {
         graph: &mut Graph<F>,
         from: NodeKey,
         to: MainSink,
+        delay: Option<Samples>,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         let wires = graph.main_wires(None, from, to)?;
         let mut edges = Vec::with_capacity(wires.len());
         for (out, input) in wires {
-            let added = graph.add_edge(out, input)?;
+            let added = graph.add_edge(out, input, delay)?;
             edges.push((ChannelEdge::new(out, input), added));
         }
         Ok(edges)
@@ -530,6 +533,7 @@ impl Wire for BusWire {
         graph: &mut Graph<F>,
         from: BusOutputPort,
         to: BusInputPort,
+        _: Option<Samples>,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         graph.add_bus_edge(from, to)?;
         Ok(Vec::new())
@@ -560,8 +564,9 @@ impl Wire for EventWire {
         graph: &mut Graph<F>,
         from: EventOutputPort,
         to: EventInputPort,
+        delay: Option<Samples>,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        graph.add_event_edge(from, to)?;
+        graph.add_event_edge(from, to, delay)?;
         Ok(Vec::new())
     }
     fn disconnect<F: Float>(

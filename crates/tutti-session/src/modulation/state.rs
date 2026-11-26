@@ -255,7 +255,8 @@ impl OwnMods {
 
     /// The edge a target key of an edge names.
     pub(super) fn edge_of(&self, key: u64) -> Option<EdgeId> {
-        crate::Graph::<f32>::edge_id(self.edge_refs.get(&key).copied()?)
+        // A route onto an edge's gain names the direct edge of its ports.
+        crate::Graph::<f32>::edge_id(self.edge_refs.get(&key).copied()?, None)
     }
 
     /// What feeds source `source`.

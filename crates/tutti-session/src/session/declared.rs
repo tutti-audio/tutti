@@ -13,17 +13,18 @@ use tutti_graph::{
     BusOutputPort, Edge, GraphSpec, HostValues, Initials, IntoNode, NodeConfig, NodeKey, NodeSpec,
     PortSink, PortSource, Shape, Shapes,
 };
-use tutti_units::Gain;
+use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
 use crate::patch::{
     Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireEnds,
+    WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
 use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
 
 mod wire;
-use wire::{KeptWire, Resolved};
+use wire::{KeptWire, Ports, Resolved};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
@@ -106,6 +107,25 @@ pub enum PatchError<K> {
         /// The wire.
         ends: WireEnds<K>,
     },
+    /// A feedback wire whose delay is shorter than the graph's largest block,
+    /// which the graph would not compile.
+    #[error("the wire {ends:?} is delayed {delay} frames, less than the block of {max_block}")]
+    FeedbackTooShort {
+        /// The wire.
+        ends: WireEnds<K>,
+        /// Its delay.
+        delay: Samples,
+        /// The graph's largest block.
+        max_block: Samples,
+    },
+    /// A wire puts a second edge on ports that hold one: a direct edge and a
+    /// feedback edge, or two delays, from the patch's wires or the edges the
+    /// graph already holds. A pair of ports holds one edge.
+    #[error("the wire {ends:?} puts a second edge on ports that hold one")]
+    TwoEdges {
+        /// The wire.
+        ends: WireEnds<K>,
+    },
     /// A wire the graph would refuse: a port or a node the declared shape does
     /// not have, a width or a fold that does not fit.
     #[error("the wire {ends:?} is refused: {cause}")]
@@ -170,8 +190,8 @@ pub(crate) struct Stored<F: Float> {
 /// The declarations of the last patch, by app key. Control side only.
 pub(crate) struct Kept<K, F: Float> {
     nodes: BTreeMap<K, Stored<F>>,
-    /// The wires the last patch made, by their ends.
-    wires: BTreeMap<WireEnds<K>, KeptWire>,
+    /// The wires the last patch made, by their ends and delay.
+    wires: BTreeMap<WireId<K>, KeptWire>,
 }
 
 impl<K, F: Float> Default for Kept<K, F> {
@@ -339,6 +359,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let planned = self.plan(&kept, patch.nodes, &host);
         let checked = self
             .check_wires(&planned, &wires)
+            .and_then(|()| self.check_feedback(&planned, &wires, &kept))
             .and_then(|()| self.check_acyclic(&planned, &wires, &kept));
         if let Err(refused) = checked {
             self.declared = kept;
@@ -387,7 +408,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     fn declared_wires(
         patch: &Declarations<K, Graph<C::Float>>,
         declared: &BTreeSet<K>,
-    ) -> Result<BTreeMap<WireEnds<K>, KeptWire>, PatchError<K>> {
+    ) -> Result<BTreeMap<WireId<K>, KeptWire>, PatchError<K>> {
         let mut wires = BTreeMap::new();
         for wire in &patch.wires {
             let ends = [Some(wire.ends.source()), wire.ends.sink()];
@@ -397,7 +418,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             if wire.initial.is_some_and(|gain| !gain.get().is_finite()) {
                 return Err(PatchError::NotFinite(wire.ends.source().clone()));
             }
-            wires.insert(wire.ends.clone(), KeptWire::of(wire));
+            wires.insert(wire.id(), KeptWire::of(wire));
         }
         Ok(wires)
     }
@@ -460,22 +481,22 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     fn check_wires(
         &self,
         planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireEnds<K>, KeptWire>,
+        wires: &BTreeMap<WireId<K>, KeptWire>,
     ) -> Result<(), PatchError<K>> {
         let pending = Some(&planned.shapes);
         let mut buses = Vec::new();
         let mut bus_ends = Vec::new();
-        for ends in wires.keys() {
-            let resolved = Resolved::of(ends, |key| planned.at[key]);
+        for id in wires.keys() {
+            let resolved = Resolved::of(id, |key| planned.at[key]);
             resolved
                 .check(&self.graph, pending)
                 .map_err(|cause| PatchError::Wire {
-                    ends: ends.clone(),
+                    ends: id.ends.clone(),
                     cause,
                 })?;
             if let Resolved::Bus(from, to) = resolved {
                 buses.push((from, to));
-                bus_ends.push(ends);
+                bus_ends.push(&id.ends);
             }
         }
         if let Some((at, cause)) = self.graph.first_unlowered(pending, &buses) {
@@ -487,6 +508,61 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         Ok(())
     }
 
+    /// Refuses a feedback wire the graph would not compile, and a wire that
+    /// puts a second edge on ports that hold one, with nothing changed.
+    fn check_feedback(
+        &self,
+        planned: &Planned<K, C::Float>,
+        wires: &BTreeMap<WireId<K>, KeptWire>,
+        kept: &Kept<K, C::Float>,
+    ) -> Result<(), PatchError<K>> {
+        let pending = Some(&planned.shapes);
+        let max_block = self.graph.max_block_samples();
+        // What the patch takes out leaves its ports free for another kind.
+        let mut leaving = BTreeSet::new();
+        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
+            let held = [Some(id.source()), id.sink()]
+                .into_iter()
+                .flatten()
+                .all(|key| kept.nodes.contains_key(key));
+            if held {
+                let resolved = Resolved::of(id, |key| kept.nodes[key].node);
+                leaving.extend(
+                    Ports::of(resolved, &self.graph, None)
+                        .into_iter()
+                        .map(|ports| (ports, id.delay)),
+                );
+            }
+        }
+        let mut declared: BTreeMap<Ports, Option<Samples>> = BTreeMap::new();
+        for id in wires.keys() {
+            if let Some(delay) = id.delay
+                && delay < max_block
+            {
+                return Err(PatchError::FeedbackTooShort {
+                    ends: id.ends.clone(),
+                    delay,
+                    max_block,
+                });
+            }
+            let resolved = Resolved::of(id, |key| planned.at[key]);
+            for ports in Ports::of(resolved, &self.graph, pending) {
+                let twice = declared
+                    .insert(ports, id.delay)
+                    .is_some_and(|other| other != id.delay);
+                let held = ports
+                    .held_delay(&self.graph)
+                    .is_some_and(|held| held != id.delay && !leaving.contains(&(ports, held)));
+                if twice || held {
+                    return Err(PatchError::TwoEdges {
+                        ends: id.ends.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Refuses a wire that closes a cycle the graph would not compile: the
     /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle)) over its wiring, less the
     /// edges this patch takes out, plus the declared wires. A feedback edge is
@@ -494,7 +570,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     fn check_acyclic(
         &self,
         planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireEnds<K>, KeptWire>,
+        wires: &BTreeMap<WireId<K>, KeptWire>,
         kept: &Kept<K, C::Float>,
     ) -> Result<(), PatchError<K>> {
         let pending = Some(&planned.shapes);
@@ -519,13 +595,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
             spec.topology.nodes.insert(node, declared);
         }
-        for ends in kept.wires.keys().filter(|ends| !wires.contains_key(*ends)) {
-            let held = [Some(ends.source()), ends.sink()]
+        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
+            let held = [Some(id.source()), id.sink()]
                 .into_iter()
                 .flatten()
                 .all(|key| kept.nodes.contains_key(key));
             if held {
-                Resolved::of(ends, |key| kept.nodes[key].node).in_spec(
+                Resolved::of(id, |key| kept.nodes[key].node).in_spec(
                     &mut spec,
                     &self.graph,
                     None,
@@ -535,12 +611,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         }
         let named: Vec<_> = wires
             .keys()
-            .map(|ends| {
-                let resolved = Resolved::of(ends, |key| planned.at[key]);
-                (
-                    ends,
-                    resolved.in_spec(&mut spec, &self.graph, pending, true),
-                )
+            .map(|id| {
+                let resolved = Resolved::of(id, |key| planned.at[key]);
+                (id, resolved.in_spec(&mut spec, &self.graph, pending, true))
             })
             .collect();
         let Some(cycle) = spec.cycle() else {
@@ -552,27 +625,29 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .into_iter()
             .find(|(_, edges)| edges.iter().any(|edge| cycle.contains(edge)))
         {
-            Some((ends, _)) => Err(PatchError::Cycle { ends: ends.clone() }),
+            Some((id, _)) => Err(PatchError::Cycle {
+                ends: id.ends.clone(),
+            }),
             None => Ok(()),
         }
     }
 
     /// Disconnects the wires the last patch made and this one does not.
-    fn unwire(&mut self, kept: &Kept<K, C::Float>, wires: &BTreeMap<WireEnds<K>, KeptWire>) {
-        for (ends, old) in &kept.wires {
-            if wires.contains_key(ends) {
+    fn unwire(&mut self, kept: &Kept<K, C::Float>, wires: &BTreeMap<WireId<K>, KeptWire>) {
+        for (id, old) in &kept.wires {
+            if wires.contains_key(id) {
                 continue;
             }
             // A node that is not kept took its wires with it, and a wire the
             // graph no longer has (its node was removed by hand) has nothing
             // to take out.
-            let nodes = [Some(ends.source()), ends.sink()];
+            let nodes = [Some(id.source()), id.sink()];
             if nodes
                 .into_iter()
                 .flatten()
                 .all(|key| kept.nodes.contains_key(key))
             {
-                let resolved = Resolved::of(ends, |key| kept.nodes[key].node);
+                let resolved = Resolved::of(id, |key| kept.nodes[key].node);
                 let _ = resolved.disconnect(&mut self.graph, old.unfaded);
             }
         }
@@ -583,24 +658,24 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     fn wire(
         &mut self,
         kept: &Kept<K, C::Float>,
-        old: BTreeMap<WireEnds<K>, KeptWire>,
-        wires: BTreeMap<WireEnds<K>, KeptWire>,
+        old: BTreeMap<WireId<K>, KeptWire>,
+        wires: BTreeMap<WireId<K>, KeptWire>,
         fresh: &BTreeSet<K>,
         patched: &mut Patched<K>,
         writes: &mut Vec<AnyAssign>,
-    ) -> BTreeMap<WireEnds<K>, KeptWire> {
+    ) -> BTreeMap<WireId<K>, KeptWire> {
         let mut made = BTreeMap::new();
-        for (ends, options) in wires {
-            let resolved = Resolved::of(&ends, |key| kept.nodes[key].node);
+        for (id, options) in wires {
+            let resolved = Resolved::of(&id, |key| kept.nodes[key].node);
             if let Err(cause) = resolved.check(&self.graph, None) {
-                patched.dormant.push((ends, cause));
+                patched.dormant.push((id.ends, cause));
                 continue;
             }
-            let touches_fresh = [Some(ends.source()), ends.sink()]
+            let touches_fresh = [Some(id.source()), id.sink()]
                 .into_iter()
                 .flatten()
                 .any(|key| fresh.contains(key));
-            match old.get(&ends) {
+            match old.get(&id) {
                 Some(before) if !touches_fresh && resolved.held(&self.graph) => {
                     self.regain(resolved, before.initial, options.initial, writes);
                 }
@@ -608,12 +683,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     let connected =
                         resolved.connect(&mut self.graph, options.unfaded, options.initial);
                     if let Err(cause) = connected {
-                        patched.dormant.push((ends, cause));
+                        patched.dormant.push((id.ends, cause));
                         continue;
                     }
                 }
             }
-            made.insert(ends, options);
+            made.insert(id, options);
         }
         made
     }

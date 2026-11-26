@@ -21,8 +21,8 @@ use tutti_units::Samples;
 
 mod wire;
 
-pub(crate) use wire::WireDecl;
 pub use wire::WireEnds;
+pub(crate) use wire::{WireDecl, WireId};
 
 /// How a declaration is swapped or removed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
