@@ -779,7 +779,7 @@ impl UmpNegotiation {
     /// later request of the session's cannot undo a grant.
     ///
     /// A MIDI-CI Device of `muid_changed` that changed its MUID tells the
-    /// device our Function Block's Info again, unasked (M2-101 §3.3.1).
+    /// peer our Function Block's Info again, unasked (M2-101 §3.3.1).
     fn answer(
         &mut self,
         heard: &Heard<'_>,
