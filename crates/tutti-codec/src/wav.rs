@@ -149,7 +149,7 @@ impl<W: Write + Seek> WavWriter<W> {
     ///
     /// # Errors
     ///
-    /// As [`Encoder::create`](crate::Encoder::create).
+    /// As [`EncoderOptions::wrap`](crate::EncoderOptions::wrap).
     pub(crate) fn create(spec: &Spec, pcm: Pcm, mut sink: W) -> Result<Self> {
         let rate = spec.header_rate()?.get();
         let mask = spec.topology().map_or(0, channel_mask);

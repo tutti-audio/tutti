@@ -641,7 +641,7 @@ pub mod session {
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
 /// bit depth and FLAC level a `Format` takes, and the decode errors.
-/// The decoders, encoders and `FileIn`/`FileOut` are `tutti-codec`'s. Feature
+/// The decoders, encoders and `FileIn`/`EncoderSink` are `tutti-codec`'s. Feature
 /// `codec`.
 #[cfg(feature = "codec")]
 pub mod codec {

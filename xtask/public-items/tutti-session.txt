@@ -134,7 +134,6 @@ fn analyze::live::Analyzer::refused
 fn apply::Session::apply
 fn bounce::Bounce::channels
 fn bounce::Bounce::clock
-fn bounce::Bounce::create_new
 fn bounce::Bounce::edit
 fn bounce::Bounce::file_topology
 fn bounce::Bounce::latency
@@ -146,6 +145,7 @@ fn bounce::Bounce::new
 fn bounce::Bounce::normalize
 fn bounce::Bounce::on_event_loss
 fn bounce::Bounce::range
+fn bounce::Bounce::replace
 fn bounce::Bounce::resample
 fn bounce::Bounce::sample_rate
 fn bounce::Bounce::serial
@@ -752,8 +752,8 @@ fn take::Take::id
 fn take::Take::placement
 fn take::Take::rolling
 fn take::Take::window
-fn take::TakeFile::create_new
 fn take::TakeFile::new
+fn take::TakeFile::replace
 fn take::TakeFile::wav
 fn take::TakePlacement::first_frame
 fn take::TakePlacement::latency

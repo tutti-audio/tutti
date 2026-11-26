@@ -365,23 +365,6 @@ fn rt_scope_is_allocation_free() {
     });
 }
 
-/// `DrainBeat::begin`, and `DrainWatch::mark` and `two_since`, neither allocate
-/// nor free: the audio thread's per-block count and the control thread's reads.
-#[test]
-fn drain_clock_is_allocation_free() {
-    let (mut beat, watch) = tutti_rt::drain_clock();
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            let mark = watch.mark();
-            assert!(!watch.two_since(mark));
-            beat.begin();
-            assert!(!watch.two_since(mark));
-            beat.begin();
-            assert!(watch.two_since(mark));
-        }
-    });
-}
-
 /// The audio end of a `handoff` trades without allocating or freeing: taking
 /// a lent value, holding it, and returning it on a recall, with the control
 /// end's lend and recall inside the gate too.

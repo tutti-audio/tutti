@@ -111,7 +111,7 @@ crates/             everything shipped, directory name = package name
   tutti-timeline   # Transport: tempo, loop, motion state machine, timed commands
   tutti-engine      # Engine: the per-block graph render over a transport
   tutti-cpal        # Device layer: CPAL stream, RT callback, driver lifecycle
-  tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
+  tutti-codec       # File codecs: the encoders and EncoderSink, the decoder (Wave, FileIn).
   tutti-modulation         # Pure modulation: the route compiler, curves. Audio-free.
   tutti-export      # Offline rendering and export
   tutti-dsp         # Pure algorithms over slices. Names only tutti-units, tutti-buffers and tutti-rt.
@@ -334,7 +334,7 @@ the buffer is for*, not by whether the width is known at compile time. Nothing i
 the engine fixes a channel count in a type any more.
 
 - **`Source` / `Sink`** (`tutti-buffers`, which replaced `AudioIn` / `AudioOut`
-  at doc 025 stage 3) — engine **edges**: mic in (`MicIn`), file out (`FileOut`),
+  at doc 025 stage 3) — engine **edges**: mic in (`MicIn`), file out (`EncoderSink`),
   a `TapReader`, `FileIn`. Both take a checked **interleaved view** of their
   `Sample` format and report their width as a runtime `ChannelLayout` from `layout()`. **Every count on this
   boundary is denominated in FRAMES** — `Source::pull` answers

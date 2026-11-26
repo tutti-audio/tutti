@@ -2812,7 +2812,6 @@ dependencies = [
  "tutti-measure",
  "tutti-music",
  "tutti-nodes",
- "tutti-platform",
  "tutti-rt",
  "tutti-sampler",
  "tutti-tempo",

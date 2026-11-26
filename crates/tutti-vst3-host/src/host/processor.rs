@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     ChannelTable, EditReader, ParamAccess, ParamEdit, ParamWriteError, PluginError, PluginIo,
     PluginResult, Processor, ReportSink, RtMidiEvents,
 };
-use tutti_rt::{DrainBeat, TallyWriter, tally};
+use tutti_rt::{TallyWriter, tally};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -214,8 +214,6 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// The plugin's `outputParameterChanges` on their way to the Controller:
     /// the last point of each emitted parameter, per block.
     reports: ReportSink,
-    /// Counts the drains, for the Controller's record of what a block has taken.
-    beat: DrainBeat,
     /// The writes taken for the block in hand, latest per parameter, and what
     /// a rejoin carried over from the last activation before the first block.
     /// Holds one write per declared parameter and no more: it is reserved at
@@ -256,8 +254,9 @@ pub(super) struct ProcessorParts {
     pub context_requirements: Option<ProcessContextRequirements>,
     pub drain: EditReader,
     pub reports: ReportSink,
-    pub beat: DrainBeat,
-    pub carried: Vec<(ParamId, Normalized)>,
+    /// The writes the activation refused before any block: counted in
+    /// `edits_dropped`.
+    pub refused: u64,
     pub declared: Arc<[(ParamId, ParamAccess)]>,
 }
 
@@ -270,21 +269,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             context_requirements,
             drain,
             reports,
-            beat,
-            carried,
+            refused,
             declared,
         } = parts;
-        let mut pending = Vec::with_capacity(declared.len());
-        let mut refused = 0u64;
-        for (id, value) in carried {
-            if ParamWriteError::check_sorted(id, &declared).is_err() {
-                refused += 1;
-            } else if let Some(slot) = pending.iter_mut().find(|(known, _)| *known == id) {
-                *slot = (id, value);
-            } else {
-                pending.push((id, value));
-            }
-        }
+        let pending = Vec::with_capacity(declared.len());
         Self {
             _format: std::marker::PhantomData,
             audio,
@@ -294,7 +282,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             context_requirements,
             drain,
             reports,
-            beat,
             pending,
             edits_dropped: refused,
             declared,
@@ -426,7 +413,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // The Controller's writes since the last block, put ahead of this
         // block's automation below, so where both set one parameter the
         // automation has the last word.
-        self.beat.begin();
         self.drain_slots();
 
         // MIDI learn (IMidiLearn): when armed, capture each incoming controller
@@ -486,7 +472,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         }
-        self.pending.clear();
 
         let mut process_context = to_process_context(
             transport,
@@ -526,6 +511,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 return Err(ProcessFailed { error });
             }
         };
+        // The staged writes reach the plugin only from here: every return
+        // before this keeps them in `pending` for the next block, so the
+        // applied mark below never covers a write the plugin was not handed.
+        self.pending.clear();
         let result = self.audio_side.process(ProcessIo {
             mode: self.audio.config.block_mode,
             num_samples: frames.get(),
@@ -539,6 +528,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             setup: &setup,
         });
 
+        // The plugin has the values the drain took once its call returned,
+        // whatever it answered; a block that left before the call leaves them
+        // in `pending` for the next one.
+        self.drain.publish_applied();
         if let Err(error) = result {
             buffer.output().silence();
             return Err(ProcessFailed { error });
@@ -598,6 +591,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         }
         self.drain_slots();
         if self.pending.is_empty() {
+            self.drain.publish_applied();
             return Ok(false);
         }
         let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
@@ -618,6 +612,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
+        self.drain.publish_applied();
         result
             .map(|()| true)
             .map_err(|error| ProcessFailed { error })
@@ -687,13 +682,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             });
         }
         self.pending.clear();
-        self.audio_side
-            .flush(FlushIo {
-                mode: self.audio.config.block_mode,
-                input_params: &self.audio.input.param_changes,
-                output_params: &self.audio.output.param_changes,
-            })
-            .map_err(|error| ProcessFailed { error })
+        let result = self.audio_side.flush(FlushIo {
+            mode: self.audio.config.block_mode,
+            input_params: &self.audio.input.param_changes,
+            output_params: &self.audio.output.param_changes,
+        });
+        self.drain.publish_applied();
+        result.map_err(|error| ProcessFailed { error })
     }
 
     /// Feed incoming MIDI CC controllers to the MIDI-learn capture (for
