@@ -51,18 +51,15 @@
 //!   NAK carrying Table 16's status. A device that declares it leaves those inquiries to
 //!   its Property Exchange Responder ([`CiDevice::refuse_property_exchange`] is the NAK for
 //!   the ones the Responder did not accept). A message for another MUID, one to the Broadcast MUID, an ACK and a NAK are never NAK'd.
-//! - Profile Configuration as Responder (§7, M2-102 §2.4 to §2.7): the device has no Profiles, and
-//!   its Discovery does not declare the category. A Profile Inquiry to the device is
-//!   still answered, optionally for a device that declares no Profile Configuration (§7.13): a Reply
-//!   on the address the Inquiry used, with both lists empty, so an Initiator that asked the
-//!   Function Block gets the final Reply on `0x7F`, which shows that no further replies will
-//!   follow (M2-102 §2.4). A Set Profile On, Set Profile Off or Profile Details
-//!   Inquiry is a Profile the device does not support: a NAK with Status `0x04`, whose
-//!   details are the Profile Id (M2-101 §5.11.3, M2-102 §2.4, §2.6, §2.7: the device should reply
-//!   with a NAK), on the address it came on. A Reply, Report, Details Reply or Profile
-//!   Specific Data is the Initiator's to read ([`ProfileInitiator`](super::ProfileInitiator))
-//!   and is ignored here; Profile Specific Data to a device with no Profiles is not answered,
-//!   as nothing requires it and a NAK of data would invite one back.
+//! - Profile Configuration as Responder (§7, M2-102 §2.4 to §2.7): the device's
+//!   Profile Responder answers a Profile Inquiry, Set Profile On, Set Profile Off and Profile
+//!   Details Inquiry from the Profiles the app offered ([`CiDevice::offer_profiles`]); with none
+//!   offered it answers an Inquiry on the address it used with both lists empty (§7.13) and NAKs
+//!   the rest with Status `0x04`, whose details are the Profile Id (M2-101 §5.11.3). The
+//!   category is the caller's to declare. A Reply, Report, Details Reply or Profile Specific Data is the
+//!   Initiator's to read ([`ProfileInitiator`](super::ProfileInitiator)) and is ignored here;
+//!   Profile Specific Data to a device with no Profiles is not answered, as nothing requires it
+//!   and a NAK of data would invite one back.
 //! - Process Inquiry as Responder (§9): a device that declares
 //!   [`CiCategories::PROCESS_INQUIRY`] answers an Inquiry: Process Inquiry Capabilities with
 //!   MIDI Message Report supported (§9.3, Table 42), and an Inquiry: MIDI Message Report with
@@ -90,44 +87,22 @@ use std::time::Duration;
 use std::vec::Vec;
 use tutti_platform::Instant;
 
-use tutti_ump::{DeviceIdentity, U7};
+use tutti_ump::{DeviceIdentity, MpeZoneSet};
 
 use super::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
-    DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage,
-    PeMessageKind, ProcessFeatures, ProfileLists, ReplyData, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
+    DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, NakStatus, PeCiMessage,
+    PeMessageKind, ProcessFeatures, ProfileOffer, ReplyData, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
+    nak_message,
 };
+use crate::action::CiAction;
+use crate::profile_responder::ProfileResponder;
 use tutti_ump::FunctionBlockId;
 
 use tutti_ump::ProductInstanceId;
 
 /// How long a Discovery waits for its replies: at least 3 seconds (§5.5.5).
 pub const DISCOVERY_WINDOW: Duration = Duration::from_secs(3);
-
-/// What the driver does next.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CiAction {
-    /// Send this message to the peer(s) on the connection.
-    Send(CiMessage),
-    /// A peer answered the Discovery: [`CiDevice::peer`] has it.
-    Found(Muid),
-    /// What a peer's entry holds changed (its Product Instance Id arrived).
-    Updated(Muid),
-    /// A peer is gone: invalidated, in collision, or dropped with the device's
-    /// own MUID. Whatever the caller keyed to it ends.
-    Lost(Muid),
-    /// The device's MUID changed (§5.9, §3.3.1): every Transaction under the old
-    /// one has ended and a new round is on its way.
-    MuidChanged {
-        /// The MUID that is no longer the device's.
-        old: Muid,
-        /// The device's MUID now.
-        new: Muid,
-    },
-    /// The Discovery round's window ([`DISCOVERY_WINDOW`]) has ended.
-    WindowClosed,
-}
 
 /// What Discovery told about a peer, and what was learned since.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,6 +149,7 @@ pub struct CiDevice<R> {
     entropy: R,
     peers: BTreeMap<Muid, CiPeer>,
     round: Round,
+    profiles: ProfileResponder,
 }
 
 impl<R> std::fmt::Debug for CiDevice<R> {
@@ -212,6 +188,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                 closed: true,
                 replied: BTreeSet::new(),
             },
+            profiles: ProfileResponder::default(),
         };
         let mut actions = Vec::new();
         device.start_round(now, &mut actions);
@@ -222,6 +199,21 @@ impl<R: FnMut() -> u32> CiDevice<R> {
     #[must_use]
     pub fn muid(&self) -> Muid {
         self.muid
+    }
+
+    /// Makes the device offer `offer` as its Profiles (M2-101 §7, M2-102 §2.4): each
+    /// entry that differs from the one offered before is Reported (Added, then
+    /// Enabled; Disabled, then Removed), and an entry left equal keeps what a
+    /// peer switched. An offer equal to the last one does nothing.
+    pub fn offer_profiles(&mut self, offer: &ProfileOffer) -> Vec<CiAction> {
+        self.profiles.offer(self.muid, offer)
+    }
+
+    /// The zones of the MPE Profile (M2-120) enabled on the device, whether the app or a
+    /// peer's Set Profile On enabled them, lowest Manager first; `None` with none.
+    #[must_use]
+    pub fn mpe_zones(&self) -> Option<MpeZoneSet> {
+        self.profiles.mpe_zones()
     }
 
     /// The peers found, in MUID order.
@@ -311,7 +303,12 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             }
             CiMessage::EndpointInquiry { header, to, .. } => {
                 if *to == self.muid {
-                    actions.push(self.nak(header.source, SUB_ID2_ENDPOINT_INQUIRY, NakStatus::Nak));
+                    actions.push(self.nak(
+                        CiDeviceId::FunctionBlock,
+                        header.source,
+                        SUB_ID2_ENDPOINT_INQUIRY,
+                        NakStatus::Nak,
+                    ));
                 }
             }
             CiMessage::EndpointReply { header, to, info } => {
@@ -333,39 +330,11 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     peer.asked = false;
                 }
             }
-            CiMessage::ProfileInquiry { header, to } => {
-                if *to == self.muid {
-                    // §7.13: both counts, enabled and disabled Profiles, are 0x00, on the
-                    // address asked.
-                    actions.push(CiAction::Send(CiMessage::ProfileReply {
-                        header: CiHeader {
-                            device_id: header.device_id,
-                            ..self.header()
-                        },
-                        to: header.source,
-                        profiles: ProfileLists::none(),
-                    }));
-                }
-            }
-            CiMessage::SetProfileOn { to, profile, .. }
-            | CiMessage::SetProfileOff { to, profile, .. }
-            | CiMessage::ProfileDetailsInquiry { to, profile, .. } => {
-                if *to == self.muid {
-                    let header = message.header();
-                    let nak = Nak::new(
-                        U7::new(message.sub_id2()).unwrap_or_default(),
-                        NakStatus::ProfileNotSupported,
-                    )
-                    .with_details(profile.to_bytes().map(U7::masked));
-                    actions.push(CiAction::Send(CiMessage::Nak {
-                        header: CiHeader {
-                            device_id: header.device_id,
-                            ..self.header()
-                        },
-                        to: header.source,
-                        nak,
-                    }));
-                }
+            CiMessage::ProfileInquiry { .. }
+            | CiMessage::SetProfileOn { .. }
+            | CiMessage::SetProfileOff { .. }
+            | CiMessage::ProfileDetailsInquiry { .. } => {
+                actions.extend(self.profiles.on_message(self.muid, message));
             }
             CiMessage::ProcessCapabilitiesInquiry { source, to, .. } => {
                 if *to == self.muid {
@@ -388,7 +357,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                         (Some(refusal), _) => actions.push(refusal),
                         // Tutti has no Channel in use (§9.5).
                         (None, address @ CiDeviceId::Channel(_)) => {
-                            actions.push(self.nak_on(
+                            actions.push(self.nak(
                                 address,
                                 *source,
                                 message.sub_id2(),
@@ -427,6 +396,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     && is_property_inquiry(message)
                 {
                     actions.push(self.nak(
+                        CiDeviceId::FunctionBlock,
                         header.source,
                         message.sub_id2(),
                         NakStatus::MessageNotSupported,
@@ -457,22 +427,12 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             return None;
         }
         let asked = inquiry.header();
-        Some(self.nak_on(
+        Some(self.nak(
             asked.device_id,
             asked.source,
             inquiry.sub_id2(),
             NakStatus::MessageNotSupported,
         ))
-    }
-
-    /// A NAK of `original` to `to`, on `address`.
-    fn nak_on(&self, address: CiDeviceId, to: Muid, original: u8, status: NakStatus) -> CiAction {
-        CiAction::Send(CiMessage::Nak {
-            header: self.header_on(address),
-            to,
-            // A sub-ID#2 is seven bits wherever it was read from.
-            nak: Nak::new(U7::new(original).unwrap_or_default(), status),
-        })
     }
 
     fn on_reply(&mut self, source: Muid, data: ReplyData, actions: &mut Vec<CiAction>) {
@@ -591,25 +551,25 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             }
         );
         (*to == self.muid && (is_property_inquiry(message) || subscription)).then(|| {
-            self.nak_message(
+            nak_message(
+                self.header(),
                 header.source,
                 message.sub_id2(),
                 NakStatus::MessageNotSupported,
+                None,
             )
         })
     }
 
-    fn nak(&self, to: Muid, original: u8, status: NakStatus) -> CiAction {
-        CiAction::Send(self.nak_message(to, original, status))
-    }
-
-    fn nak_message(&self, to: Muid, original: u8, status: NakStatus) -> CiMessage {
-        CiMessage::Nak {
-            header: self.header(),
+    /// A NAK of `original` to `to`, on `address`.
+    fn nak(&self, address: CiDeviceId, to: Muid, original: u8, status: NakStatus) -> CiAction {
+        CiAction::Send(nak_message(
+            self.header_on(address),
             to,
-            // A sub-ID#2 is seven bits wherever it was read from.
-            nak: Nak::new(U7::new(original).unwrap_or_default(), status),
-        }
+            original,
+            status,
+            None,
+        ))
     }
 }
 

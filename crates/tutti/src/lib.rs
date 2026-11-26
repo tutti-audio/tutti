@@ -225,9 +225,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, InputPort, Key, MainOutput, NoSuchNode,
-    Offline, OfflineSession, OutputPort, Playhead, RealTime, Session, SessionBuilder, SessionEvent,
-    SessionFloat, SystemClock, SystemSession, TransportHandle, Workers,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, Declarations, InputPort, IntoPatch, Key,
+    KeyError, MainOutput, NoSuchNode, NodeDecl, Offline, OfflineSession, OutputPort, PatchError,
+    PatchTarget, Patched, Playhead, RealTime, Session, SessionBuilder, SessionEvent, SessionFloat,
+    SystemClock, SystemSession, TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -497,8 +498,8 @@ pub mod graph {
         ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
         Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
         ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
-        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
-        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
+        PublishedCell, PublishedInitial, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
+        SampleRates, Scalar, SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

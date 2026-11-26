@@ -1064,6 +1064,7 @@ impl<C: Clock> SessionBuilder<C> {
             reports: Default::default(),
             midi,
             graph: parts.graph,
+            declared: Default::default(),
             mods: crate::modulation::ModSession::new(
                 self.opts.unresolved_warning,
                 Arc::clone(&table),

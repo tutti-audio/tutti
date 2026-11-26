@@ -979,35 +979,61 @@ fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
 /// can address its value, and is left out.
 #[cfg_attr(
     not(any(feature = "midi", feature = "sampler")),
-    allow(unused_variables)
+    allow(unused_variables, reason = "no kind is addressed without a feature")
 )]
 pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
-    #[cfg(feature = "midi")]
-    {
-        if let Some(cell) = entry.cell::<tutti_midi_runtime::ClipEventsKind>() {
-            return Some((SlotId::ClipEvents(node), node_cell(cell)));
-        }
-        if let Some(cell) = entry.cell::<tutti_midi_runtime::HarmonyChangesKind>() {
-            return Some((SlotId::Harmony(node), node_cell(cell)));
-        }
-    }
-    #[cfg(feature = "sampler")]
-    {
-        if let Some(cell) = entry.cell::<tutti_sampler::WindowKind>() {
-            return Some((SlotId::Window(node), node_cell(cell)));
-        }
-        if let Some(cell) = entry.cell::<tutti_sampler::LoopingKind>() {
-            return Some((SlotId::Looping(node), node_cell(cell)));
-        }
-        if let Some(cell) = entry.cell::<tutti_sampler::DirectionKind>() {
-            return Some((SlotId::Direction(node), node_cell(cell)));
-        }
-        if let Some(cell) = entry.cell::<tutti_sampler::SpeedKind>() {
-            return Some((SlotId::Speed(node), node_cell(cell)));
-        }
-    }
-    None
+    published_kinds!(K, id => Some((id(node), node_cell(entry.cell::<K>()?))))
 }
+
+/// The first `Some` that `$body` answers for a published kind the session
+/// addresses, with `$kind` the kind's type and `$id` the function that makes
+/// its slot of a node: the one list of those kinds. A node that publishes
+/// another kind has nothing that can address its value, and the session
+/// leaves it out.
+macro_rules! published_kinds {
+    ($kind:ident, $id:ident => $body:expr) => {{
+        #[allow(unused_mut, reason = "no kind is addressed without a feature")]
+        let mut answer = None;
+        #[cfg(feature = "midi")]
+        {
+            answer = answer.or_else(|| {
+                type $kind = tutti_midi_runtime::ClipEventsKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::ClipEvents;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_midi_runtime::HarmonyChangesKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Harmony;
+                (|| $body)()
+            });
+        }
+        #[cfg(feature = "sampler")]
+        {
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::WindowKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Window;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::LoopingKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Looping;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::DirectionKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Direction;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::SpeedKind;
+                let $id: fn(NodeKey) -> SlotId = SlotId::Speed;
+                (|| $body)()
+            });
+        }
+        answer
+    }};
+}
+pub(super) use published_kinds;
 
 /// The slot a node's setting cell is registered as under `node`.
 pub(crate) fn setting_of(node: NodeKey, entry: &ErasedSetting) -> (SlotId, Erased) {
@@ -1150,6 +1176,11 @@ pub struct SettingWord {
 }
 
 impl SettingWord {
+    /// `word` of the enum `of`.
+    pub(crate) fn new(word: u64, of: TypeId) -> Self {
+        Self { word, of }
+    }
+
     fn of<T: AtomicWord + 'static>(value: T) -> Self {
         Self {
             word: value.to_word(),

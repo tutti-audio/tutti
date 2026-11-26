@@ -931,6 +931,19 @@ impl<F: Float> Graph<F> {
         key
     }
 
+    /// The enum the setting of `kind` on `node` holds, as its cell declares it.
+    pub(crate) fn setting_enum(
+        &self,
+        node: NodeKey,
+        kind: tutti_units::SettingKind,
+    ) -> Option<std::any::TypeId> {
+        let held = self.nodes.get(&node)?.controls.as_ref()?;
+        held.settings
+            .iter()
+            .find(|s| s.kind() == kind)
+            .map(tutti_graph::ErasedSetting::word)
+    }
+
     /// The controls [`add`](Self::add) kept for the node at `key`; `None` when
     /// the node is gone.
     pub(crate) fn controls<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(

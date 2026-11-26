@@ -1077,3 +1077,113 @@ fn an_mpe_profile_that_makes_no_zone_is_not_one() {
     i.on_message(&reply(channel(8), &[ProfileId::MPE], &[]), Instant::now());
     assert_eq!(i.table().mpe_zones(), EnabledMpeZones::default());
 }
+
+/// An Initiator that lists `profile(1)` disabled on Channel 2 and has asked for its
+/// Number of MIDI Channels; the answer, if any, is the test's.
+fn asked_for_the_maximum() -> (ProfileInitiator, Instant) {
+    let (mut i, _, now) = start();
+    i.on_message(&reply(channel(2), &[], &[profile(1)]), now);
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), now);
+    i.details(
+        channel(2),
+        profile(1),
+        InquiryTarget::NUMBER_OF_CHANNELS,
+        now,
+    )
+    .unwrap();
+    (i, now)
+}
+
+fn maximum_is(max: u16) -> Decoded {
+    Decoded::Message(CiMessage::ProfileDetailsReply {
+        header: from_peer(channel(2)),
+        to: Muid::of(OURS),
+        profile: profile(1),
+        target: InquiryTarget::NUMBER_OF_CHANNELS,
+        data: ChannelsDetail {
+            in_use: ProfileChannels::of(0),
+            max: ProfileChannels::of(max),
+        }
+        .to_data(),
+    })
+}
+
+/// Spec: m2-102/2.5.1#3, m2-120/3.1#1, m2-120/a.3#1
+#[test]
+fn set_on_asks_for_no_more_channels_than_the_declared_maximum() {
+    let (mut i, now) = asked_for_the_maximum();
+    // The maximum is not known yet: nothing refuses a count.
+    assert!(
+        i.set_on(target_at(channel(2), 99), profile(1), now).is_ok(),
+        "no declared maximum yet"
+    );
+    i.on_message(&disabled(channel(2), profile(1), 0), now);
+
+    let actions = i.on_message(&maximum_is(6), now);
+    assert!(actions.contains(&ProfileAction::Changed {
+        address: channel(2),
+        profile: profile(1),
+        change: ProfileChange::MaxDeclared,
+    }));
+    assert_eq!(
+        i.table()
+            .get(channel(2), profile(1))
+            .and_then(ProfileEntry::max),
+        Some(ProfileChannels::of(6))
+    );
+    assert_eq!(
+        i.set_on(target_at(channel(2), 7), profile(1), now),
+        Err(ProfileRequestError::OverMaximum {
+            requested: ProfileChannels::of(7),
+            max: ProfileChannels::of(6),
+        })
+    );
+    assert!(i.set_on(target_at(channel(2), 6), profile(1), now).is_ok());
+}
+
+#[test]
+fn a_reported_state_keeps_the_declared_maximum() {
+    let (mut i, now) = asked_for_the_maximum();
+    i.on_message(&maximum_is(6), now);
+    i.on_message(&enabled(channel(2), profile(1), 3), now);
+    assert_eq!(
+        i.table()
+            .get(channel(2), profile(1))
+            .and_then(ProfileEntry::max),
+        Some(ProfileChannels::of(6))
+    );
+}
+
+#[test]
+fn the_maximum_is_asked_for_each_channel_profile_that_has_none_and_not_twice() {
+    let (mut i, _, now) = start();
+    i.on_message(&reply(channel(1), &[], &[profile(1), profile(2)]), now);
+    i.on_message(&reply(CiDeviceId::Group, &[], &[profile(3)]), now);
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), now);
+    let asked = |actions: &[ProfileAction]| -> Vec<(CiDeviceId, ProfileId)> {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                ProfileAction::Send(CiMessage::ProfileDetailsInquiry {
+                    header,
+                    profile,
+                    target,
+                    ..
+                }) => {
+                    assert_eq!(*target, InquiryTarget::NUMBER_OF_CHANNELS);
+                    Some((header.device_id, *profile))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        asked(&i.ask_maximums(now)),
+        [(channel(1), profile(1)), (channel(1), profile(2))],
+        "the Group's Profile has no Channel count"
+    );
+    assert!(
+        asked(&i.ask_maximums(now)).is_empty(),
+        "both inquiries are waiting"
+    );
+}

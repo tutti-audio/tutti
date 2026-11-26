@@ -256,8 +256,9 @@ impl HarmonyNode {
 /// What a [`HarmonyNode`] is made from: the lanes it sends from its first
 /// block. The lanes are a published value a session replaces
 /// (`harmony.changes()`), so the config has no structure: any two make the same
-/// node, and a running node's lanes are replaced through
-/// [`HarmonyControls::set`].
+/// node. A running node's lanes are replaced through
+/// [`HarmonyControls::set`], or by a patch that declares other lanes under the
+/// node's key (the config's [`initials`](NodeConfig::initials) list them).
 #[derive(Clone, Debug, Default)]
 pub struct HarmonyConfig {
     changes: Arc<HarmonyChanges>,
@@ -292,9 +293,9 @@ impl<F: Float> NodeConfig<F> for HarmonyConfig {
         true
     }
 
-    /// None: the lanes are a published value, not a param or a setting.
+    /// The lanes: a published value, not a param or a setting.
     fn initials(&self) -> Initials {
-        Initials::new()
+        Initials::new().published::<HarmonyChangesKind>(Arc::clone(&self.changes))
     }
 }
 
