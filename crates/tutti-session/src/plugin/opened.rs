@@ -52,6 +52,9 @@ pub(super) struct Install {
     pub(super) plugin: HostPlugin,
     pub(super) mirror: Option<Mirror>,
     pub(super) origin: Origin,
+    /// The writes the state the plugin started from did not hold, sent through
+    /// the record's ledger once the plugin has one.
+    pub(super) replay: Vec<(tutti_units::ParamId, tutti_units::Normalized)>,
 }
 
 /// The reading of whether a loaded plugin's live part is gone, shared by the
@@ -236,6 +239,7 @@ impl Shared {
             plugin,
             restore: _,
             mirror,
+            replay,
         } = open;
         let plugin = plugin.map_err(plugin_failed)?;
         let handle = plugin.handle().clone();
@@ -273,6 +277,7 @@ impl Shared {
             plugin,
             mirror,
             origin: Origin { config, loadable },
+            replay,
         };
         Ok((shared, install))
     }

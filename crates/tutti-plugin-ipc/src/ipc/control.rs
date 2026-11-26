@@ -35,7 +35,12 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameters_answer()
             }
 
-            fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
+            /// A served read states no pending write: the host's writes reach the
+            /// server by a flush the read does not wait for or report.
+            fn parameter_value(
+                &self,
+                id: ParamId,
+            ) -> Answer<Option<tutti_plugin_types::PluginValue>> {
                 self.link.bridge.audio().parameter_answer(id)
             }
 
@@ -114,8 +119,17 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter_value_from_text(id, text)
             }
 
-            fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-                self.link.bridge.audio().save_state(state_use)
+            /// The bridge flushes the host's writes and saves after them, so the
+            /// bytes hold them and none is stated pending.
+            fn save_state(
+                &self,
+                state_use: StateUse,
+            ) -> Result<tutti_plugin_types::PluginState, StateError> {
+                self.link
+                    .bridge
+                    .audio()
+                    .save_state(state_use)
+                    .map(tutti_plugin_types::PluginState::new)
             }
 
             /// Queued on the command bus as the blocks around it are, so the
@@ -209,6 +223,18 @@ macro_rules! served_control {
         }
 
         impl Control for $ty {
+            /// A count that never moves: A served plugin's refusals are the server's (`ServerLosses::edits_refused`), read through `Health`.
+            fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+                tutti_rt::tally()
+            }
+
+            /// None: the bridge flushes the host's writes before every request
+            /// and saves after them, so none is held back to state (P3b-2 states
+            /// the writes the server has not answered for).
+            fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+                Vec::new()
+            }
+
             fn info(&self) -> &PluginDescriptor {
                 &self.link.descriptor
             }
@@ -243,23 +269,6 @@ macro_rules! served_control {
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value)
-            }
-
-            /// The host's writes made so far: what a flush the server answers
-            /// must have carried ([`AudioBridge::edits_queued`]).
-            ///
-            /// [`AudioBridge::edits_queued`]: crate::AudioBridge
-            fn queued(&self) -> Option<tutti_rt::Generation> {
-                self.link.bridge.audio().edits_queued()
-            }
-
-            /// Whether the server answered a request that carried the writes up
-            /// to `upto`; when not, asks the audio lane to flush them
-            /// ([`AudioBridge::edits_delivered`]).
-            ///
-            /// [`AudioBridge::edits_delivered`]: crate::AudioBridge
-            fn delivered(&self, upto: tutti_rt::Generation) -> bool {
-                self.link.bridge.audio().edits_delivered(upto)
             }
 
             /// From the declared parameters the client keeps, not a round trip

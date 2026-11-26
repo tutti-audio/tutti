@@ -71,7 +71,8 @@ pub use gesture::Gesture;
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
 pub(crate) use plugin::{
-    AutomationModeSlot, CarriedParam, MidiMapSlot, PluginEntry, TrackInfoSlot,
+    AutomationModeSlot, CarriedParam, MidiMapSlot, PluginEntry, TrackInfoSlot, WriteLedger,
+    WriteRefusal,
 };
 #[cfg(feature = "plugin")]
 pub use plugin::{

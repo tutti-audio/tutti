@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, ParamWriteError, PluginError, PluginFailure, RenderMode, StateError, TerminationReason,
-    WindowHandle,
+    Health, ParamWriteError, PluginError, PluginFailure, PluginState, RenderMode, StateError,
+    TerminationReason, WindowHandle,
 };
 use tutti_plugin_types::{BypassWrite, PipelineCounts};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -44,21 +44,13 @@ pub trait MainThreadControl: Send + Sync {
     /// is lost.
     fn lend(&self, f: &mut dyn FnMut(&mut dyn Control));
 
-    /// The host's parameter writes made so far, taken when a read or a save is
-    /// made and carried through its polls ([`settle`](Self::settle)). The
-    /// default is for a control whose writes are not held apart from the plugin
-    /// (an out-of-process plugin's flushes its own before it answers).
-    fn writes(&self) -> PendingWrites {
-        PendingWrites::none()
-    }
-
-    /// Applies the host's writes no block has taken, so a call made once it is
-    /// `Ready` sees every write `pending` names. `Pending` while a node holds
-    /// the writes' reader for a drain, or the plugin's Controller holds a value
-    /// for the Processor's next block: ask again with the same `pending`.
-    /// Never waits.
-    fn settle(&self, _main: MainThreadMarker, _pending: &mut PendingWrites) -> std::task::Poll<()> {
-        std::task::Poll::Ready(())
+    /// The host's parameter writes no block has applied, from the record kept
+    /// apart from the plugin: the writes [`AnyThread::set_parameter_value`]
+    /// stored. The default is for a control whose writes are not held apart from
+    /// the plugin (an out-of-process plugin's flushes its own before it
+    /// answers). Never waits.
+    fn pending(&self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
     }
 
     /// Runs `f`, a state or preset load, on the plugin's `Control`, or does not
@@ -96,89 +88,8 @@ impl<C: Control + Clone + Send + Sync> MainThreadControl for C {
         f(&mut self.clone());
     }
 
-    /// No writes are held apart from the plugin on this side: what the control
-    /// queued for delivery ([`Control::queued`]) is fixed at the first settle.
-    fn writes(&self) -> PendingWrites {
-        PendingWrites::new(tutti_rt::Generation::new(0))
-    }
-
-    /// `Ready` once the control says every write it queued at the first settle
-    /// is delivered ([`Control::delivered`]), which asks for it.
-    fn settle(&self, _main: MainThreadMarker, pending: &mut PendingWrites) -> std::task::Poll<()> {
-        let settled = lent(self, |control| {
-            pending
-                .queue_mark(|| control.queued())
-                .is_none_or(|upto| control.delivered(upto))
-        });
-        if settled.unwrap_or(true) {
-            std::task::Poll::Ready(())
-        } else {
-            std::task::Poll::Pending
-        }
-    }
-
     fn editor_idle(&self, main: MainThreadMarker) {
         self.lend(&mut |control| control.editor_idle(main));
-    }
-}
-
-/// The host's parameter writes a call must see: taken when the call is made
-/// ([`PluginHandle::writes`]) and carried through its polls. It names the host's
-/// writes made so far and, once those have been applied to the plugin's
-/// `Control`, the values that `Control` has queued for the Processor; a later
-/// write moves neither mark.
-#[derive(Clone, Copy, Debug)]
-pub struct PendingWrites {
-    host: tutti_rt::Generation,
-    queue: QueueMark,
-}
-
-/// Where the Controller's queue stood when the host's writes reached it.
-#[derive(Clone, Copy, Debug)]
-enum QueueMark {
-    /// The host's writes are not applied to the `Control` yet.
-    Unset,
-    /// The format writes the plugin at the call: it has no queue.
-    NoQueue,
-    /// The values queued up to here are the ones to wait for.
-    At(tutti_rt::Generation),
-}
-
-impl PendingWrites {
-    /// The host's writes made up to `host`.
-    pub(crate) const fn new(host: tutti_rt::Generation) -> Self {
-        Self {
-            host,
-            queue: QueueMark::Unset,
-        }
-    }
-
-    /// No writes held apart from the plugin.
-    pub(crate) const fn none() -> Self {
-        Self {
-            host: tutti_rt::Generation::new(0),
-            queue: QueueMark::NoQueue,
-        }
-    }
-
-    /// The host writes to apply.
-    pub(crate) const fn host(&self) -> tutti_rt::Generation {
-        self.host
-    }
-
-    /// Fixes the Controller's mark at `queued` the first time it is asked, and
-    /// answers the one fixed: later calls cannot move it.
-    pub(crate) fn queue_mark(
-        &mut self,
-        queued: impl FnOnce() -> Option<tutti_rt::Generation>,
-    ) -> Option<tutti_rt::Generation> {
-        if matches!(self.queue, QueueMark::Unset) {
-            self.queue = queued().map_or(QueueMark::NoQueue, QueueMark::At);
-        }
-        match self.queue {
-            QueueMark::At(mark) => Some(mark),
-            QueueMark::Unset | QueueMark::NoQueue => None,
-        }
     }
 }
 
@@ -460,34 +371,21 @@ impl PluginHandle {
         self.any_thread.as_ref()
     }
 
-    /// Serializes the plugin's state for `state_use` ([`AnyThread::save_state`]).
+    /// Serializes the plugin's state for `state_use` ([`AnyThread::save_state`]),
+    /// with the host's writes no block has applied beside the bytes.
     ///
     /// # Errors
     ///
     /// The [`StateError`] of [`AnyThread::save_state`].
-    pub fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+    pub fn save_state(&self, state_use: StateUse) -> Result<PluginState, StateError> {
         self.any_thread.save_state(state_use)
-    }
-
-    /// The parameter writes the host has made to the plugin: what a
-    /// [`save_state_on`](Self::save_state_on) made now must see.
-    #[must_use]
-    pub fn writes(&self) -> PendingWrites {
-        self.control
-            .as_deref()
-            .map_or(PendingWrites::none(), MainThreadControl::writes)
     }
 
     /// Serializes the plugin's state for `state_use` on the main thread
     /// ([`Control::save_state`]): an out-of-process plugin's round trip runs on this
     /// thread, an in-process plugin's is a direct call. It never waits for
-    /// another thread.
-    ///
-    /// `Pending` until every parameter write `pending` names (taken with
-    /// [`writes`](Self::writes) at the call) is the plugin's: a node that is
-    /// draining them holds them for the length of a drain, and a value queued
-    /// for the Processor waits for the block that takes it. Ask again with the
-    /// same `pending`.
+    /// another thread or for a block: the host's writes no block has applied are
+    /// stated beside the bytes ([`PluginState`]), read before them.
     ///
     /// # Errors
     ///
@@ -498,20 +396,20 @@ impl PluginHandle {
         &self,
         main: MainThreadMarker,
         state_use: StateUse,
-        pending: &mut PendingWrites,
-    ) -> std::task::Poll<Result<Vec<u8>, StateError>> {
-        use std::task::Poll;
+    ) -> Result<PluginState, StateError> {
         let Some(control) = self.control.as_deref() else {
-            return Poll::Ready(Err(StateError::NoStateRoute));
+            return Err(StateError::NoStateRoute);
         };
-        if control.settle(main, pending).is_pending() {
-            return Poll::Pending;
-        }
-        Poll::Ready(match lent(control, |c| c.save_state(main, state_use)) {
-            Some(Ok(bytes)) => Ok(bytes),
+        let host = control.pending();
+        match lent(control, |c| {
+            let pending = tutti_plugin_types::overlay_writes(c.pending(), host);
+            c.save_state(main, state_use)
+                .map(|bytes| PluginState { bytes, pending })
+        }) {
+            Some(Ok(state)) => Ok(state),
             Some(Err(error)) => Err(error.into()),
             None => Err(StateError::PluginCrashed),
-        })
+        }
     }
 
     /// Tells the plugin whether it renders offline and returns whether it
@@ -1268,6 +1166,15 @@ mod tests {
     }
 
     impl Control for FakePresets {
+        /// A count that never moves: The fake refuses no write at the drain.
+        fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+            tutti_rt::tally()
+        }
+
+        fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+            Vec::new()
+        }
+
         fn info(&self) -> &PluginDescriptor {
             unreachable!("the preset tests never ask")
         }
@@ -1371,7 +1278,7 @@ mod tests {
             fn parameter_value(
                 &self,
                 _id: ParamId,
-            ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
                 tutti_plugin_types::Answer::ready(None)
             }
 
@@ -1404,7 +1311,7 @@ mod tests {
             /// `NoStateRoute`: this backend hosts no plugin, so it has no
             /// state to give and must not answer with an empty one, which a
             /// caller would save as the real thing.
-            fn save_state(&self, _: StateUse) -> std::result::Result<Vec<u8>, StateError> {
+            fn save_state(&self, _: StateUse) -> std::result::Result<PluginState, StateError> {
                 Err(StateError::NoStateRoute)
             }
             fn set_render_mode(&self, _mode: RenderMode) -> bool {

@@ -180,12 +180,12 @@ fn a_failed_load_returns_its_error() {
     let other = tutti_session::PeerState::of_plugin(entry.plugin_ref(), Vec::new());
     assert!(
         s.load_out_of_process(&second_id(), &catalog)
-            .initial_state(other.clone())
+            .initial_state(tutti_session::Saved::new(other.clone()))
             .is_err()
     );
     assert!(
         s.load_out_of_process(&first_id(), &catalog)
-            .initial_state(other)
+            .initial_state(tutti_session::Saved::new(other))
             .is_ok()
     );
 }

@@ -45,7 +45,8 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let state = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves");
+        .expect("saves")
+        .bytes;
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
     assert!(
         handle
@@ -56,7 +57,8 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let saved = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves again");
+        .expect("saves again")
+        .bytes;
     let after = Transcript::parse(&F::extract_blob(&saved));
     assert_eq!(after.mode, Mode::Level.index(), "the mode crossed");
     // The mirror a session reads: its load-time read of the served plugin's values.
@@ -458,7 +460,7 @@ mod node_midi_map {
     /// What the plugin recorded of `level`: the points it was handed and the
     /// level it holds.
     fn level_points<F: Format>(handle: &PluginHandle) -> (Vec<f64>, f64) {
-        let state = handle.save_state(StateUse::Project).expect("saves");
+        let state = handle.save_state(StateUse::Project).expect("saves").bytes;
         let t = Transcript::parse(&F::extract_blob(&state));
         let points = t
             .of(Kind::Param)
@@ -649,5 +651,35 @@ mod node_midi_map {
             (level - expected()).abs() < 1e-6,
             "the plugin holds {level}"
         );
+    }
+
+    /// In process: a host write to the read-only parameter passes the call (the
+    /// slots hold every id the plugin lists), and the Processor refuses it when
+    /// the block takes it, so the handle's `refused_edits` reads 1 after one
+    /// block. A write refused at the call is not counted.
+    #[test]
+    fn an_in_process_vst3_node_counts_a_write_to_a_read_only_parameter_refused() {
+        use tutti_graph::contract::Direct;
+        let (client, handle) = tutti_plugin_host::load_client::<tutti_vst3_host::Vst3Loaded, f32>(
+            main_thread(),
+            &tutti_fixtures::pumped_work(),
+            &tutti_plugin_types::PluginRef::file(bundle_of(&vst3_module())),
+            SampleRate::SR_48K,
+        )
+        .expect("loads");
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
+        assert_eq!(handle.refused_edits(), 0);
+        handle
+            .send_parameter(
+                tutti_plugin_contract::spec::Param::Meter.id(),
+                tutti_units::Normalized::of(1.0),
+            )
+            .expect("the slots hold every listed id");
+        unit.block();
+        assert_eq!(handle.refused_edits(), 1);
     }
 }

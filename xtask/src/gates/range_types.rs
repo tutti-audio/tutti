@@ -177,6 +177,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: any peer with any saved bytes and media type is a state; a plugin's restore does not read the media type (its format decides), and the peer refuses bytes it cannot read",
     ),
     (
+        "crates/tutti-session/src/plugin/state.rs",
+        "Saved",
+        "permanent: a state and the writes beside it; each half is its own checked type (a `PeerState`, a normalized value per id), so every pair is a save",
+    ),
+    (
         "crates/tutti-buffers/src/ambisonic.rs",
         "AmbisonicFormat",
         "permanent: each field is its own checked type, so every combination is a format",

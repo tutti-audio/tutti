@@ -43,7 +43,6 @@ use crate::{
     RestartRules, StateUse, TimerId, Told, TrackInfo, Wakeups, Widths,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
-use tutti_rt::Generation;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -164,26 +163,31 @@ pub trait Control: EditorWindow {
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
 
-    /// How many values [`set_parameter`](Self::set_parameter) has queued for
-    /// the Processor to take at the head of its next block (a CLAP
-    /// Controller's), as a [`Generation`]; `None` for a format that writes the
-    /// plugin at the call. A caller that wants every value queued so far to be
-    /// the plugin's takes this once and asks [`delivered`](Self::delivered)
-    /// with it until it is `true`.
-    fn queued(&self) -> Option<Generation> {
-        None
-    }
+    /// The writes the Processor refused when it took them from the host (a
+    /// parameter the activation did not declare, or declared read-only), as a
+    /// cumulative count over the plugin's life, across activations. The control
+    /// side reads it ([`Health::refused_edits`](crate::Health::refused_edits));
+    /// the Processor adds to it. A write refused at the call is not counted. A
+    /// format whose Processor refuses no write by itself answers a count that
+    /// never moves, and says why.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64>;
 
-    /// Asks for the delivery of every value queued up to `upto`
-    /// ([`queued`](Self::queued)) and answers whether it happened: the plugin
-    /// has them (the Processor's `process` call that took them has returned, or
-    /// a served plugin's server answered a request that carried them), so a read
-    /// or a save made now sees them. An ask is idempotent, and a caller asks
-    /// again until it is `true`. Later writes do not move it.
-    fn delivered(&self, upto: Generation) -> bool {
-        let _ = upto;
-        true
-    }
+    /// The writes made through this `Control` that the saved state does not hold
+    /// yet: the newest value of each parameter that a
+    /// [`set_parameter`](Self::set_parameter), a load or a restored state handed
+    /// the plugin or its Processor and that no block has applied. Read from the
+    /// host's own record, so it never waits for a block; empty for a format that
+    /// writes the plugin at the call. A save states them beside its bytes
+    /// ([`PluginState`](crate::PluginState)); asked before
+    /// [`save_state`](Self::save_state), so a write applied between the two is
+    /// in both rather than in neither.
+    ///
+    /// A format may instead apply what it holds, as its own tick would, and
+    /// then state none: AU's `NonRealTime` writes wait for a tick, so its answer
+    /// writes them to the unit and lists nothing. Every implementation states
+    /// its own: a format that writes the plugin at the call returns an empty
+    /// list, with its reason.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)>;
 
     /// Tells the plugin's edit controller of a value the host wrote and the
     /// Processor was handed another way (in the block's parameter changes), so
@@ -718,17 +722,10 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
-    /// What [`Control::queued`] answers: the writes
-    /// [`queue_write`](Self::queue_write) handed the Processor.
-    fn queued(&self) -> Option<Generation> {
-        None
-    }
-
-    /// What [`Control::delivered`] answers.
-    fn delivered(&self, upto: Generation) -> bool {
-        let _ = upto;
-        true
-    }
+    /// What [`Control::pending`] adds to the plugin's own: the writes
+    /// [`queue_write`](Self::queue_write) handed the Processor that no block has
+    /// applied.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)>;
 
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
@@ -774,20 +771,6 @@ pub trait Wraps {
     /// Processor.
     fn after_restore(&mut self, main: MainThreadMarker) {
         let _ = main;
-    }
-
-    /// The state, with the writes the Processor has not surely taken yet beside
-    /// it. Defaults to the plugin's own.
-    ///
-    /// # Errors
-    ///
-    /// As [`Control::save_state`].
-    fn save_with_pending(
-        &mut self,
-        main: MainThreadMarker,
-        state_use: StateUse,
-    ) -> PluginResult<Vec<u8>> {
-        self.plugin_mut().save_state(main, state_use)
     }
 
     /// Appends what the Processor reported to `out`, after the plugin's own,
@@ -864,12 +847,15 @@ impl<W: Wraps> Control for W {
         Wraps::inform_controller(self, main, id, value);
     }
 
-    fn queued(&self) -> Option<Generation> {
-        Wraps::queued(self)
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        self.plugin().refused_edits()
     }
 
-    fn delivered(&self, upto: Generation) -> bool {
-        Wraps::delivered(self, upto)
+    /// The plugin's own pending writes, then the Processor's; the Processor's
+    /// is the newer for a parameter both hold.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        let plugin = self.plugin_mut().pending();
+        crate::overlay_writes(plugin, Wraps::pending(self))
     }
 
     fn set_parameter(
@@ -927,7 +913,7 @@ impl<W: Wraps> Control for W {
     }
 
     fn save_state(&mut self, main: MainThreadMarker, state_use: StateUse) -> PluginResult<Vec<u8>> {
-        self.save_with_pending(main, state_use)
+        self.plugin_mut().save_state(main, state_use)
     }
 
     fn load_state(
@@ -1220,6 +1206,10 @@ mod tests {
 
     impl Wraps for Rig {
         type Plugin = FakeLoaded;
+
+        fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+            Vec::new()
+        }
 
         fn plugin(&self) -> &FakeLoaded {
             &self.plugin

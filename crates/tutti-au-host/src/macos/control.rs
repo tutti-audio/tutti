@@ -298,6 +298,17 @@ impl AuLoaded {
 }
 
 impl Control for AuLoaded {
+    /// A count that never moves: AU writes the unit at the call: its Processor refuses no write by itself.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
+    /// None: an AU unit is written at the call; the writes its Processor marks
+    /// for a tick are its Controller's ([`Wraps::pending`]).
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
+    }
+
     fn info(&self) -> &PluginDescriptor {
         self.descriptor()
     }
@@ -695,6 +706,15 @@ impl Wraps for AuController {
     fn tick(&mut self, _main: MainThreadMarker) {
         self.ranges.reclaim();
         self.apply_deferred();
+    }
+
+    /// A `NonRealTime` write the Processor marked is written to the unit only at
+    /// a tick, so a save made before it would not hold it. The save asks first,
+    /// and the marked values are written now, as a tick would write them, so the
+    /// state that follows holds them: none is left to state beside it.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.apply_deferred();
+        Vec::new()
     }
 }
 

@@ -11,8 +11,8 @@ use tutti_rt::Generation;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
-    PluginResult, PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request,
-    RestartRules, Samples, Stuck, Widths, Wraps,
+    PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request, RestartRules,
+    Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -191,7 +191,7 @@ impl Vst3Controller {
     /// The writes handed to the Processor that no block has applied yet, and
     /// so are in no component stream. Forgets the ones that have been. A write
     /// the Processor dropped on its way (a drain past `pending`'s room, counted
-    /// in `edits_dropped`) is forgotten with them: it is in no save.
+    /// in the plugin's refused count) is forgotten with them: it is in no save.
     fn undrained(&mut self) -> Vec<(ParamId, Normalized)> {
         let edits = &self.edits;
         self.handed.retain(|h| !edits.has_applied(h.sent_at));
@@ -279,15 +279,9 @@ impl Wraps for Vst3Controller {
         }
     }
 
-    /// Saves the state, with the writes no block has taken yet beside the
-    /// component's stream, which does not hold them.
-    fn save_with_pending(
-        &mut self,
-        main: MainThreadMarker,
-        _state_use: tutti_plugin_types::StateUse,
-    ) -> PluginResult<Vec<u8>> {
-        let undrained = self.undrained();
-        self.loaded_mut().save_state_with(main, &undrained)
+    /// The writes handed to the Processor that no block has applied.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.undrained()
     }
 
     /// The edits the plugin's own editor made (already in `out`) are queued to
@@ -440,10 +434,10 @@ impl Vst3Loaded {
         // write, so the first block takes them and the Controller's record of
         // them is told apart by generation; the rest are refused and counted.
         let mut handed = Vec::new();
-        let mut refused = 0u64;
+        let refused = loaded.refused.writer();
         for &(id, value) in &carried {
             if ParamWriteError::check_sorted(id, &declared).is_err() {
-                refused += 1;
+                refused.add(1);
             } else if sink.write(id, value).is_ok() {
                 let sent_at = sink.written();
                 match handed.iter_mut().find(|h: &&mut Handed| h.id == id) {

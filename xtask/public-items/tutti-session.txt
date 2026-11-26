@@ -611,6 +611,11 @@ fn plugin::preset::Session::load_preset_file
 fn plugin::scan::Session::measure_plugin
 fn plugin::scan::Session::register_plugin
 fn plugin::scan::Session::scan_plugins
+fn plugin::state::Saved::into_state
+fn plugin::state::Saved::new
+fn plugin::state::Saved::pending
+fn plugin::state::Saved::state
+fn plugin::state::Saved::with_pending
 fn plugin::state::Session::restore_state
 fn plugin::state::Session::save_state
 fn plugin_diagnostics::Diagnostics::block_counts
@@ -1001,6 +1006,7 @@ struct plugin::preset::LoadedPreset
 struct plugin::state::RestoreStateOp
 struct plugin::state::RestoredState
 struct plugin::state::SaveStateOp
+struct plugin::state::Saved
 struct plugin_diagnostics::Diagnostics
 struct plugin_diagnostics::PluginBuses
 struct plugin_params::ParamGesture

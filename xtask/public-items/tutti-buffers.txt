@@ -82,6 +82,7 @@ fn fold::Fold::is_identity
 fn fold::Fold::select
 fn fold::Fold::spec
 fn fold::Fold::src_layout
+fn fold::Fold::to_channels
 fn fold::compose::Fold::route
 fn fold::compose::Fold::then
 fn fold::levels::FoldLevels::check

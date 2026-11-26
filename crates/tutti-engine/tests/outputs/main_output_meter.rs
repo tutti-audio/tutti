@@ -293,7 +293,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 /// **A stereo main output reaches a stereo device unchanged.**
 ///
 /// The engine folds the graph's outputs to the device's width with
-/// `fold_to_width` over the engine's order for the main output's width; a stereo main output to a stereo device is the identity, which
+/// `Fold::to_channels` over the engine's order for the main output's width; a stereo main output to a stereo device is the identity, which
 /// must stay a passthrough. (This pinned the premise of the meter's
 /// stereo shortcut, which went with the fold; the passthrough is still the
 /// engine's own.)
@@ -301,10 +301,11 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 fn a_stereo_main_output_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
-    let fold = tutti_graph::fold_to_width(
+    let fold = tutti_buffers::Fold::to_channels(
         &tutti_buffers::ChannelTopology::default_for(stereo).unwrap(),
-        stereo,
+        &tutti_buffers::ChannelSet::default_for(stereo),
     )
+    .build()
     .unwrap();
     fold.frame(&[0.25, -0.75], &mut folded);
     assert!(fold.is_identity());

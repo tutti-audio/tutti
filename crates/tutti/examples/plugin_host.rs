@@ -193,11 +193,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SaveState::OutOfProcess(save) => block_on(save.into_future())?,
     };
     let state_path = out.with_extension("state");
-    std::fs::write(&state_path, state.bytes())?;
+    std::fs::write(&state_path, state.state().bytes())?;
     eprintln!(
         "saved {} bytes of {} to {}",
-        state.bytes().len(),
-        state.peer(),
+        state.state().bytes().len(),
+        state.state().peer(),
         state_path.display()
     );
     let restored = match session.restore_state(&node, state)? {

@@ -14,6 +14,61 @@ use crate::{
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
+/// A plugin's saved state with the writes the host made that the bytes do not
+/// hold yet ([`AnyThread::save_state`]): a save never waits for a block, so it
+/// states what a block has not applied, and a load replays it
+/// ([`pending`](Self::pending), after the bytes).
+///
+/// **The one gap.** A change the plugin made itself, whose report has not yet
+/// reached the host, is not in the host's record: replaying a pending write over
+/// it can overwrite it, by one report's latency.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginState {
+    /// The plugin's own bytes.
+    pub bytes: Vec<u8>,
+    /// The newest unapplied host write of each parameter.
+    pub pending: Vec<(ParamId, Normalized)>,
+}
+
+impl PluginState {
+    /// The bytes with nothing pending.
+    #[must_use]
+    pub const fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            pending: Vec::new(),
+        }
+    }
+}
+
+/// One parameter as a read answers it ([`AnyThread::parameter_value`]): the
+/// value the plugin holds beside the host's newest write it has not applied.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PluginValue {
+    /// The plugin's own value.
+    pub plugin: Normalized,
+    /// The host's newest write no block has applied, if there is one.
+    pub pending: Option<Normalized>,
+}
+
+impl PluginValue {
+    /// A plugin's value with no write pending.
+    #[must_use]
+    pub const fn new(plugin: Normalized) -> Self {
+        Self {
+            plugin,
+            pending: None,
+        }
+    }
+
+    /// What the host wants the parameter to be: the pending write, else the
+    /// plugin's value.
+    #[must_use]
+    pub fn wanted(self) -> Normalized {
+        self.pending.unwrap_or(self.plugin)
+    }
+}
+
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///
 /// [`Control`](crate::Control) is a format's main-thread surface, and every
@@ -52,19 +107,22 @@ pub trait AnyThread: Send + Sync {
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>>;
 
     /// The plugin's current value for one parameter as an [`Answer`], filled as
-    /// [`parameter_descriptors`](Self::parameter_descriptors) is.
+    /// [`parameter_descriptors`](Self::parameter_descriptors) is, with the
+    /// host's newest write to it that no block has applied beside it
+    /// ([`PluginValue`]): a read never waits for a block.
     ///
     /// `None` if unavailable, including when `id` uses the other addressing
     /// model, which addresses no parameter of this plugin. See [`ParamId`].
-    fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>>;
+    fn parameter_value(&self, id: ParamId) -> Answer<Option<PluginValue>>;
 
     /// Writes one parameter value, for a UI knob or an initial value.
     ///
     /// **In process** the write is stored in the parameter's slot
     /// ([`edit_slots`](crate::edit_slots())) and applied at the head of the
-    /// plugin's next block, or sooner when a read, a save or a fork of the
-    /// plugin comes first: it never waits for the plugin, is never dropped for
-    /// a locked instance or for lack of room, and a newer write to the same
+    /// plugin's next block. A read, a save or a fork made before that block
+    /// states the write as pending ([`PluginValue`], [`PluginState`]) and does
+    /// not wait for it. It never waits for the plugin, is never dropped for a
+    /// locked instance or for lack of room, and a newer write to the same
     /// parameter replaces one no block has taken. **A served** plugin's is
     /// stored in its slot on the client and sent with the next block.
     ///
@@ -115,10 +173,12 @@ pub trait AnyThread: Send + Sync {
     fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized>;
 
     /// Serializes the plugin's state for `state_use`: its own bytes, the same a
-    /// project save stores for [`StateUse::Project`]. A plugin with nothing to
-    /// save answers `Ok(vec![])`.
+    /// project save stores for [`StateUse::Project`], with the host writes no
+    /// block has applied beside them ([`PluginState`]). A plugin with nothing to
+    /// save answers empty bytes.
     ///
-    /// Blocks on a round trip (served) or a main-thread tick (in-process).
+    /// Never waits for a block. Blocks on a round trip (served) or a main-thread
+    /// tick (in-process).
     ///
     /// # Errors
     ///
@@ -126,7 +186,7 @@ pub trait AnyThread: Send + Sync {
     /// refused, the state exceeds the transport's limit, the transfer stalled,
     /// or ([`StateError::Unavailable`]) the plugin was not asked because the
     /// main thread did not answer in time.
-    fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError>;
+    fn save_state(&self, state_use: StateUse) -> Result<PluginState, StateError>;
 
     /// Tells the plugin whether it is rendering offline, and returns whether it
     /// *accepted* the mode (`false` is a refusal or an unavailable plugin, not
@@ -234,7 +294,7 @@ mod tests {
         fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
             Answer::ready(Some(self.params.clone()))
         }
-        fn parameter_value(&self, _: ParamId) -> Answer<Option<Normalized>> {
+        fn parameter_value(&self, _: ParamId) -> Answer<Option<PluginValue>> {
             Answer::ready(None)
         }
         fn set_parameter_value(
@@ -260,8 +320,8 @@ mod tests {
         fn parameter_value_from_text(&self, _: ParamId, _: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self, _: StateUse) -> Result<Vec<u8>, StateError> {
-            Ok(Vec::new())
+        fn save_state(&self, _: StateUse) -> Result<PluginState, StateError> {
+            Ok(PluginState::new(Vec::new()))
         }
         fn set_render_mode(&self, _: RenderMode) -> bool {
             false

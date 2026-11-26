@@ -24,7 +24,6 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
-use tutti_graph::fold_to_width;
 use tutti_music::{TimelineSegment, first_frame_at_or_after, snap_to_whole_frame};
 use tutti_units::{
     Beat, BeatDuration, Bpm, Frame, ReadPosition, ReadRate, SamplePosition, SampleRate, Samples,
@@ -399,7 +398,7 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 ///   the sample fans to every channel, as it did before.
 /// - any other wave → a frame of another width or another order: the
 ///   [`Fold`] from the wave's topology to the frame's
-///   ([`fold_to_width`]). A wider wave folds by the ITU-R BS.775 matrix at
+///   ([`Fold::to_channels`]). A wider wave folds by the ITU-R BS.775 matrix at
 ///   width 2 (front-pair passthrough would silently drop the centre and the
 ///   surrounds), and by position at the widths between; a narrower one keeps
 ///   its channels where they are and leaves the rest silent (stereo carries a
@@ -663,7 +662,7 @@ pub(crate) const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 ///
 /// A mono wave is placed by its [`MonoSpread`]; any other is placed by the
 /// [`Fold`] from the wave's own [`topology`](Wave::topology) to the frame's
-/// ([`fold_to_width`]), unless it is already the frame's width and order, in
+/// ([`Fold::to_channels`]), unless it is already the frame's width and order, in
 /// which case it is read channel for channel and there is no fold. Built once
 /// per reader, on the control side ([`for_wave`](Self::for_wave) allocates and
 /// can refuse); the per-frame and per-block writes are allocation-free.
@@ -753,7 +752,7 @@ impl<F: Float> Place<F> {
         } else {
             *topology
         };
-        let fold = fold_to_width(&named, frame)?;
+        let fold = Fold::to_channels(&named, &ChannelSet::default_for(frame)).build()?;
         Self::folded(fold, frame)
     }
 

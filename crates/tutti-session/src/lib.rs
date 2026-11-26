@@ -309,7 +309,8 @@ pub use plugin::{
     PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance, PluginOp,
     PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoreStateInProcess,
     RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess,
-    SaveStateOp, SaveStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
+    SaveStateOp, SaveStateOutOfProcess, Saved, StateRestore, StateStartError, StateView,
+    SwapPluginError,
 };
 
 #[cfg(feature = "plugin")]
