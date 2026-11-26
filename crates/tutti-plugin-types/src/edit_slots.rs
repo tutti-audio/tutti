@@ -40,7 +40,7 @@ pub struct UnknownParam(pub ParamId);
 /// The slots for `ids`, as the control side's writer and the audio side's
 /// reader. A repeated id is one slot.
 ///
-/// The applied pair ([`EditWriter::has_applied`], [`EditReader::applied`]) is
+/// The applied pair ([`EditWriter::has_applied`], [`EditReader::publish_applied`]) is
 /// made here, with the slots: a writer's generation counts from 0 again for
 /// each new set, and a publisher keeps only the latest generation it stored, so
 /// a publisher kept from an earlier set would never reach the new writer's
@@ -103,7 +103,7 @@ impl EditWriter {
 
     /// Whether the writes up to `mark` (a [`written`](Self::written) taken at
     /// the write) have been applied: the reader's holder called
-    /// [`EditReader::applied`] after the target's own call that took them
+    /// [`EditReader::publish_applied`] after the target's own call that took them
     /// returned. A write a reset made stale counts once a drain has passed it.
     /// Exact while the two are less than 2^31 writes apart.
     #[must_use]
@@ -163,7 +163,7 @@ impl EditReader {
     /// Called by the holder after the target's own call that took the values
     /// has returned, never at drain time; a call that never reached the
     /// target leaves the values to the next one. Wait-free.
-    pub fn applied(&mut self) {
+    pub fn publish_applied(&mut self) {
         self.applied.publish(self.slots.swept());
     }
 
@@ -292,13 +292,13 @@ mod tests {
 
         writer.write(id(2), Normalized::of(0.5)).unwrap();
         let later = writer.written();
-        reader.applied();
+        reader.publish_applied();
         assert!(writer.has_applied(mark), "the call that took it returned");
         assert!(!writer.has_applied(later), "a write after the drain is not");
 
         assert_eq!(drained(&mut reader), [(id(2), 0.5)]);
         assert!(!writer.has_applied(later), "not until its own call returns");
-        reader.applied();
+        reader.publish_applied();
         assert!(writer.has_applied(later));
     }
 

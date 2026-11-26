@@ -472,7 +472,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         }
-        self.pending.clear();
 
         let mut process_context = to_process_context(
             transport,
@@ -512,6 +511,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 return Err(ProcessFailed { error });
             }
         };
+        // The staged writes reach the plugin only from here: every return
+        // before this keeps them in `pending` for the next block, so the
+        // applied mark below never covers a write the plugin was not handed.
+        self.pending.clear();
         let result = self.audio_side.process(ProcessIo {
             mode: self.audio.config.block_mode,
             num_samples: frames.get(),
@@ -528,7 +531,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // The plugin has the values the drain took once its call returned,
         // whatever it answered; a block that left before the call leaves them
         // in `pending` for the next one.
-        self.drain.applied();
+        self.drain.publish_applied();
         if let Err(error) = result {
             buffer.output().silence();
             return Err(ProcessFailed { error });
@@ -588,7 +591,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         }
         self.drain_slots();
         if self.pending.is_empty() {
-            self.drain.applied();
+            self.drain.publish_applied();
             return Ok(false);
         }
         let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
@@ -609,7 +612,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
-        self.drain.applied();
+        self.drain.publish_applied();
         result
             .map(|()| true)
             .map_err(|error| ProcessFailed { error })
@@ -684,7 +687,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
-        self.drain.applied();
+        self.drain.publish_applied();
         result.map_err(|error| ProcessFailed { error })
     }
 
