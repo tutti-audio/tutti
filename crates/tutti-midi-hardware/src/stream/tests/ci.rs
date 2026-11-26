@@ -2230,12 +2230,23 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
     );
 }
 
-/// M2-101 section 9.3 and 9.6: the session declares Process Inquiry, and answers a
-/// capabilities inquiry with D0, and a report of the Function Block with an empty
-/// Reply (`43`, all bitmaps 0) and the End (`44`) on the same Device ID.
-/// Spec: m2-101/9.3#1, m2-101/9.6#1, m2-101/9.8#1
+fn report_asks(polled: &[Polled]) -> Vec<&crate::ReportAsked> {
+    polled
+        .iter()
+        .filter_map(|p| match p {
+            Polled::ReportAsked(_, ask) => Some(ask),
+            _ => None,
+        })
+        .collect()
+}
+
+/// M2-101 section 9.3 and 9.5: the session declares Process Inquiry and answers a
+/// capabilities inquiry with D0, and hands a report inquiry on, with who asked, how
+/// much, where and the Group its device speaks on, without answering it: the state to
+/// report is the caller's. A Channel is asked of like the Group is.
+/// Spec: m2-101/9.3#1
 #[test]
-fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
+fn a_report_inquiry_is_handed_on_unanswered_with_who_asked_and_where() {
     let (mut wire, ours) = midi1_running();
     say(
         &wire,
@@ -2247,6 +2258,57 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         },
         40,
     );
+    let scopes = [
+        ReportScope::Group {
+            controllers: ChannelControllers::all(),
+            notes: NoteData::all(),
+        },
+        ReportScope::Channel {
+            channel: tutti_ump::MidiChannel::of(5),
+            controllers: ChannelControllers::PITCH_BEND,
+            notes: NoteData::NOTES,
+        },
+    ];
+    for scope in scopes {
+        say(
+            &wire,
+            GROUP_0,
+            &CiMessage::MessageReportInquiry {
+                source: peer(),
+                ci_version: CI_VERSION,
+                to: ours,
+                control: DataControl::NonDefault,
+                scope,
+            },
+            45,
+        );
+    }
+    let polled = polled(&mut wire, 50);
+    let sent = payloads(&received(&wire));
+    let [(_, caps)] = sent.as_slice() else {
+        panic!("only the capabilities reply: {sent:?}");
+    };
+    assert_eq!(caps[..4], [0x7E, 0x7F, 0x0D, 0x41]);
+    assert_eq!(caps[13..], [0x01]);
+    let asks = report_asks(&polled);
+    let [first, second] = asks[..] else {
+        panic!("two asks: {polled:?}");
+    };
+    for (ask, scope) in [first, second].into_iter().zip(scopes) {
+        assert_eq!(ask.group(), GROUP_0);
+        assert_eq!(ask.groups().collect::<Vec<_>>(), [GROUP_0]);
+        assert_eq!(ask.control(), DataControl::NonDefault);
+        assert_eq!(*ask.scope(), scope);
+    }
+}
+
+/// M2-101 section 9.6 and 9.8: a report the session hands back is answered as a device
+/// that declares nothing: a Reply (`43`, every bitmap 0) and the End (`44`) from the
+/// device's MUID, on the Device ID and Group of the request, and nothing between.
+/// Spec: m2-101/9.6#1, m2-101/9.6#5, m2-101/9.8#1
+#[test]
+fn a_declined_report_is_an_empty_reply_and_the_end_on_the_requests_address() {
+    let (mut wire, ours) = midi1_running();
     say(
         &wire,
         GROUP_0,
@@ -2262,17 +2324,27 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         },
         45,
     );
-    let _ = polled(&mut wire, 50);
-    let sent = payloads(&received(&wire));
-    let [(_, caps), (_, begin), (_, end)] = sent.as_slice() else {
-        panic!("a reply, a Reply and an End: {sent:?}");
+    let polled = polled(&mut wire, 50);
+    assert!(
+        payloads(&received(&wire)).is_empty(),
+        "not answered by the hardware"
+    );
+    let [ask] = report_asks(&polled)[..] else {
+        panic!("one ask: {polled:?}");
     };
-    assert_eq!(caps[..4], [0x7E, 0x7F, 0x0D, 0x41]);
-    assert_eq!(caps[13..], [0x01]);
+    wire.session.decline_report(&wire.id, ask);
+    let sent = payloads(&received(&wire));
+    let [(begin_group, begin), (end_group, end)] = sent.as_slice() else {
+        panic!("a Reply and an End: {sent:?}");
+    };
+    assert_eq!((*begin_group, *end_group), (GROUP_0, GROUP_0));
     assert_eq!(begin[..4], [0x7E, 0x7E, 0x0D, 0x43]);
+    assert_eq!(begin[5..9], ours.to_bytes());
     assert_eq!(begin[9..13], peer().to_bytes());
     assert_eq!(begin[13..], [0, 0, 0, 0]);
     assert_eq!(end[..4], [0x7E, 0x7E, 0x0D, 0x44]);
+    assert_eq!(end[5..9], ours.to_bytes());
+    assert_eq!(end[9..13], peer().to_bytes());
     assert_eq!(end.len(), 13);
 }
 

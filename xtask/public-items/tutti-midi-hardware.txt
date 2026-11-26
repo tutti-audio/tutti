@@ -76,6 +76,12 @@ fn port::manager::HardwareMidiInputs::set_input_timing
 fn port::manager::HardwareMidiInputs::set_port_active
 fn process::ReportAsk::check
 fn process::ReportAsk::peer
+fn process::ReportAsked::begin
+fn process::ReportAsked::control
+fn process::ReportAsked::end
+fn process::ReportAsked::group
+fn process::ReportAsked::groups
+fn process::ReportAsked::scope
 fn process::Reporter::ask
 fn process::Reporter::at
 fn profiles::ChannelSwitcher::channel
@@ -120,6 +126,7 @@ fn session::MidiSession::connect_input_with
 fn session::MidiSession::connect_output
 fn session::MidiSession::connected_input_names
 fn session::MidiSession::deadline
+fn session::MidiSession::decline_report
 fn session::MidiSession::devices
 fn session::MidiSession::disconnect_all_inputs
 fn session::MidiSession::disconnect_input
@@ -212,6 +219,7 @@ struct port::manager::HardwareMidiInputs
 struct port::manager::PortInfo
 struct port::manager::StaleInput
 struct process::ReportAsk
+struct process::ReportAsked
 struct process::Reporter
 struct profiles::ChannelSwitcher
 struct profiles::PeerProfiles

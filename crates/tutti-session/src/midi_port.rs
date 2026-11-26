@@ -1712,6 +1712,13 @@ impl Ports {
                     }
                     device.clone()
                 }
+                // The report of state the session holds is the output port's to
+                // build; until a port answers, the empty report of a device that
+                // declares nothing is (M2-101 §9.6).
+                tutti_midi_hardware::Polled::ReportAsked(device, ask) => {
+                    io.decline_report(device, ask);
+                    continue;
+                }
                 // A kind of report this session does not know is not one.
                 _ => continue,
             };

@@ -53,7 +53,7 @@ use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
 use crate::peer::{PeerRef, PeerRequestError};
-use crate::process::{ProcessChange, ReportAsk, Reporter};
+use crate::process::{ProcessChange, ReportAsk, ReportAsked, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, profile_zone, zones_of,
 };
@@ -229,6 +229,11 @@ pub enum Polled {
     /// A MIDI-CI peer answered Process Inquiry, or the peer's Process Inquiry
     /// was dropped.
     Process(MidiDeviceId, PeerId, ProcessChange),
+    /// A MIDI-CI peer asked for a MIDI Message Report of the session's device
+    /// (M2-101 §9.5). The hardware layer holds no state to report: the caller
+    /// answers from what its output sent, or hands the request to
+    /// [`MidiSession::decline_report`].
+    ReportAsked(MidiDeviceId, ReportAsked),
     /// A request made of a MIDI-CI peer ended: the peer's Report or NAK, the
     /// wait running out, or the peer lost first.
     Answer(MidiDeviceId, PeerId, Answer),
@@ -668,6 +673,12 @@ impl MidiSession {
             );
             polled.extend(
                 stepped
+                    .report_asks
+                    .into_iter()
+                    .map(|ask| Polled::ReportAsked(id.clone(), ask)),
+            );
+            polled.extend(
+                stepped
                     .answers
                     .into_iter()
                     .map(|(peer, answer)| Polled::Answer(id.clone(), peer, answer)),
@@ -969,6 +980,17 @@ impl MidiSession {
         self.input_of(ask.peer.at())?.stream.report(ask)?;
         self.ports.ring();
         Ok(())
+    }
+
+    /// Answers a [`Polled::ReportAsked`] of the open input `id` with the report of
+    /// a device that declares nothing: the Reply with every bitmap empty (M2-101
+    /// §9.6, which has a Responder clear the bit of a kind it does not send) and the
+    /// End (§9.8), on the MIDI-CI output of that input. Nothing is sent when the
+    /// input is not open. What the output refuses is counted in the input's losses.
+    pub fn decline_report(&mut self, id: &MidiDeviceId, ask: &ReportAsked) {
+        if let Some(held) = self.inputs.get_mut(id) {
+            held.stream.decline_report(ask);
+        }
     }
 
     /// The open input the peer `at` was found on.

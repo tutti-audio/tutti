@@ -93,11 +93,11 @@ use tutti_units::Losses;
 use crate::answer::Answer;
 use crate::capability::{described, is_ump_endpoint};
 use crate::ci::{
-    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
+    Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, blocks_after_settle, blocks_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
 use crate::peer::PeerRequestError;
-use crate::process::{self, ProcessChange, ReportAsk};
+use crate::process::{self, ProcessChange, ReportAsk, ReportAsked};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
@@ -379,6 +379,8 @@ pub(crate) struct Stepped {
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
+    /// The MIDI Message Reports peers asked, still to be answered.
+    pub(crate) report_asks: Vec<ReportAsked>,
     /// The Groups whose MIDI-CI device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, getrandom::Error)>,
 }
@@ -453,6 +455,7 @@ impl Stepped {
             process: changes.process,
             properties: changes.properties,
             answers: changes.answers,
+            report_asks: changes.report_asks,
             unstarted: changes.unstarted,
         }
     }
@@ -655,6 +658,14 @@ impl Negotiation {
             .ask_property(ask)
     }
 
+    /// Answers `ask` with the empty report of a device that declares nothing, on
+    /// the MIDI-CI output of this device.
+    pub(crate) fn decline_report(&mut self, ask: &ReportAsked) {
+        if let Some(ci_output) = self.ci_output_mut() {
+            ci_output.ci.decline_report(ask, &mut ci_output.out);
+        }
+    }
+
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
     pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerRequestError> {
         self.ci_output_mut()
@@ -743,11 +754,11 @@ impl Midi1Negotiation {
                 InquiryAction::Send(ump) => self.ci_output.send(ump),
                 InquiryAction::GaveUp => {
                     self.inquire = Inquire::Over;
-                    self.ci_output.ci.decide(groups_of_a_midi1_port());
+                    self.ci_output.ci.decide(blocks_of_a_midi1_port());
                 }
                 InquiryAction::Answered(identity) => {
                     self.inquire = Inquire::Over;
-                    self.ci_output.ci.decide(groups_of_a_midi1_port());
+                    self.ci_output.ci.decide(blocks_of_a_midi1_port());
                     self.stream.endpoint = self.stream.endpoint.identified(identity);
                     self.stream.basis = Basis::Inquired;
                     return Some(self.stream);
@@ -996,7 +1007,7 @@ impl UmpNegotiation {
                 None,
             ),
         };
-        self.ci_output.ci.decide(groups_after_settle(&stream));
+        self.ci_output.ci.decide(blocks_after_settle(&stream));
         let run = Run::Done {
             stream: Box::new(stream),
             listening,
@@ -1027,7 +1038,7 @@ impl UmpNegotiation {
             stream.endpoint = *connection.endpoint();
             // MIDI-CI follows: its Groups are the blocks' now, taken
             // up by the next poll (`Ci::poll`).
-            self.ci_output.ci.decide(groups_after_settle(&stream));
+            self.ci_output.ci.decide(blocks_after_settle(&stream));
             reported = Some(*stream);
         }
         // A device that sends JR Timestamps the input did not ask for

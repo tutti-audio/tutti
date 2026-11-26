@@ -347,7 +347,7 @@ pub use peer::{PeerRef, PeerRequestError};
 pub use port::{
     Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StaleInput, StreamDrain,
 };
-pub use process::{ProcessChange, ReportAsk, Reporter};
+pub use process::{ProcessChange, ReportAsk, ReportAsked, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
     ProfilesChange, Switcher, WholeSwitcher,
