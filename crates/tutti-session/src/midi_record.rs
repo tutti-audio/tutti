@@ -64,7 +64,8 @@
 //! (123) or a channel mode (124 to 127: Omni Off, Omni On, Mono, Poly) ends the
 //! channel's keys. A channel mode is kept as one slot per pair, so only the
 //! last of Omni Off and Omni On, and of Mono On (with its channel count) and
-//! Poly On, is caught up, after Local Control and before the program. A
+//! Poly On, is caught up: Local Control first, then Omni, then Mono/Poly, all
+//! before the program. A
 //! Reset All Controllers (121) forgets exactly what RP-015 resets: modulation
 //! (CC 1), expression (CC 11), the pedals (CC 64 to 67), pitch bend, channel
 //! pressure and the parameter select (which becomes the Null pair). Every other
