@@ -18,6 +18,7 @@
 //!   pipeline latency constant.
 
 pub(crate) mod bus;
+pub(crate) mod config;
 pub(crate) mod controls;
 pub(crate) mod cost;
 pub(crate) mod declare;

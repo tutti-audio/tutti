@@ -24,7 +24,7 @@ use tutti_units::{Db, Hz, Q, Samples, UnitAddr, UnitParam};
 
 /// Four outputs: the reads of `Cutoff`, `Q`, band 1 and band 0.
 #[derive(Clone)]
-struct Bank {
+pub struct Bank {
     layout: ChannelLayout,
     cells: BankCells,
 }
