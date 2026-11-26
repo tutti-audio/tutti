@@ -44,7 +44,7 @@ use crate::output::FileTarget;
 /// LFE adds no loudness (its peak still counts). A 5.1 mix with only the LFE
 /// active reads -70 LUFS.
 ///
-/// The placement is the file's [`topology`](crate::FileTarget::topology). A
+/// The placement is the file's [`channels`](tutti_codec::Encoding::channels). A
 /// file that states none is taken to be [`ChannelTopology::default_for`] for its
 /// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
 /// [`Placement::Default`](tutti_buffers::Placement::Default). Any other width

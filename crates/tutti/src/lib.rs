@@ -653,7 +653,7 @@ pub mod codec {
         feature = "encode-flac",
         feature = "encode-aiff"
     ))]
-    pub use tutti_codec::{Encoding, Landed, ToFile, encode, write};
+    pub use tutti_codec::{Converter, Encoding, Landed, Resample, ToFile, encode, write};
     // The noise shape an `IntPcm` names.
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, IntPcm, Spec, SpecError, can_decode, decodable_extensions,

@@ -90,6 +90,7 @@
 //! use tutti_timeline::FrozenClock;
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_codec::{Encoding, FlacLevel, Format, IntDepth, IntPcm, Pcm, ToFile};
 //! use tutti_rt::SplitMix64;
 //! use tutti_graph::GraphBuilder;
@@ -269,7 +270,8 @@ pub struct Written {
     /// [`gain`](Self::gain) is still its peak normalization.
     pub measured: Option<Loudness>,
     /// Whether the file's channels were placed by the output
-    /// ([`FileTarget::topology`]: [`Stated`](tutti_buffers::Placement::Stated))
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels) named speakers other than the default:
+    /// [`Stated`](tutti_buffers::Placement::Stated))
     /// or taken to be the engine's order for the width
     /// ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for):
     /// [`Default`](tutti_buffers::Placement::Default)). A `Lufs` normalize
