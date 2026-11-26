@@ -98,8 +98,8 @@ use tutti_graph::{
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{AtomicRequestFlags, Publisher, Reader, RequestFlag};
 use tutti_ump::{
-    Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, NoteNumber, NoteVelocity, U7, Ump,
-    Voice1, Voice2, spans,
+    Bank, CCNumber, ChannelEffect, ChannelState, Message, MidiChannel, MidiGroup, NoteKey,
+    NoteNumber, NoteVelocity, Ump, Voice1, Voice2, spans,
 };
 use tutti_units::{Beat, BeatDuration, FramesPerBeat};
 
@@ -309,51 +309,30 @@ struct Setter {
     ump: Ump,
 }
 
-/// What a state message sets on its channel, in the order a chase sends
-/// them: the program (its bank rides in the MIDI 2.0 Program Change) before
-/// the controllers it may reset, the registered and assignable controllers
-/// (a bend range among them) before the bend they scale, pressure, then the
-/// bend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Chased {
-    Program,
-    Registered(U7, U7),
-    Assignable(U7, U7),
-    Control(CCNumber),
-    Pressure,
-    Bend,
-}
-
 /// The state a channel voice message sets, if it sets one a chase restores:
-/// a channel's absolute state. Notes are not chased (a note the playhead
-/// lands inside is not started), nor are per-note controllers, which live
-/// with their notes, nor relative controllers, which add to what is there,
-/// nor the Channel Mode messages (CC 120 to 127, M1 p.20): All Sound Off and
-/// All Notes Off are actions, and Reset All Controllers, Local Control,
-/// Omni and Mono/Poly are not a controller's value but a command that would
-/// undo what the chase just restored.
-fn held_by(voice: Voice2) -> Option<Chased> {
-    Some(match voice {
-        Voice2::ProgramChange { .. } => Chased::Program,
-        Voice2::Registered { bank, index, .. } => Chased::Registered(bank, index),
-        Voice2::Assignable { bank, index, .. } => Chased::Assignable(bank, index),
-        Voice2::ControlChange { controller, .. } if controller < CCNumber::ALL_SOUND_OFF => {
-            Chased::Control(controller)
-        }
-        Voice2::ChannelPressure(_) => Chased::Pressure,
-        Voice2::PitchBend(_) => Chased::Bend,
-        _ => return None,
-    })
+/// a channel's absolute state, in [`ChannelState`]'s order (the program, its
+/// bank riding in the MIDI 2.0 Program Change, before the controllers it may
+/// reset; the parameters, a bend range among them, before the bend they scale).
+/// Notes are not chased (a note the playhead lands inside is not started),
+/// nor are per-note controllers, which live with their notes, nor relative
+/// controllers, which add to what is there, nor the commands
+/// ([`ChannelEffect`]): All Sound Off, All Notes Off, Reset All Controllers and
+/// the modes would undo what the chase just restored.
+fn held_by(voice: Voice2) -> Option<ChannelState> {
+    match ChannelEffect::of_midi2(voice) {
+        Some(ChannelEffect::Sets(state)) => Some(state),
+        _ => None,
+    }
 }
 
 /// The chase table of `events` (sorted by beat): each state's setting
-/// messages in beat order, the states by group, channel and [`Chased`] order.
+/// messages in beat order, the states by group, channel and [`ChannelState`] order.
 /// A Program Change with no bank (none was selected since the last, so the
 /// channel keeps its bank) is held with the bank in force at its beat, so a
 /// chase to it selects the timeline's bank, not whatever the receiver was
 /// last on. Control thread.
 fn chase_table(events: &[ClipEvent]) -> Box<[Box<[Setter]>]> {
-    let mut table: BTreeMap<(usize, usize, Chased), Vec<Setter>> = BTreeMap::new();
+    let mut table: BTreeMap<(usize, usize, ChannelState), Vec<Setter>> = BTreeMap::new();
     let mut banks: HashMap<(usize, usize), Bank> = HashMap::new();
     for e in events {
         let Ok(Message::Midi2(address, voice)) = e.timed.event().decode() else {

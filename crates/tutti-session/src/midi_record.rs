@@ -52,16 +52,20 @@
 //!
 //! **Order of a catch-up, and why.** SysEx and Flex setup first: a device
 //! reset must come before the state it would erase. Then, one Channel after
-//! another: the bank in force and the program (a controller's meaning can
-//! depend on the patch), the bank sent since, the controllers, the parameters,
-//! the select in force (last, so the joiner is left on the stream's
-//! selection, whatever order the parameters replay in), the pitch bend and the
-//! pressure. The held notes come last, so each sounds with its channel's
+//! another: the bank in force, the modes, then [`ChannelState`]'s order (the
+//! program, since a controller's meaning can depend on the patch, the
+//! parameters, the controllers, the pressure and the pitch bend), the bank sent
+//! since, and the select in force (last, so the joiner is left on the stream's
+//! selection, whatever order the parameters replay in). The held notes come
+//! last, so each sounds with its channel's
 //! patch, controllers and bend already in place.
 //!
 //! **Mode messages.** A Control Change of All Sound Off (120), All Notes Off
 //! (123) or a channel mode (124 to 127: Omni Off, Omni On, Mono, Poly) ends the
-//! channel's keys; a channel mode's value is also kept as a controller. A
+//! channel's keys. A channel mode is kept as one slot per pair, so only the
+//! last of Omni Off and Omni On, and of Mono On (with its channel count) and
+//! Poly On, is caught up: Local Control first, then Omni, then Mono/Poly, all
+//! before the program. A
 //! Reset All Controllers (121) forgets exactly what RP-015 resets: modulation
 //! (CC 1), expression (CC 11), the pedals (CC 64 to 67), pitch bend, channel
 //! pressure and the parameter select (which becomes the Null pair). Every other
@@ -86,9 +90,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use tutti_ump::{
-    Address, Attribute, CCNumber, Data128, Flex, FlexAddress, GroupChannelIndex, Held, Message,
-    MidiGroup, NoteKey, NoteNumber, NoteVelocity, Protocol, SysexStatus, U7,
-    UNIVERSAL_NON_REAL_TIME, Ump, Voice1, Voice2,
+    Address, Attribute, CCNumber, ChannelEffect, ChannelMode, ChannelState, Data128, Flex,
+    FlexAddress, GroupChannelIndex, Held, Message, MidiGroup, NoteKey, NoteNumber, NoteVelocity,
+    ParameterKind, Protocol, SysexStatus, U7, UNIVERSAL_NON_REAL_TIME, Ump, Voice1, Voice2,
 };
 
 /// How many complete SysEx messages a record keeps. A device setup is a few
@@ -128,14 +132,6 @@ const NOTE_TABLES: usize = tutti_ump::MidiGroup::COUNT as usize;
 const GENERAL_MIDI: u8 = 0x09;
 const GENERAL_MIDI_RESETS: std::ops::RangeInclusive<u8> = 0x01..=0x03;
 
-/// The channel mode messages (Omni Off, Omni On, Mono On, Poly On): they end a
-/// channel's notes as All Notes Off does.
-const CHANNEL_MODES: std::ops::RangeInclusive<u8> = 124..=127;
-
-/// Data Increment and Decrement, CC 96 and 97: events, not values.
-const DATA_INCREMENT: CCNumber = CCNumber::of(96);
-const DATA_DECREMENT: CCNumber = CCNumber::of(97);
-
 /// Which half of a pair of MIDI 1.0 controllers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Half {
@@ -143,35 +139,19 @@ enum Half {
     Lsb,
 }
 
-/// Which parameter number a MIDI 1.0 CC 99/98 or 101/100 pair selects.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Selected {
-    Rpn,
-    Nrpn,
-}
-
-/// A parameter number: the kind, the bank (MSB) and the index (LSB).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Param {
-    kind: Selected,
-    msb: u8,
-    lsb: u8,
-}
-
 /// What a slot holds a value of, in the order a catch-up sends them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum What {
     /// MIDI 1.0 bank select as the last Program Change took it.
     Bank(Half),
-    Program,
+    /// A channel mode in force, one per pair.
+    Mode(ChannelMode),
+    /// A value of the channel's state, in [`ChannelState`]'s order.
+    State(ChannelState),
     /// MIDI 1.0 bank select sent since the last Program Change.
     PendingBank(Half),
-    Controller(CCNumber),
-    Parameter(Param),
     /// The MIDI 1.0 parameter select in force.
     Selection,
-    Bend,
-    Pressure,
 }
 
 /// Where a value of a channel's state is kept: the lane (protocol, Group,
@@ -185,7 +165,7 @@ struct Slot {
 /// A MIDI 1.0 channel's parameter select: the kind and the two halves as sent.
 #[derive(Clone, Copy, Debug)]
 struct Select {
-    kind: Selected,
+    kind: ParameterKind,
     msb: Option<(u8, Ump)>,
     lsb: Option<(u8, Ump)>,
 }
@@ -360,7 +340,7 @@ impl Record {
                 CCNumber::DATA_ENTRY | CCNumber::DATA_ENTRY_LSB => {
                     self.data_entry(lane, ump, controller);
                 }
-                _ => self.controller(lane, ump, controller),
+                _ => self.apply(lane, ump, ChannelEffect::of_midi1(voice)),
             },
             Voice1::ProgramChange(_) => {
                 // The bank sent since the last Program Change is in force now.
@@ -377,10 +357,11 @@ impl Record {
                         self.state.insert(slot, bank);
                     }
                 }
-                self.put_one(lane, What::Program, ump);
+                self.put_one(lane, What::State(ChannelState::Program), ump);
             }
-            Voice1::ChannelPressure(_) => self.put_one(lane, What::Pressure, ump),
-            Voice1::PitchBend(_) => self.put_one(lane, What::Bend, ump),
+            Voice1::ChannelPressure(_) | Voice1::PitchBend(_) => {
+                self.apply(lane, ump, ChannelEffect::of_midi1(voice));
+            }
         }
     }
 
@@ -398,11 +379,6 @@ impl Record {
                 self.note_on(at, note, (velocity, attribute));
             }
             Voice2::NoteOff { .. } => self.held.observe(ump),
-            Voice2::ControlChange { controller, .. } => {
-                if !controller.is_ignored_in_midi2() {
-                    self.controller(lane, ump, controller);
-                }
-            }
             Voice2::ProgramChange { program, bank } => {
                 // A Program Change without a valid bank keeps the receiver's.
                 let ump = match bank {
@@ -418,26 +394,13 @@ impl Record {
                         })
                         .unwrap_or(ump),
                 };
-                self.put_one(lane, What::Program, ump);
+                self.put_one(lane, What::State(ChannelState::Program), ump);
             }
-            Voice2::ChannelPressure(_) => self.put_one(lane, What::Pressure, ump),
-            Voice2::PitchBend(_) => self.put_one(lane, What::Bend, ump),
-            Voice2::Registered { bank, index, .. } => {
-                let param = Param {
-                    kind: Selected::Rpn,
-                    msb: bank.get(),
-                    lsb: index.get(),
-                };
-                self.put_one(lane, What::Parameter(param), ump);
-            }
-            Voice2::Assignable { bank, index, .. } => {
-                let param = Param {
-                    kind: Selected::Nrpn,
-                    msb: bank.get(),
-                    lsb: index.get(),
-                };
-                self.put_one(lane, What::Parameter(param), ump);
-            }
+            Voice2::ControlChange { .. }
+            | Voice2::ChannelPressure(_)
+            | Voice2::PitchBend(_)
+            | Voice2::Registered { .. }
+            | Voice2::Assignable { .. } => self.apply(lane, ump, ChannelEffect::of_midi2(voice)),
             Voice2::RegisteredPerNote { .. }
             | Voice2::AssignablePerNote { .. }
             | Voice2::RelativeRegistered { .. }
@@ -452,7 +415,7 @@ impl Record {
     fn bank_of(&self, lane: GroupChannelIndex) -> Option<tutti_ump::Bank> {
         let Some(Entry::One(ump)) = self.state.get(&Slot {
             lane,
-            what: What::Program,
+            what: What::State(ChannelState::Program),
         }) else {
             return None;
         };
@@ -462,29 +425,23 @@ impl Record {
         }
     }
 
-    /// A Control Change that is not a bank select, a parameter select or a data
-    /// entry: a mode message, or a value.
-    fn controller(&mut self, lane: GroupChannelIndex, ump: Ump, controller: CCNumber) {
-        if controller == CCNumber::RESET_ALL {
+    /// What a message does to its channel, as [`ChannelEffect`] classifies it: it
+    /// sets a value, ends the keys, or resets the controllers.
+    fn apply(&mut self, lane: GroupChannelIndex, ump: Ump, effect: Option<ChannelEffect>) {
+        let Some(effect) = effect else {
+            return;
+        };
+        if effect == ChannelEffect::ResetsControllers {
             self.reset_controllers(lane);
             return;
         }
-        if controller == CCNumber::ALL_SOUND_OFF
-            || controller == CCNumber::ALL_NOTES_OFF
-            || CHANNEL_MODES.contains(&controller.get())
-        {
+        if effect.ends_notes() {
             self.end_keys(lane);
         }
-        let event = [
-            CCNumber::ALL_SOUND_OFF,
-            CCNumber::ALL_NOTES_OFF,
-            CCNumber::PORTAMENTO_CONTROL,
-            CCNumber::VELOCITY_PREFIX,
-            DATA_INCREMENT,
-            DATA_DECREMENT,
-        ];
-        if !event.contains(&controller) {
-            self.put_one(lane, What::Controller(controller), ump);
+        match effect {
+            ChannelEffect::Sets(state) => self.put_one(lane, What::State(state), ump),
+            ChannelEffect::Mode(mode) => self.put_one(lane, What::Mode(mode), ump),
+            ChannelEffect::EndsNotes | ChannelEffect::ResetsControllers => {}
         }
     }
 
@@ -492,10 +449,10 @@ impl Record {
     /// sent decides.
     fn select(&mut self, lane: GroupChannelIndex, ump: Ump, controller: CCNumber, value: u8) {
         let (kind, half) = match controller {
-            CCNumber::RPN_MSB => (Selected::Rpn, Half::Msb),
-            CCNumber::RPN_LSB => (Selected::Rpn, Half::Lsb),
-            CCNumber::NRPN_MSB => (Selected::Nrpn, Half::Msb),
-            _ => (Selected::Nrpn, Half::Lsb),
+            CCNumber::RPN_MSB => (ParameterKind::Registered, Half::Msb),
+            CCNumber::RPN_LSB => (ParameterKind::Registered, Half::Lsb),
+            CCNumber::NRPN_MSB => (ParameterKind::Assignable, Half::Msb),
+            _ => (ParameterKind::Assignable, Half::Lsb),
         };
         let mut select = match self.state.get(&selection(lane)) {
             Some(Entry::Selection(select)) if select.kind == kind => *select,
@@ -528,7 +485,7 @@ impl Record {
         }
         let slot = Slot {
             lane,
-            what: What::Parameter(Param { kind, msb, lsb }),
+            what: What::State(ChannelState::Parameter(kind, U7::of(msb), U7::of(lsb))),
         };
         let mut parameter = Parameter {
             select: [msb_ump, lsb_ump],
@@ -560,12 +517,12 @@ impl Record {
         self.state.retain(|slot, _| {
             slot.lane != lane
                 || match slot.what {
-                    What::Controller(c) => {
+                    What::State(ChannelState::Controller(c)) => {
                         c != CCNumber::MOD_WHEEL
                             && c != CCNumber::EXPRESSION
                             && !pedals.contains(&c.get())
                     }
-                    What::Bend | What::Pressure => false,
+                    What::State(ChannelState::Bend | ChannelState::Pressure) => false,
                     _ => true,
                 }
         });
@@ -575,7 +532,7 @@ impl Record {
                 Ump::from(Message::midi1(lane.address(), voice))
             };
             let select = Select {
-                kind: Selected::Rpn,
+                kind: ParameterKind::Registered,
                 msb: Some((U7::MAX.get(), null(CCNumber::RPN_MSB))),
                 lsb: Some((U7::MAX.get(), null(CCNumber::RPN_LSB))),
             };
@@ -972,26 +929,30 @@ mod tests {
     }
 
     /// All Sound Off, All Notes Off and the channel modes (Omni Off, Omni On,
-    /// Mono, Poly: CC 120, 123 to 127) end the channel's keys; a channel mode's
-    /// value is kept as a controller.
+    /// Mono, Poly: CC 120, 123 to 127) end the channel's keys; a channel mode is
+    /// kept as one setting per pair, the last one sent.
     #[test]
-    fn mode_messages_end_the_channels_keys() {
+    fn mode_messages_end_the_channels_keys_and_the_last_of_each_pair_is_kept() {
         for mode in [120, 123] {
             let record = observed(&[on1(61, 90), cc1(mode, 0)]);
             assert_eq!(record.catch_up(), [], "CC {mode}");
         }
-        for mode in 124..=127 {
+        for mode in [124, 125, 126, 127] {
             let record = observed(&[on1(61, 90), cc1(mode, 1)]);
             assert_eq!(record.catch_up(), [cc1(mode, 1)], "CC {mode}");
         }
-    }
-
-    /// Portamento Control, the Velocity Prefix and Data Increment and Decrement
-    /// are events, not values.
-    #[test]
-    fn controllers_that_are_events_are_not_kept() {
-        let record = observed(&[cc1(84, 1), cc1(88, 2), cc1(96, 0), cc1(97, 0), cc1(7, 9)]);
-        assert_eq!(record.catch_up(), [cc1(7, 9)]);
+        // Omni Off then On is Omni On; Mono On then Poly On is Poly On; Mono On
+        // keeps its channel count.
+        let record = observed(&[
+            cc1(124, 0),
+            cc1(125, 0),
+            cc1(127, 0),
+            cc1(126, 3),
+            cc1(122, 127),
+        ]);
+        assert_eq!(record.catch_up(), [cc1(122, 127), cc1(125, 0), cc1(126, 3)]);
+        let record = observed(&[cc1(126, 3), cc1(127, 0), cc1(125, 0), cc1(124, 0)]);
+        assert_eq!(record.catch_up(), [cc1(124, 0), cc1(127, 0)]);
     }
 
     /// RP-015: Reset All Controllers resets modulation, expression, the pedals,
@@ -1056,8 +1017,8 @@ mod tests {
                 cc1(32, 2),
                 program1(5),
                 cc1(7, 90),
-                bend1(0x3000),
                 pressure1(9),
+                bend1(0x3000),
                 on2(60, 0x8000),
             ]
         );
