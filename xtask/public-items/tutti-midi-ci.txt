@@ -101,6 +101,7 @@ enum Decoded
 enum Destination
 enum UnreadReason
 enum Whole
+enum action::CiAction
 enum articulation::ArticulationDetailsError
 enum articulation::ArticulationLevel
 enum default_cc::CcFunction
@@ -108,7 +109,6 @@ enum default_cc::CcPart
 enum default_cc::CcReset
 enum default_cc::CcValue
 enum default_cc::DefaultCcLevel
-enum device::CiAction
 enum drawbar::Drawbar
 enum drawbar::OrganLevel
 enum drawbar::OrganOption
@@ -216,6 +216,7 @@ enum profile::ProfileId
 enum profile::ProfileState
 enum profile::ProfileTarget
 enum profile_details::ProfileDetails
+enum profile_responder::OfferError
 enum rotary::RotaryControl
 enum rotary::RotarySpeaker
 enum rotary::RotaryValue
@@ -271,8 +272,10 @@ fn device::CiPeer::discovery
 fn device::CiPeer::function_block
 fn device::CiPeer::product_instance_id
 fn device::u32::deadline
+fn device::u32::mpe_zones
 fn device::u32::muid
 fn device::u32::new
+fn device::u32::offer_profiles
 fn device::u32::on_message
 fn device::u32::on_timeout
 fn device::u32::peer
@@ -329,8 +332,11 @@ fn gm2::Gm2ChannelCount::groups
 fn gm2::Gm2FunctionBlock::default_role
 fn gm2::Gm2FunctionBlock::enabled_on
 fn gm2::Gm2SingleChannel::enabled_on
+fn initiator::ProfileEntry::allows
 fn initiator::ProfileEntry::channels
+fn initiator::ProfileEntry::max
 fn initiator::ProfileEntry::state
+fn initiator::ProfileInitiator::ask_maximums
 fn initiator::ProfileInitiator::details
 fn initiator::ProfileInitiator::inquire
 fn initiator::ProfileInitiator::is_known
@@ -686,6 +692,10 @@ fn profile::StandardProfile::new
 fn profile::StandardProfile::number
 fn profile::StandardProfile::version
 fn profile_details::DetailsData::decode
+fn profile_responder::ProfileOffer::is_empty
+fn profile_responder::ProfileOfferEntry::enabled
+fn profile_responder::ProfileOfferEntry::fixed
+fn profile_responder::ProfileOfferEntry::new
 fn rotary::RotaryControl::controller
 fn rotary::RotaryControl::default_value
 fn rotary::RotaryControl::is_required
@@ -830,6 +840,8 @@ struct profile::ProfileLists
 struct profile::ProfileOnRequest
 struct profile::ProfileSpecific
 struct profile::StandardProfile
+struct profile_responder::ProfileOffer
+struct profile_responder::ProfileOfferEntry
 struct text::MessageText
 trait initiate::Initiator
 trait pe::resource::state::StateDevice
