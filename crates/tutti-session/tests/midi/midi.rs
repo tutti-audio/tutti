@@ -1624,23 +1624,24 @@ impl MpePeer {
                     profile,
                     target,
                     ..
-                }) if self.max.is_some() => {
-                    let max = tutti_midi_ci::ProfileChannels::of(self.max.unwrap_or(0));
-                    answers.extend(
-                        CiMessage::ProfileDetailsReply {
-                            header: at(header.device_id),
-                            to: header.source,
-                            profile,
-                            target,
-                            data: tutti_midi_ci::ChannelsDetail {
-                                in_use: tutti_midi_ci::ProfileChannels::of(0),
-                                max,
+                }) => {
+                    if let Some(max) = self.max {
+                        answers.extend(
+                            CiMessage::ProfileDetailsReply {
+                                header: at(header.device_id),
+                                to: header.source,
+                                profile,
+                                target,
+                                data: tutti_midi_ci::ChannelsDetail {
+                                    in_use: tutti_midi_ci::ProfileChannels::of(0),
+                                    max: tutti_midi_ci::ProfileChannels::of(max),
+                                }
+                                .to_data(),
                             }
-                            .to_data(),
-                        }
-                        .packets(MidiGroup::FIRST)
-                        .unwrap(),
-                    );
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
+                        );
+                    }
                 }
                 Decoded::Message(CiMessage::SetProfileOn { source, format, .. }) => {
                     match self.switch {

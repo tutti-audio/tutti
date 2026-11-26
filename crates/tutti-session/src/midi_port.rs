@@ -310,6 +310,12 @@ pub(crate) enum Shut {
     Released,
 }
 
+impl<E> From<Shut> for PeerError<E> {
+    fn from(why: Shut) -> Self {
+        why.error()
+    }
+}
+
 impl Shut {
     /// The error a request of any kind ends with.
     pub(crate) const fn error<E>(self) -> PeerError<E> {
@@ -366,29 +372,23 @@ struct Published {
 }
 
 impl InputShared {
-    /// What `read` makes of the port's info, under its lock.
-    pub(crate) fn read<T>(&self, read: impl FnOnce(&MidiInputInfo) -> T) -> T {
-        read(&self.inbox.lock().info)
-    }
-
     /// Queues `request` with its `reply` when the port can take it now and
-    /// `lists` says the peer and what is asked of it are still listed in the
-    /// port's info; otherwise hands the reply back with why: [`Shut::Released`]
+    /// `lists` accepts the peer and what is asked of it in the port's info, under the
+    /// port's lock; otherwise hands the reply back with why: [`Shut::Released`]
     /// once every handle is dropped, [`Shut::Away`] while the device is
-    /// away or when `lists` is false, since the peer or the Profile it lists has
-    /// gone.
-    pub(crate) fn push<R, L>(
+    /// away, and what `lists` refuses with, which says why a peer or Profile
+    /// it no longer lists, or a request that cannot be made, is refused.
+    pub(crate) fn push<R, L, X: From<Shut>>(
         &self,
         request: R,
         reply: L,
-        lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&MidiInputInfo, &R) -> Result<(), X>,
         make: impl FnOnce(R, L) -> InputRequest,
-    ) -> Result<(), (L, Shut)> {
+    ) -> Result<(), (L, X)> {
         let mut inbox = self.inbox.lock();
         let refused = match &inbox.door {
-            Door::Closed(why) => Some(*why),
-            Door::Open(_) if !lists(&inbox.info, &request) => Some(Shut::Away),
-            Door::Open(_) => None,
+            Door::Closed(why) => Some(X::from(*why)),
+            Door::Open(_) => lists(&inbox.info, &request).err(),
         };
         match refused {
             Some(why) => Err((reply, why)),

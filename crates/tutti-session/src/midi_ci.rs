@@ -184,12 +184,12 @@ impl PortLink {
     fn reply<T, E, R>(
         &self,
         request: R,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), PeerError<E>>,
         make: impl FnOnce(R, ReplySender<T, E>) -> InputRequest,
     ) -> PeerReply<T, E> {
         let (sender, asked) = PeerReply::new();
         if let Err((sender, why)) = self.queue(request, sender, lists, make) {
-            resolve(sender, Err(why.error()));
+            resolve(sender, Err(why));
         }
         asked
     }
@@ -199,7 +199,7 @@ impl PortLink {
     pub(crate) fn send<R>(
         &self,
         request: R,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), Shut>,
         make: impl FnOnce(R, ()) -> InputRequest,
     ) {
         // A refused request has no answer to hand back: nothing waits for it.
@@ -208,18 +208,18 @@ impl PortLink {
 
     /// Queues `request` with its `reply`, or hands the reply back with why the
     /// port could not take it.
-    fn queue<R, L>(
+    fn queue<R, L, X: From<Shut>>(
         &self,
         request: R,
         reply: L,
-        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), X>,
         make: impl FnOnce(R, L) -> InputRequest,
-    ) -> Result<(), (L, Shut)> {
+    ) -> Result<(), (L, X)> {
         match self.shared.upgrade() {
             // The port is gone: released when every handle was dropped and the
             // session took it out, disconnected when the session itself ended.
-            None if self.session.strong_count() > 0 => Err((reply, Shut::Released)),
-            None => Err((reply, Shut::Away)),
+            None if self.session.strong_count() > 0 => Err((reply, Shut::Released.into())),
+            None => Err((reply, Shut::Away.into())),
             Some(shared) => shared.push(request, reply, lists, make),
         }
     }
@@ -486,22 +486,16 @@ impl WholeProfile {
 }
 
 fn send_switch(link: &PortLink, switch: tutti_midi_hardware::ProfileSwitch) -> SwitchProfile {
-    // A switch for more Channels than the peer declared is refused for that reason, not as a
-    // peer that went away.
-    let over = link.shared.upgrade().and_then(|shared| {
-        shared.read(|info| match switch.check(info.profile_tables()) {
-            Err(error @ ProfileError::OverMaximum { .. }) => Some(error),
-            _ => None,
-        })
-    });
-    if let Some(error) = over {
-        let (sender, asked) = PeerReply::new();
-        resolve(sender, Err(refused(error)));
-        return SwitchProfile::new(asked);
-    }
     SwitchProfile::new(link.reply(
         switch,
-        |info, switch| switch.check(info.profile_tables()).is_ok(),
+        // A switch for more Channels than the peer declared is refused for that reason, as
+        // the driver refuses one the declaration overtook; any other failure is a Profile
+        // or peer the port no longer lists.
+        |info, switch| match switch.check(info.profile_tables()) {
+            Ok(()) => Ok(()),
+            Err(error @ ProfileError::OverMaximum { .. }) => Err(refused(error)),
+            Err(_) => Err(Shut::Away.into()),
+        },
         InputRequest::Profile,
     ))
 }
@@ -531,7 +525,7 @@ impl ReportPeer {
     pub fn request(&self, what: ReportRequest) -> RequestReport {
         RequestReport::new(self.link.reply(
             self.peer.ask(what),
-            |info, ask| ask.check(info.reporters()).is_ok(),
+            listed(|info, ask: &ReportAsk| ask.check(info.reporters()).is_ok()),
             InputRequest::Report,
         ))
     }
@@ -667,7 +661,7 @@ impl ListedResource {
             Ok(target) => self.link.reply(
                 self.peer
                     .ask(PropertyCall::Get(get(target).encoded(self.encoding()))),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Get,
             ),
             Err(refused) => not_sent(refused),
@@ -684,7 +678,7 @@ impl ListedResource {
                 self.peer.ask(PropertyCall::Subscribe(
                     ResourceGet::new(target).encoded(self.encoding()),
                 )),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Subscribe,
             ),
             Err(refused) => not_sent(refused),
@@ -712,7 +706,7 @@ impl ListedResource {
             Ok(set) => self.link.reply(
                 self.peer
                     .ask(PropertyCall::Set(set.encoded(self.encoding()))),
-                listing(&self.entry),
+                listed(listing(&self.entry)),
                 InputRequest::Set,
             ),
             Err(refused) => not_sent(refused),
@@ -756,6 +750,19 @@ impl AtPeer for PropertyPeer {
 /// The handle of `peer` among `handles`, if one is.
 pub(crate) fn at_peer<T: AtPeer>(handles: &[T], peer: PeerId) -> Option<&T> {
     handles.iter().find(|handle| handle.peer_id() == peer)
+}
+
+/// `lists`, which says whether the port's info still lists what a request names, as the
+/// check a request is queued under: a request whose peer or target is gone fails as the
+/// device being away.
+pub(crate) fn listed<R, X: From<Shut>>(
+    lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+) -> impl FnOnce(&crate::MidiInputInfo, &R) -> Result<(), X> {
+    move |info, request| {
+        lists(info, request)
+            .then_some(())
+            .ok_or_else(|| Shut::Away.into())
+    }
 }
 
 /// Whether the port's info still lists the peer of `ask`.

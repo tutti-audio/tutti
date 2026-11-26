@@ -8,7 +8,7 @@ use tutti_midi_hardware::{PeerId, PropertyAsk, PropertyCall, PropertyPeer};
 use tutti_rt::Mutex;
 
 use super::reply::peer_future;
-use super::{PeFailure, PortLink, ResourcePeer, listed_peer};
+use super::{PeFailure, PortLink, ResourcePeer, listed, listed_peer};
 use crate::midi_port::InputRequest;
 use crate::peer::sealed::Sealed;
 use crate::{PeerEvent, PeerResourceId, Presence, Resource, ResourceFact, SessionEvent};
@@ -117,8 +117,9 @@ impl Drop for Subscription {
                 .peer
                 .ask(PropertyCall::Unsubscribe(self.subscribe_id.clone()));
             // Nothing waits for the peer's reply.
-            self.link
-                .send(ask, listed_peer, |ask, ()| InputRequest::Unsubscribe(ask));
+            self.link.send(ask, listed(listed_peer), |ask, ()| {
+                InputRequest::Unsubscribe(ask)
+            });
         }
     }
 }
