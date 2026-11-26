@@ -942,16 +942,7 @@ fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
     allow(unused_variables, reason = "no kind is addressed without a feature")
 )]
 pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
-    published_kinds!(K, id => {
-        let cell = entry.cell::<K>()?;
-        #[cfg(any(feature = "midi", feature = "sampler"))]
-        return Some((id(node), node_cell(cell)));
-        #[cfg(not(any(feature = "midi", feature = "sampler")))]
-        {
-            let _ = (cell, id, node);
-            None
-        }
-    })
+    published_kinds!(K, id => Some((id(node), node_cell(entry.cell::<K>()?))))
 }
 
 /// The first `Some` that `$body` answers for a published kind the session
