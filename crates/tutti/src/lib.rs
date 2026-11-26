@@ -225,9 +225,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, InputPort, Key, MainOutput, NoSuchNode,
-    Offline, OfflineSession, OutputPort, Playhead, RealTime, Session, SessionBuilder, SessionEvent,
-    SessionFloat, SystemClock, SystemSession, TransportHandle, Workers,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, Declarations, InputPort, IntoPatch, Key,
+    KeyError, MainOutput, NoSuchNode, NodeDecl, Offline, OfflineSession, OutputPort, PatchError,
+    PatchTarget, Patched, Playhead, RealTime, Session, SessionBuilder, SessionEvent, SessionFloat,
+    SystemClock, SystemSession, TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -497,8 +498,8 @@ pub mod graph {
         ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
         Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
         ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
-        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
-        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
+        PublishedCell, PublishedInitial, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
+        SampleRates, Scalar, SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -910,10 +911,11 @@ pub mod midi {
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DeviceBody, DiscoveryData, EnabledMpeZones, InquiryTarget,
         ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
-        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
-        ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
-        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
-        ReportScope, SpecificData, StandardProfile, SystemMessages,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, OfferError, ProcessError,
+        ProcessFeatures, ProfileChange, ProfileDataError, ProfileEntry, ProfileOffer,
+        ProfileOfferEntry, ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState,
+        ProfileTable, ReplyData, ReplyVersion2, ReportRequest, ReportScope, SpecificData,
+        StandardProfile, SystemMessages,
     };
     pub use tutti_midi_ci::{
         CountedVersion, NotCountedVersion, NotSetProfileOn, ProfileChannels, ProfileFormat,
@@ -1044,7 +1046,7 @@ pub mod midi {
     pub use tutti_session::{
         ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
+        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, SwitchRefusal, WholeProfile,
     };
     #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

@@ -5,14 +5,16 @@ use super::super::{
     SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SimultaneousRequests,
 };
 use super::super::{
-    DetailsData, InquiryTarget, ProfileFormat, ProfileId, ProfileSpecific, ProfileTarget,
-    SpecificData,
+    DetailsData, InquiryTarget, ProfileFormat, ProfileId, ProfileLists, ProfileSpecific,
+    ProfileTarget, SpecificData,
 };
+use super::super::{Nak, ProfileState};
 use super::super::{Unread, UnreadReason};
 use super::*;
 use crate::{PeStatus, ReplyVersion2};
 use tutti_ump::ManufacturerId;
 use tutti_ump::SoftwareRevision;
+use tutti_ump::U7;
 
 fn identity() -> DeviceIdentity {
     DeviceIdentity {
@@ -943,4 +945,51 @@ fn an_inquiry_a_responder_did_not_accept_is_refused_with_a_nak() {
             .refuse_property_exchange(&pe_message(PeMessageKind::GET_REPLY))
             .is_none()
     );
+}
+
+#[test]
+fn an_offered_profile_is_answered_and_a_peers_switch_is_told_to_the_caller() {
+    use super::super::{ProfileChannels, ProfileOffer, ProfileOfferEntry};
+    let channel = CiDeviceId::Channel(tutti_ump::MidiChannel::of(2));
+    let (mut device, _, now) = device([OURS]);
+    let offer = ProfileOffer::try_from(vec![(
+        channel,
+        piano(),
+        ProfileOfferEntry::new(ProfileChannels::of(1)),
+    )])
+    .unwrap();
+    let added = device.offer_profiles(&offer);
+    let [CiMessage::ProfileAdded { header, profile }] = sent(&added)[..] else {
+        panic!("an Added Report, got {added:?}");
+    };
+    assert_eq!((header.device_id, *profile), (channel, piano()));
+    assert!(device.offer_profiles(&offer).is_empty());
+
+    let inquiry = on(CiDeviceId::FunctionBlock, PEER, OURS, |header, to| {
+        CiMessage::ProfileInquiry { header, to }
+    });
+    let replies = device.on_message(&inquiry, now);
+    assert_eq!(
+        sent(&replies).len(),
+        2,
+        "Channel 2, then the Function Block"
+    );
+
+    let set = on(channel, PEER, OURS, |header, to| CiMessage::SetProfileOn {
+        source: header.source,
+        to,
+        format: ProfileFormat::current(target_at(channel, 1)),
+        profile: piano(),
+    });
+    let actions = device.on_message(&set, now);
+    assert!(matches!(
+        actions[..],
+        [
+            CiAction::Send(CiMessage::ProfileEnabled { .. }),
+            CiAction::ProfileSwitched {
+                state: ProfileState::Enabled,
+                ..
+            }
+        ]
+    ));
 }

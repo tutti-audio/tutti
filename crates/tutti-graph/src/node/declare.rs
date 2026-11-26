@@ -1155,6 +1155,7 @@ macro_rules! declare_params {
             $ty, $cfg [$($cu)*],
             [$($req : $rty,)*] [$($oname : $oty,)*]
             [$($kind $field,)*] [$($sname [$($skind)?] : $sty,)*]
+            [$($dn : $dk,)*]
         });
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
@@ -1234,6 +1235,7 @@ macro_rules! declare_params {
         $ty:ty, $cfg:ident [$($cu:tt)*],
         [$($req:ident : $rty:ty,)*] [$($oname:ident : $oty:ty,)*]
         [$($kind:ident $field:ident,)*] [$($sname:ident [$($skind:ty)?] : $sty:ty,)*]
+        [$($dn:ident : $dk:ty,)*]
     }) => {
         impl<$($ig)*> $crate::NodeConfig<$float> for $cfg<$($cu)*>
         where
@@ -1276,6 +1278,7 @@ macro_rules! declare_params {
                     <$skind as $crate::__private::Setting>::KIND,
                     $crate::__private::AtomicWord::to_word(self.$sname),
                 );)?)*
+                $(let initials = initials.published::<$dk>(::core::clone::Clone::clone(&self.$dn));)*
                 initials
             }
         }

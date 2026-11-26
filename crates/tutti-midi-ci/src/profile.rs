@@ -629,12 +629,20 @@ impl ProfileTarget {
         channels: ProfileChannels,
     ) -> Result<Self, u16> {
         match address {
-            CiDeviceId::Channel(channel) => Ok(Self::Channel { channel, channels }),
             CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
                 Err(channels.get())
             }
-            CiDeviceId::Group => Ok(Self::Group),
-            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock),
+            _ => Ok(Self::at(address, channels)),
+        }
+    }
+
+    /// The target at `address`; `channels` is the count of a Channel and is
+    /// dropped for a Group or Function Block, which have none.
+    pub(crate) const fn at(address: CiDeviceId, channels: ProfileChannels) -> Self {
+        match address {
+            CiDeviceId::Channel(channel) => Self::Channel { channel, channels },
+            CiDeviceId::Group => Self::Group,
+            CiDeviceId::FunctionBlock => Self::FunctionBlock,
         }
     }
 

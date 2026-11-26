@@ -662,8 +662,11 @@ fn node::config::HostValues::reader
 fn node::config::Initials::new
 fn node::config::Initials::param
 fn node::config::Initials::params
+fn node::config::Initials::published
+fn node::config::Initials::published_values
 fn node::config::Initials::setting
 fn node::config::Initials::settings
+fn node::config::PublishedInitial::value
 fn node::controls::DeclaredUnit::of
 fn node::controls::DeclaredUnit::value
 fn node::controls::ParamFork::fork_node
@@ -1087,6 +1090,7 @@ struct node::bus::OutEvents
 struct node::config::Asset
 struct node::config::HostValues
 struct node::config::Initials
+struct node::config::PublishedInitial
 struct node::controls::DeclaredUnit
 struct node::controls::ParamFork
 struct node::controls::ParamSet

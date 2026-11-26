@@ -182,6 +182,9 @@ pub enum ProfileChange {
     Enabled,
     /// Profile Disabled Report.
     Disabled,
+    /// A reply to the inquiry for the Registered Target Data `Number of MIDI
+    /// Channels` declared the Profile's maximum ([`ProfileEntry::max`]).
+    MaxDeclared,
 }
 
 /// What the driver does next.
@@ -232,6 +235,15 @@ pub enum ProfileRequestError {
     /// address, is still waiting for its answer.
     #[error("a request for that Profile at that address is already in flight")]
     AlreadyAsking,
+    /// A Set Profile On asks for more Channels than the peer declared as the
+    /// Profile's maximum (M2-102 §2.5.1; M2-120 §3.1, §A.3).
+    #[error("{} Channels asked for, past the declared maximum {}", .requested.get(), .max.get())]
+    OverMaximum {
+        /// The count asked.
+        requested: ProfileChannels,
+        /// The count the peer declared.
+        max: ProfileChannels,
+    },
 }
 
 /// One Profile of the table.
@@ -239,9 +251,37 @@ pub enum ProfileRequestError {
 pub struct ProfileEntry {
     state: ProfileState,
     channels: Option<ProfileChannels>,
+    max: Option<ProfileChannels>,
 }
 
 impl ProfileEntry {
+    pub(crate) const fn new(
+        state: ProfileState,
+        channels: Option<ProfileChannels>,
+        max: Option<ProfileChannels>,
+    ) -> Self {
+        Self {
+            state,
+            channels,
+            max,
+        }
+    }
+
+    /// The most Channels the Profile can use, as declared by the Registered Target
+    /// Data `Number of MIDI Channels` (M2-102 §2.5.1): `None` while none was read
+    /// or declared.
+    #[must_use]
+    pub const fn max(&self) -> Option<ProfileChannels> {
+        self.max
+    }
+
+    /// Whether a count of `channels` is within the declared maximum; any count
+    /// is while none is known.
+    #[must_use]
+    pub fn allows(&self, channels: ProfileChannels) -> bool {
+        self.max.is_none_or(|max| channels <= max)
+    }
+
     /// Enabled or disabled.
     #[must_use]
     pub const fn state(&self) -> ProfileState {
@@ -344,8 +384,33 @@ impl ProfileTable {
         found
     }
 
+    /// Records the maximum a Details reply declared; whether it differs from what
+    /// was known.
+    fn declare_max(
+        &mut self,
+        address: CiDeviceId,
+        profile: ProfileId,
+        max: ProfileChannels,
+    ) -> bool {
+        let Some(entry) = self
+            .addresses
+            .get_mut(&address)
+            .and_then(|profiles| profiles.get_mut(&profile))
+        else {
+            return false;
+        };
+        let changed = entry.max != Some(max);
+        entry.max = Some(max);
+        changed
+    }
+
     /// Sets one entry; whether it differs from what was there.
-    fn set(&mut self, address: CiDeviceId, profile: ProfileId, entry: ProfileEntry) -> bool {
+    pub(crate) fn set(
+        &mut self,
+        address: CiDeviceId,
+        profile: ProfileId,
+        entry: ProfileEntry,
+    ) -> bool {
         self.addresses
             .entry(address)
             .or_default()
@@ -353,7 +418,7 @@ impl ProfileTable {
             != Some(entry)
     }
 
-    fn remove(&mut self, address: CiDeviceId, profile: ProfileId) -> bool {
+    pub(crate) fn remove(&mut self, address: CiDeviceId, profile: ProfileId) -> bool {
         let Some(profiles) = self.addresses.get_mut(&address) else {
             return false;
         };
@@ -383,6 +448,7 @@ impl ProfileTable {
                     ProfileEntry {
                         state,
                         channels: kept,
+                        max: before.get(profile).and_then(|entry| entry.max),
                     },
                 );
             }
@@ -461,7 +527,10 @@ impl ProfileInitiator {
     /// # Errors
     ///
     /// [`ProfileRequestError::AlreadyAsking`] when a Set On or Off of that Profile at
-    /// that address is waiting.
+    /// that address is waiting; [`ProfileRequestError::OverMaximum`] when `target`
+    /// names more Channels than the peer declared for the Profile
+    /// ([`ProfileEntry::max`]): nothing is sent, and a maximum not yet known
+    /// refuses nothing.
     pub fn set_on(
         &mut self,
         target: ProfileTarget,
@@ -469,6 +538,15 @@ impl ProfileInitiator {
         now: Instant,
     ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
         let address = target.address();
+        if let Some(entry) = self.table.get(address, profile)
+            && let Some(max) = entry.max()
+            && !entry.allows(target.channels())
+        {
+            return Err(ProfileRequestError::OverMaximum {
+                requested: target.channels(),
+                max,
+            });
+        }
         self.begin(ProfileRequest::SetOn { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOn {
@@ -531,6 +609,32 @@ impl ProfileInitiator {
         })])
     }
 
+    /// Asks for the Registered Target Data `Number of MIDI Channels` (M2-102 §2.5.1)
+    /// of every Profile the peer lists on a Channel without a declared maximum, so
+    /// that [`set_on`](Self::set_on) can hold a request to it. An inquiry already
+    /// waiting for the same answer is not asked again.
+    pub fn ask_maximums(&mut self, now: Instant) -> Vec<ProfileAction> {
+        let unknown: Vec<_> = self
+            .table
+            .addresses()
+            .filter(|address| matches!(address, CiDeviceId::Channel(_)))
+            .flat_map(|address| {
+                self.table
+                    .profiles(address)
+                    .filter(|(_, entry)| entry.max().is_none())
+                    .map(move |(profile, _)| (address, profile))
+            })
+            .collect();
+        unknown
+            .into_iter()
+            .filter_map(|(address, profile)| {
+                self.details(address, profile, InquiryTarget::NUMBER_OF_CHANNELS, now)
+                    .ok()
+            })
+            .flatten()
+            .collect()
+    }
+
     fn on_reply(
         &mut self,
         address: CiDeviceId,
@@ -564,6 +668,7 @@ impl ProfileInitiator {
             state,
             // A Version 1 sender has no count to report.
             channels: format.channels(),
+            max: self.table.get(address, profile).and_then(|e| e.max),
         };
         if self.table.set(address, profile, entry) {
             actions.push(ProfileAction::Changed {
@@ -697,10 +802,7 @@ impl Initiator for ProfileInitiator {
                 self.on_state(*profile, ProfileState::Disabled, *format, &mut actions)
             }
             CiMessage::ProfileAdded { profile, .. } if from_peer => {
-                let entry = ProfileEntry {
-                    state: ProfileState::Disabled,
-                    channels: None,
-                };
+                let entry = ProfileEntry::new(ProfileState::Disabled, None, None);
                 // A Profile already listed keeps its state: the Report says only
                 // that it is supported.
                 if self.table.get(address, *profile).is_none() {
@@ -737,6 +839,16 @@ impl Initiator for ProfileInitiator {
                 });
                 if let Some(at) = at {
                     let pending = self.pending.remove(at);
+                    if *target == InquiryTarget::NUMBER_OF_CHANNELS
+                        && let Some(detail) = data.as_channels()
+                        && self.table.declare_max(address, *profile, detail.max)
+                    {
+                        actions.push(ProfileAction::Changed {
+                            address,
+                            profile: *profile,
+                            change: ProfileChange::MaxDeclared,
+                        });
+                    }
                     actions.push(ProfileAction::Resolved {
                         request: pending.request,
                         outcome: ProfileOutcome::Details(data.clone()),

@@ -16,7 +16,7 @@ use tutti_graph::{
 };
 use tutti_graph::{HostValues, NodeKey};
 use tutti_midi_runtime::{
-    ClipEvents, MidiClipConfig, MidiClipControls, MidiClipNode, TimedMidiEvent,
+    ClipEvents, ClipEventsKind, MidiClipConfig, MidiClipControls, MidiClipNode, TimedMidiEvent,
 };
 use tutti_music::LoopRange;
 use tutti_ump::Ump;
@@ -1514,11 +1514,13 @@ fn a_start_releases_before_the_header_and_the_chase() {
 
 /// **A clip config has no structure: the clip is a published value.** Any two
 /// configs make the same node, so a config with other events keeps the running
-/// node (the events are a write to it). The config lists no initial value (the
-/// clip is no param or setting), and builds a node that plays its events.
+/// node (the events are a write to it). The config lists its clip as its one
+/// initial value (a published value, no param or setting): two configs of one
+/// clip give equal initials and of other clips unequal ones. It builds a node
+/// that plays its events.
 #[test]
 fn a_clip_config_has_no_structure_and_builds_a_node_playing_its_events() {
-    use tutti_graph::{Initials, IntoNode, NodeConfig};
+    use tutti_graph::{IntoNode, NodeConfig};
     let one = MidiClipConfig::default().events(ClipEvents::from_iter([at(10, on(60))]));
     let other =
         MidiClipConfig::default().events(ClipEvents::from_iter([at(20, on(62)), at(30, off(62))]));
@@ -1527,7 +1529,19 @@ fn a_clip_config_has_no_structure_and_builds_a_node_playing_its_events() {
         &one,
         &MidiClipConfig::default()
     ));
-    assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
+    let initials = NodeConfig::<f32>::initials(&one);
+    assert!(initials.params().is_empty() && initials.settings().is_empty());
+    let [clip] = initials.published_values() else {
+        panic!("the clip is the one initial");
+    };
+    assert_eq!(
+        clip.value::<ClipEventsKind>().as_deref(),
+        Some(&ClipEvents::from_iter([at(10, on(60))]))
+    );
+    assert_ne!(
+        initials.published_values(),
+        NodeConfig::<f32>::initials(&other).published_values()
+    );
     let node = NodeConfig::<f32>::build(&other, &HostValues::new());
     let controls = IntoNode::<f32>::into_parts(node).controls;
     assert_eq!(controls.len(), 2);

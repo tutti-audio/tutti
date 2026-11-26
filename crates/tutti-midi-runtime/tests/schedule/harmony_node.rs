@@ -18,7 +18,8 @@ use tutti_graph::{
 use tutti_graph::{HostValues, NodeKey};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
-    HarmonyChanges, HarmonyChangesError, HarmonyConfig, HarmonyControls, HarmonyNode, TimedHarmony,
+    HarmonyChanges, HarmonyChangesError, HarmonyChangesKind, HarmonyConfig, HarmonyControls,
+    HarmonyNode, TimedHarmony,
 };
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -370,11 +371,12 @@ fn a_chord_and_a_scale_at_one_beat_are_both_kept_in_beat_order() {
 
 /// **A harmony config has no structure: the lanes are a published value.** Any
 /// two configs make the same node, so other lanes keep the running node (they
-/// are a write to it). The config lists no initial value (the lanes are no param
-/// or setting), and builds a node that sends its lanes.
+/// are a write to it). The config lists its lanes as its one initial value (a
+/// published value, no param or setting): other lanes give unequal initials. It
+/// builds a node that sends its lanes.
 #[test]
 fn a_harmony_config_has_no_structure_and_builds_a_node_sending_its_lanes() {
-    use tutti_graph::{Initials, IntoNode, NodeConfig};
+    use tutti_graph::{IntoNode, NodeConfig};
     let one = HarmonyConfig::default().changes(changes([at(0, C)]));
     let other = HarmonyConfig::default().changes(changes([at(24_000, G), at(0, C_MAJOR)]));
     assert!(NodeConfig::<f32>::same_structure(&one, &other));
@@ -382,7 +384,19 @@ fn a_harmony_config_has_no_structure_and_builds_a_node_sending_its_lanes() {
         &one,
         &HarmonyConfig::default()
     ));
-    assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
+    let initials = NodeConfig::<f32>::initials(&one);
+    assert!(initials.params().is_empty() && initials.settings().is_empty());
+    let [lanes] = initials.published_values() else {
+        panic!("the lanes are the one initial");
+    };
+    assert_eq!(
+        lanes.value::<HarmonyChangesKind>().as_deref(),
+        Some(&changes([at(0, C)]))
+    );
+    assert_ne!(
+        initials.published_values(),
+        NodeConfig::<f32>::initials(&other).published_values()
+    );
     let node = NodeConfig::<f32>::build(&other, &HostValues::new());
     let controls = IntoNode::<f32>::into_parts(node).controls;
     assert_eq!(controls.len(), 2);

@@ -777,8 +777,9 @@ impl MidiClipNode {
 /// What a [`MidiClipNode`] is made from: the clip it plays from its first
 /// block. The clip, its header included, is a published value a session
 /// replaces (`clip.events()`), so the config has no structure: any two make the
-/// same node, and a running node's clip is replaced through
-/// [`MidiClipControls::set`].
+/// same node. A running node's clip is replaced through
+/// [`MidiClipControls::set`], or by a patch that declares another clip under
+/// the node's key (the config's [`initials`](NodeConfig::initials) list it).
 #[derive(Clone, Debug, Default)]
 pub struct MidiClipConfig {
     events: Arc<ClipEvents>,
@@ -813,9 +814,9 @@ impl<F: Float> NodeConfig<F> for MidiClipConfig {
         true
     }
 
-    /// None: the clip is a published value, not a param or a setting.
+    /// The clip: a published value, not a param or a setting.
     fn initials(&self) -> Initials {
-        Initials::new()
+        Initials::new().published::<ClipEventsKind>(Arc::clone(&self.events))
     }
 }
 
