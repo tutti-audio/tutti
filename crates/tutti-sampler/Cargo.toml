@@ -99,7 +99,7 @@ assert_no_alloc = { version = "1", default-features = false }
 
 # Tests only: several fixtures write a real WAV to disk and stream it back, so
 # they need a writer. The library itself does not touch `hound` (the live file
-# sink is `tutti-codec`'s `FileOut`).
+# sink is `tutti-codec`'s `EncoderSink`).
 hound = "3.5"
 
 [[bench]]

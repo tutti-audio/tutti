@@ -123,7 +123,8 @@ fn run_many(
             let target = if i == 0 {
                 config.file_target(path, None)
             } else {
-                let target = FileTarget::new(path, second_format(), ChannelLayout::STEREO);
+                let target =
+                    FileTarget::new(path, second_format(), ChannelLayout::STEREO).replace();
                 match config.resample {
                     Some(resample) => target.resample(resample),
                     None => target,

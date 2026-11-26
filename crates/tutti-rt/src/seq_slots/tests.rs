@@ -141,3 +141,35 @@ fn a_generation_has_reached_an_earlier_one_across_the_wrap() {
     assert!(late.has_reached(early) && !early.has_reached(late));
     assert!(late.has_reached(late));
 }
+
+#[test]
+fn a_published_generation_never_moves_back() {
+    let (mut publisher, watch) = generation_watch();
+    publisher.publish(Generation::new(5));
+    publisher.publish(Generation::new(3));
+    assert_eq!(
+        watch.get(),
+        Generation::new(5),
+        "an earlier generation is kept out"
+    );
+    publisher.publish(Generation::new(u32::MAX));
+    assert_eq!(
+        watch.get(),
+        Generation::new(5),
+        "2^32 - 1 is before 5 in serial order"
+    );
+    publisher.publish(Generation::new(6));
+    assert_eq!(watch.get(), Generation::new(6), "a later one is published");
+}
+
+#[test]
+fn a_published_generation_advances_across_the_wrap() {
+    let (mut publisher, watch) = generation_watch();
+    publisher.publish(Generation::new(u32::MAX - 1));
+    publisher.publish(Generation::new(1));
+    assert_eq!(
+        watch.get(),
+        Generation::new(1),
+        "1 follows 2^32 - 2 in serial order"
+    );
+}

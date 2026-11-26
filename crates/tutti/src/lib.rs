@@ -491,11 +491,11 @@ pub mod tempo {
 pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
-        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Initials,
-        Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
-        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell,
-        PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell,
-        Shape, Status, Unforkable, declare_params, param_parts,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, HostValues, InBus, InEvents,
+        Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
+        ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
+        PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -640,7 +640,7 @@ pub mod session {
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
 /// bit depth and FLAC level a `Format` takes, and the decode errors.
-/// The decoders, encoders and `FileIn`/`FileOut` are `tutti-codec`'s. Feature
+/// The decoders, encoders and `FileIn`/`EncoderSink` are `tutti-codec`'s. Feature
 /// `codec`.
 #[cfg(feature = "codec")]
 pub mod codec {
@@ -956,9 +956,10 @@ pub mod midi {
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClipEventsKind, ClipNote, HarmonyChanges, HarmonyChangesError,
-        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
-        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
-        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
+        HarmonyChangesKind, HarmonyConfig, HarmonyControls, HarmonyNode, MidiClipConfig,
+        MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutConfig,
+        SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]

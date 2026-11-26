@@ -38,7 +38,7 @@ impl<W: Write + Seek> AiffWriter<W> {
     ///
     /// # Errors
     ///
-    /// As [`Encoder::create`](crate::Encoder::create).
+    /// As [`EncoderOptions::wrap`](crate::EncoderOptions::wrap).
     pub(crate) fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
         let sample_rate = spec.header_hz()?;
         let channels = spec.channels()?;

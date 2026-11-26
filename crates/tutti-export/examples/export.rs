@@ -86,7 +86,8 @@ fn main() -> tutti_export::Result<()> {
     // placed voices takes the `OfflineTimeline` those voices read — the clock is
     // a required argument precisely so a silent render is not something you can
     // get by forgetting one.
-    let target = FileTarget::new(dir.join("tone.flac"), flac, ChannelLayout::STEREO);
+    // `replace` on every file here: a second run overwrites what the first one wrote.
+    let target = FileTarget::new(dir.join("tone.flac"), flac, ChannelLayout::STEREO).replace();
     let written = render_one(
         &mut tone(),
         &job,
@@ -110,11 +111,14 @@ fn main() -> tutti_export::Result<()> {
     ]
     .into_iter()
     .map(|(format, ext)| {
-        Output::main_output(FileTarget::new(
-            dir.join(format!("tone.{ext}")),
-            format,
-            ChannelLayout::STEREO,
-        ))
+        Output::main_output(
+            FileTarget::new(
+                dir.join(format!("tone.{ext}")),
+                format,
+                ChannelLayout::STEREO,
+            )
+            .replace(),
+        )
     })
     .collect();
     let produced = render(
@@ -170,6 +174,7 @@ fn main() -> tutti_export::Result<()> {
         flac,
         ChannelLayout::STEREO,
     )
+    .replace()
     .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0))));
     let written = render_one(
         &mut tone(),

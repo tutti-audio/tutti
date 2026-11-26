@@ -13,7 +13,7 @@ use tutti_graph::{
     Renderer, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
@@ -50,7 +50,13 @@ fn graph(frame: u64) -> (Editor, Executor) {
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(BLOCK)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new([note_on_at(frame)]));
+    ed.insert(
+        NodeKey(1),
+        "clip",
+        MidiClipNode::from(
+            MidiClipConfig::default().events(ClipEvents::from_iter([note_on_at(frame)])),
+        ),
+    );
     ed.insert(NodeKey(2), "synth", saw());
     ed.connect_events(
         EventInputPort::new(NodeKey(2), 0),

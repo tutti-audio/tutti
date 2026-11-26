@@ -19,8 +19,9 @@
 //!   frame. A look sees only a position, so several wraps in one block can
 //!   leave it where rolling would have, and then no Locate goes at all.
 //! - Flex Data tempo, meter and metronome are the clock's too
-//!   ([`SyncMessages::flex`], [`SyncMessages::metronome`]): the meter is read
-//!   from the cell [`meter`](SyncOut::meter) names (4/4 until one is).
+//!   ([`SyncMessages::flex`], [`SyncMessages::metronome`]): the meter is the
+//!   one the host lends the block (`Cx::meter`); a host that lends none gets
+//!   no Flex Data.
 //! - **One rate**: MTC and an MMC LOCATE state time codes at
 //!   [`SyncMessages::rate`], so the two cannot disagree.
 //!
@@ -45,12 +46,11 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_graph::{
-    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset, OutEvents,
-    Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
+    Cx, Event, ForkCause, ForkSource, Forked, HostValues, Initials, IntoNode, Io, Node, NodeConfig,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_music::MeterMap;
-use tutti_rt::{AtomicCell, Counter, CounterWriter, Publisher, Reader, RtVec, counter};
+use tutti_rt::{AtomicCell, Counter, CounterWriter, RtVec, counter};
 use tutti_ump::{MidiGroup, Sysex7Packets};
 use tutti_units::{Beat, Losses, SampleRate};
 
@@ -109,35 +109,11 @@ impl SyncOutControls {
     }
 }
 
-/// Where a [`SyncOut`] gets a reader of the project meter: a function that
-/// registers one (control side), called for the node and again for each fork.
-#[derive(Clone)]
-struct MeterSource(Arc<dyn Fn() -> Reader<MeterMap> + Send + Sync>);
-
-impl MeterSource {
-    /// A source of a constant meter, 4/4.
-    fn constant() -> Self {
-        Self(Arc::new(|| Publisher::new(MeterMap::default()).reader()))
-    }
-}
-
-impl std::fmt::Debug for MeterSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("MeterSource")
-    }
-}
-
 /// The transport sent to other gear, as a graph node with one event output.
 /// See the module docs.
 #[derive(Debug)]
 pub struct SyncOut {
     clock: ClockMaster,
-    /// The reader of the project meter, lent once per block when Flex is on.
-    meter: Reader<MeterMap>,
-    /// Registers another reader on the same meter, for a fork. Control side:
-    /// `into_parts` moves it into the fork source, so the audio node holds
-    /// only its reader.
-    meter_source: Option<MeterSource>,
     sender: MachineControlSender,
     group: MidiGroup,
     controls: Arc<SyncOutControls>,
@@ -158,69 +134,91 @@ impl SyncOut {
         .cost(tutti_graph::Cost::Light)
         .no_note_events();
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
 
-    /// A node that sends on `group`, sending nothing until
-    /// [`messages`](SyncOutControls::messages) is set, placing events at the
-    /// graph's rate once prepared. Control thread.
-    ///
-    /// ```
-    /// use tutti_graph::IntoNode as _;
-    /// use tutti_midi_protocol::{MtcRate, Recipient};
-    /// use tutti_midi_runtime::{SyncMessages, SyncOut};
-    /// use tutti_ump::MidiGroup;
-    ///
-    /// // An f32 graph's node; any float format takes the same.
-    /// let (_node, controls): (Box<dyn tutti_graph::Node<f32>>, _) =
-    ///     SyncOut::new(MidiGroup::masked(2))
-    ///         .sending(SyncMessages {
-    ///             clock: true,
-    ///             mmc: Some(Recipient::AllCall),
-    ///             rate: MtcRate::Fps30,
-    ///             ..SyncMessages::OFF
-    ///         })
-    ///         .into_node();
-    /// assert!(controls.messages().load().clock);
-    /// ```
+/// What a [`SyncOut`] is made from: the [`MidiGroup`] it sends on and what it
+/// sends from its first block. The Group is structure (the node's clock and
+/// Machine Control state are the Group's), so a config on another Group makes
+/// another node. The messages are a setting with no
+/// [`SettingKind`](tutti_units::SettingKind), so nothing writes them to a
+/// running node: a config with other messages makes another node too. A running
+/// node's messages change live through [`SyncOutControls::messages`].
+///
+/// ```
+/// use tutti_graph::IntoNode as _;
+/// use tutti_midi_protocol::{MtcRate, Recipient};
+/// use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig};
+/// use tutti_ump::MidiGroup;
+///
+/// // An f32 graph's node; any float format takes the same.
+/// let (_node, controls): (Box<dyn tutti_graph::Node<f32>>, _) =
+///     SyncOut::from(SyncOutConfig::new(MidiGroup::masked(2)).sending(SyncMessages {
+///         clock: true,
+///         mmc: Some(Recipient::AllCall),
+///         rate: MtcRate::Fps30,
+///         ..SyncMessages::OFF
+///     }))
+///     .into_node();
+/// assert!(controls.messages().load().clock);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct SyncOutConfig {
+    group: MidiGroup,
+    settings: SyncSettings,
+}
+
+impl SyncOutConfig {
+    /// The config of a node on `group` that sends no message
+    /// ([`SyncMessages::OFF`]).
     #[must_use]
     pub fn new(group: MidiGroup) -> Self {
-        let (losses, reader) = counter();
-        let meter_source = MeterSource::constant();
         Self {
-            clock: ClockMaster::new(group, UNPREPARED_RATE),
-            meter: (meter_source.0)(),
-            meter_source: Some(meter_source),
-            sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
             group,
+            settings: SyncSettings::new(),
+        }
+    }
+
+    /// What the node sends from its first block.
+    #[must_use]
+    pub fn sending(mut self, messages: SyncMessages) -> Self {
+        self.settings = self.settings.messages(messages);
+        self
+    }
+}
+
+impl From<SyncOutConfig> for SyncOut {
+    /// Control thread.
+    fn from(config: SyncOutConfig) -> Self {
+        let (losses, reader) = counter();
+        Self {
+            clock: ClockMaster::new(config.group, UNPREPARED_RATE),
+            sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
+            group: config.group,
             controls: Arc::new(SyncOutControls {
-                messages: AtomicCell::new(SyncSettings::new().messages),
+                messages: AtomicCell::new(config.settings.messages),
                 losses: reader,
             }),
             losses,
             pending: RtVec::new(),
         }
     }
+}
 
-    /// The project meter the Flex time signatures state: `register` makes a
-    /// reader on its cell (control side), called now and again for each fork.
-    /// 4/4 until set.
-    #[must_use]
-    pub fn meter(
-        mut self,
-        register: impl Fn() -> Reader<MeterMap> + Send + Sync + 'static,
-    ) -> Self {
-        let source = MeterSource(Arc::new(register));
-        self.meter = (source.0)();
-        self.meter_source = Some(source);
-        self
+impl<F: Float> NodeConfig<F> for SyncOutConfig {
+    type Node = SyncOut;
+
+    fn build(&self, _host: &HostValues) -> SyncOut {
+        SyncOut::from(*self)
     }
 
-    /// What the node sends from its first block.
-    #[must_use]
-    pub fn sending(self, messages: SyncMessages) -> Self {
-        self.controls
-            .messages
-            .store(SyncSettings::new().messages(messages).messages);
-        self
+    /// The Group and the messages: nothing writes either to a running node.
+    fn same_structure(&self, other: &Self) -> bool {
+        self.group == other.group && self.settings.messages == other.settings.messages
+    }
+
+    /// None: the one setting, `messages`, has no [`SettingKind`](tutti_units::SettingKind).
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }
 
@@ -263,14 +261,12 @@ impl<F: Float> Node<F> for SyncOut {
         let messages = self.controls.messages.load();
         self.pending.clear();
         let mut dropped = 0u64;
-        // Lent once, held across every piece of the block.
-        let loan = messages.any_flex().then(|| self.meter.lend());
         for (start, seg) in cx.env.segments() {
             let base = start.get();
             let pending = &mut self.pending;
             self.clock.tick(
                 messages,
-                loan.as_deref(),
+                cx.meter,
                 &seg.transport,
                 seg.block_len,
                 &mut |(at, ump): UmpAt| {
@@ -343,15 +339,12 @@ impl<F: Float> Node<F> for SyncOut {
 struct SyncFork {
     group: MidiGroup,
     controls: Arc<SyncOutControls>,
-    meter: MeterSource,
 }
 
 impl<F: Float> ForkSource<F> for SyncFork {
     fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
-        let meter = self.meter.clone();
-        let node = SyncOut::new(self.group)
-            .meter(move || (meter.0)())
-            .sending(self.controls.messages.load());
+        let node =
+            SyncOut::from(SyncOutConfig::new(self.group).sending(self.controls.messages.load()));
         Ok(Forked::new(Box::new(node)))
     }
 }
@@ -360,15 +353,11 @@ impl<F: Float> IntoNode<F> for SyncOut {
     /// What it sends, and what it could not.
     type Controls = Arc<SyncOutControls>;
 
-    fn into_parts(mut self) -> NodeParts<Arc<SyncOutControls>, F> {
+    fn into_parts(self) -> NodeParts<Arc<SyncOutControls>, F> {
         let controls = Arc::clone(&self.controls);
         let fork = SyncFork {
             group: self.group,
             controls: Arc::clone(&controls),
-            meter: self
-                .meter_source
-                .take()
-                .unwrap_or_else(MeterSource::constant),
         };
         NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
     }

@@ -17,7 +17,7 @@ use tutti_ump::{MidiGroup, Ump};
 use tutti_units::Losses;
 use tutti_units::SampleRate;
 
-use tutti_midi_runtime::MidiClipNode;
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode};
 use tutti_session::{EventInputPort, EventOutputPort, MidiSink, Session, Stamp, Stamping};
 use tutti_ump::{Message, System};
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber};
@@ -214,12 +214,11 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         .sync_controls
         .messages()
         .store(tutti_midi_runtime::SyncMessages::OFF);
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(1.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(1.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");
@@ -340,12 +339,11 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     let _ = s.update();
     let _ = wire.batches();
 
-    let clip = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(1.0),
-        BeatDuration::new(1.0),
-    )));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(60, MF, Beat::new(1.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");

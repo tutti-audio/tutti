@@ -31,7 +31,6 @@ pub(crate) struct ProcessorParts {
     pub scratch: Box<AudioScratch>,
     pub ranges: Reader<RangeTable>,
     pub drain: EditReader,
-    pub published: tutti_rt::GenerationPublisher,
     pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
@@ -54,8 +53,6 @@ pub struct ClapProcessor {
     pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
     pub(crate) drain: EditReader,
-    /// Tells the Controller what `drain` took, once the plugin has processed it.
-    pub(crate) published: tutti_rt::GenerationPublisher,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,
@@ -90,7 +87,6 @@ impl ClapProcessor {
             scratch,
             ranges,
             drain,
-            published,
             reports,
             reports_dropped,
         } = parts;
@@ -98,7 +94,6 @@ impl ClapProcessor {
             scratch,
             ranges,
             drain,
-            published,
             reports,
             reports_dropped,
             audio_side,

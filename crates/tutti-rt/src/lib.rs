@@ -62,8 +62,6 @@
 //! - [`FaultLatch`] — a flag a producer raises when it stops for good, with
 //!   its first [`Cause`], read before the ring so a failure never hides the
 //!   frames pushed ahead of it.
-//! - [`drain_clock()`] — counts the drains the audio side begins, so the
-//!   control side can tell which of its writes a block has surely taken.
 //! - [`handoff()`] — one value that moves between a control thread and the
 //!   audio thread at a block boundary ([`Handoff`] lends and recalls, [`Rt`]
 //!   trades).
@@ -174,7 +172,6 @@ mod cell;
 mod claim;
 mod claim_lock;
 mod dirty_set;
-mod drain_clock;
 mod exclusive;
 mod fault_latch;
 mod gauge;
@@ -215,7 +212,6 @@ pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
-pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use exclusive::Exclusive;
 pub use fault_latch::{Cause, Drained, FaultLatch};
 pub use gauge::{

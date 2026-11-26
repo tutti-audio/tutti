@@ -10,10 +10,11 @@
 
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Editor, EventKind, Executor, NodeKey, Offset, TransportChanges, TransportPosition,
+    Editor, EventKind, Executor, HostValues, NodeKey, Offset, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
+use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig, SyncOutControls};
+use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{FlexTempo, Message, MidiGroup, SysexStatus, System, U14, Ump};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -42,13 +43,16 @@ struct Rig {
     exec: Executor,
     seen: Seen,
     controls: std::sync::Arc<SyncOutControls>,
+    /// The meter the host lends each block (`Cx::meter`): 4/4 unless a test
+    /// sets it, `None` for a host that lends none.
+    meter: Option<MeterMap>,
     /// The first frame of the next block.
     frame: u64,
 }
 
 impl Rig {
     fn new(group: MidiGroup, messages: SyncMessages) -> Self {
-        Self::over(SyncOut::new(group).sending(messages))
+        Self::over(SyncOut::from(SyncOutConfig::new(group).sending(messages)))
     }
 
     fn over(node: SyncOut) -> Self {
@@ -66,6 +70,7 @@ impl Rig {
             exec: rig.exec,
             seen: rig.seen,
             controls,
+            meter: Some(MeterMap::default()),
             frame: 0,
         }
     }
@@ -85,11 +90,20 @@ impl Rig {
                 .unwrap();
         }
         self.seen.lock().unwrap().clear();
+        self.exec.apply_pending();
         self.exec
-            .process_with_changes(len, &start, &cuts, &[], &mut []);
+            .render_applied(len, &start, &cuts, &[], &mut [], self.meter.as_ref(), None);
         self.frame += len as u64;
         heard(&self.seen)
     }
+}
+
+/// A meter of `numerator`/`denominator` from beat 0.
+fn in_meter(numerator: u32, denominator: u32) -> MeterMap {
+    MeterMap::new([MeterChange::new(
+        Beat::new(0.0),
+        TimeSignature::of(numerator, denominator),
+    )])
 }
 
 fn clock() -> SyncMessages {
@@ -416,7 +430,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
         .insert(
             NodeKey(1),
             "sync",
-            SyncOut::new(G).sending(SyncMessages::OFF),
+            SyncOut::from(SyncOutConfig::new(G).sending(SyncMessages::OFF)),
         )
         .controls;
     rig.feed(NodeKey(1), 0, 0);
@@ -441,19 +455,14 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
 /// both on the start's frame, and nothing more while the transport rolls on.
 #[test]
 fn flex_states_the_tempo_and_the_nodes_meter_once() {
-    use tutti_music::{MeterChange, MeterMap, TimeSignature};
-    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
-        Beat::new(0.0),
-        TimeSignature::of(3, 4),
-    )])));
-    let mut rig = Rig::over(
-        SyncOut::new(G)
-            .meter(move || meter.reader())
-            .sending(SyncMessages {
-                flex: true,
-                ..SyncMessages::OFF
-            }),
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            flex: true,
+            ..SyncMessages::OFF
+        },
     );
+    rig.meter = Some(in_meter(3, 4));
     let flexes = |events: &[(u64, Ump)]| -> Vec<(u64, tutti_ump::Flex)> {
         events
             .iter()
@@ -485,6 +494,21 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
         "no clock bytes"
     );
     assert!(flexes(&rig.block(BLOCK, rolling(beat(0.0, BLOCK)), &[])).is_empty());
+
+    // The meter is read from each block's `Cx`: lent as 6/8, the next start
+    // states it on its frame.
+    rig.meter = Some(in_meter(6, 8));
+    rig.block(BLOCK, stopped(beat(0.0, 2 * BLOCK)), &[]);
+    let restart_frame = rig.frame;
+    let restarted = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
+    assert!(flexes(&restarted).contains(&(
+        restart_frame,
+        tutti_ump::Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
+            numerator: 6,
+            denominator: 3,
+            thirty_seconds: 8,
+        })
+    )));
 }
 
 /// **Set Metronome is a Complete Flex Data packet to the Group (M2-104
@@ -494,19 +518,15 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
 /// Spec: m2-104/7.5.5#3, m2-104/7.5.5#4
 #[test]
 fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
-    use tutti_music::{MeterChange, MeterMap, TimeSignature};
-    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
-        Beat::new(0.0),
-        TimeSignature::of(6, 8),
-    )])));
     let sent = |metronome: bool| {
-        let meter = std::sync::Arc::clone(&meter);
-        let mut rig = Rig::over(SyncOut::new(G).meter(move || meter.reader()).sending(
+        let mut rig = Rig::new(
+            G,
             SyncMessages {
                 metronome,
                 ..SyncMessages::OFF
             },
-        ));
+        );
+        rig.meter = Some(in_meter(6, 8));
         rig.block(BLOCK, rolling(Beat::new(0.0)), &[])
     };
     assert!(sent(false).is_empty());
@@ -551,7 +571,11 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
         sysex(&sent.iter().map(|&u| (0, u)).collect::<Vec<_>>()) == [(0, PLAY.to_vec())]
     };
 
-    let mut d = Direct::new(SyncOut::new(G).sending(both), SampleRate::SR_48K, 64);
+    let mut d = Direct::new(
+        SyncOut::from(SyncOutConfig::new(G).sending(both)),
+        SampleRate::SR_48K,
+        64,
+    );
     assert!(!drive(&mut d, rolling(Beat::new(1.0))).is_empty());
     let run_on = drive(&mut d, rolling(beat(1.0, 64)));
     assert!(!continues(&run_on), "a run-on is no play edge");
@@ -561,7 +585,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     assert!(!after.is_empty(), "the messages set are still set");
 
     let mut kept = Direct::new(
-        SyncOut::new(G).sending(mmc(MtcRate::Fps30)),
+        SyncOut::from(SyncOutConfig::new(G).sending(mmc(MtcRate::Fps30))),
         SampleRate::SR_48K,
         64,
     );
@@ -571,7 +595,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     );
     assert!(plays(&drive(&mut kept, rolling(Beat::new(0.0)))));
     let mut reset = Direct::new(
-        SyncOut::new(G).sending(mmc(MtcRate::Fps30)),
+        SyncOut::from(SyncOutConfig::new(G).sending(mmc(MtcRate::Fps30))),
         SampleRate::SR_48K,
         64,
     );
@@ -617,7 +641,10 @@ fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
 /// `918.75 k`: 0, 919, 1 838, 2 757 (2 756.25), 3 675 (exactly).
 #[test]
 fn a_44_1_khz_graph_ticks_every_918_75_frames() {
-    let mut rig = Rig::at(44_100.0, SyncOut::new(G).sending(clock()));
+    let mut rig = Rig::at(
+        44_100.0,
+        SyncOut::from(SyncOutConfig::new(G).sending(clock())),
+    );
     let got = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
     let ticks: Vec<u64> = systems(&got, |m| (m == System::TimingClock).then_some(()))
         .iter()
@@ -714,27 +741,43 @@ fn a_locate_or_a_wrap_with_mtc_and_no_clock_sends_no_song_position_and_no_stop()
     assert!(not_time_code(&wrap).is_empty(), "{wrap:?}");
 }
 
-/// **A forked sync node states the real meter**, not a constant one: the fork
-/// registers its own reader on the cell the live node reads. A 3/4 meter is a
-/// Set Time Signature of 3, 2^2, 8 thirty-seconds on the start frame.
+/// **A host that lends no meter gets no Flex Data**: Flex on, a start with
+/// no `Cx::meter` sends neither Set Tempo nor Set Time Signature (with one
+/// lent, `flex_states_the_tempo_and_the_nodes_meter_once` sends both).
 #[test]
-fn a_fork_states_the_live_nodes_meter() {
+fn a_host_that_lends_no_meter_gets_no_flex_data() {
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            flex: true,
+            ..SyncMessages::OFF
+        },
+    );
+    rig.meter = None;
+    let flex_count = |events: &[(u64, Ump)]| {
+        events
+            .iter()
+            .filter(|(_, ump)| matches!(ump.decode(), Ok(Message::Flex(..))))
+            .count()
+    };
+    let started = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
+    assert_eq!(flex_count(&started), 0, "{started:?}");
+}
+
+/// **A forked sync node sends what the live one was sending, under the meter
+/// its own renders lend**: Flex on at the fork, and a 3/4 meter lent to the
+/// fork is a Set Time Signature of 3, 2^2, 8 thirty-seconds on the start frame.
+#[test]
+fn a_fork_keeps_the_messages_and_states_the_meter_its_block_lends() {
     use tutti_graph::ForkTarget;
-    use tutti_music::{MeterChange, MeterMap, TimeSignature};
-    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
-        Beat::new(0.0),
-        TimeSignature::of(3, 4),
-    )])));
     let mut rig = EventRig::new(RATE, BLOCK, 1);
     rig.editor.insert(
         NodeKey(1),
         "sync",
-        SyncOut::new(G)
-            .meter(move || meter.reader())
-            .sending(SyncMessages {
-                flex: true,
-                ..SyncMessages::OFF
-            }),
+        SyncOut::from(SyncOutConfig::new(G).sending(SyncMessages {
+            flex: true,
+            ..SyncMessages::OFF
+        })),
     );
     rig.feed(NodeKey(1), 0, 0);
     rig.commit();
@@ -744,7 +787,16 @@ fn a_fork_states_the_live_nodes_meter() {
         .fork(ForkTarget::MainOutput, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
-    exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);
+    exec.apply_pending();
+    exec.render_applied(
+        512,
+        &rolling(Beat::new(0.0)),
+        &TransportChanges::NONE,
+        &[],
+        &mut [&mut out[..]],
+        Some(&in_meter(3, 4)),
+        None,
+    );
     let signatures: Vec<_> = heard(&rig.seen)
         .into_iter()
         .filter_map(|(frame, ump)| match ump.decode() {
@@ -797,4 +849,32 @@ fn a_song_position_past_the_field_is_not_sent_and_is_counted_refused() {
         [(0, U14::of(16_383))]
     );
     assert_eq!(rig.controls.losses().refused, 0);
+}
+
+/// **A sync config's structure is its Group and its messages**: the node's
+/// clock and Machine Control state are the Group's, so another Group is another
+/// node, and the messages are a setting with no address, which nothing writes
+/// to a running node, so other messages are another node too. No initial value
+/// is listed, and the built node starts with the messages given.
+#[test]
+fn a_sync_config_is_structured_by_its_group_and_messages() {
+    use tutti_graph::{Initials, IntoNode, NodeConfig};
+    let base = SyncOutConfig::new(G);
+    assert!(!NodeConfig::<f32>::same_structure(
+        &base,
+        &SyncOutConfig::new(MidiGroup::masked(2))
+    ));
+    assert!(!NodeConfig::<f32>::same_structure(
+        &base,
+        &SyncOutConfig::new(G).sending(clock())
+    ));
+    assert!(NodeConfig::<f32>::same_structure(
+        &base.sending(clock()),
+        &SyncOutConfig::new(G).sending(clock())
+    ));
+    assert_eq!(NodeConfig::<f32>::initials(&base), Initials::new());
+    let node = NodeConfig::<f32>::build(&base.sending(clock()), &HostValues::new());
+    let (node, controls) = IntoNode::<f32>::into_node(node);
+    assert_eq!(controls.messages().load(), clock());
+    assert!(node.shape().event_output(0).is_some());
 }

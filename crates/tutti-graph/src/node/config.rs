@@ -1,6 +1,8 @@
 //! What a node is made from: [`NodeConfig`], and [`Asset`], the handle a config
 //! holds a shared resource by.
 
+use std::any::{Any, TypeId, type_name};
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -18,17 +20,22 @@ use crate::node::IntoNode;
 ///
 /// A config is compared by its structure, not its values. A field that decides
 /// what the node is (the `required` and `options` of the cells form, each
-/// `PartialEq`) is structure: a change builds a new node. A declared param is a
-/// value: a change is a write to the running node, which keeps its state.
+/// `PartialEq`) is structure: a change builds a new node. A setting with no
+/// [`SettingKind`] has no address, so nothing can write a changed initial to a
+/// running node: it is structure too. A declared param and a kinded setting are
+/// values: a change is a write to the running node, which keeps its state.
 pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
     /// What the config makes.
     type Node: IntoNode<F> + Send + 'static;
 
     /// The node, its params at this config's initial values. Takes `&self`: the
-    /// caller keeps the config as its record of what it asked for.
-    fn build(&self) -> Self::Node;
+    /// caller keeps the config as its record of what it asked for. `host` holds
+    /// the values the host keeps once for many nodes; a node that reads one
+    /// registers its [`Reader`](tutti_rt::Reader) here (see [`HostValues`]).
+    /// The cells form's `build` has no use for it.
+    fn build(&self, host: &HostValues) -> Self::Node;
 
-    /// Whether `other` makes the same node but for its declared param values:
+    /// Whether `other` makes the same node but for its values (params and kinded settings):
     /// `false` means a new node, `true` means the running node stays and the
     /// differing [`initials`](Self::initials) are written to it.
     fn same_structure(&self, other: &Self) -> bool;
@@ -42,7 +49,8 @@ pub trait NodeConfig<F: Float = f32>: Clone + Send + 'static {
 /// unit, and each setting that has a [`SettingKind`] as its encoded word.
 ///
 /// A param left out has no value (an `Option` param given none). A setting with
-/// no kind has no address, so it is not listed.
+/// no kind has no address, so it is not listed: it is structure, compared by
+/// [`NodeConfig::same_structure`].
 ///
 /// Listed in declaration order, and two lists of one config type compare in that
 /// order: a hand-written [`NodeConfig::initials`] lists its params and settings in
@@ -87,6 +95,62 @@ impl Initials {
     #[must_use]
     pub fn settings(&self) -> &[(SettingKind, u64)] {
         &self.settings
+    }
+}
+
+/// The values a host holds once for many nodes, as a set of its publish cells
+/// keyed by the value's type.
+///
+/// A value of this kind reaches a node as a [`Reader`](tutti_rt::Reader)
+/// registered at insertion: [`NodeConfig::build`] takes the reader from here
+/// where the node is built, stores it in the node, and lends it once per
+/// block. The node has no setter for the value; the host publishes it.
+///
+/// It is keyed by type, so the graph names no host's domain. A type the host
+/// did not [`provide`](Self::provide) has no reader: the node then uses one
+/// constant default, which its own doc states. A graph with no host (a test, a
+/// bench) builds with [`HostValues::new`].
+#[derive(Clone, Default)]
+pub struct HostValues {
+    cells: HashMap<TypeId, (&'static str, Arc<dyn Any + Send + Sync>)>,
+}
+
+impl HostValues {
+    /// Nothing provided.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Also `cell` as the host's value of type `T`, replacing one provided
+    /// before for `T`. The cell is shared, not copied: what the host publishes
+    /// on it is what every reader registered from this set lends.
+    #[must_use]
+    pub fn provide<T: Send + Sync + 'static>(mut self, cell: &tutti_rt::Publisher<T>) -> Self {
+        let cell: Arc<dyn Any + Send + Sync> = Arc::new(cell.clone());
+        self.cells
+            .insert(TypeId::of::<T>(), (type_name::<T>(), cell));
+        self
+    }
+
+    /// A new reader of the host's value of type `T`, or `None` when the host
+    /// provides none.
+    ///
+    /// Control side: registered where the node is built, stored in the node,
+    /// lent once per block.
+    #[must_use]
+    pub fn reader<T: Send + Sync + 'static>(&self) -> Option<tutti_rt::Reader<T>> {
+        let (_, cell) = self.cells.get(&TypeId::of::<T>())?;
+        cell.downcast_ref::<tutti_rt::Publisher<T>>()
+            .map(tutti_rt::Publisher::reader)
+    }
+}
+
+impl fmt::Debug for HostValues {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut names: Vec<_> = self.cells.values().map(|(name, _)| *name).collect();
+        names.sort_unstable();
+        f.debug_tuple("HostValues").field(&names).finish()
     }
 }
 

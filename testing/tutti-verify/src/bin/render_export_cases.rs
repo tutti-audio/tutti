@@ -131,7 +131,8 @@ impl Case {
         path: impl Into<std::path::PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        let target = FileTarget::new(path, self.format, self.channels);
+        // `replace`: a rerun overwrites the cases an earlier run wrote.
+        let target = FileTarget::new(path, self.format, self.channels).replace();
         let target = match self.resample {
             Some(resample) => target.resample(resample),
             None => target,

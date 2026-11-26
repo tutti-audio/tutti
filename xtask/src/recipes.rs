@@ -1070,7 +1070,6 @@ const LOOM: &[&str] = &[
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_flags_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test ring_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test drain_clock_loom -- --nocapture"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test fault_latch_loom -- --nocapture"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test gauge_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test render_count_loom"#,

@@ -55,7 +55,7 @@ impl<W: Write + Seek> FlacWriter<W> {
     ///
     /// # Errors
     ///
-    /// As [`Encoder::create`](crate::Encoder::create).
+    /// As [`EncoderOptions::wrap`](crate::EncoderOptions::wrap).
     pub(crate) fn create(
         spec: &Spec,
         depth: IntDepth,

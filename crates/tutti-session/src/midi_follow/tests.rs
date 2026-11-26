@@ -263,7 +263,9 @@ fn tapped() -> (crate::Graph, tutti_graph::NodeKey, FollowTap) {
         #[cfg(feature = "plugin")]
         tutti_timeline::TempoReader::fixed(map(120.0)),
     );
-    let node = tutti_graph::NodeKey::from(graph.add(tutti_midi_runtime::MidiClipNode::new([])));
+    let node = tutti_graph::NodeKey::from(graph.add(tutti_midi_runtime::MidiClipNode::from(
+        tutti_midi_runtime::MidiClipConfig::default(),
+    )));
     let reader = graph
         .taps()
         .open_event(

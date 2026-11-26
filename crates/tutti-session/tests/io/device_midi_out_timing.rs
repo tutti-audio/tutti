@@ -19,7 +19,7 @@ use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
-use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{EventInputPort, LiveSession, Session};
 use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -316,10 +316,11 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         };
         TimedMidiEvent::new(at, Message::midi2(MidiChannel::FIRST, voice)).unwrap()
     };
-    let clip = s.graph().add(MidiClipNode::new([
-        note(true, Beat::new(1.0)),
-        note(false, Beat::new(2.0)),
-    ]));
+    let clip = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter([note(true, Beat::new(1.0)), note(false, Beat::new(2.0))]),
+        )));
     s.graph()
         .set_sources(EventInputPort::new(sink.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");

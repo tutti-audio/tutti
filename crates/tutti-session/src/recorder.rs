@@ -4,7 +4,7 @@
 //! [`PumpLoop`] is one pass of that with no thread and no clock: an app steps it
 //! on its own loop. It joins any [`Source`] to any [`Sink`]: a
 //! `tutti_codec::FileIn` to a file, a graph tap's
-//! [`TapReader`](tutti_graph::TapReader) to a `tutti_codec::FileOut`, a
+//! [`TapReader`](tutti_graph::TapReader) to a `tutti_codec::EncoderSink`, a
 //! capture device to either.
 //!
 //! - [`PumpLoop::new`] refuses a source and sink whose channel widths disagree,
@@ -149,7 +149,7 @@ pub enum PumpPass {
 ///
 /// ```
 /// use tutti_buffers::FloatWidth;
-/// use tutti_codec::{FileOut, Format, Pcm, Spec};
+/// use tutti_codec::{EncoderOptions, EncoderSink, Format, Pcm, Spec};
 /// use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 /// use tutti_session::{PumpLoop, PumpPass};
 /// use tutti_graph::{OutputPort, PortSource};
@@ -200,8 +200,9 @@ pub enum PumpPass {
 /// let dir = tempfile::tempdir().expect("temp dir");
 /// let pcm = Pcm::Float(FloatWidth::F32);
 /// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
-/// let file = std::fs::File::create(dir.path().join("take.wav")).expect("file opens");
-/// let sink = FileOut::new(&spec, file).expect("sink opens");
+/// // In place, so a recording cut short is there to keep.
+/// let file = EncoderOptions::new(&spec).file(dir.path().join("take.wav")).in_place().create().expect("file opens");
+/// let sink = EncoderSink::<f32>::new(file);
 ///
 /// // `new` checks the widths agree, before a frame moves.
 /// let mut pump = PumpLoop::new(reader, sink, Samples::new(1024)).expect("stereo into stereo");

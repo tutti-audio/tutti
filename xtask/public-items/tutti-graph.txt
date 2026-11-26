@@ -660,6 +660,9 @@ fn node::bus::InBus::width
 fn node::bus::OutBus::width
 fn node::config::Asset::arc
 fn node::config::Asset::new
+fn node::config::HostValues::new
+fn node::config::HostValues::provide
+fn node::config::HostValues::reader
 fn node::config::Initials::new
 fn node::config::Initials::param
 fn node::config::Initials::params
@@ -1086,6 +1089,7 @@ struct node::bus::InEvents
 struct node::bus::OutBus
 struct node::bus::OutEvents
 struct node::config::Asset
+struct node::config::HostValues
 struct node::config::Initials
 struct node::controls::DeclaredUnit
 struct node::controls::ParamFork
@@ -1152,6 +1156,7 @@ trait node::declare::OwnedCell
 trait node::declare::ParamEntry
 trait node::declare::ParamValue
 trait node::declare::Scalar
+trait node::declare::SettingStructure
 trait node::declare::sealed::Sealed
 trait node::fork::ForkHealth
 trait node::fork::ForkSource

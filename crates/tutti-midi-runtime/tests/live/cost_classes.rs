@@ -17,7 +17,8 @@ use tutti_graph::{
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
-    HarmonyChanges, HarmonyNode, MidiClipNode, MidiInputNode, SyncOut, TimedMidiEvent,
+    ClipEvents, HarmonyConfig, HarmonyNode, MidiClipConfig, MidiClipNode, MidiInputNode, SyncOut,
+    SyncOutConfig, TimedMidiEvent,
 };
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -82,16 +83,18 @@ impl Node for Recorder {
 
 /// Notes every 1/50 beat for lane `k`, each lane a little later.
 fn clip(k: u64) -> MidiClipNode {
-    MidiClipNode::new((0..20).map(|i| {
-        TimedMidiEvent::new(
-            Beat::new(0.02 * i as f64 + 0.000_3 * k as f64),
-            Message::midi2(
-                MidiChannel::FIRST,
-                Voice2::note_on(NoteNumber::of((36 + k + i) as u8), NoteVelocity::MAX),
-            ),
-        )
-        .unwrap()
-    }))
+    MidiClipNode::from(
+        MidiClipConfig::default().events(ClipEvents::from_iter((0..20).map(|i| {
+            TimedMidiEvent::new(
+                Beat::new(0.02 * i as f64 + 0.000_3 * k as f64),
+                Message::midi2(
+                    MidiChannel::FIRST,
+                    Voice2::note_on(NoteNumber::of((36 + k + i) as u8), NoteVelocity::MAX),
+                ),
+            )
+            .unwrap()
+        }))),
+    )
 }
 
 /// [`LANES`] clips each under an event tap, and [`HEAVY`] clips each into a
@@ -176,11 +179,14 @@ fn sent(outs: &mut [common::Sink], seen: &[Seen]) -> Vec<Vec<(u64, [u32; 4])>> {
 fn every_midi_node_is_light() {
     assert_eq!(tutti_graph::Node::<f32>::shape(&clip(0)).cost, Cost::Light);
     assert_eq!(
-        tutti_graph::Node::<f32>::shape(&HarmonyNode::new(HarmonyChanges::default())).cost,
+        tutti_graph::Node::<f32>::shape(&HarmonyNode::from(HarmonyConfig::default())).cost,
         Cost::Light
     );
     assert_eq!(
-        tutti_graph::Node::<f32>::shape(&SyncOut::new(tutti_ump::MidiGroup::FIRST)).cost,
+        tutti_graph::Node::<f32>::shape(&SyncOut::from(SyncOutConfig::new(
+            tutti_ump::MidiGroup::FIRST
+        )))
+        .cost,
         Cost::Light
     );
     assert_eq!(
