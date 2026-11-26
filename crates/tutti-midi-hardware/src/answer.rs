@@ -14,6 +14,7 @@ use tutti_midi_ci::{
     ResourceTarget, SubscribeId,
 };
 
+use crate::ProfileError;
 use crate::properties::PropertyCall;
 
 /// How a request to a peer ended.
@@ -29,11 +30,21 @@ pub enum Answer {
         outcome: ProfileOutcome,
     },
     /// A switch was not sent: the peer was lost between the request and the
-    /// poll that would have sent it, or the peer declared a maximum that the
-    /// switch asks more Channels than (M2-102 §2.5.1) in that time.
+    /// poll that would have sent it.
     SwitchLost {
         /// What was asked.
         request: ProfileRequest,
+    },
+    /// A switch was not sent: the peer declared a maximum, between the request
+    /// and the poll that would have sent it, that the switch asks more Channels
+    /// than (M2-102 §2.5.1). It is the refusal
+    /// [`MidiSession::set_profile`](crate::MidiSession::set_profile) makes at the call
+    /// when the maximum is known by then.
+    SwitchRefused {
+        /// What was asked.
+        request: ProfileRequest,
+        /// Why it was refused.
+        error: ProfileError,
     },
     /// A MIDI Message Report ended.
     Report(ReportEnd),

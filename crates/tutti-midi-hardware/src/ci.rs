@@ -83,7 +83,8 @@
 //! an [`Answer::Switch`]. When the peer is lost (an Invalidate MUID, a collision,
 //! a changed MUID of the device or its Group ending) its Initiator and Profiles
 //! go, [`ProfilesChange::Dropped`] says so, and a switch still waiting ends with
-//! an [`Answer::SwitchLost`] if it was not yet sent. Closing the input reports
+//! an [`Answer::SwitchLost`] if it was not yet sent; one for more Channels than the peer
+//! declared meanwhile ends with an [`Answer::SwitchRefused`]. Closing the input reports
 //! nothing, as for peers.
 //!
 //! When a peer reports the MPE Profile (M2-120) enabled on a Channel, the same
@@ -117,7 +118,8 @@
 //! [`ProfilesChange::Switched`] for the peer, and never changes the
 //! offer. For each Profile a peer lists on a Channel without a declared maximum, the
 //! devices ask for its Number of MIDI Channels (M2-102 §2.5.1) once the peer's list is
-//! whole and when the peer adds a Profile later, so a Set Profile On never asks for more than the peer allows.
+//! whole and when the peer adds a Profile later, so a Set Profile On never asks for more
+//! than the peer allows.
 //!
 //! # Property Exchange
 //!
@@ -1373,10 +1375,11 @@ impl Member {
             Err(ProfileRequestError::AlreadyAsking) => {}
             // The peer's declared maximum arrived between the app's request and
             // the poll that sends it: the switch is not sent, and says so.
-            Err(ProfileRequestError::OverMaximum { .. }) => changes.answers.push((
+            Err(ProfileRequestError::OverMaximum { requested, max }) => changes.answers.push((
                 self.peer_id(switch.at.peer().muid),
-                Answer::SwitchLost {
+                Answer::SwitchRefused {
                     request: switch.request(),
+                    error: ProfileError::OverMaximum { requested, max },
                 },
             )),
         }

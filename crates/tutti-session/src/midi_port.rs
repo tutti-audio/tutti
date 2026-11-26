@@ -60,7 +60,7 @@ use crate::midi::{
 };
 use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
-    Subscription, at_peer, resolve,
+    Subscription, SwitchRefusal, at_peer, resolve,
 };
 use crate::midi_record::Record;
 use crate::value::{SlotCell, SlotId};
@@ -279,7 +279,7 @@ pub(crate) struct InputShared {
 /// with the `ReplySender` that resolves the future that asked. The end of a
 /// Subscription asks for no answer.
 pub(crate) enum InputRequest {
-    Profile(ProfileSwitch, ReplySender<ProfileState, Nak>),
+    Profile(ProfileSwitch, ReplySender<ProfileState, SwitchRefusal>),
     Report(ReportAsk, ReplySender<(), Nak>),
     Get(PropertyAsk, ReplySender<PeData>),
     Set(PropertyAsk, ReplySender<PeStatus>),
@@ -366,6 +366,11 @@ struct Published {
 }
 
 impl InputShared {
+    /// What `read` makes of the port's info, under its lock.
+    pub(crate) fn read<T>(&self, read: impl FnOnce(&MidiInputInfo) -> T) -> T {
+        read(&self.inbox.lock().info)
+    }
+
     /// Queues `request` with its `reply` when the port can take it now and
     /// `lists` says the peer and what is asked of it are still listed in the
     /// port's info; otherwise hands the reply back with why: [`Shut::Released`]

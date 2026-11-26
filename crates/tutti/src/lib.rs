@@ -1041,7 +1041,7 @@ pub mod midi {
     pub use tutti_session::{
         ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
+        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, SwitchRefusal, WholeProfile,
     };
     #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

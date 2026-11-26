@@ -3502,10 +3502,14 @@ fn a_switch_over_a_maximum_that_arrives_before_it_is_sent_is_not_sent_and_says_s
     let told = polled(&mut wire, 120);
     assert_eq!(
         request_answers(&told),
-        [&Answer::SwitchLost {
+        [&Answer::SwitchRefused {
             request: ProfileRequest::SetOn {
                 address: channel(0),
                 profile: profile(2),
+            },
+            error: ProfileError::OverMaximum {
+                requested: ProfileChannels::of(3),
+                max: ProfileChannels::of(2),
             },
         }]
     );

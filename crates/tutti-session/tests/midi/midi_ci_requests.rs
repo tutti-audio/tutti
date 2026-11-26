@@ -19,7 +19,7 @@ use tutti_session::Peer as _;
 use tutti_session::Resource as _;
 use tutti_session::{
     ChannelProfile, ListedProfile, MidiInput, MidiRouteRule, PeerError, PeerEvent, ReportPeer,
-    ResourceFact, Session, SessionEvent,
+    ResourceFact, Session, SessionEvent, SwitchRefusal,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
 
@@ -46,6 +46,11 @@ impl Wire {
     }
 
     fn new(switch: Reply, report: Reply) -> Self {
+        Self::declaring(switch, report, None)
+    }
+
+    /// As [`new`](Self::new), the peer declaring at most `max` Channels for its Profile.
+    fn declaring(switch: Reply, report: Reply, max: Option<u16>) -> Self {
         let (mut s, fake) = hot_plug_session_ci(DeviceIdentity {
             manufacturer: ManufacturerId::NON_COMMERCIAL,
             family: [U7::of(1); 2],
@@ -63,6 +68,7 @@ impl Wire {
         let mut peer = MpePeer::new();
         peer.switch = switch;
         peer.report = report;
+        peer.max = max;
         let mut wire = Self {
             s,
             fake,
@@ -129,6 +135,33 @@ impl Wire {
             .expect("listed")
             .state()
     }
+}
+
+/// M2-102 section 2.5.1: a switch for more Channels than the peer declared is refused as
+/// that, not as a peer that went away, and nothing reaches the peer.
+/// Spec: m2-102/2.5.1#3, m2-120/3.1#1
+#[test]
+fn a_switch_for_more_channels_than_the_peer_declared_is_refused_as_over_the_maximum() {
+    let mut wire = Wire::declaring(Reply::Answer, Reply::Answer, Some(2));
+    wire.run(60);
+    let mut request = wire.profile().enable(four());
+    wire.run(30);
+    assert_eq!(
+        wire.result(&mut request),
+        Some(Err(PeerError::Refused(SwitchRefusal::OverMaximum {
+            requested: tutti_midi_ci::ProfileChannels::of(4),
+            max: tutti_midi_ci::ProfileChannels::of(2),
+        })))
+    );
+    assert!(
+        !wire.peer.asked.iter().any(|a| matches!(a, Asked::On(_))),
+        "nothing was sent"
+    );
+    let mut within = wire
+        .profile()
+        .enable(ChannelCount::new(2).expect("a count"));
+    wire.run(30);
+    assert_eq!(wire.result(&mut within), Some(Ok(ProfileState::Enabled)));
 }
 
 fn four() -> ChannelCount {
@@ -229,7 +262,7 @@ fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     let mut wire = Wire::new(Reply::Refuse, Reply::Answer);
     let mut request = wire.profile().enable(four());
     wire.run(30);
-    let Some(Err(PeerError::Refused(nak))) = wire.result(&mut request) else {
+    let Some(Err(PeerError::Refused(SwitchRefusal::Nak(nak)))) = wire.result(&mut request) else {
         panic!("a refusal");
     };
     assert_eq!(nak.status, NakStatus::ProfileNotSupported);

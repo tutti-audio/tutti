@@ -1492,6 +1492,9 @@ pub(crate) struct MpePeer {
     pub(crate) muid: tutti_midi_ci::Muid,
     pub(crate) switch: Reply,
     pub(crate) report: Reply,
+    /// The most Channels it declares for the MPE Profile when asked, `None` to leave the
+    /// inquiry unanswered.
+    pub(crate) max: Option<u16>,
     /// What the session asked of it so far.
     pub(crate) asked: Vec<Asked>,
 }
@@ -1526,6 +1529,7 @@ impl MpePeer {
             muid: tutti_midi_ci::Muid::of(0x0012_3456),
             switch: Reply::Answer,
             report: Reply::Answer,
+            max: None,
             asked: Vec::new(),
         }
     }
@@ -1614,6 +1618,29 @@ impl MpePeer {
                             .unwrap(),
                         );
                     }
+                }
+                Decoded::Message(CiMessage::ProfileDetailsInquiry {
+                    header,
+                    profile,
+                    target,
+                    ..
+                }) if self.max.is_some() => {
+                    let max = tutti_midi_ci::ProfileChannels::of(self.max.unwrap_or(0));
+                    answers.extend(
+                        CiMessage::ProfileDetailsReply {
+                            header: at(header.device_id),
+                            to: header.source,
+                            profile,
+                            target,
+                            data: tutti_midi_ci::ChannelsDetail {
+                                in_use: tutti_midi_ci::ProfileChannels::of(0),
+                                max,
+                            }
+                            .to_data(),
+                        }
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
+                    );
                 }
                 Decoded::Message(CiMessage::SetProfileOn { source, format, .. }) => {
                     match self.switch {
