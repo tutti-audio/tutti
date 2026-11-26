@@ -356,11 +356,12 @@ impl PluginLoad {
             }
             Err(e) => (Err(e), None),
         };
-        // The writes the state did not hold, once the plugin took it: the epoch
-        // the state began, replayed once.
-        if let (Ok(plugin), Some(Ok(())), Some(saved)) = (&plugin, &restore, &self.state) {
-            state::replay(plugin.handle(), saved.pending());
-        }
+        // The writes the state did not hold, once the plugin took it: replayed
+        // once the plugin is a record's, through its ledger.
+        let replay = match (&plugin, &restore, &self.state) {
+            (Ok(_), Some(Ok(())), Some(saved)) => saved.pending().to_vec(),
+            _ => Vec::new(),
+        };
         if let (Ok(plugin), Some(Err(e))) = (&plugin, &restore) {
             tracing::warn!(
                 "{}: saved state was not restored ({e}); the plugin is loaded at its \
@@ -396,6 +397,7 @@ impl PluginLoad {
             plugin,
             restore,
             mirror,
+            replay,
         }
     }
 }
@@ -425,6 +427,9 @@ struct Open {
     /// The state restore, if one was asked for, and the refusal when it was refused.
     restore: Option<Result<(), StateError>>,
     mirror: Option<Mirror>,
+    /// The writes the restored state did not hold, to replay through the
+    /// record's ledger once the plugin is one's.
+    replay: Vec<(tutti_units::ParamId, tutti_units::Normalized)>,
 }
 
 impl Open {
@@ -434,6 +439,7 @@ impl Open {
             plugin: Err(why),
             restore: None,
             mirror: None,
+            replay: Vec::new(),
         }
     }
 }
@@ -2162,6 +2168,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             plugin,
             restore,
             mirror,
+            replay: _,
         } = opened;
         let client = match plugin.map(HostPlugin::into_client) {
             Ok(Ok(client)) => client,
@@ -2328,6 +2335,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return;
         };
+        // The writes the restored snapshot did not hold, through the new
+        // plugin's ledger: the swap ended the old one's epoch, so nothing owed by
+        // the dead instance is sent over them.
+        if matches!(restore, StateRestore::Restored { .. })
+            && let Some(saved) = &snapshot
+        {
+            hosted.writes.send_each(&hosted.handle, saved.pending());
+        }
         hosted.snapshot = snapshot;
         hosted.withheld = withheld_bytes;
         hosted.snapshot_from = snapshot_from;

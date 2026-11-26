@@ -763,9 +763,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return Err(SwapPluginError::Busy(with));
         }
         let (install, handle) = with.into_parts();
-        let Install { plugin, origin, .. } = install;
+        let Install {
+            plugin,
+            origin,
+            replay,
+            ..
+        } = install;
         match self.swap_installed(node.erase(), plugin, origin) {
             Ok(rebinder) => {
+                // After the swap ended the old plugin's epoch.
+                if let Some(hosted) = self.graph.plugins.get(&node.erase()) {
+                    hosted.writes.send_each(&hosted.handle, &replay);
+                }
                 self.link_node(node, NodeLink::of(handle), rebinder);
                 Ok(())
             }
@@ -810,8 +819,12 @@ impl ApplySealed<f32> for LoadedPlugin {
             plugin,
             mirror,
             origin,
+            replay,
         } = install;
         let (key, rebinder) = session.install_plugin(plugin, mirror, origin);
+        if let Some(hosted) = session.graph.plugins.get(&key.erase()) {
+            hosted.writes.send_each(&hosted.handle, &replay);
+        }
         session.link_node(key, NodeLink::of(instance), rebinder);
         Ok(key)
     }

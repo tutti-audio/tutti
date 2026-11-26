@@ -20,6 +20,7 @@
 //! the plugin's editor-only in-process instance (an Audio Unit's) load the state,
 //! on the main thread at the session's next update.
 
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -271,9 +272,10 @@ pub type RestoreStateOutOfProcess = OutOfProcessOp<RestoreStateOp>;
 pub struct RestoreStateOp {
     landed: Landed,
     saved: Saved,
-    /// The plugin's handle, which the pending writes are replayed through once
-    /// the state has loaded.
+    /// The plugin's handle and its write ledger, which the pending writes are
+    /// replayed through once the state has loaded: the one write path.
     handle: PluginHandle,
+    writes: Arc<crate::value::WriteLedger>,
 }
 
 impl OpSealed for RestoreStateOp {}
@@ -312,10 +314,13 @@ impl PluginOp for RestoreStateOp {
             mut landed,
             saved,
             handle,
+            writes,
         } = self;
         // The writes the state does not hold, after it: the load made every
-        // write before it stale, so these are the plugin's wanted values.
-        replay(&handle, saved.pending());
+        // write before it stale, so these are the plugin's wanted values. Each
+        // is sent as any write is: one the plugin does not answer for is owed,
+        // one it refuses is told.
+        writes.send_each(&handle, saved.pending());
         let state = saved.into_state();
         // What `Session::apply` has the editor-only instance load, once the
         // server took the state.
@@ -324,15 +329,6 @@ impl PluginOp for RestoreStateOp {
             state,
         });
         RestoredState(landed)
-    }
-}
-
-/// Sends `pending` to the plugin of `handle`, the newest write of each
-/// parameter. A write the plugin refuses (it no longer declares the parameter, or
-/// declares it read-only) was refused when it was made too, so none is owed.
-pub(crate) fn replay(handle: &PluginHandle, pending: &[(ParamId, Normalized)]) {
-    for &(id, value) in pending {
-        let _ = handle.send_parameter(id, value);
     }
 }
 
@@ -479,6 +475,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
                 landed,
                 saved,
                 handle: hosted.handle.clone(),
+                writes: Arc::clone(&hosted.writes),
             },
         ))
     }

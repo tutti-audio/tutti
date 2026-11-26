@@ -416,6 +416,15 @@ impl WriteLedger {
         owed.settle(handle, &self.lost, id, value);
     }
 
+    /// Sends each of `pending` (the writes a saved state did not hold) as
+    /// [`send`](Self::send) sends a write: a replay is a write like any other, so
+    /// what the plugin does not answer for is owed and what it refuses is told.
+    pub(crate) fn send_each(&self, handle: &PluginHandle, pending: &[(ParamId, Normalized)]) {
+        for &(id, value) in pending {
+            self.send(handle, id, value);
+        }
+    }
+
     /// Sends again each value the plugin did not take for want of an answer
     /// (a parameter list), and returns the refusals not told yet. The main
     /// thread's `Phase::Plugins`.

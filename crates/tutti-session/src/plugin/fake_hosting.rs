@@ -84,6 +84,17 @@ pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Ses
 pub(super) struct Inert {
     /// The thread the backend dropped on: the last owner of the handle lets go there.
     pub(super) dropped_on: Arc<tutti_rt::Mutex<Option<std::thread::ThreadId>>>,
+    /// How a parameter write is answered: [`Inert::TAKES`] takes it (and
+    /// records it in `sent`).
+    pub(super) refuse: Arc<std::sync::atomic::AtomicU8>,
+    /// The writes the backend took, in order.
+    pub(super) sent: Arc<tutti_rt::Mutex<Vec<(ParamId, Normalized)>>>,
+}
+
+impl Inert {
+    pub(super) const TAKES: u8 = 0;
+    pub(super) const UNDECLARED: u8 = 1;
+    pub(super) const UNANSWERED: u8 = 2;
 }
 
 impl Drop for Inert {
@@ -105,10 +116,17 @@ impl tutti_plugin_types::AnyThread for Inert {
 
     fn set_parameter_value(
         &self,
-        _id: ParamId,
-        _value: Normalized,
+        id: ParamId,
+        value: Normalized,
     ) -> Result<(), tutti_plugin_types::ParamWriteError> {
-        Ok(())
+        match self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            Self::UNDECLARED => Err(tutti_plugin_types::ParamWriteError::Undeclared(id)),
+            Self::UNANSWERED => Err(tutti_plugin_types::ParamWriteError::Unanswered(id)),
+            _ => {
+                self.sent.lock().push((id, value));
+                Ok(())
+            }
+        }
     }
     fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
         None

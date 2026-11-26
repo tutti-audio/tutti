@@ -12,6 +12,7 @@ use tutti_plugin_types::{PluginRef, PluginTail, StateError, StateUse};
 use tutti_units::{SampleRate, Samples};
 
 use super::{Inert, Run as _, host};
+
 use crate::plugin::{PluginApplyError, PluginSignal};
 use crate::{AnyPlugin, DetachedSession, Key, PeerState, Saved, Session};
 
@@ -320,4 +321,85 @@ fn a_restore_is_pending_while_a_node_drains_and_stalls_at_its_deadline() {
         Poll::Ready(Err(StateError::Stalled { .. }))
     ));
     assert_eq!(loads(&fake), 1, "a stalled restore asked nothing");
+}
+
+/// A session whose fake plugin's backend answers parameter writes as `refuse`
+/// says, with the backend's cells to read and move.
+fn hosted_answering() -> (DetachedSession, Key<AnyPlugin>, Inert) {
+    let mut s = session();
+    let (_fake, loaded) = FakePlugin::new();
+    let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
+    let backend = Inert::default();
+    let cells = Inert {
+        dropped_on: Arc::clone(&backend.dropped_on),
+        refuse: Arc::clone(&backend.refuse),
+        sent: Arc::clone(&backend.sent),
+    };
+    let handle = PluginHandle::from_backend(
+        Arc::new(backend),
+        Some(control),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
+        Default::default(),
+        Default::default(),
+    );
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let key = host(&mut s, node, handle, plugin());
+    s.commit();
+    (s, key, cells)
+}
+
+/// **A replayed write is a write like any other: one the plugin refuses as
+/// undeclared (a rescan dropped the parameter between the save and the restore)
+/// raises `ParamUndeclared` once.**
+#[test]
+fn a_replayed_write_the_plugin_refuses_as_undeclared_is_told_once() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, key, cells) = hosted_answering();
+    let id = tutti_units::ParamId::new(7);
+    cells.refuse.store(Inert::UNDECLARED, SeqCst);
+    let saved = Saved::with_pending(
+        PeerState::of_plugin(plugin(), vec![1]),
+        vec![(id, tutti_units::Normalized::of(0.5))],
+    );
+    let _restored = s
+        .restore_state(&key, saved)
+        .unwrap()
+        .run(tutti_fixtures::main_thread())
+        .unwrap();
+    let mut told = 0;
+    for _ in 0..3 {
+        told += s
+            .update()
+            .into_iter()
+            .filter(|e| {
+                matches!(e, crate::SessionEvent::Plugin(p)
+                    if matches!(p.change, crate::PluginChange::ParamUndeclared { id: got } if got == id))
+            })
+            .count();
+    }
+    assert_eq!(told, 1);
+}
+
+/// **A replayed write the plugin did not answer for is owed and sent again at
+/// the next phase**, once.
+#[test]
+fn a_replayed_write_the_plugin_did_not_answer_for_is_owed_and_sent_again() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, key, cells) = hosted_answering();
+    let id = tutti_units::ParamId::new(7);
+    let value = tutti_units::Normalized::of(0.5);
+    cells.refuse.store(Inert::UNANSWERED, SeqCst);
+    let saved = Saved::with_pending(PeerState::of_plugin(plugin(), vec![1]), vec![(id, value)]);
+    let _restored = s
+        .restore_state(&key, saved)
+        .unwrap()
+        .run(tutti_fixtures::main_thread())
+        .unwrap();
+    let _ = s.update();
+    assert!(cells.sent.lock().is_empty(), "no answer yet");
+    cells.refuse.store(Inert::TAKES, SeqCst);
+    let _ = s.update();
+    assert_eq!(*cells.sent.lock(), [(id, value)]);
+    let _ = s.update();
+    assert_eq!(cells.sent.lock().len(), 1, "owed once");
 }
