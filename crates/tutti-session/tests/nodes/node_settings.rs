@@ -14,7 +14,7 @@ use tutti_nodes::{
     DelayNode, DelaySync, GateConfig, GateControls, GateNode, KeyFilter, KeySource, LfoConfig,
     LfoNode, LfoShape, LfoSync, MaxDelay, NoteTimes,
 };
-use tutti_session::{InputPort, Key, MainOutput, OutputPort, Session, ValueErrorKind};
+use tutti_session::{InputPort, Key, MainOutput, OutputPort, Replacement, Session, ValueErrorKind};
 use tutti_units::{
     Amplitude, BeatsPerCycle, CompressionRatio, Db, Feedback, Hz, Q, SampleRate, Seconds,
 };
@@ -353,4 +353,38 @@ fn a_setting_in_the_nodes_own_enum_is_set_and_read_through_its_key() {
         assert_eq!(s.get(node.sync()).unwrap(), word);
         assert_eq!(pace.load(), word);
     }
+}
+
+/// A delay declared at `sync`.
+fn delay_declared(sync: DelaySync) -> DelayNode<f32> {
+    let layout = DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(2.0)))
+        .build()
+        .expect("a layout");
+    DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+        sync,
+        ..DelayControls::DEFAULT
+    }))
+}
+
+/// **A replace keeps a setting the app set, unless its declared initial changed**: a delay
+/// set to `Synced` and replaced by one declared `Free` (as the first was) reads `Synced`; one
+/// declared `Synced` (a changed declaration) reads its new initial.
+#[test]
+fn a_replace_keeps_a_set_setting_unless_its_initial_changed() {
+    let mut s = session();
+    let delay = s.graph().add(delay_declared(DelaySync::Free));
+    s.set(delay.sync().to(DelaySync::Synced)).unwrap();
+
+    let delay = s
+        .graph()
+        .replace(delay, Replacement::new(delay_declared(DelaySync::Free)))
+        .unwrap_or_else(|_| panic!("a running graph swaps at once"));
+    assert_eq!(s.get(delay.sync()).unwrap(), DelaySync::Synced, "kept");
+
+    s.set(delay.sync().to(DelaySync::Free)).unwrap();
+    let delay = s
+        .graph()
+        .replace(delay, Replacement::new(delay_declared(DelaySync::Synced)))
+        .unwrap_or_else(|_| panic!("a running graph swaps at once"));
+    assert_eq!(s.get(delay.sync()).unwrap(), DelaySync::Synced, "changed");
 }

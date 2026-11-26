@@ -250,17 +250,12 @@ struct Held {
 }
 
 impl Held {
-    /// Registers the params under `node`, seeded from `outgoing`, and the slots.
+    /// Registers the params and the slots under `node`, each seeded from `outgoing`.
     fn provide(&self, values: &ValueTable, node: NodeKey, outgoing: &Outgoing) {
         if let Some(set) = &self.params {
             values.address(node, self.owner, set.clone(), outgoing);
         }
-        self.provide_slots(values, node);
-    }
-
-    /// Registers the published values under `node`.
-    fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
-        values.provide_node(node, &self.published, &self.settings);
+        values.provide_node(node, &self.published, &self.settings, outgoing);
     }
 }
 
@@ -1549,7 +1544,12 @@ impl<F: Float> Graph<F> {
     /// the call, under the value lock, each param the two declare at one
     /// address in one unit takes the outgoing node's value when both were
     /// declared at the same initial value and the value is finite; a changed
-    /// declaration keeps its new initial. An address the incoming node lacks is
+    /// declaration keeps its new initial. A kinded setting and a published
+    /// value (a clip's window, loop, direction and speed, a MIDI clip's events
+    /// and harmony) of the same kind take the outgoing node's value, the
+    /// session's base for a published one, under the same rule: unless the
+    /// declared initial (a setting's word, a published value's own equality)
+    /// changed. An address the incoming node lacks is
     /// dropped (a call on it is `NoSuchTarget`). The seeding is no app write:
     /// no watcher sees it and no edit-log mark is made.
     ///
@@ -1731,7 +1731,7 @@ impl<F: Float> Graph<F> {
 
     /// The outgoing node's controls at `node`, which a swap that took
     /// replaced: its values go, and the controls are held until the outgoing
-    /// unit has left the render. Its params, which the incoming node's are
+    /// unit has left the render. Its params and slots, which the incoming node's are
     /// seeded from, are handed back.
     fn retire_outgoing(&mut self, node: NodeKey) -> Outgoing {
         let Some(entry) = self.nodes.get_mut(&node) else {
@@ -1950,9 +1950,6 @@ impl<F: Float> Graph<F> {
         self.values.retire(node);
         entry.controls = stash.controls;
         self.values.reinstate(node, stash.params);
-        if let Some(held) = &entry.controls {
-            held.provide_slots(&self.values, node);
-        }
     }
 
     /// How many event inputs `node` declares.
