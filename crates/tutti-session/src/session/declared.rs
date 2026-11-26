@@ -9,7 +9,7 @@ use std::fmt;
 
 use thiserror::Error;
 use tutti_buffers::Float;
-use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Shapes};
+use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, NodeSpec, Shape, Shapes};
 use tutti_units::Gain;
 
 use crate::graph::Split;
@@ -95,8 +95,9 @@ pub enum PatchError<K> {
     /// A wire names a key that no part of the patch declares.
     #[error("{0:?} is mentioned by a wire but not declared in the patch")]
     Undeclared(K),
-    /// A wire closes a cycle of direct audio edges with the edges the graph
-    /// holds and the wires declared before it. A feedback edge is not one.
+    /// A wire closes a cycle the graph would not compile, with the edges the
+    /// graph holds and the wires declared: audio, event and bus. A feedback
+    /// edge is not one.
     #[error("the wire {ends:?} closes a cycle of direct edges")]
     Cycle {
         /// The wire.
@@ -155,22 +156,6 @@ struct Planned<K, F: Float> {
     nodes: Vec<PlannedNode<K, F>>,
     shapes: Shapes,
     at: BTreeMap<K, NodeKey>,
-}
-
-/// Whether `goal` is reachable from `start` over `after`, `start` itself
-/// included.
-fn reaches(after: &BTreeMap<NodeKey, BTreeSet<NodeKey>>, start: NodeKey, goal: NodeKey) -> bool {
-    let mut seen = BTreeSet::new();
-    let mut open = vec![start];
-    while let Some(node) = open.pop() {
-        if node == goal {
-            return true;
-        }
-        if seen.insert(node) {
-            open.extend(after.get(&node).into_iter().flatten());
-        }
-    }
-    false
 }
 
 /// What a patch declared of one key, and the node it made.
@@ -447,8 +432,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     ends: ends.clone(),
                     cause,
                 })?;
-            if let Some(bus) = resolved.bus() {
-                buses.push(bus);
+            if let Resolved::Bus(from, to) = resolved {
+                buses.push((from, to));
                 bus_ends.push(ends);
             }
         }
@@ -461,50 +446,58 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         Ok(())
     }
 
-    /// Refuses a wire that closes a cycle of direct audio edges: the graph
-    /// holds, less the edges this patch takes out, plus the declared wires. A
-    /// feedback edge is the author's own and is not one.
+    /// Refuses a wire that closes a cycle the graph would not compile: the
+    /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle)) over its wiring, less the
+    /// edges this patch takes out, plus the declared wires. A feedback edge is
+    /// cut by it.
     fn check_acyclic(
         &self,
         planned: &Planned<K, C::Float>,
         wires: &BTreeMap<WireEnds<K>, KeptWire>,
         kept: &Kept<K, C::Float>,
     ) -> Result<(), PatchError<K>> {
-        let mut taken = Vec::new();
+        let pending = Some(&planned.shapes);
+        let mut spec = self.graph.live_spec();
+        for (&node, shape) in &planned.shapes {
+            let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
+            spec.topology.nodes.insert(node, declared);
+        }
         for ends in kept.wires.keys().filter(|ends| !wires.contains_key(*ends)) {
             let held = [Some(ends.source()), ends.sink()]
                 .into_iter()
                 .flatten()
                 .all(|key| kept.nodes.contains_key(key));
             if held {
-                let resolved = Resolved::of(ends, |key| kept.nodes[key].node);
-                taken.extend(
-                    resolved
-                        .edges(&self.graph, None)
-                        .into_iter()
-                        .filter_map(Graph::<C::Float>::edge_id),
+                Resolved::of(ends, |key| kept.nodes[key].node).in_spec(
+                    &mut spec,
+                    &self.graph,
+                    None,
+                    false,
                 );
             }
         }
-        let mut after: BTreeMap<NodeKey, BTreeSet<NodeKey>> = BTreeMap::new();
-        for (id, from, to) in self.graph.direct_links() {
-            if !taken.contains(&id) {
-                after.entry(from).or_default().insert(to);
-            }
+        let named: Vec<_> = wires
+            .keys()
+            .map(|ends| {
+                let resolved = Resolved::of(ends, |key| planned.at[key]);
+                (
+                    ends,
+                    resolved.in_spec(&mut spec, &self.graph, pending, true),
+                )
+            })
+            .collect();
+        let Some(cycle) = spec.cycle() else {
+            return Ok(());
+        };
+        // Only a cycle through a declared wire is the patch's; any other the
+        // commit reports.
+        match named
+            .into_iter()
+            .find(|(_, edges)| edges.iter().any(|edge| cycle.contains(edge)))
+        {
+            Some((ends, _)) => Err(PatchError::Cycle { ends: ends.clone() }),
+            None => Ok(()),
         }
-        for ends in wires.keys() {
-            let resolved = Resolved::of(ends, |key| planned.at[key]);
-            for edge in resolved.edges(&self.graph, Some(&planned.shapes)) {
-                let (from, Some(to)) = (edge.source().node(), edge.sink().node()) else {
-                    continue;
-                };
-                if reaches(&after, to, from) {
-                    return Err(PatchError::Cycle { ends: ends.clone() });
-                }
-                after.entry(from).or_default().insert(to);
-            }
-        }
-        Ok(())
     }
 
     /// Disconnects the wires the last patch made and this one does not.

@@ -40,7 +40,7 @@ impl From<SrcConfig> for Src {
 impl Node for Src {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.layout)
-            .events(0, 1)
+            .events(1, 1)
             .param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -80,7 +80,7 @@ impl From<PassConfig> for Pass {
 impl Node for Pass {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(self.layout)
-            .events(1, 0)
+            .events(1, 1)
             .param_ports(self.declared_ports())
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -457,4 +457,33 @@ fn a_wire_closing_a_cycle_is_refused_with_nothing_changed() {
     assert_eq!(s.graph_ref().node_count(), nodes_now);
 
     s.patch((nodes(), back())).unwrap();
+}
+
+/// **A cycle through event or bus wires is refused too**, as one of audio
+/// is: the graph's own search reads them all.
+#[test]
+fn an_event_or_bus_cycle_is_refused_with_nothing_changed() {
+    let mut s = session();
+    let empty = s.graph_ref().node_count();
+    let nodes = || (NodeDecl::new("src", src()), NodeDecl::new("pass", pass()));
+    let (a, b) = nodes();
+    let events = (
+        a.event_output(0).connect(b.event_input(0)),
+        b.event_output(0).connect(a.event_input(0)),
+    );
+    let refused = s.patch((a, b, events));
+    assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
+    assert_eq!(s.graph_ref().node_count(), empty);
+
+    let (a, b) = (
+        NodeDecl::new("pass", pass()),
+        NodeDecl::new("other", pass()),
+    );
+    let buses = (
+        a.bus_output(0).connect(b.bus_input(0)),
+        b.bus_output(0).connect(a.bus_input(0)),
+    );
+    let refused = s.patch((a, b, buses));
+    assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
+    assert_eq!(s.graph_ref().node_count(), empty);
 }

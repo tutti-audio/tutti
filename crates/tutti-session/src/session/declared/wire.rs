@@ -3,7 +3,10 @@
 //! [`Graph::connect`] takes.
 
 use tutti_buffers::Float;
-use tutti_graph::{BusOutputPort, EventInputPort, EventOutputPort, NodeBus, NodeKey};
+use tutti_graph::{
+    BusOutputPort, CycleEdge, EdgeId, EventInputPort, EventOutputPort, GraphSpec, NodeBus, NodeKey,
+    PortSink,
+};
 use tutti_units::Gain;
 
 use crate::graph::Pending;
@@ -77,14 +80,6 @@ impl Resolved {
         }
     }
 
-    /// The bus wire's ends, for the lowering check.
-    pub(crate) fn bus(self) -> Option<(BusOutputPort, BusInputPort)> {
-        match self {
-            Self::Bus(o, i) => Some((o, i)),
-            _ => None,
-        }
-    }
-
     /// The audio edges the wire is: one channel, one per channel of a main
     /// bus, none for a bus or an event wire.
     pub(crate) fn edges<F: Float>(
@@ -105,6 +100,63 @@ impl Resolved {
                 .unwrap_or_default(),
             Self::Bus(..) | Self::Event(..) => Vec::new(),
         }
+    }
+
+    /// Writes the wire into `spec` (or takes it out), and names the edges it
+    /// is there: what `GraphSpec::cycle` reports a cycle by.
+    pub(crate) fn in_spec<F: Float>(
+        self,
+        spec: &mut GraphSpec,
+        graph: &Graph<F>,
+        pending: Pending<'_>,
+        connect: bool,
+    ) -> Vec<CycleEdge> {
+        let mut named = Vec::new();
+        match self {
+            Self::Channel(..) | Self::Main(..) => {
+                for edge in self.edges(graph, pending) {
+                    let Some(EdgeId {
+                        sink: PortSink::Port(at),
+                        from,
+                    }) = Graph::<F>::edge_id(edge)
+                    else {
+                        continue;
+                    };
+                    if connect {
+                        spec.connect(at, from);
+                    } else {
+                        spec.disconnect(at, from);
+                    }
+                    named.push(CycleEdge::Audio(at));
+                }
+            }
+            Self::Event(from, at) => {
+                if connect {
+                    spec.connect_events(at, tutti_graph::EventEdge::Direct(from));
+                } else {
+                    spec.disconnect_events(at, from);
+                }
+                named.push(CycleEdge::Event { at, from });
+            }
+            Self::Bus(from, to) => match to.0 {
+                BusEnd::Node(at) => {
+                    if connect {
+                        spec.connect_bus(from, at);
+                    } else {
+                        spec.disconnect_bus(from, at);
+                    }
+                    named.push(CycleEdge::Bus { at, from });
+                }
+                BusEnd::MainOutput => {
+                    if connect {
+                        spec.connect_bus_to_main_output(from);
+                    } else {
+                        spec.disconnect_bus_from_main_output(from);
+                    }
+                }
+            },
+        }
+        named
     }
 
     /// Whether the graph holds the wire: every edge of it, or for an event or

@@ -3,8 +3,8 @@
 
 use tutti_buffers::Float;
 use tutti_graph::{
-    BusError, BusOutputPort, Buses, Edge as RawEdge, EdgeFade, EdgeId, EventInputPort,
-    EventOutputPort, NodeKey, PortSource, Shape, Shapes,
+    BusError, BusOutputPort, Buses, EdgeFade, EdgeId, EventInputPort, EventOutputPort, GraphSpec,
+    NodeKey, Shape, Shapes,
 };
 
 use crate::key::{BusEnd, BusInputPort, InEnd, MainSink};
@@ -18,21 +18,20 @@ use super::Graph;
 pub(crate) type Pending<'a> = Option<&'a Shapes>;
 
 impl<F: Float> Graph<F> {
-    /// Every direct audio link between two nodes the graph holds and is not
-    /// fading out: its edge, its source node and its sink node.
-    pub(crate) fn direct_links(&self) -> Vec<(EdgeId, NodeKey, NodeKey)> {
-        let mut links = Vec::new();
-        for (at, froms) in &self.editor.spec().topology.edges {
-            for &from in froms {
-                let id = EdgeId::into_port(*at, from);
-                if let RawEdge::Direct(PortSource::Node(source)) = from
-                    && !self.fading_out(id)
-                {
-                    links.push((id, source.node(), at.node()));
-                }
-            }
+    /// The graph's spec without the edges it is only fading out: the wiring
+    /// a new wire is searched for a cycle against.
+    pub(crate) fn live_spec(&self) -> GraphSpec {
+        let mut spec = self.editor.spec().clone();
+        spec.topology.edges.retain(|at, edges| {
+            edges.retain(|&e| !self.fading_out(EdgeId::into_port(*at, e)));
+            !edges.is_empty()
+        });
+        for feeds in spec.bus_edges.values_mut() {
+            feeds.retain(|feed| feed.fade != EdgeFade::Out);
         }
-        links
+        spec.main_output_sources
+            .retain(|feed| feed.fade != EdgeFade::Out);
+        spec
     }
 
     /// Whether the graph holds `edge` and is not fading it out.
