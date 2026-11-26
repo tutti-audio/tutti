@@ -43,6 +43,8 @@ tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = f
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # `Exclusive`, which makes the probe's `Send` reader `Sync` without a lock.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+# `Quantizer`, the encoder's dither and rounding of an integer file.
+tutti-dsp = { version = "0.0.1", path = "../tutti-dsp" }
 # No default features: the encoder drives flacenc's frame encoder on its own
 # workers, so flacenc's `par` (and its `serde`/`log`) are unused.
 flacenc = { version = "0.5", optional = true, default-features = false }

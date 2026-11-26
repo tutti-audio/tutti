@@ -19,6 +19,7 @@ use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut}
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
+use tutti_rt::SplitMix64;
 use tutti_timeline::RenderClock;
 use tutti_units::{Db, SampleRate, Samples};
 
@@ -270,7 +271,12 @@ fn open_lanes<F: FftFloat>(
         };
         let (sink, path) = match target {
             Target::File(file) => {
-                let chain = Box::new(open_file(&file, plan, job.rate())?);
+                let chain = Box::new(open_file(
+                    &file,
+                    plan,
+                    job.rate(),
+                    SplitMix64::mix(i as u64),
+                )?);
                 let path = file.path().to_path_buf();
                 match file.normalize {
                     None => (Sink::Stream { chain }, Some(path)),

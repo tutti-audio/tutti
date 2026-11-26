@@ -65,11 +65,15 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-graph",
         "tutti-dsp",
         "tutti-modulation",
-        "tutti-codec",
         "tutti-voicing",
         "tutti-sf2",
     ],
-    &["tutti-timeline", "tutti-plugin-types", "tutti-measure"],
+    &[
+        "tutti-timeline",
+        "tutti-plugin-types",
+        "tutti-measure",
+        "tutti-codec",
+    ],
     &[
         "tutti-engine",
         "tutti-nodes",
@@ -138,10 +142,17 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-midi-network",
         &["tutti-ump", "tutti-units", "tutti-platform", "tutti-rt"],
     ),
-    // `Exclusive`, which makes the probe's `Send` reader `Sync` without a lock.
+    // `Exclusive`, which makes the probe's `Send` reader `Sync` without a lock; `Quantizer`,
+    // the encoder's dither.
     (
         "tutti-codec",
-        &["tutti-units", "tutti-buffers", "tutti-platform", "tutti-rt"],
+        &[
+            "tutti-units",
+            "tutti-buffers",
+            "tutti-platform",
+            "tutti-rt",
+            "tutti-dsp",
+        ],
     ),
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (

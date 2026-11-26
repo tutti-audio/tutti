@@ -133,7 +133,6 @@ fn apply::Session::apply
 fn bounce::Bounce::channels
 fn bounce::Bounce::clock
 fn bounce::Bounce::create_new
-fn bounce::Bounce::dither
 fn bounce::Bounce::edit
 fn bounce::Bounce::file_topology
 fn bounce::Bounce::latency
@@ -142,8 +141,6 @@ fn bounce::Bounce::main_output_buffers
 fn bounce::Bounce::main_output_topology
 fn bounce::Bounce::map
 fn bounce::Bounce::new
-fn bounce::Bounce::no_dither
-fn bounce::Bounce::noise_shaping
 fn bounce::Bounce::normalize
 fn bounce::Bounce::on_event_loss
 fn bounce::Bounce::range
@@ -749,10 +746,7 @@ fn take::Take::placement
 fn take::Take::rolling
 fn take::Take::window
 fn take::TakeFile::create_new
-fn take::TakeFile::dither
 fn take::TakeFile::new
-fn take::TakeFile::no_dither
-fn take::TakeFile::noise_shaping
 fn take::TakeFile::wav
 fn take::TakePlacement::first_frame
 fn take::TakePlacement::latency

@@ -71,7 +71,6 @@ use tutti_platform::{Instant, WeakExecutor};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::Format;
-use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, CancelToken, Control, EventLossPolicy, FileTarget, GRAPH_MAX_BLOCK, Job,
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
@@ -278,14 +277,14 @@ impl MainOutputKind for BufferMainOutput {
 ///
 /// ```no_run
 /// # use tutti_session::{Bounce, Range, Session};
-/// # use tutti_codec::{Format, Pcm};
+/// # use tutti_codec::{Format, IntDepth, IntPcm, Pcm};
 /// # use tutti_graph::NodeKey;
 /// # use tutti_units::Beat;
 /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
 /// let rendering = session.bounce(
 ///     Bounce::new()
 ///         .range(Range::Beats(Beat::new(0.0), Beat::new(16.0)))
-///         .main_output("out/main_output.wav", Format::Wav(Pcm::Int24))
+///         .main_output("out/main_output.wav", Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
 ///         .stem(drums, "out/drums.wav"),
 /// )?;
 /// let rendered = rendering.await;
@@ -312,8 +311,6 @@ pub struct Bounce<N = NodeKey, M = NoMainOutput, F: Float = f32> {
     channels: Option<ChannelLayout>,
     file_topology: Option<ChannelTopology>,
     serial: bool,
-    dither: Option<DitherShape>,
-    noise_shaping: bool,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
     create_new: bool,
@@ -346,8 +343,6 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
             channels: None,
             file_topology: None,
             serial: false,
-            dither: Some(DitherShape::Triangular),
-            noise_shaping: false,
             on_event_loss: EventLossPolicy::default(),
             normalize: None,
             create_new: false,
@@ -358,9 +353,8 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
     /// The main output into a file at `path` as `format`: written beside it and
     /// renamed over it when the bounce finishes, so a cancelled or failed
     /// bounce leaves what was at the path as it was. [`Bounced::main_output`] is a
-    /// [`Written`]. A file main output is the one that has a rate conversion, a
-    /// dither and a normalize ([`resample`](Bounce::resample),
-    /// [`dither`](Bounce::dither), [`normalize`](Bounce::normalize)), which
+    /// [`Written`]. A file main output is the one that has a rate conversion and a
+    /// normalize ([`resample`](Bounce::resample), [`normalize`](Bounce::normalize)), which
     /// only a file honours: a [`main_output_buffers`](Self::main_output_buffers) bounce
     /// cannot be given them.
     pub fn main_output(
@@ -407,8 +401,6 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             channels,
             file_topology,
             serial,
-            dither,
-            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -427,8 +419,6 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             channels,
             file_topology,
             serial,
-            dither,
-            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -465,8 +455,6 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             channels,
             file_topology,
             serial,
-            dither,
-            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -489,8 +477,6 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             channels,
             file_topology,
             serial,
-            dither,
-            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -598,7 +584,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     }
 }
 
-/// What only a file honours: a rate conversion, a dither, a normalize, and the
+/// What only a file honours: a rate conversion, a normalize, and the
 /// stems that share the main output's format.
 impl<N, F: Float> Bounce<N, FileMainOutput, F> {
     /// Also writes `node`'s own outputs into a file at `path` in the main output's
@@ -617,29 +603,6 @@ impl<N, F: Float> Bounce<N, FileMainOutput, F> {
     /// Writes the files at another rate than the render's.
     pub fn resample(mut self, resample: Resample) -> Self {
         self.resample = Some(resample);
-        self
-    }
-
-    /// The dither applied when quantizing to an integer width: triangular
-    /// unless this or [`no_dither`](Self::no_dither) says otherwise. A float
-    /// width ignores it.
-    pub fn dither(mut self, shape: DitherShape) -> Self {
-        self.dither = Some(shape);
-        self
-    }
-
-    /// No dither when quantizing to an integer width: the rounding error is
-    /// left as it falls. A float width ignores it.
-    pub fn no_dither(mut self) -> Self {
-        self.dither = None;
-        self
-    }
-
-    /// Shapes the quantization error of an integer width
-    /// ([`FileTarget::noise_shaping`]): off unless this says so, independent of
-    /// the dither, and ignored by a float width.
-    pub fn noise_shaping(mut self) -> Self {
-        self.noise_shaping = true;
         self
     }
 
@@ -666,8 +629,6 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("channels", &self.channels)
             .field("file_topology", &self.file_topology)
             .field("serial", &self.serial)
-            .field("dither", &self.dither)
-            .field("noise_shaping", &self.noise_shaping)
             .field("on_event_loss", &self.on_event_loss)
             .field("normalize", &self.normalize)
             .field("create_new", &self.create_new)
@@ -1153,26 +1114,15 @@ pub enum BounceError {
     Stale,
 }
 
-/// `file` with the bounce's resample, dither, noise shaping and normalize, each only when set.
+/// `file` with the bounce's resample and normalize, each only when set.
 fn file_options(
     file: FileTarget,
     resample: Option<Resample>,
-    dither: Option<DitherShape>,
-    noise_shaping: bool,
     normalize: Option<NormalizeSpec>,
 ) -> FileTarget {
     let file = match resample {
         Some(resample) => file.resample(resample),
         None => file,
-    };
-    let file = match dither {
-        Some(shape) => file.dither(shape),
-        None => file.no_dither(),
-    };
-    let file = if noise_shaping {
-        file.noise_shaping()
-    } else {
-        file
     };
     match normalize {
         Some(normalize) => file.normalize(normalize),
@@ -2035,8 +1985,6 @@ where
             channels,
             file_topology,
             serial,
-            dither,
-            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -2070,13 +2018,7 @@ where
                     Some(topology) => file.topology(topology),
                     None => file,
                 };
-                let file = file_options(
-                    file,
-                    resample,
-                    dither,
-                    noise_shaping,
-                    normalize.map(NormalizeSpec::own),
-                );
+                let file = file_options(file, resample, normalize.map(NormalizeSpec::own));
                 refusing_existing(file, create_new).into()
             }
             None => {
@@ -2132,13 +2074,7 @@ where
                             0,
                         )),
                     };
-                    let file = file_options(
-                        FileTarget::new(path, format, layout),
-                        resample,
-                        dither,
-                        noise_shaping,
-                        gain,
-                    );
+                    let file = file_options(FileTarget::new(path, format, layout), resample, gain);
                     refusing_existing(file, create_new).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),

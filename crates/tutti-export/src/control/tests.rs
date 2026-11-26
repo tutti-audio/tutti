@@ -1,4 +1,6 @@
 use super::*;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 
 /// Every reading a control delivers while `run` drives it.
 fn delivered(weights: Weights, run: impl FnOnce(&mut Control<'_>)) -> Vec<Progress> {
@@ -171,8 +173,12 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
         ChannelLayout::STEREO,
     ))];
     let normalized = [Output::main_output(
-        FileTarget::new("n.wav", Format::Wav(Pcm::Int16), ChannelLayout::STEREO)
-            .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-1.0)))),
+        FileTarget::new(
+            "n.wav",
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))),
+            ChannelLayout::STEREO,
+        )
+        .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-1.0)))),
     )];
     for (outputs, steps, end) in [
         (&streaming, [(2u32, 0.025f32), (4, 0.05)], 0.05f32),

@@ -1,15 +1,15 @@
 //! Noise shaping: an error-feedback filter that moves the quantization error
 //! to where the ear is least sensitive.
 //!
-//! [`NoiseShaping`] is the filter, designed for one sample rate. The sink's
-//! quantizer runs it as error feedback: it quantizes `x + d + Σ c_k e[n-k]`
-//! by the rule in [`Sample`] and records `e[n] = y[n] - (x[n] + Σ c_k e[n-k])`,
+//! [`NoiseShaping`] is the filter, designed for one sample rate. The
+//! [`Quantizer`](crate::Quantizer) runs it as error feedback: it quantizes `x + d + Σ c_k e[n-k]`
+//! by the rule in [`Sample`](tutti_buffers::Sample) and records `e[n] = y[n] - (x[n] + Σ c_k e[n-k])`,
 //! the whole error including the dither `d`. So `y - x = e * NTF`, with
 //! `NTF(z) = 1 + Σ c_k z^-k`, and `e` is white at the unshaped error's
 //! variance whatever the signal is.
 
 use crate::{Complex, RealFft};
-use tutti_buffers::{Float, Interleaved, InterleavedMut, MonoMut, Sample};
+use tutti_buffers::MonoMut;
 use tutti_units::{Amplitude, Db, Hz, SampleRate};
 
 /// The weighting is held at its value at this frequency below it.
@@ -128,98 +128,6 @@ impl NoiseShaping {
     /// The taps `c_1..=c_n`.
     pub(crate) fn taps(&self) -> &[f64] {
         &self.taps
-    }
-}
-
-/// The running error-feedback state of every channel: the last `order`
-/// errors of each, sized at construction.
-///
-/// The fed-back error is held within two least significant bits. With dither up
-/// to one LSB in amplitude the error `y - (x + feedback)` is at most 1.5 LSB, so
-/// the bound is never reached while the quantizer is in range; it only acts when
-/// a value clips, where the error is as large as the overload. The feedback is
-/// then at most `2 Σ|c_k|` LSB and the filter forgets the overload after as
-/// many frames as it has taps.
-#[derive(Debug, Clone)]
-pub(crate) struct ErrorFeedback<F> {
-    /// `c_n..=c_1`: oldest error first, to match a window of the history.
-    taps: Vec<F>,
-    /// Per channel, `2 * order` errors: each is written at `head` and at
-    /// `head + order`, so `[head, head + order)` holds the last `order`
-    /// errors, oldest first, as one slice.
-    history: Vec<Vec<F>>,
-    head: usize,
-}
-
-impl<F: Float> ErrorFeedback<F> {
-    pub(crate) fn new(shaping: &NoiseShaping, channels: usize) -> Self {
-        let taps: Vec<F> = shaping
-            .taps()
-            .iter()
-            .rev()
-            .map(|&c| F::from_design(c))
-            .collect();
-        Self {
-            history: vec![vec![F::ZERO; 2 * taps.len()]; channels],
-            taps,
-            head: 0,
-        }
-    }
-
-    /// The largest error held in the history, in float units.
-    #[cfg(test)]
-    pub(crate) fn peak(&self) -> F {
-        self.history
-            .iter()
-            .flatten()
-            .fold(F::ZERO, |m, &e| m.max(e.abs()))
-    }
-
-    /// The largest error held for channel `c`, in float units.
-    #[cfg(test)]
-    pub(crate) fn peak_of(&self, c: usize) -> F {
-        self.history[c].iter().fold(F::ZERO, |m, &e| m.max(e.abs()))
-    }
-
-    /// Quantizes `dithered` (the signal `clean` with its noise) into `out` by
-    /// the rule in [`Sample`], feeding back the error of each value against
-    /// `clean`; returns the clips. `lsb` is one step of `S`.
-    pub(crate) fn process<S: Sample>(
-        &mut self,
-        lsb: Amplitude,
-        clean: Interleaved<'_, F>,
-        dithered: Interleaved<'_, F>,
-        mut out: InterleavedMut<'_, S>,
-    ) -> usize {
-        let order = self.taps.len();
-        let bound = F::from_unit(lsb) * F::lit(2.0);
-        let mut clipped = 0;
-        let frames = clean.iter().zip(dithered.iter()).zip(out.iter_mut());
-        for ((clean, dithered), out) in frames {
-            let channels = clean.iter().zip(dithered).zip(out).zip(&mut self.history);
-            for (((&x, &u), y), history) in channels {
-                let window = &history[self.head..self.head + order];
-                let feedback = self
-                    .taps
-                    .iter()
-                    .zip(window)
-                    .fold(F::ZERO, |acc, (&tap, &e)| acc + tap * e);
-                let (value, clip) = (u + feedback).convert_to_clipped::<S>();
-                *y = value;
-                clipped += usize::from(clip);
-                let error = value.convert_to::<F>() - (x + feedback);
-                // A non-finite input leaves nothing behind, a clip no more than the bound.
-                let error = if error.is_finite() {
-                    error.clamp(-bound, bound)
-                } else {
-                    F::ZERO
-                };
-                history[self.head] = error;
-                history[self.head + order] = error;
-            }
-            self.head = (self.head + 1) % order;
-        }
-        clipped
     }
 }
 

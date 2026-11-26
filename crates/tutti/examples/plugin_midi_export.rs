@@ -40,6 +40,8 @@ use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
     SampleRate, Samples, Session, SessionEvent, Written,
 };
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -151,7 +153,7 @@ fn play_to_file(
     out: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
-        bounce.main_output(out, Format::Wav(Pcm::Int24))
+        bounce.main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
     })
 }
 

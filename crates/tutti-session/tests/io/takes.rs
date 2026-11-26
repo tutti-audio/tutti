@@ -12,6 +12,8 @@ use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
@@ -1117,8 +1119,13 @@ fn signal_take(
     (samples, first)
 }
 
+/// A take into a WAV of the integer type `pcm`.
+fn int_take(path: std::path::PathBuf, pcm: IntPcm) -> TakeFile {
+    TakeFile::new(path, tutti_codec::Format::Wav(tutti_codec::Pcm::Int(pcm)))
+}
+
 fn int16(path: std::path::PathBuf) -> TakeFile {
-    TakeFile::new(path, tutti_codec::Format::Wav(tutti_codec::Pcm::Int16))
+    int_take(path, IntPcm::new(IntDepth::Int16))
 }
 
 /// **A take to an integer file is dithered by default, and the dither is triangular:** the
@@ -1143,26 +1150,85 @@ fn a_take_to_an_integer_file_is_triangular_dithered_by_default() {
     assert!((power - 0.25).abs() < 2.1 / n.sqrt(), "{power} over {n}");
 }
 
+/// **Takes armed together draw their own dither noise.** They are summed later, and one noise
+/// sequence would add coherently. Two takes of one constant, armed in one update, start at one
+/// frame, so equal noise would give equal files.
+#[test]
+fn takes_armed_together_do_not_share_dither_noise() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (wav(&dir, "a.wav"), wav(&dir, "b.wav"));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.signal = Some(constant);
+    rig.step(256);
+    let first = rig
+        .session
+        .record(Record::new(&rig.input, int16(a.clone())))
+        .expect("armed");
+    let second = rig
+        .session
+        .record(Record::new(&rig.input, int16(b.clone())))
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    first.finish();
+    second.finish();
+    rig.steps_until(|events| {
+        let ended = |e: &&SessionEvent| matches!(e, SessionEvent::Take(TakeEvent::Finished { .. }));
+        events.iter().filter(ended).count() == 2
+    });
+    let starts: Vec<_> = rig
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Take(TakeEvent::Finished { recorded, .. }) => {
+                Some(recorded.placement().first_frame())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(starts[0], starts[1], "the takes start together");
+    let read16 = |path: &std::path::Path| -> Vec<i16> {
+        hound::WavReader::open(path)
+            .unwrap()
+            .into_samples::<i16>()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let (a, b) = (read16(&a), read16(&b));
+    let n = a.len().min(b.len());
+    assert!(n > 200, "{n}");
+    assert_ne!(a[..n], b[..n], "two takes shared one noise sequence");
+}
+
 /// **`no_dither` writes the plain rounding, exactly:** every sample is the quantization of
 /// the level.
 #[test]
 fn a_take_with_no_dither_writes_the_rounded_value_exactly() {
-    let (samples, _) = signal_take(constant, |path| int16(path).no_dither());
+    let (samples, _) = signal_take(constant, |path| {
+        int_take(path, IntPcm::new(IntDepth::Int16).no_dither())
+    });
     let plain = tutti_codec::IntDepth::Int16.quantize(LEVEL);
     assert!(!samples.is_empty());
     assert!(samples.iter().all(|&s| s == plain), "{:?}", &samples[..8]);
 }
 
-/// **`noise_shaping` reaches the take's quantizer:** with no dither a sine is written as
+/// **`noise_shaping` reaches the take's encoder:** with no dither a sine is written as
 /// its plain rounding; fed back through the filter a good part of the samples round the
 /// other way, and each stays within the feedback bound
 /// `(1 + sum |c|) / 2` steps of the sine.
 #[test]
 fn a_take_with_noise_shaping_feeds_the_rounding_error_back() {
-    let (shaped, first) = signal_take(tone, |path| int16(path).no_dither().noise_shaping());
+    let (shaped, first) = signal_take(tone, |path| {
+        int_take(
+            path,
+            IntPcm::new(IntDepth::Int16).no_dither().noise_shaping(),
+        )
+    });
     let bound = 0.5
         * (1.0
-            + tutti_session::NoiseShaping::new(SampleRate::of(RATE))
+            + tutti_dsp::NoiseShaping::new(SampleRate::of(RATE))
                 .feedback_gain()
                 .get());
     let mut moved = 0;

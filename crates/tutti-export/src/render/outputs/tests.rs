@@ -2,6 +2,7 @@ use super::*;
 use crate::Setup;
 use crate::spill::SPILL_MEMORY_BYTES;
 use crate::{BufferTarget, Normalize, NormalizeSpec, Progress, TailPolicy};
+use tutti_buffers::FloatWidth;
 use tutti_codec::Pcm;
 use tutti_graph::GraphBuilder;
 use tutti_timeline::FrozenClock;
@@ -49,7 +50,7 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
     let mut control = Control::new(&token).on_progress(&mut watch);
     let target = crate::FileTarget::new(
         &path,
-        tutti_codec::Format::Wav(Pcm::Float32),
+        tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)),
         ChannelLayout::STEREO,
     )
     .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))));
@@ -142,7 +143,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
         Output::main_output(
             crate::FileTarget::new(
                 &path,
-                tutti_codec::Format::Wav(Pcm::Float32),
+                tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)),
                 ChannelLayout::STEREO,
             )
             .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),

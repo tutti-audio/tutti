@@ -55,14 +55,15 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, I24, Interleaved, InterleavedMut, Sample, Sink, SinkFailed};
-use tutti_codec::{FileEncoder, Format, IntDepth, Spec};
-use tutti_dsp::{DitherShape, DitherSink, NoiseShaping};
+use tutti_buffers::{
+    ChannelLayout, ChannelSet, Float, FloatWidth, Interleaved, InterleavedMut, Sample, Sink,
+    SinkFailed,
+};
+use tutti_codec::{FileEncoder, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::{Staged, StagedCommitError};
-use tutti_rt::{Bell, Listener};
+use tutti_rt::{Bell, Listener, SplitMix64};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{Recording, TakeId};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
@@ -178,66 +179,35 @@ pub struct Window {
 /// [`kept`](StagedCommitError::kept) and leaves the path alone; the app owns
 /// the kept file, and nothing removes it.
 ///
-/// A file of an integer width is quantized through a [`DitherSink`]: triangular
-/// dither unless [`dither`](Self::dither) or [`no_dither`](Self::no_dither)
-/// says otherwise, and error feedback with [`noise_shaping`](Self::noise_shaping).
-/// A float format has nothing to quantize and takes the frames as they are.
+/// A file of an integer type is quantized by the encoder as the format's
+/// [`IntPcm`](tutti_codec::IntPcm) says (triangular dither unless it says otherwise), and
+/// each take draws its own noise: takes armed together are summed later, and one noise
+/// sequence would add coherently. A float format has nothing to quantize and takes the frames
+/// as they are.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TakeFile {
     path: PathBuf,
     format: Format,
     create_new: bool,
-    dither: Option<DitherShape>,
-    noise_shaping: bool,
 }
 
 impl TakeFile {
     /// A file at `path`, in `format`, as wide as the input and at the graph's
-    /// rate, with triangular dither when `format` has an integer width.
+    /// rate.
     #[must_use]
     pub fn new(path: impl Into<PathBuf>, format: Format) -> Self {
         Self {
             path: path.into(),
             format,
             create_new: false,
-            dither: Some(DitherShape::Triangular),
-            noise_shaping: false,
         }
     }
 
     /// A WAV file of 32-bit float at `path`. An `f64` session keeps its frames
-    /// whole with [`new`](Self::new) and `Pcm::Float64`.
+    /// whole with [`new`](Self::new) and `Pcm::Float(FloatWidth::F64)`.
     #[must_use]
     pub fn wav(path: impl Into<PathBuf>) -> Self {
-        Self::new(path, Format::Wav(tutti_codec::Pcm::Float32))
-    }
-
-    /// The noise added when an integer width is quantized: triangular unless
-    /// this or [`no_dither`](Self::no_dither) says otherwise. A float format
-    /// ignores it.
-    #[must_use]
-    pub fn dither(mut self, shape: DitherShape) -> Self {
-        self.dither = Some(shape);
-        self
-    }
-
-    /// No dither when an integer width is quantized: the rounding error is
-    /// left as it falls. A float format ignores it.
-    #[must_use]
-    pub fn no_dither(mut self) -> Self {
-        self.dither = None;
-        self
-    }
-
-    /// Shapes the quantization error of an integer width
-    /// ([`NoiseShaping`], designed for the graph's rate, which is the file's):
-    /// off unless this says so, independent of the dither (with
-    /// [`no_dither`](Self::no_dither) the rounding error alone is fed back).
-    /// A float format ignores it.
-    #[must_use]
-    pub fn noise_shaping(mut self) -> Self {
-        self.noise_shaping = true;
-        self
+        Self::new(path, Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)))
     }
 
     /// Refuses a path that already exists instead of replacing it: the take
@@ -255,8 +225,8 @@ impl TakeFile {
 
 /// Where a take goes: a [`TakeFile`], or a sink of the caller's.
 ///
-/// A sink dithers itself: wrap a [`DitherSink`] yourself and give it to
-/// [`sink`](Self::sink). Such a take has no path, so no
+/// A sink dithers itself: put a [`tutti_dsp::Quantizer`] in front of your own integer sink and
+/// give it to [`sink`](Self::sink). Such a take has no path, so no
 /// `Recorded::clip`.
 pub struct TakeTarget<F: Float = f32> {
     kind: TargetKind<F>,
@@ -925,8 +895,7 @@ impl<S: InFlight> Take<S> {
 ///
 /// [`Session::record`] takes it. The punch is [`Punch::new`] at
 /// [`At::NextBlock`] (a take that starts at once) until [`punch`](Self::punch).
-/// `target` is a [`TakeFile`] (an integer format triangular-dithered unless it
-/// says otherwise) or a sink ([`TakeTarget::sink`]).
+/// `target` is a [`TakeFile`] (an integer format dithered as its `IntPcm` says) or a sink ([`TakeTarget::sink`]).
 ///
 /// ```no_run
 /// # use tutti_session::{Input, Punch, Record, TakeFile};
@@ -1054,7 +1023,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             recorder: None,
         };
 
-        let (sink, path) = open_target(target, layout, rate)?;
+        // The id seeds the file's dither, so it is minted before the open; an open that
+        // fails leaves a gap in the ids, which only need to be unique.
+        let id = self.transport.handle.next_take_id();
+        let (sink, path) = open_target(target, layout, rate, SplitMix64::mix(id.get()))?;
 
         let ports: Vec<_> = (0..width).map(|channel| node.output(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
@@ -1064,7 +1036,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .taps()
             .open_ports(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
 
-        let id = self.transport.handle.next_take_id();
         // The transport records from the punch-in to the punch-out, or to the
         // take's end. A start the transport refuses fails the arm; a
         // punch-out it refuses ends the take through the stop that follows.
@@ -1165,14 +1136,13 @@ fn open_target<F: Float>(
     target: TakeTarget<F>,
     layout: ChannelLayout,
     rate: SampleRate,
+    seed: u64,
 ) -> Result<(Box<dyn DynSink<F>>, Option<PathBuf>), TakeError> {
     match target.kind {
         TargetKind::File(TakeFile {
             path,
             format,
             create_new,
-            dither,
-            noise_shaping,
         }) => {
             let staged = Staged::new(&path);
             let staged = if create_new {
@@ -1180,22 +1150,13 @@ fn open_target<F: Float>(
             } else {
                 staged
             };
-            let encoder = FileEncoder::create(&Spec::of_width(format, layout, rate), staged)
-                .map_err(|e| TakeError::Open(Arc::new(e)))?;
-            let shaping = noise_shaping.then(|| NoiseShaping::new(rate));
-            let file: Box<dyn DynSink<F>> = match format.int_depth() {
-                None => Box::new(StagedSink::<F>::new(encoder, layout)),
-                Some(IntDepth::Int16) => Box::new(quantizer(
-                    StagedSink::<i16>::new(encoder, layout),
-                    dither,
-                    shaping.as_ref(),
-                )),
-                Some(IntDepth::Int24) => Box::new(quantizer(
-                    StagedSink::<I24>::new(encoder, layout),
-                    dither,
-                    shaping.as_ref(),
-                )),
-            };
+            let encoder = FileEncoder::create(
+                &Spec::of_channels(format, ChannelSet::default_for(layout), rate),
+                staged,
+            )
+            .map_err(|e| TakeError::Open(Arc::new(e)))?
+            .dither_seed(seed);
+            let file: Box<dyn DynSink<F>> = Box::new(StagedSink::<F>::new(encoder, layout));
             Ok((file, Some(path)))
         }
         TargetKind::Sink(sink) => {
@@ -1210,22 +1171,7 @@ fn open_target<F: Float>(
     }
 }
 
-/// `sink` behind the quantizer a file of an integer width gets: `dither`'s
-/// noise, and the error feedback of `shaping` when it is given.
-fn quantizer<F: Float, K: Sink>(
-    sink: K,
-    dither: Option<DitherShape>,
-    shaping: Option<&NoiseShaping>,
-) -> DitherSink<K, F> {
-    let sink = DitherSink::new(sink, dither);
-    match shaping {
-        Some(shaping) => sink.shaped(shaping),
-        None => sink,
-    }
-}
-
-/// A staged file as the [`Sink`] a take writes, of samples `S` (the float
-/// the take records, or the integer its quantizer writes): whole frames at the take's
+/// A staged file as the [`Sink`] a take writes, of the floats `S` the take records: whole frames at the take's
 /// width, the encoder keeping the first write failure for
 /// [`finalize`](Sink::finalize), which closes the file and puts it in place.
 struct StagedSink<S> {
