@@ -950,7 +950,7 @@ fn a_remembered_device_resolves_through_the_session() {
 /// re-aimed elsewhere leaves the host's edges where they are.
 #[test]
 fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
-    use tutti_midi_runtime::MidiClipNode;
+    use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode};
 
     let sorted = |mut v: Vec<EventOutputPort>| {
         v.sort();
@@ -960,12 +960,11 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     let (other, _) = tap(&mut s);
-    let hand = s.graph().add(MidiClipNode::new(note(
-        62,
-        MF,
-        Beat::new(1.0 / 3.0),
-        BeatDuration::new(1.0),
-    )));
+    let hand = s
+        .graph()
+        .add(MidiClipNode::from(MidiClipConfig::default().events(
+            ClipEvents::from_iter(note(62, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0))),
+        )));
     s.graph()
         .set_sources(input(synth), [hand.event_output(0)])
         .unwrap();
@@ -990,7 +989,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     ons.sort_unstable();
     assert_eq!(ons, vec![(8_000, 60), (8_000, 62)], "both play");
 
-    let hand2 = s.graph().add(MidiClipNode::new([]));
+    let hand2 = s.graph().add(MidiClipNode::from(MidiClipConfig::default()));
     s.graph()
         .set_sources(input(synth), [hand2.event_output(0)])
         .unwrap();

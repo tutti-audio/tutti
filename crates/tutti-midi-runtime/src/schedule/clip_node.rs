@@ -91,9 +91,9 @@ use tutti_buffers::Float;
 use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, EventDensity, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io,
-    MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents, Prepare, Published, PublishedKind,
-    RenderMode, Shape, Status,
+    Cx, EventDensity, ForkCause, ForkSource, Forked, HasPublished, HostValues, Initials, IntoNode,
+    Io, MIN_EVENT_PORT_CAPACITY, Node, NodeConfig, NodeParts, Offset, OutEvents, Prepare,
+    Published, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{AtomicRequestFlags, Publisher, Reader, RequestFlag};
@@ -697,13 +697,14 @@ impl MidiClipControls {
 /// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Prepare};
-/// use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
+/// use tutti_midi_runtime::{ClipEvents, MidiClipConfig, MidiClipNode, TimedMidiEvent};
 /// use tutti_fixtures::midi;
 /// use tutti_ump::{MidiChannel, NoteVelocity};
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-/// let clip = MidiClipNode::new([TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]);
+/// let events = ClipEvents::from_iter([TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]);
+/// let clip = MidiClipNode::from(MidiClipConfig::default().events(events));
 /// let controls = editor.insert(NodeKey(1), "clip", clip).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```
@@ -756,11 +757,6 @@ impl MidiClipNode {
         .event_output(0)
         .expect("declared");
 
-    /// A node playing `events` (in any order: they are sorted by beat).
-    pub fn new(events: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
-        Self::over(Publisher::new(events.into_iter().collect::<ClipEvents>()))
-    }
-
     /// A node over `cell`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
     fn over(cell: Publisher<ClipEvents>) -> Self {
@@ -775,6 +771,51 @@ impl MidiClipNode {
             receiver: Arc::default(),
             capacity: MIN_EVENT_PORT_CAPACITY,
         }
+    }
+}
+
+/// What a [`MidiClipNode`] is made from: the clip it plays from its first
+/// block. The clip, its header included, is a published value a session
+/// replaces (`clip.events()`), so the config has no structure: any two make the
+/// same node, and a running node's clip is replaced through
+/// [`MidiClipControls::set`].
+#[derive(Clone, Debug, Default)]
+pub struct MidiClipConfig {
+    events: Arc<ClipEvents>,
+}
+
+impl MidiClipConfig {
+    /// The clip the node plays from its first block.
+    #[must_use]
+    pub fn events(mut self, events: impl Into<Arc<ClipEvents>>) -> Self {
+        self.events = events.into();
+        self
+    }
+}
+
+impl From<MidiClipConfig> for MidiClipNode {
+    /// Control thread: registering a reader may allocate.
+    fn from(config: MidiClipConfig) -> Self {
+        Self::over(Publisher::from_arc(config.events))
+    }
+}
+
+impl<F: Float> NodeConfig<F> for MidiClipConfig {
+    type Node = MidiClipNode;
+
+    fn build(&self, _host: &HostValues) -> MidiClipNode {
+        MidiClipNode::from(self.clone())
+    }
+
+    /// Every clip config makes the same node: the clip is published, not
+    /// structure.
+    fn same_structure(&self, _other: &Self) -> bool {
+        true
+    }
+
+    /// None: the clip is a published value, not a param or a setting.
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }
 

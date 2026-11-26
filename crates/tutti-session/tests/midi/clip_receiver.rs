@@ -5,7 +5,7 @@
 use crate::common::{Seen, blocks, headed_clip, offline, play, program, tap, tick, volume};
 use std::sync::Arc;
 use tutti_graph::{EventInputPort, Fade, NodeKey};
-use tutti_midi_runtime::MidiClipNode;
+use tutti_midi_runtime::{MidiClipConfig, MidiClipNode};
 use tutti_music::MeterMap;
 use tutti_session::{Feeder, Key, LoadedTrack, Replacement, Session};
 use tutti_tempo::TempoMap;
@@ -21,7 +21,7 @@ fn rig() -> (Session, Key<MidiClipNode>, (NodeKey, Seen), (NodeKey, Seen)) {
     let mut s = offline();
     let a = tap(&mut s);
     let b = tap(&mut s);
-    let clip = s.graph().add(MidiClipNode::new([]));
+    let clip = s.graph().add(MidiClipNode::from(MidiClipConfig::default()));
     s.set(clip.events().to(headed_clip())).expect("sets");
     s.graph()
         .set_feed(a.0, Feeder::Declared, vec![clip.event_output(0)])
@@ -173,7 +173,7 @@ fn the_setup_is_sent_after_the_executor_applied_the_wiring() {
     let heard_b = Seen::new();
     let a = s.graph().add(crate::common::Tap(Seen::new())).erase();
     let b = s.graph().add(crate::common::Tap(heard_b.clone())).erase();
-    let clip = s.graph().add(MidiClipNode::new([]));
+    let clip = s.graph().add(MidiClipNode::from(MidiClipConfig::default()));
     s.set(clip.events().to(headed_clip())).expect("sets");
     s.graph()
         .set_feed(a, Feeder::Declared, vec![clip.event_output(0)])
