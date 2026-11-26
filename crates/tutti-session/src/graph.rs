@@ -85,8 +85,8 @@ pub use testing::{AudioSide, Testing};
 pub(crate) use wiring::Pending;
 
 use crate::key::{
-    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, Outlet, Removal, SetSources,
-    Wire,
+    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, Outlet, Removal,
+    SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
@@ -2649,6 +2649,13 @@ impl<F: Float> Graph<F> {
     /// fading out, else the one that is, else the direct name. A patch keeps
     /// one edge, direct or feedback, on a pair of ports.
     pub(crate) fn held_edge_id(&self, edge: ChannelEdge) -> Option<EdgeId> {
+        Self::held_edge_id_in(&self.editor, edge)
+    }
+
+    /// [`held_edge_id`](Self::held_edge_id) in `editor`'s spec: the one rule
+    /// the graph's edge readers and a modulation route onto an edge's gain
+    /// resolve an edge by.
+    pub(crate) fn held_edge_id_in(editor: &Editor<F>, edge: ChannelEdge) -> Option<EdgeId> {
         let direct = Self::edge_id(edge, None)?;
         let PortSink::Port(at) = direct.sink else {
             return Some(direct);
@@ -2656,8 +2663,7 @@ impl<F: Float> Graph<F> {
         let RawEdge::Direct(source) = direct.from else {
             return Some(direct);
         };
-        let held: Vec<EdgeId> = self
-            .editor
+        let held: Vec<EdgeId> = editor
             .spec()
             .topology
             .edges
@@ -2673,7 +2679,7 @@ impl<F: Float> Graph<F> {
         Some(
             held.iter()
                 .copied()
-                .find(|id| !self.fading_out(*id))
+                .find(|id| !Self::fading_out_in(editor, *id))
                 .or_else(|| held.first().copied())
                 .unwrap_or(direct),
         )
@@ -2741,7 +2747,11 @@ impl<F: Float> Graph<F> {
     /// Whether `id` is an edge the session has already taken out and is only
     /// fading to silence.
     fn fading_out(&self, id: EdgeId) -> bool {
-        self.editor.spec().has_edge(id) && self.editor.edge_fade(id) == Some(EdgeFade::Out)
+        Self::fading_out_in(&self.editor, id)
+    }
+
+    fn fading_out_in(editor: &Editor<F>, id: EdgeId) -> bool {
+        editor.spec().has_edge(id) && editor.edge_fade(id) == Some(EdgeFade::Out)
     }
 
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
@@ -2993,21 +3003,38 @@ impl<F: Float> Graph<F> {
         from: O,
         to: T,
     ) -> Result<Connection<'_, O::Wire, F>, ConnectError> {
-        self.connect_delayed(from, to, None)
+        let (from, to) = (from.out(), to.sink());
+        let edges = <O::Wire as Wire>::connect(self, from, to)?;
+        Ok(Connection::new(self, edges, from, to))
     }
 
-    /// [`connect`](Self::connect) with the edge delayed by `delay`
-    /// (a feedback edge), the one connect a patch's feedback wire goes
-    /// through.
-    pub(crate) fn connect_delayed<O: Outlet, T: Inlet<O::Wire>>(
+    /// The edge of one channel wire, delayed by `delay` for a feedback edge:
+    /// what [`connect`](Self::connect) and a patch's feedback wire both add.
+    pub(crate) fn add_channel_wire(
         &mut self,
-        from: O,
-        to: T,
+        from: OutputPort,
+        to: InputPort,
         delay: Option<Samples>,
-    ) -> Result<Connection<'_, O::Wire, F>, ConnectError> {
-        let (from, to) = (from.out(), to.sink());
-        let edges = <O::Wire as Wire>::connect(self, from, to, delay)?;
-        Ok(Connection::new(self, edges, from, to))
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
+        let added = self.add_edge(from, to, delay)?;
+        Ok(vec![(ChannelEdge::new(from, to), added)])
+    }
+
+    /// The edges of one main bus wire, delayed by `delay` for feedback
+    /// edges.
+    pub(crate) fn add_main_wire(
+        &mut self,
+        from: NodeKey,
+        to: MainSink,
+        delay: Option<Samples>,
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
+        let wires = self.main_wires(None, from, to)?;
+        let mut edges = Vec::with_capacity(wires.len());
+        for (out, input) in wires {
+            let added = self.add_edge(out, input, delay)?;
+            edges.push((ChannelEdge::new(out, input), added));
+        }
+        Ok(edges)
     }
 
     /// Takes the edge `from -> to` out, its gain with it (for a bus edge, its

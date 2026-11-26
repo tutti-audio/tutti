@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use tutti_buffers::Float;
-use tutti_graph::{EdgeId, EventOutputPort, NodeKey, PassError};
+use tutti_graph::{EdgeId, Editor, EventOutputPort, NodeKey, PassError};
 use tutti_modulation::{ProgramCompileError, RouteKey, SourceKey, TargetKey};
 use tutti_nodes::automation::LaneControls;
 use tutti_platform::Instant;
@@ -253,10 +253,10 @@ impl OwnMods {
         }
     }
 
-    /// The edge a target key of an edge names.
-    pub(super) fn edge_of(&self, key: u64) -> Option<EdgeId> {
-        // A route onto an edge's gain names the direct edge of its ports.
-        crate::Graph::<f32>::edge_id(self.edge_refs.get(&key).copied()?, None)
+    /// The edge a target key of an edge names: the edge `editor` holds on its
+    /// ports, by the rule the graph's own edge readers use.
+    pub(super) fn edge_of<F: Float>(&self, key: u64, editor: &Editor<F>) -> Option<EdgeId> {
+        Graph::<F>::held_edge_id_in(editor, self.edge_refs.get(&key).copied()?)
     }
 
     /// What feeds source `source`.

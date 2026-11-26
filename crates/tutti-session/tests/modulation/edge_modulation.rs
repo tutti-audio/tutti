@@ -13,12 +13,15 @@ use crate::common;
 use crate::common::render;
 use crate::offline::offline_48k;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
 use tutti_session::{
-    ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
-    Session,
+    ChannelEdge, GainTarget, InputPort, MainOutput, Mention, ModTarget, NodeDecl, OutputPort,
+    ParamRef, RangeTarget, RouteSpec, Session, WireStart,
 };
-use tutti_units::{Bipolar, Gain, UnitParam};
+use tutti_units::{Bipolar, Gain, Samples, UnitParam};
+
+use crate::echo_node::{EchoConfig, RelayConfig};
 
 use common::probe::Pulse;
 
@@ -293,4 +296,55 @@ fn a_lane_on_an_edge_without_a_gain_survives_an_unrelated_edit() {
         plans + 1,
         "the edit's own plan alone"
     );
+}
+
+/// **A route onto a feedback wire's gain moves the loop's echo.** `echo` adds
+/// a unit impulse at frame 0 and `relay` carries it to the output and back
+/// into `echo` by `DELAY` frames at the wire's gain (no node of the loop has
+/// latency), so the echoes are at `k * DELAY` of amplitude `w^k`. The wire's
+/// base is 0.25; a macro at 0.5 routed at depth 0.25 over `-2..=2` (span 4)
+/// offsets it by `0.25 * 0.5 * 4 = 0.5`, so `w = 0.75`.
+#[test]
+fn a_route_onto_a_feedback_wire_modulates_the_echo() {
+    /// The graph's largest block, the shortest feedback delay.
+    const DELAY: usize = 1_024;
+    let mut s = offline_48k();
+    s.patch((
+        NodeDecl::new("echo", EchoConfig::new(ChannelLayout::MONO)),
+        NodeDecl::new("relay", RelayConfig::new(ChannelLayout::MONO)),
+        Mention::new("echo")
+            .connect(Mention::new("relay"))
+            .unfaded(),
+        Mention::new("relay")
+            .connect(Mention::new("echo"))
+            .feedback(Samples::new(DELAY))
+            .unfaded()
+            .initial_gain(Gain::new(0.25)),
+        Mention::new("relay").connect(MainOutput).unfaded(),
+    ))
+    .unwrap();
+    let node = |s: &Session, key: &'static str| {
+        s.key::<RelayConfig>(&key)
+            .map(|k| k.erase())
+            .or_else(|_| s.key::<EchoConfig>(&key).map(|k| k.erase()))
+            .unwrap()
+    };
+    let edge = ChannelEdge::new(
+        OutputPort::new(node(&s, "relay"), 0),
+        InputPort::new(node(&s, "echo"), 0),
+    );
+    let mut m = s.mods_mut();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
+    let source = m.macro_(0.5);
+    m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
+        .unwrap();
+    settle(&mut s);
+
+    let out = render(&mut s, 20, BLOCK);
+
+    let mut want = vec![0.0f32; 20 * BLOCK];
+    want[0] = 1.0;
+    want[DELAY] = 0.75;
+    want[2 * DELAY] = 0.5625;
+    assert_eq!(out, want);
 }

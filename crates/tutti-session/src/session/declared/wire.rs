@@ -13,7 +13,8 @@ use crate::graph::Pending;
 use crate::key::{BusEnd, Inlet, MainSink, Outlet};
 use crate::patch::{WireDecl, WireEnds, WireId};
 use crate::{
-    BusInputPort, ChannelEdge, ConnectError, EventEdge, Graph, InputPort, MainOutput, OutputPort,
+    BusInputPort, ChannelEdge, ChannelWire, ConnectError, Connection, EventEdge, Graph, InputPort,
+    MainBusWire, MainOutput, OutputPort, Wire,
 };
 
 /// What a patch last made of one wire: the options it was declared with.
@@ -240,11 +241,25 @@ impl Resolved {
         initial: Option<Gain>,
     ) -> Result<(), ConnectError> {
         let edges = match self {
-            Self::Channel(o, i, d) => made(graph, o, i, d, unfaded)?,
-            Self::Main(o, MainSink::Node(i), d) => made(graph, o, i, d, unfaded)?,
-            Self::Main(o, MainSink::MainOutput, d) => made(graph, o, MainOutput, d, unfaded)?,
-            Self::Bus(o, i) => made(graph, o, i, None, unfaded)?,
-            Self::Event(o, i, d) => made(graph, o, i, d, unfaded)?,
+            Self::Channel(o, i, d) => {
+                let edges = graph.add_channel_wire(o, i, d)?;
+                finished(
+                    Connection::<ChannelWire, F>::new(graph, edges, o, i),
+                    unfaded,
+                )
+            }
+            Self::Main(o, to, d) => {
+                let edges = graph.add_main_wire(o, to, d)?;
+                finished(
+                    Connection::<MainBusWire, F>::new(graph, edges, o, to),
+                    unfaded,
+                )
+            }
+            Self::Bus(o, i) => finished(graph.connect(o, i)?, unfaded),
+            Self::Event(o, i, d) => {
+                graph.add_event_edge(o, i, d)?;
+                Vec::new()
+            }
         };
         if let Some(gain) = initial {
             for edge in edges {
@@ -272,20 +287,17 @@ impl Resolved {
     }
 }
 
-fn made<F: Float, O: Outlet, T: Inlet<O::Wire>>(
-    graph: &mut Graph<F>,
-    from: O,
-    to: T,
-    delay: Option<Samples>,
+/// The edges of `connection`, hardened when `unfaded`.
+fn finished<F: Float, W: Wire>(
+    connection: Connection<'_, W, F>,
     unfaded: bool,
-) -> Result<Vec<ChannelEdge>, ConnectError> {
-    let connection = graph.connect_delayed(from, to, delay)?;
+) -> Vec<ChannelEdge> {
     let connection = if unfaded {
         connection.unfaded()
     } else {
         connection
     };
-    Ok(connection.edges())
+    connection.edges()
 }
 
 fn cut<F: Float, O: Outlet, T: Inlet<O::Wire>>(
