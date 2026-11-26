@@ -18,7 +18,7 @@
 //! has no count to get wrong, since there the field is the width of what is
 //! addressed. A count of 0 on a Channel is unwritable. The limit a peer
 //! declares in a Profile Details reply (M2-102 §2.5.1) is read when the peer's
-//! Profile list is known, for each Profile on a Channel ([`ProfileEntry::max`]),
+//! Profile list is known and when the peer adds a Profile, for each Profile on a Channel ([`ProfileEntry::max`]),
 //! and a switch for more Channels than it is refused ([`ProfileError::OverMaximum`]);
 //! until the reply arrives the peer's Disabled Report is how a refusal arrives.
 

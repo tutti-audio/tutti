@@ -1960,11 +1960,12 @@ fn an_mpe_profile_the_app_offers_and_withdraws_switches_its_inputs_rules() {
     run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
 
-    let mpe = ProfileOffer::default().with(
+    let mpe = ProfileOffer::try_from(vec![(
         tutti_midi_ci::CiDeviceId::Channel(MidiChannel::of(0)),
         ProfileId::MPE,
         ProfileOfferEntry::new(ProfileChannels::of(15)).enabled(ProfileChannels::of(4)),
-    );
+    )])
+    .unwrap();
     s.set(s.policy::<tutti_session::MidiPolicy>().to(with(mpe)))
         .unwrap();
     run(&mut s, 60);
@@ -1974,6 +1975,20 @@ fn an_mpe_profile_the_app_offers_and_withdraws_switches_its_inputs_rules() {
         omni_offs(&seen),
         1,
         "the offered zone prohibits it on a Member"
+    );
+
+    // The device goes and comes back: the input reopens with a node that follows no zone,
+    // and the next polls give it the offered one again.
+    fake.unplug(raw);
+    let _ = s.update();
+    plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
+    run(&mut s, 120);
+    assert!(fake.send_input(raw, omni_off(), next_block()));
+    run(&mut s, 5);
+    assert_eq!(
+        omni_offs(&seen),
+        1,
+        "the reopened input follows the offered zone again"
     );
 
     s.set(

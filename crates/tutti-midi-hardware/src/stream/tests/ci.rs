@@ -3257,13 +3257,15 @@ const DISABLED: u8 = 0x25;
 /// Spec: m2-102/2.6#1, m2-102/2.6#2, m2-101/7.4#3
 #[test]
 fn an_offered_profile_is_announced_and_a_peers_set_on_is_answered_and_reported_to_the_app() {
-    let offer = ProfileOffer::default()
-        .with(channel(0), profile(1), one())
-        .with(
+    let offer = ProfileOffer::try_from(vec![
+        (channel(0), profile(1), one()),
+        (
             channel(1),
             profile(2),
             one().enabled(ProfileChannels::of(1)),
-        );
+        ),
+    ])
+    .unwrap();
     let (mut wire, ours) = midi1_running();
     wire.session.offer_profiles(offer);
     let _ = polled(&mut wire, 30);
@@ -3300,7 +3302,7 @@ fn an_offered_profile_is_announced_and_a_peers_set_on_is_answered_and_reported_t
 /// Spec: m2-102/2.6#5, m2-102/2.7#6
 #[test]
 fn a_fixed_entry_refuses_a_peers_switch_with_the_state_it_keeps() {
-    let offer = ProfileOffer::default().with(channel(0), profile(1), one().fixed());
+    let offer = ProfileOffer::try_from(vec![(channel(0), profile(1), one().fixed())]).unwrap();
     let (mut wire, ours) = offering(&offer);
     set_on_from_peer(&wire, ours, 0, 1, profile(1), 40);
     let told = polled(&mut wire, 50);
@@ -3313,17 +3315,14 @@ fn a_fixed_entry_refuses_a_peers_switch_with_the_state_it_keeps() {
 fn a_peers_switch_of_one_entry_survives_the_app_changing_another() {
     let a = (channel(0), profile(1));
     let b = (channel(1), profile(2));
-    let offer = ProfileOffer::default()
-        .with(a.0, a.1, one())
-        .with(b.0, b.1, one());
+    let offer = ProfileOffer::try_from(vec![(a.0, a.1, one()), (b.0, b.1, one())]).unwrap();
     let (mut wire, ours) = offering(&offer);
     set_on_from_peer(&wire, ours, 0, 1, profile(1), 40);
     let _ = polled(&mut wire, 50);
     let _ = received(&wire);
 
-    let changed = offer
-        .clone()
-        .with(b.0, b.1, ProfileOfferEntry::new(ProfileChannels::of(2)));
+    let two = ProfileOfferEntry::new(ProfileChannels::of(2));
+    let changed = ProfileOffer::try_from(vec![(a.0, a.1, one()), (b.0, b.1, two)]).unwrap();
     wire.session.offer_profiles(changed.clone());
     let told = polled(&mut wire, 60);
     assert!(
@@ -3335,11 +3334,8 @@ fn a_peers_switch_of_one_entry_survives_the_app_changing_another() {
     assert_eq!(enabled_on_channel(&mut wire, ours, 0, 70), [profile(1)]);
 
     // A's own entry changing takes the app's value back, and says so.
-    wire.session.offer_profiles(changed.with(
-        a.0,
-        a.1,
-        ProfileOfferEntry::new(ProfileChannels::of(2)),
-    ));
+    wire.session
+        .offer_profiles(ProfileOffer::try_from(vec![(a.0, a.1, two), (b.0, b.1, two)]).unwrap());
     let _ = received(&wire);
     let _ = polled(&mut wire, 80);
     assert_eq!(profile_reports(&wire), [(DISABLED, a.0, a.1)]);
@@ -3348,11 +3344,12 @@ fn a_peers_switch_of_one_entry_survives_the_app_changing_another() {
 
 #[test]
 fn offering_the_same_profiles_again_sends_nothing() {
-    let offer = ProfileOffer::default().with(
+    let offer = ProfileOffer::try_from(vec![(
         channel(0),
         profile(1),
         one().enabled(ProfileChannels::of(1)),
-    );
+    )])
+    .unwrap();
     let (mut wire, _) = offering(&offer);
     wire.session.offer_profiles(offer);
     let _ = polled(&mut wire, 40);
@@ -3362,16 +3359,18 @@ fn offering_the_same_profiles_again_sends_nothing() {
 /// Spec: m2-102/2.4#19
 #[test]
 fn a_profile_the_app_stops_offering_is_disabled_and_then_removed() {
-    let offer = ProfileOffer::default()
-        .with(
+    let offer = ProfileOffer::try_from(vec![
+        (
             channel(0),
             profile(1),
             one().enabled(ProfileChannels::of(1)),
-        )
-        .with(channel(1), profile(2), one());
+        ),
+        (channel(1), profile(2), one()),
+    ])
+    .unwrap();
     let (mut wire, _) = offering(&offer);
     wire.session
-        .offer_profiles(ProfileOffer::default().with(channel(1), profile(2), one()));
+        .offer_profiles(ProfileOffer::try_from(vec![(channel(1), profile(2), one())]).unwrap());
     let _ = polled(&mut wire, 40);
     assert_eq!(
         profile_reports(&wire),
@@ -3386,11 +3385,12 @@ fn a_profile_the_app_stops_offering_is_disabled_and_then_removed() {
 /// zone the input reads its MIDI in, by the route the peers' zones take.
 #[test]
 fn an_mpe_profile_a_peer_enabled_on_the_session_is_a_zone_the_input_follows() {
-    let offer = ProfileOffer::default().with(
+    let offer = ProfileOffer::try_from(vec![(
         channel(0),
         ProfileId::MPE,
         ProfileOfferEntry::new(ProfileChannels::of(15)),
-    );
+    )])
+    .unwrap();
     let (mut wire, ours) = offering(&offer);
     assert!(wire.session.received_mpe_zones(&wire.id, GROUP_0).is_none());
     set_on_from_peer(&wire, ours, 0, 8, ProfileId::MPE, 40);
@@ -3408,6 +3408,112 @@ fn an_mpe_profile_a_peer_enabled_on_the_session_is_a_zone_the_input_follows() {
         wire.session.mpe_zones(&wire.id, GROUP_0).is_none(),
         "a peer's zones are what an output sends in: the session's own are not"
     );
+}
+
+/// The Number of MIDI Channels inquiries the session sent, as address and Profile.
+fn maximum_inquiries(wire: &Wire) -> Vec<(CiDeviceId, ProfileId)> {
+    ci_sent(wire)
+        .into_iter()
+        .filter_map(|(_, m)| match m {
+            CiMessage::ProfileDetailsInquiry {
+                header,
+                profile,
+                target: InquiryTarget::NUMBER_OF_CHANNELS,
+                ..
+            } => Some((header.device_id, profile)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The peer declares at most `max` Channels for `profile` on Channel 1, at `ms`.
+fn declare_maximum(wire: &Wire, ours: Muid, profile: ProfileId, max: u16, ms: u64) {
+    say(
+        wire,
+        GROUP_0,
+        &CiMessage::ProfileDetailsReply {
+            header: CiHeader {
+                device_id: channel(0),
+                ..CiHeader::new(peer())
+            },
+            to: ours,
+            profile,
+            target: InquiryTarget::NUMBER_OF_CHANNELS,
+            data: tutti_midi_ci::ChannelsDetail {
+                in_use: ProfileChannels::of(0),
+                max: ProfileChannels::of(max),
+            }
+            .to_data(),
+        },
+        ms,
+    );
+}
+
+/// M2-102 section 2.5.1: a Profile a peer adds after its list was known is asked for its
+/// Number of MIDI Channels too, once, and a Profile on the Group is not.
+#[test]
+fn a_profile_a_peer_adds_later_is_asked_for_its_maximum() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
+    assert_eq!(maximum_inquiries(&wire), [(channel(0), profile(2))]);
+    declare_maximum(&wire, ours, profile(2), 2, 110);
+    let _ = polled(&mut wire, 120);
+    let added = |address, profile| {
+        say(
+            &wire,
+            GROUP_0,
+            &CiMessage::ProfileAdded {
+                header: CiHeader {
+                    device_id: address,
+                    ..CiHeader::new(peer())
+                },
+                profile,
+            },
+            130,
+        );
+    };
+    added(channel(1), profile(3));
+    added(CiDeviceId::Group, profile(4));
+    let _ = polled(&mut wire, 140);
+    assert_eq!(
+        maximum_inquiries(&wire),
+        [(channel(1), profile(3))],
+        "only the new Channel Profile has no maximum and no inquiry waiting"
+    );
+}
+
+/// A switch the app asked for while the peer's maximum was unknown, and the peer then
+/// declares one the switch exceeds before the poll that would send it: nothing is sent,
+/// and the app is told the switch was lost.
+/// Spec: m2-102/2.5.1#3, m2-120/3.1#1, m2-120/a.3#1
+#[test]
+fn a_switch_over_a_maximum_that_arrives_before_it_is_sent_is_not_sent_and_says_so() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
+    let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
+    let [Switcher::Channel(c)] = listed.as_slice() else {
+        panic!("one Channel Profile: {listed:?}");
+    };
+    wire.session
+        .set_profile(c.enable(ChannelCount::new(3).unwrap()))
+        .expect("no maximum is known yet");
+    let _ = received(&wire);
+    declare_maximum(&wire, ours, profile(2), 2, 110);
+    let told = polled(&mut wire, 120);
+    assert_eq!(
+        request_answers(&told),
+        [&Answer::SwitchLost {
+            request: ProfileRequest::SetOn {
+                address: channel(0),
+                profile: profile(2),
+            },
+        }]
+    );
+    let set_ons = ci_sent(&wire)
+        .into_iter()
+        .filter(|(_, m)| matches!(m, CiMessage::SetProfileOn { .. }))
+        .count();
+    assert_eq!(set_ons, 0, "the switch was not sent");
 }
 
 /// M2-102 section 2.5.1: the session asks a peer for the Number of MIDI Channels of each

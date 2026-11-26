@@ -766,7 +766,7 @@ fn a_policy_offer_is_served_and_a_peers_set_on_is_answered() {
         ProfileChannels, ProfileFormat, ProfileOffer, ProfileState, ProfileTarget,
     };
     let (mut s, fake, _ports) = wired(0);
-    let offer = ProfileOffer::default().with(channel_0(), profile(), one(1));
+    let offer = ProfileOffer::try_from(vec![(channel_0(), profile(), one(1))]).unwrap();
     let with = |profiles: ProfileOffer| MidiPolicy {
         profiles,
         ..policy(2, "My App")
@@ -842,7 +842,8 @@ fn an_offer_is_refused_on_a_session_with_no_os_midi_layer() {
         .build()
         .expect("builds");
     let offer = MidiPolicy {
-        profiles: tutti_midi_ci::ProfileOffer::default().with(channel_0(), profile(), one(1)),
+        profiles: tutti_midi_ci::ProfileOffer::try_from(vec![(channel_0(), profile(), one(1))])
+            .unwrap(),
         ..MidiPolicy::default()
     };
     assert_eq!(
