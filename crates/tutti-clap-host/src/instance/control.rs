@@ -270,6 +270,17 @@ impl ClapLoaded {
 }
 
 impl Control for ClapLoaded {
+    /// A count that never moves: CLAP's refusals are the event list's own (`input_events_refused`), already in the losses.
+    fn refused_edits(&self) -> tutti_rt::Tally<u64> {
+        tutti_rt::tally()
+    }
+
+    /// None: a loaded CLAP plugin is written at the call (`params.flush`); the
+    /// writes the Processor holds are its Controller's ([`Wraps::pending`]).
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        Vec::new()
+    }
+
     /// The editor is measured from the plugin on the first ask that holds a
     /// `MainThreadMarker` (`wiring`, or this one on the main thread); a thread that
     /// holds none before then gets the unmeasured descriptor
@@ -724,14 +735,9 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
-    /// The values queued to the Processor.
-    fn queued(&self) -> Option<tutti_rt::Generation> {
-        Some(self.queued_edits())
-    }
-
-    /// The plugin has processed the values queued up to `upto`.
-    fn delivered(&self, upto: tutti_rt::Generation) -> bool {
-        self.edits_delivered(upto)
+    /// What the slots hold that no block has applied.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.pending_edits()
     }
 
     /// Applied at the head of the Processor's next block: the slot of the

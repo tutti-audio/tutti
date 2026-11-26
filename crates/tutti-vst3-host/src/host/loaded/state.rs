@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use tutti_plugin_types::{BareFrame, MainThreadMarker, Opened, StateFrameError};
 
 use super::*;
-use crate::host::controller::latest_per_parameter;
 
 impl Vst3Loaded {
     /// The plugin's program lists — the named preset sets its units select
@@ -124,11 +123,12 @@ impl Vst3Loaded {
     /// The component's stream holds only what a process call has delivered. A
     /// write made while the plugin is not active waits in `carried` for the
     /// next activation's first block, and one handed to a Processor waits for a
-    /// block to take it (`undrained`, from the Controller), so the blob stores
-    /// both beside the streams (container version 2) and `load_state` puts them
-    /// back. A write a plugin makes itself (`performEdit`) while no block runs
-    /// is the plugin's to carry; the host sees it only if the app relays it
-    /// through `set_parameter`.
+    /// block to take it: the blob does not hold them, and
+    /// [`Control::pending`](tutti_plugin_types::Control::pending) states them
+    /// beside it. (A blob saved by an earlier version stores them in container
+    /// version 2, and `load_state` still puts them back.) A write a plugin makes
+    /// itself (`performEdit`) while no block runs is the plugin's to carry; the
+    /// host sees it only if the app relays it through `set_parameter`.
     ///
     /// # Errors
     ///
@@ -144,21 +144,10 @@ impl Vst3Loaded {
     /// component half is the one a project cannot be restored without, and
     /// plenty of controllers have no UI state to give. That half degrades to
     /// empty and the component half is still returned.
-    pub(in crate::host) fn read_state(
-        &self,
-        main: MainThreadMarker,
-        undrained: &[(ParamId, Normalized)],
-    ) -> Result<Vec<u8>> {
+    pub(in crate::host) fn read_state(&self, main: MainThreadMarker) -> Result<Vec<u8>> {
         let component = self.read_component_state(main)?;
         let controller = self.read_controller_state(main);
-        let pending = latest_per_parameter(
-            self.carried
-                .iter()
-                .chain(undrained)
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        Ok(pack_state_with_pending(&component, &controller, &pending)?)
+        Ok(pack_state(&component, &controller)?)
     }
 
     /// Reads the controller's own `getState` stream, or `None` when there is no
@@ -367,44 +356,6 @@ fn length_of(len: u64, field: &'static str) -> std::result::Result<u32, StateFra
     })
 }
 
-/// [`pack_state`], with the parameter writes the component's stream cannot hold
-/// yet (`Vst3Loaded::carried`): magic, version 2, their count as a `u32`, each
-/// write, then the component's length, the component and the controller as in
-/// version 1. With nothing pending the blob is [`pack_state`]'s, and so it is when the writes
-/// or the component are too long for a `u32` length field: the pending writes are then dropped.
-///
-/// # Errors
-///
-/// As [`pack_state`].
-pub(super) fn pack_state_with_pending(
-    component: &[u8],
-    controller: &Option<Vec<u8>>,
-    pending: &[(ParamId, Normalized)],
-) -> std::result::Result<Vec<u8>, StateFrameError> {
-    let (Ok(count), Ok(len), false) = (
-        length_field(pending.len(), "pending writes"),
-        length_field(component.len(), "component"),
-        pending.is_empty(),
-    ) else {
-        return pack_state(component, controller);
-    };
-    let controller = controller.as_deref().unwrap_or_default();
-    let mut out = Vec::with_capacity(
-        STATE_MAGIC.len() + 9 + pending.len() * PENDING_BYTES + component.len() + controller.len(),
-    );
-    out.extend_from_slice(STATE_MAGIC);
-    out.push(STATE_VERSION_PENDING);
-    out.extend_from_slice(&count.to_le_bytes());
-    for (id, value) in pending {
-        out.extend_from_slice(&id.get().to_le_bytes());
-        out.extend_from_slice(&value.get().to_le_bytes());
-    }
-    out.extend_from_slice(&len.to_le_bytes());
-    out.extend_from_slice(component);
-    out.extend_from_slice(controller);
-    Ok(out)
-}
-
 /// `pending` with each listed parameter once, at its latest value, in the order
 /// each was first written. One pass: a crafted blob of a million duplicates
 /// costs a million steps, not a million times the parameter count.
@@ -500,8 +451,7 @@ pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, Stat
 mod state_container_tests {
     use super::{
         ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError, Unpacked,
-        latest_listed, length_of, pack_state as try_pack_state,
-        pack_state_with_pending as try_pack_pending, unpack_full,
+        latest_listed, length_of, pack_state as try_pack_state, unpack_full,
     };
     use tutti_units::Normalized;
 
@@ -509,12 +459,27 @@ mod state_container_tests {
         try_pack_state(component, controller).unwrap()
     }
 
+    /// A container as an earlier version wrote it (version 2): the parameter
+    /// writes the component's stream did not hold, then the component and the
+    /// controller as in version 1. The reader still takes it.
     fn pack_state_with_pending(
         component: &[u8],
         controller: &Option<Vec<u8>>,
         pending: &[(ParamId, Normalized)],
     ) -> Vec<u8> {
-        try_pack_pending(component, controller, pending).unwrap()
+        let controller = controller.as_deref().unwrap_or_default();
+        let mut out = Vec::new();
+        out.extend_from_slice(STATE_MAGIC);
+        out.push(STATE_VERSION_PENDING);
+        out.extend_from_slice(&u32::try_from(pending.len()).unwrap().to_le_bytes());
+        for (id, value) in pending {
+            out.extend_from_slice(&id.get().to_le_bytes());
+            out.extend_from_slice(&value.get().to_le_bytes());
+        }
+        out.extend_from_slice(&u32::try_from(component.len()).unwrap().to_le_bytes());
+        out.extend_from_slice(component);
+        out.extend_from_slice(controller);
+        out
     }
 
     /// Both halves survive the round trip, split back at the right byte.
@@ -670,21 +635,6 @@ mod state_container_tests {
         let bare = pack_state_with_pending(b"component", &None, &writes());
         assert_eq!(unpack_full(&bare).unwrap().pending, writes().to_vec());
         assert_eq!(unpack_full(&bare).unwrap().controller, None);
-    }
-
-    /// With nothing pending the blob is version 1's, byte for byte, for a
-    /// plugin with a controller stream and for one without.
-    #[test]
-    fn nothing_pending_packs_to_the_version_1_container() {
-        let ui = Some(b"ui".to_vec());
-        assert_eq!(
-            pack_state_with_pending(b"component", &ui, &[]),
-            pack_state(b"component", &ui)
-        );
-        assert_eq!(
-            pack_state_with_pending(b"component", &None, &[]),
-            b"component"
-        );
     }
 
     /// Version 1 and bare blobs read as having nothing pending, so every blob

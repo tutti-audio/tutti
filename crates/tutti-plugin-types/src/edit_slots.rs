@@ -59,6 +59,7 @@ pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditRe
     let (publisher, watch) = generation_watch();
     (
         EditWriter {
+            wanted: vec![None; ids.len()],
             ids: Arc::clone(&ids),
             slots: writer,
             applied: watch,
@@ -78,6 +79,9 @@ pub struct EditWriter {
     slots: SeqSlotsWriter<f64>,
     /// What the holder of the reader has published as applied.
     applied: GenerationWatch,
+    /// The newest write of each slot with the mark it was made at: the wanted
+    /// record, read without asking the reader ([`pending`](Self::pending)).
+    wanted: Vec<Option<(Normalized, Generation)>>,
 }
 
 impl EditWriter {
@@ -90,7 +94,25 @@ impl EditWriter {
     pub fn write(&mut self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
         let slot = self.ids.binary_search(&id).map_err(|_| UnknownParam(id))?;
         self.slots.write(slot, value.get());
+        self.wanted[slot] = Some((value, self.slots.written()));
         Ok(())
+    }
+
+    /// The writes not yet applied ([`has_applied`](Self::has_applied)): the
+    /// newest value of each parameter whose write the reader's holder has not
+    /// published, in id order. Read from the writer's own record, so it never
+    /// waits for a block; a parameter whose newest write is applied is not
+    /// listed.
+    #[must_use]
+    pub fn pending(&self) -> Vec<(ParamId, Normalized)> {
+        self.ids
+            .iter()
+            .zip(&self.wanted)
+            .filter_map(|(&id, wanted)| {
+                let (value, mark) = (*wanted)?;
+                (!self.has_applied(mark)).then_some((id, value))
+            })
+            .collect()
     }
 
     /// How many writes have been made, as the [`Generation`] the reader's
@@ -122,6 +144,7 @@ impl EditWriter {
     /// the reset sees the new epoch and applies no write from before it.
     pub fn reset(&mut self) {
         self.slots.new_epoch();
+        self.wanted.fill(None);
     }
 }
 
@@ -186,6 +209,23 @@ impl EditReader {
     pub fn epoch_watch(&self) -> tutti_rt::EpochWatch {
         self.slots.epoch_watch()
     }
+}
+
+/// `older` writes with `newer` laid over them: each parameter once, at the
+/// newer value where both hold it, in the order each was first named. For two
+/// records of one parameter's writes (a plugin's own and the host's).
+#[must_use]
+pub fn overlay_writes(
+    mut older: Vec<(ParamId, Normalized)>,
+    newer: impl IntoIterator<Item = (ParamId, Normalized)>,
+) -> Vec<(ParamId, Normalized)> {
+    for (id, value) in newer {
+        match older.iter_mut().find(|(known, _)| *known == id) {
+            Some(entry) => entry.1 = value,
+            None => older.push((id, value)),
+        }
+    }
+    older
 }
 
 /// Whether epoch `a` is before epoch `b`, as the serial numbers
@@ -300,6 +340,32 @@ mod tests {
         assert!(!writer.has_applied(later), "not until its own call returns");
         reader.publish_applied();
         assert!(writer.has_applied(later));
+    }
+
+    /// **A write is pending until its call returned, the newest of each
+    /// parameter, from the writer's own record; a reset ends it.**
+    #[test]
+    fn a_write_is_pending_until_the_targets_call_returns() {
+        let (mut writer, mut reader) = edit_slots([id(1), id(2)]);
+        assert!(writer.pending().is_empty());
+        writer.write(id(1), Normalized::of(0.25)).unwrap();
+        writer.write(id(1), Normalized::of(0.5)).unwrap();
+        writer.write(id(2), Normalized::of(0.75)).unwrap();
+        assert_eq!(
+            writer.pending(),
+            [(id(1), Normalized::of(0.5)), (id(2), Normalized::of(0.75))]
+        );
+        assert_eq!(drained(&mut reader).len(), 2);
+        assert_eq!(
+            writer.pending().len(),
+            2,
+            "taken, the call has not returned"
+        );
+        reader.publish_applied();
+        assert!(writer.pending().is_empty());
+        writer.write(id(2), Normalized::of(0.125)).unwrap();
+        writer.reset();
+        assert!(writer.pending().is_empty(), "stale writes are not wanted");
     }
 
     /// **A drain allocates nothing**, with every slot written (the crate's test

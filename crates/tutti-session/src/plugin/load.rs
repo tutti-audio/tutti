@@ -46,7 +46,7 @@ use crate::graph::{OnShape, SwapRefused};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
 use crate::{AppKey, Clock, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
-use crate::{OtherPeer, PeerResourceId, PeerState, ReplaceRefused, Resource, SavedPeer, Session};
+use crate::{OtherPeer, PeerResourceId, ReplaceRefused, Resource, Saved, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
 /// runs is decided when it is built, from the catalog's row and the format: a
@@ -78,14 +78,16 @@ pub enum LoadPlugin {
 struct Request {
     id: PluginId,
     loadable: Loadable,
-    state: Option<Arc<PeerState>>,
+    state: Option<Arc<Saved>>,
     cx: Context,
 }
 
 impl Request {
-    fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
-        state.check_for(&SavedPeer::Plugin(self.loadable.plugin().clone()))?;
-        self.state = Some(Arc::new(state));
+    fn initial_state(&mut self, saved: Saved) -> Result<(), OtherPeer> {
+        saved
+            .state()
+            .check_for(&SavedPeer::Plugin(self.loadable.plugin().clone()))?;
+        self.state = Some(Arc::new(saved));
         Ok(())
     }
 
@@ -132,15 +134,17 @@ pub struct LoadInProcess {
 }
 
 impl LoadInProcess {
-    /// With `state` restored at the load, before the plugin is activated. A
-    /// refusal by the plugin is logged, and it loads at its defaults.
+    /// With `saved`'s state restored at the load, before the plugin is activated,
+    /// and its pending writes replayed once the plugin has taken it. A refusal
+    /// by the plugin is logged, and it loads at its defaults with nothing
+    /// replayed.
     ///
     /// # Errors
     ///
-    /// [`OtherPeer`] when `state` was saved from another peer than the one the
+    /// [`OtherPeer`] when `saved` was saved from another peer than the one the
     /// id resolved to.
-    pub fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
-        self.request.initial_state(state)
+    pub fn initial_state(&mut self, saved: Saved) -> Result<(), OtherPeer> {
+        self.request.initial_state(saved)
     }
 
     /// Opens the plugin on the main thread `main` proves and restores the
@@ -182,15 +186,17 @@ pub struct LoadOutOfProcess {
 }
 
 impl LoadOutOfProcess {
-    /// With `state` restored at the load, before the plugin is activated. A
-    /// refusal by the plugin is logged, and it loads at its defaults.
+    /// With `saved`'s state restored at the load, before the plugin is activated,
+    /// and its pending writes replayed once the plugin has taken it. A refusal
+    /// by the plugin is logged, and it loads at its defaults with nothing
+    /// replayed.
     ///
     /// # Errors
     ///
-    /// [`OtherPeer`] when `state` was saved from another peer than the one the
+    /// [`OtherPeer`] when `saved` was saved from another peer than the one the
     /// id resolved to.
-    pub fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
-        self.request.initial_state(state)
+    pub fn initial_state(&mut self, saved: Saved) -> Result<(), OtherPeer> {
+        self.request.initial_state(saved)
     }
 }
 
@@ -757,9 +763,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return Err(SwapPluginError::Busy(with));
         }
         let (install, handle) = with.into_parts();
-        let Install { plugin, origin, .. } = install;
+        let Install {
+            plugin,
+            origin,
+            replay,
+            ..
+        } = install;
         match self.swap_installed(node.erase(), plugin, origin) {
             Ok(rebinder) => {
+                // After the swap ended the old plugin's epoch.
+                if let Some(hosted) = self.graph.plugins.get(&node.erase()) {
+                    hosted.writes.send_each(&hosted.handle, &replay);
+                }
                 self.link_node(node, NodeLink::of(handle), rebinder);
                 Ok(())
             }
@@ -804,8 +819,12 @@ impl ApplySealed<f32> for LoadedPlugin {
             plugin,
             mirror,
             origin,
+            replay,
         } = install;
         let (key, rebinder) = session.install_plugin(plugin, mirror, origin);
+        if let Some(hosted) = session.graph.plugins.get(&key.erase()) {
+            hosted.writes.send_each(&hosted.handle, &replay);
+        }
         session.link_node(key, NodeLink::of(instance), rebinder);
         Ok(key)
     }

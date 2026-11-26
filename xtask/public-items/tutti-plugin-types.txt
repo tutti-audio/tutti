@@ -132,6 +132,9 @@ fn answer::Answer::channel
 fn answer::Answer::ready
 fn answer::AnswerSender::is_canceled
 fn answer::AnswerSender::send
+fn any_thread::PluginState::new
+fn any_thread::PluginValue::new
+fn any_thread::PluginValue::wanted
 fn automation::ParameterChanges::add_change
 fn automation::ParameterChanges::add_queue
 fn automation::ParameterChanges::capacity
@@ -236,11 +239,13 @@ fn edit_slots::EditReader::epoch_watch
 fn edit_slots::EditReader::publish_applied
 fn edit_slots::EditReader::swept
 fn edit_slots::EditWriter::has_applied
+fn edit_slots::EditWriter::pending
 fn edit_slots::EditWriter::reset
 fn edit_slots::EditWriter::write
 fn edit_slots::EditWriter::written
 fn edit_slots::edit_slots
 fn edit_slots::epoch_before
+fn edit_slots::overlay_writes
 fn editor::ContentScale::get
 fn editor::ContentScale::new
 fn editor::EditorOpened::mirror_failed
@@ -619,6 +624,8 @@ mod features
 mod features::probed
 struct answer::Answer
 struct answer::AnswerSender
+struct any_thread::PluginState
+struct any_thread::PluginValue
 struct automation::ParameterChanges
 struct automation::ParameterPoint
 struct automation::ParameterQueue

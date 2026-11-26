@@ -36,6 +36,28 @@ fn write<C: Control + ?Sized>(c: &mut C, param: Param, value: f64) {
         .unwrap_or_else(|why| panic!("writing {param:?}: {why}"));
 }
 
+/// A save as the host states it: the bytes, and the writes no block has applied
+/// beside them ([`Control::pending`]).
+type Saved = (Vec<u8>, Vec<(tutti_units::ParamId, Normalized)>);
+
+fn save<C: Control + ?Sized>(c: &mut C) -> Saved {
+    let pending = c.pending();
+    let bytes = c
+        .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
+        .expect("saves");
+    (bytes, pending)
+}
+
+/// A save put back: the bytes, then the pending writes replayed over them.
+fn restore<C: Control + ?Sized>(c: &mut C, (bytes, pending): &Saved) {
+    c.load_state(main_thread(), bytes, tutti_plugin_types::StateUse::Project)
+        .expect("loads");
+    for &(id, value) in pending {
+        c.set_parameter(main_thread(), id, value)
+            .unwrap_or_else(|why| panic!("replaying {id:?}: {why}"));
+    }
+}
+
 fn activate<L: Loaded>(loaded: L, block: usize) -> Active<L> {
     Active::activate(loaded, prepare(RATE, block, FloatWidth::F32))
         .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"))
@@ -1470,14 +1492,10 @@ pub fn state_round_trip<F: Format>() {
     let mut loaded = F::load();
     write(&mut loaded, Param::Level, 0.75);
     write(&mut loaded, Param::Aux, 0.5);
-    let saved = loaded
-        .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
-        .expect("saves");
+    let saved = save(&mut loaded);
     write(&mut loaded, Param::Level, 0.125);
     write(&mut loaded, Param::Aux, 0.0);
-    loaded
-        .load_state(main_thread(), &saved, tutti_plugin_types::StateUse::Project)
-        .expect("loads");
+    restore(&mut loaded, &saved);
     assert_reads::<F>(read(&loaded, Param::Level), 0.75, "level");
     assert_reads::<F>(read(&loaded, Param::Aux), 0.5, "aux");
 }
@@ -1496,7 +1514,8 @@ pub fn loaded_write_reaches_the_audio<F: Format>() {
 }
 
 /// A parameter written to a loaded plugin and saved before it ever renders is
-/// in the state; a restore of that state reads it back and renders it.
+/// stated by the save (in its bytes or beside them as pending); a restore of
+/// that save reads it back and renders it.
 ///
 /// # Panics
 ///
@@ -1505,13 +1524,9 @@ pub fn loaded_write_survives_a_save<F: Format>() {
     let mut loaded = F::load();
     set_mode::<F, _>(&mut loaded, Mode::Level);
     write(&mut loaded, Param::Level, 0.75);
-    let saved = loaded
-        .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
-        .expect("saves");
+    let saved = save(&mut loaded);
     let mut other = F::load();
-    other
-        .load_state(main_thread(), &saved, tutti_plugin_types::StateUse::Project)
-        .expect("loads");
+    restore(&mut other, &saved);
     assert_eq!(read(&other, Param::Level), Some(0.75), "read");
     let out = activate(other, BLOCK).silent(BLOCK);
     assert!(out[0].iter().all(|&v| v == 0.75), "got {:?}", &out[0][..4]);

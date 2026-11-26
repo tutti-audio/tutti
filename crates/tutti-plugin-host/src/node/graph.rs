@@ -373,7 +373,13 @@ where
                         lost += reported;
                     }
                     if completes {
-                        this.params.handed_off(!this.out.params_unsent());
+                        let handed = !this.out.params_unsent();
+                        this.params.handed_off(handed);
+                        // The plugin's call that took the chunk's writes has
+                        // returned.
+                        if handed && let Some(edits) = &this.edits {
+                            edits.publish_applied();
+                        }
                     }
                     if sends {
                         let out_events = &mut this.out.midi_events;
@@ -549,8 +555,12 @@ where
             }
         }
         // Set on the plugin with the block, or owed to the next one.
-        this.params
-            .handed_off(processed && !this.out.params_unsent());
+        let handed = processed && !this.out.params_unsent();
+        this.params.handed_off(handed);
+        // The plugin's call that took the block's writes has returned.
+        if handed && let Some(edits) = &this.edits {
+            edits.publish_applied();
+        }
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,
             // and the rest of every SysEx open in it is skipped.
@@ -774,7 +784,7 @@ mod owed_tests {
     fn read(handle: &PluginHandle, i: i32) -> Option<f64> {
         futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(i as u32)))
             .flatten()
-            .map(|v| v.get())
+            .map(|v| v.plugin.get())
     }
 
     /// A graph prepare at `rate`.

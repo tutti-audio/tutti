@@ -38,7 +38,10 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
         tutti_plugin_types::Answer::ready(None)
     }
-    fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+    fn parameter_value(
+        &self,
+        _id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
         tutti_plugin_types::Answer::ready(None)
     }
 
@@ -71,7 +74,7 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+    ) -> Result<tutti_plugin_types::PluginState, tutti_plugin_types::StateError> {
         Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
@@ -539,7 +542,12 @@ fn a_failed_periodic_snapshot_is_counted() {
             .failed_snapshots()
     };
     assert_eq!(diagnostics(&s), Calls::ZERO);
-    assert!(s.land_snapshot(node, &token, Instant::now(), Ok(vec![1, 2, 3]),));
+    assert!(s.land_snapshot(
+        node,
+        &token,
+        Instant::now(),
+        Ok(tutti_plugin_types::PluginState::new(vec![1, 2, 3])),
+    ));
     assert_eq!(
         diagnostics(&s),
         Calls::ZERO,
