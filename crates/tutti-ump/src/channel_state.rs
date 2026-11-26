@@ -13,15 +13,30 @@ pub enum ParameterKind {
     Assignable,
 }
 
+/// A channel mode: a command whose setting a receiver keeps. Each is one slot, the
+/// last message of its pair being the one in force.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ChannelMode {
+    /// Local Control (CC 122).
+    LocalControl,
+    /// Omni Mode Off or On (CC 124, 125).
+    Omni,
+    /// Mono Mode On or Poly Mode On (CC 126, 127).
+    MonoPoly,
+}
+
 /// One value of a channel's state: what a receiver that joins late has to be told
 /// to sound as the channel does.
 ///
-/// The derived order is the order to tell them in: the program first (a
-/// controller's meaning can depend on the patch), the parameters (a bend range
+/// The derived order is the order to tell them in: the modes first (they decide how
+/// a receiver reads the rest), then the program (a controller's meaning can depend
+/// on the patch), the parameters (a bend range
 /// among them) before the bend they scale, then the controllers, the pressure
 /// and the bend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChannelState {
+    /// A channel mode in force.
+    Mode(ChannelMode),
     /// The program (MIDI 2.0: with its bank).
     Program,
     /// A registered or assignable parameter, by its bank (MSB) and index (LSB).
@@ -46,11 +61,11 @@ pub enum ChannelState {
 pub enum ChannelEffect {
     /// Sets an absolute value of the channel's state.
     Sets(ChannelState),
-    /// A mode message (Local Control, Omni Off, Omni On, Mono On, Poly On, CC 122
-    /// and 124 to 127): a command, not a value to restore, whose setting a
-    /// receiver still keeps. Omni, Mono and Poly also end the channel's notes
+    /// A mode message (Local Control, Omni Off, Omni On, Mono On, Poly On): a
+    /// command, not a value to restore, whose setting a receiver still keeps.
+    /// Omni, Mono and Poly also end the channel's notes
     /// ([`ends_notes`](Self::ends_notes)).
-    Mode(ChannelState),
+    Mode(ChannelMode),
     /// All Sound Off (CC 120) or All Notes Off (CC 123): ends the channel's notes
     /// and sets nothing.
     EndsNotes,
@@ -58,11 +73,6 @@ pub enum ChannelEffect {
     /// position.
     ResetsControllers,
 }
-
-/// The controllers that are events, not values: Portamento Control (CC 84), the
-/// High-Resolution Velocity Prefix (CC 88), and Data Increment and Decrement
-/// (CC 96 and 97).
-const EVENTS: [u8; 4] = [84, 88, 96, 97];
 
 impl ChannelEffect {
     /// What a MIDI 1.0 channel voice message does, or `None` when it is no
@@ -104,24 +114,28 @@ impl ChannelEffect {
     }
 
     fn of_controller(controller: CCNumber) -> Option<Self> {
-        let state = ChannelState::Controller(controller);
-        match controller.get() {
-            120 | 123 => Some(Self::EndsNotes),
-            121 => Some(Self::ResetsControllers),
-            122 | 124..=127 => Some(Self::Mode(state)),
-            n if EVENTS.contains(&n) => None,
-            _ => Some(Self::Sets(state)),
-        }
+        Some(match controller {
+            CCNumber::ALL_SOUND_OFF | CCNumber::ALL_NOTES_OFF => Self::EndsNotes,
+            CCNumber::RESET_ALL => Self::ResetsControllers,
+            CCNumber::LOCAL_CONTROL => Self::Mode(ChannelMode::LocalControl),
+            CCNumber::OMNI_MODE_OFF | CCNumber::OMNI_MODE_ON => Self::Mode(ChannelMode::Omni),
+            CCNumber::MONO_MODE_ON | CCNumber::POLY_MODE_ON => Self::Mode(ChannelMode::MonoPoly),
+            // Events, not values.
+            CCNumber::PORTAMENTO_CONTROL
+            | CCNumber::VELOCITY_PREFIX
+            | CCNumber::DATA_INCREMENT
+            | CCNumber::DATA_DECREMENT => return None,
+            _ => Self::Sets(ChannelState::Controller(controller)),
+        })
     }
 
     /// Whether the message ends the channel's notes: All Sound Off, All Notes
-    /// Off, and the Omni, Mono and Poly modes (CC 124 to 127).
+    /// Off, and the Omni, Mono and Poly modes.
     #[must_use]
-    pub fn ends_notes(self) -> bool {
-        match self {
-            Self::EndsNotes => true,
-            Self::Mode(ChannelState::Controller(c)) => c.get() >= 124,
-            _ => false,
-        }
+    pub const fn ends_notes(self) -> bool {
+        matches!(
+            self,
+            Self::EndsNotes | Self::Mode(ChannelMode::Omni | ChannelMode::MonoPoly)
+        )
     }
 }

@@ -2,8 +2,8 @@
 //! Change, Channel Mode messages), M2-104 section 7.4.
 
 use tutti_ump::{
-    CCNumber, ChannelEffect, ChannelState, ControlValue, NoteNumber, ParameterKind, U7, U14,
-    Voice1, Voice2,
+    CCNumber, ChannelEffect, ChannelMode, ChannelState, ControlValue, NoteNumber, ParameterKind,
+    U7, U14, Voice1, Voice2,
 };
 
 fn cc1(n: u8) -> Option<ChannelEffect> {
@@ -38,9 +38,15 @@ fn the_commands_of_the_mode_range_are_not_values() {
     assert_eq!(cc1(120), Some(ChannelEffect::EndsNotes));
     assert_eq!(cc1(123), Some(ChannelEffect::EndsNotes));
     assert_eq!(cc1(121), Some(ChannelEffect::ResetsControllers));
-    for n in [122, 124, 125, 126, 127] {
-        let mode = ChannelEffect::Mode(ChannelState::Controller(CCNumber::new(n).unwrap()));
-        assert_eq!(cc1(n), Some(mode));
+    let modes = [
+        (122, ChannelMode::LocalControl),
+        (124, ChannelMode::Omni),
+        (125, ChannelMode::Omni),
+        (126, ChannelMode::MonoPoly),
+        (127, ChannelMode::MonoPoly),
+    ];
+    for (n, mode) in modes {
+        assert_eq!(cc1(n), Some(ChannelEffect::Mode(mode)), "CC {n}");
     }
 }
 
@@ -132,6 +138,7 @@ fn notes_and_polyphonic_pressure_are_not_channel_state() {
 fn the_order_of_the_state_is_the_order_a_receiver_is_told_it_in() {
     let parameter = |kind| ChannelState::Parameter(kind, U7::of(0), U7::of(0));
     let order = [
+        ChannelState::Mode(ChannelMode::MonoPoly),
         ChannelState::Program,
         parameter(ParameterKind::Registered),
         parameter(ParameterKind::Assignable),

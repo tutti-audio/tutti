@@ -135,7 +135,7 @@ pub use articulation::{
 };
 pub use bend_value::BendValue;
 pub use cc_number::{CCNumber, CCNumberOutOfRange};
-pub use channel_state::{ChannelEffect, ChannelState, ParameterKind};
+pub use channel_state::{ChannelEffect, ChannelMode, ChannelState, ParameterKind};
 pub use ci_version::{CiVersion, NotAVersion};
 pub use control_value::ControlValue;
 pub use field::{

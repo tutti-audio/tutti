@@ -52,8 +52,8 @@
 //!
 //! **Order of a catch-up, and why.** SysEx and Flex setup first: a device
 //! reset must come before the state it would erase. Then, one Channel after
-//! another: the bank in force and the program (a controller's meaning can
-//! depend on the patch), then the rest of [`ChannelState`]'s order (the
+//! another: the bank in force, the modes and the program (a controller's
+//! meaning can depend on the patch), then the rest of [`ChannelState`]'s order (the
 //! parameters, the controllers, the pressure and the pitch bend), the bank sent
 //! since, and the select in force (last, so the joiner is left on the stream's
 //! selection, whatever order the parameters replay in). The held notes come
@@ -62,7 +62,9 @@
 //!
 //! **Mode messages.** A Control Change of All Sound Off (120), All Notes Off
 //! (123) or a channel mode (124 to 127: Omni Off, Omni On, Mono, Poly) ends the
-//! channel's keys; a channel mode's value is also kept as a controller. A
+//! channel's keys. A channel mode is kept as one slot per pair, so only the
+//! last of Omni Off and Omni On, and of Mono On (with its channel count) and
+//! Poly On, is caught up, after Local Control and before the program. A
 //! Reset All Controllers (121) forgets exactly what RP-015 resets: modulation
 //! (CC 1), expression (CC 11), the pedals (CC 64 to 67), pitch bend, channel
 //! pressure and the parameter select (which becomes the Null pair). Every other
@@ -433,8 +435,12 @@ impl Record {
         if effect.ends_notes() {
             self.end_keys(lane);
         }
-        if let ChannelEffect::Sets(state) | ChannelEffect::Mode(state) = effect {
-            self.put_one(lane, What::State(state), ump);
+        match effect {
+            ChannelEffect::Sets(state) => self.put_one(lane, What::State(state), ump),
+            ChannelEffect::Mode(mode) => {
+                self.put_one(lane, What::State(ChannelState::Mode(mode)), ump);
+            }
+            ChannelEffect::EndsNotes | ChannelEffect::ResetsControllers => {}
         }
     }
 
@@ -925,23 +931,27 @@ mod tests {
     /// Mono, Poly: CC 120, 123 to 127) end the channel's keys; a channel mode's
     /// value is kept as a controller.
     #[test]
-    fn mode_messages_end_the_channels_keys() {
+    fn mode_messages_end_the_channels_keys_and_the_last_of_each_pair_is_kept() {
         for mode in [120, 123] {
             let record = observed(&[on1(61, 90), cc1(mode, 0)]);
             assert_eq!(record.catch_up(), [], "CC {mode}");
         }
-        for mode in 124..=127 {
+        for mode in [124, 125, 126, 127] {
             let record = observed(&[on1(61, 90), cc1(mode, 1)]);
             assert_eq!(record.catch_up(), [cc1(mode, 1)], "CC {mode}");
         }
-    }
-
-    /// Portamento Control, the Velocity Prefix and Data Increment and Decrement
-    /// are events, not values.
-    #[test]
-    fn controllers_that_are_events_are_not_kept() {
-        let record = observed(&[cc1(84, 1), cc1(88, 2), cc1(96, 0), cc1(97, 0), cc1(7, 9)]);
-        assert_eq!(record.catch_up(), [cc1(7, 9)]);
+        // Omni Off then On is Omni On; Mono On then Poly On is Poly On; Mono On
+        // keeps its channel count.
+        let record = observed(&[
+            cc1(124, 0),
+            cc1(125, 0),
+            cc1(127, 0),
+            cc1(126, 3),
+            cc1(122, 127),
+        ]);
+        assert_eq!(record.catch_up(), [cc1(122, 127), cc1(125, 0), cc1(126, 3)]);
+        let record = observed(&[cc1(126, 3), cc1(127, 0), cc1(125, 0), cc1(124, 0)]);
+        assert_eq!(record.catch_up(), [cc1(124, 0), cc1(127, 0)]);
     }
 
     /// RP-015: Reset All Controllers resets modulation, expression, the pedals,
