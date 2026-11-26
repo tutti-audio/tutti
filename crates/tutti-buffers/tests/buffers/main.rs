@@ -11,6 +11,7 @@ static ALLOC: AllocDisabler = AllocDisabler;
 mod convert;
 mod float;
 mod fold_no_alloc;
+mod fold_to_channels;
 mod fold_views;
 mod i24;
 #[cfg(feature = "serde")]

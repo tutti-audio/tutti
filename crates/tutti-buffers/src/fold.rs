@@ -1,7 +1,7 @@
 //! [`Fold`]: the one way a signal of one channel topology becomes another's.
 
 use crate::convert::same_frames;
-use crate::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
+use crate::{AmbisonicNormalization, ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use alloc::boxed::Box;
 use alloc::vec;
@@ -643,7 +643,9 @@ fn expr<F: Float>(src: &[Speaker], hits: &[Hit<F>], j: usize) -> Expr<F> {
 impl<F: Float> Fold<F> {
     /// Builds the fold from `src` into `dst`.
     ///
-    /// Control side: it allocates. The rules are on [`Fold`].
+    /// Control side: it allocates. The rules are on [`Fold`]. For an output
+    /// whose channels may be numbered buses (a main output, a device, a file),
+    /// use [`to_channels`](Self::to_channels).
     ///
     /// # Errors
     ///
@@ -658,6 +660,41 @@ impl<F: Float> Fold<F> {
     /// spec.
     pub fn spec<'a>(src: &'a ChannelTopology, dst: &'a ChannelTopology) -> FoldSpec<'a, F> {
         FoldSpec::new(src, dst)
+    }
+
+    /// The fold from `src` into the output channels `dst`, as a spec
+    /// ([`FoldSpec::levels`], [`build`](FoldSpec::build)): where
+    /// [`between`](Self::between) is strict about what it cannot place, this
+    /// is the fold of a signal onto a device, a file or a node's outputs, whose
+    /// channels the signal need not name. The source is placed by speaker,
+    /// except where a speaker cannot be named:
+    ///
+    /// - a source with an [`Unknown`](Speaker::Unknown) channel (a second LFE, a
+    ///   wide or high speaker) is [`FoldError::Unnamed`], whatever the
+    ///   destination: nothing can be said about where it goes;
+    /// - a source whose channels are all [`Unassigned`](Speaker::Unassigned) is
+    ///   independent buses, and an ambisonic source is not speaker feeds: channel
+    ///   `i` stays channel `i` ([`by_index`](Self::by_index)). A wider
+    ///   destination is zero-filled and a narrower one is an error, never a
+    ///   matrix. A caller that reads a bare count in the engine's order says so
+    ///   with [`ChannelSet::default_for`] before it calls;
+    /// - a destination with no named speaker (unassigned channels, or a width past
+    ///   [`MAX_CHANNELS`](crate::MAX_CHANNELS), which has no topology) takes channels by index
+    ///   too, and a narrowing is [`FoldError::Unplaced`], never a truncation;
+    /// - otherwise, [`between`](Self::between), at the spec's levels. A mono
+    ///   source lands on the centre of a 6, 8 or 12-wide destination and the
+    ///   front pair of a 2 or 4-wide one.
+    ///
+    /// The levels are checked on every path, though channels placed by index
+    /// have none. For a dry path between placed buses, which must refuse a
+    /// guess, use [`between`](Self::between).
+    ///
+    /// # Errors
+    ///
+    /// As [`between`](Self::between) and [`by_index`](Self::by_index), and
+    /// [`FoldError::Unnamed`] as above.
+    pub fn to_channels<'a>(src: &'a ChannelTopology, dst: &'a ChannelSet) -> FoldSpec<'a, F> {
+        FoldSpec::to_channels(src, dst)
     }
 
     fn build(

@@ -133,10 +133,6 @@ fn compile::latency::delays
 fn compile::latency::plan
 fn compile::main_output::MainOutputId::get
 fn compile::main_output::MainOutputId::next
-fn compile::main_output::fold_to_channels
-fn compile::main_output::fold_to_topology
-fn compile::main_output::fold_to_topology_with
-fn compile::main_output::fold_to_width
 fn compile::plan::Csr::row
 fn compile::plan::Csr::rows
 fn compile::plan::Delta::attach

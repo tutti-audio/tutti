@@ -727,10 +727,7 @@ pub use compile::latency::{
     ChannelFeed, Compensation, Delays, Feed, LatencyGraph, MAX_NODE_LATENCY, PortFeed, delays,
     plan as latency_plan,
 };
-pub use compile::main_output::{
-    MainOutputBank, MainOutputError, MainOutputId, fold_to_channels, fold_to_topology,
-    fold_to_topology_with, fold_to_width,
-};
+pub use compile::main_output::{MainOutputBank, MainOutputError, MainOutputId};
 pub use compile::plan::{
     AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, Delta, EventDelay, EventDelayKey,
     EventFeedbackKey, EventSlotCapacity, FeedbackSpec, GainPortOp, InputBound, Op, ParamPortOp,
