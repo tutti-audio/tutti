@@ -19,7 +19,7 @@ const WRITE_CHUNK: usize = 8192;
 ///   ([`EncodeError::Commit`](crate::EncodeError::Commit) of kind
 ///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists)), keeping the complete file at the
 ///   error's `kept` path, the caller's to move or delete. The destination's
-///   [`create_new`](Destination::create_new) is this behaviour already.
+///   [`create_new`](Destination::create_new) says what this already does.
 /// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
 ///   to) is encoded into memory first and then handed over in one `write_all`,
 ///   so it needs no `Seek` and never holds a partial file from an encode error.

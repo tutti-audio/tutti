@@ -694,8 +694,8 @@ pub enum TakeError {
     /// The file could not be created.
     #[error("the take's file could not be created: {0}")]
     Open(#[source] Arc<tutti_codec::EncodeError>),
-    /// The finished file could not be put in place (the path exists under
-    /// [`TakeFile::create_new`], or the file system refused the move). The
+    /// The finished file could not be put in place (a path appeared after the take was
+    /// armed, or the file system refused the move). The
     /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
     /// untouched; the file is the app's to move or delete.
     #[error(transparent)]
