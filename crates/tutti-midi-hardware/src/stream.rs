@@ -97,7 +97,7 @@ use crate::ci::{
 };
 use crate::devices::OpenOutput;
 use crate::peer::PeerRequestError;
-use crate::process::{self, ProcessChange, ReportAsk, ReportAsked};
+use crate::process::{self, ProcessChange, ReportAsk, ReportInquiry};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
@@ -380,7 +380,7 @@ pub(crate) struct Stepped {
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The MIDI Message Reports peers asked, still to be answered.
-    pub(crate) report_asks: Vec<ReportAsked>,
+    pub(crate) report_asks: Vec<ReportInquiry>,
     /// The Groups whose MIDI-CI device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, getrandom::Error)>,
 }
@@ -660,7 +660,7 @@ impl Negotiation {
 
     /// Answers `ask` with the empty report of a device that declares nothing, on
     /// the MIDI-CI output of this device.
-    pub(crate) fn decline_report(&mut self, ask: &ReportAsked) {
+    pub(crate) fn decline_report(&mut self, ask: &ReportInquiry) {
         if let Some(ci_output) = self.ci_output_mut() {
             ci_output.ci.decline_report(ask, &mut ci_output.out);
         }

@@ -10,8 +10,8 @@
 //! lost before the request is sent, and that is refused ([`PeerRequestError::NoSuchPeer`]).
 //!
 //! The session is also the Responder: a peer's request for a report of what the
-//! session sent ([`ReportAsked`]) is handed to the app through
-//! [`Polled::ReportAsked`](crate::Polled::ReportAsked), which answers it from what
+//! session sent ([`ReportInquiry`]) is handed to the app through
+//! [`Polled::ReportInquiry`](crate::Polled::ReportInquiry), which answers it from what
 //! its output said, or hands it back to
 //! [`MidiSession::decline_report`](crate::MidiSession::decline_report).
 //!
@@ -90,11 +90,11 @@ impl ReportAsk {
 ///
 /// The report is the Reply, the messages and the End, in that order on one
 /// connection (§9.8.2): the messages are the state of what the session sent, which
-/// the hardware layer does not hold, so [`Polled::ReportAsked`](crate::Polled::ReportAsked)
+/// the hardware layer does not hold, so [`Polled::ReportInquiry`](crate::Polled::ReportInquiry)
 /// hands the request on, and [`MidiSession::decline_report`](crate::MidiSession::decline_report)
 /// answers it with the report of a device that declares nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReportAsked {
+pub struct ReportInquiry {
     pub(crate) group: MidiGroup,
     pub(crate) groups: GroupSpan,
     pub(crate) own: Muid,
@@ -103,7 +103,7 @@ pub struct ReportAsked {
     pub(crate) scope: ReportScope,
 }
 
-impl ReportAsked {
+impl ReportInquiry {
     /// The Group the MIDI-CI Device speaks on: the first Group of its Function
     /// Block, which the Reply and the End go out on.
     #[must_use]
@@ -134,7 +134,7 @@ impl ReportAsked {
     /// The Reply to MIDI Message Report that begins the report, on the request's
     /// Device ID and declaring `declared` (§9.6).
     #[must_use]
-    pub const fn begin(&self, declared: ReportScope) -> CiMessage {
+    pub const fn reply(&self, declared: ReportScope) -> CiMessage {
         CiMessage::MessageReportReply {
             source: self.own,
             ci_version: CI_VERSION,
@@ -182,8 +182,8 @@ mod tests {
 
     use super::*;
 
-    fn asked(first: u8, span: u8) -> ReportAsked {
-        ReportAsked {
+    fn asked(first: u8, span: u8) -> ReportInquiry {
+        ReportInquiry {
             group: MidiGroup::of(first),
             groups: GroupSpan::of(span),
             own: Muid::of(1),

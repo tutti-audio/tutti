@@ -164,7 +164,7 @@
 //!   Profile Inquiry gets empty lists (M2-101 §7.13) and a Set Profile On or Off a NAK. They
 //!   answer an Inquiry:
 //!   Process Inquiry Capabilities with MIDI Message Report supported. A request for a MIDI
-//!   Message Report holds no state here to report: it is a [`Polled::ReportAsked`](crate::Polled::ReportAsked)
+//!   Message Report holds no state here to report: it is a [`Polled::ReportInquiry`](crate::Polled::ReportInquiry)
 //!   for the caller, who answers from what its output sent, or hands it to
 //!   [`MidiSession::decline_report`](crate::MidiSession::decline_report), which sends the Reply
 //!   with empty bitmaps and the End (§9.6, §9.8). A Channel is never refused as not in use
@@ -208,7 +208,7 @@ use tutti_units::Losses;
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
 use crate::peer::{PeerRef, PeerRequestError};
-use crate::process::{self, ProcessChange, ReportAsk, ReportAsked, Reporter};
+use crate::process::{self, ProcessChange, ReportAsk, ReportInquiry, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
@@ -227,7 +227,7 @@ pub(crate) const MAX_SYSEX: MaxSysexSize = MaxSysexSize::of(MaxSysexSize::INITIA
 /// module's "What it does"). They answer Profile Configuration from the Profiles the app
 /// offered ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)), none
 /// until then; they hand a request for a MIDI Message Report to the caller
-/// ([`Polled::ReportAsked`](crate::Polled::ReportAsked)).
+/// ([`Polled::ReportInquiry`](crate::Polled::ReportInquiry)).
 const CATEGORIES: CiCategories = CiCategories::PROFILE_CONFIGURATION
     .union(CiCategories::PROCESS_INQUIRY)
     .union(CiCategories::PROPERTY_EXCHANGE);
@@ -247,7 +247,7 @@ pub(crate) struct CiChanges {
     pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The MIDI Message Reports peers asked of the session's devices, each still
     /// to be answered.
-    pub(crate) report_asks: Vec<ReportAsked>,
+    pub(crate) report_asks: Vec<ReportInquiry>,
     /// The Groups whose device changed its MUID (M2-101 §3.3.1): its Function
     /// Block is announced again.
     pub(crate) muid_changed: Vec<MidiGroup>,
@@ -679,9 +679,9 @@ impl Ci {
     /// every bitmap empty and the End (M2-101 §9.6, §9.8), on `out` and the
     /// Group of the device. The messages are one send each, in order; what the
     /// output refuses is counted.
-    pub(crate) fn decline_report(&mut self, ask: &ReportAsked, out: &mut OpenOutput) {
+    pub(crate) fn decline_report(&mut self, ask: &ReportInquiry, out: &mut OpenOutput) {
         let sends = [
-            (ask.group, ask.begin(ReportScope::none(ask.scope.address()))),
+            (ask.group, ask.reply(ReportScope::none(ask.scope.address()))),
             (ask.group, ask.end()),
         ];
         self.refused.add(send(out, &sends));
@@ -1215,7 +1215,7 @@ impl Member {
                     peer,
                     control,
                     scope,
-                } => changes.report_asks.push(ReportAsked {
+                } => changes.report_asks.push(ReportInquiry {
                     group: self.group,
                     groups: self.span,
                     own: self.device.muid(),

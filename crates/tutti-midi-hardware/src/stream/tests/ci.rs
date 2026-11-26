@@ -2230,11 +2230,11 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
     );
 }
 
-fn report_asks(polled: &[Polled]) -> Vec<&crate::ReportAsked> {
+fn report_asks(polled: &[Polled]) -> Vec<&crate::ReportInquiry> {
     polled
         .iter()
         .filter_map(|p| match p {
-            Polled::ReportAsked(_, ask) => Some(ask),
+            Polled::ReportInquiry(_, ask) => Some(ask),
             _ => None,
         })
         .collect()

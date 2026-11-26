@@ -76,12 +76,12 @@ fn port::manager::HardwareMidiInputs::set_input_timing
 fn port::manager::HardwareMidiInputs::set_port_active
 fn process::ReportAsk::check
 fn process::ReportAsk::peer
-fn process::ReportAsked::begin
-fn process::ReportAsked::control
-fn process::ReportAsked::end
-fn process::ReportAsked::group
-fn process::ReportAsked::groups
-fn process::ReportAsked::scope
+fn process::ReportInquiry::control
+fn process::ReportInquiry::end
+fn process::ReportInquiry::group
+fn process::ReportInquiry::groups
+fn process::ReportInquiry::reply
+fn process::ReportInquiry::scope
 fn process::Reporter::ask
 fn process::Reporter::at
 fn profiles::ChannelSwitcher::channel
@@ -219,7 +219,7 @@ struct port::manager::HardwareMidiInputs
 struct port::manager::PortInfo
 struct port::manager::StaleInput
 struct process::ReportAsk
-struct process::ReportAsked
+struct process::ReportInquiry
 struct process::Reporter
 struct profiles::ChannelSwitcher
 struct profiles::PeerProfiles
