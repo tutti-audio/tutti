@@ -719,6 +719,9 @@ macro_rules! published_methods {
     };
 }
 
+// A published kind is listed three times: here (its key method), in `SlotId`
+// (its slot) and in `published_kinds!` (registration and the patch's write).
+// A new kind goes in all three.
 published_methods! {
     #[cfg(feature = "midi")]
     events, ClipEventsTarget => tutti_midi_runtime::ClipEventsKind,
@@ -990,6 +993,7 @@ pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId,
 /// its slot of a node: the one list of those kinds. A node that publishes
 /// another kind has nothing that can address its value, and the session
 /// leaves it out.
+// A new kind also goes in `published_methods!` and `SlotId`.
 macro_rules! published_kinds {
     ($kind:ident, $id:ident => $body:expr) => {{
         #[allow(unused_mut, reason = "no kind is addressed without a feature")]
