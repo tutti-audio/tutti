@@ -216,6 +216,7 @@ enum profile::ProfileId
 enum profile::ProfileState
 enum profile::ProfileTarget
 enum profile_details::ProfileDetails
+enum profile_responder::OfferError
 enum rotary::RotaryControl
 enum rotary::RotarySpeaker
 enum rotary::RotaryValue
@@ -692,7 +693,6 @@ fn profile::StandardProfile::number
 fn profile::StandardProfile::version
 fn profile_details::DetailsData::decode
 fn profile_responder::ProfileOffer::is_empty
-fn profile_responder::ProfileOffer::with
 fn profile_responder::ProfileOfferEntry::enabled
 fn profile_responder::ProfileOfferEntry::fixed
 fn profile_responder::ProfileOfferEntry::new

@@ -117,7 +117,7 @@
 //! [`ProfilesChange::Switched`] for the peer, and never changes the
 //! offer. For each Profile a peer lists on a Channel without a declared maximum, the
 //! devices ask for its Number of MIDI Channels (M2-102 §2.5.1) once the peer's list is
-//! whole, so a Set Profile On never asks for more than the peer allows.
+//! whole and when the peer adds a Profile later, so a Set Profile On never asks for more than the peer allows.
 //!
 //! # Property Exchange
 //!
@@ -1371,7 +1371,8 @@ impl Member {
             // the one in flight has ended; a second here has no answer of its
             // own.
             Err(ProfileRequestError::AlreadyAsking) => {}
-            // The check of `Ci::set_profile` read a table that had no maximum yet.
+            // The peer's declared maximum arrived between the app's request and
+            // the poll that sends it: the switch is not sent, and says so.
             Err(ProfileRequestError::OverMaximum { .. }) => changes.answers.push((
                 self.peer_id(switch.at.peer().muid),
                 Answer::SwitchLost {
@@ -1395,7 +1396,7 @@ impl Member {
     ) {
         let id = self.peer_id(muid);
         let mut enabled = Vec::new();
-        let mut known = false;
+        let mut ask_maximums = false;
         for action in actions {
             let change = match action {
                 ProfileAction::Send(message) => {
@@ -1403,7 +1404,7 @@ impl Member {
                     continue;
                 }
                 ProfileAction::ProfilesKnown => {
-                    known = true;
+                    ask_maximums = true;
                     ProfilesChange::Known
                 }
                 ProfileAction::InquiryTimedOut => ProfilesChange::InquiryTimedOut,
@@ -1413,6 +1414,8 @@ impl Member {
                     profile,
                     change,
                 } => {
+                    // A Profile the peer added later has no declared maximum either.
+                    ask_maximums |= change == ProfileChange::Added;
                     if let (CiDeviceId::Channel(manager), ProfileId::MPE) = (address, profile) {
                         match change {
                             ProfileChange::Enabled => {
@@ -1477,7 +1480,7 @@ impl Member {
             };
             changes.profiles.push((id, change));
         }
-        if known && let Some(initiator) = self.initiators.get_mut(&muid) {
+        if ask_maximums && let Some(initiator) = self.initiators.get_mut(&muid) {
             let asked = initiator.ask_maximums(now);
             self.carry_out(muid, asked, now, sends, changes);
         }
@@ -1485,7 +1488,8 @@ impl Member {
             let Some(initiator) = self.initiators.get_mut(&muid) else {
                 return;
             };
-            // An inquiry already in flight is the answer the session waits for.
+            // An inquiry asks no count, so its one refusal is the inquiry already in
+            // flight, whose answer is what the session waits for.
             if let Ok(asked) = ask_mpe_features(initiator, manager, now) {
                 self.carry_out(muid, asked, now, sends, changes);
             }
