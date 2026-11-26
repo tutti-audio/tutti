@@ -487,3 +487,31 @@ fn an_event_or_bus_cycle_is_refused_with_nothing_changed() {
     assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
     assert_eq!(s.graph_ref().node_count(), empty);
 }
+
+/// **A node the patch drops takes its hand-made edges out of the cycle
+/// search**: `c -> b -> a` is wired by hand, `b` is dropped, and the declared
+/// `a -> c` closes no cycle once `b` is gone.
+#[test]
+fn a_dropped_nodes_hand_made_edges_close_no_cycle() {
+    let mut s = session();
+    let nodes = || {
+        (
+            NodeDecl::new("a", pass()),
+            NodeDecl::new("b", pass()),
+            NodeDecl::new("c", pass()),
+        )
+    };
+    s.patch(nodes()).unwrap();
+    let node = |s: &Session, key| s.key::<PassConfig>(&key).unwrap().erase();
+    let (a, b, c) = (node(&s, "a"), node(&s, "b"), node(&s, "c"));
+    s.graph().connect(c, b).unwrap();
+    s.graph().connect(b, a).unwrap();
+
+    let patched = s.patch((
+        NodeDecl::new("a", pass()),
+        NodeDecl::new("c", pass()),
+        Mention::new("a").connect(Mention::new("c")),
+    ));
+
+    assert_eq!(patched.unwrap().removed, ["b"]);
+}

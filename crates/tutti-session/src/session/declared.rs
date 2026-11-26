@@ -9,7 +9,10 @@ use std::fmt;
 
 use thiserror::Error;
 use tutti_buffers::Float;
-use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, NodeSpec, Shape, Shapes};
+use tutti_graph::{
+    BusOutputPort, Edge, GraphSpec, HostValues, Initials, IntoNode, NodeConfig, NodeKey, NodeSpec,
+    PortSink, PortSource, Shape, Shapes,
+};
 use tutti_units::Gain;
 
 use crate::graph::Split;
@@ -199,6 +202,44 @@ impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
             .entries(self.nodes.iter().map(|(key, s)| (key, s.node)))
             .finish()
     }
+}
+
+/// Takes `gone` out of `spec`: the nodes, and every edge into or out of them
+/// (audio, event, param, gain and bus).
+fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
+    let from_gone =
+        |source: PortSource| matches!(source, PortSource::Node(p) if gone.contains(&p.node()));
+    let edge_gone = |edge: &Edge| match *edge {
+        Edge::Direct(source) => from_gone(source),
+        Edge::Feedback(f) => gone.contains(&f.from.node()),
+    };
+    for node in gone {
+        spec.topology.nodes.remove(node);
+    }
+    spec.topology.edges.retain(|at, edges| {
+        edges.retain(|e| !edge_gone(e));
+        !gone.contains(&at.node()) && !edges.is_empty()
+    });
+    for sources in &mut spec.topology.outputs {
+        sources.retain(|source| !from_gone(*source));
+    }
+    spec.events.retain(|at, edges| {
+        edges.retain(|e| !gone.contains(&e.from().node()));
+        !gone.contains(&at.node()) && !edges.is_empty()
+    });
+    spec.params
+        .retain(|at, from| !gone.contains(&at.node) && !gone.contains(&from.node()));
+    spec.gains.retain(|id, _| {
+        let sink = matches!(id.sink, PortSink::Port(at) if gone.contains(&at.node()));
+        !sink && !edge_gone(&id.from)
+    });
+    let bus_gone = |source: &BusOutputPort| matches!(source, BusOutputPort::Node(bus) if gone.contains(&bus.node()));
+    spec.bus_edges.retain(|at, feeds| {
+        feeds.retain(|feed| !bus_gone(&feed.source));
+        !gone.contains(&at.node()) && !feeds.is_empty()
+    });
+    spec.main_output_sources
+        .retain(|feed| !bus_gone(&feed.source));
 }
 
 /// The assignments of what `new` gives that `old` did not give or gave
@@ -458,6 +499,22 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ) -> Result<(), PatchError<K>> {
         let pending = Some(&planned.shapes);
         let mut spec = self.graph.live_spec();
+        // The nodes this patch takes out are not in the graph it makes, nor
+        // are the edges into or out of them, hand-made ones included.
+        let leaving: BTreeSet<NodeKey> = kept
+            .nodes
+            .iter()
+            .filter(|(key, _)| !planned.at.contains_key(*key))
+            .map(|(_, stored)| stored.node)
+            .chain(
+                planned
+                    .nodes
+                    .iter()
+                    .filter(|p| matches!(p.fate, Fate::Readd(_)))
+                    .filter_map(|p| kept.nodes.get(&p.key).map(|stored| stored.node)),
+            )
+            .collect();
+        forget_nodes(&mut spec, &leaving);
         for (&node, shape) in &planned.shapes {
             let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
             spec.topology.nodes.insert(node, declared);
