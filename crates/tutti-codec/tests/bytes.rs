@@ -20,10 +20,9 @@ use tutti_buffers::ChannelSet;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::Interleaved;
 #[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
-use tutti_codec::FileEncoder;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
-use tutti_codec::{Encoder, Format, Spec};
+use tutti_codec::{EncoderOptions, Format, Spec};
 use tutti_units::SampleRate;
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per
@@ -48,7 +47,9 @@ fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
     let spec = Spec::of_channels(format, ChannelSet::default_for(layout), SampleRate::SR_44K1);
     let samples = input(usize::from(channels), frames);
     let cut = frames / 3 * usize::from(channels);
-    let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new())).unwrap();
+    let mut encoder = EncoderOptions::new(&spec)
+        .wrap(Cursor::new(Vec::new()))
+        .unwrap();
     encoder
         .write(Interleaved::new(&samples[..cut], layout).unwrap())
         .unwrap();
@@ -63,7 +64,9 @@ fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
 fn file_of<S: tutti_buffers::Sample>(format: Format, channels: u16, samples: &[S]) -> Vec<u8> {
     let layout = ChannelLayout::from(channels);
     let spec = Spec::of_channels(format, ChannelSet::default_for(layout), SampleRate::SR_44K1);
-    let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new())).unwrap();
+    let mut encoder = EncoderOptions::new(&spec)
+        .wrap(Cursor::new(Vec::new()))
+        .unwrap();
     encoder
         .write(Interleaved::new(samples, layout).unwrap())
         .unwrap();
@@ -339,7 +342,7 @@ fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
     let samples = input(usize::from(channels), frames);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("written");
-    let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+    let mut encoder = EncoderOptions::new(&spec).create(&path).unwrap();
     encoder
         .write(Interleaved::new(&samples, layout).unwrap())
         .unwrap();

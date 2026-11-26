@@ -1,36 +1,63 @@
 use super::*;
 use crate::IntDepth;
 use crate::IntPcm;
-use crate::{EncodeError, Format, Pcm};
+use crate::{EncodeError, EncoderOptions, Format, Pcm, Spec};
 use hound::SampleFormat;
 use std::path::Path;
 use tutti_buffers::ChannelSet;
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Interleaved, Sink};
+use tutti_units::{SampleRate, Samples};
 
 /// One write of `samples`, viewed at the sink's own width.
-fn write_samples(sink: &mut FileOut, samples: &[f32]) -> std::result::Result<(), SinkFailed> {
+fn write_samples(sink: &mut EncoderSink, samples: &[f32]) -> std::result::Result<(), SinkFailed> {
     let frames = Interleaved::new(samples, sink.layout()).unwrap();
     sink.write(frames)
 }
 
-/// A WAV sink at `rate` and `channels` wide, the way the recorder's callers
+/// An in-place sink of `spec`, replacing what is at `path`, the way the recorder's callers
 /// build one.
+fn sink_of(
+    spec: &Spec,
+    path: impl AsRef<Path>,
+    limit: Option<u64>,
+) -> std::io::Result<EncoderSink> {
+    let options = EncoderOptions::new(spec).in_place().replace();
+    let options = match limit {
+        Some(frames) => options.limit_frames(frames),
+        None => options,
+    };
+    Ok(EncoderSink::new(options.create(path)?))
+}
+
+/// A WAV sink at `rate` and `channels` wide.
 fn wav(
     path: impl AsRef<Path>,
     rate: f64,
     channels: impl Into<ChannelLayout>,
     pcm: Pcm,
-) -> std::io::Result<FileOut> {
-    Ok(FileOut::new(
+) -> std::io::Result<EncoderSink> {
+    wav_limited(path, rate, channels, pcm, None)
+}
+
+/// As [`wav`], holding at most `limit` frames.
+fn wav_limited(
+    path: impl AsRef<Path>,
+    rate: f64,
+    channels: impl Into<ChannelLayout>,
+    pcm: Pcm,
+    limit: Option<u64>,
+) -> std::io::Result<EncoderSink> {
+    sink_of(
         &Spec::of_channels(
             Format::Wav(pcm),
             ChannelSet::default_for(channels.into()),
             SampleRate::of(rate),
         ),
-        std::fs::File::create(path)?,
-    )?)
+        path,
+        limit,
+    )
 }
 
 /// A WAV sink for the channels `topology` names, so the header's speaker mask
@@ -40,11 +67,20 @@ fn wav_with_topology(
     rate: f64,
     topology: ChannelTopology,
     pcm: Pcm,
-) -> std::io::Result<FileOut> {
-    Ok(FileOut::new(
+) -> std::io::Result<EncoderSink> {
+    sink_of(
         &Spec::new(Format::Wav(pcm), topology, SampleRate::of(rate)),
-        std::fs::File::create(path)?,
-    )?)
+        path,
+        None,
+    )
+}
+
+/// The first failure of a sink's `finalize`, as the error the write hit.
+fn first_failure(closed: Result<(), Kept>) -> EncodeError {
+    match closed.expect_err("the failure must be reported") {
+        Kept::Unfinished { source, .. } => source,
+        other => panic!("not an unfinished file: {other}"),
+    }
 }
 
 /// The sink writes INCREMENTALLY: feeding frames across many `write` calls
@@ -130,12 +166,9 @@ mod full_device {
             "the full device must have refused a write"
         );
 
-        let err = sink
-            .finalize()
-            .expect_err("a failed write must be reported, not swallowed");
-        assert_eq!(
-            err.kind(),
-            std::io::ErrorKind::StorageFull,
+        let err = first_failure(sink.finalize());
+        assert!(
+            matches!(&err, EncodeError::Io(e) if e.kind() == std::io::ErrorKind::StorageFull),
             "the cause rides out as the OS gave it, not flattened: {err}"
         );
     }
@@ -150,14 +183,14 @@ mod full_device {
 fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("partial.wav");
-    let mut sink = wav(
+    let mut sink = wav_limited(
         &path,
         48_000.0,
         2u16,
         Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+        Some(2),
     )
-    .expect("create")
-    .limit_frames(2);
+    .expect("create");
 
     write_samples(&mut sink, &[0.001, -0.001, 0.001, -0.001]).unwrap();
     // The third frame is past the limit, so this fails.
@@ -173,11 +206,14 @@ fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
         Err(SinkFailed)
     );
 
-    let err = sink.finalize().expect_err("the failure must be reported");
+    assert_eq!(
+        sink.frames(),
+        Samples::new(2),
+        "the frames counted are the frames in the file"
+    );
+    let err = first_failure(sink.finalize());
     assert!(
-        err.get_ref()
-            .and_then(|e| e.downcast_ref::<EncodeError>())
-            .is_some_and(|e| matches!(e, EncodeError::WavTooLarge { limit_frames: 2 })),
+        matches!(err, EncodeError::WavTooLarge { limit_frames: 2 }),
         "carrying the typed error, got: {err}"
     );
 
@@ -335,24 +371,20 @@ fn a_plain_header_is_left_alone() {
 fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("limit.wav");
-    let mut sink = wav(
+    let mut sink = wav_limited(
         &path,
         48_000.0,
         6u16,
         Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+        Some(3),
     )
-    .unwrap()
-    .limit_frames(3);
+    .unwrap();
     // Eight frames, in two writes, the limit falling in the first.
     let block: Vec<f32> = (0..5 * 6).map(|i| i as f32 * 0.001).collect();
     assert_eq!(write_samples(&mut sink, &block), Err(SinkFailed));
     assert_eq!(write_samples(&mut sink, &block[..3 * 6]), Err(SinkFailed));
 
-    let err = sink.finalize().expect_err("the limit must be reported");
-    let limit = err
-        .get_ref()
-        .and_then(|e| e.downcast_ref::<EncodeError>())
-        .expect("the typed error rides out of finalize");
+    let limit = first_failure(sink.finalize());
     assert!(matches!(
         limit,
         EncodeError::WavTooLarge { limit_frames: 3 }
@@ -377,30 +409,11 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
 fn a_take_that_ends_at_the_limit_is_clean() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("exact.wav");
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32))
-        .unwrap()
-        .limit_frames(4);
+    let mut sink =
+        wav_limited(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32), Some(4)).unwrap();
     write_samples(&mut sink, &[0.1; 8]).unwrap();
     sink.finalize().expect("exactly the limit is fine");
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 8);
-}
-
-/// A `FileOut` dropped without `finalize` (a recording whose pump thread
-/// panicked) is still a readable file: the writer back-patches on drop.
-#[test]
-fn a_dropped_sink_leaves_a_readable_take() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("dropped.wav");
-    let mut sink = wav(
-        &path,
-        48_000.0,
-        2u16,
-        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
-    )
-    .unwrap();
-    write_samples(&mut sink, &[0.25; 20]).unwrap();
-    drop(sink);
-    assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
 }
 
 /// A view of another width than the file's fails the sink instead of rotating
@@ -419,8 +432,12 @@ fn a_view_of_another_width_fails_the_sink() {
         Err(SinkFailed),
         "the sink stays failed"
     );
-    let err = sink.finalize().unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    let err = first_failure(sink.finalize());
+    assert!(
+        matches!(err, EncodeError::BlockWidth { expected, got }
+            if expected == ChannelLayout::STEREO && got == ChannelLayout::MONO),
+        "{err}"
+    );
 }
 
 /// The sink is generic over the format: a FLAC take round-trips through the
@@ -449,8 +466,7 @@ fn a_flac_take_round_trips_through_the_decoder() {
         })
         .collect();
 
-    let mut sink = FileOut::new(&spec, std::fs::File::create(&path).unwrap()).unwrap();
-    assert_eq!(sink.sample_rate(), SampleRate::SR_44K1);
+    let mut sink = sink_of(&spec, &path, None).unwrap();
     // In blocks of 300 frames, the last one short: the sink is incremental.
     for block in signal.chunks(300 * 2) {
         write_samples(&mut sink, block).unwrap();

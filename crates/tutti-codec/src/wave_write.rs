@@ -1,7 +1,6 @@
 //! Writing a [`Wave`] as a file.
 
-use crate::encoder::check_planned;
-use crate::{Encoder, FileEncoder, Format, Result, Spec};
+use crate::{Encoder, EncoderOptions, FileEncoder, Format, Result, Spec};
 use std::io::{Cursor, Seek, Write};
 use tutti_buffers::{Interleaved, InterleavedMut, Sample, Wave, interleave};
 use tutti_platform::Destination;
@@ -13,14 +12,14 @@ const WRITE_CHUNK: usize = 8192;
 /// Writes `wave` as a file of `format` to `dest`, at its own rate and with its
 /// own topology (the speaker mask of a WAV).
 ///
-/// - A path is written beside itself and renamed over it when whole, as
-///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
-///   it was. An existing file is replaced unless the destination is
-///   [`create_new`](Destination::create_new), which refuses it with an
-///   [`EncodeError::Commit`](crate::EncodeError::Commit) whose source kind is
-///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). A failed commit
-///   keeps the complete file at the error's `kept` path, the caller's to move
-///   or delete.
+/// - A path is written beside itself and renamed over it when whole, as a staged
+///   [`FileEncoder`] does, so a failure leaves what was at the path as it was. An
+///   existing file is refused with [`EncodeError::Exists`](crate::EncodeError::Exists), and
+///   nothing is written; a file that appears before the commit is refused there
+///   ([`EncodeError::Commit`](crate::EncodeError::Commit) of kind
+///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists)), keeping the complete file at the
+///   error's `kept` path, the caller's to move or delete. The destination's
+///   [`create_new`](Destination::create_new) is this behaviour already.
 /// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
 ///   to) is encoded into memory first and then handed over in one `write_all`,
 ///   so it needs no `Seek` and never holds a partial file from an encode error.
@@ -63,16 +62,13 @@ pub fn write_wave<'a, S: Sample>(
     format: Format,
 ) -> Result<()> {
     let spec = Spec::of_channels(format, wave.channel_set(), wave.sample_rate());
+    let options = EncoderOptions::new(&spec).planned(wave.len());
     match dest.into() {
-        Destination::Path(staged) => {
-            check_planned(&spec, wave.len())?;
-            write_file(wave, FileEncoder::create(&spec, staged)?)
-        }
+        Destination::Path(staged) => write_file(wave, options.create(staged.target())?),
         Destination::Writer(writer) => {
-            check_planned(&spec, wave.len())?;
             // A borrowed writer need not seek: the file is encoded into an owned
             // cursor and handed over whole.
-            let file = write_all(wave, Encoder::create(&spec, Cursor::new(Vec::new()))?)?;
+            let file = write_all(wave, options.wrap(Cursor::new(Vec::new()))?)?;
             writer.write_all(file.get_ref())?;
             Ok(())
         }
