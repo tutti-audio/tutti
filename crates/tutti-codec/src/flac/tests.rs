@@ -1,4 +1,6 @@
 use super::*;
+use crate::IntPcm;
+use tutti_buffers::ChannelSet;
 
 fn configs() -> Configs {
     Configs {
@@ -39,12 +41,12 @@ fn a_writer_that_lost_a_frame_fails_every_later_call() {
     use tutti_buffers::Interleaved;
     use tutti_units::SampleRate;
 
-    let spec = Spec::of_width(
+    let spec = Spec::of_channels(
         crate::Format::Flac {
-            depth: IntDepth::Int16,
+            pcm: IntPcm::new(IntDepth::Int16).no_dither(),
             level: FlacLevel::Standard,
         },
-        ChannelLayout::STEREO,
+        ChannelSet::default_for(ChannelLayout::STEREO),
         SampleRate::SR_44K1,
     );
     let mut w = FlacWriter::create(

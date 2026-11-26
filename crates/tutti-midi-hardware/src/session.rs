@@ -54,7 +54,7 @@ use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
 use crate::peer::{PeerRef, PeerRequestError};
 use crate::process::{ProcessChange, ReportAsk, Reporter};
-use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
+use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, zones_of};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::start::Started;
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
@@ -68,10 +68,10 @@ const _: () = {
     send::<MidiSession>();
 };
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
-use tutti_midi_protocol::{PitchBendSensitivity, ProfileZones};
+use tutti_midi_protocol::{ProfileZone, ProfileZones};
 use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;
-use tutti_ump::{GroupSpan, MidiGroup, MpeZoneSet, MpeZoneSpan};
+use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -505,7 +505,8 @@ impl MidiSession {
 
     /// `output` follows what a [`poll`](Self::poll) reported: a settled or changed
     /// Stream of its device is its [`set_config`](OpenOutput::set_config), a change
-    /// of its Profiles is the [`mpe_zones`](Self::mpe_zones) it sends to, and any
+    /// of its Profiles (a features answer included, which keeps the notes of the zone it
+    /// is for) is the [`mpe_zones`](Self::mpe_zones) it sends to, and any
     /// other report, or another device's, changes nothing.
     pub fn follow(&self, output: &mut OpenOutput, polled: &Polled) {
         match polled {
@@ -866,23 +867,15 @@ impl MidiSession {
         &self,
         id: &MidiDeviceId,
         group: MidiGroup,
-        kept: impl Fn(MpeZoneSpan) -> bool,
+        kept: impl Fn(&ProfileZone) -> bool,
     ) -> Option<ProfileZones> {
         let peers = self.profiles(id);
-        let sets = peers
+        let zones = peers
             .iter()
             .filter(|peer| peer.at().peer().group == group)
-            .filter_map(|peer| peer.table().mpe_zones().zones);
-        let mut all: Option<MpeZoneSet> = None;
-        for set in sets {
-            for zone in set.zones().filter(|zone| kept(*zone)) {
-                all = match all {
-                    Some(held) => Some(held.with(zone).unwrap_or(held)),
-                    None => Some(MpeZoneSet::single(zone)),
-                };
-            }
-        }
-        all.map(|set| ProfileZones::new(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
+            .flat_map(PeerProfiles::zones)
+            .filter(|zone| kept(zone));
+        zones_of(zones)
     }
 
     /// Asks a peer to enable or disable a Profile it lists, on the input the

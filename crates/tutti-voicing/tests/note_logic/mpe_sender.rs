@@ -1,7 +1,10 @@
 //! The `MpeSender` against M2-120 sections 3 to 5, with figures written here from
 //! the spec. Channels are indices: Ch1 is 0.
 
-use tutti_midi_protocol::{Midi1Translator, PitchBendSensitivity, ProfileZone, ProfileZones};
+use tutti_midi_protocol::{
+    ControllerSupport, Midi1Translator, MpeFeatures, PitchBendSensitivity, PitchBendSupport,
+    ProfileZone, ProfileZones,
+};
 use tutti_ump::{
     Address, Attribute, Bank, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     MpeChannels, MpeZoneSpan, NoteNumber, NoteVelocity, PerNoteManagement, Pitch,
@@ -335,6 +338,33 @@ fn a_value_told_before_the_note_on_is_sent_ahead_of_it() {
             (1, note_on(60)),
         ]
     );
+}
+
+/// **A zone whose range changes keeps its notes and tells each of them its
+/// bend over the new range**: the range goes to the Manager with the next
+/// event, and a note that event does not touch is told again too (section 3.5).
+#[test]
+fn a_new_range_tells_every_note_of_the_zone_its_bend() {
+    let mut s = started(3);
+    feed(&mut s, 2, bend_range(12));
+    feed(&mut s, 2, note_on(60)); // Ch3
+    feed(&mut s, 0, note_on(64)); // Ch4
+    let sent = feed(&mut s, 2, bend(0xFFFF_FFFF));
+    assert_bend(&sent, 2, bend_of(12.0, 48.0));
+    let wider = ProfileZone::new(
+        zone(0, 3).span(),
+        PitchBendSensitivity::from_semitones(U7::of(96)),
+    );
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(wider)));
+    // Only the Ch4 note is touched; the Ch3 note's octave is half as far now.
+    let sent = feed(&mut s, 0, note_pressure(64, CENTER));
+    assert!(sent.contains(&(0, bend_range(96))), "{sent:?}");
+    let ch3: Vec<_> = sent
+        .iter()
+        .filter(|(at, v)| *at == 2 && matches!(v, Voice2::PitchBend(_)))
+        .copied()
+        .collect();
+    assert_bend(&ch3, 2, bend_of(12.0, 96.0));
 }
 
 /// **A source channel's Pitch Bend bends its notes and no other channel's**: an
@@ -693,4 +723,219 @@ fn the_midi1_translator_makes_it_midi1() {
             vec![0x91, 60, 0x40],
         ]
     );
+}
+
+/// A receiver that declared `pressure` and `third` for the two controls, and
+/// Pitch Bend as `bend`.
+fn features(
+    bend: PitchBendSupport,
+    pressure: ControllerSupport,
+    third: ControllerSupport,
+) -> MpeFeatures {
+    MpeFeatures {
+        pitch_bend: bend,
+        channel_pressure: pressure,
+        third_dimension: third,
+        ..MpeFeatures::default()
+    }
+}
+
+/// A sender with one zone of `members` Members whose receiver declared `features`.
+fn sender_declaring(members: u8, features: MpeFeatures) -> MpeSender {
+    let mut sender = MpeSender::new();
+    let zone = zone(0, members).mpe_features(features);
+    sender.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(zone)));
+    sender
+}
+
+fn bipolar() -> MpeFeatures {
+    features(
+        PitchBendSupport::Supported,
+        ControllerSupport::Bipolar,
+        ControllerSupport::Bipolar,
+    )
+}
+
+/// The Registered Controller `0x20/index`, as the bipolar controllers are.
+fn bipolar_rc(index: u8, data: u32) -> Voice2 {
+    Voice2::registered(
+        Rpn::new(U7::of(0x20), U7::of(index)),
+        ControlValue::new(data),
+    )
+}
+
+/// **A receiver that declared the bipolar controllers is sent them** instead of
+/// Channel Pressure and Control Change 74, on a Member, ahead of the Note On
+/// and as they change: Registered Controller 0x20/0x20 for Pressure, whose
+/// upper half carries it (section 4.9), and 0x20/0x21 for the third dimension,
+/// centred at 0x8000_0000. Neither Control Change form is sent with them.
+/// Spec: m2-120/4.8#1, m2-120/4.4#5, m2-120/4.5#6, m2-120/4.9#2, m2-120/4.9#3, m2-120/4.9#4
+#[test]
+fn bipolar_controllers_are_sent_as_their_registered_controllers_and_not_the_control_changes() {
+    let mut s = sender_declaring(1, bipolar());
+    let mut sent = feed(&mut s, 0, note_on(60));
+    assert_eq!(
+        sent,
+        [
+            (0, bend_range(48)),
+            (1, bend(CENTER)),
+            (1, bipolar_rc(0x21, CENTER)),
+            (1, bipolar_rc(0x20, CENTER)),
+            (1, note_on(60)),
+        ]
+    );
+    sent.clear();
+    sent.extend(feed(&mut s, 0, pressure(CENTER)));
+    sent.extend(feed(&mut s, 0, slide(0x4000_0000)));
+    assert_eq!(
+        sent,
+        [
+            (1, bipolar_rc(0x20, 0xC000_0000)),
+            (1, bipolar_rc(0x21, 0x4000_0000)),
+        ]
+    );
+}
+
+/// The same through a MIDI 1.0 device (section 4.9: RPN data is atomic, MSB then
+/// LSB, centred at 0x2000): Pressure at rest is RPN 0x20 0x20 at 0x2000, and the
+/// third dimension at its centre is RPN 0x20 0x21 at 0x2000.
+/// Spec: m2-120/4.9#4
+#[test]
+fn bipolar_controllers_reach_a_midi1_device_as_rpns_centred_at_0x2000() {
+    let mut s = sender_declaring(1, bipolar());
+    let translator = Midi1Translator::new();
+    let mut bytes = Vec::new();
+    let on = Message::Midi2(Address::first(MidiChannel::FIRST), note_on(60));
+    s.feed(on.into(), |ump| {
+        translator.feed(ump, |b| bytes.push(b.as_slice().to_vec()));
+    });
+    let rpn = |index| {
+        [
+            vec![0xB1, 101, 0x20],
+            vec![0xB1, 100, index],
+            vec![0xB1, 6, 0x40],
+            vec![0xB1, 38, 0x00],
+        ]
+    };
+    let mut want = vec![
+        vec![0xB0, 101, 0],
+        vec![0xB0, 100, 0],
+        vec![0xB0, 6, 48],
+        vec![0xB0, 38, 0],
+        vec![0xE1, 0x00, 0x40],
+    ];
+    want.extend(rpn(0x21));
+    want.extend(rpn(0x20));
+    want.push(vec![0x91, 60, 0x40]);
+    assert_eq!(bytes, want);
+}
+
+/// **A control the receiver does not use is not sent**, in either form, and Pitch
+/// Bend too (section 3.7: a receiver does not need all three).
+#[test]
+fn a_control_the_receiver_does_not_use_is_not_sent() {
+    let none = features(
+        PitchBendSupport::Unsupported,
+        ControllerSupport::Unsupported,
+        ControllerSupport::Unsupported,
+    );
+    let mut s = sender_declaring(1, none);
+    assert_eq!(
+        feed(&mut s, 0, note_on(60)),
+        [(0, bend_range(48)), (1, note_on(60))]
+    );
+    assert!(feed(&mut s, 0, bend(0xC000_0000)).is_empty());
+    assert!(feed(&mut s, 0, pressure(0x4000_0000)).is_empty());
+    assert!(feed(&mut s, 0, slide(0x4000_0000)).is_empty());
+    assert!(feed(&mut s, 0, bipolar_rc(0x20, 0xC000_0000)).is_empty());
+    // One control alone: the others still go.
+    let only_bend = features(
+        PitchBendSupport::Supported,
+        ControllerSupport::Unsupported,
+        ControllerSupport::ControlChange,
+    );
+    let mut s = sender_declaring(1, only_bend);
+    assert_eq!(
+        feed(&mut s, 0, note_on(60)),
+        [
+            (0, bend_range(48)),
+            (1, bend(CENTER)),
+            (1, slide(CENTER)),
+            (1, note_on(60)),
+        ]
+    );
+}
+
+/// **A source's bipolar controller is its control**: Registered Controller 0x20/0x20
+/// is its Channel Pressure over the upper half, and 0x20/0x21 its third
+/// dimension as is, whether the zone's receiver takes the Control Change form
+/// or the bipolar one, from MIDI 2.0 or from the MIDI 1.0 RPN.
+/// Spec: m2-120/4.4#5, m2-120/4.5#6
+#[test]
+fn a_sources_bipolar_controllers_are_its_pressure_and_third_dimension() {
+    let mut s = started(1);
+    feed(&mut s, 0, note_on(60));
+    assert_eq!(
+        feed(&mut s, 0, bipolar_rc(0x20, 0xC000_0000)),
+        [(1, pressure(0x8000_0000))]
+    );
+    assert_eq!(
+        feed(&mut s, 0, bipolar_rc(0x21, 0x4000_0000)),
+        [(1, slide(0x4000_0000))]
+    );
+    // Below its centre a bipolar Pressure is none.
+    assert_eq!(
+        feed(&mut s, 0, bipolar_rc(0x20, 0x1000_0000)),
+        [(1, pressure(0))]
+    );
+    // The MIDI 1.0 form: RPN 0x20 0x20 at its top, 0x3FFF of 14 bits.
+    let mut sent = Vec::new();
+    for (controller, value) in [(101, 0x20), (100, 0x20), (6, 0x7F), (38, 0x7F)] {
+        let message = Message::Midi1(
+            Address::first(MidiChannel::FIRST),
+            Voice1::ControlChange {
+                controller: CCNumber::of(controller),
+                value: U7::of(value),
+            },
+        );
+        s.feed(message.into(), |ump| match ump.decode() {
+            Ok(Message::Midi2(address, voice)) => sent.push((address.channel.get(), voice)),
+            other => panic!("not MIDI 2.0 voice: {other:?}"),
+        });
+    }
+    assert_eq!(sent, [(1, pressure(0xFFFF_FFFE))]);
+}
+
+/// **A features answer or another range does not stop the notes**: the receiver
+/// resets only when a zone's channels change (section 3.3), so the note is still
+/// ended on its Member, and the next value goes in the form now declared.
+#[test]
+fn a_features_answer_keeps_the_notes_and_the_next_value_takes_its_form() {
+    let mut s = sender(1);
+    feed(&mut s, 0, note_on(60));
+    let declared = ProfileZones::single(zone(0, 1).mpe_features(bipolar()));
+    s.set_profile(MidiGroup::FIRST, Some(declared));
+    // The zone is told again: its range on the Manager, and the values the
+    // Member holds in the Control Change forms in the forms the receiver
+    // declared, though none of them changed.
+    assert_eq!(
+        feed(&mut s, 0, pressure(0)),
+        [
+            (0, bend_range(48)),
+            (1, bend(CENTER)),
+            (1, bipolar_rc(0x21, CENTER)),
+            (1, bipolar_rc(0x20, CENTER)),
+        ]
+    );
+    assert_eq!(
+        feed(&mut s, 0, pressure(CENTER)),
+        [(1, bipolar_rc(0x20, 0xC000_0000))]
+    );
+    // A range of its own is no new zone either.
+    let wider = ProfileZone::new(
+        zone(0, 1).span(),
+        PitchBendSensitivity::from_semitones(U7::of(24)),
+    );
+    s.set_profile(MidiGroup::FIRST, Some(ProfileZones::single(wider)));
+    assert_eq!(feed(&mut s, 0, note_off(60)), [(1, note_off(60))]);
 }

@@ -10,10 +10,10 @@
 //! - [`PumpLoop::new`] refuses a source and sink whose channel widths disagree,
 //!   before any frame moves. The same check is a `debug_assert` in the pass
 //!   itself (`pump`, private: nothing else calls it).
-//! - A recording does not dither unless asked. To dither a take as an export
-//!   does, open the file for its integer format and wrap it in one line:
-//!   `PumpLoop::new(src, DitherSink::<_, f32>::new(FileOut::<i16>::new(&spec, File::create(path)?)?, Some(shape)), capacity)`.
-//!   The stage adds the noise at one LSB of `i16`, converts and counts the values it clipped.
+//! - A recording into an integer file is dithered by the file's [`Pcm`](tutti_codec::Pcm), as an
+//!   export is: triangular dither by default, which an `IntPcm::no_dither()` turns off for a
+//!   capture whose floats already sit on the file's grid. The encoder adds the noise at one
+//!   LSB of the file's depth, converts and counts the values it clipped.
 //! - The scratch buffer is allocated once, so a pass never allocates.
 //! - An empty pull means "back off", "finished" or "broken" according to the
 //!   source's own [`Pull`] verdict. `Starved` sources (every microphone, every
@@ -148,12 +148,13 @@ pub enum PumpPass {
 /// interchangeability is the reason the traits exist.
 ///
 /// ```
+/// use tutti_buffers::FloatWidth;
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 /// use tutti_session::{PumpLoop, PumpPass};
 /// use tutti_graph::{OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// use tutti_buffers::{ChannelLayout, MaxBlock};
+/// use tutti_buffers::{ChannelLayout, ChannelSet, MaxBlock};
 /// use tutti_buffers::Sink;
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{TapId, TapOptions};
@@ -197,7 +198,8 @@ pub enum PumpPass {
 /// executor.process(3, &transport, &[], &mut [&mut left[..], &mut right[..]]);
 ///
 /// let dir = tempfile::tempdir().expect("temp dir");
-/// let spec = Spec::of_width(Format::Wav(Pcm::Float32), ChannelLayout::STEREO, SampleRate::SR_48K);
+/// let pcm = Pcm::Float(FloatWidth::F32);
+/// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
 /// let file = std::fs::File::create(dir.path().join("take.wav")).expect("file opens");
 /// let sink = FileOut::new(&spec, file).expect("sink opens");
 ///

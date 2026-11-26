@@ -1,4 +1,5 @@
 use super::*;
+use tutti_dsp::DitherShape;
 
 /// Each depth maps 0 to 0, +1.0 to `MAX` (it clips), -1.0 to `MIN` (exact),
 /// and clips anything beyond them to the rail: the rule in `Sample`.
@@ -35,22 +36,39 @@ fn an_integer_of_the_depths_own_format_is_exact() {
 }
 
 #[test]
-fn each_width_names_its_bits_and_integer_depth() {
+fn each_width_names_its_bits_and_integer_type() {
+    let int = |depth| Pcm::Int(IntPcm::new(depth));
     assert_eq!(
         [
-            Pcm::Int16.bits(),
-            Pcm::Int24.bits(),
-            Pcm::Float32.bits(),
-            Pcm::Float64.bits()
+            int(IntDepth::Int16).bits(),
+            int(IntDepth::Int24).bits(),
+            Pcm::Float(FloatWidth::F32).bits(),
+            Pcm::Float(FloatWidth::F64).bits()
         ],
         [16, 24, 32, 64]
     );
-    assert_eq!(Pcm::Int16.int_depth(), Some(IntDepth::Int16));
-    assert_eq!(Pcm::Int24.int_depth(), Some(IntDepth::Int24));
-    assert_eq!(Pcm::Float32.int_depth(), None);
-    assert_eq!(Pcm::Float64.int_depth(), None);
-    assert_eq!(Pcm::from(IntDepth::Int16), Pcm::Int16);
-    assert_eq!(Pcm::from(IntDepth::Int24).bits(), IntDepth::Int24.bits());
+    assert_eq!(
+        int(IntDepth::Int16).int_pcm(),
+        Some(IntPcm::new(IntDepth::Int16))
+    );
+    assert_eq!(Pcm::Float(FloatWidth::F32).int_pcm(), None);
+    assert_eq!(Pcm::Float(FloatWidth::F64).int_pcm(), None);
+}
+
+/// An integer file is dithered with triangular noise and not shaped unless told otherwise, and
+/// the default is 24 bits.
+#[test]
+fn an_integer_file_defaults_to_triangular_dither_and_no_shaping() {
+    let pcm = IntPcm::new(IntDepth::Int16);
+    assert_eq!(pcm.dither_shape(), Some(DitherShape::Triangular));
+    assert!(!pcm.is_noise_shaped());
+    assert_eq!(Pcm::default(), Pcm::Int(IntPcm::new(IntDepth::Int24)));
+    assert_eq!(pcm.no_dither().dither_shape(), None);
+    assert_eq!(
+        pcm.dither(DitherShape::Rectangular).dither_shape(),
+        Some(DitherShape::Rectangular)
+    );
+    assert!(pcm.noise_shaping().is_noise_shaped());
 }
 
 /// One LSB is the format's step, `2^-(bits - 1)`: 16 bit is 2^-15, 24 bit is

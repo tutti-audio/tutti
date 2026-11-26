@@ -1,7 +1,7 @@
 //! The container to write, carrying only the settings it accepts.
 
 use crate::error::{EncodeError, Result};
-use crate::pcm::IntDepth;
+use crate::pcm::IntPcm;
 #[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
 use crate::pcm::Pcm;
 use std::path::Path;
@@ -10,8 +10,8 @@ use tutti_buffers::ChannelLayout;
 /// The container to write, carrying that format's own settings.
 ///
 /// The settings live in the variant, so a combination a format cannot write is
-/// not expressible: FLAC holds integer widths only (`depth` is an
-/// [`IntDepth`]).
+/// not expressible: FLAC holds integer widths only (`pcm` is an
+/// [`IntPcm`]).
 ///
 /// Each variant exists only with its cargo feature (`encode-wav`, `encode-aiff`, `encode-flac`), so a format this build cannot write cannot be named.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20,15 +20,15 @@ pub enum Format {
     /// Uncompressed RIFF/WAVE at any [`Pcm`] width.
     #[cfg(feature = "encode-wav")]
     Wav(Pcm),
-    /// AIFF at an integer width; AIFF-C at `Float32`, since float samples are
+    /// AIFF at an integer width; AIFF-C at a float width, since float samples are
     /// an AIFF-C extension.
     #[cfg(feature = "encode-aiff")]
     Aiff(Pcm),
     /// Lossless FLAC at an integer width.
     #[cfg(feature = "encode-flac")]
     Flac {
-        /// The sample width.
-        depth: IntDepth,
+        /// The integer sample type: the depth and how a block is brought down to it.
+        pcm: IntPcm,
         /// The encoder effort.
         level: FlacLevel,
     },
@@ -49,7 +49,7 @@ impl Format {
             "wav" => Ok(Self::Wav(Pcm::default())),
             #[cfg(feature = "encode-flac")]
             "flac" => Ok(Self::Flac {
-                depth: IntDepth::default(),
+                pcm: IntPcm::default(),
                 level: FlacLevel::default(),
             }),
             #[cfg(feature = "encode-aiff")]
@@ -75,17 +75,17 @@ impl Format {
         )
     }
 
-    /// The integer width this format quantizes to, or `None` when it does not
-    /// quantize (`Float32`).
+    /// The integer type this format quantizes to, or `None` when it does not
+    /// quantize (a float width).
     #[must_use]
-    pub fn int_depth(&self) -> Option<IntDepth> {
+    pub fn int_pcm(&self) -> Option<IntPcm> {
         match *self {
             #[cfg(feature = "encode-wav")]
-            Self::Wav(pcm) => pcm.int_depth(),
+            Self::Wav(pcm) => pcm.int_pcm(),
             #[cfg(feature = "encode-aiff")]
-            Self::Aiff(pcm) => pcm.int_depth(),
+            Self::Aiff(pcm) => pcm.int_pcm(),
             #[cfg(feature = "encode-flac")]
-            Self::Flac { depth, .. } => Some(depth),
+            Self::Flac { pcm, .. } => Some(pcm),
         }
     }
 

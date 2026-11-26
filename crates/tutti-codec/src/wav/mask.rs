@@ -7,7 +7,7 @@
 //! a speaker has no WAVE bit or the order differs. Samples are never
 //! reordered, so file channel `n` is always the engine's channel `n`.
 //!
-//! A spec built from a width alone (`Spec::of_width`) takes the default
+//! A spec built from a width alone (`ChannelSet::default_for`) takes the default
 //! topology ([`ChannelTopology::default_for`]): 1 channel is `0x4`
 //! (`KSAUDIO_SPEAKER_MONO`), 2 is `0x3`, 4 is `0x33` (`KSAUDIO_SPEAKER_QUAD`),
 //! 6 is `0x60F` (`KSAUDIO_SPEAKER_5POINT1_SURROUND`), and every other width is

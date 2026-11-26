@@ -1,8 +1,12 @@
 use super::*;
+use crate::IntDepth;
+use crate::IntPcm;
 use crate::{EncodeError, Format, Pcm};
 use hound::SampleFormat;
 use std::path::Path;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::ChannelTopology;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Interleaved, Sink};
 
 /// One write of `samples`, viewed at the sink's own width.
@@ -20,7 +24,11 @@ fn wav(
     pcm: Pcm,
 ) -> std::io::Result<FileOut> {
     Ok(FileOut::new(
-        &Spec::of_width(Format::Wav(pcm), channels.into(), SampleRate::of(rate)),
+        &Spec::of_channels(
+            Format::Wav(pcm),
+            ChannelSet::default_for(channels.into()),
+            SampleRate::of(rate),
+        ),
         std::fs::File::create(path)?,
     )?)
 }
@@ -47,7 +55,8 @@ fn wav_out_writes_incrementally_and_finalizes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("capture.wav");
 
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float32).expect("sink should open");
+    let mut sink =
+        wav(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32)).expect("sink should open");
 
     // Flat interleaved stereo: 256 frames, 512 samples.
     let block: Vec<f32> = (0..256)
@@ -76,7 +85,8 @@ fn six_channel_sink_writes_six_samples_per_frame() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("six_channel.wav");
 
-    let mut sink = wav(&path, 48_000.0, 6u16, Pcm::Float32).expect("create 6ch sink");
+    let mut sink =
+        wav(&path, 48_000.0, 6u16, Pcm::Float(FloatWidth::F32)).expect("create 6ch sink");
     assert_eq!(sink.layout(), ChannelLayout::from(6u16));
 
     let frames: Vec<f32> = (0..128)
@@ -110,8 +120,8 @@ mod full_device {
 
     #[test]
     fn a_failed_write_surfaces_from_finalize() {
-        let mut sink =
-            wav("/dev/full", 48_000.0, 2u16, Pcm::Float32).expect("/dev/full opens for writing");
+        let mut sink = wav("/dev/full", 48_000.0, 2u16, Pcm::Float(FloatWidth::F32))
+            .expect("/dev/full opens for writing");
 
         // 64 KiB of samples: well past the 8 KiB buffer.
         assert_eq!(
@@ -140,9 +150,14 @@ mod full_device {
 fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("partial.wav");
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Int16)
-        .expect("create")
-        .limit_frames(2);
+    let mut sink = wav(
+        &path,
+        48_000.0,
+        2u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+    )
+    .expect("create")
+    .limit_frames(2);
 
     write_samples(&mut sink, &[0.001, -0.001, 0.001, -0.001]).unwrap();
     // The third frame is past the limit, so this fails.
@@ -183,7 +198,13 @@ fn sixteen_bit_capture_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("i16.wav");
 
-    let mut sink = wav(&path, 44_100.0, 2u16, Pcm::Int16).expect("sink should open");
+    let mut sink = wav(
+        &path,
+        44_100.0,
+        2u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+    )
+    .expect("sink should open");
     write_samples(&mut sink, &[1.0, -1.0, 0.0, 0.0]).unwrap();
     sink.finalize().expect("finalize");
 
@@ -203,7 +224,13 @@ fn twenty_four_bit_capture_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("i24.wav");
 
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Int24).expect("sink should open");
+    let mut sink = wav(
+        &path,
+        48_000.0,
+        2u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+    )
+    .expect("sink should open");
     write_samples(&mut sink, &[1.0, -1.0, 0.0, 0.0]).unwrap();
     sink.finalize().expect("finalize");
 
@@ -227,14 +254,14 @@ fn twenty_four_bit_capture_round_trips() {
 fn a_multichannel_file_declares_the_mask_of_tutti_s_channel_order() {
     let dir = tempfile::tempdir().unwrap();
     for (channels, depth, mask) in [
-        (4u16, Pcm::Float32, 0x33u32),
-        (6, Pcm::Float32, 0x60F),
-        (6, Pcm::Int24, 0x60F),
-        (8, Pcm::Float32, 0),
-        (3, Pcm::Int16, 0),
+        (4u16, Pcm::Float(FloatWidth::F32), 0x33u32),
+        (6, Pcm::Float(FloatWidth::F32), 0x60F),
+        (6, Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()), 0x60F),
+        (8, Pcm::Float(FloatWidth::F32), 0),
+        (3, Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()), 0),
         // Extensible because of the depth; hound would write 0x1.
-        (1, Pcm::Int24, 0x4),
-        (2, Pcm::Float32, 0x3),
+        (1, Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()), 0x4),
+        (2, Pcm::Float(FloatWidth::F32), 0x3),
     ] {
         let path = dir
             .path()
@@ -268,7 +295,7 @@ fn a_declared_quad_topology_sets_the_quad_mask() {
         &path,
         48_000.0,
         tutti_buffers::Bed::Quad.topology(),
-        Pcm::Float32,
+        Pcm::Float(FloatWidth::F32),
     )
     .unwrap();
     assert_eq!(sink.layout(), ChannelLayout::from(4u16));
@@ -283,7 +310,13 @@ fn a_declared_quad_topology_sets_the_quad_mask() {
 fn a_plain_header_is_left_alone() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("plain.wav");
-    let mut sink = wav(&path, 44_100.0, 2u16, Pcm::Int16).unwrap();
+    let mut sink = wav(
+        &path,
+        44_100.0,
+        2u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+    )
+    .unwrap();
     write_samples(&mut sink, &[0.5, -0.5, 0.25, -0.25]).unwrap();
     sink.finalize().unwrap();
     let bytes = std::fs::read(&path).unwrap();
@@ -302,9 +335,14 @@ fn a_plain_header_is_left_alone() {
 fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("limit.wav");
-    let mut sink = wav(&path, 48_000.0, 6u16, Pcm::Int24)
-        .unwrap()
-        .limit_frames(3);
+    let mut sink = wav(
+        &path,
+        48_000.0,
+        6u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither()),
+    )
+    .unwrap()
+    .limit_frames(3);
     // Eight frames, in two writes, the limit falling in the first.
     let block: Vec<f32> = (0..5 * 6).map(|i| i as f32 * 0.001).collect();
     assert_eq!(write_samples(&mut sink, &block), Err(SinkFailed));
@@ -339,7 +377,7 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
 fn a_take_that_ends_at_the_limit_is_clean() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("exact.wav");
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float32)
+    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32))
         .unwrap()
         .limit_frames(4);
     write_samples(&mut sink, &[0.1; 8]).unwrap();
@@ -353,7 +391,13 @@ fn a_take_that_ends_at_the_limit_is_clean() {
 fn a_dropped_sink_leaves_a_readable_take() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dropped.wav");
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Int16).unwrap();
+    let mut sink = wav(
+        &path,
+        48_000.0,
+        2u16,
+        Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()),
+    )
+    .unwrap();
     write_samples(&mut sink, &[0.25; 20]).unwrap();
     drop(sink);
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
@@ -365,7 +409,7 @@ fn a_dropped_sink_leaves_a_readable_take() {
 fn a_view_of_another_width_fails_the_sink() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("whole.wav");
-    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float32).unwrap();
+    let mut sink = wav(&path, 48_000.0, 2u16, Pcm::Float(FloatWidth::F32)).unwrap();
     write_samples(&mut sink, &[0.1, -0.1]).unwrap();
     // Three mono frames into a stereo file.
     let mono = Interleaved::new(&[0.1, 0.2, 0.3], ChannelLayout::MONO).unwrap();
@@ -389,12 +433,12 @@ fn a_flac_take_round_trips_through_the_decoder() {
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.flac");
-    let spec = Spec::of_width(
+    let spec = Spec::of_channels(
         Format::Flac {
-            depth: IntDepth::Int16,
+            pcm: IntPcm::new(IntDepth::Int16).no_dither(),
             level: FlacLevel::Standard,
         },
-        ChannelLayout::STEREO,
+        ChannelSet::default_for(ChannelLayout::STEREO),
         SampleRate::SR_44K1,
     );
     let frames = 2_000;

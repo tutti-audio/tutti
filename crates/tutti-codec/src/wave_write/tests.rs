@@ -1,6 +1,8 @@
 use super::*;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
-use crate::{FlacLevel, IntDepth};
+use crate::FlacLevel;
+use crate::{IntDepth, IntPcm};
+use tutti_buffers::FloatWidth;
 #[cfg(all(feature = "encode-wav", decode))]
 use tutti_buffers::{ChannelTopology, Interleaved};
 use tutti_units::SampleRate;
@@ -37,7 +39,7 @@ fn a_wave_wider_than_a_topology_has_none_and_round_trips() {
             .unwrap();
     }
     let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float32)).unwrap();
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
     let back = read_wave::<f32>(bytes).unwrap();
     assert_eq!(back, wave);
     assert_eq!((back.layout().count(), back.topology()), (17, None));
@@ -53,17 +55,25 @@ fn a_written_wave_reads_back_as_itself() {
     let dir = tempfile::tempdir().unwrap();
     let stereo = || tutti_buffers::Bed::Stereo.topology();
     let cases = [
-        ("stereo.wav", Format::Wav(Pcm::Int16), stereo()),
-        ("float.wav", Format::Wav(Pcm::Float32), stereo()),
+        (
+            "stereo.wav",
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+            stereo(),
+        ),
+        (
+            "float.wav",
+            Format::Wav(Pcm::Float(FloatWidth::F32)),
+            stereo(),
+        ),
         (
             "quad.wav",
-            Format::Wav(Pcm::Int16),
+            Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
             tutti_buffers::Bed::Quad.topology(),
         ),
         (
             "stereo.flac",
             Format::Flac {
-                depth: IntDepth::Int16,
+                pcm: IntPcm::new(IntDepth::Int16).no_dither(),
                 level: FlacLevel::Standard,
             },
             stereo(),
@@ -78,7 +88,7 @@ fn a_written_wave_reads_back_as_itself() {
         assert_eq!(back.sample_rate(), wave.sample_rate(), "{name}: rate");
         assert_eq!(back.topology(), wave.topology(), "{name}: topology");
         assert_eq!(back.len(), wave.len(), "{name}: length");
-        let step = if format == Format::Wav(Pcm::Float32) {
+        let step = if format == Format::Wav(Pcm::Float(FloatWidth::F32)) {
             0.0
         } else {
             1.0 / 32_768.0
@@ -105,7 +115,12 @@ fn an_integer_wave_writes_the_integers_it_holds() {
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ints.wav");
-    write_wave(&wave, &path, Format::Wav(Pcm::Int16)).unwrap();
+    write_wave(
+        &wave,
+        &path,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    )
+    .unwrap();
     let back = read_wave::<i16>(&path).unwrap();
     assert!(back.channel(0).iter().eq(&samples));
 }
@@ -119,7 +134,7 @@ fn an_f64_wave_writes_as_float64_bit_for_bit() {
     let samples = [0.1f64, 1.0 + 2f64.powi(-40), -0.3];
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
     let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float64)).unwrap();
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float(FloatWidth::F64))).unwrap();
     let back = read_wave::<f64>(bytes).unwrap();
     let got: Vec<u64> = back.channel(0).iter().map(|x| x.to_bits()).collect();
     let want: Vec<u64> = samples.iter().map(|x| x.to_bits()).collect();
@@ -137,7 +152,12 @@ fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
     let x = (4_194_304.5 + 2f64.powi(-10)) / scale;
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[x]));
     let mut bytes = Vec::new();
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Int24)).unwrap();
+    write_wave(
+        &wave,
+        &mut bytes,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24).no_dither())),
+    )
+    .unwrap();
     let back = read_wave::<f64>(bytes).unwrap();
     let got: Vec<f64> = back.channel(0).iter().copied().collect();
     assert_eq!(got, [4_194_305.0 / scale]);
@@ -155,7 +175,7 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
     let refused = write_wave(
         &wave,
         Destination::from(&path).create_new(),
-        Format::Wav(Pcm::Float32),
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
     );
     let Err(EncodeError::Commit(e)) = refused else {
         panic!("an existing file is refused: {refused:?}");
@@ -168,7 +188,7 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
     assert_eq!(&kept_bytes[..4], b"RIFF");
     std::fs::remove_file(&kept).unwrap();
     let whole = dir.path().join("whole.wav");
-    write_wave(&wave, &whole, Format::Wav(Pcm::Float32)).unwrap();
+    write_wave(&wave, &whole, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
     assert_eq!(
         kept_bytes,
         std::fs::read(&whole).unwrap(),
@@ -176,7 +196,7 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
     );
     std::fs::remove_file(&whole).unwrap();
 
-    write_wave(&wave, &path, Format::Wav(Pcm::Float32)).unwrap();
+    write_wave(&wave, &path, Format::Wav(Pcm::Float(FloatWidth::F32))).unwrap();
     assert_eq!(&std::fs::read(&path).unwrap()[..4], b"RIFF");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 
@@ -184,7 +204,7 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
     write_wave(
         &wave,
         Destination::from(&fresh).create_new(),
-        Format::Wav(Pcm::Float32),
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
     )
     .unwrap();
     assert_eq!(&std::fs::read(&fresh).unwrap()[..4], b"RIFF");
@@ -222,7 +242,12 @@ fn an_integer_wave_written_to_a_vec_reads_back_exactly() {
     use crate::{Pcm, read_wave};
     let (_, wave) = long_int_wave();
     let mut bytes = vec![0xAAu8];
-    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Int16)).unwrap();
+    write_wave(
+        &wave,
+        &mut bytes,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    )
+    .unwrap();
     assert_eq!(bytes[0], 0xAA, "a Vec is appended to");
     let back = read_wave::<i16>(bytes[1..].to_vec()).unwrap();
     assert_eq!(back, wave);
@@ -235,7 +260,12 @@ fn an_integer_wave_written_to_a_non_seek_writer_reads_back_exactly() {
     use crate::{Pcm, read_wave};
     let (_, wave) = long_int_wave();
     let mut sink = AppendOnly(Vec::new());
-    write_wave(&wave, &mut sink, Format::Wav(Pcm::Int16)).unwrap();
+    write_wave(
+        &wave,
+        &mut sink,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    )
+    .unwrap();
     assert_eq!(read_wave::<i16>(sink.0).unwrap(), wave);
 }
 
@@ -249,9 +279,19 @@ fn a_wave_written_as_wav_reads_back_equal() {
     let (_, mono) = long_int_wave();
     let stereo = ramp_wave(tutti_buffers::Bed::Stereo.topology(), 44_100.0, 500);
     let mut bytes = Vec::new();
-    write_wave(&mono, &mut bytes, Format::Wav(Pcm::Int16)).unwrap();
+    write_wave(
+        &mono,
+        &mut bytes,
+        Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither())),
+    )
+    .unwrap();
     assert_eq!(read_wave::<i16>(bytes).unwrap(), mono);
     let mut bytes = Vec::new();
-    write_wave(&stereo, &mut bytes, Format::Wav(Pcm::Float32)).unwrap();
+    write_wave(
+        &stereo,
+        &mut bytes,
+        Format::Wav(Pcm::Float(FloatWidth::F32)),
+    )
+    .unwrap();
     assert_eq!(read_wave::<f32>(bytes).unwrap(), stereo);
 }

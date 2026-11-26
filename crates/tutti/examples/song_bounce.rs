@@ -20,6 +20,8 @@ use tutti::{
     MaxBlock, Pcm, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
 use tutti_buffers::Interleaved;
+use tutti_codec::IntDepth;
+use tutti_codec::IntPcm;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -119,7 +121,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let rendering = s.bounce(
         Bounce::new()
             .range(Beat::new(0.0)..Beat::new(8.0))
-            .main_output(&path, Format::Wav(Pcm::Int24)),
+            .main_output(&path, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
     )?;
     // The render runs on a thread the session starts; an app awaits it on its own
     // executor, here the simplest one.

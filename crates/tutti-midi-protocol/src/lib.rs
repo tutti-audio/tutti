@@ -163,8 +163,9 @@ pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;
 pub use mpe::InvalidMpeZones;
 pub use mpe::{
-    ChannelResponse, ControllerSupport, Mcm, MemberCount, Mpe11Zone, Mpe11Zones, MpeFeatures,
-    MpeLayout, MpeMode, MpeZone, NotMemberCount, PitchBendSupport, ProfileZone, ProfileZones,
+    ChannelResponse, ControllerSupport, Mcm, MemberCount, Mpe11Zone, Mpe11Zones, MpeExpression,
+    MpeFeatures, MpeLayout, MpeMode, MpeZone, NotMemberCount, PitchBendSupport, ProfileZone,
+    ProfileZones,
 };
 #[cfg(feature = "serde")]
 pub use mpe::{InvalidMpeLayout, InvalidProfileZone};

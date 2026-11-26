@@ -1364,6 +1364,151 @@ fn an_output_sends_mpe_while_its_device_has_the_profile_enabled() {
     assert_eq!(note_channel(&mut wire), 0, "disabled");
 }
 
+/// The Reply of the peer to a Profile Details Inquiry for the optional features
+/// of its MPE Profile on `manager` (M2-120 section 3.7).
+fn features_reply(
+    ours: Muid,
+    manager: u8,
+    features: tutti_midi_protocol::MpeFeatures,
+) -> CiMessage {
+    CiMessage::ProfileDetailsReply {
+        header: CiHeader {
+            device_id: channel(manager),
+            ..CiHeader::new(peer())
+        },
+        to: ours,
+        profile: ProfileId::MPE,
+        target: tutti_midi_ci::InquiryTarget::new(U7::of(0x01)),
+        data: tutti_midi_ci::DetailsData::new(features.to_data().to_vec()).unwrap(),
+    }
+}
+
+/// **A device that enabled the MPE Profile is asked for its features, and an
+/// output sends the bipolar controllers it declares** (M2-120 sections 3.7, 4.9):
+/// the Enabled Report makes the session send a Profile Details Inquiry for the
+/// MPE Profile on that Channel, Target 1; the Reply is kept with the zone and
+/// reported; a Member is then sent Registered Controllers 0x20/0x20 and 0x20/0x21
+/// (as MIDI 1.0 RPNs, MSB then LSB) in place of Channel Pressure and Control
+/// Change 74. A Disabled Report drops the answer: the zone enabled again has the
+/// default features.
+/// Spec: m2-120/4.9#1, m2-120/4.9#4
+#[test]
+fn an_enabled_mpe_profile_is_asked_its_features_and_the_output_sends_what_they_declare() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
+    wire.connect_output();
+    let _ = received(&wire);
+    let format = || ProfileFormat::current(on_channel(0, ProfileChannels::of(3)));
+    let enabled = CiMessage::ProfileEnabled {
+        source: peer(),
+        format: format(),
+        profile: ProfileId::MPE,
+    };
+    say(&wire, GROUP_0, &enabled, 120);
+    let _ = wire.poll(130);
+    let asked: Vec<_> = ci_sent(&wire)
+        .into_iter()
+        .filter(|(_, m)| matches!(m, CiMessage::ProfileDetailsInquiry { .. }))
+        .collect();
+    let [
+        (
+            group,
+            CiMessage::ProfileDetailsInquiry {
+                header,
+                profile,
+                target,
+                ..
+            },
+        ),
+    ] = asked.as_slice()
+    else {
+        panic!("one Profile Details Inquiry: {asked:?}");
+    };
+    assert_eq!(*group, GROUP_0);
+    assert_eq!(header.device_id, channel(0));
+    assert_eq!(*profile, ProfileId::MPE);
+    assert_eq!(target.get().get(), 0x01);
+    let zone_features = |wire: &Wire| {
+        let zones = wire.session.profiles(&wire.id)[0].mpe_zones();
+        zones
+            .unwrap()
+            .zone_of(MidiChannel::FIRST)
+            .unwrap()
+            .features()
+    };
+    assert_eq!(
+        zone_features(&wire),
+        tutti_midi_protocol::MpeFeatures::default()
+    );
+
+    let declared = tutti_midi_protocol::MpeFeatures {
+        channel_pressure: tutti_midi_protocol::ControllerSupport::Bipolar,
+        third_dimension: tutti_midi_protocol::ControllerSupport::Bipolar,
+        ..tutti_midi_protocol::MpeFeatures::default()
+    };
+    say(&wire, GROUP_0, &features_reply(ours, 0, declared), 140);
+    let changes = wire.poll(150);
+    assert_eq!(
+        profile_events(&changes),
+        [&ProfilesChange::MpeFeatures {
+            manager: MidiChannel::FIRST,
+            features: Some(declared)
+        }]
+    );
+    assert!(
+        request_answers(&changes).is_empty(),
+        "not a switch's answer"
+    );
+    assert_eq!(zone_features(&wire), declared);
+
+    // The output now sends the bipolar forms on the Member, Channel 2.
+    let _ = received(&wire);
+    let on = tutti_fixtures::midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
+    wire.send(&[(Offset::ZERO, on)]);
+    let on_member: Vec<_> = received(&wire)
+        .iter()
+        .filter_map(|ump| match ump.decode() {
+            Ok(Message::Midi1(a, voice)) if a.channel.get() == 1 => Some(voice),
+            _ => None,
+        })
+        .collect();
+    let rpn = |index| {
+        [(101, 0x20), (100, index), (6, 0x40), (38, 0x00)].map(|(controller, value)| {
+            tutti_ump::Voice1::ControlChange {
+                controller: tutti_ump::CCNumber::of(controller),
+                value: U7::of(value),
+            }
+        })
+    };
+    let bend = tutti_ump::Voice1::PitchBend(tutti_ump::U14::of(0x2000));
+    let note = |v: &tutti_ump::Voice1| matches!(v, tutti_ump::Voice1::NoteOn { .. });
+    let mut want = vec![bend];
+    want.extend(rpn(0x21));
+    want.extend(rpn(0x20));
+    assert_eq!(
+        on_member
+            .iter()
+            .filter(|v| !note(v))
+            .copied()
+            .collect::<Vec<_>>(),
+        want
+    );
+
+    // Disabled, and enabled again with no answer: the default features.
+    let disabled = CiMessage::ProfileDisabled {
+        source: peer(),
+        format: format(),
+        profile: ProfileId::MPE,
+    };
+    say(&wire, GROUP_0, &disabled, 160);
+    say(&wire, GROUP_0, &enabled, 161);
+    let _ = wire.poll(170);
+    assert_eq!(
+        zone_features(&wire),
+        tutti_midi_protocol::MpeFeatures::default()
+    );
+}
+
 /// M2-120 section 3.4: a zone that shares a Channel with a lower one is not a
 /// zone of the peer, and the session says so rather than leaving it out in
 /// silence: a change names the zone and why.

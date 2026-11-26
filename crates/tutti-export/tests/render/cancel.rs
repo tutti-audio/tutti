@@ -11,6 +11,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_buffers_under, render_file_under, render_to_file};
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntPcm;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     CancelToken, Control, FileTarget, GRAPH_MAX_BLOCK, Normalize, NormalizeSpec, Outcome, Output,
@@ -41,7 +42,7 @@ fn graph() -> RenderGraph {
 /// FLAC at 24 bit and the default level.
 fn flac() -> Format {
     Format::Flac {
-        depth: IntDepth::Int24,
+        pcm: IntPcm::new(IntDepth::Int24),
         level: FlacLevel::default(),
     }
 }
@@ -68,9 +69,9 @@ fn config(format: Format) -> ExportConfig {
 
 fn formats() -> [(Format, &'static str); 3] {
     [
-        (Format::Wav(Pcm::Int16), "wav"),
+        (Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))), "wav"),
         (flac(), "flac"),
-        (Format::Aiff(Pcm::Int16), "aiff"),
+        (Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int16))), "aiff"),
     ]
 }
 
@@ -90,7 +91,7 @@ struct RunMany {
 /// differ in format and quantization.
 fn second_format() -> Format {
     Format::Flac {
-        depth: IntDepth::Int16,
+        pcm: IntPcm::new(IntDepth::Int16),
         level: FlacLevel::default(),
     }
 }
@@ -289,7 +290,7 @@ fn a_failed_rename_leaves_the_target_and_keeps_the_file() {
 /// token is cancelled while it renders or as its last stage begins.
 #[test]
 fn a_cancelled_buffer_render_is_cancelled() {
-    let cfg = config(Format::Wav(Pcm::Int16));
+    let cfg = config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
     for at in [Stage::Rendering, Stage::Finalizing] {
         let token = CancelToken::new();
         let mut seen = Vec::new();
@@ -348,7 +349,7 @@ fn cancelling_the_rendering_stage_of_a_normalized_export_never_measures() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("n.wav");
     let r = run(
-        &config(Format::Wav(Pcm::Int16)),
+        &config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
         Some(Normalize::peak(Db::new(-6.0))),
         &path,
         |p| p.stage() == Stage::Rendering && done(p) >= 4096,
@@ -365,9 +366,12 @@ fn cancelling_the_rendering_stage_of_a_normalized_export_never_measures() {
 fn a_cancel_on_the_final_reading_is_cancelled() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("last.wav");
-    let r = run(&config(Format::Wav(Pcm::Int16)), None, &path, |p| {
-        p.stage() == Stage::Rendering && p.frames().is_some_and(|(d, t)| d == t)
-    });
+    let r = run(
+        &config(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+        None,
+        &path,
+        |p| p.stage() == Stage::Rendering && p.frames().is_some_and(|(d, t)| d == t),
+    );
     assert_eq!(r.outcome, Outcome::Cancelled);
     assert_eq!(
         r.seen.last().unwrap().stage(),
@@ -432,7 +436,7 @@ const TWO_OUTPUT_SHAPES: [Shape; 3] = [
 
 impl Shape {
     fn config(self, frames: usize) -> ExportConfig {
-        let mut cfg = config_of(Format::Wav(Pcm::Int16), frames);
+        let mut cfg = config_of(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))), frames);
         if self.resample {
             cfg.resample = Some(Resample::to(FILE_RATE));
         }

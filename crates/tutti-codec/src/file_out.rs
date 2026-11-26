@@ -15,17 +15,19 @@ use crate::spec::Spec;
 /// A file sink: the [`Sink`] a recording writes into, as a file of any
 /// [`Format`](crate::Format) this build can write, taking blocks of any
 /// [`Sample`] format `S` (`f32` by default) and converting them to the file's
-/// width by the rule in [`Sample`]. For a file of an integer width, open it as
-/// that integer and put a `tutti_dsp::DitherSink` in front to dither.
+/// sample type by the rule in [`Sample`]. A file of an integer type is dithered as its
+/// [`IntPcm`](crate::IntPcm) says, where a block has more resolution than the file's depth.
 ///
 /// The write edge, the mirror of `FileIn` (with a `decode-*` feature): `FileIn` is the
 /// codec's [`Source`](tutti_buffers::Source) and this is its
 /// [`Sink`]. It is an [`Encoder`] behind that contract, the same writer
 /// an export bounces through, so a recorded and an exported file agree
-/// sample-for-sample and byte-for-byte for a [`Spec`]. One difference is
-/// deliberate: a live capture does not dither unless it is wrapped in a
-/// `DitherSink`, because noise shaping is a decision a capture path should not
-/// make silently.
+/// sample-for-sample and byte-for-byte for a [`Spec`].
+///
+/// A capture into an integer file is dithered by default (triangular, one LSB wide). A capture
+/// whose floats already sit on the file's grid (a 24-bit converter into a 24-bit file) gains
+/// about one LSB of noise it did not need and loses bit-transparency; `IntPcm::new(depth)`
+/// with [`no_dither`](crate::IntPcm::no_dither) keeps it bit-exact.
 ///
 /// It writes incrementally through a buffered file writer, so a take of any
 /// length is never held in memory. Frames are whole: a trailing part of a
@@ -61,14 +63,15 @@ use crate::spec::Spec;
 ///
 /// ```
 /// # #[cfg(feature = "encode-wav")] {
-/// use tutti_codec::{FileOut, Format, Pcm, Spec};
+/// use tutti_codec::{FileOut, Format, IntDepth, IntPcm, Pcm, Spec};
 /// use tutti_buffers::{Interleaved, Sink};
 /// use tutti_units::SampleRate;
-/// use tutti_buffers::ChannelLayout;
+/// use tutti_buffers::{ChannelLayout, ChannelSet};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;
-/// let spec = Spec::of_width(Format::Wav(Pcm::Int24), ChannelLayout::STEREO, SampleRate::SR_48K);
+/// let pcm = Pcm::Int(IntPcm::new(IntDepth::Int24));
+/// let spec = Spec::of_channels(Format::Wav(pcm), ChannelSet::default_for(ChannelLayout::STEREO), SampleRate::SR_48K);
 /// let file = std::fs::File::create(dir.path().join("tone.wav"))?;
 /// let mut out = FileOut::<f32>::new(&spec, file)?;
 /// let frames = [0.5, -0.5, 0.25, -0.25]; // two stereo frames

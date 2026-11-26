@@ -44,6 +44,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::FloatWidth;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::GraphBuilder;
@@ -84,16 +85,14 @@ fn config(freq_target: SampleRateTarget) -> ExportConfig {
             ..Default::default()
         },
         encode: EncodeConfig {
-            format: Format::Wav(Pcm::Float32),
+            format: Format::Wav(Pcm::Float(FloatWidth::F32)),
             channels: ChannelLayout::STEREO,
             topology: None,
         },
-        dither: None,
         resample: match freq_target {
             SampleRateTarget::Convert => Some(Resample::to(tutti_units::SampleRate::of(OUT_RATE))),
             SampleRateTarget::Passthrough => None,
         },
-        noise_shaping: false,
     }
 }
 

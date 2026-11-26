@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ControllerSupport, PitchBendSupport};
 use tutti_ump::{MpeChannels, NoteNumber, NoteVelocity, U7, Voice2};
 
 const MASTER: PitchBendSensitivity = PitchBendSensitivity::MPE_MASTER_DEFAULT;
@@ -359,6 +360,22 @@ fn pzone(manager: u8, channels: u8) -> ProfileZone {
     )
 }
 
+/// M2-120 section 4.8: a receiver that declared nothing is taken to use Pitch
+/// Bend, Channel Pressure and Control Change 74, the three MPE uses by default.
+#[test]
+fn a_zone_starts_with_the_default_features_and_takes_others() {
+    let default = pzone(0, 4).features();
+    assert_eq!(default.pitch_bend, PitchBendSupport::Supported);
+    assert_eq!(default.channel_pressure, ControllerSupport::ControlChange);
+    assert_eq!(default.third_dimension, ControllerSupport::ControlChange);
+    let declared = MpeFeatures {
+        channel_pressure: ControllerSupport::Bipolar,
+        ..default
+    };
+    assert_eq!(pzone(0, 4).mpe_features(declared).features(), declared);
+    assert_ne!(pzone(0, 4).mpe_features(declared), pzone(0, 4));
+}
+
 /// M2-120 section 3.5: a Profile starts at 48 for the Manager and for every
 /// Member, where MPE 1.1 starts the Manager at 2.
 /// Spec: m2-120/3.5#4
@@ -578,14 +595,25 @@ mod serde_tests {
     /// A persisted Profile zone and set are read back through the check too.
     #[test]
     fn a_persisted_profile_zone_is_read_back_through_its_check() {
-        let set = ProfileZones::single(pzone(0, 4).channel_response(ChannelResponse::Monophonic))
-            .with(ProfileZone::new(
-                MpeZoneSpan::new(ch(8), MpeChannels::of(8)).unwrap(),
-                PitchBendSensitivity::from_semitones(U7::of(24)),
-            ))
-            .unwrap();
+        let bipolar = MpeFeatures {
+            channel_pressure: ControllerSupport::Bipolar,
+            third_dimension: ControllerSupport::Unsupported,
+            ..MpeFeatures::default()
+        };
+        let set = ProfileZones::single(
+            pzone(0, 4)
+                .channel_response(ChannelResponse::Monophonic)
+                .mpe_features(bipolar),
+        )
+        .with(ProfileZone::new(
+            MpeZoneSpan::new(ch(8), MpeChannels::of(8)).unwrap(),
+            PitchBendSensitivity::from_semitones(U7::of(24)),
+        ))
+        .unwrap();
         let json = serde_json::to_string(&set).unwrap();
-        assert_eq!(serde_json::from_str::<ProfileZones>(&json).unwrap(), set);
+        let back = serde_json::from_str::<ProfileZones>(&json).unwrap();
+        assert_eq!(back, set);
+        assert_eq!(back.zone_of(ch(0)).unwrap().features(), bipolar);
 
         let mut bad = serde_json::to_value(pzone(0, 4)).unwrap();
         bad["member_count"] = 0.into();
@@ -595,6 +623,17 @@ mod serde_tests {
         assert!(serde_json::from_value::<ProfileZone>(bad).is_err());
         let overlapping = serde_json::to_value([pzone(0, 4), pzone(3, 2)]).unwrap();
         assert!(serde_json::from_value::<ProfileZones>(overlapping).is_err());
+    }
+
+    /// A zone persisted before it carried features reads with the features of a
+    /// receiver that answered nothing.
+    #[test]
+    fn a_persisted_zone_without_features_has_the_default() {
+        let mut old = serde_json::to_value(pzone(0, 4)).unwrap();
+        old.as_object_mut().unwrap().remove("features");
+        let zone = serde_json::from_value::<ProfileZone>(old).unwrap();
+        assert_eq!(zone, pzone(0, 4));
+        assert_eq!(zone.features(), MpeFeatures::default());
     }
 
     /// A persisted layout is read back through its check: exactly the shapes

@@ -1,5 +1,5 @@
-//! A bounce's dither: triangular unless it says otherwise, and none when it
-//! says none.
+//! A bounce's dither is its format's: triangular unless the `IntPcm` says otherwise, and none
+//! when it says none.
 //!
 //! A constant that falls between two 16-bit steps shows what each setting
 //! does to the quantization: undithered, every sample is the plain rounding;
@@ -7,6 +7,7 @@
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::IntPcm;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
@@ -16,25 +17,15 @@ use tutti_units::{SampleRate, Seconds};
 /// 9830.1 steps of 16 bit: a tenth of a step off a code.
 const LEVEL: f32 = 9_830.1 / 32_768.0;
 
-/// The 16-bit samples of a bounce of a constant `LEVEL`, as `configure` sets
-/// its dither.
-fn dithered(
-    configure: impl FnOnce(
-        Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
-    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
-) -> Vec<i32> {
-    bounced_node(
-        ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)),
-        configure,
-    )
+/// The 16-bit samples of a bounce of a constant `LEVEL` into a file of `pcm`.
+fn dithered(pcm: IntPcm) -> Vec<i32> {
+    bounced_node(ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)), pcm)
 }
 
-/// The 16-bit samples of a bounce of `node`, as `configure` sets its options.
+/// The 16-bit samples of a bounce of `node` into a file of `pcm`.
 fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     node: ForkByClone<N>,
-    configure: impl FnOnce(
-        Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
-    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
+    pcm: IntPcm,
 ) -> Vec<i32> {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
@@ -46,9 +37,9 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     let path = dir.path().join("out.wav");
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .main_output(&path, Format::Wav(Pcm::Int16))
+        .main_output(&path, Format::Wav(Pcm::Int(pcm)))
         .tail(tutti_session::BounceTail::None);
-    bounced(&mut session, configure(bounce)).expect("renders");
+    bounced(&mut session, bounce).expect("renders");
     hound::WavReader::open(&path)
         .expect("readable")
         .samples::<i16>()
@@ -61,7 +52,7 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
 #[test]
 fn no_dither_writes_the_plain_quantization() {
     let plain = IntDepth::Int16.quantize(LEVEL);
-    let samples = dithered(Bounce::no_dither);
+    let samples = dithered(IntPcm::new(IntDepth::Int16).no_dither());
     assert!(!samples.is_empty());
     assert!(samples.iter().all(|&s| s == plain), "{:?}", &samples[..8]);
 }
@@ -84,7 +75,7 @@ fn error_power(samples: &[i32]) -> f64 {
 /// dither moves a sample by at most one step.
 #[test]
 fn the_default_dither_is_triangular() {
-    let default = dithered(|b| b);
+    let default = dithered(IntPcm::new(IntDepth::Int16));
     assert!(
         (error_power(&default) - 0.25).abs() < 0.02,
         "{}",
@@ -92,7 +83,7 @@ fn the_default_dither_is_triangular() {
     );
 
     let plain = IntDepth::Int16.quantize(LEVEL);
-    let rectangular = dithered(|b| b.dither(DitherShape::Rectangular));
+    let rectangular = dithered(IntPcm::new(IntDepth::Int16).dither(DitherShape::Rectangular));
     assert!(rectangular.iter().any(|&s| s != plain), "it dithers");
     assert!(rectangular.iter().all(|&s| (s - plain).abs() <= 1));
     assert!(
@@ -121,8 +112,11 @@ fn noise_shaping_feeds_the_rounding_error_back() {
                 .with_layout(ChannelLayout::STEREO),
         )
     };
-    let plain = bounced_node(node(), Bounce::no_dither);
-    let shaped = bounced_node(node(), |b| b.no_dither().noise_shaping());
+    let plain = bounced_node(node(), IntPcm::new(IntDepth::Int16).no_dither());
+    let shaped = bounced_node(
+        node(),
+        IntPcm::new(IntDepth::Int16).no_dither().noise_shaping(),
+    );
     assert_eq!(plain.len(), shaped.len());
     let moved = plain.iter().zip(&shaped).filter(|(a, b)| a != b).count();
     assert!(moved * 10 > plain.len(), "{moved} of {}", plain.len());

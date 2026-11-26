@@ -70,7 +70,7 @@ use crate::output::FileTarget;
 ///
 /// # Headroom
 ///
-/// For an integer format (`Pcm::Int16`, `Pcm::Int24`) the peak target of
+/// For an integer format (`Pcm::Int(IntPcm::new(IntDepth::Int16))`, `Pcm::Int(IntPcm::new(IntDepth::Int24))`) the peak target of
 /// [`Peak`](Self::Peak), and the ceiling of [`Lufs`](Self::Lufs), are pulled
 /// down to leave one LSB plus the dither amplitude of headroom below full
 /// scale (an LSB for no dither, 1.5 for rectangular, 2 for triangular): a peak
@@ -245,7 +245,7 @@ impl Normalize {
     /// [`NoiseShaping::feedback_gain`] times the largest error (the dither's
     /// amplitude plus half an LSB). A target or
     /// ceiling already under it is unchanged, and a format that does not
-    /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32)) has no
+    /// quantize ([`Pcm::Float(FloatWidth::F32)`](tutti_codec::Pcm::Float(FloatWidth::F32))) has no
     /// limit.
     pub(crate) fn within(self, target: &FileTarget, render_rate: SampleRate) -> Self {
         let Some(limit) = headroom_ceiling(target, render_rate) else {
@@ -276,10 +276,10 @@ fn finished<T>(outcome: Outcome<T>) -> T {
 /// `render_rate` is the rate the file's frames are rendered at; the shaping filter
 /// is designed for the file's, after any resample.
 fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> {
-    let depth = target.format().int_depth()?;
+    let pcm = target.format().int_pcm()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
-    let lsb = depth.lsb().get();
-    let dither_peak = match target.dither {
+    let lsb = pcm.depth().lsb().get();
+    let dither_peak = match pcm.dither_shape() {
         None => 0.0,
         Some(DitherShape::Rectangular) => 0.5,
         Some(DitherShape::Triangular) => 1.0,
@@ -287,7 +287,7 @@ fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> 
     // Error feedback adds the filtered past errors to each value. Every
     // recorded error is at most the dither plus half a step of rounding, and the
     // filter passes at most `feedback_gain` times that.
-    let feedback_peak = if target.noise_shaping {
+    let feedback_peak = if pcm.is_noise_shaped() {
         let rate = output_rate(target, render_rate);
         NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
     } else {
