@@ -18,6 +18,8 @@ enum bounce::BounceLatency
 enum bounce::BounceTail
 enum bounce::Range
 enum bounce::StemGain
+enum bounce::StemKey
+enum bounce::sealed::Landing
 enum builder::Workers
 enum device::DeviceEvent
 enum device::RestartOutcome
@@ -159,6 +161,7 @@ fn bounce::BounceJob::handle
 fn bounce::Bounced::into_main_output
 fn bounce::Bounced::into_parts
 fn bounce::Bounced::main_output
+fn bounce::Bounced::stem_results
 fn bounce::Bounced::stems
 fn bounce::ExportClock::frozen
 fn bounce::ExportClock::timeline
@@ -881,6 +884,8 @@ struct bounce::FileStem
 struct bounce::NoMainOutput
 struct bounce::PreparedGraph
 struct bounce::Stem
+struct bounce::sealed::FileOptions
+struct bounce::sealed::MainShape
 struct builder::BlockConfig
 struct builder::SessionBuilder
 struct clock::Detached

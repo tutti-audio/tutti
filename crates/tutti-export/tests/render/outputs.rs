@@ -23,8 +23,8 @@ use tutti_codec::IntPcm;
 use tutti_codec::ToFile;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
-    BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement, Produced,
-    RenderError, RenderGraph, Setup, TailPolicy, TargetError, render,
+    BufferTarget, Control, DoneError, FileTarget, Gain, Job, Normalize, Output, Outputs, Placement,
+    RenderError, RenderGraph, Setup, TailPolicy, TargetError, Written, render,
 };
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutputPort, PortSource,
@@ -135,11 +135,15 @@ fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
     )
 }
 
-fn planes(produced: Produced) -> Vec<Vec<f32>> {
-    produced
-        .into_buffers()
-        .expect("a buffers output")
-        .into_planes()
+/// `target`'s file from one render of the graph's main output.
+fn render_file(graph: &mut RenderGraph, job: &Job, target: FileTarget) -> Written {
+    let mut outputs = Outputs::new();
+    let key = outputs.file(Output::main_output(target));
+    let done = render(graph, job, &FrozenClock, outputs, &mut Control::none())
+        .expect("renders")
+        .into_finished()
+        .expect("not cancelled");
+    done.file(&key).expect("a key of these outputs").clone()
 }
 
 /// Decodes a file with `symphonia`, which shares no code with the encoders,
@@ -246,29 +250,31 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
         sample_rate: RATE,
         loop_range: None,
     });
-    let produced = render(
+    let mut outputs = Outputs::new();
+    let (ka, kb) = (
+        outputs.file(Output::main_output(wav(
+            &a,
+            Pcm::Int(IntPcm::new(IntDepth::Int24)),
+        ))),
+        outputs.file(Output::main_output(flac(&b, IntDepth::Int16))),
+    );
+    let kheld = outputs.buffers(Output::main_output(BufferTarget::new(
+        ChannelLayout::STEREO,
+    )));
+    let done = render(
         &mut two_tones(),
         &job(frames),
         &timeline,
-        vec![
-            Output::main_output(wav(&a, Pcm::Int(IntPcm::new(IntDepth::Int24)))),
-            Output::main_output(flac(&b, IntDepth::Int16)),
-            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    assert_eq!(produced.len(), 3);
-    let mut produced = produced.into_iter();
-    let (wa, wb) = (
-        produced.next().unwrap().into_file().unwrap(),
-        produced.next().unwrap().into_file().unwrap(),
-    );
+    let (wa, wb) = (done.file(&ka).unwrap(), done.file(&kb).unwrap());
     assert_eq!((wa.path.as_path(), wb.path.as_path()), (&*a, &*b));
-    let held = planes(produced.next().unwrap());
-    assert_eq!(held[0].len(), frames);
+    let held = done.buffers(&kheld).unwrap().planes();
+    assert_eq!((held.len(), held[0].len()), (2, frames));
     let peak = held[0].iter().fold(0.0f32, |m, s| m.max(s.abs()));
     assert!(peak > 0.45, "the tone is there: {peak}");
 
@@ -312,15 +318,15 @@ fn each_output_is_dithered_with_its_own_seed() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let silence = g.add(Const::frame(&[0.0, 0.0]));
     g.pipe_output(silence);
+    let mut outputs = Outputs::new();
+    for (path, seed) in [(&paths[0], 1), (&paths[1], 2), (&paths[2], 1)] {
+        outputs.file(Output::main_output(dithered(path, seed)));
+    }
     render(
         &mut finish(g),
         &job(4_096),
         &FrozenClock,
-        vec![
-            Output::main_output(dithered(&paths[0], 1)),
-            Output::main_output(dithered(&paths[1], 2)),
-            Output::main_output(dithered(&paths[2], 1)),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
@@ -353,39 +359,38 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
     let before = rig.tap(1, source);
     let after = rig.tap(2, gain);
     let mut graph = rig.assemble();
-    let produced = render(
+    let mut outputs = Outputs::new();
+    let keys = [
+        outputs.buffers(Output::main_output(BufferTarget::new(
+            ChannelLayout::STEREO,
+        ))),
+        outputs.buffers(Output::tap(
+            before,
+            stereo_placement(),
+            BufferTarget::new(ChannelLayout::STEREO),
+        )),
+        outputs.buffers(Output::tap(
+            after,
+            stereo_placement(),
+            BufferTarget::new(ChannelLayout::STEREO),
+        )),
+    ];
+    let done = render(
         &mut graph,
         &job(3_000),
         &FrozenClock,
-        vec![
-            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-            Output::tap(
-                before,
-                stereo_placement(),
-                BufferTarget::new(ChannelLayout::STEREO),
-            ),
-            Output::tap(
-                after,
-                stereo_placement(),
-                BufferTarget::new(ChannelLayout::STEREO),
-            ),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let [main_output, before, after]: [Vec<Vec<f32>>; 3] = produced
-        .into_iter()
-        .map(planes)
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("three outputs");
-    for (name, got, want) in [
-        ("main_output", main_output, 0.25),
-        ("before the gain", before, 0.5),
-        ("after the gain", after, 0.25),
+    for (name, key, want) in [
+        ("main_output", &keys[0], 0.25),
+        ("before the gain", &keys[1], 0.5),
+        ("after the gain", &keys[2], 0.25),
     ] {
+        let got = done.buffers(key).unwrap().planes();
         assert_eq!(got.len(), 2, "{name}");
         for (c, plane) in got.iter().enumerate() {
             assert_eq!(plane.len(), 3_000, "{name}");
@@ -421,21 +426,23 @@ fn a_tap_is_drained_and_gated_like_the_main_output() {
         TailPolicy::Frames(Samples::ZERO),
     )
     .expect("a render");
-    let produced = render(
+    let mut outputs = Outputs::new();
+    let key = outputs.buffers(Output::tap(
+        reader,
+        stereo_placement(),
+        BufferTarget::new(ChannelLayout::STEREO),
+    ));
+    let done = render(
         &mut graph,
         &job,
         &FrozenClock,
-        vec![Output::tap(
-            reader,
-            stereo_placement(),
-            BufferTarget::new(ChannelLayout::STEREO),
-        )],
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let got = planes(produced.into_iter().next().unwrap());
+    let got = done.buffers(&key).unwrap().planes();
     assert_eq!(got[0].len(), 2_000);
     for (i, s) in got[0].iter().enumerate() {
         let n = (1_500 + i) as f64;
@@ -459,18 +466,20 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
     let mut graph = rig.assemble();
 
     // Two lanes, a placement of one.
+    let mut outputs = Outputs::new();
+    outputs.file(Output::tap(
+        wide,
+        Placement::new(tutti_buffers::Bed::Mono.topology()),
+        wav(
+            &dir.path().join("a.wav"),
+            Pcm::Int(IntPcm::new(IntDepth::Int16)),
+        ),
+    ));
     let err = render(
         &mut graph,
         &job(1_000),
         &FrozenClock,
-        vec![Output::tap(
-            wide,
-            Placement::new(tutti_buffers::Bed::Mono.topology()),
-            wav(
-                &dir.path().join("a.wav"),
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
-            ),
-        )],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("two lanes are not one");
@@ -487,24 +496,24 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
 
     // The same check at the second output: it is made for every output before
     // the first file is begun, so the main output's is never created.
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(wav(
+        &dir.path().join("m.wav"),
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
+    outputs.file(Output::tap(
+        narrow,
+        Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap()),
+        wav(
+            &dir.path().join("b.wav"),
+            Pcm::Int(IntPcm::new(IntDepth::Int16)),
+        ),
+    ));
     let err = render(
         &mut graph,
         &job(1_000),
         &FrozenClock,
-        vec![
-            Output::main_output(wav(
-                &dir.path().join("m.wav"),
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
-            )),
-            Output::tap(
-                narrow,
-                Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap()),
-                wav(
-                    &dir.path().join("b.wav"),
-                    Pcm::Int(IntPcm::new(IntDepth::Int16)),
-                ),
-            ),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("two lanes are not three");
@@ -527,27 +536,27 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
     let (mut rig, source, _) = gain_graph();
     let reader = rig.tap(1, source);
     let mut graph = rig.assemble();
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(wav(
+        &dir.path().join("m.wav"),
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
+    outputs.file(Output::tap(
+        reader,
+        // Two unassigned feeds onto a mono file: unassigned channels are
+        // not downmixed, so there is no place for them.
+        Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
+        FileTarget::new(
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
+                .channels(ChannelSet::default_for(ChannelLayout::MONO)),
+            ToFile::new(dir.path().join("t.wav")),
+        ),
+    ));
     let err = render(
         &mut graph,
         &job(1_000),
         &FrozenClock,
-        vec![
-            Output::main_output(wav(
-                &dir.path().join("m.wav"),
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
-            )),
-            Output::tap(
-                reader,
-                // Two unassigned feeds onto a mono file: unassigned channels are
-                // not downmixed, so there is no place for them.
-                Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
-                FileTarget::new(
-                    Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
-                        .channels(ChannelSet::default_for(ChannelLayout::MONO)),
-                    ToFile::new(dir.path().join("t.wav")),
-                ),
-            ),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("unassigned feeds are not L and R");
@@ -588,42 +597,40 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .iter()
         .map(|n| dir.path().join(n))
         .collect();
-    let float = |path: &std::path::Path, spec| {
+    let float = |path: &std::path::Path, gain| {
         FileTarget::new(
             Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
             ToFile::new(path),
         )
-        .normalize(spec)
+        .normalize(gain)
     };
-    let mut produced = render(
+    let mut outputs = Outputs::new();
+    let main_key = outputs.file(Output::main_output(float(&files[0], Gain::Own(mode))));
+    let key_a = outputs.file(Output::tap(
+        ta,
+        stereo_placement(),
+        float(&files[1], Gain::Of(main_key.clone())),
+    ));
+    let key_b = outputs.file(Output::tap(
+        tb,
+        stereo_placement(),
+        float(&files[2], Gain::Of(main_key.clone())),
+    ));
+    let done = render(
         &mut graph,
         &job(24_000),
         &FrozenClock,
-        vec![
-            Output::main_output(float(&files[0], NormalizeSpec::own(mode))),
-            Output::tap(
-                ta,
-                stereo_placement(),
-                float(&files[1], NormalizeSpec::from_output(mode, 0)),
-            ),
-            Output::tap(
-                tb,
-                stereo_placement(),
-                float(&files[2], NormalizeSpec::from_output(mode, 0)),
-            ),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
-    .expect("not cancelled")
-    .into_iter()
-    .map(|p| p.into_file().expect("files"));
+    .expect("not cancelled");
     let (main_output, sa, sb) = (
-        produced.next().unwrap(),
-        produced.next().unwrap(),
-        produced.next().unwrap(),
+        done.file(&main_key).unwrap(),
+        done.file(&key_a).unwrap(),
+        done.file(&key_b).unwrap(),
     );
 
     let gain = main_output.gain.expect("the main output normalized");
@@ -677,14 +684,20 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     std::fs::create_dir(&second).unwrap();
     std::fs::write(second.join("keep"), b"x").unwrap();
 
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(wav(
+        &first,
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
+    outputs.file(Output::main_output(wav(
+        &second,
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
     let err = render(
         &mut two_tones(),
         &job(2_000),
         &FrozenClock,
-        vec![
-            Output::main_output(wav(&first, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
-            Output::main_output(wav(&second, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
@@ -721,17 +734,20 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     // The first rename failing lands nothing: the plain error.
     std::fs::remove_file(&first).unwrap();
     std::fs::create_dir(&first).unwrap();
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(wav(
+        &first,
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
+    outputs.file(Output::main_output(wav(
+        &dir.path().join("third.wav"),
+        Pcm::Int(IntPcm::new(IntDepth::Int16)),
+    )));
     let err = render(
         &mut two_tones(),
         &job(2_000),
         &FrozenClock,
-        vec![
-            Output::main_output(wav(&first, Pcm::Int(IntPcm::new(IntDepth::Int16)))),
-            Output::main_output(wav(
-                &dir.path().join("third.wav"),
-                Pcm::Int(IntPcm::new(IntDepth::Int16)),
-            )),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
@@ -748,21 +764,21 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
 }
 
 /// Outputs that contradict each other are named errors before anything is
-/// rendered: none at all, a gain taken from the output itself, from one past
-/// the list or from one that does not measure itself, and two files at one
-/// path.
+/// rendered: none at all, a gain taken from a file that does not measure itself
+/// (one that takes none, or another's), a gain taken from another `Outputs`'
+/// key, and two files at one path.
 #[test]
 fn outputs_that_contradict_each_other_are_named_errors() {
     let dir = tempfile::tempdir().unwrap();
     let mode = Normalize::peak(Db::new(-6.0));
-    let file = |n: &str, spec: Option<NormalizeSpec>| {
+    let file = |n: &str, gain: Option<Gain>| {
         let target = wav(&dir.path().join(n), Pcm::Int(IntPcm::new(IntDepth::Int16)));
-        Output::main_output(match spec {
-            Some(spec) => target.normalize(spec),
+        Output::main_output(match gain {
+            Some(gain) => target.normalize(gain),
             None => target,
         })
     };
-    let run = |outputs: Vec<Output>| {
+    let run = |outputs: Outputs| {
         render(
             &mut two_tones(),
             &job(2_000),
@@ -773,36 +789,65 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     };
 
     assert!(matches!(
-        run(vec![]).expect_err("nothing to render"),
+        run(Outputs::new()).expect_err("nothing to render"),
         RenderError::NoOutputs
     ));
-    for (outputs, bad) in [
-        (
-            vec![file("a.wav", Some(NormalizeSpec::from_output(mode, 0)))],
-            0,
+
+    // A gain from a file that takes none.
+    let mut outputs = Outputs::new();
+    let plain = outputs.file(file("a.wav", None));
+    outputs.file(file("b.wav", Some(Gain::Of(plain))));
+    let err = run(outputs).expect_err("a gain from nowhere");
+    assert!(
+        matches!(
+            err,
+            RenderError::Target {
+                output: 1,
+                why: TargetError::GainSource { index: 0 }
+            }
         ),
-        (
-            vec![file("a.wav", Some(NormalizeSpec::from_output(mode, 4)))],
-            4,
+        "{err:?}"
+    );
+
+    // A gain from a file that itself takes another's.
+    let mut outputs = Outputs::new();
+    let own = outputs.file(file("a.wav", Some(Gain::Own(mode))));
+    let follower = outputs.file(file("b.wav", Some(Gain::Of(own))));
+    outputs.file(file("c.wav", Some(Gain::Of(follower))));
+    let err = run(outputs).expect_err("a gain from a follower");
+    assert!(
+        matches!(
+            err,
+            RenderError::Target {
+                output: 2,
+                why: TargetError::GainSource { index: 1 }
+            }
         ),
-        (
-            vec![
-                file("a.wav", None),
-                file("b.wav", Some(NormalizeSpec::from_output(mode, 0))),
-            ],
-            0,
+        "{err:?}"
+    );
+
+    // A key of another `Outputs` is refused by name, though its index is in range.
+    let mut elsewhere = Outputs::new();
+    let foreign = elsewhere.file(file("z.wav", Some(Gain::Own(mode))));
+    let mut outputs = Outputs::new();
+    outputs.file(file("a.wav", Some(Gain::Own(mode))));
+    outputs.file(file("b.wav", Some(Gain::Of(foreign))));
+    let err = run(outputs).expect_err("a key of another Outputs");
+    assert!(
+        matches!(
+            err,
+            RenderError::Target {
+                output: 1,
+                why: TargetError::ForeignGain
+            }
         ),
-    ] {
-        let err = run(outputs).expect_err("a gain from nowhere");
-        assert!(
-            matches!(
-                err,
-                RenderError::Target { why: TargetError::GainSource { index }, .. } if index == bad
-            ),
-            "{err:?}"
-        );
-    }
-    let err = run(vec![file("a.wav", None), file("a.wav", None)]).expect_err("one path twice");
+        "{err:?}"
+    );
+
+    let mut outputs = Outputs::new();
+    outputs.file(file("a.wav", None));
+    outputs.file(file("a.wav", None));
+    let err = run(outputs).expect_err("one path twice");
     assert!(
         matches!(
             err,
@@ -814,6 +859,56 @@ fn outputs_that_contradict_each_other_are_named_errors() {
         "{err:?}"
     );
     assert!(names(dir.path()).is_empty());
+}
+
+/// A key is read from the `Done` of the `Outputs` that made it: another render's
+/// key is a named error for a file and for planes alike, though its index is in
+/// range, and a second read of one key is the same value.
+#[test]
+fn a_done_refuses_the_key_of_another_outputs_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let render_two = |name: &str| {
+        let mut outputs = Outputs::new();
+        let file = outputs.file(Output::main_output(wav(
+            &dir.path().join(name),
+            Pcm::Int(IntPcm::new(IntDepth::Int16)),
+        )));
+        let planes = outputs.buffers(Output::main_output(BufferTarget::new(
+            ChannelLayout::STEREO,
+        )));
+        let done = render(
+            &mut two_tones(),
+            &job(500),
+            &FrozenClock,
+            outputs,
+            &mut Control::none(),
+        )
+        .expect("renders")
+        .into_finished()
+        .expect("not cancelled");
+        (done, file, planes)
+    };
+    let (done, file, planes) = render_two("a.wav");
+    let (other, other_file, other_planes) = render_two("b.wav");
+    assert_eq!(done.file(&other_file), Err(DoneError::Foreign));
+    assert_eq!(
+        done.buffers(&other_planes).map(|_| ()),
+        Err(DoneError::Foreign)
+    );
+    assert_eq!(other.file(&file), Err(DoneError::Foreign));
+    assert_eq!(done.file(&file), done.file(&file));
+    assert_eq!(done.buffers(&planes).unwrap().channels(), 2);
+    assert_eq!(done.buffers(&planes).unwrap().frames().get(), 500);
+
+    // A taken result is a named error afterwards, not a default.
+    let (mut done, file, planes) = (done, file, planes);
+    assert_eq!(done.take_file(&file).unwrap().frames.get(), 500);
+    assert_eq!(done.file(&file), Err(DoneError::Taken));
+    assert_eq!(done.take_buffers(&planes).unwrap().channels(), 2);
+    assert_eq!(
+        done.take_buffers(&planes).map(|_| ()),
+        Err(DoneError::Taken)
+    );
 }
 
 /// An output whose audio cannot be normalized names itself: with an audible
@@ -830,30 +925,30 @@ fn an_unmeasurable_output_names_its_index() {
     let reader = rig.tap(1, silent);
     let mut graph = rig.assemble();
 
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(
+        FileTarget::new(
+            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new(dir.path().join("m.wav")),
+        )
+        .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
+    ));
+    outputs.file(Output::tap(
+        reader,
+        stereo_placement(),
+        FileTarget::new(
+            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            ToFile::new(dir.path().join("s.wav")),
+        )
+        .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
+    ));
     let err = render(
         &mut graph,
         &job(2_000),
         &FrozenClock,
-        vec![
-            Output::main_output(
-                FileTarget::new(
-                    Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
-                        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-                    ToFile::new(dir.path().join("m.wav")),
-                )
-                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
-            ),
-            Output::tap(
-                reader,
-                stereo_placement(),
-                FileTarget::new(
-                    Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
-                        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-                    ToFile::new(dir.path().join("s.wav")),
-                )
-                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
-            ),
-        ],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("silence has no peak to normalize");
@@ -895,25 +990,7 @@ fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
 #[test]
 fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
     let dir = tempfile::tempdir().unwrap();
-    let placement = |target: FileTarget| {
-        let mut graph = wide(6);
-        let produced = render(
-            &mut graph,
-            &job(2_000),
-            &FrozenClock,
-            vec![Output::main_output(target)],
-            &mut Control::none(),
-        )
-        .expect("renders");
-        produced
-            .into_finished()
-            .expect("not cancelled")
-            .into_iter()
-            .next()
-            .and_then(Produced::into_file)
-            .expect("a file")
-            .placement
-    };
+    let placement = |target: FileTarget| render_file(&mut wide(6), &job(2_000), target).placement;
     let unstated = FileTarget::new(
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
         ToFile::new(dir.path().join("a.wav")),
@@ -939,13 +1016,15 @@ fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
 fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
     let dir = tempfile::tempdir().unwrap();
     let mut graph = wide(3);
-    let lufs = file_of(&dir.path().join("l.wav"), 3)
-        .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0))));
+    let lufs =
+        file_of(&dir.path().join("l.wav"), 3).normalize(Gain::Own(Normalize::lufs(Db::new(-23.0))));
+    let mut outputs = Outputs::new();
+    outputs.file(Output::main_output(lufs));
     let err = render(
         &mut graph,
         &job(2_000),
         &FrozenClock,
-        vec![Output::main_output(lufs)],
+        outputs,
         &mut Control::none(),
     )
     .expect_err("three channels name no speakers");
@@ -985,21 +1064,8 @@ fn tone(width: u16) -> RenderGraph {
 fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.wav");
-    let target = file_of(&path, 3).normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
-    let written = render(
-        &mut tone(3),
-        &job(48_000),
-        &FrozenClock,
-        vec![Output::main_output(target)],
-        &mut Control::none(),
-    )
-    .expect("a peak needs no placement")
-    .into_finished()
-    .expect("not cancelled")
-    .into_iter()
-    .next()
-    .and_then(Produced::into_file)
-    .unwrap();
+    let target = file_of(&path, 3).normalize(Gain::Own(Normalize::peak(Db::new(-12.0))));
+    let written = render_file(&mut tone(3), &job(48_000), target);
     assert_eq!(written.measured, None);
     let gain = written.gain.expect("normalized").get();
     assert!(
@@ -1026,21 +1092,8 @@ fn a_peak_output_with_a_default_layout_reports_its_weighted_loudness() {
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
         ToFile::new(dir.path().join("p.wav")),
     )
-    .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
-    let written = render(
-        &mut tone(6),
-        &job(48_000),
-        &FrozenClock,
-        vec![Output::main_output(target)],
-        &mut Control::none(),
-    )
-    .expect("renders")
-    .into_finished()
-    .expect("not cancelled")
-    .into_iter()
-    .next()
-    .and_then(Produced::into_file)
-    .unwrap();
+    .normalize(Gain::Own(Normalize::peak(Db::new(-12.0))));
+    let written = render_file(&mut tone(6), &job(48_000), target);
     assert_eq!(written.placement, tutti_buffers::Placement::Default);
     let lufs = written.measured.expect("a placed loudness").lufs.get();
     let analytic = Db::from_power(0.5f64.powi(2) / 2.0 * 5.82).get();

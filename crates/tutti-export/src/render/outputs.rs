@@ -14,8 +14,8 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, ChannelSet, Placement as ChannelPlacement};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_codec::{Chain, Converter, Landed};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
@@ -25,12 +25,16 @@ use tutti_units::{Db, SampleRate, Samples};
 
 use crate::control::{Control, Outcome, Stage, Weights};
 use crate::normalize::{Measurer, Normalize, Reading, chunk_frames};
-use crate::output::{FileTarget, GainSource, NormalizeSpec, Output, Produced, Target, TargetError};
+use crate::output::{BufferTarget, FileTarget, Gain, TargetError};
+use crate::outputs::{Parts, Placed};
 use crate::render::{
     FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
 };
 use crate::spill::{Spill, SpillBudget};
-use crate::{ConfigError, Job, RenderError, RenderGraph, Rendered, Result, Unmeasured, Written};
+use crate::{
+    ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Rendered, Result, Unmeasured,
+    Written,
+};
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
 /// is drained into.
@@ -46,10 +50,10 @@ struct Waiting<F: Float> {
     /// The channels of the file: what the spill holds.
     channels: ChannelSet,
     spill: Spill<F>,
-    spec: NormalizeSpec,
+    gain: Gain,
 }
 
-/// Where a lane's gated frames go.
+/// Where a file lane's gated frames go.
 enum Sink<F: FftFloat> {
     /// Straight into the file's chain as the blocks arrive.
     Stream { chain: Box<Chain<F>> },
@@ -58,24 +62,67 @@ enum Sink<F: FftFloat> {
         chain: Box<Chain<F>>,
         waiting: Box<Waiting<F>>,
     },
-    /// Onto planes in memory.
-    Buffers { planes: Vec<Vec<F>> },
 }
 
-/// One output of the pass.
+/// What every lane holds, whatever it becomes: the feed, its fold onto the
+/// target's channels and the block it folds into.
 struct Lane<F: FftFloat> {
-    /// The path of a file output.
-    path: Option<PathBuf>,
+    /// The output's position among the render's outputs of both kinds.
+    position: usize,
     /// The feed's channels onto the target's.
     fold: Fold<F>,
     /// Set for a tap feed; the graph's planes otherwise.
     tap: Option<TapFeed<F>>,
     layout: ChannelLayout,
     /// Whether the target stated its channels' topology.
-    placement: tutti_buffers::Placement,
+    placement: ChannelPlacement,
     /// The interleaved frames of one block's window, at the target's layout.
     scratch: Vec<F>,
+}
+
+/// A file output of the pass.
+struct FileLane<F: FftFloat> {
+    lane: Lane<F>,
+    path: PathBuf,
     sink: Sink<F>,
+}
+
+/// A buffer output of the pass: planes appended in memory.
+struct BufferLane<F: FftFloat> {
+    lane: Lane<F>,
+    planes: Vec<Vec<F>>,
+}
+
+impl<F: FftFloat> Lane<F> {
+    /// Drains the feed, folds the window of this block onto the target's
+    /// layout and returns it; `None` when the gate keeps nothing of the block.
+    fn block(
+        &mut self,
+        graph_planes: &[Vec<F>],
+        n: usize,
+        window: &std::ops::Range<usize>,
+    ) -> Result<Option<Interleaved<'_, F>>> {
+        let planes: &[Vec<F>] = match &mut self.tap {
+            Some(tap) => {
+                drain_tap(self.position, tap, n)?;
+                &tap.planes
+            }
+            None => graph_planes,
+        };
+        if window.is_empty() {
+            return Ok(None);
+        }
+        let frames = window.len();
+        let samples = self.layout.interleaved_len(Samples::new(frames));
+        let mut block = InterleavedMut::new(&mut self.scratch[..samples], self.layout)?;
+        let span = Samples::new(window.start)..Samples::new(window.end);
+        self.fold
+            .fold_planar_to_interleaved(Planes::from_vecs(planes)?.slice(span), block.reborrow())?;
+        Ok(Some(Interleaved::new(
+            &self.scratch[..samples],
+            self.layout,
+        )?))
+    }
 }
 
 /// Renders `graph` once into every output of `outputs`.
@@ -88,16 +135,19 @@ pub(crate) fn render_outputs<F: FftFloat>(
     graph: &mut RenderGraph<F>,
     job: &Job,
     clock: &dyn RenderClock,
-    outputs: Vec<Output<F>>,
+    outputs: Outputs<F>,
     control: &mut Control<'_>,
     spill_budget: usize,
-) -> Result<Outcome<Vec<Produced<F>>>> {
-    control.weigh(Weights::of(outputs.iter().map(Output::target)));
+) -> Result<Outcome<Done<F>>> {
+    let parts = outputs.into_parts();
+    let stamp = parts.stamp();
+    control.weigh(Weights::of(parts.files.iter().map(|f| f.output.target())));
     let plan = RenderPlan::of(job);
     let (done, _lost) = with_source(graph, job.rate(), clock, |src| {
-        check_outputs(&outputs, src.main_output())?;
-        let mut lanes = open_lanes(
-            outputs,
+        check_outputs(&parts, src.main_output())?;
+        let (mut files, mut buffers) = open_lanes(
+            parts.files,
+            parts.buffers,
             job,
             &plan,
             src.outputs(),
@@ -114,32 +164,20 @@ pub(crate) fn render_outputs<F: FftFloat>(
             job.on_event_loss(),
             |src, n, window| {
                 let graph_planes = src.planes();
-                for (i, lane) in lanes.iter_mut().enumerate() {
-                    let planes: &[Vec<F>] = match &mut lane.tap {
-                        Some(tap) => {
-                            drain_tap(i, tap, n)?;
-                            &tap.planes
-                        }
-                        None => graph_planes,
-                    };
-                    if window.is_empty() {
+                for file in &mut files {
+                    let Some(block) = file.lane.block(graph_planes, n, &window)? else {
                         continue;
-                    }
-                    let frames = window.len();
-                    let samples = lane.layout.interleaved_len(Samples::new(frames));
-                    let mut block = InterleavedMut::new(&mut lane.scratch[..samples], lane.layout)?;
-                    let span = Samples::new(window.start)..Samples::new(window.end);
-                    lane.fold.fold_planar_to_interleaved(
-                        Planes::from_vecs(planes)?.slice(span),
-                        block.reborrow(),
-                    )?;
-                    let block = block.as_interleaved();
-                    match &mut lane.sink {
+                    };
+                    match &mut file.sink {
                         Sink::Stream { chain } => chain.block(block)?,
                         Sink::Spill { waiting, .. } => {
                             waiting.spill.push(block.samples(), &mut budget)?;
                         }
-                        Sink::Buffers { planes } => crate::planar::append(block, planes)?,
+                    }
+                }
+                for buffer in &mut buffers {
+                    if let Some(block) = buffer.lane.block(graph_planes, n, &window)? {
+                        crate::planar::append(block, &mut buffer.planes)?;
                     }
                 }
                 Ok(())
@@ -155,41 +193,47 @@ pub(crate) fn render_outputs<F: FftFloat>(
         let lost = src.lost_events();
         check_loss(job.on_event_loss(), lost)?;
 
-        finish(lanes, job, lost, control)
+        finish(files, buffers, job, lost, control)
     })?;
-    Ok(done)
+    Ok(done.map(|(files, buffers)| stamp.done(files, buffers)))
 }
 
 /// What the outputs are refused for before any of them is opened: no outputs, a
 /// zero width, a tap that is not as wide as its placement, a gain taken from an
-/// output that does not measure, and two files with one path.
-fn check_outputs<F: Float>(outputs: &[Output<F>], main_output: &ChannelSet) -> Result<()> {
-    if outputs.is_empty() {
+/// output that does not measure or from another `Outputs`, and two files with
+/// one path.
+fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result<()> {
+    if parts.files.is_empty() && parts.buffers.is_empty() {
         return Err(RenderError::NoOutputs);
     }
-    for (i, output) in outputs.iter().enumerate() {
-        let target_error = |why| RenderError::Target { output: i, why };
-        let channels = channels_of(output, main_output);
-        let file = match output.target() {
-            Target::File(f) => Some(f),
-            Target::Buffers(_) => None,
+    for placed in &parts.buffers {
+        let target_error = |why| RenderError::Target {
+            output: placed.position,
+            why,
         };
-        if channels.width().count() == 0 {
-            return Err(RenderError::UnsupportedChannels);
-        }
-        if let crate::Feed::Tap { reader, lanes } = output.feed()
-            && reader.layout() != lanes.layout()
-        {
-            return Err(target_error(TargetError::Lanes {
-                lanes: reader.layout(),
-                placement: lanes.layout(),
-            }));
-        }
-        let Some(file) = file else { continue };
-        if let Some(normalize) = file.normalize
-            && normalize.gain() == GainSource::Own
-            && matches!(normalize.mode(), Normalize::Lufs { .. })
-        {
+        check_feed(
+            placed,
+            &channels_of(
+                placed.output.feed(),
+                Some(placed.output.target().channel_set()),
+                main_output,
+            ),
+            target_error,
+        )?;
+    }
+    for (i, placed) in parts.files.iter().enumerate() {
+        let file = placed.output.target();
+        let target_error = |why| RenderError::Target {
+            output: placed.position,
+            why,
+        };
+        let channels = channels_of(
+            placed.output.feed(),
+            file.encoding().channel_set(),
+            main_output,
+        );
+        check_feed(placed, &channels, target_error)?;
+        if let Some(Gain::Own(Normalize::Lufs { .. })) = file.normalize {
             // Loudness is weighted by placement: refused here, not after the render.
             // A width with no topology has no placement.
             let placed = channels.topology().is_some_and(|topology| {
@@ -205,126 +249,168 @@ fn check_outputs<F: Float>(outputs: &[Output<F>], main_output: &ChannelSet) -> R
                 }));
             }
         }
-        if let Some(normalize) = file.normalize
-            && let GainSource::FromOutput(j) = normalize.gain()
-        {
-            let measures = outputs.get(j).is_some_and(|other| {
-                j != i
-                    && matches!(other.target(), Target::File(f)
-                        if f.normalize.is_some_and(|n| n.gain() == GainSource::Own))
-            });
-            if !measures {
-                return Err(target_error(TargetError::GainSource { index: j }));
+        if let Some(Gain::Of(key)) = &file.normalize {
+            if !parts.owns(key) {
+                return Err(target_error(TargetError::ForeignGain));
+            }
+            // A key names a file added before this one, of these outputs.
+            let from = &parts.files[key.index()];
+            if !matches!(from.output.target().normalize, Some(Gain::Own(_))) {
+                return Err(target_error(TargetError::GainSource {
+                    index: from.position,
+                }));
             }
         }
-        for (j, other) in outputs.iter().enumerate().take(i) {
-            if let Target::File(f) = other.target()
-                && f.path() == file.path()
-            {
-                return Err(target_error(TargetError::SamePath { other: j }));
+        for other in parts.files.iter().take(i) {
+            if other.output.target().path() == file.path() {
+                return Err(target_error(TargetError::SamePath {
+                    other: other.position,
+                }));
             }
         }
     }
     Ok(())
 }
 
-/// The channels of `output`'s target: the file's, when it states them, else the feed's.
-fn channels_of<F: Float>(output: &Output<F>, main_output: &ChannelSet) -> ChannelSet {
-    let stated = match output.target() {
-        Target::Buffers(b) => Some(b.width.channel_set()),
-        Target::File(f) => f.encoding().channel_set(),
-    };
-    stated.unwrap_or_else(|| match output.feed() {
-        crate::Feed::MainOutput => *main_output,
-        crate::Feed::Tap { lanes, .. } => lanes.channel_set(),
+/// What any output is refused for: a zero width, and a tap whose lanes are
+/// not as wide as its placement.
+fn check_feed<T, F: Float>(
+    placed: &Placed<T, F>,
+    channels: &ChannelSet,
+    target_error: impl Fn(TargetError) -> RenderError,
+) -> Result<()> {
+    if channels.width().count() == 0 {
+        return Err(RenderError::UnsupportedChannels);
+    }
+    if let Feed::Tap { reader, lanes } = placed.output.feed()
+        && reader.layout() != lanes.layout()
+    {
+        return Err(target_error(TargetError::Lanes {
+            lanes: reader.layout(),
+            placement: lanes.layout(),
+        }));
+    }
+    Ok(())
+}
+
+/// The channels of a target: the ones it states, else the feed's.
+fn channels_of<F: Float>(
+    feed: &Feed<F>,
+    stated: Option<ChannelSet>,
+    main_output: &ChannelSet,
+) -> ChannelSet {
+    stated.unwrap_or_else(|| match feed {
+        Feed::MainOutput => *main_output,
+        Feed::Tap { lanes, .. } => lanes.channel_set(),
     })
 }
 
 /// Opens every output: its fold, its file (refused before it is touched when
 /// the format cannot hold the render) or its planes.
 fn open_lanes<F: FftFloat>(
-    outputs: Vec<Output<F>>,
+    file_outputs: Vec<Placed<FileTarget, F>>,
+    buffer_outputs: Vec<Placed<BufferTarget, F>>,
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
     main_output: &ChannelSet,
     max_block: usize,
-) -> Result<Vec<Lane<F>>> {
-    let mut lanes = Vec::with_capacity(outputs.len());
-    for (i, output) in outputs.into_iter().enumerate() {
-        let set = channels_of(&output, main_output);
-        let placement = match output.target() {
-            Target::Buffers(b) => b.width.placement(),
-            Target::File(f) => f.encoding().placement(),
+) -> Result<(Vec<FileLane<F>>, Vec<BufferLane<F>>)> {
+    let mut files = Vec::with_capacity(file_outputs.len());
+    for Placed { position, output } in file_outputs {
+        let (feed, file) = output.into_parts();
+        let set = channels_of(&feed, file.encoding().channel_set(), main_output);
+        let lane = open_lane(
+            position,
+            feed,
+            set,
+            file.encoding().placement(),
+            graph_outputs,
+            main_output,
+            max_block,
+        )?;
+        // The blocks the chain is given are folded onto the file's channels by the
+        // lane, which also holds them for a normalize: its source is the file's.
+        let chain = Box::new(Chain::new(
+            file.encoding(),
+            file.to_file(),
+            &set,
+            job.rate(),
+            plan.output_length,
+        )?);
+        let path = file.path().to_path_buf();
+        let sink = match file.normalize.clone() {
+            None => Sink::Stream { chain },
+            Some(gain) => Sink::Spill {
+                chain,
+                waiting: Box::new(Waiting {
+                    spill: Spill::new(lane.layout, &path),
+                    channels: set,
+                    target: file,
+                    gain,
+                }),
+            },
         };
-        let (feed, target) = output.into_parts();
-        let layout = set.width();
-        let channels = FileChannels { channels: set };
-        let (fold, tap) = match feed {
-            crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
-            crate::Feed::Tap { reader, lanes } => {
-                let width = lanes.layout();
-                let fold = channels
-                    .fold_from(usize::from(width.count()), &lanes.channel_set())
-                    .map_err(|e| match e {
-                        RenderError::InvalidConfig(ConfigError::Placement(why)) => {
-                            RenderError::Target {
-                                output: i,
-                                why: TargetError::Placement(why),
-                            }
-                        }
-                        other => other,
-                    })?;
-                let planes = vec![vec![F::ZERO; max_block]; reader.width()];
-                (fold, Some(TapFeed { reader, planes }))
-            }
-        };
-        let (sink, path) = match target {
-            Target::File(file) => {
-                // The blocks the chain is given are folded onto the file's channels by the
-                // lane, which also holds them for a normalize: its source is the file's.
-                let chain = Box::new(Chain::new(
-                    file.encoding(),
-                    file.to_file(),
-                    &set,
-                    job.rate(),
-                    plan.output_length,
-                )?);
-                let path = file.path().to_path_buf();
-                match file.normalize {
-                    None => (Sink::Stream { chain }, Some(path)),
-                    Some(spec) => (
-                        Sink::Spill {
-                            chain,
-                            waiting: Box::new(Waiting {
-                                spill: Spill::new(layout, &path),
-                                channels: set,
-                                target: file,
-                                spec,
-                            }),
-                        },
-                        Some(path),
-                    ),
-                }
-            }
-            Target::Buffers(_) => (
-                Sink::Buffers {
-                    planes: reserve_planes(plan, layout)?,
-                },
-                None,
-            ),
-        };
-        lanes.push(Lane {
-            path,
-            fold,
-            tap,
-            layout,
-            placement,
-            scratch: vec![F::ZERO; layout.interleaved_len(Samples::new(max_block))],
-            sink,
-        });
+        files.push(FileLane { lane, path, sink });
     }
-    Ok(lanes)
+    let mut buffers = Vec::with_capacity(buffer_outputs.len());
+    for Placed { position, output } in buffer_outputs {
+        let (feed, target) = output.into_parts();
+        let set = channels_of(&feed, Some(target.channel_set()), main_output);
+        let lane = open_lane(
+            position,
+            feed,
+            set,
+            target.placement(),
+            graph_outputs,
+            main_output,
+            max_block,
+        )?;
+        let planes = reserve_planes(plan, lane.layout)?;
+        buffers.push(BufferLane { lane, planes });
+    }
+    Ok((files, buffers))
+}
+
+/// The lane of one output onto `set`: its fold and the block it folds into.
+fn open_lane<F: FftFloat>(
+    position: usize,
+    feed: Feed<F>,
+    set: ChannelSet,
+    placement: ChannelPlacement,
+    graph_outputs: usize,
+    main_output: &ChannelSet,
+    max_block: usize,
+) -> Result<Lane<F>> {
+    let layout = set.width();
+    let channels = FileChannels { channels: set };
+    let (fold, tap) = match feed {
+        Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
+        Feed::Tap { reader, lanes } => {
+            let width = lanes.layout();
+            let fold = channels
+                .fold_from(usize::from(width.count()), &lanes.channel_set())
+                .map_err(|e| match e {
+                    RenderError::InvalidConfig(ConfigError::Placement(why)) => {
+                        RenderError::Target {
+                            output: position,
+                            why: TargetError::Placement(why),
+                        }
+                    }
+                    other => other,
+                })?;
+            let planes = vec![vec![F::ZERO; max_block]; reader.width()];
+            (fold, Some(TapFeed { reader, planes }))
+        }
+    };
+    Ok(Lane {
+        position,
+        fold,
+        tap,
+        layout,
+        placement,
+        scratch: vec![F::ZERO; layout.interleaved_len(Samples::new(max_block))],
+    })
 }
 
 /// Empty planes with room for what the plan keeps.
@@ -378,18 +464,19 @@ struct Chosen {
 
 /// The stages after the render: measure, write, finalize, commit.
 fn finish<F: FftFloat>(
-    mut lanes: Vec<Lane<F>>,
+    mut files: Vec<FileLane<F>>,
+    buffers: Vec<BufferLane<F>>,
     job: &Job,
     lost: u64,
     control: &mut Control<'_>,
-) -> Result<Outcome<Vec<Produced<F>>>> {
+) -> Result<Outcome<(Vec<Written>, Vec<Rendered<F>>)>> {
     let rate = job.rate();
-    let mut chosen: Vec<Option<Chosen>> = vec![None; lanes.len()];
-    let waiting: Vec<usize> = (0..lanes.len())
-        .filter(|&i| matches!(lanes[i].sink, Sink::Spill { .. }))
+    let mut chosen: Vec<Option<Chosen>> = vec![None; files.len()];
+    let waiting: Vec<usize> = (0..files.len())
+        .filter(|&i| matches!(files[i].sink, Sink::Spill { .. }))
         .collect();
     for &i in &waiting {
-        if let Sink::Spill { waiting, .. } = &mut lanes[i].sink {
+        if let Sink::Spill { waiting, .. } = &mut files[i].sink {
             waiting.spill.finish()?;
         }
     }
@@ -398,26 +485,36 @@ fn finish<F: FftFloat>(
         let own: Vec<usize> = waiting
             .iter()
             .copied()
-            .filter(|&i| waiting_of(&lanes[i]).spec.gain() == GainSource::Own)
+            .filter(|&i| matches!(waiting_of(&files[i]).gain, Gain::Own(_)))
             .collect();
         // Measuring: the outputs that choose their own gain, a spill each.
         let total = Samples::new(
             own.iter()
-                .map(|&i| waiting_of(&lanes[i]).spill.frames().get())
+                .map(|&i| waiting_of(&files[i]).spill.frames().get())
                 .sum(),
         );
-        control.set_output(own.first().copied().unwrap_or(0));
+        control.set_output(own.first().map_or(0, |&i| files[i].lane.position));
         control.begin(Stage::Measuring, Some(total));
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
         let mut done = Samples::new(0);
         for &i in &own {
-            control.set_output(i);
-            let w = waiting_of(&lanes[i]);
-            let normalize = w.spec.mode().within(&w.target, rate);
-            let Outcome::Finished((reading, at)) =
-                measure(w, i, lanes[i].layout, rate, normalize, done, total, control)?
+            let position = files[i].lane.position;
+            control.set_output(position);
+            let w = waiting_of(&files[i]);
+            let Gain::Own(mode) = &w.gain else { continue };
+            let normalize = mode.within(&w.target, rate);
+            let Outcome::Finished((reading, at)) = measure(
+                w,
+                position,
+                files[i].lane.layout,
+                rate,
+                normalize,
+                done,
+                total,
+                control,
+            )?
             else {
                 return Ok(Outcome::Cancelled);
             };
@@ -428,8 +525,9 @@ fn finish<F: FftFloat>(
             });
         }
         for &i in &waiting {
-            if let GainSource::FromOutput(j) = waiting_of(&lanes[i]).spec.gain() {
-                let from = chosen[j].expect("an output measures before one takes its gain");
+            if let Gain::Of(key) = &waiting_of(&files[i]).gain
+                && let Some(from) = chosen[key.index()]
+            {
                 chosen[i] = Some(Chosen {
                     gain: from.gain,
                     measured: None,
@@ -442,21 +540,28 @@ fn finish<F: FftFloat>(
         let total = Samples::new(
             waiting
                 .iter()
-                .map(|&i| waiting_of(&lanes[i]).spill.frames().get())
+                .map(|&i| waiting_of(&files[i]).spill.frames().get())
                 .sum(),
         );
-        control.set_output(waiting[0]);
+        control.set_output(files[waiting[0]].lane.position);
         control.begin(Stage::Writing, Some(total));
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
         let mut done = Samples::new(0);
         for &i in &waiting {
-            control.set_output(i);
-            let Sink::Spill { chain, waiting } = &mut lanes[i].sink else {
-                unreachable!("listed as waiting");
+            let FileLane {
+                lane,
+                sink: Sink::Spill { chain, waiting },
+                ..
+            } = &mut files[i]
+            else {
+                continue;
             };
-            chain.set_gain(chosen[i].expect("chosen above").gain);
+            control.set_output(lane.position);
+            if let Some(chosen) = chosen[i] {
+                chain.set_gain(chosen.gain);
+            }
             let block = if waiting.target.encoding().resampling().is_some() {
                 chunk_frames(rate).get()
             } else {
@@ -480,60 +585,51 @@ fn finish<F: FftFloat>(
     }
 
     // Finalizing.
-    let mut produced: Vec<Option<Produced<F>>> = Vec::with_capacity(lanes.len());
-    let mut files: Vec<PendingFile<F>> = Vec::new();
-    let mut spill_left: Vec<Option<PathBuf>> = vec![None; lanes.len()];
-    let placements: Vec<tutti_buffers::Placement> = lanes.iter().map(|l| l.placement).collect();
-    for (i, lane) in lanes.into_iter().enumerate() {
-        match lane.sink {
-            Sink::Buffers { planes } => {
-                produced.push(Some(Produced::Buffers(Rendered::from_render(
-                    planes, rate, lost,
-                ))));
-            }
+    let rendered: Vec<Rendered<F>> = buffers
+        .into_iter()
+        .map(|b| Rendered::from_render(b.planes, rate, lost))
+        .collect();
+    let mut pending: Vec<PendingFile<F>> = Vec::with_capacity(files.len());
+    let mut spill_left: Vec<Option<PathBuf>> = vec![None; files.len()];
+    let placements: Vec<ChannelPlacement> = files.iter().map(|f| f.lane.placement).collect();
+    for (i, file) in files.into_iter().enumerate() {
+        let chain = match file.sink {
             Sink::Spill { chain, mut waiting } => {
                 spill_left[i] = waiting.spill.remove().map(|(path, _)| path);
-                files.push(PendingFile {
-                    index: i,
-                    path: lane.path.expect("a file lane has a path"),
-                    chain: *chain,
-                });
-                produced.push(None);
+                chain
             }
-            Sink::Stream { chain } => {
-                files.push(PendingFile {
-                    index: i,
-                    path: lane.path.expect("a file lane has a path"),
-                    chain: *chain,
-                });
-                produced.push(None);
-            }
-        }
+            Sink::Stream { chain } => chain,
+        };
+        pending.push(PendingFile {
+            position: file.lane.position,
+            path: file.path,
+            chain: *chain,
+        });
     }
-    let Outcome::Finished(landed) = finalize_files(files, control)? else {
+    let Outcome::Finished(landed) = finalize_files(pending, control)? else {
         return Ok(Outcome::Cancelled);
     };
-    for (index, path, file) in landed {
-        let mut w = written(&path, file, lost, placements[index]);
-        w.spill_left = spill_left[index].take();
-        if let Some(c) = chosen[index] {
-            w.gain = Some(c.gain);
-            w.measured = c.measured;
-        }
-        produced[index] = Some(Produced::File(w));
-    }
-    Ok(Outcome::Finished(
-        produced
-            .into_iter()
-            .map(|p| p.expect("every output produced"))
-            .collect(),
-    ))
+    let written = landed
+        .into_iter()
+        .enumerate()
+        .map(|(i, (path, file))| {
+            let mut w = self::written(&path, file, lost, placements[i]);
+            w.spill_left = spill_left[i].take();
+            if let Some(c) = chosen[i] {
+                w.gain = Some(c.gain);
+                w.measured = c.measured;
+            }
+            w
+        })
+        .collect();
+    Ok(Outcome::Finished((written, rendered)))
 }
 
-fn waiting_of<F: FftFloat>(lane: &Lane<F>) -> &Waiting<F> {
-    match &lane.sink {
+fn waiting_of<F: FftFloat>(file: &FileLane<F>) -> &Waiting<F> {
+    match &file.sink {
         Sink::Spill { waiting, .. } => waiting,
-        _ => unreachable!("listed as waiting"),
+        // Only the lanes listed as waiting are asked.
+        Sink::Stream { .. } => unreachable!("listed as waiting"),
     }
 }
 
@@ -661,8 +757,8 @@ fn replay_through<F: FftFloat>(
 
 /// A file output whose frames are all written: its chain, to be finalized.
 pub(crate) struct PendingFile<F: FftFloat> {
-    /// The output's index in the list the render was given.
-    pub(crate) index: usize,
+    /// The output's position among the render's outputs.
+    pub(crate) position: usize,
     pub(crate) path: PathBuf,
     pub(crate) chain: Chain<F>,
 }
@@ -681,9 +777,9 @@ pub(crate) struct PendingFile<F: FftFloat> {
 pub(crate) fn finalize_files<F: FftFloat>(
     files: Vec<PendingFile<F>>,
     control: &mut Control<'_>,
-) -> Result<Outcome<Vec<(usize, PathBuf, Landed)>>> {
+) -> Result<Outcome<Vec<(PathBuf, Landed)>>> {
     let count = files.len();
-    control.set_output(files.first().map_or(0, |f| f.index));
+    control.set_output(files.first().map_or(0, |f| f.position));
     control.begin(Stage::Finalizing, None);
     if control.is_cancelled() {
         return Ok(Outcome::Cancelled);
@@ -693,8 +789,8 @@ pub(crate) fn finalize_files<F: FftFloat>(
         if k > 0 && control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        control.set_output(file.index);
-        closed.push((file.index, file.path, file.chain.finalize()?));
+        control.set_output(file.position);
+        closed.push((file.path, file.chain.finalize()?));
         if k + 1 < count {
             control.at(Stage::Finalizing, 0.5 * (k + 1) as f32 / count as f32);
         }
@@ -706,13 +802,13 @@ pub(crate) fn finalize_files<F: FftFloat>(
         }
     }
     let mut landed = Vec::with_capacity(count);
-    for (index, path, file) in closed {
+    for (path, file) in closed {
         match file.commit() {
-            Ok(clipped) => landed.push((index, path, clipped)),
+            Ok(clipped) => landed.push((path, clipped)),
             Err(cause) if landed.is_empty() => return Err(cause.into()),
             Err(cause) => {
                 return Err(RenderError::NotCommitted {
-                    landed: landed.into_iter().map(|(_, path, _)| path).collect(),
+                    landed: landed.into_iter().map(|(path, _)| path).collect(),
                     cause,
                 });
             }

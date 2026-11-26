@@ -5,14 +5,13 @@ use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::FreeverbBank;
-use tutti_export::Produced;
 use tutti_fixtures::midi;
 use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_nodes::FreeverbControls;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, LIVE_MAX_BLOCK, MainOutput, OutputPort, Range,
-    Session, Stem,
+    Session, Stem, StemKey,
 };
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
@@ -102,7 +101,7 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
         sample_rate: SampleRate::of(RATE),
         loop_range: None,
     }));
-    let (main, mut stems) = bounced(
+    let (main, mut done, keys) = bounced(
         &mut session,
         Bounce::new()
             .main_output_buffers()
@@ -117,10 +116,10 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
     .expect("the bounce renders")
     .into_parts();
     let length = main.into_planes()[0].len();
-    let Some(Produced::Buffers(send)) = stems.pop() else {
+    let [StemKey::Buffers(send)] = keys.as_slice() else {
         panic!("the send stem is held in memory")
     };
-    let send = send.into_planes();
+    let send = done.take_buffers(send).expect("its own key").into_planes();
     let fed_until = send[0]
         .iter()
         .rposition(|&x| x != 0.0)

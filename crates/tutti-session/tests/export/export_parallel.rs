@@ -22,10 +22,10 @@ use std::thread::ThreadId;
 use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
-use tutti_export::{Produced, Rendered};
+use tutti_export::Rendered;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    Bounce, BounceTail, ExportClock, InputPort, OutputPort, Range, Session, Stem, Workers,
+    Bounce, BounceTail, ExportClock, InputPort, OutputPort, Range, Session, Stem, StemKey, Workers,
 };
 use tutti_units::{SampleRate, Samples, Seconds};
 
@@ -157,10 +157,10 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     for &stem in stems {
         bounce = bounce.stem_with(Stem::new(named[stem]));
     }
-    let (main_output, stems) = bounced(&mut session, bounce).unwrap().into_parts();
+    let (main_output, mut done, keys) = bounced(&mut session, bounce).unwrap().into_parts();
     let targets = std::iter::once(main_output)
-        .chain(stems.into_iter().map(|p| match p {
-            Produced::Buffers(rendered) => rendered,
+        .chain(keys.iter().map(|key| match key {
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key"),
             other => panic!("the bounce finishes into memory, got {other:?}"),
         }))
         .collect();

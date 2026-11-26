@@ -584,10 +584,10 @@ pub mod session {
     pub use tutti_session::SamplerError;
     #[cfg(feature = "export")]
     pub use tutti_session::{
-        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
-        BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
-        MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
-        Progress, Stage,
+        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing, BufferKey,
+        BufferMainOutput, BufferStem, Done, DoneError, EventLossPolicy, ExportClock, FileKey,
+        FileMainOutput, FileStem, MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit,
+        PreparedGraph, Progress, Stage, StemKey,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{

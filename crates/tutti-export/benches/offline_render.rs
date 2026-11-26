@@ -37,8 +37,8 @@ use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm, Resample};
 use tutti_export::{
-    BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph,
-    Rendered, Setup, TailPolicy, Written, render_one,
+    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph,
+    Rendered, Setup, TailPolicy, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -103,7 +103,7 @@ impl Case {
         };
         let target = FileTarget::new(encoding, ToFile::new(path));
         match normalize {
-            Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
+            Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,
         }
     }
@@ -131,17 +131,21 @@ fn config(seconds: f64, rate: f64, channels: ChannelLayout, format: Format) -> C
 
 /// `cfg`'s render into memory.
 fn to_buffers(mut graph: RenderGraph, cfg: &Case) -> Rendered {
-    render_one(
+    let mut outputs = Outputs::new();
+    let planes = outputs.buffers(Output::main_output(cfg.buffer_target()));
+    let done = render(
         &mut graph,
         &cfg.job(),
         &FrozenClock,
-        Output::main_output(cfg.buffer_target()),
+        outputs,
         &mut Control::none(),
     )
     .expect("renders")
     .into_finished()
-    .and_then(tutti_export::Produced::into_buffers)
-    .expect("nothing cancels a control with no token")
+    .expect("nothing cancels a control with no token");
+    done.buffers(&planes)
+        .expect("a key of these outputs")
+        .clone()
 }
 
 /// `cfg`'s render into the file at `path`, normalized by `normalize` if given.
@@ -151,17 +155,19 @@ fn to_file(
     normalize: Option<Normalize>,
     path: &std::path::Path,
 ) -> Written {
-    render_one(
+    let mut outputs = Outputs::new();
+    let file = outputs.file(Output::main_output(cfg.file_target(path, normalize)));
+    let done = render(
         &mut graph,
         &cfg.job(),
         &FrozenClock,
-        Output::main_output(cfg.file_target(path, normalize)),
+        outputs,
         &mut Control::none(),
     )
     .expect("writes")
     .into_finished()
-    .and_then(tutti_export::Produced::into_file)
-    .expect("nothing cancels a control with no token")
+    .expect("nothing cancels a control with no token");
+    done.file(&file).expect("a key of these outputs").clone()
 }
 
 /// Render throughput by duration, width and rate. No file touched.

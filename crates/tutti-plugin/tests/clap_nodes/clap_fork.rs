@@ -686,14 +686,20 @@ fn render_to_buffers(
     config: &(tutti_export::Job, tutti_buffers::ChannelLayout),
     clock: &dyn tutti_timeline::RenderClock,
 ) -> tutti_export::Result<tutti_export::Outcome<tutti_export::Rendered>> {
-    tutti_export::render_one(
+    let mut outputs = tutti_export::Outputs::new();
+    let planes = outputs.buffers(tutti_export::Output::main_output(
+        tutti_export::BufferTarget::new(config.1),
+    ));
+    tutti_export::render(
         &mut graph,
         &config.0,
         clock,
-        tutti_export::Output::main_output(tutti_export::BufferTarget::new(config.1)),
+        outputs,
         &mut tutti_export::Control::none(),
     )
-    .map(|outcome| outcome.map(|produced| produced.into_buffers().expect("a buffers output")))
+    .map(|outcome| {
+        outcome.map(|mut done| done.take_buffers(&planes).expect("a key of these outputs"))
+    })
 }
 
 /// Export the plugin through `tutti_export` exactly as an export does: fork
