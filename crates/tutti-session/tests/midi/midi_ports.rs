@@ -1845,3 +1845,55 @@ fn an_mpe11_write_for_a_node_that_is_not_an_output_fails_at_the_call() {
         ValueErrorKind::NoSuchTarget
     );
 }
+
+/// **A device has one output port**: a second open of a device a held output has
+/// open is `InUse`, as an input's is, and the first port still sends.
+#[test]
+fn a_second_output_on_a_device_is_in_use_and_the_first_still_sends() {
+    let (mut s, fake, out, mut keys, synth) = retiring_rig();
+    let error = s
+        .open_output(synth.clone())
+        .expect_err("the device is held by an output");
+    assert!(
+        matches!(&error, MidiPortError::InUse(id) if *id == synth.id),
+        "{error:?}"
+    );
+    assert_eq!(fake.connected_outputs().len(), 1, "no second connection");
+    assert_eq!(out.presence(), Presence::Live);
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(64),
+        NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&mut s, 3);
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(sent.iter().any(|u| is_on(u, 64)), "{sent:?}");
+}
+
+/// **A restore gives a device to the first port in saved order**: two ports opened on
+/// a device while it was away reopen when it returns, the first on it and the second
+/// refused the way an input's failed reopen is, reading `ReopenFailed`.
+#[test]
+fn a_restore_of_two_outputs_on_one_device_opens_the_first_and_refuses_the_second() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    unplug(&fake, 10);
+    let _ = s.update();
+    let first = s.open_output(synth.clone()).expect("opens, away");
+    let second = s.open_output(synth).expect("opens, away");
+    let _ = s.update();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(first.presence(), Presence::Live);
+    assert_eq!(
+        second.presence(),
+        Presence::Lost(PortCause::ReopenFailed),
+        "the second is refused"
+    );
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
+}

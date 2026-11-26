@@ -990,8 +990,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// The apply: [`MidiPortError::Stale`] for another session's open;
     /// [`MidiPortError::Ambiguous`] when the table now holds several that could be
-    /// `saved`; [`MidiPortError::Hardware`] when the present device cannot be
-    /// opened.
+    /// `saved`; [`MidiPortError::InUse`] when a held output port of this session
+    /// has the device open already (a device has one output port); and
+    /// [`MidiPortError::Hardware`] when the present device cannot be opened.
     pub fn open_midi_output(&self, saved: DeviceInfo) -> Result<OpeningMidiOutput, MidiPortError> {
         let start = self.midi_layer_for(&saved)?;
         Ok(OpeningMidiOutput {
@@ -1606,15 +1607,23 @@ impl Ports {
             }
             edits.graph = true;
         }
-        for port in &mut self.outputs {
-            let OutLink::Away { stream, .. } = port.link else {
+        for at in 0..self.outputs.len() {
+            let OutLink::Away { stream, .. } = self.outputs[at].link else {
                 continue;
             };
-            if !arrived.direction.is_output() || !is_arrived(io, &port.saved) {
+            if !arrived.direction.is_output() || !is_arrived(io, &self.outputs[at].saved) {
                 continue;
             }
-            port.link = match open_device_output(io, port.started, &arrived.id, port.active_sensing)
-            {
+            // The first port in saved order holds the device; a later one is
+            // refused as an open of it is.
+            let held = self.holds_output(&arrived.id);
+            let port = &mut self.outputs[at];
+            let opened = if held {
+                Err(MidiPortError::InUse(arrived.id.clone()))
+            } else {
+                open_device_output(io, port.started, &arrived.id, port.active_sensing)
+            };
+            port.link = match opened {
                 Ok(device) => OutLink::open(device, stream),
                 Err(_) => OutLink::Away {
                     stream,
@@ -1629,6 +1638,13 @@ impl Ports {
             port.publish(out);
         }
         edits
+    }
+
+    /// Whether a held output port has `device` open.
+    fn holds_output(&self, device: &MidiDeviceId) -> bool {
+        self.outputs.iter().any(|port| {
+            port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
+        })
     }
 
     /// The open input port that holds `device`.
@@ -1999,6 +2015,13 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             self.state
                 .ports
                 .release_device(&info.id, self.graph, timing.as_ref());
+        }
+        // One output port a device, as one input port: a second would send the
+        // device a second stream, and a report has one port to answer on.
+        if let Some(info) = &found
+            && self.state.ports.holds_output(&info.id)
+        {
+            return Err(MidiPortError::InUse(info.id.clone()));
         }
         let device = match &found {
             Some(info) => Some(open_device_output(io, started, &info.id, active_sensing)?),
