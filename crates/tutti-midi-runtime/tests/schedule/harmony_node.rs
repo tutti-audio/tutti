@@ -11,11 +11,11 @@ use tutti_graph::testing::WireDeclared;
 use tutti_buffers::MaxBlock;
 
 use crate::common::{beat_of, connect, rolling};
-use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventKind, Executor, ForkTarget, Harmony, HarmonyKind, InEvents, Io, Node, Prepare,
     Shape, Status, TransportPosition,
 };
+use tutti_graph::{HostValues, NodeKey};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
     HarmonyChanges, HarmonyChangesError, HarmonyConfig, HarmonyControls, HarmonyNode, TimedHarmony,
@@ -383,7 +383,7 @@ fn a_harmony_config_has_no_structure_and_builds_a_node_sending_its_lanes() {
         &HarmonyConfig::default()
     ));
     assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
-    let node = NodeConfig::<f32>::build(&other);
+    let node = NodeConfig::<f32>::build(&other, &HostValues::new());
     let controls = IntoNode::<f32>::into_parts(node).controls;
     assert_eq!(controls.len(), 2);
     assert_eq!(

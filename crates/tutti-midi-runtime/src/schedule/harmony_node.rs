@@ -29,8 +29,8 @@ use tutti_rt::Mutex;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkSource, Forked, Harmony, HarmonyKind,
-    HasPublished, Initials, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeConfig, NodeParts,
-    Offset, OutEvents, Prepare, Published, PublishedKind, RenderMode, Shape, Status,
+    HasPublished, HostValues, Initials, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeConfig,
+    NodeParts, Offset, OutEvents, Prepare, Published, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
 use tutti_units::{Beat, FramesPerBeat};
@@ -281,7 +281,7 @@ impl From<HarmonyConfig> for HarmonyNode {
 impl<F: Float> NodeConfig<F> for HarmonyConfig {
     type Node = HarmonyNode;
 
-    fn build(&self) -> HarmonyNode {
+    fn build(&self, _host: &HostValues) -> HarmonyNode {
         HarmonyNode::from(self.clone())
     }
 

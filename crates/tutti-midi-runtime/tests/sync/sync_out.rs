@@ -10,7 +10,7 @@
 
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Editor, EventKind, Executor, NodeKey, Offset, TransportChanges, TransportPosition,
+    Editor, EventKind, Executor, HostValues, NodeKey, Offset, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig, SyncOutControls};
@@ -845,7 +845,7 @@ fn a_sync_config_is_structured_by_its_group_and_builds_with_its_messages() {
         &SyncOutConfig::new(G).sending(clock())
     ));
     assert_eq!(NodeConfig::<f32>::initials(&base), Initials::new());
-    let node = NodeConfig::<f32>::build(&base.sending(clock()));
+    let node = NodeConfig::<f32>::build(&base.sending(clock()), &HostValues::new());
     let (node, controls) = IntoNode::<f32>::into_node(node);
     assert_eq!(controls.messages().load(), clock());
     assert!(node.shape().event_output(0).is_some());

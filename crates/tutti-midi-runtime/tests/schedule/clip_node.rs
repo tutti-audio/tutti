@@ -11,10 +11,10 @@ use crate::common::{at, beat_of, off, on, rolling};
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_fixtures::{EventRig, Seen, heard};
-use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
+use tutti_graph::{HostValues, NodeKey};
 use tutti_midi_runtime::{
     ClipEvents, MidiClipConfig, MidiClipControls, MidiClipNode, TimedMidiEvent,
 };
@@ -1528,7 +1528,7 @@ fn a_clip_config_has_no_structure_and_builds_a_node_playing_its_events() {
         &MidiClipConfig::default()
     ));
     assert_eq!(NodeConfig::<f32>::initials(&one), Initials::new());
-    let node = NodeConfig::<f32>::build(&other);
+    let node = NodeConfig::<f32>::build(&other, &HostValues::new());
     let controls = IntoNode::<f32>::into_parts(node).controls;
     assert_eq!(controls.len(), 2);
     assert_eq!(

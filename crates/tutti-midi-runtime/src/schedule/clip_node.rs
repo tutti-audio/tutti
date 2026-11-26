@@ -91,9 +91,9 @@ use tutti_buffers::Float;
 use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, EventDensity, ForkCause, ForkSource, Forked, HasPublished, Initials, IntoNode, Io,
-    MIN_EVENT_PORT_CAPACITY, Node, NodeConfig, NodeParts, Offset, OutEvents, Prepare, Published,
-    PublishedKind, RenderMode, Shape, Status,
+    Cx, EventDensity, ForkCause, ForkSource, Forked, HasPublished, HostValues, Initials, IntoNode,
+    Io, MIN_EVENT_PORT_CAPACITY, Node, NodeConfig, NodeParts, Offset, OutEvents, Prepare,
+    Published, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{AtomicRequestFlags, Publisher, Reader, RequestFlag};
@@ -802,7 +802,7 @@ impl From<MidiClipConfig> for MidiClipNode {
 impl<F: Float> NodeConfig<F> for MidiClipConfig {
     type Node = MidiClipNode;
 
-    fn build(&self) -> MidiClipNode {
+    fn build(&self, _host: &HostValues) -> MidiClipNode {
         MidiClipNode::from(self.clone())
     }
 

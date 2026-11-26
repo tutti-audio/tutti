@@ -46,8 +46,8 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_graph::{
-    Cx, Event, ForkCause, ForkSource, Forked, Initials, IntoNode, Io, Node, NodeConfig, NodeParts,
-    Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
+    Cx, Event, ForkCause, ForkSource, Forked, HostValues, Initials, IntoNode, Io, Node, NodeConfig,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_rt::{AtomicCell, Counter, CounterWriter, RtVec, counter};
@@ -205,7 +205,7 @@ impl From<SyncOutConfig> for SyncOut {
 impl<F: Float> NodeConfig<F> for SyncOutConfig {
     type Node = SyncOut;
 
-    fn build(&self) -> SyncOut {
+    fn build(&self, _host: &HostValues) -> SyncOut {
         SyncOut::from(*self)
     }
 
