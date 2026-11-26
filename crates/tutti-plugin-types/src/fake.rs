@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use tutti_rt::{Generation, Mutex};
+use tutti_rt::Mutex;
 
 use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
@@ -721,16 +721,11 @@ fn set_value(values: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normal
 }
 
 macro_rules! fake_control {
-    ($ty:ty, $set:expr, $flush:expr, $queued:expr, $delivered:expr) => {
+    ($ty:ty, $set:expr, $flush:expr, $pending:expr) => {
         impl Control for $ty {
-            fn queued(&self) -> Option<Generation> {
-                let queued: fn(&Self) -> Option<Generation> = $queued;
-                queued(self)
-            }
-
-            fn delivered(&self, upto: Generation) -> bool {
-                let delivered: fn(&Self, Generation) -> bool = $delivered;
-                delivered(self, upto)
+            fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+                let pending: fn(&mut Self) -> Vec<(ParamId, Normalized)> = $pending;
+                pending(self)
             }
 
             fn info(&self) -> &PluginDescriptor {
@@ -996,7 +991,7 @@ macro_rules! fake_control {
     };
 }
 
-fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {}, |_| None, |_, _| true);
+fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {}, |_| Vec::new());
 fake_control!(
     FakeController,
     |this, id, value| {
@@ -1005,8 +1000,7 @@ fake_control!(
         let _ = this.sink.write(id, value);
     },
     |_, _| {},
-    |this| Some(this.sink.written()),
-    |this, upto| this.sink.has_applied(upto)
+    |this| this.sink.pending()
 );
 
 impl Loaded for FakeLoaded {

@@ -17,8 +17,9 @@
 //! **main thread** (see "Threads" below):
 //!
 //! 1. **Read what the live node has delivered** per parameter (its parameter
-//!    delivery's record, `host::node`'s `param_delivery`), then **ask the
-//!    live instance for its state**, under its lock: the current preset,
+//!    delivery's record, `host::node`'s `param_delivery`) and **the host
+//!    writes no block has applied** (what a save states as pending), then
+//!    **ask the live instance for its state**, under its lock: the current preset,
 //!    when the plugin lists any (`Control::current_preset`), its state blob
 //!    (`Control::save_state` as a [`StateUse::Duplicate`]; VST2's is the plugin's own chunk when it
 //!    declares `effFlagsProgramChunks`, else every parameter's value), and
@@ -51,6 +52,9 @@
 //!    returned, and the state is saved later, under the instance lock); a
 //!    value delivered between the two is in the state and sent to the fork
 //!    once more, harmlessly.
+//!    **The pending writes** are written to the fork's slots after the state
+//!    loaded, so its first block applies them. An undriven live graph forks the
+//!    same: nothing waits for a block.
 //! 6. **Report the render mode**: an offline fork is told it renders
 //!    offline; a live fork ([`RenderMode::Realtime`]) is told what the live
 //!    instance ran in when it was forked (offline if a host had set the live
@@ -193,10 +197,14 @@ where
             let control = instance
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
-            if let Some(edits) = &self.edits {
-                // `Node::fork` is synchronous: there is no tick to ask again on.
-                edits.settle_now(main, control);
-            }
+            // Read before the state, as a save does: a write a block applies
+            // in between is then in both, and none in neither. `Node::fork` is
+            // synchronous and the graph may be undriven, so nothing waits for a
+            // block.
+            let pending = match &self.edits {
+                Some(post) => super::control_backend::pending_writes(post, control),
+                None => control.pending(),
+            };
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
             let preset = if self.features.contains(Features::PRESET_LOAD) {
@@ -207,8 +215,9 @@ where
             let state = control
                 .save_state(main, StateUse::Duplicate)
                 .map_err(|e| PluginForkError::SaveState(e.into()))?;
-            ForkState::new(preset, state, live_mode)
+            (ForkState::new(preset, state, live_mode), pending)
         };
+        let (snapshot, pending) = snapshot;
         drop(live);
 
         // The preset, then the state, on the fresh instance **before it is
@@ -270,6 +279,17 @@ where
         }
 
         fork.params.seed(&delivered);
+        // The writes the live plugin had not applied are the fork's wanted
+        // values too: its first block applies them over the state it was loaded
+        // with.
+        if let Some(edits) = &fork.edits {
+            let post = edits.post();
+            for (id, value) in pending {
+                // An id the second instance does not declare was refused at its
+                // load too.
+                let _ = post.write(id, value);
+            }
+        }
         fork.transport = self.transport.forked(offline);
         Ok(fork.bind(self.tempo.clone()))
     }

@@ -402,12 +402,11 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
     assert!((event.value - 350.0).abs() < 1e-9, "100 + 0.25 * 1000");
 }
 
-/// **A write queued to the Controller is delivered once the Processor's block
-/// that took it has run**, and a later write does not move what was asked: the
-/// mark taken after the first write is delivered by the block, though a second
-/// write is queued after it.
+/// **A write queued to the Controller is pending until the Processor's block
+/// that took it has run**, and a later write is the one pending: the first is
+/// applied by the block, the second waits for its own.
 #[test]
-fn a_controller_write_is_delivered_once_a_block_took_it() {
+fn a_controller_write_is_pending_until_a_block_took_it() {
     let probe = Probe::acquire();
     let (mut processor, mut controller) = probe
         .load()
@@ -418,23 +417,22 @@ fn a_controller_write_is_delivered_once_a_block_took_it() {
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
-    let upto = Control::queued(&controller).expect("a CLAP Controller queues");
-    assert!(
-        !Control::delivered(&controller, upto),
+    assert_eq!(
+        Control::pending(&mut controller),
+        [(id, Normalized::of(0.25))],
         "the Processor has not taken the write"
     );
     render(&mut processor, FloatWidth::F32).expect("block");
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.5))
         .expect("a declared, writable parameter");
-    assert!(
-        Control::delivered(&controller, upto),
-        "the block that took the first write delivered it, whatever came after"
+    assert_eq!(
+        Control::pending(&mut controller),
+        [(id, Normalized::of(0.5))],
+        "the block applied the first write; the second waits for its block"
     );
-    assert!(
-        !Control::delivered(&controller, Control::queued(&controller).expect("queue")),
-        "the second write waits for its block"
-    );
+    render(&mut processor, FloatWidth::F32).expect("block");
+    assert!(Control::pending(&mut controller).is_empty());
 }
 
 /// **A state load makes the writes queued before it stale**: they were written

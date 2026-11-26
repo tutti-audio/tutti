@@ -12,7 +12,7 @@ use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
     AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamMapping,
-    ParamUnit, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
+    ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -358,10 +358,106 @@ pub(crate) struct PluginEntry {
     reporter: ParamReporter,
     /// The parameters the plugin declares, `None` until its read lands.
     declared: Option<BTreeMap<ParamId, Declared>>,
-    /// The writes the plugin did not take after `writable` passed (a dropped
-    /// parameter, a lost plugin, one that did not answer), which the
-    /// plugin's record counts in its losses.
-    refused: Arc<AtomicU64>,
+    /// What the plugin's handle did not take of the writes that passed
+    /// `writable`: shared with the plugin's record, which counts the lost ones
+    /// in its losses, sends the owed ones again and tells of the refused ones.
+    ledger: Arc<WriteLedger>,
+}
+
+/// A refusal by name of a write that passed the session's own check: the plugin
+/// no longer declares the parameter, or declares it read-only now. Told once, as
+/// the [`PluginChange`](crate::PluginChange) of the same name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WriteRefusal {
+    /// The plugin does not declare the parameter (a rescan dropped it).
+    Undeclared(ParamId),
+    /// The plugin declares the parameter read-only.
+    ReadOnly(ParamId),
+}
+
+/// The host writes to one plugin that its handle did not take, by cause. A
+/// level is state, so what the carrier lost is owed again and what the target
+/// refused is given up with a notice:
+///
+/// - `Unanswered` (a served plugin gave no parameter list to check against) is
+///   **owed**: the newest value of each parameter is sent again at the next
+///   `Phase::Plugins`, until the plugin takes it. A newer write replaces it.
+/// - `Undeclared` and `ReadOnly` are **refused**: re-sending would repeat the
+///   refusal, so each is told once ([`WriteRefusal`]).
+/// - `Lost` (the plugin is gone) is counted, as it always was.
+///
+/// What is owed or told belongs to the plugin instance it was written for:
+/// [`end_epoch`](Self::end_epoch) forgets it when the plugin is replaced. The
+/// count of lost writes is cumulative, as the plugin's other losses are.
+#[derive(Debug, Default)]
+pub(crate) struct WriteLedger {
+    lost: AtomicU64,
+    state: Mutex<Owed>,
+}
+
+#[derive(Debug, Default)]
+struct Owed {
+    /// The newest value of each parameter the plugin has not taken.
+    values: BTreeMap<ParamId, Normalized>,
+    /// Refusals not told yet.
+    refused: Vec<WriteRefusal>,
+}
+
+impl WriteLedger {
+    /// The writes lost because the plugin was gone.
+    pub(crate) fn lost(&self) -> u64 {
+        self.lost.load(Ordering::Relaxed)
+    }
+
+    /// Sends `value` to `id` through `handle`, under the ledger's lock so a send
+    /// again cannot overtake a newer write, and records what the handle answers.
+    fn send(&self, handle: &PluginHandle, id: ParamId, value: Normalized) {
+        let mut owed = self.state.lock();
+        owed.settle(handle, &self.lost, id, value);
+    }
+
+    /// Sends again each value the plugin did not take for want of an answer
+    /// (a parameter list), and returns the refusals not told yet. The main
+    /// thread's `Phase::Plugins`.
+    pub(crate) fn resend(&self, handle: &PluginHandle) -> Vec<WriteRefusal> {
+        let mut owed = self.state.lock();
+        for (id, value) in std::mem::take(&mut owed.values) {
+            owed.settle(handle, &self.lost, id, value);
+        }
+        std::mem::take(&mut owed.refused)
+    }
+
+    /// The plugin instance these writes were for is gone: nothing owed or
+    /// untold is carried to its successor.
+    pub(crate) fn end_epoch(&self) {
+        *self.state.lock() = Owed::default();
+    }
+}
+
+impl Owed {
+    /// One send and what it answers: taken, owed, refused by name, or lost.
+    fn settle(&mut self, handle: &PluginHandle, lost: &AtomicU64, id: ParamId, value: Normalized) {
+        match handle.send_parameter(id, value) {
+            Ok(()) => {
+                self.values.remove(&id);
+            }
+            Err(ParamWriteError::Unanswered(_)) => {
+                self.values.insert(id, value);
+            }
+            Err(ParamWriteError::Undeclared(_)) => {
+                self.values.remove(&id);
+                self.refused.push(WriteRefusal::Undeclared(id));
+            }
+            Err(ParamWriteError::ReadOnly(_)) => {
+                self.values.remove(&id);
+                self.refused.push(WriteRefusal::ReadOnly(id));
+            }
+            Err(ParamWriteError::Lost(_)) => {
+                self.values.remove(&id);
+                lost.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 /// One declared parameter. The plugin's mirror is the source of its value;
@@ -421,7 +517,7 @@ impl PluginEntry {
         driven: Driven,
         mirror: &PluginParamValues,
         carried: Option<&[CarriedParam]>,
-        refused: Arc<AtomicU64>,
+        ledger: Arc<WriteLedger>,
     ) -> Self {
         let declared = if mirror.is_ready() {
             Some(
@@ -452,7 +548,7 @@ impl PluginEntry {
             driven,
             reporter: mirror.reporter(),
             declared,
-            refused,
+            ledger,
         }
     }
 
@@ -503,13 +599,14 @@ impl PluginEntry {
     fn write(&self, id: ParamId, value: Normalized) {
         self.note(id, value);
         // A value table's `store` is infallible and a batch lands whole, so a
-        // write the send refuses is counted in the plugin's losses: `id` was
-        // dropped by a rescan (the mirror resyncs at the next read of its list,
-        // which makes `id` no such target), or the plugin is lost or did not
-        // answer. A recovery replaces the mirror with the replacement's own
-        // read, so the value `note` stored is not sent again.
-        if !self.driven.write(id, value) && self.handle.send_parameter(id, value).is_err() {
-            self.refused.fetch_add(1, Ordering::Relaxed);
+        // write the send refuses is the ledger's: owed again when the plugin did
+        // not answer, told by name when `id` was dropped by a rescan (the mirror
+        // resyncs at the next read of its list, which makes `id` no such target)
+        // or is read-only, counted when the plugin is lost. A recovery replaces
+        // the mirror with the replacement's own read and ends the ledger's epoch,
+        // so the value `note` stored is not sent again.
+        if !self.driven.write(id, value) {
+            self.ledger.send(&self.handle, id, value);
         }
         self.reporter.report(id, value);
     }

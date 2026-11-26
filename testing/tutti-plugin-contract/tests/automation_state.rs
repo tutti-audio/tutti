@@ -31,7 +31,7 @@ where
         assert_eq!(handle.set_automation_mode(*mode), Ok(()), "{mode:?}");
         let state = handle
             .save_state(StateUse::Project)
-            .expect("the plugin saves");
+            .expect("the plugin saves").bytes;
         let told = Transcript::parse(&find_blob(&state));
         assert_eq!(
             told.automation_last, *raw,

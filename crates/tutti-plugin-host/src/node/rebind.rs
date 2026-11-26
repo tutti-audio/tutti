@@ -505,79 +505,24 @@ mod tests {
         );
     }
 
-    /// **A settle waits for the block that took the values queued when its sweep
-    /// finished, and later writes do not move that mark.** A CLAP Controller
-    /// queues a host write to its Processor, which applies it at the head of its
-    /// next block: the settle is `Pending` until that block has run, whatever is
-    /// written meanwhile.
+    /// **A write is pending until the block that took it has returned, and a
+    /// block that did not run leaves it pending.** The node publishes applied
+    /// only once its call into the plugin went through: a failed block owes the
+    /// write to the next, and the host still states it.
     #[test]
-    fn a_settle_waits_for_the_block_after_its_sweep_and_for_no_later_write() {
-        let (fake, post, mut unit, inner) = edited_node();
+    fn a_write_is_pending_until_a_block_that_ran_took_it() {
+        let (fake, post, mut unit, _inner) = edited_node();
         let id = ParamId::new(1);
-        let value = |v| tutti_units::Normalized::of(v);
-        post.write(id, value(0.25)).expect("a declared parameter");
-        let mut pending = post.pending();
-        let mut settle = || {
-            post.settle(
-                main_thread(),
-                inner.lock().control().expect("alive"),
-                &mut pending,
-            )
-        };
-        assert!(
-            settle().is_pending(),
-            "the Processor has not taken the write"
-        );
+        let value = tutti_units::Normalized::of(0.25);
+        post.write(id, value).expect("a declared parameter");
+        assert_eq!(post.pending(), [(id, value)], "no block has run");
+        fake.fail_blocks(true);
         unit.block();
-        // Another write arrives before the re-poll: it is swept into the
-        // Controller's queue, past the mark the settle fixed.
-        post.write(id, value(0.5)).expect("a declared parameter");
-        assert!(
-            settle().is_ready(),
-            "the block after the sweep took what was asked, later writes or not"
-        );
-        assert!(
-            fake.calls().contains(&Call::Edit(id, value(0.25))),
-            "the Processor applied it at the head of the block"
-        );
-    }
-
-    /// **A write made after a settle is the plugin's last word**, through a node:
-    /// the first write is applied by a settle (the plugin's own `Control`), the
-    /// second rides the next block, and nothing the plugin is told after the
-    /// block undoes it.
-    #[test]
-    fn a_write_after_a_flush_ends_the_plugin_on_the_later_write() {
-        let (fake, post, mut unit, inner) = edited_node();
-        let id = ParamId::new(1);
-        post.write(id, tutti_units::Normalized::of(0.25))
-            .expect("a declared parameter");
-        let mut pending = post.pending();
-        assert!(
-            post.settle(
-                main_thread(),
-                inner.lock().control().expect("alive"),
-                &mut pending
-            )
-            .is_pending(),
-            "the Controller's write waits for the Processor's block"
-        );
-        post.write(id, tutti_units::Normalized::of(0.75))
-            .expect("a declared parameter");
+        assert_eq!(post.pending(), [(id, value)], "the failed block applied nothing");
+        fake.fail_blocks(false);
         unit.block();
-        let told: Vec<Call> = fake
-            .calls()
-            .into_iter()
-            .filter(|call| matches!(call, Call::SetParameter(_) | Call::BlockParam(..)))
-            .collect();
-        assert_eq!(
-            told,
-            [
-                Call::SetParameter(id),
-                Call::BlockParam(id, tutti_units::Normalized::of(0.75)),
-            ],
-            "the settled write first, the block's later write last"
-        );
+        assert!(post.pending().is_empty(), "the block that ran applied it");
+        assert!(fake.calls().contains(&Call::BlockParam(id, value)));
     }
 
     /// **A write owed after a failed block, with no load, is sent by the next**

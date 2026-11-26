@@ -11,7 +11,7 @@ use tutti_rt::Generation;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
-    PluginResult, PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request,
+    PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request,
     RestartRules, Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
@@ -279,15 +279,9 @@ impl Wraps for Vst3Controller {
         }
     }
 
-    /// Saves the state, with the writes no block has taken yet beside the
-    /// component's stream, which does not hold them.
-    fn save_with_pending(
-        &mut self,
-        main: MainThreadMarker,
-        _state_use: tutti_plugin_types::StateUse,
-    ) -> PluginResult<Vec<u8>> {
-        let undrained = self.undrained();
-        self.loaded_mut().save_state_with(main, &undrained)
+    /// The writes handed to the Processor that no block has applied.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.undrained()
     }
 
     /// The edits the plugin's own editor made (already in `out`) are queued to

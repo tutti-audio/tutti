@@ -14,7 +14,6 @@ use std::task::Poll;
 use std::time::Duration;
 
 use tutti_plugin::{Answer, PluginAnswers};
-use tutti_plugin_host::PendingWrites;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
@@ -136,7 +135,6 @@ impl PluginOp for LoadPresetOp {
         &self,
         handle: &PluginHandle,
         main: MainThreadMarker,
-        _pending: &mut PendingWrites,
     ) -> Poll<Result<(), PresetError>> {
         handle.load_preset(main, &self.id)
     }

@@ -81,6 +81,9 @@ pub(super) struct Fake {
     /// The plugin is alive and did not answer in time: a write is refused at
     /// the call.
     unanswered: std::sync::atomic::AtomicBool,
+    /// The plugin declares every parameter read-only now: a write is refused
+    /// by name, as a plugin that flagged a parameter after the session read it.
+    read_only: std::sync::atomic::AtomicBool,
 }
 
 impl Fake {
@@ -134,8 +137,17 @@ impl AnyThread for Fake {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
         tutti_plugin_types::Answer::ready(Some(self.infos.lock().clone()))
     }
-    fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::Answer::ready(self.values.lock().get(&id).copied())
+    fn parameter_value(
+        &self,
+        id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
+        tutti_plugin_types::Answer::ready(
+            self.values
+                .lock()
+                .get(&id)
+                .copied()
+                .map(tutti_plugin_types::PluginValue::new),
+        )
     }
 
     fn set_parameter_value(
@@ -151,6 +163,9 @@ impl AnyThread for Fake {
         }
         if !self.infos.lock().iter().any(|i| i.id() == id) {
             return Err(tutti_plugin_types::ParamWriteError::Undeclared(id));
+        }
+        if self.read_only.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(tutti_plugin_types::ParamWriteError::ReadOnly(id));
         }
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
             self.pending.lock().push((id, value));
@@ -189,7 +204,7 @@ impl AnyThread for Fake {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+    ) -> Result<tutti_plugin_types::PluginState, tutti_plugin_types::StateError> {
         Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: RenderMode) -> bool {
@@ -1022,13 +1037,14 @@ fn a_replace_by_another_plugin_has_no_target_until_its_read_lands() {
     s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
 }
 
-/// **A write to a parameter the plugin dropped is counted as refused, and the
+/// **A write to a parameter the plugin dropped is refused by name, and the
 /// re-read makes the id no target.** The plugin drops `cutoff` and the session
 /// has not read the new list yet, so the write passes the session's check; the
-/// plugin refuses it, the write is counted in the plugin's losses, and after the
-/// read lands `set` fails with `NoSuchTarget`.
+/// plugin refuses it, the next phase reports it as `ParamUndeclared` once, the
+/// write is given up (nothing is owed), and after the read lands `set` fails
+/// with `NoSuchTarget`.
 #[test]
-fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
+fn a_write_to_a_parameter_a_rescan_dropped_is_refused_by_name_and_then_no_target() {
     let (mut s, key, fake, refresh) = session_keyed();
     let _ = update(&mut s);
     let refused = |s: &DetachedSession| s.plugin_view(key).unwrap().losses().refused;
@@ -1036,19 +1052,86 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
 
     *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
     s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
-    assert_eq!(refused(&s), 1, "the plugin's refusal is counted");
     assert!(fake.sets().is_empty(), "the plugin took nothing");
+    assert_eq!(
+        changes(update(&mut s))
+            .iter()
+            .filter(|c| matches!(c, PluginChange::ParamUndeclared { id } if *id == CUTOFF))
+            .count(),
+        1,
+        "the refusal is told once, by name"
+    );
+    assert!(
+        !changes(update(&mut s))
+            .iter()
+            .any(|c| matches!(c, PluginChange::ParamUndeclared { .. })),
+        "and not again"
+    );
+    assert_eq!(refused(&s), 0, "a refusal by name is not a loss");
 
     refresh.fire(PluginRefresh::ParamTitles);
     let _ = update(&mut s);
     assert!(no_such_target(
         s.set(key.param(CUTOFF).to(Normalized::of(0.8)))
     ));
-    assert_eq!(
-        refused(&s),
-        1,
-        "a write that is refused at the call is not counted"
+}
+
+/// **A write the plugin did not answer for is owed, and sent again at the next
+/// phase, newest value only.** Two writes to one parameter while the plugin
+/// gives no answer are one send of the later value once it answers; a phase
+/// that finds nothing owed sends nothing.
+#[test]
+fn an_unanswered_write_is_owed_and_sent_again_at_the_next_phase() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    fake.unanswered.store(true, SeqCst);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
+    s.set(key.param(CUTOFF).to(Normalized::of(0.9))).unwrap();
+    let _ = update(&mut s);
+    assert!(fake.sets().is_empty(), "the plugin still gives no answer");
+
+    fake.unanswered.store(false, SeqCst);
+    let _ = update(&mut s);
+    assert_eq!(fake.sets(), [(CUTOFF, 0.9)], "the newest, once");
+    let _ = update(&mut s);
+    assert_eq!(fake.sets(), [(CUTOFF, 0.9)], "nothing is owed any more");
+    assert_eq!(s.plugin_view(key).unwrap().losses().refused, 0);
+}
+
+/// **A write the plugin refuses as read-only is told by name and given up**:
+/// it is not sent again at the next phase.
+#[test]
+fn a_read_only_refusal_raises_its_notice_and_is_not_sent_again() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    fake.read_only.store(true, SeqCst);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
+    let told = changes(update(&mut s));
+    assert!(
+        told.iter()
+            .any(|c| matches!(c, PluginChange::ParamReadOnly { id } if *id == CUTOFF)),
+        "{told:?}"
     );
+    fake.read_only.store(false, SeqCst);
+    let _ = update(&mut s);
+    assert!(fake.sets().is_empty(), "the refused write is not owed");
+}
+
+/// **What is owed belongs to the plugin it was written for**: a replace ends the
+/// epoch, so the successor is sent nothing.
+#[test]
+fn an_owed_write_is_not_sent_to_the_replacement() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    fake.unanswered.store(true, SeqCst);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
+    let again = Fake::new();
+    replace_with(&mut s, key.erase(), &again, "fake.clap");
+    let _ = update(&mut s);
+    assert!(again.sets().is_empty(), "the old plugin's owed write died with it");
 }
 
 /// **One plugin parameter named in two value types in one batch is refused**:

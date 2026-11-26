@@ -724,14 +724,9 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
-    /// The values queued to the Processor.
-    fn queued(&self) -> Option<tutti_rt::Generation> {
-        Some(self.queued_edits())
-    }
-
-    /// The plugin has processed the values queued up to `upto`.
-    fn delivered(&self, upto: tutti_rt::Generation) -> bool {
-        self.edits_delivered(upto)
+    /// What the slots hold that no block has applied.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.pending_edits()
     }
 
     /// Applied at the head of the Processor's next block: the slot of the

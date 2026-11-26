@@ -33,7 +33,7 @@ use std::sync::mpsc::sync_channel;
 use std::task::Poll;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginState, PluginValue, StateUse};
 
 use tutti_rt::Mutex;
 
@@ -191,33 +191,6 @@ where
         answer
     }
 
-    /// `work` on the plugin on the main thread once the host's writes made
-    /// before this call are the plugin's, and `reply` told what it gave, or
-    /// `None` when it cannot be answered: the collector has never run (no main
-    /// thread to hop to). A write a node is draining is asked again on the main
-    /// thread's next tick; a job dropped unrun cancels the reply.
-    fn after_writes<R: Send + 'static>(
-        &self,
-        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
-        reply: impl FnOnce(Option<R>) + Send + 'static,
-    ) {
-        let job = AfterWrites {
-            inner: Arc::clone(&self.inner),
-            post: self.edits.clone(),
-            pending: self.edits.pending(),
-            collector: self.work.clone(),
-            work,
-            reply,
-        };
-        if let Some(main) = MainThreadMarker::new() {
-            job.step(main);
-        } else if self.work.is_pumped() {
-            job.defer();
-        } else {
-            (job.reply)(None);
-        }
-    }
-
     /// Queues the main-thread job that tells the plugin's edit controller of
     /// the host's writes, unless one is queued: the controller hears each
     /// parameter's newest value when the main thread runs, the way the
@@ -258,6 +231,16 @@ where
     }
 }
 
+/// The writes no block has applied: the plugin's own record
+/// ([`Control::pending`]) under the host's, which is the newer for a parameter
+/// both hold.
+pub(super) fn pending_writes(
+    post: &super::host_edits::EditPost,
+    control: &mut dyn Control,
+) -> Vec<(ParamId, Normalized)> {
+    tutti_plugin_types::overlay_writes(control.pending(), post.pending())
+}
+
 /// Tells the plugin's edit controller of the host's writes on the main thread's
 /// next tick, through `tell`, which answers whether it could (`false`: the
 /// instance is locked, as it is while the main thread is inside a call of its
@@ -284,53 +267,6 @@ pub(super) fn queue_inform(
     });
 }
 
-/// A call waiting for the host's writes to be the plugin's: `work` runs on the
-/// main thread under the instance lock once the sweep has reached `mark`.
-struct AfterWrites<L: InProcess, W, P> {
-    inner: Arc<Mutex<Instance<L>>>,
-    post: super::host_edits::EditPost,
-    pending: crate::PendingWrites,
-    collector: MainWorkHandle,
-    work: W,
-    reply: P,
-}
-
-impl<L, R, W, P> AfterWrites<L, W, P>
-where
-    L: InProcess + 'static,
-    L::Processor: 'static,
-    R: Send + 'static,
-    W: FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
-    P: FnOnce(Option<R>) + Send + 'static,
-{
-    /// Settles the writes and runs the work; a node draining them now leaves it
-    /// for the next tick, or answers `None` when no main thread ticks. The
-    /// re-asks end: the claim's holder is one bounded audio-thread drain.
-    fn step(mut self, main: MainThreadMarker) {
-        let settled = {
-            let mut instance = self.inner.lock();
-            match instance.control() {
-                Some(control) => self.post.settle(main, control, &mut self.pending),
-                None => Poll::Ready(()),
-            }
-        };
-        match settled {
-            Poll::Ready(()) => {
-                let answer = (self.work)(main, &mut self.inner.lock());
-                (self.reply)(Some(answer));
-            }
-            Poll::Pending if self.collector.is_pumped() => self.defer(),
-            Poll::Pending => (self.reply)(None),
-        }
-    }
-
-    /// Runs [`step`](Self::step) on the main thread's next tick.
-    fn defer(self) {
-        let collector = self.collector.clone();
-        collector.defer(move |main| self.step(main));
-    }
-}
-
 impl<L> AnyThread for ControlBackend<L>
 where
     L: InProcess + 'static,
@@ -338,16 +274,21 @@ where
 {
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
-    fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
-        let (tx, answer) = Answer::channel();
-        self.after_writes(
-            move |main, instance| instance.control()?.parameter(main, id),
-            // A dropped receiver has no one to tell.
-            move |read| {
-                let _ = tx.send(read.flatten());
-            },
-        );
-        answer
+    /// The host's write to `id` that no block has applied is stated beside the
+    /// plugin's value, read first so a block between the two is not missed.
+    fn parameter_value(&self, id: ParamId) -> Answer<Option<PluginValue>> {
+        let post = self.edits.clone();
+        self.on_main_answer(move |main, instance| {
+            let control = instance.control()?;
+            let pending = pending_writes(&post, control);
+            let plugin = control.parameter(main, id)?;
+            Some(PluginValue {
+                plugin,
+                pending: pending
+                    .into_iter()
+                    .find_map(|(known, value)| (known == id).then_some(value)),
+            })
+        })
     }
 
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
@@ -446,41 +387,23 @@ where
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
     /// runs this on the session's executor: it is run by the main thread's
-    /// next tick once the host's earlier writes are the plugin's, and
-    /// [`StateError::Unavailable`] if that does not come within the deadline.
-    /// On the main thread the writes are settled and the state saved at once.
-    fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-        if let Some(main) = MainThreadMarker::new() {
-            // No later tick to ask again on: settle now, then save.
-            let mut instance = self.inner.lock();
-            let Some(control) = instance.control() else {
-                return Err(StateError::PluginCrashed);
-            };
-            self.edits.settle_now(main, control);
-            return control
-                .save_state(main, state_use)
-                .map_err(StateError::from);
-        }
-        let (reply, wait) = sync_channel(1);
-        self.after_writes(
-            move |main, instance| {
-                instance.control().map(|control| {
-                    control
-                        .save_state(main, state_use)
-                        .map_err(StateError::from)
-                })
-            },
-            move |saved| {
-                let _ = reply.send(saved);
-            },
-        );
-        match await_answer(
-            &wait,
-            OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
-            Instant::now,
-        )
-        .flatten()
-        {
+    /// next tick, and is [`StateError::Unavailable`] if that does not come within
+    /// the deadline. On the main thread the state is saved at once. The host's
+    /// writes no block has applied are stated beside the bytes, read before them
+    /// so a block between the two is in both rather than neither; nothing waits
+    /// for a block.
+    fn save_state(&self, state_use: StateUse) -> Result<PluginState, StateError> {
+        let post = self.edits.clone();
+        match self.on_main(move |main, instance| {
+            let control = instance.control()?;
+            let pending = pending_writes(&post, control);
+            Some(
+                control
+                    .save_state(main, state_use)
+                    .map(|bytes| PluginState { bytes, pending })
+                    .map_err(StateError::from),
+            )
+        }) {
             Some(Some(state)) => state,
             Some(None) => Err(StateError::PluginCrashed),
             None => Err(StateError::Unavailable),
@@ -544,8 +467,12 @@ impl<L: InProcess> Health for ControlBackend<L> {
         tutti_plugin_types::PipelineCounts::default()
     }
 
+    /// None: a host write is refused at the call
+    /// ([`set_parameter_value`](AnyThread::set_parameter_value)), and never
+    /// applied through the plugin's `Control` here, so the plugin has no refusal
+    /// to count.
     fn refused_edits(&self) -> u64 {
-        self.edits.refused()
+        0
     }
 
     fn terminate(&self, _reason: TerminationReason) {}
@@ -563,15 +490,8 @@ where
         }
     }
 
-    fn writes(&self) -> crate::PendingWrites {
+    fn pending(&self) -> Vec<(ParamId, Normalized)> {
         self.edits.pending()
-    }
-
-    fn settle(&self, main: MainThreadMarker, pending: &mut crate::PendingWrites) -> Poll<()> {
-        match self.inner.lock().control() {
-            Some(control) => self.edits.settle(main, control, pending),
-            None => Poll::Ready(()),
-        }
     }
 
     fn restoring(&self, f: &mut dyn FnMut(&mut dyn Control)) -> Poll<()> {
@@ -721,8 +641,8 @@ mod inform_tests {
 mod off_main_tests {
     use tutti_fixtures::main_thread;
     use tutti_plugin_types::{
-        AutomationMode, AutomationModeError, MainWork, MainWorkHandle, RenderMode, StateError,
-        StateUse,
+        AutomationMode, AutomationModeError, MainWork, MainWorkHandle, PluginValue, RenderMode,
+        StateError, StateUse,
     };
     use tutti_units::ParamId;
     use tutti_units::{Normalized, SampleRate};
@@ -786,7 +706,7 @@ mod off_main_tests {
         };
         let (state, value) = job.join().expect("the job returns");
         assert_eq!(state.expect("saved off the main thread"), expected);
-        assert_eq!(value.map(Normalized::get), Some(0.75));
+        assert_eq!(value.map(|v| v.plugin.get()), Some(0.75));
     }
 
     /// **With a collector that has never run, an off-main call answers
@@ -824,7 +744,7 @@ mod off_main_tests {
         assert_eq!(
             futures_lite::future::block_on(any.parameter_value(ParamId::new(1)))
                 .flatten()
-                .map(Normalized::get),
+                .map(|v| v.plugin.get()),
             Some(0.75)
         );
         let text = any.parameter_text(ParamId::new(1), Normalized::of(0.75));
@@ -851,7 +771,7 @@ mod off_main_tests {
         assert_eq!(
             futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
                 .flatten()
-                .map(Normalized::get),
+                .map(|v| v.plugin.get()),
             Some(0.25)
         );
     }
@@ -893,7 +813,7 @@ mod off_main_tests {
         let read =
             futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
                 .flatten()
-                .map(Normalized::get)
+                .map(|v| v.plugin.get())
                 .expect("a declared parameter");
         let expected = f64::from(word) / f64::from(u32::MAX);
         assert!((read - expected).abs() < 1e-6, "{read} against {expected}");
@@ -923,41 +843,61 @@ mod off_main_tests {
         assert_eq!(
             futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
                 .flatten()
-                .map(Normalized::get),
+                .map(|v| v.plugin.get()),
             Some(0.25)
         );
     }
 
-    /// **A write made after a settle wins over it**, through the whole path: a
-    /// write, a read (which flushes it into the plugin), a later write, a block.
-    /// The plugin ends on the later write; a settle that landed after the block
-    /// would leave it on the first.
+    /// **A read after a write with no block answers the plugin's old value and
+    /// the new one pending, and a block makes it the plugin's.** The read waits
+    /// for no block: the plugin reads what it held, the host's record says what
+    /// was written since.
     #[test]
-    fn a_write_after_a_flush_is_the_plugins_last_word() {
+    fn a_read_after_a_write_with_no_block_states_the_write_pending() {
         let (mut unit, handle, _pump) = loaded();
         let id = ParamId::new(1);
+        let read = || {
+            futures_lite::future::block_on(handle.any_thread().parameter_value(id))
+                .flatten()
+                .expect("a declared parameter")
+        };
+        assert_eq!(read(), PluginValue::new(Normalized::of(0.75)));
         handle
             .any_thread()
             .set_parameter_value(id, Normalized::of(0.25))
             .expect("a declared parameter");
         assert_eq!(
-            futures_lite::future::block_on(handle.any_thread().parameter_value(id))
-                .flatten()
-                .map(Normalized::get),
-            Some(0.25),
-            "the read flushes the first write into the plugin"
+            read(),
+            PluginValue {
+                plugin: Normalized::of(0.75),
+                pending: Some(Normalized::of(0.25)),
+            },
+            "no block has run: the plugin still holds the old value"
         );
+        unit.block();
+        assert_eq!(read(), PluginValue::new(Normalized::of(0.25)));
+    }
+
+    /// **A save after a write with no block states the write in `pending`, and
+    /// a block makes it the plugin's.** The bytes are the plugin's as it holds
+    /// it (the chunk of this probe does not follow its parameters); the write is
+    /// beside them, and a state restored with it replays it.
+    #[test]
+    fn a_save_after_a_write_with_no_block_states_the_write_pending() {
+        let (mut unit, handle, _pump) = loaded();
+        let id = ParamId::new(1);
+        let applied = handle.any_thread().save_state(StateUse::Project).unwrap();
+        assert!(applied.pending.is_empty(), "the load's block applied its write");
         handle
             .any_thread()
-            .set_parameter_value(id, Normalized::of(0.75))
+            .set_parameter_value(id, Normalized::of(0.25))
             .expect("a declared parameter");
+        let saved = handle.any_thread().save_state(StateUse::Project).unwrap();
+        assert_eq!(saved.pending, [(id, Normalized::of(0.25))]);
+        assert_eq!(saved.bytes, applied.bytes, "the plugin has not changed");
         unit.block();
-        assert_eq!(
-            futures_lite::future::block_on(handle.any_thread().parameter_value(id))
-                .flatten()
-                .map(Normalized::get),
-            Some(0.75)
-        );
+        let after = handle.any_thread().save_state(StateUse::Project).unwrap();
+        assert!(after.pending.is_empty(), "the block applied the write");
     }
 
     /// **A write to a parameter the plugin does not declare fails at the call**,
@@ -984,7 +924,7 @@ mod off_main_tests {
             .any_thread()
             .save_state(StateUse::Project)
             .expect("the probe saves");
-        assert!(!state.is_empty());
+        assert!(!state.bytes.is_empty());
     }
 
     /// **The render mode is accepted** (VST2 answers the process level from a

@@ -96,7 +96,10 @@ impl tutti_plugin_types::AnyThread for Inert {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
         tutti_plugin_types::Answer::ready(None)
     }
-    fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+    fn parameter_value(
+        &self,
+        _id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<tutti_plugin_types::PluginValue>> {
         tutti_plugin_types::Answer::ready(None)
     }
 
@@ -129,7 +132,7 @@ impl tutti_plugin_types::AnyThread for Inert {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+    ) -> Result<tutti_plugin_types::PluginState, tutti_plugin_types::StateError> {
         Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
@@ -193,7 +196,7 @@ impl Run for crate::SaveState {
 
     fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
         match self {
-            Self::InProcess(save) => ready(save, main),
+            Self::InProcess(save) => ready(save, main).map(crate::Saved::into_state),
             Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
         }
     }

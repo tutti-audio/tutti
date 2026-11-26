@@ -146,7 +146,7 @@ fn handle_state_roundtrip() {
 
     let original = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the probe declares chunk-based state");
+        .expect("the probe declares chunk-based state").bytes;
     assert!(!original.is_empty(), "a declared chunk must not be empty");
 
     // Load a blob that is *different* from the one saved. Round-tripping the
@@ -163,7 +163,7 @@ fn handle_state_roundtrip() {
     );
     let after = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("state must still be readable after a load");
+        .expect("state must still be readable after a load").bytes;
 
     assert_eq!(
         after, modified,
@@ -186,7 +186,7 @@ fn an_accepted_chunk_reports_success() {
 
     let blob = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("probe declares state");
+        .expect("probe declares state").bytes;
     assert!(
         handle
             .load_state(main_thread(), &blob)

@@ -112,7 +112,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::Timeouts;
-use tutti_rt::{Generation, Mutex};
+use tutti_rt::Mutex;
 
 pub use messages::IpcEvent;
 pub use thread::IpcThread;
@@ -564,43 +564,6 @@ impl AudioBridge {
             }
             None
         }
-    }
-
-    /// How many of the host's writes have been made, as the generation
-    /// [`edits_delivered`](Self::edits_delivered) waits for; `None` before the
-    /// first write, when the table does not exist.
-    pub(crate) fn edits_queued(&self) -> Option<Generation> {
-        self.host_edits
-            .lock()
-            .as_ref()
-            .map(|table| table.writer.written())
-    }
-
-    /// Asks for the delivery of the host's writes up to `upto`
-    /// ([`edits_queued`](Self::edits_queued)) and answers whether the server has
-    /// answered a flush that carried them: `false` asks the audio lane to flush
-    /// (idempotent: one already queued is not asked again), and the answer, in
-    /// its window or late, makes a later call `true`. A flush that timed out is
-    /// asked for again, empty if nothing was written since: the lane hears the
-    /// late answer ahead of that one's, so a settle that keeps asking moves on
-    /// by its own poll. A flush that is never answered leaves it `false`, and
-    /// the caller's deadline ends the wait. A crashed plugin reads as
-    /// delivered: the call that follows fails on its own. Control side; never
-    /// waits.
-    pub(crate) fn edits_delivered(&self, upto: Generation) -> bool {
-        if self.lifecycle.is_crashed() || self.channels.acked().has_reached(upto) {
-            return true;
-        }
-        // The answer is read from the cell, not from this ask. Writes not yet
-        // flushed are asked for as a read asks; with none, a flush still owed
-        // an answer is waited behind by one that may be empty.
-        if self.request_flush().is_none() && self.channels.ask_flush() {
-            let (_ask, done) = ask::ask::<bool>();
-            if !self.channels.push_block(AudioCommand::Params { done }) {
-                self.channels.flush_dequeued();
-            }
-        }
-        false
     }
 
     /// Has the plugin apply the writes no block has carried yet, before the
@@ -1107,7 +1070,7 @@ impl AudioBridge {
     pub fn save_state_answer(
         &self,
         state_use: StateUse,
-    ) -> Answer<std::result::Result<Vec<u8>, StateError>> {
+    ) -> Answer<std::result::Result<tutti_plugin_types::PluginState, StateError>> {
         // The lane waits for the flush, as a blocking save waits for it itself.
         let flush = self.request_flush();
         self.answer_with(
@@ -1115,7 +1078,13 @@ impl AudioBridge {
             Deadline::State,
             flush,
             Object::State,
-            |outcome| Some(outcome.map(|received| received.object).map_err(state_lost)),
+            |outcome| {
+                Some(
+                    outcome
+                        .map(|received| tutti_plugin_types::PluginState::new(received.object))
+                        .map_err(state_lost),
+                )
+            },
         )
     }
 
@@ -1171,14 +1140,23 @@ impl AudioBridge {
     /// [`parameter`](Self::parameter) as an answer, filled and bounded as
     /// [`parameters_answer`](Self::parameters_answer) is. The lane applies the
     /// host's writes no block has carried before it asks.
-    pub fn parameter_answer(&self, param_id: ParamId) -> Answer<Option<Normalized>> {
+    pub fn parameter_answer(
+        &self,
+        param_id: ParamId,
+    ) -> Answer<Option<tutti_plugin_types::PluginValue>> {
         let flush = self.request_flush();
         self.call_answer(
             GetParameter { param_id },
             Deadline::Query,
             flush,
             Object::None,
-            |read| unless_refused(read).map(|read| read.ok().and_then(|read| read.value)),
+            |read| {
+                unless_refused(read).map(|read| {
+                    read.ok()
+                        .and_then(|read| read.value)
+                        .map(tutti_plugin_types::PluginValue::new)
+                })
+            },
         )
     }
 

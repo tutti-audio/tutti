@@ -211,7 +211,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         .expect("the probe forks");
     let state_at_fork = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the probe saves");
+        .expect("the probe saves").bytes;
 
     // After the fork: the live instance moves to -15 dB.
     probe
@@ -280,7 +280,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     assert_eq!(
         handle
             .save_state(tutti_plugin_types::StateUse::Project)
-            .expect("the probe saves"),
+            .expect("the probe saves").bytes,
         state_at_fork,
         "rendering the fork changed the live instance's state"
     );
@@ -361,7 +361,7 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
     let project = probe
         .handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the project save");
+        .expect("the project save").bytes;
     assert_eq!(project[CONTEXT_BYTE], 3, "a project save is FOR_PROJECT");
 
     probe
@@ -1393,7 +1393,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let state = probe
         .handle
         .save_state(StateUse::Duplicate)
-        .expect("the probe saves");
+        .expect("the probe saves").bytes;
     let dir = tempfile::TempDir::new().expect("a directory");
     let preset = dir.path().join("a.tutti-preset");
     std::fs::write(&preset, b"x").expect("a preset file");

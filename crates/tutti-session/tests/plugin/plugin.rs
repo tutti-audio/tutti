@@ -42,7 +42,7 @@ use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
     Range, Session, SessionEvent,
 };
-use tutti_session::{Peer as _, PeerState};
+use tutti_session::Peer as _;
 use tutti_session::{RecoveryFailure, ReloadCause};
 use tutti_units::{Chunks, SampleRate, Samples};
 
@@ -1297,7 +1297,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         .state()
         .last_good()
         .unwrap()
-        .bytes()
+        .state().bytes()
         .to_vec();
     let mut drive = Drive::new();
     drive.until(&mut s, "a second attempt", |e| {
@@ -1369,7 +1369,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         "{why}"
     );
     assert_eq!(
-        state.as_deref().map(PeerState::bytes),
+        state.as_deref().map(|saved| saved.state().bytes()),
         Some(kept.as_slice()),
         "the user's last state goes out with the event"
     );
@@ -1470,7 +1470,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .state()
         .last_good()
         .unwrap()
-        .bytes()
+        .state().bytes()
         .to_vec();
     let mut drive = Drive::new();
     drive.until(&mut s, "recovered", |e| {
@@ -1513,7 +1513,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
             .unwrap()
             .state()
             .withheld()
-            .map(PeerState::bytes),
+            .map(|saved| saved.state().bytes()),
         Some(users.as_slice())
     );
     // ...and the snapshots taken since, of a plugin at its defaults, do not
@@ -1525,14 +1525,14 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .state()
         .last_good()
         .expect("a new snapshot")
-        .bytes();
+        .state().bytes();
     assert_ne!(fresh, users.as_slice(), "the plugin is at its defaults");
     assert_eq!(
         s.plugin_view(node)
             .unwrap()
             .state()
             .withheld()
-            .map(PeerState::bytes),
+            .map(|saved| saved.state().bytes()),
         Some(users.as_slice()),
         "a default-state snapshot replaced the withheld one"
     );

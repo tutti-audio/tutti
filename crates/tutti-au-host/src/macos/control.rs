@@ -696,6 +696,15 @@ impl Wraps for AuController {
         self.ranges.reclaim();
         self.apply_deferred();
     }
+
+    /// A `NonRealTime` write the Processor marked is written to the unit only at
+    /// a tick, so a save made before it would not hold it. The save asks first,
+    /// and the marked values are written now, as a tick would write them, so the
+    /// state that follows holds them: none is left to state beside it.
+    fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
+        self.apply_deferred();
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

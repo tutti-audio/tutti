@@ -179,14 +179,10 @@ impl ClapController {
         debug_assert!(written.is_ok(), "{written:?}");
     }
 
-    /// How many values [`queue_edit`](Self::queue_edit) has stored.
-    pub(crate) fn queued_edits(&self) -> tutti_rt::Generation {
-        self.edits.written()
-    }
-
-    /// Whether the plugin has processed the values queued up to `upto`.
-    pub(crate) fn edits_delivered(&self, upto: tutti_rt::Generation) -> bool {
-        self.edits.has_applied(upto)
+    /// The values [`queue_edit`](Self::queue_edit) stored that the plugin has
+    /// not processed.
+    pub(crate) fn pending_edits(&self) -> Vec<(ParamId, Normalized)> {
+        self.edits.pending()
     }
 
     /// Makes every write made so far stale (see [`EditWriter::reset`]).

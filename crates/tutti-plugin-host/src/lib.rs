@@ -46,7 +46,7 @@ mod wakeups;
 mod walk_tests;
 
 pub use control_handle::{
-    InstanceId, MainThreadControl, PendingWrites, PluginHandle, PluginStatus,
+    InstanceId, MainThreadControl, PluginHandle, PluginStatus,
 };
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use fork_state::ForkState;

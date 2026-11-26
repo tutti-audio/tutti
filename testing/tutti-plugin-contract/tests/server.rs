@@ -45,7 +45,7 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let state = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves");
+        .expect("saves").bytes;
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
     assert!(
         handle
@@ -56,7 +56,7 @@ fn through_server<F: Format>(path: PathBuf) {
 
     let saved = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("saves again");
+        .expect("saves again").bytes;
     let after = Transcript::parse(&F::extract_blob(&saved));
     assert_eq!(after.mode, Mode::Level.index(), "the mode crossed");
     // The mirror a session reads: its load-time read of the served plugin's values.
@@ -458,7 +458,7 @@ mod node_midi_map {
     /// What the plugin recorded of `level`: the points it was handed and the
     /// level it holds.
     fn level_points<F: Format>(handle: &PluginHandle) -> (Vec<f64>, f64) {
-        let state = handle.save_state(StateUse::Project).expect("saves");
+        let state = handle.save_state(StateUse::Project).expect("saves").bytes;
         let t = Transcript::parse(&F::extract_blob(&state));
         let points = t
             .of(Kind::Param)

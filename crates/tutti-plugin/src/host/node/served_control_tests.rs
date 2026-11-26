@@ -65,7 +65,8 @@ fn the_served_control_and_any_thread_answer_alike() {
 
     let value = futures_lite::future::block_on(AnyThread::parameter_value(&any, GAIN))
         .flatten()
-        .expect("the probe answers a value");
+        .expect("the probe answers a value")
+        .plugin;
     assert_eq!(
         Control::parameter(&control, main, GAIN),
         Some(value),
@@ -92,7 +93,7 @@ fn the_served_control_and_any_thread_answer_alike() {
     assert_eq!(
         Control::save_state(&mut control, main, tutti_plugin_types::StateUse::Project)
             .expect("the probe saves"),
-        state,
+        state.bytes,
         "the state"
     );
 

@@ -167,8 +167,8 @@ struct Reading {
 }
 
 enum Question {
-    /// The plugin's current value.
-    Value(Answer<Option<Normalized>>),
+    /// The plugin's current value, with the host's write it has not applied.
+    Value(Answer<Option<tutti_plugin_types::PluginValue>>),
     /// The declared default of a plain-range parameter, converted by the plugin.
     Default(Answer<Option<Normalized>>),
 }
@@ -216,8 +216,16 @@ impl Future for ReadingParams {
                 }
                 continue;
             };
-            let (Question::Value(answer) | Question::Default(answer)) = question;
-            let answered = std::task::ready!(Pin::new(answer).poll(cx)).flatten();
+            // What the host wants: a write no block has applied over the plugin's
+            // own value.
+            let answered = match question {
+                Question::Value(answer) => std::task::ready!(Pin::new(answer).poll(cx))
+                    .flatten()
+                    .map(tutti_plugin_types::PluginValue::wanted),
+                Question::Default(answer) => {
+                    std::task::ready!(Pin::new(answer).poll(cx)).flatten()
+                }
+            };
             let value = match (&*question, answered) {
                 (_, Some(value)) => value,
                 (Question::Value(_), None) => match info.range() {
@@ -520,13 +528,15 @@ mod tests {
         fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
             self.deliver(self.listed(), matches!(self.mode, Mode::ListCanceled))
         }
-        fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
+        fn parameter_value(&self, id: ParamId) -> Answer<Option<tutti_plugin_types::PluginValue>> {
             let value = self
                 .params
                 .iter()
                 .find(|(a, _)| *a == id)
                 .and_then(|(_, v)| *v)
-                .map(|v| Normalized::clamped(f64::from(v)));
+                .map(|v| {
+                    tutti_plugin_types::PluginValue::new(Normalized::clamped(f64::from(v)))
+                });
             self.deliver(value, matches!(self.mode, Mode::ValuesCanceled))
         }
         fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Answer<Option<Normalized>> {
@@ -551,7 +561,10 @@ mod tests {
         fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self, _: tutti_plugin_types::StateUse) -> Result<Vec<u8>, StateError> {
+        fn save_state(
+            &self,
+            _: tutti_plugin_types::StateUse,
+        ) -> Result<tutti_plugin_types::PluginState, StateError> {
             Err(StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: RenderMode) -> bool {

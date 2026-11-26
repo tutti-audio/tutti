@@ -14,7 +14,7 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::Mutex;
 use tutti_session::{AnyPlugin, Key, LoadError, LoadInProcess, LoadOutOfProcess};
-use tutti_session::{LoadPlugin as Load, PeerState, PluginInstance, Session};
+use tutti_session::{LoadPlugin as Load, PeerState, PluginInstance, Saved, Session};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
@@ -228,13 +228,13 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         let opened = match load? {
             Load::InProcess(mut load) => {
                 if let Some(state) = state {
-                    load.initial_state(state).expect("a state of the plugin");
+                    load.initial_state(Saved::new(state)).expect("a state of the plugin");
                 }
                 load.run(main)?
             }
             Load::OutOfProcess(mut load) => {
                 if let Some(state) = state {
-                    load.initial_state(state).expect("a state of the plugin");
+                    load.initial_state(Saved::new(state)).expect("a state of the plugin");
                 }
                 load.block()?
             }
@@ -327,6 +327,7 @@ impl Perform for tutti_session::SaveState {
             Self::InProcess(save) => ready(save, main),
             Self::OutOfProcess(save) => tutti_fixtures::block_on(save),
         }
+        .map(Saved::into_state)
     }
 }
 

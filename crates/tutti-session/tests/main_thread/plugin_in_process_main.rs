@@ -279,7 +279,7 @@ fn restore_round_trip(hosting: Hosting) {
 
     set(&s, 0.1);
     blocks(&mut s);
-    let restore = s.restore_state(&node, state).expect("its own plugin's");
+    let restore = s.restore_state(&node, tutti_session::Saved::new(state)).expect("its own plugin's");
     assert_eq!(
         matches!(restore, tutti_session::RestoreState::InProcess(_)),
         in_process,
@@ -299,6 +299,107 @@ fn restore_round_trip(hosting: Hosting) {
         thread::yield_now();
     }
     s.close(tutti_fixtures::main_thread());
+}
+
+/// Renders four blocks of `s`, updating before each: an in-process plugin takes a
+/// host write at the head of a block it runs in.
+fn blocks(s: &mut Session) {
+    for _ in 0..4 {
+        let _ = s.update();
+        let mut out = vec![0.0f32; 512 * 2];
+        s.render(
+            &mut tutti_buffers::InterleavedMut::new(&mut out, tutti_buffers::ChannelLayout::STEREO)
+                .unwrap(),
+        );
+    }
+}
+
+/// **A save after a write with no block states the write in `pending`, and a
+/// block makes it the plugin's; a restore replays what a save stated.** The
+/// plugin's own bytes hold the value it had applied; the host's write is beside
+/// them until a block has run, and a restore of that save ends on the wanted
+/// value after one block.
+fn a_save_after_a_write_states_it_pending_and_a_restore_replays_it() {
+    const CUTOFF: tutti_units::ParamId = tutti_units::ParamId::new(101);
+    let own = |saved: &tutti_session::Saved| {
+        tutti_clap_test_plugin::saved_normalized(saved.state().bytes(), CUTOFF.get())
+            .expect("the state holds the parameter")
+    };
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    let main = tutti_fixtures::main_thread();
+    let (_, node) = s
+        .load_from(main, &catalog, &id(), Hosting::InProcess, None)
+        .unwrap();
+    s.graph().connect(node, tutti_session::MainOutput).unwrap();
+    blocks(&mut s);
+    let set = |s: &Session, v: f64| {
+        let target = s
+            .plugin_view(node)
+            .unwrap()
+            .params()
+            .get(CUTOFF)
+            .expect("the plugin declares the parameter")
+            .target();
+        s.set(target.to(tutti_units::Normalized::of(v))).unwrap();
+    };
+    let save = |s: &Session| {
+        let tutti_session::SaveState::InProcess(mut save) = s
+            .save_state(&node, tutti_plugin_types::StateUse::Project)
+            .expect("a node holds the plugin")
+        else {
+            panic!("an in-process plugin is saved on the main thread");
+        };
+        match save.poll(main, Instant::now()) {
+            std::task::Poll::Ready(saved) => saved.expect("a state"),
+            std::task::Poll::Pending => panic!("a save never waits"),
+        }
+    };
+
+    let applied = save(&s);
+    assert!(applied.pending().is_empty(), "nothing was written");
+    set(&s, 0.9);
+    let waiting = save(&s);
+    assert_eq!(
+        waiting.pending(),
+        [(CUTOFF, tutti_units::Normalized::of(0.9))],
+        "no block has applied the write"
+    );
+    assert!(
+        (own(&waiting) - 0.9).abs() > 1e-3,
+        "the plugin's bytes do not hold it: {}",
+        own(&waiting)
+    );
+    blocks(&mut s);
+    let after = save(&s);
+    assert!(after.pending().is_empty(), "a block applied it");
+    assert!((own(&after) - 0.9).abs() < 1e-4, "{}", own(&after));
+
+    // A save made with a write pending, restored into a plugin that has moved on:
+    // one block later the plugin holds the wanted value.
+    set(&s, 0.1);
+    let stated = save(&s);
+    blocks(&mut s);
+    set(&s, 0.6);
+    blocks(&mut s);
+    assert!((own(&save(&s)) - 0.6).abs() < 1e-4);
+    let tutti_session::RestoreState::InProcess(mut restore) =
+        s.restore_state(&node, stated).expect("its own plugin's")
+    else {
+        panic!("an in-process plugin restores on the main thread");
+    };
+    let std::task::Poll::Ready(restored) = restore.poll(main, Instant::now()) else {
+        panic!("no node holds the claim between blocks");
+    };
+    s.apply(restored.expect("the plugin takes it"))
+        .expect("the node still hosts the plugin");
+    blocks(&mut s);
+    assert!(
+        (own(&save(&s)) - 0.1).abs() < 1e-4,
+        "the replayed write is the plugin's after a block: {}",
+        own(&save(&s))
+    );
+    s.close(main);
 }
 
 /// **A restore applies the saved state to an in-process plugin**: its
@@ -997,6 +1098,7 @@ a_swap_replaces_an_in_process_nodes_plugin,
 a_served_plugin_swapped_over_an_in_process_one_is_reloaded_when_it_dies,
 an_in_process_swap_to_other_ports_is_refused,
 a_restore_applies_the_saved_state_to_an_in_process_plugin,
+a_save_after_a_write_states_it_pending_and_a_restore_replays_it,
 a_restore_applies_the_saved_state_to_a_served_plugin,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
