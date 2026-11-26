@@ -5,15 +5,19 @@
 //! [`Session::apply`](crate::Session::apply); what it says
 //! of itself is its handle's [`Peer::info`](crate::Peer::info).
 
+use std::sync::Arc;
+
 use tutti_buffers::Float;
+use tutti_midi_ci::ResourceStore;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_device::MidiIdentity;
 
 use crate::Policy;
 use crate::midi::Midi;
 
-/// Who the session is on the wire: the identity it presents to every MIDI
-/// device with an input and an output, set through
+/// Who the session is on the wire and what it serves there: the identity it
+/// presents to every MIDI device with an input and an output, and the Property
+/// Exchange Resources it answers peers with, set through
 /// [`Session::policy`](crate::Session::policy).
 ///
 /// `None`, the default, presents nothing: no MIDI-CI Device runs and a peer's
@@ -32,12 +36,24 @@ use crate::midi::Midi;
 /// are the ones in force with the device, and a Stream Configuration Request is
 /// granted within what it declares and moves them, JR asked off included.
 ///
+/// `properties` is the store the MIDI-CI Devices serve as Property Exchange
+/// Responders (M2-103) on every input port with an output; `None`, the default,
+/// serves an empty store. A policy holds the store by `Arc`, and two policies
+/// are equal when they hold the same `Arc` ([`Arc::ptr_eq`]), never by content:
+/// writing the same store again is not a change, and a store that changed is a
+/// new `Arc`, served afresh: a new `Arc` of equal content discards what peers'
+/// Sets changed. A peer's Set changes the copy the devices serve, which
+/// [`MidiSession::served_properties`](tutti_midi_hardware::MidiSession::served_properties)
+/// reads, not the store in the policy.
+///
 /// A change applies in the next [`Session::update`](crate::Session::update):
 /// the MIDI-CI Devices of the old identity send Invalidate MUID for their MUIDs
 /// and the new identity starts Discovery under fresh ones; a change of the name
 /// or the Product Instance Id alone announces the Endpoint again.
 ///
 /// ```
+/// use std::sync::Arc;
+/// use tutti_midi_ci::ResourceStore;
 /// use tutti_ump::EndpointName;
 /// use tutti_midi_device::MidiIdentity;
 /// use tutti_session::MidiPolicy;
@@ -57,22 +73,45 @@ use crate::midi::Midi;
 ///         name: EndpointName::new("My App").unwrap(),
 ///         instance: None,
 ///     }),
+///     // The Resources peers can Get and Set; `ResourceStore::default()` has none.
+///     properties: Some(Arc::new(ResourceStore::default())),
 /// };
 /// assert!(policy.identity.is_some());
+/// assert_eq!(policy.clone(), policy);
 /// assert_eq!(MidiPolicy::default().identity, None);
+/// assert!(MidiPolicy::default().properties.is_none());
 /// ```
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct MidiPolicy {
     /// Who the session is; `None` presents nothing.
     pub identity: Option<MidiIdentity>,
+    /// The Resources the session serves; `None` serves none.
+    pub properties: Option<Arc<ResourceStore>>,
 }
+
+impl PartialEq for MidiPolicy {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity && same_store(&self.properties, &other.properties)
+    }
+}
+
+/// Whether `a` and `b` are the same store: both none, or the same `Arc`.
+pub(crate) fn same_store(a: &Option<Arc<ResourceStore>>, b: &Option<Arc<ResourceStore>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+impl Eq for MidiPolicy {}
 
 /// Why a [`MidiPolicy`] was refused when it was set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum MidiPolicyError {
     /// The session has no OS MIDI layer, so there is no device to present an
-    /// identity to.
+    /// identity to or serve Resources on.
     #[error(transparent)]
     NoHardware(#[from] crate::NoHardware),
 }
@@ -85,11 +124,11 @@ impl Policy for MidiPolicy {
     }
 }
 
-/// The cell of the session's MIDI policy: an identity is refused when the
-/// session has no OS MIDI layer (`attached` is false).
+/// The cell of the session's MIDI policy: an identity or a store is refused
+/// when the session has no OS MIDI layer (`attached` is false).
 pub(crate) fn policy_cell(attached: bool) -> std::sync::Arc<crate::value::Cell<MidiPolicy>> {
     crate::value::Cell::new(MidiPolicy::default(), move |policy| {
-        if policy.identity.is_some() && !attached {
+        if (policy.identity.is_some() || policy.properties.is_some()) && !attached {
             return Err(MidiPolicyError::from(crate::NoHardware).into());
         }
         Ok(())

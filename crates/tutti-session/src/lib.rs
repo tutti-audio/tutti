@@ -370,6 +370,8 @@ pub use tutti_timeline::TakeId;
 pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]
 pub use value::MidiPolicyTarget;
+#[cfg(feature = "midi-hardware")]
+pub use value::Mpe11Target;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
