@@ -192,12 +192,11 @@ fn mcm_from_the_wire_configures_the_lower_zone() {
     let mut translator = MpeTranslator::new(MpeMode::Disabled);
     let mcm = at(
         0,
-        Mpe11Zone::lower(
+        midi::mcm(Mpe11Zone::lower(
             MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
 
     // The MCM itself is absorbed (configuration, not a musical event);
@@ -232,12 +231,11 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     // 10 members up from channel 1 leave 4: an upper zone of 5 would share channel 10.
     let overlapping = at(
         0,
-        Mpe11Zone::upper(
+        midi::mcm(Mpe11Zone::upper(
             MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     assert_eq!(
         translator.translated(&overlapping).count(),
@@ -251,12 +249,11 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     // One that fits is taken.
     let fits = at(
         0,
-        Mpe11Zone::upper(
+        midi::mcm(Mpe11Zone::upper(
             MemberCount::of(4),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     assert!(translator.translated(&fits).count() > 0);
     assert_eq!(
@@ -370,12 +367,11 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     }
     let mcm = at(
         9,
-        Mpe11Zone::upper(
+        midi::mcm(Mpe11Zone::upper(
             MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     let reset: Vec<UmpAt> = translator.translated(&mcm).collect();
     assert!(matches!(
@@ -399,12 +395,11 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     // members are back at ±48, the lower zone's ±12 stands.
     let mcm = at(
         0,
-        Mpe11Zone::upper(
+        midi::mcm(Mpe11Zone::upper(
             MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     for ev in translator.translated(&bend_sensitivity(13, 12)) {
         receiver.observe(&ev.1);
@@ -910,12 +905,11 @@ fn an_mcm_stops_only_the_channels_it_moves() {
 
     let grow = at(
         0,
-        Mpe11Zone::lower(
+        midi::mcm(Mpe11Zone::lower(
             MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     let out: Vec<UmpAt> = translator.translated(&grow).collect();
     assert_eq!(stopped(out.iter().copied()), [4, 5]);
@@ -953,21 +947,19 @@ fn a_channel_that_left_the_zone_forgets_its_note_and_its_bend() {
         translator.translated(&pitch_bend14(4, 9000));
         translator.translated(&at(
             0,
-            Mpe11Zone::lower(
+            midi::mcm(Mpe11Zone::lower(
                 MemberCount::of(3),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-            )
-            .to_mcm(),
+            )),
         ));
         translator.translated(&at(
             0,
-            Mpe11Zone::lower(
+            midi::mcm(Mpe11Zone::lower(
                 MemberCount::of(5),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-            )
-            .to_mcm(),
+            )),
         ));
         translator
     };
@@ -1444,12 +1436,11 @@ fn a_configuration_message_does_nothing_while_the_profile_is_enabled() {
     let mut translator = profiled(0, 4);
     let mcm = at(
         0,
-        Mpe11Zone::lower(
+        midi::mcm(Mpe11Zone::lower(
             MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .to_mcm(),
+        )),
     );
     assert_eq!(
         translator.translated(&mcm).count(),

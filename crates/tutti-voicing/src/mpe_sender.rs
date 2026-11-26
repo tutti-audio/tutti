@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use tutti_midi_protocol::{
-    ControllerSupport, Midi2Translator, MpeExpression, MpeFeatures, MpeLayout,
-    PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
+    ControllerSupport, Midi2Translator, Mpe11Zone, Mpe11Zones, MpeExpression, MpeFeatures,
+    MpeLayout, PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
 };
 use tutti_ump::{
     Address, Attribute, BendValue, CCNumber, ControlValue, GroupSpan, Message, MidiChannel,
@@ -28,13 +28,14 @@ const THIRD_DIMENSION: u8 = CCNumber::BRIGHTNESS.get();
 const OMNI_OFF: u8 = 124;
 
 /// MIDI 2.0 in, MPE out: what an output edge runs for a device that has the
-/// MIDI-CI MPE Profile enabled (M2-120). The inverse of a receiver's MPE
+/// MIDI-CI MPE Profile enabled (M2-120), or that an app configured as MPE 1.1
+/// (M1-100). The inverse of a receiver's MPE
 /// translation, for the MIDI 2.0 and the MIDI 1.0 Protocol alike: its output is
 /// MIDI 2.0 Channel Voice, which a [`Midi1Translator`](tutti_midi_protocol::Midi1Translator)
 /// makes MIDI 1.0.
 ///
 /// A Group with no zone, and a channel in none, passes unchanged. In a zone
-/// ([`set_profile`](Self::set_profile)):
+/// ([`set_profile`](Self::set_profile), [`set_mpe11`](Self::set_mpe11)):
 ///
 /// - **A note takes a Member Channel of its own** while one plays none: the one
 ///   idle longest. With none idle it shares one that does not play its key, if
@@ -60,7 +61,9 @@ const OMNI_OFF: u8 = 124;
 ///   Registered Controller is read as the control it stands for.
 /// - **The bend range** is the widest Per-Note Pitch Bend Sensitivity of the
 ///   zone's source channels, at least the range the zone was set with, whole
-///   semitones up to 96, and is sent on the Manager (section 3.5).
+///   semitones up to 96. A Profile zone is sent it on the Manager (section 3.5);
+///   an MPE 1.1 zone on every Member Channel (M1-100 section 2.2.5), and the
+///   Manager's own range is never sent.
 /// - **Every other message** is sent on the Manager Channel as it is, when the
 ///   Manager is its source (section 4.1). From a Member nothing is sent: it would
 ///   act on one source channel of many, and the zone has one Manager. Its All
@@ -79,7 +82,7 @@ pub struct MpeSender {
     translator: Box<Midi2Translator>,
     /// What each channel of each Group was told, in a zone or not.
     sources: Box<[[Source; CHANNELS]; GROUPS]>,
-    zoned: [Option<Box<Zoned>>; GROUPS],
+    groups: [Group; GROUPS],
 }
 
 impl Default for MpeSender {
@@ -95,7 +98,7 @@ impl MpeSender {
         Self {
             translator: Box::default(),
             sources: Box::new([[Source::DEFAULT; CHANNELS]; GROUPS]),
-            zoned: [const { None }; GROUPS],
+            groups: [const { Group::NONE }; GROUPS],
         }
     }
 
@@ -104,20 +107,88 @@ impl MpeSender {
     /// receiver stops them (M2-120 section 3.3); a zone that stays keeps its
     /// notes, whatever its range, response or features. A zone's bend range is
     /// sent before its first note.
+    ///
+    /// While a Group has Profile zones the MPE 1.1 zones of
+    /// [`set_mpe11`](Self::set_mpe11) are held and not used; once the Profile
+    /// zones go they apply, and their Configuration Messages are sent ahead of
+    /// the next packet fed on the Group. The receiver's MPE 1.1 configuration
+    /// is not known once a Profile was enabled, so each zone is sent one.
     pub fn set_profile(&mut self, group: MidiGroup, zones: Option<ProfileZones>) {
-        let held = &mut self.zoned[group.index()];
-        let Some(zones) = zones else {
-            *held = None;
+        let held = &mut self.groups[group.index()];
+        held.profile = zones;
+        held.unconfirmed |= zones.is_some() && held.configured.is_some();
+        self.apply(group);
+    }
+
+    /// Takes `zones` as the MPE 1.1 zones (M1-100) an app chose for `group`, and
+    /// calls `out` at once with the MPE Configuration Message of each zone that
+    /// starts or changes its Member Channels (section 2.2.1), and with one that
+    /// has no Member Channels for each zone that goes. The notes of a zone that
+    /// went, or whose channels changed, are forgotten, since the receiver ends
+    /// them (section 2.2.3); a zone that stays keeps its notes and is sent no
+    /// message. A zone's Member range is sent before its first note, as a
+    /// Profile zone's is. While the Group has Profile zones
+    /// ([`set_profile`](Self::set_profile)) these zones are held and nothing is
+    /// sent.
+    pub fn set_mpe11(
+        &mut self,
+        group: MidiGroup,
+        zones: Option<Mpe11Zones>,
+        mut out: impl FnMut(Ump),
+    ) {
+        self.groups[group.index()].mpe11 = zones;
+        self.apply(group);
+        self.configure(group, &mut out);
+    }
+
+    /// Takes the zones `group` runs from the zones it was given.
+    fn apply(&mut self, group: MidiGroup) {
+        let sources = &self.sources[group.index()];
+        let held = &mut self.groups[group.index()];
+        match held.zones() {
+            None => held.zoned = None,
+            Some(zones) => held
+                .zoned
+                .get_or_insert_with(|| Box::new(Zoned::new(zones)))
+                .set(zones, sources),
+        }
+    }
+
+    /// The receiver of `group` may not hold the MPE 1.1 zones it was sent (a
+    /// Configuration Message the device refused): ahead of the next packet fed
+    /// on the Group each side is sent its zone again, or no zone, and the
+    /// notes of the Group's zones are forgotten, since the receiver ends them
+    /// (M1-100 section 2.2.3).
+    pub fn resend_configuration(&mut self, group: MidiGroup) {
+        self.groups[group.index()].unconfirmed = true;
+    }
+
+    /// Calls `out` with the MPE Configuration Messages that take what the
+    /// receiver of `group` was configured with to the MPE 1.1 zones in use.
+    /// Nothing is sent while the Group has Profile zones.
+    fn configure(&mut self, group: MidiGroup, out: &mut impl FnMut(Ump)) {
+        let held = &mut self.groups[group.index()];
+        if held.profile.is_some() {
             return;
-        };
-        held.get_or_insert_with(|| Box::new(Zoned::new(zones)))
-            .set(zones, &self.sources[group.index()]);
+        }
+        let wanted = held.mpe11;
+        let unconfirmed = core::mem::take(&mut held.unconfirmed);
+        if unconfirmed {
+            Mpe11Zones::full_configuration(wanted, group).for_each(out);
+            held.zoned = None;
+        } else {
+            Mpe11Zones::configuration(held.configured, wanted, group).for_each(out);
+        }
+        held.configured = wanted;
+        if unconfirmed {
+            self.apply(group);
+        }
     }
 
     /// The receiver may hold other values than it was told: each Member is told
     /// its own again at its next change or note, and each zone its bend range.
     pub fn resend(&mut self) {
-        for zoned in self.zoned.iter_mut().flatten() {
+        for zoned in self.groups.iter_mut().filter_map(|g| g.zoned.as_mut()) {
             zoned.resend();
         }
     }
@@ -142,19 +213,147 @@ impl MpeSender {
             Some(Ok(Message::Midi2(_, voice))) => Some(voice),
             _ => None,
         };
+        self.configure(address.group, &mut out);
         let sources = &mut self.sources[address.group.index()];
         let source = &mut sources[address.channel.index()];
         let meant = meant.map(|voice| MpeExpression::to_control_change(source.absolute(voice)));
         if let Some(voice) = meant {
             source.observe(voice);
         }
-        let zoned = self.zoned[address.group.index()].as_mut();
+        let zoned = self.groups[address.group.index()].zoned.as_mut();
         let Some((zone, zoned)) = zoned.and_then(|z| Some((z.zone_of(address.channel)?, z))) else {
             out(packet);
             return true;
         };
         let mut send = sender(address.group, &mut out);
         meant.is_none_or(|voice| zoned.route(&zone, sources, address.channel, voice, &mut send))
+    }
+}
+
+/// What one Group was given and runs.
+#[derive(Clone, Debug)]
+struct Group {
+    /// The MPE Profile zones a device enabled, which take precedence.
+    profile: Option<ProfileZones>,
+    /// The MPE 1.1 zones an app chose.
+    mpe11: Option<Mpe11Zones>,
+    /// The MPE 1.1 zones the receiver was sent Configuration Messages for.
+    configured: Option<Mpe11Zones>,
+    /// The receiver may not hold `configured`: the next configuration tells
+    /// each side what it is.
+    unconfirmed: bool,
+    /// What plays in the zones in use, if there are any.
+    zoned: Option<Box<Zoned>>,
+}
+
+impl Group {
+    const NONE: Self = Self {
+        profile: None,
+        mpe11: None,
+        configured: None,
+        unconfirmed: false,
+        zoned: None,
+    };
+
+    /// The zones in use: the Profile's, else the MPE 1.1 ones.
+    fn zones(&self) -> Option<Zones> {
+        match (self.profile, self.mpe11) {
+            (Some(zones), _) => Some(Zones::new(zones.zones().map(Zone::from))),
+            (None, Some(zones)) => Some(Zones::new(zones.zones().map(Zone::from))),
+            (None, None) => None,
+        }
+    }
+}
+
+/// How a zone was configured, which decides where its bend range goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// By the MPE Profile: the one range of the zone is sent on the Manager
+    /// (M2-120 section 3.5).
+    Profile,
+    /// By an MPE Configuration Message: the range is the Members', sent on
+    /// each Member Channel (M1-100 section 2.2.5).
+    Mpe11,
+}
+
+/// A zone of either kind, as the sender runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Zone {
+    kind: Kind,
+    layout: MpeLayout,
+    /// The bend range the zone starts with.
+    range: PitchBendSensitivity,
+    /// What its receiver declared.
+    features: MpeFeatures,
+}
+
+impl From<&ProfileZone> for Zone {
+    fn from(zone: &ProfileZone) -> Self {
+        Self {
+            kind: Kind::Profile,
+            layout: zone.layout(),
+            range: zone.range(),
+            features: zone.features(),
+        }
+    }
+}
+
+impl From<&Mpe11Zone> for Zone {
+    /// MPE 1.1 has no Pitch Bend, Channel Pressure or third dimension forms
+    /// to declare: the zone has the default features.
+    fn from(zone: &Mpe11Zone) -> Self {
+        Self {
+            kind: Kind::Mpe11,
+            layout: zone.layout(),
+            range: zone.member_range(),
+            features: MpeFeatures::default(),
+        }
+    }
+}
+
+impl Zone {
+    /// The Manager Channel (MPE 1.1's Master).
+    fn manager(&self) -> MidiChannel {
+        self.layout.master_channel()
+    }
+
+    /// What a zone keeps its notes by: another range or other features do not
+    /// stop them (M2-120 section 3.3, M1-100 section 2.2.3).
+    fn channels(&self) -> (Kind, MpeLayout) {
+        (self.kind, self.layout)
+    }
+
+    /// The channels the zone's bend range is sent on.
+    fn range_channels(&self) -> impl Iterator<Item = MidiChannel> {
+        let manager = (self.kind == Kind::Profile).then(|| self.manager());
+        let members = self
+            .layout
+            .member_channels()
+            .filter(|_| self.kind == Kind::Mpe11);
+        manager.into_iter().chain(members)
+    }
+}
+
+/// The zone each channel of a Group is in.
+#[derive(Clone, Copy, Debug)]
+struct Zones([Option<Zone>; CHANNELS]);
+
+impl Zones {
+    fn new(zones: impl Iterator<Item = Zone>) -> Self {
+        let mut by_channel = [None; CHANNELS];
+        for zone in zones {
+            let layout = zone.layout;
+            let channels =
+                core::iter::once(layout.master_channel()).chain(layout.member_channels());
+            for channel in channels {
+                by_channel[channel.index()] = Some(zone);
+            }
+        }
+        Self(by_channel)
+    }
+
+    fn of(&self, channel: MidiChannel) -> Option<&Zone> {
+        self.0[channel.index()].as_ref()
     }
 }
 
@@ -394,7 +593,7 @@ impl Member {
 /// One Group's zones and what plays in them.
 #[derive(Clone, Debug)]
 struct Zoned {
-    zones: ProfileZones,
+    zones: Zones,
     /// The bend range each zone's receiver was sent, by Manager Channel.
     ranges: [Option<Range>; CHANNELS],
     members: [Member; CHANNELS],
@@ -404,7 +603,7 @@ struct Zoned {
 }
 
 impl Zoned {
-    fn new(zones: ProfileZones) -> Self {
+    fn new(zones: Zones) -> Self {
         Self {
             zones,
             ranges: [None; CHANNELS],
@@ -420,18 +619,18 @@ impl Zoned {
 
     /// Takes `zones`, and what the channels were told outside a zone. The notes of a
     /// zone whose channels changed are forgotten.
-    fn set(&mut self, zones: ProfileZones, sources: &[Source; CHANNELS]) {
+    fn set(&mut self, zones: Zones, sources: &[Source; CHANNELS]) {
         let had = core::mem::replace(&mut self.zones, zones);
-        // A zone is the same while it has its channels: another range, response
-        // or set of features does not stop its notes (section 3.3).
-        let span = |zones: &ProfileZones, channel| zones.zone_of(channel).map(ProfileZone::span);
-        let changed = |channel| span(&had, channel) != span(&zones, channel);
+        // A zone is the same while it has its channels: another range or set of
+        // features does not stop its notes.
+        let channels = |zones: &Zones, channel| zones.of(channel).map(Zone::channels);
+        let changed = |channel| channels(&had, channel) != channels(&zones, channel);
         while self.end(|n| changed(n.source)).is_some() {}
         for channel in MidiChannel::all() {
             if changed(channel) {
                 self.ranges[channel.index()] = None;
                 self.members[channel.index()] = Member::IDLE;
-            } else if had.zone_of(channel) != zones.zone_of(channel) {
+            } else if had.of(channel) != zones.of(channel) {
                 // Another range or other forms: the zone's notes are told again in
                 // them at its next event.
                 self.ranges[channel.index()] = None;
@@ -458,22 +657,22 @@ impl Zoned {
     }
 
     /// The zone `channel` is in.
-    fn zone_of(&self, channel: MidiChannel) -> Option<ProfileZone> {
-        self.zones.zone_of(channel).copied()
+    fn zone_of(&self, channel: MidiChannel) -> Option<Zone> {
+        self.zones.of(channel).copied()
     }
 
-    /// The bend range of `zone`, which its sources need, sent on its Manager when
-    /// the receiver has another.
+    /// The bend range of `zone`, which its sources need, sent on the channels
+    /// that take it when the receiver has another.
     fn fit_range(
         &mut self,
-        zone: &ProfileZone,
+        zone: &Zone,
         sources: &[Source; CHANNELS],
         send: &mut impl FnMut(MidiChannel, Voice2),
     ) -> Range {
         let range = MidiChannel::all()
             .filter(|c| self.zone_of(*c) == Some(*zone))
             .map(|c| Range::covering(sources[c.index()].note_range))
-            .fold(Range::covering(zone.range()), Range::max);
+            .fold(Range::covering(zone.range), Range::max);
         let held = &mut self.ranges[zone.manager().index()];
         if held.replace(range) != Some(range) {
             let data = range.sensitivity().to_channel_data();
@@ -481,7 +680,9 @@ impl Zoned {
                 Rpn::PITCH_BEND_SENSITIVITY,
                 ControlValue::new(data.to_word()),
             );
-            send(zone.manager(), voice);
+            for channel in zone.range_channels() {
+                send(channel, voice);
+            }
         }
         range
     }
@@ -490,13 +691,13 @@ impl Zoned {
     /// like, where it is not what they hold.
     fn tell(
         &mut self,
-        zone: &ProfileZone,
+        zone: &Zone,
         sources: &[Source; CHANNELS],
         changed: impl Fn(&Note) -> bool,
         send: &mut impl FnMut(MidiChannel, Voice2),
     ) {
         let zones = self.zones;
-        let told = |note: &Note| zones.zone_of(note.source) == Some(zone) && changed(note);
+        let told = |note: &Note| zones.of(note.source) == Some(zone) && changed(note);
         if !self.notes.iter().any(told) {
             return;
         }
@@ -504,12 +705,12 @@ impl Zoned {
         let range = self.fit_range(zone, sources, send);
         // A range the receiver did not hold moves every note of the zone.
         let moved = held != Some(range);
-        let told = |note: &Note| told(note) || (moved && zones.zone_of(note.source) == Some(zone));
+        let told = |note: &Note| told(note) || (moved && zones.of(note.source) == Some(zone));
         for note in &self.notes {
             if told(note) {
                 let expression = note.expression(&sources[note.source.index()], range);
                 let member = &mut self.members[note.member.index()];
-                member.tell(note.member, expression, zone.features(), send);
+                member.tell(note.member, expression, zone.features, send);
             }
         }
     }
@@ -544,7 +745,7 @@ impl Zoned {
     /// Sends what `voice` of `source` becomes, and returns whether MPE carries it.
     fn route(
         &mut self,
-        zone: &ProfileZone,
+        zone: &Zone,
         sources: &[Source; CHANNELS],
         source: MidiChannel,
         voice: Voice2,
@@ -615,10 +816,7 @@ impl Zoned {
                     // The receiver ends the notes of the whole zone.
                     send(source, voice);
                     let zones = self.zones;
-                    while self
-                        .end(|n| zones.zone_of(n.source) == Some(zone))
-                        .is_some()
-                    {}
+                    while self.end(|n| zones.of(n.source) == Some(zone)).is_some() {}
                 }
                 CCNumber::ALL_SOUND_OFF | CCNumber::ALL_NOTES_OFF => {
                     while let Some(note) = self.end(|n| n.source == source) {
@@ -640,7 +838,7 @@ impl Zoned {
     /// sent ahead of it, and returns the Member.
     fn start(
         &mut self,
-        zone: &ProfileZone,
+        zone: &Zone,
         sources: &[Source; CHANNELS],
         at: (MidiChannel, NoteNumber),
         voice: Voice2,
@@ -654,7 +852,7 @@ impl Zoned {
         if let Some(note) = again {
             send(note.member, off(key));
         }
-        let member = again.map_or_else(|| self.pick(&zone.layout(), key), |note| note.member);
+        let member = again.map_or_else(|| self.pick(&zone.layout, key), |note| note.member);
         for event in self.per_note.step(Address::first(source), voice) {
             match *event {
                 NoteEvent::Started { id, .. } => self.notes.push(Note {
@@ -688,7 +886,7 @@ impl Zoned {
     /// Reset All Controllers (RP-015) of `source`, which [`Source`] has read.
     fn reset_controllers(
         &mut self,
-        zone: &ProfileZone,
+        zone: &Zone,
         sources: &[Source; CHANNELS],
         source: MidiChannel,
         voice: Voice2,
@@ -700,7 +898,7 @@ impl Zoned {
         if source == zone.manager() {
             send(source, voice);
             // The receiver reset the bend and pressure of the whole zone.
-            for member in zone.layout().member_channels() {
+            for member in zone.layout.member_channels() {
                 let member = &mut self.members[member.index()];
                 member.bend = Some(BendValue::CENTER);
                 member.pressure = Some(ControlValue::MIN);

@@ -465,3 +465,38 @@ fn the_events_with_no_wire_form_are_counted_in_the_events_taken() {
     );
     assert_eq!(wire.unrepresentable_in(0), Losses::NONE);
 }
+
+/// **An MPE 1.1 zone the app chose reaches the device as its MPE Configuration
+/// Message** (M1-100 section 2.2.1): in MIDI 2.0 the Registered Controller 0/6 on
+/// the zone's Master, in MIDI 1.0 CC 101 = 0, CC 100 = 6, CC 6 = the Member
+/// count and CC 38 = 0 (the LSB of the data has no function, and Appendix D.2.3
+/// sends it).
+/// Spec: m2-104/d.4.2#1
+#[test]
+fn an_mpe11_zone_is_the_mcm_in_either_protocol() {
+    use tutti_midi_protocol::{MemberCount, Mpe11Zone, Mpe11Zones, PitchBendSensitivity};
+    let zones = Mpe11Zones::single(Mpe11Zone::upper(
+        MemberCount::of(5),
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+    ));
+    for (config, kind) in [
+        (MIDI2, MessageType::Midi2ChannelVoice),
+        (MIDI1, MessageType::Midi1ChannelVoice),
+    ] {
+        let mut wire = Wire::new(config);
+        let messages = wire.set_mpe11(MidiGroup::FIRST, Some(zones));
+        let out = convert(&mut wire, &messages);
+        assert!(out.iter().all(|u| u.message_type() == kind), "{out:?}");
+        if config == MIDI2 {
+            assert_eq!(out, [Ump([0x402F_0006, 5 << 25, 0, 0])]);
+        } else {
+            assert_eq!(controls(&out), [(101, 0), (100, 6), (6, 5), (38, 0)]);
+            assert!(out.iter().all(|u| (u.words()[0] >> 16) & 0xF == 15));
+        }
+        assert_eq!(
+            wire.set_mpe11(MidiGroup::FIRST, None),
+            [Ump([0x402F_0006, 0, 0, 0])]
+        );
+    }
+}
