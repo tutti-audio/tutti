@@ -330,7 +330,7 @@ pub use additive::{AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet};
 pub use fm::{FmConfig, FmKernel, FmNode, FmSet};
 
 mod granular;
-pub use granular::{GranularConfig, GranularError, GranularNode};
+pub use granular::{GranularConfig, GranularError, GranularNode, GranularSource};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
 

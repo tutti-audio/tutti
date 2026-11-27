@@ -228,7 +228,7 @@ fn each_node_declares_its_shape() {
         }),
         ("polarity", || {
             check(
-                prepared(PolarityNode::try_from(PolarityConfig::new(3u16)).unwrap()),
+                prepared(PolarityNode::from(PolarityConfig::all(3u16).unwrap())),
                 Facts::default().io(3, 3).cost(Cost::Light).tail(Tail::None),
             )
         }),

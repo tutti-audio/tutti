@@ -2,37 +2,46 @@
 //! at, a change of values keeps the structure, and a change of structure does not.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-use tutti_buffers::{AmbisonicOrder, ChannelLayout, ChannelTopology};
+use tutti_buffers::{
+    AmbisonicOrder, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave,
+};
 use tutti_dsp::{
     Algorithm, ButterworthOrder, ClipperDrive, CombDelay, CombForm, CompressorControls,
     CrossoverControls, CutAlignment, CutResponse, DynamicMode, FdnControls, FdnLayout, FmPatch,
     FreeverbControls, FreezeControls, GateControls, GraphicBands, HarmonicNormalization, HopSize,
-    HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType, LimiterControls,
-    Lookahead, LowestPitch, MaxDecay, ModDelayControls, Mode, Modes, OperatorCount,
-    OperatorFrequency, OperatorSpec, OscillatorWave, OversamplingFactor, PanLaw, Partial, Partials,
-    PeakDetection, PhaserControls, ReferenceDistance, ShapeKind, ShimmerControls, ShimmerLayout,
-    SpringLength, SpringStages, Stages, Tap, TapSet, TubeDrive, VelvetDensity, Waveshape,
+    HrirSphere, HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType,
+    LimiterControls, Lookahead, LowestPitch, MaxDecay, MaxGrains, ModDelayControls, Mode, Modes,
+    OperatorCount, OperatorFrequency, OperatorSpec, OscillatorWave, OversamplingFactor, PanLaw,
+    Partial, Partials, PeakDetection, PhaserControls, ReferenceDistance, ShapeKind,
+    ShimmerControls, ShimmerLayout, SpringLength, SpringStages, Stages, Tap, TapSet, TubeDrive,
+    VelvetDensity, Waveshape, Wavetable,
 };
 use tutti_graph::{HostValues, IntoNode, NodeConfig, ParamSet};
 use tutti_nodes::{
     AdditiveConfig, AmbisonicEncoderConfig, AmbisonicRotatorConfig, AutoPanConfig,
-    BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, CombFilterConfig, CompressorConfig,
-    CrossoverConfig, CutFilterConfig, DcBlockerConfig, DecorrelatorConfig, DelayConfig,
-    DelayControls, DelayLayout, DelaySync, DiodeClipperConfig, DistanceConfig, DistortionConfig,
-    DynamicEqConfig, EarlyReflectionsConfig, EnvelopeFilterConfig, FdnConfig, FdnNodeControls,
-    FmConfig, FreeverbConfig, FrequencyShifterConfig, GateConfig, GraphicEqConfig,
-    HysteresisConfig, InterpolationMode, KarplusStrongConfig, LadderFilterConfig, LevellerConfig,
-    LimiterConfig, MaxDelay, ModDelayConfig, ModalBankConfig, PhaserConfig, PitchShifterConfig,
-    PlateReverbConfig, RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger,
-    StereoWidthConfig, SvfFilterConfig, SvfType, SweepRange, TiltFilterConfig,
-    TransientShaperConfig, TremoloConfig, TubeStageConfig, WaveguideStringConfig,
+    BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, ClickNodeConfig, ClickSettings,
+    CombFilterConfig, CompressorConfig, CrossoverConfig, CutFilterConfig, DcBlockerConfig,
+    DecorrelatorConfig, DelayConfig, DelayControls, DelayLayout, DelaySync, DiodeClipperConfig,
+    DistanceConfig, DistortionConfig, DynamicEqConfig, EarlyReflectionsConfig,
+    EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FmConfig, FreeverbConfig,
+    FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource, GraphicEqConfig,
+    HrtfBinauralConfig, HysteresisConfig, InterpolationMode, KarplusStrongConfig,
+    LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay, MidSideConfig, ModDelayConfig,
+    ModalBankConfig, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
+    RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger, StereoWidthConfig, SvfFilterConfig,
+    SvfType, SweepRange, TiltFilterConfig, TransientShaperConfig, TremoloConfig, TubeStageConfig,
+    WaveguideStringConfig, WavetableConfig,
 };
 use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, Bipolar, BitDepth, Cents, CompressionRatio, Db, Direction,
     Drive, Elevation, Feedback, FrequencyRatio, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex,
-    Normalized, Q, Resonance, SampleSpan, Samples, Seconds, Semitones, Speed, StereoWidth,
+    Normalized, Q, Resonance, SampleRate, SampleSpan, Samples, Seconds, Semitones, Speed,
+    StereoWidth,
 };
+
+use tutti_fixtures::hrir::synthetic_hrir_sphere;
 
 /// One config's row: `base`, a variant `values` that moves every value it has (each
 /// param and each kinded setting; `None` for a config that holds none), and variants that
@@ -113,6 +122,31 @@ where
         assert!(
             !other.same_structure(base),
             "{name}: structure variant {k} (reversed)"
+        );
+    }
+}
+
+/// A node with no param and no kinded setting: its config lists no initial value, is its own
+/// structure, and each variant is a new node.
+fn check_plain<C>(name: &str, base: &C, structures: &[C])
+where
+    C: NodeConfig<f64> + Debug,
+{
+    let initials = base.initials();
+    assert!(
+        initials.params().is_empty() && initials.settings().is_empty(),
+        "{name}: lists no initial value"
+    );
+    let parts = base.build(&HostValues::new()).into_parts();
+    assert!(parts.settings.is_empty(), "{name}: the node has no setting");
+    assert!(
+        base.same_structure(&base.clone()),
+        "{name}: a config is its own structure"
+    );
+    for (k, other) in structures.iter().enumerate() {
+        assert!(
+            !base.same_structure(other) && !other.same_structure(base),
+            "{name}: structure variant {k} is a new node"
         );
     }
 }
@@ -782,5 +816,95 @@ fn each_config_lists_its_values_and_compares_its_structure() {
             // The roll is fixed for the life of the node, not a param: structure.
             rotator.roll(ArcDegrees::new(45.0)),
         ],
+    );
+
+    // Hand configs: no params, so the whole config is structure.
+    check_plain(
+        "mid/side",
+        &MidSideConfig::encode(),
+        &[MidSideConfig::decode()],
+    );
+    check_plain(
+        "polarity",
+        &PolarityConfig::only(stereo(), [ChannelIndex::of(1)]).unwrap(),
+        &[
+            PolarityConfig::all(stereo()).unwrap(),
+            PolarityConfig::only(stereo(), [ChannelIndex::of(0)]).unwrap(),
+            PolarityConfig::only(4u16, [ChannelIndex::of(1)]).unwrap(),
+        ],
+    );
+    check_plain(
+        "click",
+        &ClickNodeConfig::new(Arc::new(ClickSettings::new())),
+        &[ClickNodeConfig::new(Arc::new(ClickSettings::new()))],
+    );
+    let band = EqBandConfig::new(SvfType::Bell);
+    check(
+        "eq band",
+        &band,
+        Some(&band.freq(Hz::new(440.0)).q(Q::new(2.0)).gain(Db::new(-3.0))),
+        &[EqBandConfig::new(SvfType::LowShelf)],
+    );
+
+    // Assets: equal by identity, so a loaded again resource is a new node.
+    let wave = |frames: usize| {
+        let mut wave = Wave::<f64>::new(1, SampleRate::SR_48K);
+        wave.append(Interleaved::new(&vec![0.5; frames], ChannelLayout::MONO).unwrap())
+            .unwrap();
+        Arc::new(wave)
+    };
+    let source = wave(64);
+    let granular = GranularConfig::new(GranularSource::new(mono(), Arc::clone(&source)).unwrap());
+    check(
+        "granular",
+        &granular,
+        Some(
+            &granular
+                .clone()
+                .density(Hz::new(20.0))
+                .rate(Cents::new(100.0))
+                .length(Seconds::new(0.05))
+                .jitter([Normalized::of(0.25), Normalized::of(0.5)])
+                .position(Normalized::of(0.5)),
+        ),
+        &[
+            GranularConfig::new(GranularSource::new(mono(), wave(64)).unwrap()),
+            GranularConfig::new(GranularSource::new(stereo(), Arc::clone(&source)).unwrap()),
+            granular.clone().max_grains(MaxGrains::of(8)),
+            granular.clone().seed(1),
+        ],
+    );
+    let frame = [0.25_f64; 16];
+    let table = Wavetable::new(&[Mono::new(&frame)]).unwrap();
+    let wavetable = WavetableConfig::new(mono(), Arc::clone(&table));
+    check(
+        "wavetable",
+        &wavetable,
+        Some(
+            &wavetable
+                .clone()
+                .frequency(Hz::new(220.0))
+                .level(Amplitude::new(0.5))
+                .position(Normalized::of(0.5)),
+        ),
+        &[
+            WavetableConfig::new(mono(), Wavetable::new(&[Mono::new(&frame)]).unwrap()),
+            WavetableConfig::new(stereo(), table),
+        ],
+    );
+    let sphere = |rate| Arc::new(HrirSphere::from_bytes(&synthetic_hrir_sphere(rate, 64)).unwrap());
+    let first = sphere(48_000);
+    let hrtf = HrtfBinauralConfig::new(Arc::clone(&first));
+    check(
+        "hrtf",
+        &hrtf,
+        Some(
+            &hrtf
+                .clone()
+                .azimuth(Azimuth::new(45.0))
+                .elevation(Elevation::new(10.0))
+                .blend(Mix::new(0.5)),
+        ),
+        &[HrtfBinauralConfig::new(sphere(48_000))],
     );
 }
