@@ -68,3 +68,38 @@ fn a_change_is_present_or_gone_under_the_endpoints_id() {
         OsChange::Gone(device.handle)
     );
 }
+
+/// **A change buffered after the list was read is applied after it**: an endpoint the list
+/// has that a buffered `Removed` follows ends gone, one a buffered `Added` follows ends
+/// present, and a change that only repeats the list changes nothing.
+#[test]
+fn buffered_changes_apply_in_order_after_the_list() {
+    use tutti_midi_device::DeviceTable;
+    let (x, y, z) = (r"\\?\a", r"\\?\b", r"\\?\c");
+    let mut table = DeviceTable::default();
+    for path in [x, y] {
+        let OsChange::Present(device) = change_of(Change::Added(endpoint(path))) else {
+            unreachable!("an added endpoint is present");
+        };
+        table.apply(OsChange::Present(device));
+    }
+    let buffered = vec![
+        Ok(Change::Added(endpoint(x))),
+        Ok(Change::Removed(y.to_owned())),
+        Ok(Change::Added(endpoint(z))),
+        Err(Error::WatcherStopped),
+        Ok(Change::Removed(x.to_owned())),
+    ];
+    let (changes, error) = super::watch::replayed(buffered);
+    assert_eq!(error, Some(Error::WatcherStopped));
+    for change in changes {
+        table.apply(change);
+    }
+    let left: Vec<_> = table.list().map(|d| d.name.clone()).collect();
+    assert_eq!(left.len(), 2, "x and z remain, y is gone: {left:?}");
+    assert!(
+        table
+            .list()
+            .all(|d| d.id.to_string().contains(x) || d.id.to_string().contains(z))
+    );
+}
