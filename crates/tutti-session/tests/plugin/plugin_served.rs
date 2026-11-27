@@ -1004,8 +1004,8 @@ fn block_on_save(save: SaveState) -> PeerState {
 /// `pending`, and a restore of a save with writes pending replays them through
 /// the session's ledger once the state has loaded.** No block runs for the
 /// first save (the node has no output), so the write is the host's alone; the
-/// restore is of a state that does not hold a value and names it pending, and
-/// the plugin holds that value once a block has run.
+/// restore is of a state holding 0.9 that names 0.2 pending, and the plugin
+/// holds 0.2 once a block has run.
 #[test]
 fn a_served_save_states_a_pending_write_and_a_restore_replays_it() {
     const CUTOFF: ParamId = ParamId::new(101);
@@ -1040,11 +1040,10 @@ fn a_served_save_states_a_pending_write_and_a_restore_replays_it() {
 
     // A state that holds the plugin's own value, with another write pending.
     s.graph().connect(node, tutti_session::MainOutput).unwrap();
-    for _ in 0..4 {
-        let _ = pump(&mut s);
-    }
+    pump_until(&mut s, "blocks apply the write", |s| {
+        (own(&save(s)) - 0.9).abs() < 1e-4
+    });
     let held = save(&s);
-    assert!((own(&held) - 0.9).abs() < 1e-4, "blocks applied the write");
     assert!(held.pending().is_empty(), "so nothing is pending");
     let stated =
         tutti_session::Saved::with_pending(held.into_state(), vec![(CUTOFF, Normalized::of(0.2))]);
