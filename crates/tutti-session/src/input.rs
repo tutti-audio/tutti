@@ -246,8 +246,6 @@ pub(crate) struct Inputs<F: SessionFloat> {
     /// Where the output stream's callback reports its delay, once the session
     /// has a device ([`Device::latency`](crate::Device::latency)'s `output`).
     output_latency: Option<Arc<StreamLatency>>,
-    /// Names the takes begun and carries what they report.
-    takes: crate::take::Takes,
 }
 
 impl<F: SessionFloat> std::fmt::Debug for Inputs<F> {
@@ -284,7 +282,6 @@ impl<F: SessionFloat> Inputs<F> {
             ),
             held: Vec::new(),
             output_latency: None,
-            takes: crate::take::Takes::new(),
         }
     }
 
@@ -317,16 +314,6 @@ impl<F: SessionFloat> Inputs<F> {
     /// What a take reads the device's delay through.
     pub(crate) fn latency_probe(&self) -> crate::take::LatencyProbe {
         crate::take::LatencyProbe::new(Arc::clone(&self.latency), self.output_latency.clone())
-    }
-
-    /// The takes' numbering and report channel.
-    pub(crate) fn takes(&self) -> &crate::take::Takes {
-        &self.takes
-    }
-
-    /// Lands what the takes' pumps reported since the last update, in the order sent.
-    pub(crate) fn land_takes(&mut self, out: &mut Vec<crate::SessionEvent>) {
-        self.takes.land(out);
     }
 
     /// The cell the capture callbacks report into.

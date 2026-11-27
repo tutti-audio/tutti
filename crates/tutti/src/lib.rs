@@ -234,7 +234,7 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, ToMemory,
-    Written,
+    ToSink, Written,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -248,9 +248,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
-pub use tutti_session::{
-    Input, InputConfig, Punch, Record, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
-};
+pub use tutti_session::{Finishing, Input, InputConfig, Punch, Record, Recorded, Take, TakeError};
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
