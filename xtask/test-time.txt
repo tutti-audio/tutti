@@ -16,7 +16,6 @@
 0 2 crates/tutti-midi-hardware/tests/input/listener.rs
 0 1 crates/tutti-midi-hardware/tests/input/virtual_endpoint.rs
 0 1 crates/tutti-midi-hardware/tests/input/virtual_loopback.rs
-2 1 crates/tutti-midi-hardware/tests/winmm/synth_open.rs
 0 5 crates/tutti-plugin-ipc/src/client/hostile_peer_tests.rs
 0 3 crates/tutti-rt/tests/spin_starvation.rs
 1 3 crates/tutti-sampler/src/streamer/contained.rs
