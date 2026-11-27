@@ -41,13 +41,16 @@ fn pair(send_to: Loopback) -> Pair {
     let session = Session::create(name).expect("a session");
     let (tx, received) = channel();
     let receiver = session
-        .connect(&receive_on.id, move |at, ump| {
-            // The test may have ended: a send to a dropped receiver is the end.
-            let _ = tx.send((at, ump));
+        .connect(&receive_on.id, move |received| {
+            // The test may have ended: a send to a dropped receiver is the end. A message
+            // that cannot be read is no message, and the test then waits in vain for it.
+            if let Ok(received) = received {
+                let _ = tx.send(received);
+            }
         })
         .expect("a connection to the receiving loopback endpoint");
     let sender = session
-        .connect(&send_to.id, |_, _| {})
+        .connect(&send_to.id, |_| {})
         .expect("a connection to the sending loopback endpoint");
     Pair {
         session,
@@ -180,16 +183,18 @@ fn a_panicking_handler_does_not_stop_later_messages() {
     let (tx, received) = channel();
     let mut first = true;
     let _receiver = session
-        .connect(&receive_on.id, move |_, ump| {
+        .connect(&receive_on.id, move |received| {
             assert!(
                 !std::mem::take(&mut first),
                 "the handler's first message panics"
             );
-            let _ = tx.send(ump);
+            if let Ok((_, ump)) = received {
+                let _ = tx.send(ump);
+            }
         })
         .expect("a connection to the receiving loopback endpoint");
     let sender = session
-        .connect(&send_to.id, |_, _| {})
+        .connect(&send_to.id, |_| {})
         .expect("a connection to the sending loopback endpoint");
     let (one, two) = (
         Ump([0x4090_3C00, 0x8000_0000, 0, 0]),

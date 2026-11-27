@@ -41,7 +41,9 @@ pub struct PortInfo {
     /// the driver's thread, not queued.
     pub active: bool,
     /// What the port lost since it opened: `lost` counts the UMP Stream
-    /// messages its stream ring had no room for, and `late` the JR Clock
+    /// messages its stream ring had no room for and the events the driver
+    /// delivered that could not be read
+    /// ([`InputProducerHandle::count_lost`](crate::InputProducerHandle::count_lost)), and `late` the JR Clock
     /// messages ignored as late (reordered, repeated, or from a clock that
     /// stepped back), counted only while the port is timed by the device's JR
     /// Timestamps.

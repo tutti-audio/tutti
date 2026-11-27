@@ -382,6 +382,32 @@ fn a_winmm_interface_path_resolves_exactly_and_a_name_only_by_name() {
     assert_eq!(table.resolve(&by_name), Resolved::SameName(by_name.clone()));
 }
 
+/// A Windows MIDI Services endpoint is named by its device interface path, so a saved id
+/// resolves exactly to the one endpoint that has it, of either direction.
+#[test]
+fn a_midi_services_endpoint_resolves_exactly_by_its_device_id() {
+    let mut table = DeviceTable::default();
+    let on = |n, id: &str, direction| OsDevice {
+        handle: handle(n),
+        identity: OsEndpointIdentity::MidiServices(id.into()),
+        name: "Loopback".into(),
+        direction,
+    };
+    let one = added(table.apply(OsChange::Present(on(
+        1,
+        "\\\\?\\swd#midisrv#a",
+        PortDirection::Duplex,
+    ))));
+    let other = added(table.apply(OsChange::Present(on(
+        2,
+        "\\\\?\\swd#midisrv#b",
+        PortDirection::Duplex,
+    ))));
+    assert_eq!(table.resolve(&one), Resolved::Exact(one.clone()));
+    assert_eq!(table.resolve(&other), Resolved::Exact(other.clone()));
+    assert_ne!(one.id, other.id);
+}
+
 /// An input and an output of one WinMM unit share a name and driver ids, so
 /// each is told by its direction: neither takes the other's ordinal.
 #[test]

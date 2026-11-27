@@ -205,11 +205,12 @@ jobs:
         run: cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
       # The winmm MIDI backend against the runner's own winmm: no MIDI input,
       # and the built-in GS Wavetable Synth listed. Only these two crates, so
-      # the build is the two and their dependencies.
+      # the build is the two and their dependencies. `winmm` replaces the default Windows MIDI
+      # Services backend, which `--no-default-features` leaves out (its dependency would be unused).
       # `synth-tests` opens the synth, which needs an audio endpoint the runner lacks: the
       # script installs the VB-Audio virtual cable (a pinned download, WHQL-signed).
       - name: MIDI synth lint
-        run: cargo clippy --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets -- -D warnings
+        run: cargo clippy --locked -p tutti-winmm-ffi -p tutti-midi-hardware --no-default-features --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets -- -D warnings
       # Keyed by the pin in the script, so a vendor swap breaks only a cold cache.
       - uses: actions/cache@v6
         with:
@@ -222,7 +223,7 @@ jobs:
       - uses: taiki-e/install-action@nextest
       # The features add suites to the default ones, so this is every test of the two crates.
       - name: MIDI backend tests
-        run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests
+        run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware --no-default-features --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests
       # The Windows side of the plugin transport: the mapping, the header, the exit watch, and the control
       # framing over named pipes, and the spawn's handle list, job and command line, whose children are the
       # ffi test binary run again. Neither suite spawns a server.
@@ -233,7 +234,8 @@ jobs:
   # the service (the Server images do not; `MidiSrv` is installed there and `EnsureServiceAvailable` starts it).
   # The API's DLL is not in the box yet: the job downloads Microsoft's preview package, checks its hash, and puts the
   # arm64 DLL beside the test binaries, where the loader finds it. The package is the one `cargo xtask
-  # winmidi2-bindings` generates from. A missing service or DLL fails the tests by name.
+  # winmidi2-bindings` generates from. A missing service or DLL fails the tests by name. The job runs the tests of
+  # `tutti-winmidi2-ffi` and of `tutti-midi-hardware`, whose default Windows backend is MIDI Services.
   midi-services:
     name: midi services (windows arm64)
     needs: changes
@@ -248,9 +250,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - name: Lint
-        run: cargo clippy --locked -p tutti-winmidi2-ffi --features services-tests --all-targets -- -D warnings
+        run: cargo clippy --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests --all-targets -- -D warnings
       - name: Build the tests
-        run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests --no-run
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests --no-run
       - name: Windows MIDI Services API
         shell: pwsh
         env:
@@ -270,7 +272,7 @@ jobs:
             $entry = $zip.GetEntry('runtimes/win-arm64/native/Windows.Devices.Midi2.dll')
             if (-not $entry) { throw 'the package has no arm64 DLL' }
             # The loader looks beside each executable: nextest names every test binary it runs.
-            $list = cargo nextest list --locked -p tutti-winmidi2-ffi --features services-tests --list-type binaries-only --message-format json | ConvertFrom-Json
+            $list = cargo nextest list --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests --list-type binaries-only --message-format json | ConvertFrom-Json
             $dirs = @($list.'rust-binaries'.PSObject.Properties.Value | ForEach-Object { Split-Path $_.'binary-path' } | Sort-Object -Unique)
             if ($dirs.Count -eq 0) { throw 'nextest lists no test binaries' }
             foreach ($dir in $dirs) {
@@ -278,8 +280,14 @@ jobs:
               Write-Output "staged the DLL in $dir"
             }
           } finally { $zip.Dispose() }
-      - name: Tests
-        run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests
+      # Two runs, one after the other: the loopback pair is machine-wide, and a hardware test that sends on it
+      # must not overlap an ffi test that asserts exact receipt (nextest's groups hold within one run). Both name
+      # the packages and features the DLL was staged for, so they run those binaries rather than a rebuild with
+      # another feature set, and a filter picks each package's tests.
+      - name: Tests (ffi)
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests -E 'package(tutti-winmidi2-ffi)'
+      - name: Tests (hardware)
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests -E 'package(tutti-midi-hardware)'
 
   # Every AU crate is macOS-only, so the Linux and Windows jobs compile it to nothing. Lints only: the AU
   # suites need installed audio units and run locally, and the macOS `test` runs on pushes to main.
@@ -654,7 +662,7 @@ jobs:
           else
             echo "deps=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-ump|tutti-platform)/|Cargo\.lock$|\.config/nextest\.toml$|\.github/workflows/ci\.yml$)'; then
+          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-midi-hardware|tutti-midi-device|tutti-ump|tutti-platform)/|Cargo\.lock$|\.config/nextest\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "midi_services=true" >> "$GITHUB_OUTPUT"
           else
             echo "midi_services=false" >> "$GITHUB_OUTPUT"

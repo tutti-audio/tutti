@@ -17,8 +17,9 @@
 //! | `ensure_service_available` | starts the MIDI service if it is stopped and answers whether it is running: `Error::ServiceUnavailable` when it is not, `Error::ApiMissing` when the API itself is not present |
 //! | `endpoints`, `Endpoint`, `Loopback` | the endpoints the service lists now with their device id and name, and which of the two diagnostic loopback endpoints (A, B) one is |
 //! | `Session` | the app's session with the service, closed by `close` or by dropping it |
-//! | `Connection` | an open connection to an endpoint, made by `Session::connect`: `send` a `Ump` now or at an `Instant`, and a callback that receives each `Ump` with its `Instant` on the service's thread behind a panic guard; `close`, or dropping it, removes the handler and disconnects it, and a closed connection refuses a send with `Error::Closed` |
-//! | `Error` | the named causes: the API missing, the service unavailable, a call that failed or was refused, a closed connection, a full buffer, a time that is not a timestamp |
+//! | `Connection` | an open connection to an endpoint, made by `Session::connect`: `send` a `Ump` now or at an `Instant`, and a callback that receives each `Ump` with its `Instant`, or the `Error` that kept a message from being read, on the service's thread behind a panic guard; `close`, or dropping it, removes the handler and disconnects it, and a closed connection refuses a send with `Error::Closed` |
+//! | `Watcher`, `Change` | the service's endpoint list followed: each endpoint added, removed or updated, on the service's thread behind a panic guard, and the watcher stopping on its own as an `Error`; dropping it removes its handlers and stops it |
+//! | `Error` | the named causes: the API missing, the service unavailable, a call that failed or was refused, a closed connection, a full buffer, a time that is not a timestamp, a message that is not whole, a watcher that stopped |
 //!
 //! The bindings in `bindings.rs` are generated from the API's metadata by
 //! `cargo xtask winmidi2-bindings`. Each `unsafe` block here carries one `// SAFETY:`

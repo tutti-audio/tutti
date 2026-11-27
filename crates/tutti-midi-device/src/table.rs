@@ -247,7 +247,8 @@ impl DeviceTable {
             }
             (
                 OsEndpointIdentity::WinMmInput(WinMmDevice::Interface(_))
-                | OsEndpointIdentity::WinMmOutput(WinMmDevice::Interface(_)),
+                | OsEndpointIdentity::WinMmOutput(WinMmDevice::Interface(_))
+                | OsEndpointIdentity::MidiServices(_),
                 [only],
             ) if saved.id.ordinal() == 0 && serves(only.direction, saved.direction) => {
                 Resolved::Exact((*only).clone())
