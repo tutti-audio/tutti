@@ -415,6 +415,7 @@ fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
 /// sixteen channels.
 /// M2-120 section 2.2: the Manager is the zone's lowest channel, and the
 /// Members are the channels above it, on any Manager.
+/// Spec: m2-102/2.3.4.1#2
 #[test]
 fn the_manager_is_the_lowest_channel_and_the_members_follow_it() {
     let z = pzone(4, 5);

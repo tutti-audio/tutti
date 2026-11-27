@@ -65,12 +65,15 @@
 //!
 //! # What a manager's messages become
 //!
-//! A manager channel's Damper and Sostenuto pedals, All Sound Off (where the
-//! rules take it there), All Notes Off and Reset All Controllers apply to the
-//! whole zone (M1-100 section 2.3.1) and a member's to its own channel. The
-//! transform sends each of them on the manager and on every member channel of
-//! its zone; the instrument (`tutti_voicing::VoiceAllocator`) reads one channel's
-//! message as that channel's own and holds no zone.
+//! A manager channel's Damper and Sostenuto pedals, Volume, Expression, Coarse
+//! and Fine Tuning, All Sound Off (where the rules take it there), All Notes
+//! Off and Reset All Controllers apply to the whole zone (M1-100 section 2.3.1,
+//! M2-102 section 2.3.4.1). The transform sends each of them on the manager and
+//! on every member channel of its zone; the instrument
+//! (`tutti_voicing::VoiceAllocator`) reads one channel's message as that
+//! channel's own and holds no zone. A pedal, Volume, Expression or tuning
+//! message on a member channel is ignored (M1-100 section 2.3.1, M2-120
+//! section 4.1), so a member never undoes what its manager sent.
 //!
 //! A manager's Pitch Bend moves every note of its zone (RP-053): it goes on and
 //! is copied onto each member channel as that channel's own Pitch Bend, over a
@@ -196,21 +199,41 @@ fn send_zone_defaults(
     );
 }
 
-/// Whether `voice` is one of the messages that affect every sounding note
-/// across a zone's Manager Channel and its Member Channels, and are sent only
-/// on the Manager Channel (M1-100 section 2.3.1): the Damper and Sostenuto
-/// pedals, All Sound Off (which MPE 1.1 prohibits on the Manager Channel and
-/// the Profile takes there: `receive` has dropped it before this asks), Reset
-/// All Controllers and All Notes Off.
+/// Whether `voice` is a Manager-level message: one that affects every sounding
+/// note of a zone, which the Manager Channel alone carries and a Member Channel
+/// ignores (M1-100 section 2.3.1, M2-120 section 4.1). They are the Damper and
+/// Sostenuto pedals, Volume and Expression (M2-102 section 2.3.4.1), and the
+/// Registered Controllers Coarse and Fine Tuning.
+fn manager_level(voice: &Voice2) -> bool {
+    match voice {
+        Voice2::ControlChange { controller, .. } => [
+            CCNumber::SUSTAIN,
+            CCNumber::SOSTENUTO,
+            CCNumber::VOLUME,
+            CCNumber::EXPRESSION,
+        ]
+        .contains(controller),
+        Voice2::Registered { bank, index, .. } => {
+            [Rpn::CHANNEL_COARSE_TUNING, Rpn::CHANNEL_FINE_TUNING]
+                .contains(&Rpn::new(*bank, *index))
+        }
+        _ => false,
+    }
+}
+
+/// Whether `voice` is one of the messages a Manager Channel sends on each
+/// Member Channel of its zone too: the Manager-level messages, and the Channel
+/// Mode messages that stop or reset every note (All Sound Off, which MPE 1.1
+/// prohibits on the Manager Channel and the Profile takes there: `receive` has
+/// dropped it before this asks; Reset All Controllers; All Notes Off).
 fn zone_wide(voice: &Voice2) -> bool {
-    matches!(voice, Voice2::ControlChange { controller, .. } if [
-        CCNumber::SUSTAIN,
-        CCNumber::SOSTENUTO,
-        CCNumber::ALL_SOUND_OFF,
-        CCNumber::RESET_ALL,
-        CCNumber::ALL_NOTES_OFF,
-    ]
-    .contains(controller))
+    manager_level(voice)
+        || matches!(voice, Voice2::ControlChange { controller, .. } if [
+            CCNumber::ALL_SOUND_OFF,
+            CCNumber::RESET_ALL,
+            CCNumber::ALL_NOTES_OFF,
+        ]
+        .contains(controller))
 }
 
 /// What a receiver does with a message its table has no use for there.
@@ -222,14 +245,6 @@ enum Receive {
     Ignore,
 }
 
-/// Control Change numbers of the Channel Mode messages the tables name.
-const CC_RESET_ALL: u8 = 121;
-const CC_ALL_NOTES_OFF: u8 = 123;
-const CC_OMNI_OFF: u8 = 124;
-const CC_OMNI_ON: u8 = 125;
-const CC_MONO_ON: u8 = 126;
-const CC_POLY_ON: u8 = 127;
-
 /// MPE 1.1, Appendix E (Table 5), receive columns, for the rows tutti
 /// reads at this edge.
 fn mpe11_receive(role: Role, voice: &Voice2, mono: bool) -> Receive {
@@ -237,10 +252,12 @@ fn mpe11_receive(role: Role, voice: &Voice2, mono: bool) -> Receive {
         // Control Change #120 (All Sounds Off): prohibited on the Manager
         // Channel, optional on a Member Channel. Mono Mode On and Poly Mode
         // On are prohibited there too.
-        (Role::Master, Voice2::ControlChange { controller, .. }) => matches!(
-            controller.get(),
-            c if c == CCNumber::ALL_SOUND_OFF.get() || c == CC_MONO_ON || c == CC_POLY_ON
-        ),
+        (Role::Master, Voice2::ControlChange { controller, .. }) => [
+            CCNumber::ALL_SOUND_OFF,
+            CCNumber::MONO_MODE_ON,
+            CCNumber::POLY_MODE_ON,
+        ]
+        .contains(controller),
         // RPN #6 (MPE Configuration Message): prohibited on Member
         // Channels (the Manager Channels' is handled before this).
         (Role::Member, Voice2::Registered { bank, index, .. }) => {
@@ -254,8 +271,7 @@ fn mpe11_receive(role: Role, voice: &Voice2, mono: bool) -> Receive {
         _ => false,
     };
     // Control Change #125 (Omni On): prohibited on every channel.
-    let omni =
-        matches!(voice, Voice2::ControlChange { controller, .. } if controller.get() == CC_OMNI_ON);
+    let omni = matches!(voice, Voice2::ControlChange { controller, .. } if *controller == CCNumber::OMNI_MODE_ON);
     if ignored || omni {
         Receive::Ignore
     } else {
@@ -275,9 +291,15 @@ fn profile_receive(role: Role, voice: &Voice2, mono: bool) -> Receive {
     let ignored = match (role, voice) {
         // Control Changes #124 to #127: prohibited on every channel.
         (_, Voice2::ControlChange { controller, .. }) => {
-            (CC_OMNI_OFF..=CC_POLY_ON).contains(&controller.get())
+            [
+                CCNumber::OMNI_MODE_OFF,
+                CCNumber::OMNI_MODE_ON,
+                CCNumber::MONO_MODE_ON,
+                CCNumber::POLY_MODE_ON,
+            ]
+            .contains(controller)
                 || (role == Role::Member
-                    && [CC_RESET_ALL, CC_ALL_NOTES_OFF].contains(&controller.get()))
+                    && [CCNumber::RESET_ALL, CCNumber::ALL_NOTES_OFF].contains(controller))
         }
         // RPN #0 (Pitch Bend Sensitivity): prohibited on Member Channels.
         (Role::Member, Voice2::Registered { bank, index, .. }) => {
@@ -434,6 +456,9 @@ impl Rules {
     /// monophonic when `mono` (MIDI Mode 4 under MPE 1.1, a Monophonic Channel
     /// Response under the Profile).
     ///
+    /// A Manager-level message (`manager_level`) on a Member Channel is ignored
+    /// under both tables (M1-100 section 2.3.1, M2-120 section 4.1).
+    ///
     /// Each table marks a message prohibited (P) for a sender, and for a
     /// receiver on the same row. A receiver ignores a message that is not for
     /// the channel it came on (M1-100 section 2.3.1). A prohibited message is
@@ -442,6 +467,9 @@ impl Rules {
     /// with (an All Sound Off on the Manager Channel silencing every member,
     /// say).
     fn receive(self, role: Role, voice: &Voice2, mono: bool) -> Receive {
+        if role == Role::Member && manager_level(voice) {
+            return Receive::Ignore;
+        }
         match self {
             Self::Mpe11 => mpe11_receive(role, voice, mono),
             Self::Profile => profile_receive(role, voice, mono),
@@ -455,9 +483,9 @@ impl Rules {
     /// and the receiver's Channel Response is its own (M2-120 section 3.6).
     fn mode_switch(self, controller: CCNumber) -> Option<bool> {
         match self {
-            Self::Mpe11 => match controller.get() {
-                CC_MONO_ON => Some(true),
-                CC_POLY_ON => Some(false),
+            Self::Mpe11 => match controller {
+                CCNumber::MONO_MODE_ON => Some(true),
+                CCNumber::POLY_MODE_ON => Some(false),
                 _ => None,
             },
             Self::Profile => None,
