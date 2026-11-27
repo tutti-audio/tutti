@@ -262,7 +262,7 @@ mod render_output {
 
     /// What turns a destination into an output of a render: its target, the key the render
     /// adds it under, and the result taken out of the finished render by that key.
-    pub trait RenderOutput: Send + Sized + 'static {
+    pub trait Sealed: Send + Sized + 'static {
         /// What the output is once rendered, at the graph's float.
         type Output<F: Float>: std::fmt::Debug + Send;
         /// What the main output becomes: a `FileTarget` or a `BufferTarget`.
@@ -293,8 +293,6 @@ mod render_output {
     }
 }
 
-use render_output::RenderOutput;
-
 /// Where a bounce's output goes: a [`tutti_codec::ToFile`] or a [`ToMemory`] (sealed). Its
 /// `Output` is what the finished bounce holds for that output, so the
 /// caller who chose a file is handed a [`Written`] and one who chose memory a [`Rendered`]
@@ -317,7 +315,7 @@ use render_output::RenderOutput;
 ///     ToFile::new("out/mix.wav", Encoding::new(wav).width(ChannelLayout::STEREO)).replace(),
 /// );
 /// ```
-pub trait Destination: RenderOutput {}
+pub trait Destination: render_output::Sealed {}
 
 impl Destination for ToFile {}
 
@@ -399,7 +397,7 @@ impl<F: Float> StemOutput<F> for MemoryStem {
     }
 }
 
-impl RenderOutput for ToFile {
+impl render_output::Sealed for ToFile {
     type Output<F: Float> = Written;
     type Target = FileTarget;
     type Key = FileKey;
@@ -447,7 +445,7 @@ impl RenderOutput for ToFile {
     }
 }
 
-impl RenderOutput for ToMemory {
+impl render_output::Sealed for ToMemory {
     type Output<F: Float> = Rendered<F>;
     type Target = BufferTarget;
     type Key = BufferKey;
@@ -1050,7 +1048,7 @@ impl<D: Destination, F: Float> Bounced<D, F> {
     /// The pipeline's results, with the main output's taken out by its key.
     fn new(
         mut done: Done<F>,
-        main: &<D as RenderOutput>::Key,
+        main: &<D as render_output::Sealed>::Key,
         stems: Vec<StemKey>,
     ) -> Result<Self, DoneError> {
         Ok(Self {
