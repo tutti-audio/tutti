@@ -54,7 +54,7 @@
 //! no main output ([`NoMainOutput`]) into one with a [`Destination`] ([`ToFile`] or
 //! [`ToMemory`]), and only one with a main output starts: a bounce with no main output is not
 //! writable. The destination rides through [`BounceJob`] and [`BounceRendered`] to
-//! [`Bounced`], whose main output is a [`Written`] for a file and a [`Rendered`] for planes,
+//! [`Bounced`], whose main output is a [`Written`](tutti_export::Written) for a file and a [`Rendered`](tutti_export::Rendered) for planes,
 //! with no `Option` to unwrap. A cancelled bounce is [`BounceError::Cancelled`].
 
 use std::future::{Future, IntoFuture};
@@ -698,15 +698,15 @@ pub enum StemGain {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum StemKey {
-    /// A file stem: read its [`Written`] with [`Done::file`].
+    /// A file stem: read its [`Written`](tutti_export::Written) with [`Done::file`].
     File(FileKey),
-    /// A stem in memory: read its [`Rendered`] with [`Done::buffers`].
+    /// A stem in memory: read its [`Rendered`](tutti_export::Rendered) with [`Done::buffers`].
     Buffers(BufferKey),
 }
 
 /// What a finished bounce produced: the main output's result, which is what the
-/// bounce's main output kind says it is ([`Written`] for a [`ToFile`],
-/// [`Rendered`] for a [`ToMemory`]), and the stems' results, read from
+/// bounce's main output destination says it is ([`Written`](tutti_export::Written) for a [`ToFile`],
+/// [`Rendered`](tutti_export::Rendered) for a [`ToMemory`]), and the stems' results, read from
 /// [`stem_results`](Self::stem_results) by the [`StemKey`] each stem has, in the
 /// order the bounce named them.
 #[derive(Debug)]
