@@ -1708,13 +1708,6 @@ impl Ports {
         }
     }
 
-    /// Whether a held output port, open or away, is saved under `saved`.
-    fn holds_saved(&self, saved: &MidiDeviceId) -> bool {
-        self.outputs
-            .iter()
-            .any(|port| port.claim.is_held() && port.saved.id == *saved)
-    }
-
     /// Whether a held output port has `device` open.
     fn holds_output(&self, device: &MidiDeviceId) -> bool {
         self.outputs.iter().any(|port| {
