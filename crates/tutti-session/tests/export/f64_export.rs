@@ -44,7 +44,7 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
 fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
     // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
-    let planes = bounced(
+    let planes = bounced!(
         &mut session(),
         Bounce::new()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
@@ -71,7 +71,7 @@ fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
 fn an_f64_bounce_to_a_float64_file_reads_back_exactly() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
-    bounced(
+    bounced!(
         &mut session(),
         Bounce::new()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))

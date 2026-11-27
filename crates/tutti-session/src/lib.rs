@@ -195,11 +195,12 @@ pub use analyze::{
     MeterBindError,
 };
 pub use apply::Apply;
+
 #[cfg(feature = "export")]
 pub use bounce::{
     Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency, BounceRendered,
     BounceTail, Bounced, Bouncing, ExportClock, NoMainOutput, PrepareEdit, PreparedGraph, Range,
-    RenderOutput, Stem, StemGain, StemKey,
+    Stem, StemGain, StemKey,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]

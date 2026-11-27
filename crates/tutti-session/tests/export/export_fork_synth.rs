@@ -54,7 +54,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, ToM
 }
 
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    bounced(session, bounce)
+    bounced!(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
         .into_planes()
@@ -63,7 +63,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
 /// The planes of the one stem `bounce` names, in memory: the main output is
 /// rendered beside it and dropped.
 fn render_stem(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    let (_, mut done, keys) = bounced(session, bounce)
+    let (_, mut done, keys) = bounced!(session, bounce)
         .expect("the bounce renders")
         .into_parts();
     match keys.as_slice() {

@@ -102,7 +102,7 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
         sample_rate: SampleRate::of(RATE),
         loop_range: None,
     }));
-    let (main, mut done, keys) = bounced(
+    let (main, mut done, keys) = bounced!(
         &mut session,
         Bounce::new()
             .main_output(

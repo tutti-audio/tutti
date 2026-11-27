@@ -99,7 +99,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None)
         .stem_with(Stem::new(node.erase()));
-    let planes = match bounced(&mut session, bounce) {
+    let planes = match bounced!(&mut session, bounce) {
         Ok(out) => {
             let (_, mut done, keys) = out.into_parts();
             match keys.as_slice() {

@@ -149,7 +149,7 @@ fn a_cancel_stops_the_render_and_frees_the_session() {
     assert_eq!(seen.frames(), Some((Samples::new(0), TOTAL)));
 
     // The next export is not refused, and runs to its end.
-    bounced(&mut r.session, file_request(&path, None)).unwrap();
+    bounced!(&mut r.session, file_request(&path, None)).unwrap();
     assert!(path.exists());
     assert_eq!(r.blocks.load(Ordering::SeqCst), 3 + BLOCKS);
 }
@@ -291,7 +291,7 @@ fn a_cancel_leaves_no_file_of_any_target() {
 
     // And one nobody cancels lands both files.
     let request = with_stem(&r, dir.path(), false);
-    bounced(&mut r.session, request).unwrap();
+    bounced!(&mut r.session, request).unwrap();
     assert!(dir.path().join("main_output.wav").exists());
     assert!(dir.path().join("stem.wav").exists());
 }

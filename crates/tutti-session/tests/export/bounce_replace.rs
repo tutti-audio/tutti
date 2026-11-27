@@ -56,7 +56,7 @@ fn a_bounce_onto_an_existing_main_output_is_refused_and_leaves_the_path() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    let error = bounced(
+    let error = bounced!(
         &mut session,
         bounce().main_output(tutti_codec::ToFile::new(
             &main_output,
@@ -88,7 +88,7 @@ fn a_replacing_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    bounced(
+    bounced!(
         &mut session,
         bounce().main_output(
             tutti_codec::ToFile::new(&main_output, Encoding::new(float_wav())).replace(),

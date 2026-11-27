@@ -706,7 +706,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     }
 
     let request = config.clock(ExportClock::timeline(timeline));
-    let export = bounced(&mut s, request)
+    let export = bounced!(&mut s, request)
         .expect("the export renders")
         .into_main_output();
     for (c, (l, e)) in live.iter().zip(export.planes()).enumerate() {

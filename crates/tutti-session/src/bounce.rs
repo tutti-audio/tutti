@@ -292,7 +292,7 @@ mod render_output {
     }
 }
 
-pub use render_output::RenderOutput;
+use render_output::RenderOutput;
 
 /// The file of output number `index` of the bounce: `to`, `width` channels wide unless its
 /// encoding states its channels. The outputs are summed later (the stems and the master), so

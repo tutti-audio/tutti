@@ -594,7 +594,7 @@ pub mod session {
     pub use tutti_session::{
         BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing, BufferKey,
         Destination, Done, EventLossPolicy, ExportClock, FileKey, NoMainOutput, Normalize, Outcome,
-        PrepareEdit, PreparedGraph, Progress, RenderOutput, Stage, StemKey,
+        PrepareEdit, PreparedGraph, Progress, Stage, StemKey,
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};

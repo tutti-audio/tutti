@@ -24,12 +24,12 @@ use tutti_codec::{Format, Pcm};
 use tutti_export::{Normalize, RenderError, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
+use tutti_session::Bounced;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
     ExportClock, InputPort, MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain,
     StemKey,
 };
-use tutti_session::{Bounced, Destination, RenderOutput};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -69,14 +69,13 @@ fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Destination + RenderOutput>(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, M>,
-) -> BounceError {
-    match bounced(session, bounce) {
-        Err(e) => e,
-        Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
-    }
+macro_rules! refused {
+    ($session:expr, $bounce:expr $(,)?) => {
+        match bounced!($session, $bounce) {
+            Err(e) => e,
+            Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
+        }
+    };
 }
 
 /// Every sample of a WAV file written by a bounce (32-bit float, so read back
@@ -171,7 +170,7 @@ fn stems_are_aligned_with_the_main_output_and_sum_to_it() {
     };
 
     // BounceLatency kept: the programme starts `LATE` frames in.
-    let kept = planes(bounced(&mut session, stems(bounce(seconds))));
+    let kept = planes(bounced!(&mut session, stems(bounce(seconds))));
     let [main_output, constant, step] = kept.as_slice() else {
         panic!("the main output and two stems")
     };
@@ -209,7 +208,7 @@ fn stems_are_aligned_with_the_main_output_and_sum_to_it() {
     );
 
     // BounceLatency trimmed: the programme from frame 0, and the same length.
-    let trimmed = planes(bounced(
+    let trimmed = planes(bounced!(
         &mut session,
         stems(bounce(seconds).latency(BounceLatency::Graph)),
     ));
@@ -249,7 +248,7 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
             .unwrap();
     }
 
-    let out = planes(bounced(
+    let out = planes(bounced!(
         &mut session,
         bounce(0.01)
             .stem_with(Stem::new(source.erase()))
@@ -316,7 +315,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
         .topology(tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO).unwrap());
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
-        match refused(&mut session, b) {
+        match refused!(&mut session, b) {
             BounceError::Export(RenderError::Target { output: 1, why }) => {
                 assert!(
                     matches!(why, TargetError::Placement(_) | TargetError::Lanes { .. }),
@@ -345,7 +344,7 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     session.graph().connect(node, MainOutput).unwrap();
     let main_output = dir.path().join("main_output.wav");
     let stem = dir.path().join("stem.wav");
-    let done = bounced(
+    let done = bounced!(
         &mut session,
         base(0.25)
             .main_output(tutti_codec::ToFile::new(
@@ -406,7 +405,7 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
         let paths =
             ["main_output", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
-        let done = bounced(
+        let done = bounced!(
             session,
             base(0.1)
                 .main_output(tutti_codec::ToFile::new(
@@ -501,18 +500,17 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    fn why<M: Destination + RenderOutput>(
-        session: &mut DetachedSession,
-        b: Bounce<NodeKey, M>,
-    ) -> BounceConfigError {
-        match refused(session, b) {
-            BounceError::Config(why) => why,
-            other => panic!("expected a refusal by name, got {other:?}"),
-        }
+    macro_rules! why {
+        ($session:expr, $b:expr $(,)?) => {
+            match refused!($session, $b) {
+                BounceError::Config(why) => why,
+                other => panic!("expected a refusal by name, got {other:?}"),
+            }
+        };
     }
 
     assert_eq!(
-        why(
+        why!(
             &mut session,
             base(0.01)
                 .main_output(tutti_codec::ToFile::new(
@@ -531,7 +529,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         BounceConfigError::SharedGainWithoutMainOutput
     );
     assert_eq!(
-        why(
+        why!(
             &mut session,
             base(0.01)
                 .main_output(tutti_codec::ToFile::new(
@@ -543,7 +541,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         BounceConfigError::DuplicatePath(path("one.wav"))
     );
     assert_eq!(
-        why(
+        why!(
             &mut session,
             base(0.01)
                 .main_output(tutti_codec::ToFile::new(
@@ -579,7 +577,7 @@ fn a_host_resolves_its_own_names_once() {
         .clock(ExportClock::frozen())
         .map(|name| keys.get(name).copied().ok_or(name))
         .expect("kick is a node");
-    let out = planes(bounced(&mut session, resolved));
+    let out = planes(bounced!(&mut session, resolved));
     assert!(out[1][0].iter().all(|&s| s == 0.5), "the kick's stem");
 
     let unresolved = named("snare").map(|name| keys.get(name).copied().ok_or(name));
@@ -598,7 +596,7 @@ fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
             prepared.editor.remove(node.erase());
         }));
-    match refused(&mut session, b) {
+    match refused!(&mut session, b) {
         BounceError::Config(BounceConfigError::StemNotInGraph { node: gone }) => {
             assert_eq!(gone, node.erase())
         }

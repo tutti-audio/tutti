@@ -1726,7 +1726,7 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
         );
     }
 
-    bounced(&mut s, request()).expect("the next export is not refused, and renders to its end");
+    bounced!(&mut s, request()).expect("the next export is not refused, and renders to its end");
 }
 
 /// **A replacement that refused the snapshot is not blamed for its death.**

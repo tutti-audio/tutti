@@ -43,7 +43,7 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
             Encoding::new(Format::Wav(Pcm::Int(pcm))),
         ))
         .tail(tutti_session::BounceTail::None);
-    bounced(&mut session, bounce).expect("renders");
+    bounced!(&mut session, bounce).expect("renders");
     hound::WavReader::open(&path)
         .expect("readable")
         .samples::<i16>()
@@ -183,7 +183,7 @@ fn the_files_of_a_bounce_are_dithered_with_different_noise() {
             Encoding::new(format).dither_seed(7),
         )))
         .tail(tutti_session::BounceTail::None);
-    bounced(&mut session, bounce).expect("renders");
+    bounced!(&mut session, bounce).expect("renders");
     let [main, one, two, seven, seven_again] = paths.map(|path| {
         hound::WavReader::open(path)
             .expect("readable")

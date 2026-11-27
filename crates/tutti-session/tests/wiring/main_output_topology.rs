@@ -279,7 +279,7 @@ fn an_export_is_placed_from_the_declaration() {
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None);
-        let rendered = bounced(s, request).unwrap().into_main_output();
+        let rendered = bounced!(s, request).unwrap().into_main_output();
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
     let mut declared = Session::builder()
@@ -322,7 +322,7 @@ fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
             ))
             .main_output(tutti_codec::ToFile::new(dir.path().join(name), encoding))
             .tail(BounceTail::None);
-        bounced(&mut session, bounce)
+        bounced!(&mut session, bounce)
             .expect("renders")
             .into_main_output()
             .placement
