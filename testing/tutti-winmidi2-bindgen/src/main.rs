@@ -22,6 +22,17 @@ const FILTER: &[&str] = &[
     "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationAddedEventArgs",
     "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationRemovedEventArgs",
     "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationUpdatedEventArgs",
+    "Windows.Devices.Midi2.MidiGroup",
+    "Windows.Devices.Midi2.MidiMessageProcessingPluginAddResult",
+    "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDeviceManager",
+    "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDeviceCreationConfig",
+    "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDevice",
+    "Windows.Devices.Midi2.Enumeration.MidiDeclaredEndpointInfo",
+    "Windows.Devices.Midi2.Enumeration.MidiDeclaredDeviceIdentity",
+    "Windows.Devices.Midi2.Enumeration.MidiFunctionBlock",
+    "Windows.Devices.Midi2.Enumeration.MidiFunctionBlockDirection",
+    "Windows.Devices.Midi2.Enumeration.MidiFunctionBlockUIHint",
+    "Windows.Devices.Midi2.Enumeration.MidiFunctionBlockRepresentsMidi10Connection",
 ];
 
 /// The vtable members the safe face calls (`os/`), by name. A member the generator leaves out
@@ -57,6 +68,21 @@ const NEEDED: &[&str] = &[
     "AddedDevice",
     "RemovedDevice",
     "UpdatedDevice",
+    "CreateVirtualDevice",
+    "DeviceEndpointDeviceId",
+    "AddMessageProcessingPlugin",
+    "SetCreateOnlyUmpEndpoints",
+    "FunctionBlocks",
+    "SetNumber",
+    "SetName",
+    "SetIsActive",
+    "SetDirection",
+    "SetUIHint",
+    "SetRepresentsMidi10Connection",
+    "SetFirstGroup",
+    "SetGroupCount",
+    "SetMidiCIMessageVersionFormat",
+    "SetMaxSystemExclusive8Streams",
 ];
 
 fn main() -> ExitCode {

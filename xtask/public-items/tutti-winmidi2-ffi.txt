@@ -2,6 +2,8 @@
 # sorted (`cargo xtask write-public-items` rewrites this file from the tree).
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
+enum checks::declared::DeclaredField
+enum checks::declared::Refusal
 enum os::endpoint::Loopback
 enum os::error::Error
 enum os::watcher::Change
@@ -12,8 +14,13 @@ fn os::endpoint::ensure_service_available
 fn os::session::Session::close
 fn os::session::Session::connect
 fn os::session::Session::create
+fn os::virtual_device::Session::publish
+fn os::virtual_device::VirtualDevice::send
 fn os::watcher::Watcher::start
+struct checks::declared::Block
 struct os::connection::Connection
 struct os::endpoint::Endpoint
 struct os::session::Session
+struct os::virtual_device::VirtualDevice
+struct os::virtual_device::VirtualDeviceSpec
 struct os::watcher::Watcher

@@ -3,76 +3,25 @@
 use std::time::Duration;
 use tutti_coremidi_ffi::{BlockRefusal, Error, ump_endpoints};
 use tutti_fixtures::unique_name;
-use tutti_graph::{EventCapacity, EventInletNode, Offset};
+use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::FunctionBlock;
-use tutti_midi_hardware::{
-    MidiHardwareConfig, MidiHardwareError, MidiSession, VirtualEndpoint, VirtualSpec,
-};
+use tutti_midi_hardware::{MidiHardwareConfig, MidiHardwareError, MidiSession, VirtualSpec};
 use tutti_midi_runtime::InputInlets;
-use tutti_platform::{Executor, MainThreadMarker};
+use tutti_platform::Executor;
+use tutti_ump::EndpointName;
 use tutti_ump::{
     BlockDirection, CiVersion, Field, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port,
     Sysex8StreamCount, UiHint, Ump,
 };
-use tutti_ump::{BlockName, EndpointName};
 
-#[path = "../input/listener.rs"]
-#[allow(
-    dead_code,
-    reason = "the listener is shared with the input tests, which use more of it"
-)]
-mod listener;
-use listener::Listener;
-#[path = "../input/opening.rs"]
-mod opening;
+use super::common::listener::Listener;
 
 /// A bound that only guards a hang.
 const PATIENCE: Duration = Duration::from_secs(30);
-const INSTANCE: &str = "tutti-test-instance";
-
-/// `session` once its backend has started: CoreMIDI's client is made on a thread of
-/// the backend's own, so a port is opened with the proof that it resolved.
-fn started(session: MidiSession) -> MidiSession {
-    tutti_fixtures::block_on(session.start()).expect("the backend starts");
-    session
-}
-
-fn main_thread() -> MainThreadMarker {
-    MainThreadMarker::new().expect("a harness = false target runs on the main thread")
-}
+use super::common::{INSTANCE, main_thread, open, opening, started, two_blocks};
 
 fn has_ump_endpoints() -> bool {
     tutti_fixtures::macos_major().expect("sw_vers names the macOS version") >= 15
-}
-
-/// Block 0 an output over Groups 1 to 2, block 1 a bidirectional one over Group
-/// 4, both named.
-fn two_blocks(name: &str) -> VirtualSpec {
-    let block = |id, direction, first, span| {
-        FunctionBlock::builder(
-            FunctionBlockId::new(id).unwrap(),
-            direction,
-            FirstGroup::new(first).unwrap(),
-            GroupSpan::new(span).unwrap(),
-        )
-    };
-    let out = block(0, BlockDirection::Output, 1, 2)
-        .ui_hint(UiHint::Sender)
-        .name(BlockName::new(&format!("{name} Out")).unwrap())
-        .build()
-        .unwrap();
-    let both = block(1, BlockDirection::Bidirectional, 4, 1)
-        .midi1(Midi1Port::Unrestricted)
-        .name(BlockName::new(&format!("{name} Both")).unwrap())
-        .build()
-        .unwrap();
-    VirtualSpec::new(
-        EndpointName::new(name).unwrap(),
-        tutti_fixtures::midi::device_identity(),
-        tutti_ump::ProductInstanceId::new(INSTANCE),
-    )
-    .block(out)
-    .block(both)
 }
 
 /// The endpoint CoreMIDI lists that has the block `block`, once it lists one: the
@@ -87,19 +36,6 @@ fn listed(block: &str) -> tutti_coremidi_ffi::UmpEndpointInfo {
     };
     tutti_fixtures::wait_until("CoreMIDI lists the endpoint", PATIENCE, || find().is_some());
     find().expect("the endpoint is listed")
-}
-
-/// An endpoint of `spec` whose input goes to an inlet of `session`.
-fn open(
-    executor: &Executor,
-    spec: &VirtualSpec,
-    session: &MidiSession,
-) -> (Result<VirtualEndpoint, MidiHardwareError>, EventInletNode) {
-    let (producer, inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
-    (
-        opening::open(executor, spec, producer, main_thread()),
-        inlet,
-    )
 }
 
 /// **A spec's Function Blocks are the blocks other apps read from CoreMIDI**

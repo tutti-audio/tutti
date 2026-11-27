@@ -26,12 +26,17 @@
 //! - **macOS 15 and later, with Function Blocks:** one `MIDIUMPMutableEndpoint`,
 //!   which has a source and a destination, and the OS numbers the blocks itself
 //!   ([`VirtualEndpoint::blocks`] reads the numbers peers see).
+//! - **Windows with MIDI Services:** one virtual device, which the service lists as one
+//!   UMP Endpoint with the declared Function Blocks under the numbers declared. The
+//!   endpoint lives as long as the connection this process holds to the device's side of
+//!   it.
 //! - **macOS without Function Blocks:** a source and a destination under one name,
 //!   which is what CoreMIDI offers for an endpoint with no blocks to declare (before
 //!   macOS 15 it is all CoreMIDI offers).
 //!
 //! On macOS a peer reads from the endpoint's source and writes to its destination;
-//! on Linux it subscribes to the one port in either direction.
+//! on Linux it subscribes to the one port in either direction, and on Windows it
+//! connects to the one endpoint.
 //!
 //! # Opening is polled
 //!
@@ -61,10 +66,13 @@ use tutti_platform::Instant;
 use tutti_rt::{Counter, CounterWriter, Mutex, counter};
 use tutti_units::Losses;
 
-use tutti_midi_device::FunctionBlock;
+use tutti_midi_device::{FunctionBlock, UMP_VERSION};
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_platform::{Executor, MainThreadMarker};
-use tutti_ump::{DeviceIdentity, EndpointName, FunctionBlockId, Message, ProductInstanceId, Ump};
+use tutti_ump::{
+    DeviceIdentity, EndpointInfoNotification, EndpointName, FunctionBlockCount, FunctionBlockId,
+    FunctionBlocks, Message, ProductInstanceId, Ump,
+};
 
 use crate::InputProducerHandle;
 use crate::backend;
@@ -144,7 +152,7 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
+        reason = "the backends that publish read it; the Windows Multimedia and stub ones publish none"
     )]
     pub(crate) fn device(&self) -> &DeviceIdentity {
         &self.device
@@ -154,10 +162,32 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
+        reason = "the backends that publish read it; the Windows Multimedia and stub ones publish none"
     )]
     pub(crate) fn instance(&self) -> Option<&ProductInstanceId> {
         self.instance.as_ref()
+    }
+
+    /// The Endpoint Info Notification (M2-104 §7.1.2) of an endpoint created from this spec
+    /// that carries `protocol`: the one protocol it speaks, no JR Timestamps either way
+    /// (the spec has no JR support), and its Function Blocks declared and static.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "the backends that publish an endpoint record read it; CoreMIDI's OS makes its own"
+    )]
+    pub(crate) fn endpoint_info(&self, protocol: VirtualProtocol) -> EndpointInfoNotification {
+        EndpointInfoNotification {
+            version: UMP_VERSION,
+            static_function_blocks: true,
+            function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(
+                self.blocks.len(),
+            )),
+            midi2: protocol == VirtualProtocol::Midi2,
+            midi1: protocol == VirtualProtocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        }
     }
 
     /// The Function Blocks declared, in the order they were added.
@@ -203,27 +233,19 @@ pub(crate) trait SenderBackend: Send + Sync {
 /// [`MidiHardwareError::EndpointGone`]. A clone shares the cell.
 #[derive(Clone, Debug)]
 #[cfg_attr(
-    any(
-        midi_backend = "none",
-        midi_backend = "winmm",
-        midi_backend = "midi_services"
-    ),
+    any(midi_backend = "none", midi_backend = "winmm"),
     allow(
         dead_code,
-        reason = "only the ALSA and CoreMIDI virtual endpoints use it"
+        reason = "only the backends that publish a virtual endpoint use it"
     )
 )]
 pub(crate) struct Live(Arc<tutti_rt::RwLock<bool>>);
 
 #[cfg_attr(
-    any(
-        midi_backend = "none",
-        midi_backend = "winmm",
-        midi_backend = "midi_services"
-    ),
+    any(midi_backend = "none", midi_backend = "winmm"),
     allow(
         dead_code,
-        reason = "only the ALSA and CoreMIDI virtual endpoints use it"
+        reason = "only the backends that publish a virtual endpoint use it"
     )
 )]
 impl Live {
@@ -256,7 +278,7 @@ impl Live {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     dead_code,
-    reason = "the ALSA and macOS backends send; Windows has no virtual endpoint"
+    reason = "the backends that publish send; the Windows Multimedia and stub ones publish none"
 )]
 pub(crate) enum Delivery {
     /// The OS took it.

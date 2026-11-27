@@ -173,8 +173,17 @@ pub mod Windows {
                     *mut core::ffi::c_void,
                     *mut bool,
                 ) -> windows_core::HRESULT,
-                MessageProcessingPlugins: usize,
-                AddMessageProcessingPlugin: usize,
+                pub MessageProcessingPlugins: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub AddMessageProcessingPlugin: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut MidiMessageProcessingPluginAddResult,
+                )
+                    -> windows_core::HRESULT,
                 pub RemoveMessageProcessingPlugin:
                     unsafe extern "system" fn(
                         *mut core::ffi::c_void,
@@ -634,6 +643,386 @@ pub mod Windows {
                 pub SendMessageFailed: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     MidiSendMessageResults,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IMidiEndpointMessageProcessingPlugin,
+                IMidiEndpointMessageProcessingPlugin_Vtbl,
+                0x8087b303_0519_c0de_31d1_cc001000f040
+            );
+            impl windows_core::RuntimeType for IMidiEndpointMessageProcessingPlugin {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            windows_core::imp::interface_hierarchy!(
+                IMidiEndpointMessageProcessingPlugin,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl IMidiEndpointMessageProcessingPlugin {}
+            impl windows_core::RuntimeName for IMidiEndpointMessageProcessingPlugin {
+                const NAME: &'static str =
+                    "Windows.Devices.Midi2.IMidiEndpointMessageProcessingPlugin";
+            }
+            pub trait IMidiEndpointMessageProcessingPlugin_Impl:
+                windows_core::IUnknownImpl
+            {
+                fn PluginId(&self) -> windows_core::GUID;
+                fn PluginName(&self) -> windows_core::HSTRING;
+                fn SetPluginName(&self, value: &windows_core::HSTRING);
+                fn PluginTag(&self) -> Option<windows_core::IInspectable>;
+                fn SetPluginTag(&self, value: windows_core::Ref<windows_core::IInspectable>);
+                fn IsEnabled(&self) -> bool;
+                fn SetIsEnabled(&self, value: bool);
+                fn Initialize(
+                    &self,
+                    endpointConnection: windows_core::Ref<IMidiEndpointConnectionSource>,
+                );
+                fn OnEndpointConnectionOpened(&self);
+                fn ProcessIncomingMessage(
+                    &self,
+                    args: windows_core::Ref<MidiMessageReceivedEventArgs>,
+                    skipFurtherListeners: &mut bool,
+                    skipMainMessageReceivedEvent: &mut bool,
+                );
+                fn Cleanup(&self);
+            }
+            impl IMidiEndpointMessageProcessingPlugin_Vtbl {
+                pub const fn new<
+                    Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                    const OFFSET: isize,
+                >() -> Self {
+                    unsafe extern "system" fn PluginId<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut windows_core::GUID,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            let ok__ = IMidiEndpointMessageProcessingPlugin_Impl::PluginId(this);
+                            result__.write(core::mem::transmute_copy(&ok__));
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn PluginName<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            let ok__ = IMidiEndpointMessageProcessingPlugin_Impl::PluginName(this);
+                            result__.write(core::mem::transmute_copy(&ok__));
+                            core::mem::forget(ok__);
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn SetPluginName<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::SetPluginName(
+                                this,
+                                core::mem::transmute(&value),
+                            );
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn PluginTag<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            let ok__ = IMidiEndpointMessageProcessingPlugin_Impl::PluginTag(this);
+                            result__.write(core::mem::transmute_copy(&ok__));
+                            core::mem::forget(ok__);
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn SetPluginTag<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::SetPluginTag(
+                                this,
+                                core::mem::transmute_copy(&value),
+                            );
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn IsEnabled<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            let ok__ = IMidiEndpointMessageProcessingPlugin_Impl::IsEnabled(this);
+                            result__.write(core::mem::transmute_copy(&ok__));
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn SetIsEnabled<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::SetIsEnabled(this, value);
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn Initialize<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        endpointconnection: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::Initialize(
+                                this,
+                                core::mem::transmute_copy(&endpointconnection),
+                            );
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn OnEndpointConnectionOpened<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::OnEndpointConnectionOpened(
+                                this,
+                            );
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn ProcessIncomingMessage<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        args: *mut core::ffi::c_void,
+                        skipfurtherlisteners: *mut bool,
+                        skipmainmessagereceivedevent: *mut bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::ProcessIncomingMessage(
+                                this,
+                                core::mem::transmute_copy(&args),
+                                core::mem::transmute_copy(&skipfurtherlisteners),
+                                core::mem::transmute_copy(&skipmainmessagereceivedevent),
+                            );
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    unsafe extern "system" fn Cleanup<
+                        Identity: IMidiEndpointMessageProcessingPlugin_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IMidiEndpointMessageProcessingPlugin_Impl::Cleanup(this);
+                            windows_core::HRESULT(0)
+                        }
+                    }
+                    Self {
+                        base__: windows_core::IInspectable_Vtbl::new::<
+                            Identity,
+                            IMidiEndpointMessageProcessingPlugin,
+                            OFFSET,
+                        >(),
+                        PluginId: PluginId::<Identity, OFFSET>,
+                        PluginName: PluginName::<Identity, OFFSET>,
+                        SetPluginName: SetPluginName::<Identity, OFFSET>,
+                        PluginTag: PluginTag::<Identity, OFFSET>,
+                        SetPluginTag: SetPluginTag::<Identity, OFFSET>,
+                        IsEnabled: IsEnabled::<Identity, OFFSET>,
+                        SetIsEnabled: SetIsEnabled::<Identity, OFFSET>,
+                        Initialize: Initialize::<Identity, OFFSET>,
+                        OnEndpointConnectionOpened: OnEndpointConnectionOpened::<Identity, OFFSET>,
+                        ProcessIncomingMessage: ProcessIncomingMessage::<Identity, OFFSET>,
+                        Cleanup: Cleanup::<Identity, OFFSET>,
+                    }
+                }
+                pub fn matches(iid: &windows_core::GUID) -> bool {
+                    iid == &<IMidiEndpointMessageProcessingPlugin as windows_core::Interface>::IID
+                }
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IMidiEndpointMessageProcessingPlugin_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub PluginId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut windows_core::GUID,
+                ) -> windows_core::HRESULT,
+                pub PluginName: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetPluginName: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub PluginTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetPluginTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub IsEnabled: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
+                pub SetIsEnabled: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    bool,
+                )
+                    -> windows_core::HRESULT,
+                pub Initialize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub OnEndpointConnectionOpened:
+                    unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                pub ProcessIncomingMessage: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub Cleanup:
+                    unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IMidiGroup,
+                IMidiGroup_Vtbl,
+                0x8087b303_0519_c0de_31d1_dd0010002000
+            );
+            impl windows_core::RuntimeType for IMidiGroup {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IMidiGroup_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Index: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u8,
+                ) -> windows_core::HRESULT,
+                pub SetIndex:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, u8) -> windows_core::HRESULT,
+                pub DisplayValue: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u8,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IMidiGroupFactory,
+                IMidiGroupFactory_Vtbl,
+                0x8087b303_0519_c0de_31d1_ff0010002000
+            );
+            impl windows_core::RuntimeType for IMidiGroupFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IMidiGroupFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateInstance: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u8,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IMidiGroupStatics,
+                IMidiGroupStatics_Vtbl,
+                0x8087b303_0519_c0de_31d1_ee0010002000
+            );
+            impl windows_core::RuntimeType for IMidiGroupStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IMidiGroupStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub ShortLabel: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub ShortLabelPlural: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub LongLabel: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub LongLabelPlural: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub IsValidIndex: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u8,
                     *mut bool,
                 )
                     -> windows_core::HRESULT,
@@ -1124,6 +1513,111 @@ pub mod Windows {
             unsafe impl Sync for MidiEndpointConnection {}
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct MidiGroup(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                MidiGroup,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(
+                MidiGroup,
+                super::super::Foundation::IStringable
+            );
+            impl MidiGroup {
+                pub fn new() -> windows_core::Result<Self> {
+                    Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                }
+                fn IActivationFactory<
+                    R,
+                    F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        MidiGroup,
+                        windows_core::imp::IGenericFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                pub fn CreateInstance(index: u8) -> windows_core::Result<MidiGroup> {
+                    Self::IMidiGroupFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateInstance)(
+                            windows_core::Interface::as_raw(this),
+                            index,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn ToString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<
+                        super::super::Foundation::IStringable,
+                    >(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ToString)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                fn IMidiGroupFactory<
+                    R,
+                    F: FnOnce(&IMidiGroupFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<MidiGroup, IMidiGroupFactory> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IMidiGroupStatics<
+                    R,
+                    F: FnOnce(&IMidiGroupStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<MidiGroup, IMidiGroupStatics> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for MidiGroup {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IMidiGroup>();
+            }
+            unsafe impl windows_core::Interface for MidiGroup {
+                type Vtable = <IMidiGroup as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IMidiGroup as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for MidiGroup {
+                const NAME: &'static str = "Windows.Devices.Midi2.MidiGroup";
+            }
+            unsafe impl Send for MidiGroup {}
+            unsafe impl Sync for MidiGroup {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct MidiMessageProcessingPluginAddResult(pub i32);
+            impl MidiMessageProcessingPluginAddResult {
+                pub const Succeeded: Self = Self(0i32);
+                pub const FailedPluginIsNull: Self = Self(1i32);
+                pub const FailedRawCallbackRegistered: Self = Self(2i32);
+                pub const FailedPluginAlreadyAdded: Self = Self(3i32);
+                pub const FailedPluginInitializationError: Self = Self(4i32);
+            }
+            impl windows_core::TypeKind for MidiMessageProcessingPluginAddResult {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for MidiMessageProcessingPluginAddResult {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Windows.Devices.Midi2.MidiMessageProcessingPluginAddResult;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct MidiMessageReceivedEventArgs(windows_core::IUnknown);
             windows_core::imp::interface_hierarchy!(
                 MidiMessageReceivedEventArgs,
@@ -1314,6 +1808,262 @@ pub mod Windows {
             }
             pub mod Enumeration {
                 windows_core::imp::define_interface!(
+                    IMidiDeclaredDeviceIdentity,
+                    IMidiDeclaredDeviceIdentity_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd0040011000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredDeviceIdentity {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredDeviceIdentity_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub IsReadOnly: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SystemExclusiveId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u32,
+                        *mut *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSystemExclusiveId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u8,
+                        u8,
+                        u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub DeviceFamilyLsb: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub DeviceFamilyMsb: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetDeviceFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u8,
+                        u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub DeviceFamilyModelNumberLsb:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub DeviceFamilyModelNumberMsb:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetDeviceFamilyModelNumber:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                    pub SoftwareRevisionLevel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u32,
+                        *mut *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSoftwareRevisionLevel:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                            u8,
+                            u8,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiDeclaredDeviceIdentityFactory,
+                    IMidiDeclaredDeviceIdentityFactory_Vtbl,
+                    0x8087b303_0519_c0de_31d1_ff0040011000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredDeviceIdentityFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredDeviceIdentityFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        u8,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiDeclaredEndpointInfo,
+                    IMidiDeclaredEndpointInfo_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd0040012000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredEndpointInfo {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredEndpointInfo_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub IsReadOnly: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Name: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ProductInstanceId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetProductInstanceId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SupportsMidi10Protocol: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSupportsMidi10Protocol:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub SupportsMidi20Protocol: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSupportsMidi20Protocol:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub SupportsReceivingJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub SetSupportsReceivingJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub SupportsSendingJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub SetSupportsSendingJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub HasStaticFunctionBlocks: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHasStaticFunctionBlocks:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub DeclaredFunctionBlockCount:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetDeclaredFunctionBlockCount:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                    pub SpecificationVersionMajor:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetSpecificationVersionMajor:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                    pub SpecificationVersionMinor:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetSpecificationVersionMinor:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiDeclaredEndpointInfoFactory,
+                    IMidiDeclaredEndpointInfoFactory_Vtbl,
+                    0x8087b303_0519_c0de_31d1_ff0040012000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredEndpointInfoFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredEndpointInfoFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                        bool,
+                        bool,
+                        bool,
+                        bool,
+                        u8,
+                        u8,
+                        u8,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
                     IMidiEndpointDeviceInformation,
                     IMidiEndpointDeviceInformation_Vtbl,
                     0x8087b303_0519_c0de_31d1_dd004000a000
@@ -1347,13 +2097,25 @@ pub mod Windows {
                     )
                         -> windows_core::HRESULT,
                     EndpointPurpose: usize,
-                    GetDeclaredEndpointInfo: usize,
+                    pub GetDeclaredEndpointInfo: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     DeclaredEndpointInfoLastUpdateTime: usize,
-                    GetDeclaredDeviceIdentity: usize,
+                    pub GetDeclaredDeviceIdentity:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
                     DeclaredDeviceIdentityLastUpdateTime: usize,
                     GetDeclaredStreamConfiguration: usize,
                     DeclaredStreamConfigurationLastUpdateTime: usize,
-                    GetDeclaredFunctionBlocks: usize,
+                    pub GetDeclaredFunctionBlocks:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
                     DeclaredFunctionBlocksLastUpdateTime: usize,
                     GetGroupTerminalBlocks: usize,
                     GetUserSuppliedInfo: usize,
@@ -1686,6 +2448,337 @@ pub mod Windows {
                     )
                         -> windows_core::HRESULT,
                 }
+                windows_core::imp::define_interface!(
+                    IMidiFunctionBlock,
+                    IMidiFunctionBlock_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd004000f000
+                );
+                impl windows_core::RuntimeType for IMidiFunctionBlock {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiFunctionBlock_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub IsReadOnly: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Number: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetNumber: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Name: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IsActive: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIsActive: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Direction: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut MidiFunctionBlockDirection,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetDirection: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        MidiFunctionBlockDirection,
+                    )
+                        -> windows_core::HRESULT,
+                    pub UIHint: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut MidiFunctionBlockUIHint,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetUIHint: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        MidiFunctionBlockUIHint,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RepresentsMidi10Connection:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut MidiFunctionBlockRepresentsMidi10Connection,
+                        ) -> windows_core::HRESULT,
+                    pub SetRepresentsMidi10Connection:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            MidiFunctionBlockRepresentsMidi10Connection,
+                        ) -> windows_core::HRESULT,
+                    pub FirstGroup: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFirstGroup: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GroupCount: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetGroupCount: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u8,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IncludesGroup: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub MidiCIMessageVersionFormat:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetMidiCIMessageVersionFormat:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                    pub MaxSystemExclusive8Streams:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u8,
+                        ) -> windows_core::HRESULT,
+                    pub SetMaxSystemExclusive8Streams:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            u8,
+                        ) -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiFunctionBlockStatics,
+                    IMidiFunctionBlockStatics_Vtbl,
+                    0x8087b303_0519_c0de_31d1_ee004000f000
+                );
+                impl windows_core::RuntimeType for IMidiFunctionBlockStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiFunctionBlockStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub ShortLabel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ShortLabelPlural: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub LongLabel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub LongLabelPlural: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiDeclaredDeviceIdentity(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiDeclaredDeviceIdentity,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiDeclaredDeviceIdentity {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredDeviceIdentity,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn CreateInstance(
+                        sysexidbyte1: u8,
+                        sysexidbyte2: u8,
+                        sysexidbyte3: u8,
+                        devicefamilylsb: u8,
+                        devicefamilymsb: u8,
+                        devicefamilymodelnumberlsb: u8,
+                        devicefamilymodelnumbermsb: u8,
+                        softwarerevisionlevelbyte1: u8,
+                        softwarerevisionlevelbyte2: u8,
+                        softwarerevisionlevelbyte3: u8,
+                        softwarerevisionlevelbyte4: u8,
+                    ) -> windows_core::Result<MidiDeclaredDeviceIdentity> {
+                        Self::IMidiDeclaredDeviceIdentityFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                sysexidbyte1,
+                                sysexidbyte2,
+                                sysexidbyte3,
+                                devicefamilylsb,
+                                devicefamilymsb,
+                                devicefamilymodelnumberlsb,
+                                devicefamilymodelnumbermsb,
+                                softwarerevisionlevelbyte1,
+                                softwarerevisionlevelbyte2,
+                                softwarerevisionlevelbyte3,
+                                softwarerevisionlevelbyte4,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IMidiDeclaredDeviceIdentityFactory<
+                        R,
+                        F: FnOnce(&IMidiDeclaredDeviceIdentityFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredDeviceIdentity,
+                            IMidiDeclaredDeviceIdentityFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for MidiDeclaredDeviceIdentity {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IMidiDeclaredDeviceIdentity,
+                        >();
+                }
+                unsafe impl windows_core::Interface for MidiDeclaredDeviceIdentity {
+                    type Vtable = <IMidiDeclaredDeviceIdentity as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IMidiDeclaredDeviceIdentity as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for MidiDeclaredDeviceIdentity {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.Enumeration.MidiDeclaredDeviceIdentity";
+                }
+                unsafe impl Send for MidiDeclaredDeviceIdentity {}
+                unsafe impl Sync for MidiDeclaredDeviceIdentity {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiDeclaredEndpointInfo(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiDeclaredEndpointInfo,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiDeclaredEndpointInfo {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredEndpointInfo,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn CreateInstance(
+                        name: &windows_core::HSTRING,
+                        productinstanceid: &windows_core::HSTRING,
+                        supportsmidi10protocol: bool,
+                        supportsmidi20protocol: bool,
+                        supportsreceivingjitterreductiontimestamps: bool,
+                        supportssendingjitterreductiontimestamps: bool,
+                        hasstaticfunctionblocks: bool,
+                        declaredfunctionblockcount: u8,
+                        specificationversionmajor: u8,
+                        specificationversionminor: u8,
+                    ) -> windows_core::Result<MidiDeclaredEndpointInfo> {
+                        Self::IMidiDeclaredEndpointInfoFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(name),
+                                core::mem::transmute_copy(productinstanceid),
+                                supportsmidi10protocol,
+                                supportsmidi20protocol,
+                                supportsreceivingjitterreductiontimestamps,
+                                supportssendingjitterreductiontimestamps,
+                                hasstaticfunctionblocks,
+                                declaredfunctionblockcount,
+                                specificationversionmajor,
+                                specificationversionminor,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IMidiDeclaredEndpointInfoFactory<
+                        R,
+                        F: FnOnce(&IMidiDeclaredEndpointInfoFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredEndpointInfo,
+                            IMidiDeclaredEndpointInfoFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for MidiDeclaredEndpointInfo {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IMidiDeclaredEndpointInfo>(
+                        );
+                }
+                unsafe impl windows_core::Interface for MidiDeclaredEndpointInfo {
+                    type Vtable = <IMidiDeclaredEndpointInfo as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IMidiDeclaredEndpointInfo as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for MidiDeclaredEndpointInfo {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.Enumeration.MidiDeclaredEndpointInfo";
+                }
+                unsafe impl Send for MidiDeclaredEndpointInfo {}
+                unsafe impl Sync for MidiDeclaredEndpointInfo {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct MidiEndpointDeviceInformation(windows_core::IUnknown);
@@ -2081,6 +3174,613 @@ pub mod Windows {
                 }
                 unsafe impl Send for MidiEndpointDeviceWatcher {}
                 unsafe impl Sync for MidiEndpointDeviceWatcher {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiFunctionBlock(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiFunctionBlock,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    MidiFunctionBlock,
+                    super::super::super::Foundation::IStringable
+                );
+                impl MidiFunctionBlock {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiFunctionBlock,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn ToString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<
+                            super::super::super::Foundation::IStringable,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ToString)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    fn IMidiFunctionBlockStatics<
+                        R,
+                        F: FnOnce(&IMidiFunctionBlockStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiFunctionBlock,
+                            IMidiFunctionBlockStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for MidiFunctionBlock {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IMidiFunctionBlock>();
+                }
+                unsafe impl windows_core::Interface for MidiFunctionBlock {
+                    type Vtable = <IMidiFunctionBlock as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IMidiFunctionBlock as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for MidiFunctionBlock {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.Enumeration.MidiFunctionBlock";
+                }
+                unsafe impl Send for MidiFunctionBlock {}
+                unsafe impl Sync for MidiFunctionBlock {}
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct MidiFunctionBlockDirection(pub i32);
+                impl MidiFunctionBlockDirection {
+                    pub const Undefined: Self = Self(0i32);
+                    pub const BlockInput: Self = Self(1i32);
+                    pub const BlockOutput: Self = Self(2i32);
+                    pub const Bidirectional: Self = Self(3i32);
+                }
+                impl windows_core::TypeKind for MidiFunctionBlockDirection {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for MidiFunctionBlockDirection {
+                    const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Windows.Devices.Midi2.Enumeration.MidiFunctionBlockDirection;i4)" ) ;
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct MidiFunctionBlockRepresentsMidi10Connection(pub i32);
+                impl MidiFunctionBlockRepresentsMidi10Connection {
+                    pub const Not10: Self = Self(0i32);
+                    pub const YesBandwidthUnrestricted: Self = Self(1i32);
+                    pub const YesBandwidthRestricted: Self = Self(2i32);
+                    pub const Reserved: Self = Self(3i32);
+                }
+                impl windows_core::TypeKind for MidiFunctionBlockRepresentsMidi10Connection {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for MidiFunctionBlockRepresentsMidi10Connection {
+                    const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Windows.Devices.Midi2.Enumeration.MidiFunctionBlockRepresentsMidi10Connection;i4)" ) ;
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct MidiFunctionBlockUIHint(pub i32);
+                impl MidiFunctionBlockUIHint {
+                    pub const Unknown: Self = Self(0i32);
+                    pub const Receiver: Self = Self(1i32);
+                    pub const Sender: Self = Self(2i32);
+                    pub const Bidirectional: Self = Self(3i32);
+                }
+                impl windows_core::TypeKind for MidiFunctionBlockUIHint {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for MidiFunctionBlockUIHint {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Windows.Devices.Midi2.Enumeration.MidiFunctionBlockUIHint;i4)",
+                        );
+                }
+            }
+            pub mod ServiceConfig {
+                windows_core::imp::define_interface!(
+                    IMidiServiceTransportPluginConfig,
+                    IMidiServiceTransportPluginConfig_Vtbl,
+                    0x8087b303_0519_c0de_31d1_cc0060006000
+                );
+                impl windows_core::RuntimeType for IMidiServiceTransportPluginConfig {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                windows_core::imp::interface_hierarchy!(
+                    IMidiServiceTransportPluginConfig,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl IMidiServiceTransportPluginConfig {}
+                impl windows_core::RuntimeName for IMidiServiceTransportPluginConfig {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.ServiceConfig.IMidiServiceTransportPluginConfig";
+                }
+                pub trait IMidiServiceTransportPluginConfig_Impl:
+                    windows_core::IUnknownImpl
+                {
+                    fn TransportId(&self) -> windows_core::GUID;
+                }
+                impl IMidiServiceTransportPluginConfig_Vtbl {
+                    pub const fn new<
+                        Identity: IMidiServiceTransportPluginConfig_Impl,
+                        const OFFSET: isize,
+                    >() -> Self {
+                        unsafe extern "system" fn TransportId<
+                            Identity: IMidiServiceTransportPluginConfig_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut windows_core::GUID,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                let ok__ =
+                                    IMidiServiceTransportPluginConfig_Impl::TransportId(this);
+                                result__.write(core::mem::transmute_copy(&ok__));
+                                windows_core::HRESULT(0)
+                            }
+                        }
+                        Self {
+                            base__: windows_core::IInspectable_Vtbl::new::<
+                                Identity,
+                                IMidiServiceTransportPluginConfig,
+                                OFFSET,
+                            >(),
+                            TransportId: TransportId::<Identity, OFFSET>,
+                            ConfigJson: 0,
+                        }
+                    }
+                    pub fn matches(iid: &windows_core::GUID) -> bool {
+                        iid == &<IMidiServiceTransportPluginConfig as windows_core::Interface>::IID
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiServiceTransportPluginConfig_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub TransportId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut windows_core::GUID,
+                    )
+                        -> windows_core::HRESULT,
+                    ConfigJson: usize,
+                }
+            }
+            pub mod Transports {
+                pub mod Virtual {
+                    windows_core::imp::define_interface!(
+                        IMidiVirtualDevice,
+                        IMidiVirtualDevice_Vtbl,
+                        0x8087b303_0519_c0de_31d1_dd00f0402000
+                    );
+                    impl windows_core::RuntimeType for IMidiVirtualDevice {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IMidiVirtualDevice_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub DeviceEndpointDeviceId:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        pub AssociationId: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut windows_core::GUID,
+                        )
+                            -> windows_core::HRESULT,
+                        pub FunctionBlocks: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub UpdateFunctionBlock: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        )
+                            -> windows_core::HRESULT,
+                        pub UpdateEndpointName: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        )
+                            -> windows_core::HRESULT,
+                        pub IsClientEndpointInUse:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut bool,
+                            )
+                                -> windows_core::HRESULT,
+                        CapabilityInquiry: usize,
+                        pub SuppressHandledMessages:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut bool,
+                            )
+                                -> windows_core::HRESULT,
+                        pub SetSuppressHandledMessages:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                bool,
+                            )
+                                -> windows_core::HRESULT,
+                        StreamConfigRequestReceived: usize,
+                        pub RemoveStreamConfigRequestReceived:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                i64,
+                            )
+                                -> windows_core::HRESULT,
+                        ClientEndpointInUseChanged: usize,
+                        pub RemoveClientEndpointInUseChanged:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                i64,
+                            )
+                                -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        IMidiVirtualDeviceCreationConfig,
+                        IMidiVirtualDeviceCreationConfig_Vtbl,
+                        0x8087b303_0519_c0de_31d1_dd00f0403000
+                    );
+                    impl windows_core::RuntimeType for IMidiVirtualDeviceCreationConfig {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IMidiVirtualDeviceCreationConfig_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub Name: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub SetName: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub Description: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub SetDescription: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub Manufacturer: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub SetManufacturer: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub CreateOnlyUmpEndpoints:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut bool,
+                            )
+                                -> windows_core::HRESULT,
+                        pub SetCreateOnlyUmpEndpoints:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                bool,
+                            )
+                                -> windows_core::HRESULT,
+                        pub AssociationId: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut windows_core::GUID,
+                        )
+                            -> windows_core::HRESULT,
+                        pub DeclaredDeviceIdentity:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        pub SetDeclaredDeviceIdentity:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        pub DeclaredEndpointInfo:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        pub SetDeclaredEndpointInfo:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        UserSuppliedInfo: usize,
+                        SetUserSuppliedInfo: usize,
+                        pub FunctionBlocks: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        IMidiVirtualDeviceCreationConfigFactory,
+                        IMidiVirtualDeviceCreationConfigFactory_Vtbl,
+                        0x8087b303_0519_c0de_31d1_ff00f0403000
+                    );
+                    impl windows_core::RuntimeType for IMidiVirtualDeviceCreationConfigFactory {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IMidiVirtualDeviceCreationConfigFactory_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub CreateInstance: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub CreateInstance2: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        CreateInstance3: usize,
+                    }
+                    windows_core::imp::define_interface!(
+                        IMidiVirtualDeviceManagerStatics,
+                        IMidiVirtualDeviceManagerStatics_Vtbl,
+                        0x8087b303_0519_c0de_31d1_ee00f0404000
+                    );
+                    impl windows_core::RuntimeType for IMidiVirtualDeviceManagerStatics {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IMidiVirtualDeviceManagerStatics_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub IsTransportAvailable:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut bool,
+                            )
+                                -> windows_core::HRESULT,
+                        pub TransportId: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut windows_core::GUID,
+                        )
+                            -> windows_core::HRESULT,
+                        pub CreateVirtualDevice: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetAssociatedClientEndpointDeviceId:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                windows_core::GUID,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                    }
+                    #[repr(transparent)]
+                    #[derive(Clone, Debug, Eq, PartialEq)]
+                    pub struct MidiVirtualDevice(windows_core::IUnknown);
+                    windows_core::imp::interface_hierarchy!(
+                        MidiVirtualDevice,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    windows_core::imp::required_hierarchy!(
+                        MidiVirtualDevice,
+                        super::super::IMidiEndpointMessageProcessingPlugin
+                    );
+                    impl MidiVirtualDevice {
+                        pub fn RemoveStreamConfigRequestReceived(
+                            &self,
+                            token: i64,
+                        ) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .RemoveStreamConfigRequestReceived)(
+                                    windows_core::Interface::as_raw(this),
+                                    token,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn RemoveClientEndpointInUseChanged(
+                            &self,
+                            token: i64,
+                        ) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .RemoveClientEndpointInUseChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    token,
+                                )
+                                .ok()
+                            }
+                        }
+                    }
+                    impl windows_core::RuntimeType for MidiVirtualDevice {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_class::<Self, IMidiVirtualDevice>();
+                    }
+                    unsafe impl windows_core::Interface for MidiVirtualDevice {
+                        type Vtable = <IMidiVirtualDevice as windows_core::Interface>::Vtable;
+                        const IID: windows_core::GUID =
+                            <IMidiVirtualDevice as windows_core::Interface>::IID;
+                    }
+                    impl windows_core::RuntimeName for MidiVirtualDevice {
+                        const NAME: &'static str =
+                            "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDevice";
+                    }
+                    unsafe impl Send for MidiVirtualDevice {}
+                    unsafe impl Sync for MidiVirtualDevice {}
+                    #[repr(transparent)]
+                    #[derive(Clone, Debug, Eq, PartialEq)]
+                    pub struct MidiVirtualDeviceCreationConfig(windows_core::IUnknown);
+                    windows_core::imp::interface_hierarchy!(
+                        MidiVirtualDeviceCreationConfig,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    windows_core::imp::required_hierarchy!(
+                        MidiVirtualDeviceCreationConfig,
+                        super::super::ServiceConfig::IMidiServiceTransportPluginConfig
+                    );
+                    impl MidiVirtualDeviceCreationConfig {
+                        pub fn CreateInstance<P3>(
+                            name: &windows_core::HSTRING,
+                            description: &windows_core::HSTRING,
+                            manufacturer: &windows_core::HSTRING,
+                            declaredendpointinfo: P3,
+                        ) -> windows_core::Result<MidiVirtualDeviceCreationConfig>
+                        where
+                            P3: windows_core::Param<
+                                    super::super::Enumeration::MidiDeclaredEndpointInfo,
+                                >,
+                        {
+                            Self::IMidiVirtualDeviceCreationConfigFactory(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).CreateInstance)(
+                                    windows_core::Interface::as_raw(this),
+                                    core::mem::transmute_copy(name),
+                                    core::mem::transmute_copy(description),
+                                    core::mem::transmute_copy(manufacturer),
+                                    declaredendpointinfo.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            })
+                        }
+                        pub fn CreateInstance2<P3, P4>(
+                            name: &windows_core::HSTRING,
+                            description: &windows_core::HSTRING,
+                            manufacturer: &windows_core::HSTRING,
+                            declaredendpointinfo: P3,
+                            declareddeviceidentity: P4,
+                        ) -> windows_core::Result<MidiVirtualDeviceCreationConfig>
+                        where
+                            P3: windows_core::Param<
+                                    super::super::Enumeration::MidiDeclaredEndpointInfo,
+                                >,
+                            P4: windows_core::Param<
+                                    super::super::Enumeration::MidiDeclaredDeviceIdentity,
+                                >,
+                        {
+                            Self::IMidiVirtualDeviceCreationConfigFactory(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).CreateInstance2)(
+                                    windows_core::Interface::as_raw(this),
+                                    core::mem::transmute_copy(name),
+                                    core::mem::transmute_copy(description),
+                                    core::mem::transmute_copy(manufacturer),
+                                    declaredendpointinfo.param().abi(),
+                                    declareddeviceidentity.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            })
+                        }
+                        fn IMidiVirtualDeviceCreationConfigFactory<
+                            R,
+                            F: FnOnce(
+                                &IMidiVirtualDeviceCreationConfigFactory,
+                            ) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                MidiVirtualDeviceCreationConfig,
+                                IMidiVirtualDeviceCreationConfigFactory,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                    }
+                    impl windows_core::RuntimeType for MidiVirtualDeviceCreationConfig {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_class::<
+                                Self,
+                                IMidiVirtualDeviceCreationConfig,
+                            >();
+                    }
+                    unsafe impl windows_core::Interface for MidiVirtualDeviceCreationConfig {
+                        type Vtable =
+                            <IMidiVirtualDeviceCreationConfig as windows_core::Interface>::Vtable;
+                        const IID: windows_core::GUID =
+                            <IMidiVirtualDeviceCreationConfig as windows_core::Interface>::IID;
+                    }
+                    impl windows_core::RuntimeName for MidiVirtualDeviceCreationConfig {
+                        const NAME: &'static str = "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDeviceCreationConfig";
+                    }
+                    unsafe impl Send for MidiVirtualDeviceCreationConfig {}
+                    unsafe impl Sync for MidiVirtualDeviceCreationConfig {}
+                    pub struct MidiVirtualDeviceManager;
+                    impl MidiVirtualDeviceManager {
+                        fn IMidiVirtualDeviceManagerStatics<
+                            R,
+                            F: FnOnce(&IMidiVirtualDeviceManagerStatics) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                MidiVirtualDeviceManager,
+                                IMidiVirtualDeviceManagerStatics,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                    }
+                    impl windows_core::RuntimeName for MidiVirtualDeviceManager {
+                        const NAME: &'static str =
+                            "Windows.Devices.Midi2.Transports.Virtual.MidiVirtualDeviceManager";
+                    }
+                }
             }
         }
     }

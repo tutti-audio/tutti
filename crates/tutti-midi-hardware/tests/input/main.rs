@@ -15,6 +15,7 @@ mod hardware_poll_no_alloc;
 mod listener;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
+    all(midi_backend = "midi_services", feature = "services-tests"),
     all(target_os = "macos", feature = "coremidi")
 ))]
 mod listing;
@@ -25,6 +26,7 @@ mod listing;
 mod loopback;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
+    all(midi_backend = "midi_services", feature = "services-tests"),
     all(target_os = "macos", feature = "coremidi")
 ))]
 mod opening;
@@ -47,11 +49,9 @@ mod target;
 mod virtual_endpoint;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
+    all(midi_backend = "midi_services", feature = "services-tests"),
     all(target_os = "macos", feature = "coremidi")
 ))]
 mod virtual_loopback;
-#[cfg(any(
-    all(midi_backend = "winmm", feature = "synth-tests"),
-    all(midi_backend = "midi_services", feature = "services-tests")
-))]
+#[cfg(all(midi_backend = "winmm", feature = "synth-tests"))]
 mod virtual_unsupported;

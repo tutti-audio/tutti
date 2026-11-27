@@ -1,5 +1,7 @@
 //! The error every call here returns.
 
+use crate::checks::declared::Refusal;
+
 /// Why a call into Windows MIDI Services failed.
 ///
 /// A code is the `HRESULT` the call returned, as the signed 32-bit value Windows
@@ -53,6 +55,10 @@ pub enum Error {
     /// The endpoint watcher stopped on its own: the service went away or the watcher failed.
     #[error("the endpoint device watcher stopped")]
     WatcherStopped,
+    /// What a virtual device declares has a field the service has no number for, or a
+    /// count that is not its blocks.
+    #[error("the virtual device's declaration cannot be carried: {0}")]
+    Declaration(#[from] Refusal),
     /// The service refused the message for a reason that is not a closed connection or a
     /// full buffer.
     #[error("the service refused the message (result {bits:#x})")]

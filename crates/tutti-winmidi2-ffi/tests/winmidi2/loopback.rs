@@ -2,16 +2,13 @@
 //! is sent to one arrives at the other.
 
 use std::sync::mpsc::{Receiver, channel};
-use std::time::Duration;
 
+use crate::deadline::{Deadline, HANG_GUARD};
 use tutti_platform::Instant;
 use tutti_ump::Ump;
 use tutti_winmidi2_ffi::{
     Connection, Endpoint, Error, Loopback, Session, endpoints, ensure_service_available,
 };
-
-/// Only a hang guard: it bounds a wait for a message that never comes, and is not a speed.
-const HANG_GUARD: Duration = Duration::from_secs(60);
 
 fn loopback(which: Loopback) -> Endpoint {
     ensure_service_available().expect("the MIDI service is available");
@@ -75,10 +72,11 @@ fn messages() -> Vec<Ump> {
 }
 
 fn receive_all(pair: &Pair, count: usize) -> Vec<(Option<Instant>, Ump)> {
+    let deadline = Deadline::start();
     (0..count)
         .map(|n| {
-            pair.received
-                .recv_timeout(HANG_GUARD)
+            deadline
+                .recv(&pair.received)
                 .unwrap_or_else(|e| panic!("message {n} of {count} never arrived: {e}"))
         })
         .collect()
