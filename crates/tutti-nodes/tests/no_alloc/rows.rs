@@ -18,7 +18,7 @@ use tutti_nodes::{
     DistanceNode, DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig,
     EarlyReflectionsNode, EllipticTolerances, EnvelopeFilterConfig, EnvelopeFilterNode, FmConfig,
     FmNode, FrequencyShifterConfig, FrequencyShifterNode, GranularConfig, GranularNode,
-    GraphicBands, GraphicEqConfig, GraphicEqNode, HysteresisConfig, HysteresisNode,
+    GranularSource, GraphicBands, GraphicEqConfig, GraphicEqNode, HysteresisConfig, HysteresisNode,
     KarplusStrongConfig, KarplusStrongNode, KeySource, LevellerConfig, LevellerNode, MidSideConfig,
     MidSideNode, ModalBankConfig, ModalBankNode, Mode, Modes, NoiseColour, NoiseConfig, NoiseNode,
     OversamplingFactor, PassbandRipple, PitchShifterConfig, PitchShifterNode, PolarityConfig,
@@ -231,13 +231,12 @@ fn granular() {
     source
         .append(Interleaved::new(&frames, ChannelLayout::STEREO).unwrap())
         .unwrap();
-    let node = GranularNode::<f32>::try_from(
-        GranularConfig::new(ChannelLayout::STEREO, Arc::new(source))
+    let node = GranularNode::<f32>::from(
+        GranularConfig::new(GranularSource::new(ChannelLayout::STEREO, Arc::new(source)).unwrap())
             .max_grains(MaxGrains::of(8))
             .seed(11)
             .jitter([Normalized::of(0.3), Normalized::of(0.5)]),
-    )
-    .unwrap();
+    );
     Gate::new(feeds::silence)
         .warm_moves()
         .frames(480)
@@ -509,12 +508,8 @@ fn bell_tilt_graphic_eq() {
 
 fn utility() {
     let gate = Gate::new(feeds::offset_square).warm_moves();
-    let polarity = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);
-    gate.run(
-        "polarity",
-        PolarityNode::try_from(polarity).unwrap(),
-        |_, _| {},
-    );
+    let polarity = PolarityConfig::only(ChannelLayout::STEREO, [ChannelIndex::of(1)]).unwrap();
+    gate.run("polarity", PolarityNode::from(polarity), |_, _| {});
     gate.run(
         "mid/side encode",
         MidSideNode::from(MidSideConfig::encode()),

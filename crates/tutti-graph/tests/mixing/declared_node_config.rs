@@ -2,13 +2,13 @@
 //! structure (`required`, `options`, whether an optional param is given) and
 //! what is a value (a param's or a setting's initial), the initials by
 //! address, the node `build` makes, the host's values a build can take, and the
-//! identity an `Asset` compares by.
+//! identity an `Shared` compares by.
 
 use std::sync::{Arc, OnceLock};
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Asset, Cx, HostValues, IntoNode, Io, Node, NodeConfig, Prepare, Shape, Status, declare_params,
+    Cx, HostValues, IntoNode, Io, Node, NodeConfig, Prepare, Shape, Shared, Status, declare_params,
 };
 use tutti_rt::{Publisher, atomic_word};
 use tutti_units::{Amplitude, Db, Hz, SettingKind, SyncSetting, UnitAddr, UnitParam};
@@ -30,7 +30,7 @@ pub struct Voiced {
 }
 
 declare_params!([] Voiced, VoicedConfig, VoicedCells {
-    required { layout: ChannelLayout, table: Asset<Vec<f32>> }
+    required { layout: ChannelLayout, table: Shared<Vec<f32>> }
     params {
         Cutoff => cutoff: Hz = Hz::new(1_000.0),
         Threshold => bands[2]: Db = Db::new(-10.0),
@@ -63,10 +63,10 @@ impl Node for Voiced {
     }
 }
 
-/// One table every `config()` shares, so two of them hold the same asset.
+/// One table every `config()` shares, so two of them hold the same `Shared`.
 fn config() -> VoicedConfig {
-    static TABLE: OnceLock<Asset<Vec<f32>>> = OnceLock::new();
-    let table = TABLE.get_or_init(|| Asset::new(vec![0.5_f32]));
+    static TABLE: OnceLock<Shared<Vec<f32>>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| Shared::new(vec![0.5_f32]));
     VoicedConfig::new(ChannelLayout::MONO, table.clone())
 }
 
@@ -83,14 +83,14 @@ fn a_param_or_setting_initial_is_a_value_not_structure() {
     assert_eq!(louder.initials().settings(), &[(SettingKind::Sync, 1)]);
 }
 
-/// A `required` value is structure: a different width, or a different asset,
+/// A `required` value is structure: a different width, or a different `Shared`,
 /// is a different node.
 #[test]
 fn a_required_change_is_structure() {
     let base = config();
     let wider = VoicedConfig::new(ChannelLayout::STEREO, base.table.clone());
     assert!(!base.same_structure(&wider));
-    let other_table = VoicedConfig::new(ChannelLayout::MONO, Asset::new(vec![0.5_f32]));
+    let other_table = VoicedConfig::new(ChannelLayout::MONO, Shared::new(vec![0.5_f32]));
     assert!(!base.same_structure(&other_table));
 }
 
@@ -110,16 +110,16 @@ fn giving_or_withdrawing_an_optional_param_is_structure() {
     assert!(given.same_structure(&config().volume(Some(Amplitude::new(0.5)))));
 }
 
-/// An asset equals itself and its clones, and no other allocation, though its
+/// A `Shared` equals itself and its clones, and no other allocation, though its
 /// content is equal.
 #[test]
-fn an_asset_is_equal_by_identity() {
-    let asset = Asset::new(vec![1.0_f32, 2.0]);
+fn a_shared_is_equal_by_identity() {
+    let asset = Shared::new(vec![1.0_f32, 2.0]);
     assert_eq!(asset, asset.clone());
-    let twin = Asset::from(Arc::new(vec![1.0_f32, 2.0]));
+    let twin = Shared::from(Arc::new(vec![1.0_f32, 2.0]));
     assert_eq!(*asset, *twin);
     assert_ne!(asset, twin);
-    assert_eq!(asset, Asset::from(Arc::clone(asset.arc())));
+    assert_eq!(asset, Shared::from(Arc::clone(asset.arc())));
 }
 
 /// The initials are the declared params' initial raws, each at its address, a
