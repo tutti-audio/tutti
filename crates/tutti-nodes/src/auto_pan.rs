@@ -76,6 +76,9 @@ impl Default for AutoPanConfig {
 /// (`AutoPanNode::from`).
 pub type AutoPanNode<F> = KernelNode<AutoPanKernel<F>>;
 
+kernel_config!(AutoPanConfig => AutoPanNode<F> where [F: Float],
+    set(_): AutoPanSet = AutoPanSet);
+
 impl<F: Float> From<AutoPanConfig> for AutoPanNode<F> {
     fn from(config: AutoPanConfig) -> Self {
         // A placeholder rate: an unprepared node renders nothing.
@@ -85,7 +88,7 @@ impl<F: Float> From<AutoPanConfig> for AutoPanNode<F> {
             pan: AutoPan::new(config.wave, config.law, SampleRate::SR_48K),
             float: core::marker::PhantomData,
         };
-        Self::with_kernel(kernel, AutoPanSet, config.controls)
+        Self::with_kernel(kernel, config.kernel_set(), config.controls)
     }
 }
 

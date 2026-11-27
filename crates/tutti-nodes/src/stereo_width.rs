@@ -56,11 +56,14 @@ impl Default for StereoWidthConfig {
     }
 }
 
+kernel_config!(StereoWidthConfig => StereoWidthNode<F> where [F: Float + Lerp],
+    set(_): StereoWidthSet = StereoWidthSet);
+
 impl<F: Float + Lerp> From<StereoWidthConfig> for StereoWidthNode<F> {
     fn from(config: StereoWidthConfig) -> Self {
         Self::with_kernel(
             StereoWidthKernel::<F>::new(),
-            StereoWidthSet,
+            config.kernel_set(),
             config.controls,
         )
     }

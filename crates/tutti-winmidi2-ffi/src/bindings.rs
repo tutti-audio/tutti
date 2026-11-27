@@ -1384,6 +1384,44 @@ pub mod Windows {
                         ) -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
+                    IMidiEndpointDeviceInformationAddedEventArgs,
+                    IMidiEndpointDeviceInformationAddedEventArgs_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd004000b000
+                );
+                impl windows_core::RuntimeType for IMidiEndpointDeviceInformationAddedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiEndpointDeviceInformationAddedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub AddedDevice: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiEndpointDeviceInformationRemovedEventArgs,
+                    IMidiEndpointDeviceInformationRemovedEventArgs_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd004000c000
+                );
+                impl windows_core::RuntimeType for IMidiEndpointDeviceInformationRemovedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiEndpointDeviceInformationRemovedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub RemovedDevice: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
                     IMidiEndpointDeviceInformationStatics,
                     IMidiEndpointDeviceInformationStatics_Vtbl,
                     0x8087b303_0519_c0de_31d1_ee004000a000
@@ -1441,6 +1479,210 @@ pub mod Windows {
                         *mut core::ffi::c_void,
                         MidiEndpointDeviceInformationFilters,
                         *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiEndpointDeviceInformationUpdatedEventArgs,
+                    IMidiEndpointDeviceInformationUpdatedEventArgs_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd004000d000
+                );
+                impl windows_core::RuntimeType for IMidiEndpointDeviceInformationUpdatedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiEndpointDeviceInformationUpdatedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub UpdatedDevice: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    DeviceInformationUpdate: usize,
+                    pub IsNameUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IsEndpointInformationUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub IsDeviceIdentityUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IsStreamConfigurationUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub AreFunctionBlocksUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub IsUserMetadataUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub AreAdditionalCapabilitiesUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub AreUniqueIdsUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub AreGroupTerminalBlocksUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub IsMutedStateUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IsEndpointDiscoveryStateUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub IsMidi1PortMappingUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub IsDevicePresenceUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub AreLatencyPropertiesUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub AreTransportSuppliedPropertiesUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub AreSystemDevicePropertiesUpdated:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiEndpointDeviceWatcher,
+                    IMidiEndpointDeviceWatcher_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd004000e000
+                );
+                impl windows_core::RuntimeType for IMidiEndpointDeviceWatcher {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiEndpointDeviceWatcher_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Start:
+                        unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                    pub Stop:
+                        unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                    pub EnumeratedEndpointDevices:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                    Status: usize,
+                    pub Added: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveAdded: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Removed: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveRemoved: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Updated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveUpdated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub EnumerationCompleted: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveEnumerationCompleted:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i64,
+                        ) -> windows_core::HRESULT,
+                    pub Stopped: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveStopped: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiEndpointDeviceWatcherStatics,
+                    IMidiEndpointDeviceWatcherStatics_Vtbl,
+                    0x8087b303_0519_c0de_31d1_ee004000e000
+                );
+                impl windows_core::RuntimeType for IMidiEndpointDeviceWatcherStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiEndpointDeviceWatcherStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Create: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Create2: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        MidiEndpointDeviceInformationFilters,
+                        *mut *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
                 }
@@ -1503,6 +1745,31 @@ pub mod Windows {
                 unsafe impl Send for MidiEndpointDeviceInformation {}
                 unsafe impl Sync for MidiEndpointDeviceInformation {}
                 #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiEndpointDeviceInformationAddedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiEndpointDeviceInformationAddedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiEndpointDeviceInformationAddedEventArgs {}
+                impl windows_core::RuntimeType for MidiEndpointDeviceInformationAddedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IMidiEndpointDeviceInformationAddedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for MidiEndpointDeviceInformationAddedEventArgs {
+                    type Vtable = < IMidiEndpointDeviceInformationAddedEventArgs as windows_core::Interface >::Vtable ;
+                    const IID :windows_core::GUID = < IMidiEndpointDeviceInformationAddedEventArgs as windows_core::Interface >::IID ;
+                }
+                impl windows_core::RuntimeName for MidiEndpointDeviceInformationAddedEventArgs {
+                    const NAME: &'static str = "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationAddedEventArgs";
+                }
+                unsafe impl Send for MidiEndpointDeviceInformationAddedEventArgs {}
+                unsafe impl Sync for MidiEndpointDeviceInformationAddedEventArgs {}
+                #[repr(transparent)]
                 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
                 pub struct MidiEndpointDeviceInformationFilters(pub u32);
                 impl MidiEndpointDeviceInformationFilters {
@@ -1553,6 +1820,31 @@ pub mod Windows {
                     }
                 }
                 #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiEndpointDeviceInformationRemovedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiEndpointDeviceInformationRemovedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiEndpointDeviceInformationRemovedEventArgs {}
+                impl windows_core::RuntimeType for MidiEndpointDeviceInformationRemovedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IMidiEndpointDeviceInformationRemovedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for MidiEndpointDeviceInformationRemovedEventArgs {
+                    type Vtable = < IMidiEndpointDeviceInformationRemovedEventArgs as windows_core::Interface >::Vtable ;
+                    const IID :windows_core::GUID = < IMidiEndpointDeviceInformationRemovedEventArgs as windows_core::Interface >::IID ;
+                }
+                impl windows_core::RuntimeName for MidiEndpointDeviceInformationRemovedEventArgs {
+                    const NAME: &'static str = "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationRemovedEventArgs";
+                }
+                unsafe impl Send for MidiEndpointDeviceInformationRemovedEventArgs {}
+                unsafe impl Sync for MidiEndpointDeviceInformationRemovedEventArgs {}
+                #[repr(transparent)]
                 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
                 pub struct MidiEndpointDeviceInformationSortOrder(pub i32);
                 impl MidiEndpointDeviceInformationSortOrder {
@@ -1573,6 +1865,222 @@ pub mod Windows {
                 impl windows_core::RuntimeType for MidiEndpointDeviceInformationSortOrder {
                     const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationSortOrder;i4)" ) ;
                 }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiEndpointDeviceInformationUpdatedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiEndpointDeviceInformationUpdatedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiEndpointDeviceInformationUpdatedEventArgs {}
+                impl windows_core::RuntimeType for MidiEndpointDeviceInformationUpdatedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IMidiEndpointDeviceInformationUpdatedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for MidiEndpointDeviceInformationUpdatedEventArgs {
+                    type Vtable = < IMidiEndpointDeviceInformationUpdatedEventArgs as windows_core::Interface >::Vtable ;
+                    const IID :windows_core::GUID = < IMidiEndpointDeviceInformationUpdatedEventArgs as windows_core::Interface >::IID ;
+                }
+                impl windows_core::RuntimeName for MidiEndpointDeviceInformationUpdatedEventArgs {
+                    const NAME: &'static str = "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationUpdatedEventArgs";
+                }
+                unsafe impl Send for MidiEndpointDeviceInformationUpdatedEventArgs {}
+                unsafe impl Sync for MidiEndpointDeviceInformationUpdatedEventArgs {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiEndpointDeviceWatcher(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiEndpointDeviceWatcher,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiEndpointDeviceWatcher {
+                    pub fn Added<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                                super::super::super::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    MidiEndpointDeviceInformationAddedEventArgs,
+                                >,
+                            >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Added)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn RemoveAdded(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveAdded)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Removed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                                super::super::super::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    MidiEndpointDeviceInformationRemovedEventArgs,
+                                >,
+                            >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Removed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn RemoveRemoved(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveRemoved)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Updated<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                                super::super::super::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    MidiEndpointDeviceInformationUpdatedEventArgs,
+                                >,
+                            >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Updated)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn RemoveUpdated(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveUpdated)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn EnumerationCompleted<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                                super::super::super::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    windows_core::IInspectable,
+                                >,
+                            >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).EnumerationCompleted)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn RemoveEnumerationCompleted(
+                        &self,
+                        token: i64,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveEnumerationCompleted)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Stopped<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                                super::super::super::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    windows_core::IInspectable,
+                                >,
+                            >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Stopped)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn RemoveStopped(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveStopped)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    fn IMidiEndpointDeviceWatcherStatics<
+                        R,
+                        F: FnOnce(&IMidiEndpointDeviceWatcherStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiEndpointDeviceWatcher,
+                            IMidiEndpointDeviceWatcherStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for MidiEndpointDeviceWatcher {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IMidiEndpointDeviceWatcher>(
+                        );
+                }
+                unsafe impl windows_core::Interface for MidiEndpointDeviceWatcher {
+                    type Vtable = <IMidiEndpointDeviceWatcher as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IMidiEndpointDeviceWatcher as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for MidiEndpointDeviceWatcher {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceWatcher";
+                }
+                unsafe impl Send for MidiEndpointDeviceWatcher {}
+                unsafe impl Sync for MidiEndpointDeviceWatcher {}
             }
         }
     }

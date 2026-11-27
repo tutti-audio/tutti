@@ -18,6 +18,10 @@ const FILTER: &[&str] = &[
     "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationFilters",
     "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationSortOrder",
     "Windows.Foundation.TypedEventHandler",
+    "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceWatcher",
+    "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationAddedEventArgs",
+    "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationRemovedEventArgs",
+    "Windows.Devices.Midi2.Enumeration.MidiEndpointDeviceInformationUpdatedEventArgs",
 ];
 
 /// The vtable members the safe face calls (`os/`), by name. A member the generator leaves out
@@ -43,6 +47,16 @@ const NEEDED: &[&str] = &[
     "DiagnosticsLoopbackAEndpointDeviceId",
     "DiagnosticsLoopbackBEndpointDeviceId",
     "Close",
+    "Create2",
+    "Start",
+    "Stop",
+    "Added",
+    "Removed",
+    "Updated",
+    "Stopped",
+    "AddedDevice",
+    "RemovedDevice",
+    "UpdatedDevice",
 ];
 
 fn main() -> ExitCode {

@@ -133,14 +133,16 @@ impl GateConfig {
     }
 }
 
+kernel_config!(GateConfig => GateNode<F> where [F: Float + SimdLanes + Lerp],
+set(c): GateSet = GateSet {
+    key_filter: Arc::new(AtomicCell::new(c.controls.key_filter)),
+});
+
 impl<F: Float + SimdLanes + Lerp> From<GateConfig> for GateNode<F> {
     fn from(config: GateConfig) -> Self {
-        let set = GateSet {
-            key_filter: Arc::new(AtomicCell::new(config.controls.key_filter)),
-        };
         Self::with_kernel(
             GateKernel::new(config.input, config.key),
-            set,
+            config.kernel_set(),
             config.controls,
         )
     }

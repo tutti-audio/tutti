@@ -173,6 +173,7 @@ fn filter::eq_band::EqBandConfig::gain
 fn filter::eq_band::EqBandConfig::new
 fn filter::eq_band::EqBandConfig::q
 fn filter::graphic_eq::GraphicEqConfig::new
+fn filter::ladder::LadderFilterConfig::drive
 fn filter::ladder::LadderFilterConfig::freq
 fn filter::ladder::LadderFilterConfig::new
 fn filter::ladder::LadderFilterConfig::res

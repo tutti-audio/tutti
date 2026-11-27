@@ -44,6 +44,15 @@ pub enum Error {
     /// a timestamp holds, or the clock reports no frequency.
     #[error("the time is not a timestamp of the service's clock")]
     Timestamp,
+    /// The service delivered words that are not one whole UMP message.
+    #[error("the service delivered {words} words, which are not one UMP message")]
+    NotAMessage {
+        /// How many words the service said the message had.
+        words: u8,
+    },
+    /// The endpoint watcher stopped on its own: the service went away or the watcher failed.
+    #[error("the endpoint device watcher stopped")]
+    WatcherStopped,
     /// The service refused the message for a reason that is not a closed connection or a
     /// full buffer.
     #[error("the service refused the message (result {bits:#x})")]

@@ -126,14 +126,16 @@ impl CompressorConfig {
     }
 }
 
+kernel_config!(CompressorConfig => CompressorNode<F> where [F: Float + SimdLanes + Lerp],
+set(c): CompressorSet = CompressorSet {
+    key_filter: Arc::new(AtomicCell::new(c.controls.key_filter)),
+});
+
 impl<F: Float + SimdLanes + Lerp> From<CompressorConfig> for CompressorNode<F> {
     fn from(config: CompressorConfig) -> Self {
-        let set = CompressorSet {
-            key_filter: Arc::new(AtomicCell::new(config.controls.key_filter)),
-        };
         Self::with_kernel(
             CompressorKernel::new(config.input, config.key),
-            set,
+            config.kernel_set(),
             config.controls,
         )
     }

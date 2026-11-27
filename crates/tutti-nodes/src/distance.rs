@@ -89,6 +89,9 @@ impl DistanceConfig {
 /// is one bus.
 pub type DistanceNode<F> = KernelNode<DistanceKernel<F>>;
 
+kernel_config!(DistanceConfig => DistanceNode<F> where [F: Float],
+    set(_): DistanceSet = DistanceSet);
+
 impl<F: Float> From<DistanceConfig> for DistanceNode<F> {
     fn from(config: DistanceConfig) -> Self {
         Self::with_kernel(
@@ -98,7 +101,7 @@ impl<F: Float> From<DistanceConfig> for DistanceNode<F> {
                 SampleRate::SR_48K,
                 config.controls,
             ),
-            DistanceSet,
+            config.kernel_set(),
             config.controls,
         )
     }

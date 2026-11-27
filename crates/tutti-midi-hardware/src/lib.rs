@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
 //! them, send MIDI out and receive it back, through CoreMIDI (macOS), the
-//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). `tutti::midi` names its
+//! ALSA UMP sequencer (Linux) and Windows MIDI Services or Windows Multimedia (Windows). `tutti::midi` names its
 //! device and profile types (feature `midi-hardware`).
 //!
 //! Events reach the wire as UMP words, not MIDI 1.0 bytes, so MIDI-2-only messages
@@ -14,15 +14,20 @@
 //! ## Features
 //!
 //! A backend is a cargo feature, each a no-op off its OS: `alsa` (Linux, needing
-//! alsa-lib 1.2.10 or later), `coremidi` (macOS) and `winmm` (Windows). All three are
-//! on by default, so every platform keeps its backend; with
-//! `default-features = false` the backend is a stub that lists no device and fails
-//! to open one with [`MidiHardwareError::Unsupported`]. `build.rs` picks the
-//! backend from the target OS and these features: there is no runtime fallback.
+//! alsa-lib 1.2.10 or later), `coremidi` (macOS), `midi-services` (Windows MIDI
+//! Services) and `winmm` (Windows Multimedia). All but `winmm` are on by default, so
+//! every platform keeps its native backend; `winmm` replaces `midi-services` on Windows
+//! (with both on the backend is winmm), so only the app turns it on, for a PC with no MIDI
+//! Services. With `default-features = false` the backend is a stub that lists no device
+//! and fails to open one with [`MidiHardwareError::Unsupported`]. `build.rs` picks the
+//! backend from the target OS and these features: there is no runtime fallback, and a
+//! PC without the service fails to open with
+//! [`MidiHardwareError::MidiServicesNotRunning`] or
+//! [`MidiHardwareError::MidiServicesApiMissing`].
 //! `serde` adds `Serialize` and `Deserialize` on `MidiHardwareConfig` and
 //! `InputTiming`; `testing` exports `test_support::FakeBackend`; `sequencer-tests` and
-//! `synth-tests` gate the suites that need a real ALSA sequencer or Windows' GS
-//! Wavetable Synth, and turn their backend on.
+//! `synth-tests` and `services-tests` gate the suites that need a real ALSA sequencer,
+//! Windows' GS Wavetable Synth or the Windows MIDI service, and turn their backend on.
 //!
 //! ## Devices
 //!
@@ -82,7 +87,11 @@
 //!   [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
 //! - If the watch ends on its own, the [`DeviceEvents`] stream ends once the events the watch reported are taken,
 //!   [`DeviceEvents::failure`] says why, and the list stays as it was.
-//! - **Windows:** Windows Multimedia has no notification, so the watch lists the
+//! - **Windows (MIDI Services):** the service's endpoint watcher reports each endpoint
+//!   that appears, leaves or changes, with no re-list. A
+//!   [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the endpoint's device interface
+//!   path, and each endpoint is one duplex device.
+//! - **Windows (winmm):** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
 //!   that long. A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the device interface path the driver reports,
 //!   or the product name and ids when it reports none, with the direction.
@@ -107,7 +116,7 @@
 //! another thread. What peers write is delivered into an [`InputProducerHandle`],
 //! so its events take the path a device input's do. Where the platform cannot publish what the
 //! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
-//! or the API has no virtual ports (Windows Multimedia),
+//! or the backend publishes no virtual ports (Windows Multimedia, Windows MIDI Services),
 //! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS before 15,
 //! where an endpoint carries a name and a protocol only (from macOS 15 the endpoint is
 //! a UMP Endpoint that declares its blocks and its identity; CoreMIDI numbers the blocks
@@ -220,7 +229,8 @@
 //! |---|---|---|
 //! | macOS | CoreMIDI | `MIDIInputPortCreateWithProtocol` / `MIDISendEventList`. |
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
-//! | Windows | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and translated as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Windows MIDI Services (UMP-native) is not used. |
+//! | Windows | Windows MIDI Services | UMP words end to end, each endpoint one duplex device. The service's endpoint watcher feeds the list, an output hands each packet to the service at its send time, and a PC without the service fails to open with a named error. No virtual endpoints. |
+//! | Windows (`winmm` feature) | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and translated as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Replaces Windows MIDI Services, for a PC that has none. |
 //! | Elsewhere | stub | Enumerates nothing, [`MidiHardwareError::Unsupported`] on open. |
 //!
 //! [`MidiSession::open`] picks one, once, at construction; nothing downstream learns
@@ -246,6 +256,9 @@
 //! - `synth-tests`: the suites that open Windows' GS Wavetable Synth through
 //!   the winmm backend. Windows only; needs an audio endpoint, which a machine
 //!   with no sound hardware gets from a virtual audio driver. Off by default.
+//! - `services-tests`: the suites that open the diagnostic loopback endpoints of
+//!   Windows MIDI Services. Windows only; needs the MIDI service and
+//!   `Windows.Devices.Midi2.dll` beside the test binary. Off by default.
 //!
 //! ## Where it sits
 //!
@@ -284,10 +297,14 @@ mod backend;
 #[path = "../backend_choice.rs"]
 mod backend_choice;
 // Compiled everywhere so its tests run on every platform; only the native
-// backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub
-// or winmm is the backend.
+// backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub,
+// winmm or Windows MIDI Services (which describes no block yet) is the backend.
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "winmm"),
+    any(
+        midi_backend = "none",
+        midi_backend = "winmm",
+        midi_backend = "midi_services"
+    ),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
 mod capability;
@@ -296,13 +313,13 @@ mod devices;
 mod endpoints;
 mod error;
 mod fault;
-// Only the ALSA and Windows Multimedia callbacks run through it: the stub has none,
-// and CoreMIDI's port catches a panic in its own.
+// Only the ALSA, Windows Multimedia and Windows MIDI Services callbacks run through it: the
+// stub has none, and CoreMIDI's port catches a panic in its own.
 #[cfg_attr(
     any(midi_backend = "none", midi_backend = "coremidi"),
     allow(
         dead_code,
-        reason = "only the ALSA and Windows Multimedia backends use it"
+        reason = "only the ALSA, Windows Multimedia and Windows MIDI Services backends use it"
     )
 )]
 mod guard;
@@ -316,7 +333,11 @@ mod session;
 mod start;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "winmm"),
+    any(
+        midi_backend = "none",
+        midi_backend = "winmm",
+        midi_backend = "midi_services"
+    ),
     allow(
         dead_code,
         reason = "only the ALSA and CoreMIDI backends convert a clock"

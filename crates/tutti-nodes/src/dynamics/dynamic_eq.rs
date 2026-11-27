@@ -154,6 +154,9 @@ impl DynamicEqConfig {
 /// `F` is the float of the graph it runs in, and of the detector and the bell.
 pub type DynamicEqNode<F> = KernelNode<DynamicEqKernel<F>>;
 
+kernel_config!(DynamicEqConfig => DynamicEqNode<F> where [F: Float + SimdLanes + Lerp],
+    set(_): DynamicEqSet = DynamicEqSet);
+
 impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// # Panics
     ///
@@ -163,7 +166,7 @@ impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
             ChannelTopology::default_for(config.width).expect("a band is at most 16 channels wide");
         Self::with_kernel(
             DynamicEqKernel::new(input, config.key, config.mode),
-            DynamicEqSet,
+            config.kernel_set(),
             config.controls,
         )
     }

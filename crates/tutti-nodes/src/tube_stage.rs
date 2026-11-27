@@ -77,12 +77,15 @@ impl TubeStageConfig {
 /// `F` is the float of the graph it runs in, and of the solve.
 pub type TubeStageNode<F> = KernelNode<TubeStageKernel<F>>;
 
+kernel_config!(TubeStageConfig => TubeStageNode<F> where [F: Float + Lerp],
+    set(_): TubeStageSet = TubeStageSet);
+
 impl<F: Float + Lerp> From<TubeStageConfig> for TubeStageNode<F> {
     fn from(config: TubeStageConfig) -> Self {
         let input = unassigned_bus(config.width, "a tube stage");
         Self::with_kernel(
             TubeStageKernel::<F>::new(&config, input),
-            TubeStageSet,
+            config.kernel_set(),
             config.controls,
         )
     }

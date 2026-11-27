@@ -41,9 +41,13 @@ test-group = 'sequencer'
 # Windows' GS Wavetable Synth takes one client at a time: a second
 # `midiOutOpen` while another test binary holds it fails (`MMSYSERR_ERROR`).
 # The synth tests of every crate, and the output suite that opens it, run one
-# at a time (the suite's ALSA arm joins the group too, at no cost).
+# at a time (the suite's ALSA arm joins the group too, at no cost). The
+# loopback suite joins them: on Windows MIDI Services its endpoints are the
+# system-wide loopback pair the output suite also sends on, and a Windows
+# process id (a multiple of 4) leaves the suite's per-process note marker only
+# 24 distinct values, so parallel tests could hear each other's notes as their own.
 [[profile.default.overrides]]
-filter = 'test(/^synth_open::/) | (package(tutti-midi-hardware) & test(/^output::/))'
+filter = 'test(/^synth_open::/) | (package(tutti-midi-hardware) & test(/^(output|loopback)::/))'
 test-group = 'gs-synth'
 
 # Windows MIDI Services' two diagnostic loopback endpoints are one system-wide

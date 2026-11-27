@@ -90,14 +90,16 @@ impl<F: Float + SimdLanes> GraphicEqKernel<F> {
     }
 }
 
+kernel_config!(GraphicEqConfig => GraphicEqNode<F> where [F: Float + SimdLanes],
+    set(c): GraphicEqSet = GraphicEqSet { bands: c.bands },
+    fixed: GraphicEqControls::FLAT);
+
 impl<F: Float + SimdLanes> From<GraphicEqConfig> for GraphicEqNode<F> {
     fn from(config: GraphicEqConfig) -> Self {
         Self::with_kernel(
             GraphicEqKernel::new(config.input, config.bands),
-            GraphicEqSet {
-                bands: config.bands,
-            },
-            GraphicEqControls::FLAT,
+            config.kernel_set(),
+            config.kernel_controls(),
         )
     }
 }

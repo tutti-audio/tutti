@@ -101,11 +101,14 @@ impl SpringReverbConfig {
 /// `F` is the float of the graph it runs in, and of the all-passes and the loop.
 pub type SpringReverbNode<F> = KernelNode<SpringReverbKernel<F>>;
 
+kernel_config!(SpringReverbConfig => SpringReverbNode<F> where [F: Float],
+    set(_): SpringReverbSet = SpringReverbSet);
+
 impl<F: Float> From<SpringReverbConfig> for SpringReverbNode<F> {
     fn from(config: SpringReverbConfig) -> Self {
         Self::with_kernel(
             SpringReverbKernel::new(config.width, config.layout),
-            SpringReverbSet,
+            config.kernel_set(),
             config.controls,
         )
     }

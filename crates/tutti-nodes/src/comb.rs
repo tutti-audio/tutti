@@ -60,13 +60,16 @@ impl CombFilterConfig {
 /// one bus.
 pub type CombFilterNode<F> = KernelNode<CombFilterKernel<F>>;
 
+kernel_config!(CombFilterConfig => CombFilterNode<F> where [F: Float],
+    set(_): CombFilterSet = CombFilterSet);
+
 impl<F: Float> From<CombFilterConfig> for CombFilterNode<F> {
     /// The ring is sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it.
     /// Allocates.
     fn from(config: CombFilterConfig) -> Self {
         Self::with_kernel(
             CombFilterKernel::new(config.width, config.form, config.delay),
-            CombFilterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

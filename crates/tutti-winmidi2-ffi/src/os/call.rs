@@ -5,6 +5,8 @@
 //! leave them out. Every one the safe face needs is called here, through the vtable of the
 //! interface it belongs to, so a failure is an `Error` and never a panic or a zeroed value.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use super::Error;
 
 /// The factory of the runtime class `C`, as its `I` statics interface.
@@ -19,6 +21,15 @@ pub(super) fn abi(name: &windows_core::HSTRING) -> *mut core::ffi::c_void {
     // SAFETY: an `HSTRING` is one pointer, the handle its ABI passes. The copy is not an owner
     // (nothing releases it) and the callee only reads it during the call that borrows `name`.
     unsafe { core::mem::transmute_copy(name) }
+}
+
+/// Runs `body`, a service callback's, so that a panic does not unwind into the service. The
+/// payload is forgotten, since dropping it here would run arbitrary code on the service's
+/// thread.
+pub(super) fn contained(body: impl FnOnce()) {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(body)) {
+        std::mem::forget(payload);
+    }
 }
 
 /// Calls the member `$method` of the interface `$interface` (any interface or class whose

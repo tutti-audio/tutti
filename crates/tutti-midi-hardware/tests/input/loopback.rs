@@ -1,42 +1,36 @@
-//! Linux loopback over the kernel's `Midi Through` port.
+//! A loopback through the platform's target endpoints (`target`).
 //!
-//! Sends UMP out through one endpoint and reads it back through another,
-//! checking the message survives the round trip.
+//! Sends UMP out through the target's output and reads it back through its input,
+//! checking the message survives the round trip. The target is a loopback the whole
+//! machine shares, so the tests assert on the events of their own [`Marker`] only.
 //!
-//! **`Midi Through`, not VirMIDI.** A virmidi port does not echo: writing to
-//! it feeds the raw-MIDI device, not that port's own subscribers, so a
-//! send/receive pair on one virmidi port receives nothing. `Midi Through` is
-//! the kernel's loopback.
+//! **Linux** loops over the kernel's `Midi Through` port, not VirMIDI: a virmidi port does
+//! not echo (writing to it feeds the raw-MIDI device, not that port's own subscribers).
+//! The suite needs the `snd-seq` module and a `Midi Through` client (`sudo modprobe
+//! snd-seq-dummy`) and fails without them.
 //!
-//! The suite needs the `snd-seq` module and a `Midi Through` client
-//! (`sudo modprobe snd-seq-dummy`) and fails without them.
+//! **Windows** loops over the MIDI service's two cross-wired diagnostic loopback
+//! endpoints: out on A, in on B.
 
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use super::listener::Listener;
+use super::target::{input, output};
 
 use tutti_fixtures::midi::{note_off, note_on};
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{MidiHardwareConfig, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
 
-/// `Midi Through`'s input (`input`) or output, once `io` lists it.
-fn through(io: &MidiSession, input: bool) -> DeviceInfo {
-    super::listing::listed(io, "`Midi Through` (`sudo modprobe snd-seq-dummy`)", |d| {
-        let way = if input {
-            d.direction.is_input()
-        } else {
-            d.direction.is_output()
-        };
-        way && d.name.contains("Midi Through")
-    })
+/// The proof that `io`'s backend has started.
+fn started(io: &MidiSession) -> tutti_midi_hardware::Started {
+    tutti_fixtures::block_on(io.start()).expect("the backend starts")
 }
 
-/// A session with `Midi Through` connected both ways, and the graph that
+/// A session with the target connected both ways, and the graph that
 /// listens to it. The fields drop in order: the output, the graph, then the
 /// session.
 struct Loopback {
@@ -56,16 +50,16 @@ fn open() -> Loopback {
         MidiHardwareConfig::new(),
     )
     .expect("open MIDI");
-    let (inp, out) = (through(&io, true), through(&io, false));
+    let (inp, out) = (input(io.devices()), output(io.devices()));
     let tutti_midi_hardware::Connected::Opened(inlet) = io
-        .connect_input(super::opening::started(&io), &inp.id)
+        .connect_input(started(&io), &inp.id)
         .expect("connect input")
     else {
         panic!("a new input opens");
     };
     graph.attach(inlet);
     let mut sink = io
-        .connect_output(super::opening::started(&io), &out.id)
+        .connect_output(started(&io), &out.id)
         .expect("connect output");
     // Whatever was buffered before the test is drained with the probes.
     graph.ready(
@@ -84,8 +78,9 @@ fn open() -> Loopback {
 /// What only this process sends: a channel and a run of ten notes derived from
 /// the process id, so that a note another process puts into the kernel-wide
 /// loopback is told from this test's. Ids are mapped to 96 distinct
-/// (channel, run) pairs, so any 96 consecutive process ids never share one. The
-/// notes sit above the probe's 59.
+/// (channel, run) pairs, so any 96 consecutive process ids never share one; Windows
+/// ids are multiples of 4, so there the suite runs one test at a time instead
+/// (`.config/nextest.toml`). The notes sit above the probe's 59.
 struct Marker {
     channel: MidiChannel,
     base: u8,
@@ -144,11 +139,10 @@ impl Marker {
     }
 }
 
-/// `Midi Through` is a kernel-wide loopback, so a test running in parallel in
-/// another process puts its notes into the stream too: the test asserts on the
-/// events of its own [`Marker`] only.
+/// The loopback is machine-wide, so a test running in parallel in another process puts its
+/// notes into the stream too: the test asserts on the events of its own [`Marker`] only.
 #[test]
-fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
+fn the_loopback_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     let mut lb = open();
     let m = Marker::of_this_process();
     let base = m.base;
@@ -193,19 +187,19 @@ fn an_input_reopened_at_once_hears_a_note() {
         MidiHardwareConfig::new(),
     )
     .expect("open MIDI");
-    let (input_id, output_id) = (through(&io, true).id, through(&io, false).id);
+    let (input_id, output_id) = (input(io.devices()).id, output(io.devices()).id);
     let mut sink = io
-        .connect_output(super::opening::started(&io), &output_id)
+        .connect_output(started(&io), &output_id)
         .expect("connect output");
 
     let first = io
-        .connect_input(super::opening::started(&io), &input_id)
+        .connect_input(started(&io), &input_id)
         .expect("connect input");
     assert!(matches!(first, tutti_midi_hardware::Connected::Opened(_)));
     drop(first);
     io.disconnect_input(&input_id).expect("the input was open");
     let tutti_midi_hardware::Connected::Opened(inlet) = io
-        .connect_input(super::opening::started(&io), &input_id)
+        .connect_input(started(&io), &input_id)
         .expect("reconnects at once")
     else {
         panic!("a closed input opens anew");
