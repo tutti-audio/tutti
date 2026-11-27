@@ -48,9 +48,11 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
+#[cfg(feature = "device")]
+use tutti_graph::CompileError;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
-use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
+use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, FeedbackFrom, NodeBus};
 use tutti_graph::{
     CommitError, EdgeGainError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade,
     InletNode, InletRing, IntoNode, MeterReader, Prepare, RenderMode,
@@ -83,8 +85,8 @@ pub use testing::{AudioSide, Testing};
 pub(crate) use wiring::Pending;
 
 use crate::key::{
-    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, Outlet, Removal, SetSources,
-    Wire,
+    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, Outlet, Removal,
+    SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
@@ -836,8 +838,9 @@ impl<F: Float> Graph<F> {
 
     /// Refuse, before a device restart stops anything, a re-prepare to
     /// `max_block` this graph could not start: past the engine's block
-    /// capacity (the editor's limits, set by `Engine::new`), with one
-    /// already between its halves, or on a poisoned editor.
+    /// capacity (the editor's limits, set by `Engine::new`), past its shortest
+    /// feedback delay, with one already between its halves, or on a poisoned
+    /// editor.
     #[cfg(feature = "device")]
     pub(crate) fn check_reprepare(&self, max_block: Option<MaxBlock>) -> Result<(), CommitError> {
         if let Some(cause) = self.editor.poison_cause() {
@@ -849,11 +852,25 @@ impl<F: Float> Graph<F> {
             return Err(CommitError::Repreparing);
         }
         let limit = self.editor.limits().max_block;
-        match max_block {
-            Some(b) if b.get() > limit => Err(CommitError::BlockTooLong {
-                max_block: b.get(),
+        let Some(block) = max_block else {
+            return Ok(());
+        };
+        if block.get() > limit {
+            return Err(CommitError::BlockTooLong {
+                max_block: block.get(),
                 limit,
-            }),
+            });
+        }
+        // The compile refuses a feedback delay shorter than the block, but
+        // only once the device has stopped.
+        match self.shortest_feedback() {
+            Some((edge, delay)) if delay < block.samples() => {
+                Err(CommitError::Compile(CompileError::FeedbackTooShort {
+                    edge,
+                    delay,
+                    max_block: block.samples(),
+                }))
+            }
             _ => Ok(()),
         }
     }
@@ -2011,13 +2028,16 @@ impl<F: Float> Graph<F> {
         self.shape_of(node.into()).map(|s| usize::from(s.event_in))
     }
 
-    /// Adds the event edge `from -> to`: whether it was new. Events are
-    /// never faded. An edge a feed ([`set_feed`](Self::set_feed)) put there
-    /// becomes the caller's: it stays when the feed drops it.
+    /// Adds the event edge `from -> to`, a feedback edge when `delay`:
+    /// whether it was new. Events are never faded. An edge a feed
+    /// ([`set_feed`](Self::set_feed)) put there becomes the caller's: it
+    /// stays when the feed drops it. A pair of ports holds one edge: ports
+    /// that already hold one, of either kind, are held as they are.
     pub(crate) fn add_event_edge(
         &mut self,
         from: EventOutputPort,
         to: EventInputPort,
+        delay: Option<Samples>,
     ) -> Result<bool, ConnectError> {
         self.check_event_wire(None, from, to)?;
         let held = self
@@ -2037,16 +2057,20 @@ impl<F: Float> Graph<F> {
         if held {
             return Ok(false);
         }
-        self.connect_event(to, from);
+        self.connect_event(to, from, delay);
         self.edited = true;
         Ok(true)
     }
 
     /// Writes the event edge `from -> at` into the editor, the one place an
     /// event edge is added, and notes that `from`'s node gained a receiver.
-    fn connect_event(&mut self, at: EventInputPort, from: EventOutputPort) {
+    fn connect_event(&mut self, at: EventInputPort, from: EventOutputPort, delay: Option<Samples>) {
+        let edge = match delay {
+            None => EventEdge::Direct(from),
+            Some(delay) => EventEdge::Feedback { from, delay },
+        };
         self.editor
-            .connect_events(at, EventEdge::Direct(from))
+            .connect_events(at, edge)
             .expect("checked: both ends exist");
         self.note_gained(from.node());
     }
@@ -2094,7 +2118,8 @@ impl<F: Float> Graph<F> {
 
     /// Takes the event edge `from -> to` out: whether it was there.
     pub(crate) fn remove_event_edge(&mut self, from: EventOutputPort, to: EventInputPort) -> bool {
-        let removed = self.editor.disconnect_events(to, EventEdge::Direct(from));
+        let held = self.held_event_edge(from, to);
+        let removed = held.is_some_and(|edge| self.editor.disconnect_events(to, edge));
         if removed {
             if let Some(ours) = self.fed_edges.get_mut(&to.node()) {
                 ours.retain(|s| *s != from);
@@ -2102,6 +2127,21 @@ impl<F: Float> Graph<F> {
             self.edited = true;
         }
         removed
+    }
+
+    /// The event edge `from -> to` the graph holds, of either kind.
+    pub(crate) fn held_event_edge(
+        &self,
+        from: EventOutputPort,
+        to: EventInputPort,
+    ) -> Option<EventEdge> {
+        self.editor
+            .spec()
+            .events
+            .get(&to)?
+            .iter()
+            .copied()
+            .find(|e| e.from() == from)
     }
 
     /// Feeds `to` from exactly `sources` (fan-in merges them by offset; the
@@ -2145,7 +2185,7 @@ impl<F: Float> Graph<F> {
         want.sort();
         want.dedup();
         let nodes = &self.nodes;
-        let have: Vec<EventEdge> = self
+        let ours: Vec<EventEdge> = self
             .editor
             .spec()
             .events
@@ -2155,6 +2195,11 @@ impl<F: Float> Graph<F> {
             .copied()
             .filter(|e| nodes.contains_key(&e.from().node()))
             .collect();
+        // A feedback edge is a patch's: a set of sources leaves it, and a
+        // source it holds is not wired again beside it.
+        let feedback = |e: &EventEdge| matches!(e, EventEdge::Feedback { .. });
+        want.retain(|from| !ours.iter().any(|e| feedback(e) && e.from() == *from));
+        let have: Vec<EventEdge> = ours.into_iter().filter(|e| !feedback(e)).collect();
         if have.iter().map(|e| e.from()).eq(want.iter().copied()) {
             return;
         }
@@ -2167,7 +2212,7 @@ impl<F: Float> Graph<F> {
         for from in want {
             let edge = EventEdge::Direct(from);
             if !have.contains(&edge) {
-                self.connect_event(at, from);
+                self.connect_event(at, from, None);
             }
         }
         self.edited = true;
@@ -2581,16 +2626,72 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The graph's name for `edge`: a direct one, `None` for an index no
-    /// port has.
-    pub(crate) fn edge_id(edge: ChannelEdge) -> Option<EdgeId> {
+    /// The graph's name for `edge`: a direct one, or the feedback edge of
+    /// `delay`. `None` for an index no port has, and for a feedback edge into
+    /// a main output channel, which the graph has none of.
+    pub(crate) fn edge_id(edge: ChannelEdge, delay: Option<Samples>) -> Option<EdgeId> {
         let sink = match edge.sink().end() {
             InEnd::Node(..) => PortSink::Port(Self::raw_in(edge.sink())?),
             InEnd::Output(channel) => PortSink::Output(u16::try_from(channel).ok()?),
         };
-        Some(EdgeId {
-            sink,
-            from: RawEdge::Direct(Self::raw_source(edge.source())?),
+        let source = Self::raw_source(edge.source())?;
+        let from = match (delay, source) {
+            (None, source) => RawEdge::Direct(source),
+            (Some(delay), PortSource::Node(from)) if matches!(sink, PortSink::Port(_)) => {
+                RawEdge::Feedback(FeedbackFrom::new(from, delay))
+            }
+            (Some(_), _) => return None,
+        };
+        Some(EdgeId { sink, from })
+    }
+
+    /// The graph's name for the edge of `edge`'s ports it holds: the one not
+    /// fading out, else the one that is, else the direct name. A patch keeps
+    /// one edge, direct or feedback, on a pair of ports.
+    pub(crate) fn held_edge_id(&self, edge: ChannelEdge) -> Option<EdgeId> {
+        Self::held_edge_id_in(&self.editor, edge)
+    }
+
+    /// [`held_edge_id`](Self::held_edge_id) in `editor`'s spec: the one rule
+    /// the graph's edge readers and a modulation route onto an edge's gain
+    /// resolve an edge by.
+    pub(crate) fn held_edge_id_in(editor: &Editor<F>, edge: ChannelEdge) -> Option<EdgeId> {
+        let direct = Self::edge_id(edge, None)?;
+        let PortSink::Port(at) = direct.sink else {
+            return Some(direct);
+        };
+        let RawEdge::Direct(source) = direct.from else {
+            return Some(direct);
+        };
+        let held: Vec<EdgeId> = editor
+            .spec()
+            .topology
+            .edges
+            .get(&at)
+            .into_iter()
+            .flatten()
+            .filter(|e| {
+                *e == &direct.from
+                    || matches!(e, RawEdge::Feedback(f) if PortSource::Node(f.from) == source)
+            })
+            .map(|&e| EdgeId::into_port(at, e))
+            .collect();
+        Some(
+            held.iter()
+                .copied()
+                .find(|id| !Self::fading_out_in(editor, *id))
+                .or_else(|| held.first().copied())
+                .unwrap_or(direct),
+        )
+    }
+
+    /// The delay of the edge of `edge`'s ports the graph holds and is not
+    /// fading out: `None` for no edge, `Some(None)` for a direct one.
+    pub(crate) fn held_delay(&self, edge: ChannelEdge) -> Option<Option<Samples>> {
+        let id = self.held_edge_id(edge)?;
+        (self.editor.spec().has_edge(id) && !self.fading_out(id)).then_some(match id.from {
+            RawEdge::Direct(_) => None,
+            RawEdge::Feedback(f) => Some(f.delay),
         })
     }
 
@@ -2611,13 +2712,23 @@ impl<F: Float> Graph<F> {
     /// [`DECLICK`](tutti_graph::DECLICK), and an edge that
     /// is fading out is brought back (and counts as new): see
     /// [`Connection::unfaded`](crate::Connection::unfaded).
+    ///
+    /// A feedback edge (`delay`) is the same edge in every way but its name.
+    /// A pair of ports holds one edge: ports that already hold another kind
+    /// (a direct one, or a feedback one of another delay) are held as they
+    /// are.
     pub(crate) fn add_edge(
         &mut self,
         from: OutputPort,
         to: InputPort,
+        delay: Option<Samples>,
     ) -> Result<bool, ConnectError> {
         self.check_wire(None, from, to)?;
-        let id = Self::edge_id(ChannelEdge::new(from, to)).expect("checked: the ports fit");
+        let edge = ChannelEdge::new(from, to);
+        let id = Self::edge_id(edge, delay).expect("checked: the ports fit");
+        if self.held_delay(edge).is_some_and(|held| held != delay) {
+            return Ok(false);
+        }
         let leaving = self.fading_out(id);
         let added = self
             .editor
@@ -2636,14 +2747,18 @@ impl<F: Float> Graph<F> {
     /// Whether `id` is an edge the session has already taken out and is only
     /// fading to silence.
     fn fading_out(&self, id: EdgeId) -> bool {
-        self.editor.spec().has_edge(id) && self.editor.edge_fade(id) == Some(EdgeFade::Out)
+        Self::fading_out_in(&self.editor, id)
+    }
+
+    fn fading_out_in(editor: &Editor<F>, id: EdgeId) -> bool {
+        editor.spec().has_edge(id) && editor.edge_fade(id) == Some(EdgeFade::Out)
     }
 
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
     /// (and no entry, when the fade was all it carried). The step
     /// [`Connection::unfaded`](crate::Connection::unfaded) takes.
     pub(crate) fn harden_edge(&mut self, edge: ChannelEdge) {
-        let Some(id) = Self::edge_id(edge) else {
+        let Some(id) = self.held_edge_id(edge) else {
             return;
         };
         if !self
@@ -2676,7 +2791,7 @@ impl<F: Float> Graph<F> {
     /// leaves the spec when the fade ends (`Editor::finish_fades`), and one
     /// already fading out is not there.
     pub(crate) fn remove_edge(&mut self, from: OutputPort, to: InputPort, hard: bool) -> bool {
-        match Self::edge_id(ChannelEdge::new(from, to)) {
+        match self.held_edge_id(ChannelEdge::new(from, to)) {
             Some(id) => self.drop_edge(id, hard),
             None => false,
         }
@@ -2697,7 +2812,6 @@ impl<F: Float> Graph<F> {
             return false;
         }
         if !hard
-            && matches!(id.from, RawEdge::Direct(_))
             && self.editor.edge_is_live(id)
             && self.editor.set_edge_fade(id, EdgeFade::Out).is_ok()
         {
@@ -2761,8 +2875,7 @@ impl<F: Float> Graph<F> {
             .into_iter()
             .filter_map(|id| match id.from {
                 RawEdge::Direct(source) => self.lift(source),
-                // This graph writes no feedback edge.
-                RawEdge::Feedback(_) => None,
+                RawEdge::Feedback(f) => self.lift(PortSource::Node(f.from)),
             })
             .collect()
     }
@@ -2817,14 +2930,18 @@ impl<F: Float> Graph<F> {
         // touches nothing.
         let mut cut = Vec::new();
         for id in self.live_edges(to) {
-            let keep = matches!(id.from, RawEdge::Direct(s) if want.iter().any(|(w, _)| *w == s));
+            // A feedback edge is a patch's: a set of sources leaves it.
+            let RawEdge::Direct(held) = id.from else {
+                continue;
+            };
+            let keep = want.iter().any(|(w, _)| *w == held);
             if !keep {
                 self.drop_edge(id, hard);
                 cut.push(id);
             }
         }
         for (_, port) in want {
-            self.add_edge(port, to)?;
+            self.add_edge(port, to, None)?;
             if hard {
                 self.harden_edge(ChannelEdge::new(port, to));
             }
@@ -2889,6 +3006,35 @@ impl<F: Float> Graph<F> {
         let (from, to) = (from.out(), to.sink());
         let edges = <O::Wire as Wire>::connect(self, from, to)?;
         Ok(Connection::new(self, edges, from, to))
+    }
+
+    /// The edge of one channel wire, delayed by `delay` for a feedback edge:
+    /// what [`connect`](Self::connect) and a patch's feedback wire both add.
+    pub(crate) fn add_channel_wire(
+        &mut self,
+        from: OutputPort,
+        to: InputPort,
+        delay: Option<Samples>,
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
+        let added = self.add_edge(from, to, delay)?;
+        Ok(vec![(ChannelEdge::new(from, to), added)])
+    }
+
+    /// The edges of one main bus wire, delayed by `delay` for feedback
+    /// edges.
+    pub(crate) fn add_main_wire(
+        &mut self,
+        from: NodeKey,
+        to: MainSink,
+        delay: Option<Samples>,
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
+        let wires = self.main_wires(None, from, to)?;
+        let mut edges = Vec::with_capacity(wires.len());
+        for (out, input) in wires {
+            let added = self.add_edge(out, input, delay)?;
+            edges.push((ChannelEdge::new(out, input), added));
+        }
+        Ok(edges)
     }
 
     /// Takes the edge `from -> to` out, its gain with it (for a bus edge, its
@@ -3027,7 +3173,7 @@ impl<F: Float> Graph<F> {
         if !gain.get().is_finite() {
             return Err(DeclarationError::NotFinite);
         }
-        let Some(id) = Self::edge_id(edge) else {
+        let Some(id) = self.held_edge_id(edge) else {
             return Ok(());
         };
         if self.fading_out(id) {
@@ -3050,7 +3196,7 @@ impl<F: Float> Graph<F> {
         ends.into_iter()
             .flatten()
             .all(|node| self.nodes.contains_key(&node))
-            && Self::edge_id(edge).is_some_and(|id| {
+            && self.held_edge_id(edge).is_some_and(|id| {
                 !self.fading_out(id) && self.editor.spec().gains.contains_key(&id)
             })
     }
@@ -3078,7 +3224,9 @@ impl<F: Float> Graph<F> {
         to: InputPort,
     ) -> Result<GainTarget, GainTargetError> {
         let edge = ChannelEdge::new(from, to);
-        let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
+        let id = self
+            .held_edge_id(edge)
+            .ok_or(GainTargetError::NoLane(edge))?;
         match self.editor.check_gain_edge(id) {
             Ok(()) => {}
             Err(EdgeGainError::BusLane { .. }) => return Err(GainTargetError::BusLane(edge)),
@@ -3096,7 +3244,7 @@ impl<F: Float> Graph<F> {
     }
 
     pub(crate) fn clear_edge_gain_of(&mut self, edge: ChannelEdge) -> bool {
-        let Some(id) = Self::edge_id(edge) else {
+        let Some(id) = self.held_edge_id(edge) else {
             return false;
         };
         if self.fading_out(id) {
@@ -3175,7 +3323,7 @@ impl<F: Float> Graph<F> {
                     }
                 }
                 Write::Gain(edge, gain) => {
-                    if let Some(id) = Self::edge_id(edge)
+                    if let Some(id) = self.held_edge_id(edge)
                         && !self.fading_out(id)
                     {
                         let _ = self.editor.set_edge_gain(id, gain);

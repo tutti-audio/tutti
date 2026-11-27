@@ -323,3 +323,308 @@ fn a_host_removed_input_node_does_not_keep_its_retiring_entry() {
     let _ = s.update();
     assert!(s.midi.state.ports.retiring.is_empty());
 }
+
+/// A session with output ports on `Synth` (device 10) and `Pad` (device 11), their
+/// handles, and the device ids.
+fn two_outputs() -> (
+    Session,
+    tutti_midi_hardware::test_support::FakeCounters,
+    [MidiDeviceId; 2],
+    Vec<crate::MidiOutput>,
+) {
+    let (backend, fake) = FakeBackend::build_with(
+        vec![],
+        vec![
+            persistent_endpoint(10, "Synth"),
+            persistent_endpoint(11, "Pad"),
+        ],
+        usize::MAX,
+    );
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+        .build()
+        .expect("builds");
+    let _ = s.update();
+    let devices = s.midi().devices();
+    let (mut ids, mut handles) = (Vec::new(), Vec::new());
+    for name in ["Synth", "Pad"] {
+        let info = devices
+            .iter()
+            .find(|d| d.name == name)
+            .expect("listed")
+            .clone();
+        ids.push(info.id.clone());
+        let opened = ready(s.open_midi_output(info).expect("begins"));
+        handles.push(s.apply(opened).expect("opens"));
+    }
+    let _ = s.update();
+    let ids: [MidiDeviceId; 2] = ids.try_into().expect("two");
+    (s, fake, ids, handles)
+}
+
+fn inquiry(control: tutti_midi_ci::DataControl) -> ReportInquiry {
+    tutti_midi_hardware::test_support::report_inquiry(
+        MidiGroup::of(0),
+        tutti_ump::GroupSpan::of(1),
+        tutti_midi_ci::Muid::of(0x0102_0304),
+        tutti_midi_ci::Muid::of(0x0506_0708),
+        control,
+        ReportScope::Group {
+            controllers: tutti_midi_ci::ChannelControllers::all(),
+            notes: tutti_midi_ci::NoteData::all(),
+        },
+    )
+}
+
+/// What a sent packet is, for an order: the first packet of a MIDI-CI Reply (`reply`) or
+/// End (`end`), another SysEx7 packet (`""`), and a message of the report (`data`).
+fn kind(ump: &tutti_ump::Ump) -> &'static str {
+    match ump.decode() {
+        Ok(tutti_ump::Message::Sysex7(_, packet))
+            if packet.status() == tutti_ump::SysexStatus::Start =>
+        {
+            match packet.data()[3] {
+                0x43 => "reply",
+                0x44 => "end",
+                _ => "sysex",
+            }
+        }
+        Ok(tutti_ump::Message::Sysex7(..)) => "",
+        _ => "data",
+    }
+}
+
+/// The report's shape: each message kind, with the SysEx7 continuations left out.
+fn shape(sent: &[tutti_ump::Ump]) -> Vec<&'static str> {
+    sent.iter().map(kind).filter(|k| !k.is_empty()).collect()
+}
+
+/// M2-101 section 9.6 to 9.8: the report of an output is its Reply, the messages of what the
+/// port said (a Note On and the Note Off that matches it) and the End, in that order, on the
+/// port's own device, and a port of another device sends nothing.
+/// Spec: m2-101/9.6#1, m2-101/9.8#1
+#[test]
+fn an_output_answers_a_report_as_a_reply_its_messages_and_an_end_in_order() {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0x8000);
+    s.midi.state.ports.outputs[0].record.observe(note);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let _ = fake.take_sent(EndpointId::from_raw(11));
+    let ask = inquiry(tutti_midi_ci::DataControl::Full);
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), None);
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert_eq!(shape(&sent), ["reply", "data", "data", "end"]);
+    assert!(fake.take_sent(EndpointId::from_raw(11)).is_empty());
+}
+
+/// A report asked of an output whose device is away is handed back unanswered and sends
+/// nothing, so the caller answers it as a device that declares nothing.
+#[test]
+fn an_output_whose_device_is_away_hands_the_report_back() {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    fake.unplug(EndpointId::from_raw(10));
+    let _ = s.update();
+    let ask = inquiry(tutti_midi_ci::DataControl::Full);
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), Some(ask));
+    assert!(fake.take_sent(EndpointId::from_raw(10)).is_empty());
+}
+
+/// A report inquiry on a device is answered by the held port of that device, found by its
+/// device id and not by its place: the second port answers its own device's.
+#[test]
+fn a_report_is_answered_by_the_held_port_of_its_device() {
+    let (mut s, fake, [_synth, pad], _handles) = two_outputs();
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let _ = fake.take_sent(EndpointId::from_raw(11));
+    let ask = inquiry(tutti_midi_ci::DataControl::Capabilities);
+    let mut io = s.midi.hardware.locked().expect("hardware");
+    s.midi.state.ports.answer_report(&mut io, &pad, &ask);
+    drop(io);
+    assert!(fake.take_sent(EndpointId::from_raw(10)).is_empty());
+    assert_eq!(
+        shape(&fake.take_sent(EndpointId::from_raw(11))),
+        ["reply", "end"]
+    );
+}
+
+/// M2-101 section 9.5 and 9.7.1: a report of the Function Block covers the Groups of the
+/// block, not the Group its MIDI-CI Device speaks on alone, Groups ascending.
+/// Spec: m2-101/9.5#5, m2-101/9.6#6
+#[test]
+fn a_report_of_the_function_block_covers_every_group_of_the_block() {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    for group in [1, 0] {
+        let at = tutti_ump::Address::new(MidiGroup::of(group), tutti_ump::MidiChannel::FIRST);
+        let voice =
+            tutti_ump::Voice1::control_change(tutti_ump::CCNumber::VOLUME, tutti_ump::U7::of(90));
+        let ump = tutti_ump::Ump::from(tutti_ump::Message::midi1(at, voice));
+        s.midi.state.ports.outputs[0].record.observe(ump);
+    }
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let ask = tutti_midi_hardware::test_support::report_inquiry(
+        MidiGroup::of(0),
+        tutti_ump::GroupSpan::of(2),
+        tutti_midi_ci::Muid::of(1),
+        tutti_midi_ci::Muid::of(2),
+        tutti_midi_ci::DataControl::Full,
+        ReportScope::FunctionBlock {
+            system: tutti_midi_ci::SystemMessages::empty(),
+            controllers: tutti_midi_ci::ChannelControllers::CONTROL_CHANGE,
+            notes: tutti_midi_ci::NoteData::empty(),
+        },
+    );
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), None);
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    let groups: Vec<u8> = sent
+        .iter()
+        .filter(|ump| kind(ump) == "data")
+        .filter_map(|ump| ump.group().map(MidiGroup::get))
+        .collect();
+    assert_eq!(groups, [0, 1]);
+    // One Reply and one End for the whole block, not for each Group (§9.6).
+    assert_eq!(shape(&sent), ["reply", "data", "data", "end"]);
+}
+
+fn use_protocol(s: &mut Session, protocol: tutti_ump::Protocol, rx_jr: bool) {
+    s.midi.state.ports.outputs[0]
+        .link
+        .open_mut()
+        .expect("open")
+        .destination_mut()
+        .set_config(tutti_ump::StreamConfig {
+            protocol,
+            rx_jr,
+            tx_jr: false,
+        });
+}
+
+/// What the device was sent of a report of a Note On sent in MIDI 1.0 with velocity 80.
+fn reported_note(protocol: tutti_ump::Protocol) -> Vec<tutti_ump::Ump> {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    use_protocol(&mut s, protocol, false);
+    let at = tutti_ump::Address::first(tutti_ump::MidiChannel::FIRST);
+    let on = tutti_ump::Voice1::note_on(tutti_ump::NoteNumber::of(60), tutti_ump::U7::of(80));
+    let ump = tutti_ump::Ump::from(tutti_ump::Message::midi1(at, on));
+    s.midi.state.ports.outputs[0].record.observe(ump);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let ask = inquiry(tutti_midi_ci::DataControl::Full);
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), None);
+    fake.take_sent(EndpointId::from_raw(10))
+        .into_iter()
+        .filter(|u| kind(u) == "data")
+        .collect()
+}
+
+/// M2-101 section 9.7.2: under the MIDI 1.0 Protocol each active note is a MIDI 1.0 Note On
+/// with its original velocity, and the matching Note Off is MIDI 1.0 too.
+/// Spec: m2-101/9.7.2#14
+#[test]
+fn a_midi_1_device_is_reported_a_midi_1_note_on_with_its_velocity_and_a_note_off() {
+    let sent = reported_note(tutti_ump::Protocol::Midi1);
+    let [on, off] = sent[..] else {
+        panic!("a Note On and a Note Off: {sent:?}");
+    };
+    assert!(matches!(
+        on.decode(),
+        Ok(tutti_ump::Message::Midi1(_, tutti_ump::Voice1::NoteOn { note, velocity }))
+            if note.get() == 60 && velocity.get() == 80
+    ));
+    assert!(matches!(
+        off.note_key_event(),
+        Some(tutti_ump::NoteKeyEvent::Off(k)) if k.note().get() == 60
+    ));
+    assert!(matches!(off.decode(), Ok(tutti_ump::Message::Midi1(..))));
+}
+
+/// Under the MIDI 2.0 Protocol the same note is a MIDI 2.0 Note On and Note Off.
+/// Spec: m2-101/9.7.2#15
+#[test]
+fn a_midi_2_device_is_reported_a_midi_2_note_on_and_note_off() {
+    let sent = reported_note(tutti_ump::Protocol::Midi2);
+    let [on, off] = sent[..] else {
+        panic!("a Note On and a Note Off: {sent:?}");
+    };
+    assert!(matches!(
+        on.decode(),
+        Ok(tutti_ump::Message::Midi2(_, tutti_ump::Voice2::NoteOn { note, .. })) if note.get() == 60
+    ));
+    assert!(matches!(
+        off.decode(),
+        Ok(tutti_ump::Message::Midi2(
+            _,
+            tutti_ump::Voice2::NoteOff { .. }
+        ))
+    ));
+}
+
+/// The report is one batch: the device's sink is handed one `queue_timed`, so nothing a
+/// drain sends lands between its Reply and its End (M2-101 section 9.8.2).
+#[test]
+fn a_report_is_one_send_to_the_device() {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    use_protocol(&mut s, tutti_ump::Protocol::Midi2, true);
+    let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0x8000);
+    s.midi.state.ports.outputs[0].record.observe(note);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let ask = inquiry(tutti_midi_ci::DataControl::Full);
+    let before = fake.batches.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), None);
+    let batches = fake.batches.load(std::sync::atomic::Ordering::SeqCst) - before;
+    assert_eq!(batches, 1);
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    let report: Vec<_> = sent.iter().filter(|u| u.0[0] >> 28 != 0).copied().collect();
+    assert_eq!(shape(&report), ["reply", "data", "data", "end"]);
+}
+
+/// A report asked of no held port, or of one whose device is away, is handed back to
+/// the caller's one decline; one a held port answers is not.
+#[test]
+fn a_report_with_no_port_or_an_away_port_is_returned_for_the_decline() {
+    let (mut s, fake, [synth, pad], _handles) = two_outputs();
+    let ask = inquiry(tutti_midi_ci::DataControl::Full);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    assert_eq!(s.midi.state.ports.route_report(&synth, &ask), None);
+    assert!(!fake.take_sent(EndpointId::from_raw(10)).is_empty());
+    fake.unplug(EndpointId::from_raw(11));
+    let _ = s.update();
+    assert_eq!(s.midi.state.ports.route_report(&pad, &ask), Some(ask));
+    let other = MidiDeviceId::clone(&synth);
+    drop(_handles);
+    let _ = s.update();
+    assert_eq!(s.midi.state.ports.route_report(&other, &ask), Some(ask));
+}
+
+/// M2-101 section 9.5: a report of one Channel names that Channel alone.
+#[test]
+fn a_channel_scope_report_has_that_channel_only() {
+    let (mut s, fake, _ids, _handles) = two_outputs();
+    for channel in [2, 5] {
+        let at = tutti_ump::Address::first(tutti_ump::MidiChannel::of(channel));
+        let voice =
+            tutti_ump::Voice1::control_change(tutti_ump::CCNumber::VOLUME, tutti_ump::U7::of(90));
+        s.midi.state.ports.outputs[0]
+            .record
+            .observe(tutti_ump::Ump::from(tutti_ump::Message::midi1(at, voice)));
+    }
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    let ask = tutti_midi_hardware::test_support::report_inquiry(
+        MidiGroup::of(0),
+        tutti_ump::GroupSpan::of(1),
+        tutti_midi_ci::Muid::of(1),
+        tutti_midi_ci::Muid::of(2),
+        tutti_midi_ci::DataControl::Full,
+        ReportScope::Channel {
+            channel: tutti_ump::MidiChannel::of(5),
+            controllers: tutti_midi_ci::ChannelControllers::CONTROL_CHANGE,
+            notes: tutti_midi_ci::NoteData::empty(),
+        },
+    );
+    assert_eq!(s.midi.state.ports.outputs[0].answer_report(&ask), None);
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    let channels: Vec<u8> = sent
+        .iter()
+        .filter(|u| kind(u) == "data")
+        .filter_map(|u| u.channel().map(tutti_ump::MidiChannel::get))
+        .collect();
+    assert_eq!(channels, [5]);
+}

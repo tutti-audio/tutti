@@ -1845,3 +1845,121 @@ fn an_mpe11_write_for_a_node_that_is_not_an_output_fails_at_the_call() {
         ValueErrorKind::NoSuchTarget
     );
 }
+
+/// **A device has one output port**: a second open of a device a held output has
+/// open is `InUse`, as an input's is, and the first port still sends.
+#[test]
+fn a_second_output_on_a_device_is_in_use_and_the_first_still_sends() {
+    let (mut s, fake, out, mut keys, synth) = retiring_rig();
+    let error = s
+        .open_output(synth.clone())
+        .expect_err("the device is held by an output");
+    assert!(
+        matches!(&error, MidiPortError::InUse(id) if *id == synth.id),
+        "{error:?}"
+    );
+    assert_eq!(fake.connected_outputs().len(), 1, "no second connection");
+    assert_eq!(out.presence(), Presence::Live);
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(64),
+        NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&mut s, 3);
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(sent.iter().any(|u| is_on(u, 64)), "{sent:?}");
+}
+
+/// **A device has one output port, away or open**: a second open of a device whose
+/// output port is away, saved under the same identity, is `InUse` as one of an open
+/// port is.
+#[test]
+fn a_second_output_on_a_device_whose_first_port_is_away_is_in_use() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    unplug(&fake, 10);
+    let _ = s.update();
+    let first = s.open_output(synth.clone()).expect("opens, away");
+    assert_eq!(first.presence(), Presence::Lost(PortCause::Unplugged));
+    let error = s
+        .open_output(synth.clone())
+        .expect_err("the device has a port");
+    assert!(
+        matches!(&error, MidiPortError::InUse(id) if *id == synth.id),
+        "{error:?}"
+    );
+}
+
+/// **Two saved identities that resolve to one arriving device share it by port
+/// order**: the first away port opens it, the second reads `Lost(InUse)` and opens
+/// at the next arrival after the first has closed.
+#[test]
+fn two_identities_for_one_arriving_device_open_the_first_and_the_second_when_it_closes() {
+    let (mut s, fake) = session();
+    // Two units the OS tells by one unique id are ordinal 0 and 1 of it; either
+    // resolves to the lone device that carries the id.
+    let unit = |raw: u32| tutti_midi_hardware::OsEndpoint {
+        identity: tutti_midi_device::OsEndpointIdentity::CoreMidi(5),
+        ..endpoint(u64::from(raw), "Synth")
+    };
+    fake.plug(unit(10), PortDirection::Output);
+    fake.plug(unit(11), PortDirection::Output);
+    let _ = s.update();
+    let mut both = s.midi().devices();
+    both.sort_by_key(|d| d.id.clone());
+    let [first_identity, second_identity] = <[DeviceInfo; 2]>::try_from(both).expect("two units");
+    unplug(&fake, 10);
+    unplug(&fake, 11);
+    let _ = s.update();
+    assert_ne!(first_identity.id, second_identity.id);
+    let first = s.open_output(first_identity).expect("opens, away");
+    let second = s.open_output(second_identity).expect("opens, away");
+    let _ = s.update();
+
+    fake.plug(unit(12), PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(first.presence(), Presence::Live);
+    assert_eq!(second.presence(), Presence::Lost(PortCause::InUse));
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
+
+    // The device stays plugged in: the second takes it on the update the first's
+    // device closes, with no arrival between.
+    drop(first);
+    let _ = s.update();
+    let mut updates = 0;
+    while second.presence() != Presence::Live {
+        assert!(
+            updates < 4,
+            "the first's device closes within a few updates"
+        );
+        blocks(&mut s, 1);
+        let _ = s.update();
+        updates += 1;
+        // The device is never left closed between the first's close and the
+        // second's open.
+        assert_eq!(fake.connected_outputs().len(), 1, "update {updates}");
+    }
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
+    let mut keys = s
+        .midi()
+        .input(second.node())
+        .expect("the node takes events");
+    let _ = s.update();
+    let _ = fake.take_sent(EndpointId::from_raw(12));
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(64),
+        NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&mut s, 3);
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(12));
+    assert!(sent.iter().any(|u| is_on(u, 64)), "{sent:?}");
+}

@@ -184,7 +184,9 @@ mod transport_handle;
 ))]
 mod unblocked;
 mod wire_ends;
-pub use wire_ends::{Chain, Connected, InputEnd, Mention, OutputEnd, WireEnd, WireStart};
+pub use wire_ends::{
+    Chain, Connected, InputEnd, Mention, OutputEnd, ToNode, ToOutput, WireEnd, WireStart,
+};
 mod value;
 #[cfg(feature = "device")]
 mod watch;

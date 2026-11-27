@@ -37,11 +37,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tutti_graph::{EventTapReader, NodeKey};
-use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
+use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState, ReportScope};
 use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, OpenOutput, PeerProfiles,
-    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
+    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, ReportInquiry, Start, Started,
 };
 use tutti_midi_protocol::Mpe11Zones;
 use tutti_midi_runtime::{
@@ -91,6 +91,12 @@ pub enum PortCause {
     /// The device returned and is the one a load would bind, but opening it failed.
     /// It is tried again when its device next appears in the device list.
     ReopenFailed,
+    /// The device returned and is the one a load would bind, but another output
+    /// port of this session, saved under another identity that resolves to the same
+    /// device, has it open. The first port in order takes a device; this one takes it
+    /// on the update the other closes, and is tried again when the device next appears
+    /// in the device list.
+    InUse,
     /// The reader of an open input died while its device stayed listed, for
     /// the [`InputFault`] it carries. The session reopens it at once, and the
     /// port reads this only when that failed; it is tried again when its device
@@ -990,8 +996,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// The apply: [`MidiPortError::Stale`] for another session's open;
     /// [`MidiPortError::Ambiguous`] when the table now holds several that could be
-    /// `saved`; [`MidiPortError::Hardware`] when the present device cannot be
-    /// opened.
+    /// `saved`; [`MidiPortError::InUse`] when a held output port of this session,
+    /// open or away, is saved under the same device, or has the device open already
+    /// (a device has one output port); and
+    /// [`MidiPortError::Hardware`] when the present device cannot be opened.
     pub fn open_midi_output(&self, saved: DeviceInfo) -> Result<OpeningMidiOutput, MidiPortError> {
         let start = self.midi_layer_for(&saved)?;
         Ok(OpeningMidiOutput {
@@ -1216,6 +1224,9 @@ pub(crate) struct Ports {
     retiring_outputs: Vec<Retiring<OutputPort>>,
     /// The notices of leases whose port went, for the next step to report.
     notices: Vec<SessionEvent>,
+    /// The devices whose retiring output closed, which an away port may now take
+    /// ([`reopen_released`](Self::reopen_released)).
+    released: Vec<MidiDeviceId>,
 }
 
 impl std::fmt::Debug for Ports {
@@ -1481,6 +1492,7 @@ impl Ports {
     ) -> Edits {
         let mut edits = Edits::default();
         edits |= self.retire(io, graph);
+        self.reopen_released(io, out);
         for event in events {
             out.push(MidiEvent::of_device(event.clone()).into());
             match event {
@@ -1562,7 +1574,8 @@ impl Ports {
     /// `arrived` was added to the list: the lost ports it is open again (it is
     /// what a load would bind: surely the saved device, or the only one of its
     /// name), and a port that fails to open reads [`PortCause::ReopenFailed`] and
-    /// is tried again when a device next arrives.
+    /// is tried again when a device next arrives. An output is opened as
+    /// [`reopen_outputs`](Self::reopen_outputs) does.
     fn restore<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
@@ -1606,20 +1619,47 @@ impl Ports {
             }
             edits.graph = true;
         }
-        for port in &mut self.outputs {
-            let OutLink::Away { stream, .. } = port.link else {
+        self.reopen_outputs(io, arrived, out);
+        edits
+    }
+
+    /// The away output ports that `device`, present, is the device of, open on it:
+    /// the first in port order takes it and a later one reads
+    /// [`PortCause::InUse`]; a port that fails to open reads
+    /// [`PortCause::ReopenFailed`]. A device that arrived and one a closing port
+    /// released are opened the same way.
+    fn reopen_outputs(
+        &mut self,
+        io: &mut MidiSession,
+        arrived: &DeviceInfo,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
+            matches!(
+                io.devices().resolve(saved),
+                Resolved::Exact(found) | Resolved::SameName(found) if found.id == arrived.id
+            )
+        };
+        for at in 0..self.outputs.len() {
+            let OutLink::Away { stream, .. } = self.outputs[at].link else {
                 continue;
             };
-            if !arrived.direction.is_output() || !is_arrived(io, &port.saved) {
+            if !arrived.direction.is_output() || !is_arrived(io, &self.outputs[at].saved) {
                 continue;
             }
-            port.link = match open_device_output(io, port.started, &arrived.id, port.active_sensing)
-            {
+            // The first port in saved order holds the device; a later one is
+            // refused as an open of it is.
+            let held = self.holds_output(&arrived.id);
+            let port = &mut self.outputs[at];
+            let opened = if held {
+                Err(PortCause::InUse)
+            } else {
+                open_device_output(io, port.started, &arrived.id, port.active_sensing)
+                    .map_err(|_| PortCause::ReopenFailed)
+            };
+            port.link = match opened {
                 Ok(device) => OutLink::open(device, stream),
-                Err(_) => OutLink::Away {
-                    stream,
-                    cause: PortCause::ReopenFailed,
-                },
+                Err(cause) => OutLink::Away { stream, cause },
             };
             // The device lost its setup: it hears the zones chosen for it, then
             // what the port said.
@@ -1628,7 +1668,60 @@ impl Ports {
             port.refresh(out);
             port.publish(out);
         }
-        edits
+    }
+
+    /// Opens the away output ports on the devices closing output ports released
+    /// since the last call: the drain of an update closes them, and the poll after it
+    /// in the same update opens the next port.
+    fn reopen_released(&mut self, io: &mut MidiSession, out: &mut Vec<SessionEvent>) {
+        for id in std::mem::take(&mut self.released) {
+            if let Some(device) = io.devices().list().into_iter().find(|d| d.id == id) {
+                self.reopen_outputs(io, &device, out);
+            }
+        }
+    }
+
+    /// Whether a held output port, open or away, is saved under `saved`.
+    fn holds_saved(&self, saved: &MidiDeviceId) -> bool {
+        self.outputs
+            .iter()
+            .any(|port| port.claim.is_held() && port.saved.id == *saved)
+    }
+
+    /// Answers a peer's report inquiry on `device`: from the held output port that has
+    /// it open, or, when none does or its device is away, as a device that declares
+    /// nothing ([`MidiSession::decline_report`]). The one call site of the decline.
+    fn answer_report(&mut self, io: &mut MidiSession, device: &MidiDeviceId, ask: &ReportInquiry) {
+        if let Some(ask) = self.route_report(device, ask) {
+            io.decline_report(device, &ask);
+        }
+    }
+
+    /// Has the held output port of `device` answer `ask`; the ask comes back when
+    /// there is no such port or its device is away.
+    fn route_report(
+        &mut self,
+        device: &MidiDeviceId,
+        ask: &ReportInquiry,
+    ) -> Option<ReportInquiry> {
+        let mut holders = self.outputs.iter_mut().filter(|port| {
+            port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
+        });
+        let holder = holders.next();
+        // A device has one output port (`open_output_port`).
+        let second = holders.next().is_some();
+        debug_assert!(!second, "two held output ports have one device open");
+        match holder {
+            Some(port) => port.answer_report(ask),
+            None => Some(*ask),
+        }
+    }
+
+    /// Whether a held output port has `device` open.
+    fn holds_output(&self, device: &MidiDeviceId) -> bool {
+        self.outputs.iter().any(|port| {
+            port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
+        })
     }
 
     /// The open input port that holds `device`.
@@ -1711,6 +1804,10 @@ impl Ports {
                         port.shared.pending.lock().make_room_everywhere(io);
                     }
                     device.clone()
+                }
+                tutti_midi_hardware::Polled::ReportInquiry(device, ask) => {
+                    self.answer_report(io, device, ask);
+                    continue;
                 }
                 // A kind of report this session does not know is not one.
                 _ => continue,
@@ -1813,6 +1910,37 @@ impl OutputPort {
             .collect();
         let refused = out.send_frames(&events, None) as u64;
         self.losses.refused(refused);
+    }
+
+    /// Answers `ask` with the report of what the port has said: the Reply, the
+    /// messages and the End, as one batch on the open device, so nothing the port
+    /// drains lands between them (M2-101 §9.8.2), and what the device refuses is
+    /// counted. A refusal can drop the End, as it can any part of a catch-up; the
+    /// ask comes back when the device is away: the caller answers it.
+    fn answer_report(&mut self, ask: &ReportInquiry) -> Option<ReportInquiry> {
+        let Some(out) = self.link.open_mut() else {
+            return Some(*ask);
+        };
+        let groups = match ask.scope() {
+            ReportScope::FunctionBlock { .. } => ask.groups().collect(),
+            _ => vec![ask.group()],
+        };
+        let report = self.record.report(ask.control(), &ask.scope(), groups);
+        // A Reply and an End encode: their fields are range-checked types, so no
+        // byte is past 7 bits (`CiMessage::packets` fails only for one that is).
+        let frames = |message: tutti_midi_ci::CiMessage| -> Vec<(Frame, tutti_ump::Ump)> {
+            message
+                .packets(ask.group())
+                .expect("a MIDI-CI message of range-checked fields is 7-bit")
+                .map(|ump| (Frame::ZERO, ump))
+                .collect()
+        };
+        let mut events = frames(ask.reply(report.declared));
+        events.extend(report.messages.into_iter().map(|ump| (Frame::ZERO, ump)));
+        events.extend(frames(ask.end()));
+        let refused = out.send_frames(&events, None) as u64;
+        self.losses.refused(refused);
+        None
     }
 
     /// Sends the open device the MPE 1.1 zones written since the last call; with
@@ -1994,6 +2122,16 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 .ports
                 .release_device(&info.id, self.graph, timing.as_ref());
         }
+        // One output port a device, as one input port: a second would send the
+        // device a second stream, and a report has one port to answer on.
+        if self.state.ports.holds_saved(&saved.id) {
+            return Err(MidiPortError::InUse(saved.id));
+        }
+        if let Some(info) = &found
+            && self.state.ports.holds_output(&info.id)
+        {
+            return Err(MidiPortError::InUse(info.id.clone()));
+        }
         let device = match &found {
             Some(info) => Some(open_device_output(io, started, &info.id, active_sensing)?),
             None => None,
@@ -2113,12 +2251,36 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) {
-        crate::midi::settle(
+        self.settle_outputs(graph, timing, |port| {
+            port.link.device().is_some_and(|open| open.id() == device)
+        });
+    }
+
+    /// Takes out the retiring output ports that are done (or `force` names), and
+    /// notes the devices they closed as released.
+    fn settle_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        graph: &mut crate::graph::Graph<F>,
+        timing: Option<&crate::midi::OutputTiming>,
+        force: impl FnMut(&OutputPort) -> bool,
+    ) -> bool {
+        let open = |ports: &[Retiring<OutputPort>]| -> Vec<MidiDeviceId> {
+            ports
+                .iter()
+                .filter_map(|going| going.going.link.device().map(|d| d.id().clone()))
+                .collect()
+        };
+        let before = open(&self.retiring_outputs);
+        let edited = crate::midi::settle(
             &mut self.retiring_outputs,
             graph,
             |port| port.drain(timing),
-            |port| port.link.device().is_some_and(|open| open.id() == device),
+            force,
         );
+        let after = open(&self.retiring_outputs);
+        self.released
+            .extend(before.into_iter().filter(|id| !after.contains(id)));
+        edited
     }
 
     /// The output ports whose handles were all dropped, retired: each is sent
@@ -2131,12 +2293,7 @@ impl Ports {
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
         crate::midi::sweep_dropped(&mut self.outputs, &mut self.retiring_outputs, |_| {});
-        crate::midi::settle(
-            &mut self.retiring_outputs,
-            graph,
-            |port| port.drain(timing),
-            |_| false,
-        )
+        self.settle_outputs(graph, timing, |_| false)
     }
 }
 

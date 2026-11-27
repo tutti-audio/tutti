@@ -39,9 +39,10 @@ test-group = 'sequencer'
 
 # Windows' GS Wavetable Synth takes one client at a time: a second
 # `midiOutOpen` while another test binary holds it fails (`MMSYSERR_ERROR`).
-# The synth tests of every crate run one at a time.
+# The synth tests of every crate, and the output suite that opens it, run one
+# at a time (the suite's ALSA arm joins the group too, at no cost).
 [[profile.default.overrides]]
-filter = 'test(/^synth_open::/)'
+filter = 'test(/^synth_open::/) | (package(tutti-midi-hardware) & test(/^output::/))'
 test-group = 'gs-synth'
 
 # `cargo xtask conformance` joins each test's result to the spec rows it tags.

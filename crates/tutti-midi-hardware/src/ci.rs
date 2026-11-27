@@ -163,10 +163,12 @@
 //!   ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)): with none, a
 //!   Profile Inquiry gets empty lists (M2-101 §7.13) and a Set Profile On or Off a NAK. They
 //!   answer an Inquiry:
-//!   Process Inquiry Capabilities with MIDI Message Report supported, and a MIDI Message
-//!   Report of the Function Block or Group with an empty Reply and the End (§9.6, §9.8),
-//!   as a device with no MIDI state to report does, and one of a Channel with a NAK, since
-//!   none is in use (§9.5).
+//!   Process Inquiry Capabilities with MIDI Message Report supported. A request for a MIDI
+//!   Message Report holds no state here to report: it is a [`Polled::ReportInquiry`](crate::Polled::ReportInquiry)
+//!   for the caller, who answers from what its output sent, or hands it to
+//!   [`MidiSession::decline_report`](crate::MidiSession::decline_report), which sends the Reply
+//!   with empty bitmaps and the End (§9.6, §9.8). A Channel is never refused as not in use
+//!   (§9.5): a request reaches a device on the first Group of its Function Block.
 //! - **Receivable Maximum SysEx Message Size**: [`MAX_SYSEX`], 512 bytes, the
 //!   floor of a device that will initiate Profile Configuration or Property
 //!   Exchange (§5.5.3); the reassembler is sized for it, delimiters included.
@@ -190,7 +192,7 @@ use tutti_midi_ci::{
     CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader, CiMessage, CiPeer, Decoded, Initiator,
     InquiryTarget, MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator,
     ProfileAction, ProfileChange, ProfileId, ProfileInitiator, ProfileOffer, ProfileRequest,
-    ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
+    ProfileRequestError, ReportScope, ResourceInitiator, ResourceResponder, ResourceStore,
 };
 use tutti_midi_device::MidiDeviceId;
 use tutti_midi_protocol::MpeFeatures;
@@ -198,15 +200,15 @@ use tutti_midi_runtime::{ask_mpe_features, mpe_features};
 use tutti_rt::CounterWriter;
 use tutti_rt::SplitMix64;
 use tutti_ump::{
-    DeviceIdentity, MessageType, MidiChannel, MidiGroup, MpeZoneSpan, SysexAssembler, SysexStep,
-    Ump,
+    DeviceIdentity, GroupSpan, MessageType, MidiChannel, MidiGroup, MpeZoneSpan, SysexAssembler,
+    SysexStep, Ump,
 };
 use tutti_units::Losses;
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
 use crate::peer::{PeerRef, PeerRequestError};
-use crate::process::{self, ProcessChange, ReportAsk, Reporter};
+use crate::process::{self, ProcessChange, ReportAsk, ReportInquiry, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
@@ -224,8 +226,8 @@ pub(crate) const MAX_SYSEX: MaxSysexSize = MaxSysexSize::of(MaxSysexSize::INITIA
 /// declares them too (the
 /// module's "What it does"). They answer Profile Configuration from the Profiles the app
 /// offered ([`MidiSession::offer_profiles`](crate::MidiSession::offer_profiles)), none
-/// until then; they answer a Process Inquiry with the report of a device with no MIDI
-/// state.
+/// until then; they hand a request for a MIDI Message Report to the caller
+/// ([`Polled::ReportInquiry`](crate::Polled::ReportInquiry)).
 const CATEGORIES: CiCategories = CiCategories::PROFILE_CONFIGURATION
     .union(CiCategories::PROCESS_INQUIRY)
     .union(CiCategories::PROPERTY_EXCHANGE);
@@ -243,6 +245,9 @@ pub(crate) struct CiChanges {
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
+    /// The MIDI Message Reports peers asked of the session's devices, each still
+    /// to be answered.
+    pub(crate) report_asks: Vec<ReportInquiry>,
     /// The Groups whose device changed its MUID (M2-101 §3.3.1): its Function
     /// Block is announced again.
     pub(crate) muid_changed: Vec<MidiGroup>,
@@ -375,6 +380,8 @@ fn entropy() -> Result<Entropy, getrandom::Error> {
 /// One MIDI-CI Device on its Group.
 struct Member {
     group: MidiGroup,
+    /// How many Groups the device's Function Block spans.
+    span: GroupSpan,
     device: CiDevice<Entropy>,
     /// The Initiator of Profile Configuration with each peer that declared it.
     initiators: BTreeMap<Muid, ProfileInitiator>,
@@ -393,6 +400,14 @@ struct Member {
 }
 
 impl Member {
+    /// Where the device runs.
+    const fn block(&self) -> Block {
+        Block {
+            first: self.group,
+            span: self.span,
+        }
+    }
+
     /// When the device, its Initiators or its Responder next need a poll for a
     /// wait that runs out.
     fn deadline(&self) -> Option<Instant> {
@@ -414,10 +429,11 @@ impl Member {
         .min()
     }
 
-    fn new(group: MidiGroup, device: CiDevice<Entropy>) -> Self {
+    fn new(block: Block, device: CiDevice<Entropy>) -> Self {
         let server = property::responder(device.muid());
         Self {
-            group,
+            group: block.first,
+            span: block.span,
             device,
             initiators: BTreeMap::new(),
             features: BTreeMap::new(),
@@ -454,6 +470,36 @@ fn expire_all<I: Initiator>(
         .collect()
 }
 
+/// Where one MIDI-CI Device runs: the first Group of its Function Block, which it
+/// speaks on, and how many Groups the block spans. A block that changes either is
+/// a new device (M2-101 §3.3.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Block {
+    first: MidiGroup,
+    /// Never past the last Group: `first + span <= 16`.
+    span: GroupSpan,
+}
+
+impl Block {
+    /// The block from `first` over `span` Groups, cut at Group 16: the one place a
+    /// span is brought to the wire's Groups.
+    pub(crate) fn clipped(first: MidiGroup, span: GroupSpan) -> Option<Self> {
+        let room = MidiGroup::COUNT - first.get();
+        Some(Self {
+            first,
+            span: GroupSpan::new(span.get().min(room))?,
+        })
+    }
+
+    /// A block of one Group.
+    pub(crate) const fn single(first: MidiGroup) -> Self {
+        Self {
+            first,
+            span: GroupSpan::of(1),
+        }
+    }
+}
+
 /// The devices running on one input, and what hears their SysEx.
 struct Running {
     /// The identity they declare.
@@ -463,7 +509,7 @@ struct Running {
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns is reported again.
-    unstarted: Vec<MidiGroup>,
+    unstarted: Vec<Block>,
 }
 
 /// One input's MIDI-CI: the Groups it is to run on, once the negotiation or the
@@ -471,7 +517,7 @@ struct Running {
 pub(crate) struct Ci {
     /// The device the input is, named in every Profile snapshot.
     device: MidiDeviceId,
-    groups: Vec<MidiGroup>,
+    blocks: Vec<Block>,
     running: Option<Box<Running>>,
     /// Every peer found, by Group then MUID: rebuilt when a step changes them,
     /// so a read is a pointer clone, not a copy.
@@ -501,26 +547,28 @@ pub(crate) struct Ci {
 /// of its blocks.
 const GROUP_ZERO: MidiGroup = MidiGroup::of(0);
 
-/// The Groups a settled Stream negotiation calls for (the module's "Where it
+/// The blocks a settled Stream negotiation calls for (the module's "Where it
 /// runs").
-pub(crate) fn groups_after_settle(stream: &DeviceStream) -> Vec<MidiGroup> {
+pub(crate) fn blocks_after_settle(stream: &DeviceStream) -> Vec<Block> {
     let endpoint = stream.endpoint();
     if stream.basis() != crate::Basis::Negotiated || endpoint.function_blocks().next().is_none() {
-        return vec![GROUP_ZERO];
+        return vec![Block::single(GROUP_ZERO)];
     }
-    let mut groups: Vec<MidiGroup> = endpoint
+    let mut blocks: Vec<Block> = endpoint
         .function_blocks()
         .filter(|block| block.midi_ci_version().is_some())
-        .filter_map(|block| MidiGroup::new(block.first_group().get()))
+        .filter_map(|block| {
+            Block::clipped(MidiGroup::new(block.first_group().get())?, block.groups())
+        })
         .collect();
-    groups.sort_unstable();
-    groups.dedup();
-    groups
+    blocks.sort_unstable();
+    blocks.dedup_by_key(|block| block.first);
+    blocks
 }
 
-/// The Groups of a MIDI 1.0 port.
-pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
-    vec![GROUP_ZERO]
+/// The blocks of a MIDI 1.0 port.
+pub(crate) fn blocks_of_a_midi1_port() -> Vec<Block> {
+    vec![Block::single(GROUP_ZERO)]
 }
 
 impl Ci {
@@ -528,7 +576,7 @@ impl Ci {
     pub(crate) fn new(device: MidiDeviceId, refused: CounterWriter<Losses>) -> Self {
         Self {
             device,
-            groups: Vec::new(),
+            blocks: Vec::new(),
             running: None,
             peers: Arc::default(),
             profiles: Arc::default(),
@@ -542,9 +590,9 @@ impl Ci {
         }
     }
 
-    /// MIDI-CI is to run on `groups` when the session has an identity.
-    pub(crate) fn decide(&mut self, groups: Vec<MidiGroup>) {
-        self.groups = groups;
+    /// MIDI-CI is to run on `blocks` when the session has an identity.
+    pub(crate) fn decide(&mut self, blocks: Vec<Block>) {
+        self.blocks = blocks;
         self.decided = true;
     }
 
@@ -567,7 +615,7 @@ impl Ci {
     /// session has an identity (`has_identity`) and there is a device to run,
     /// or one runs.
     pub(crate) fn hears_sysex(&self, has_identity: bool) -> bool {
-        has_identity && (!self.groups.is_empty() || self.running.is_some())
+        has_identity && (!self.blocks.is_empty() || self.running.is_some())
     }
 
     /// One step at `now`, with the identity the session runs MIDI-CI with, if
@@ -598,21 +646,22 @@ impl Ci {
         }
         match (&mut self.running, identity) {
             (Some(running), _) => {
-                running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
+                running.reconcile(&self.blocks, &mut entropy, now, out, &mut changes);
                 running.offer(offer, now, out, &mut changes);
                 running.step(store, now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
                 running.start_properties(&mut self.calls, now, out, &mut changes);
             }
-            (None, Some(identity)) if !self.groups.is_empty() => {
+            (None, Some(identity)) if !self.blocks.is_empty() => {
                 let (running, started) =
-                    Running::start(&self.groups, identity, &mut entropy, now, out);
+                    Running::start(&self.blocks, identity, &mut entropy, now, out);
                 self.running = Some(Box::new(running));
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
                 changes.process.extend(started.process);
                 changes.properties.extend(started.properties);
+                changes.report_asks.extend(started.report_asks);
                 changes.refused += started.refused;
                 changes.unstarted.extend(started.unstarted);
             }
@@ -632,6 +681,18 @@ impl Ci {
             self.property_peers = self.collect_property_peers();
         }
         changes
+    }
+
+    /// Answers `ask` as a device that declares nothing does: the Reply with
+    /// every bitmap empty and the End (M2-101 §9.6, §9.8), on `out` and the
+    /// Group of the device. The messages are one send each, in order; what the
+    /// output refuses is counted.
+    pub(crate) fn decline_report(&mut self, ask: &ReportInquiry, out: &mut OpenOutput) {
+        let sends = [
+            (ask.group, ask.reply(ReportScope::none(ask.scope.address()))),
+            (ask.group, ask.end()),
+        ];
+        self.refused.add(send(out, &sends));
     }
 
     /// The input is closing: each running device announces its MUID invalid
@@ -793,11 +854,11 @@ impl Running {
         self.members.is_empty() && self.unstarted.is_empty()
     }
 
-    /// The devices of `groups`, each with its first Discovery sent on `out`. A
-    /// Group whose device cannot start is reported in the changes and kept in
+    /// The devices of `blocks`, each with its first Discovery sent on `out`. A
+    /// block whose device cannot start is reported in the changes and kept in
     /// [`unstarted`](Self::unstarted).
     fn start(
-        groups: &[MidiGroup],
+        blocks: &[Block],
         identity: DeviceIdentity,
         entropy: &mut impl FnMut() -> Result<Entropy, getrandom::Error>,
         now: Instant,
@@ -807,16 +868,16 @@ impl Running {
         let mut firsts = Vec::new();
         let mut unstarted = Vec::new();
         let mut failures = Vec::new();
-        let members: Vec<Member> = groups
+        let members: Vec<Member> = blocks
             .iter()
-            .filter_map(|&group| match start_device(identity, entropy, now) {
+            .filter_map(|&block| match start_device(identity, entropy, now) {
                 Ok((device, first)) => {
                     firsts.push(first);
-                    Some(Member::new(group, device))
+                    Some(Member::new(block, device))
                 }
                 Err(error) => {
-                    unstarted.push(group);
-                    failures.push((group, error));
+                    unstarted.push(block);
+                    failures.push((block.first, error));
                     None
                 }
             })
@@ -848,16 +909,16 @@ impl Running {
         stop_members(&self.members, out, changes);
     }
 
-    /// Brings the devices to `groups` (the Groups MIDI-CI is now called for,
-    /// sorted): a Group no longer called for ends its device (as
+    /// Brings the devices to `blocks` (the blocks MIDI-CI is now called for,
+    /// sorted): a block no longer called for ends its device (as
     /// [`stop`](Self::stop)), a new one starts a device with its first
-    /// Discovery, and a Group that stays keeps its device and peers. A Group
+    /// Discovery, and a block that stays keeps its device and peers. A block
     /// whose device cannot start is tried again each time and reported once per
-    /// failure episode (until it starts or leaves the Groups); nothing is
+    /// failure episode (until it starts or leaves the blocks); nothing is
     /// rebuilt while the devices are the same.
     fn reconcile(
         &mut self,
-        groups: &[MidiGroup],
+        blocks: &[Block],
         entropy: &mut impl FnMut() -> Result<Entropy, getrandom::Error>,
         now: Instant,
         out: &mut OpenOutput,
@@ -865,28 +926,28 @@ impl Running {
     ) {
         let (kept, gone): (Vec<Member>, Vec<Member>) = std::mem::take(&mut self.members)
             .into_iter()
-            .partition(|m| groups.contains(&m.group));
+            .partition(|m| blocks.contains(&m.block()));
         let mut changed = !gone.is_empty();
         stop_members(&gone, out, changes);
         self.members = kept;
-        self.unstarted.retain(|g| groups.contains(g));
+        self.unstarted.retain(|b| blocks.contains(b));
         let mut sends = Vec::new();
         let mut started = Vec::new();
-        for &group in groups {
-            if self.members.iter().any(|m| m.group == group) {
+        for &block in blocks {
+            if self.members.iter().any(|m| m.block() == block) {
                 continue;
             }
             match start_device(self.identity, entropy, now) {
                 Ok((device, first)) => {
-                    started.push((group, first));
-                    self.unstarted.retain(|g| *g != group);
-                    self.members.push(Member::new(group, device));
+                    started.push((block.first, first));
+                    self.unstarted.retain(|b| *b != block);
+                    self.members.push(Member::new(block, device));
                     changed = true;
                 }
                 Err(error) => {
-                    if !self.unstarted.contains(&group) {
-                        self.unstarted.push(group);
-                        changes.unstarted.push((group, error));
+                    if !self.unstarted.contains(&block) {
+                        self.unstarted.push(block);
+                        changes.unstarted.push((block.first, error));
                     }
                 }
             }
@@ -1158,6 +1219,18 @@ impl Member {
                     self.renew_property(new);
                     changes.muid_changed.push(self.group);
                 }
+                CiAction::ReportAsked {
+                    peer,
+                    control,
+                    scope,
+                } => changes.report_asks.push(ReportInquiry {
+                    group: self.group,
+                    groups: self.span,
+                    own: self.device.muid(),
+                    peer,
+                    control,
+                    scope,
+                }),
                 // The device's own MUID changing reaches the app as every peer
                 // lost (and so every Initiator dropped), and the Responder is
                 // made again for it; the window closing is the core's own
@@ -1529,452 +1602,4 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use tutti_midi_ci::{CiCategories, CiDeviceId, DeviceBody, DiscoveryData};
-    use tutti_midi_device::{EndpointId, PortDirection};
-
-    use super::*;
-    use crate::MidiSession;
-    use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-    use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
-
-    /// The output of a fake device, and the counters of what it was sent.
-    fn output() -> (OpenOutput, FakeCounters) {
-        output_taking(usize::MAX)
-    }
-
-    /// As [`output`], the device taking `room` packets in all.
-    fn output_taking(room: usize) -> (OpenOutput, FakeCounters) {
-        let (backend, counters) = FakeBackend::build_with(vec![], vec![], room);
-        let inlets = tutti_midi_runtime::InputInlets::new(
-            tutti_graph::EventCapacity::of(64),
-            Duration::ZERO,
-        );
-        let session = MidiSession::open_over(
-            &tutti_platform::Executor::new(),
-            backend,
-            crate::HardwareMidiInputs::new(inlets),
-            crate::MidiHardwareConfig::new(),
-        )
-        .unwrap();
-        counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
-        let id = session.outputs().first().expect("the device").id.clone();
-        (
-            session
-                .connect_output(crate::testing::started(), &id)
-                .unwrap(),
-            counters,
-        )
-    }
-
-    // A MIDI-CI message is SysEx7 packets, and a device with room for some of
-    // them takes none: a SysEx7 whose end the device never gets is no message.
-    #[test]
-    fn a_ci_message_the_device_has_no_room_for_whole_is_not_sent_in_part() {
-        let message = CiMessage::Discovery {
-            device_id: CiDeviceId::FunctionBlock,
-            source: Muid::of(0x0012_3456),
-            data: DiscoveryData::new(DeviceBody::new(
-                identity(),
-                CiCategories::empty(),
-                MaxSysexSize::of(256),
-            )),
-        };
-        let packets = message.packets(G0).unwrap().count();
-        assert!(packets >= 2, "a message of several packets");
-        let (mut out, counters) = output_taking(packets - 1);
-        assert_eq!(send(&mut out, &[(G0, message.clone())]), Losses::refused(1));
-        assert!(counters.take_sent(EndpointId::from_raw(7)).is_empty());
-
-        let (mut out, counters) = output_taking(packets);
-        assert_eq!(send(&mut out, &[(G0, message)]), Losses::NONE);
-        assert_eq!(counters.take_sent(EndpointId::from_raw(7)).len(), packets);
-    }
-
-    /// An entropy source that refuses draws `from..to` (counted from 1) and
-    /// gives every other, with the count it keeps.
-    fn refusing(from: usize, to: usize) -> impl FnMut() -> Result<Entropy, getrandom::Error> {
-        let mut draws = 0;
-        move || {
-            draws += 1;
-            if (from..to).contains(&draws) {
-                Err(getrandom::Error::UNSUPPORTED)
-            } else {
-                entropy()
-            }
-        }
-    }
-
-    fn heard(packets: &[Ump]) -> Heard<'_> {
-        Heard {
-            packets,
-            lost_before: false,
-            lost_during: false,
-        }
-    }
-
-    fn group_of(ump: &Ump) -> u8 {
-        ((ump.0[0] >> 24) & 0xF) as u8
-    }
-
-    const G0: MidiGroup = MidiGroup::of(0);
-    const G1: MidiGroup = MidiGroup::of(1);
-
-    // A Group whose device cannot start is reported once, however many polls
-    // retry it, and the retries do not rebuild the reader, so a message open on
-    // a Group that did start is finished; the Group starts when the source gives.
-    #[test]
-    fn a_group_that_cannot_start_is_reported_once_and_retried_without_dropping_a_message() {
-        let (mut out, counters) = output();
-        let raw = EndpointId::from_raw(7);
-        // Group 0 takes the first draw; Group 1 is refused the next three.
-        let mut source = refusing(2, 5);
-        let t0 = Instant::now();
-        let at = |ms| t0 + Duration::from_millis(ms);
-
-        let (mut running, first) =
-            Running::start(&[G0, G1], identity(), &mut source, at(0), &mut out);
-        assert_eq!(first.unstarted, [(G1, getrandom::Error::UNSUPPORTED)]);
-        let _ = counters.take_sent(raw);
-
-        // A peer's Discovery arrives on Group 0 in two polls; Group 1 is refused
-        // again in both and is not reported again.
-        let message = CiMessage::Discovery {
-            device_id: CiDeviceId::FunctionBlock,
-            source: Muid::of(0x0012_3456),
-            data: DiscoveryData::new(DeviceBody::new(
-                identity(),
-                CiCategories::empty(),
-                MaxSysexSize::of(256),
-            )),
-        };
-        let packets: Vec<Ump> = message.packets(G0).unwrap().collect();
-        assert!(packets.len() >= 2);
-        let (head, tail) = packets.split_at(packets.len() / 2);
-        for (ms, part) in [(1, head), (2, tail)] {
-            let mut changes = CiChanges::default();
-            running.reconcile(&[G0, G1], &mut source, at(ms), &mut out, &mut changes);
-            running.step(
-                &mut ResourceStore::new(),
-                at(ms),
-                &heard(part),
-                &mut out,
-                &mut changes,
-            );
-            assert!(changes.unstarted.is_empty(), "reported once");
-            if ms == 1 {
-                assert!(
-                    counters.take_sent(raw).is_empty(),
-                    "the message is not whole yet"
-                );
-            }
-        }
-        assert!(
-            !counters.take_sent(raw).is_empty(),
-            "the message survived the retries and was answered"
-        );
-
-        // The next draw succeeds: Group 1 starts and sends its Discovery.
-        let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, at(3), &mut out, &mut changes);
-        assert!(changes.unstarted.is_empty());
-        assert!(running.unstarted.is_empty());
-        let sent = counters.take_sent(raw);
-        assert!(!sent.is_empty() && sent.iter().all(|u| group_of(u) == 1));
-    }
-
-    // Every Group refused: each is reported once over several polls, the set
-    // stays not idle (what keeps `Ci::poll` from dropping it), and the retry goes
-    // on: the first draw that succeeds starts both Groups.
-    #[test]
-    fn when_every_group_is_refused_each_is_reported_once_and_the_retry_goes_on() {
-        let (mut out, _counters) = output();
-        // Two draws at the start and two on each of three polls are refused.
-        let mut source = refusing(1, 9);
-        let now = Instant::now();
-        let (mut running, first) =
-            Running::start(&[G0, G1], identity(), &mut source, now, &mut out);
-        assert_eq!(
-            first.unstarted,
-            [
-                (G0, getrandom::Error::UNSUPPORTED),
-                (G1, getrandom::Error::UNSUPPORTED)
-            ]
-        );
-        assert!(!running.is_idle(), "the Groups still wait to start");
-        for _ in 0..3 {
-            let mut changes = CiChanges::default();
-            running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
-            assert!(changes.unstarted.is_empty(), "reported once");
-            assert!(!running.is_idle());
-            assert!(running.members.is_empty());
-        }
-        // The next draws succeed: both Groups start, and nothing is reported.
-        let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
-        assert!(changes.unstarted.is_empty());
-        assert_eq!(running.members.len(), 2);
-        assert!(running.unstarted.is_empty());
-        // No Group is called for: nothing waits and nothing runs.
-        running.reconcile(&[], &mut source, now, &mut out, &mut changes);
-        assert!(running.is_idle());
-    }
-
-    // A Group that leaves the Groups while it is refused and returns is a new
-    // failure: it is reported again.
-    #[test]
-    fn a_group_that_leaves_and_returns_while_refused_is_reported_again() {
-        let (mut out, _counters) = output();
-        let mut source = refusing(1, 100);
-        let now = Instant::now();
-        let (mut running, first) = Running::start(&[G0], identity(), &mut source, now, &mut out);
-        assert_eq!(first.unstarted.len(), 1);
-        let mut changes = CiChanges::default();
-        running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
-        assert_eq!(changes.unstarted, [(G1, getrandom::Error::UNSUPPORTED)]);
-        let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
-        assert_eq!(changes.unstarted, [(G0, getrandom::Error::UNSUPPORTED)]);
-    }
-
-    // A CI message the output cannot take is counted, not dropped without a
-    // trace: the first Discovery of each of two Groups goes to an output that
-    // takes nothing, so two messages are refused; an output that takes them
-    // counts none.
-    #[test]
-    fn a_ci_message_the_output_refuses_is_counted_and_one_it_takes_is_not() {
-        let now = Instant::now();
-        let (mut full, _counters) = output_taking(0);
-        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut full);
-        assert_eq!(changes.refused, Losses::refused(2));
-
-        let (mut roomy, counters) = output();
-        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut roomy);
-        assert_eq!(changes.refused, Losses::NONE);
-        assert!(counters.sent() > 0, "the messages were sent");
-    }
-
-    // A message the output has room for only in part is not sent in part: it
-    // is refused whole, and counted.
-    #[test]
-    fn a_ci_message_the_output_has_room_for_only_in_part_is_counted() {
-        let now = Instant::now();
-        let (mut short, _counters) = output_taking(1);
-        let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
-        assert_eq!(changes.refused, Losses::refused(1));
-    }
-
-    /// The initiator `init` and the Responder `server` trade messages until
-    /// neither has more to say; the initiator's events are returned.
-    fn trade(
-        init: &mut tutti_midi_ci::ResourceInitiator,
-        server: &mut ResourceResponder,
-        store: &mut ResourceStore,
-        first: Vec<tutti_midi_ci::ResourceAction>,
-        now: Instant,
-    ) -> Vec<tutti_midi_ci::ResourceEvent> {
-        use tutti_midi_ci::{ResourceAction, ResponderAction};
-        let mut events = Vec::new();
-        let mut actions = first;
-        for _ in 0..40 {
-            let mut to_server = Vec::new();
-            for action in actions.drain(..) {
-                match action {
-                    ResourceAction::Send(message) => to_server.push(message),
-                    ResourceAction::Event(event) => events.push(*event),
-                    _ => {}
-                }
-            }
-            if to_server.is_empty() {
-                break;
-            }
-            for message in to_server {
-                let replies = server.on_message(store, &Decoded::Message(message), now);
-                for reply in replies {
-                    if let ResponderAction::Send(message) = reply {
-                        actions.extend(init.on_message(&Decoded::Message(message), now));
-                    }
-                }
-            }
-        }
-        events
-    }
-
-    // Every Group of an input serves the one store the app gave: a Set through
-    // one Group is read through another, and by the app.
-    #[test]
-    fn a_set_through_one_group_is_read_through_another_and_by_the_app() {
-        use tutti_midi_ci::{
-            PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits, PeSettings, ResourceEntry,
-            ResourceEvent, ResourceGet, ResourceInitiator, ResourceSet, ResourceTarget,
-            SimultaneousRequests, StandardResource,
-        };
-        let (mut out, _counters) = output();
-        let now = Instant::now();
-        let mut store = ResourceStore::new();
-        store.declare(
-            ResourceEntry::standard(StandardResource::LocalOn)
-                .build()
-                .unwrap(),
-        );
-        store
-            .put(None, PeData::LocalOn(PeLocalOn(true)))
-            .expect("declared");
-        let (mut running, _) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut out);
-
-        let peer = Muid::of(0x0012_3456);
-        let settings = |max| PeSettings {
-            capabilities: PeCapabilities::new(SimultaneousRequests::of(2)),
-            peer_max_sysex: max,
-            reassembly: PeReassemblyLimits {
-                streams: tutti_midi_ci::StreamLimit::of(4),
-                bytes: tutti_midi_ci::BufferLimit::of(1 << 16),
-            },
-            body_limit: tutti_midi_ci::BodyLimit::of(1 << 16),
-        };
-        let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
-        let mut ends = Vec::new();
-        for member in &mut running.members {
-            member.server.accept(peer, MAX_SYSEX);
-            let (init, first) =
-                ResourceInitiator::new(peer, member.device.muid(), settings(MAX_SYSEX), now);
-            ends.push((init, first));
-        }
-        let [(a, first_a), (b, first_b)] = &mut ends[..] else {
-            panic!("two Groups");
-        };
-        let [ma, mb] = &mut running.members[..] else {
-            panic!("two Groups");
-        };
-        let _ = trade(a, &mut ma.server, &mut store, std::mem::take(first_a), now);
-        let _ = trade(b, &mut mb.server, &mut store, std::mem::take(first_b), now);
-
-        let set = ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(false))).unwrap();
-        let (_, actions) = a.set(&set, now).unwrap();
-        let _ = trade(a, &mut ma.server, &mut store, actions, now);
-
-        let (_, actions) = b.get(&ResourceGet::new(target.clone()), now).unwrap();
-        let events = trade(b, &mut mb.server, &mut store, actions, now);
-        let got = events.iter().find_map(|e| match e {
-            ResourceEvent::Got { result, .. } => Some(result.clone()),
-            _ => None,
-        });
-        assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
-        assert_eq!(
-            store.get(&target),
-            Some(&PeData::LocalOn(PeLocalOn(false))),
-            "the app's store sees it"
-        );
-    }
-
-    /// The id of a fake device.
-    fn device_id() -> MidiDeviceId {
-        let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-        let inlets = tutti_midi_runtime::InputInlets::new(
-            tutti_graph::EventCapacity::of(64),
-            Duration::ZERO,
-        );
-        let session = MidiSession::open_over(
-            &tutti_platform::Executor::new(),
-            backend,
-            crate::HardwareMidiInputs::new(inlets),
-            crate::MidiHardwareConfig::new(),
-        )
-        .unwrap();
-        counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
-        session.outputs().first().expect("the device").id.clone()
-    }
-
-    // A request whose peer is gone when the poll would send it is reported with
-    // the reason, never dropped: for a Group with no device and for a peer the
-    // device no longer has, and for each of Profile, Process and Property Exchange.
-    #[test]
-    fn a_request_for_a_peer_that_is_gone_is_reported_not_dropped() {
-        use crate::properties::PropertyCall;
-        use tutti_midi_ci::{
-            CiDeviceId, DataControl, ProfileId, ReportRequest, ReportScope, ResourceGet,
-            ResourceTarget,
-        };
-        let device = device_id();
-        let (mut out, _counters) = output();
-        let now = Instant::now();
-        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
-        let muid = Muid::of(0x0012_3456);
-        let profile = ProfileId::from_bytes([0x7E, 1, 0, 1, 1]).unwrap();
-        for group in [G1, G0] {
-            let id = PeerId { group, muid };
-            let mut changes = CiChanges::default();
-            running.start_switches(
-                &mut vec![ProfileSwitch {
-                    at: PeerRef::new(device.clone(), id),
-                    profile,
-                    switch: Switch::Off(CiDeviceId::Group),
-                }],
-                now,
-                &mut out,
-                &mut changes,
-            );
-            assert_eq!(
-                changes.answers,
-                [(
-                    id,
-                    Answer::SwitchLost {
-                        request: tutti_midi_ci::ProfileRequest::SetOff {
-                            address: CiDeviceId::Group,
-                            profile
-                        }
-                    }
-                )],
-                "{group:?}"
-            );
-            let peer = Reporter {
-                at: PeerRef::new(device.clone(), id),
-            };
-            let request = ReportRequest::new(
-                DataControl::Full,
-                ReportScope::Group {
-                    controllers: tutti_midi_ci::ChannelControllers::all(),
-                    notes: tutti_midi_ci::NoteData::all(),
-                },
-            );
-            running.start_reports(
-                &mut vec![ReportAsk { peer, request }],
-                now,
-                &mut out,
-                &mut changes,
-            );
-            assert_eq!(
-                changes.answers[1..2],
-                [(id, Answer::ReportLost)],
-                "{group:?}"
-            );
-            let call = PropertyCall::Get(ResourceGet::new(
-                ResourceTarget::try_from(tutti_midi_ci::StandardResource::LocalOn).unwrap(),
-            ));
-            running.start_properties(
-                &mut vec![PropertyAsk {
-                    peer: PropertyPeer {
-                        at: PeerRef::new(device.clone(), id),
-                        resources: Arc::default(),
-                    },
-                    call: call.clone(),
-                }],
-                now,
-                &mut out,
-                &mut changes,
-            );
-            assert_eq!(
-                changes.answers[2..],
-                [(
-                    id,
-                    Answer::PropertyLost {
-                        call: Box::new(call)
-                    }
-                )],
-                "{group:?}"
-            );
-        }
-    }
-}
+mod tests;

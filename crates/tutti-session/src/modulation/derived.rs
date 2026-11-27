@@ -277,7 +277,7 @@ impl Derived {
         let mut applied = Applied::default();
         let mut targets = BTreeMap::new();
         for &target in compiled.programs.keys() {
-            let Some(asked) = ask(target, own, cell, mirror) else {
+            let Some(asked) = ask(target, own, cell, mirror, editor) else {
                 applied.awaiting_values = true;
                 applied.unresolved_targets.push(target);
                 continue;
@@ -521,11 +521,12 @@ struct Keys {
 /// not list). The outer `None`: the plugin's value is not read yet, and a lane
 /// built without a knob could not take one later; the inner, the key names
 /// nothing.
-fn ask(
+fn ask<F: Float>(
     target: TargetKey,
     own: &OwnMods,
     cell: &dyn Fn(ParamIn) -> Option<ParamCell>,
     mirror: &dyn Fn(NodeKey, ParamId) -> Option<Option<Normalized>>,
+    editor: &Editor<F>,
 ) -> Option<Option<Resolved>> {
     let (drive, knob, seed) = match target {
         TargetKey::Param { node, param } => {
@@ -546,7 +547,7 @@ fn ask(
         }
         TargetKey::Mix(node) => (Drive::Mix(NodeKey(node)), None, None),
         TargetKey::Edge(edge) => {
-            let Some(id) = own.edge_of(edge) else {
+            let Some(id) = own.edge_of(edge, editor) else {
                 return Some(None);
             };
             (Drive::Gain(id), None, None)

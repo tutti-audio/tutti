@@ -1098,6 +1098,8 @@ struct wire_ends::Connected
 struct wire_ends::InputEnd
 struct wire_ends::Mention
 struct wire_ends::OutputEnd
+struct wire_ends::ToNode
+struct wire_ends::ToOutput
 trait analyze::feed::AudioContext
 trait analyze::feed::AudioInput
 trait analyze::feed::sealed::Sealed

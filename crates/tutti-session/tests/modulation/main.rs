@@ -1,7 +1,14 @@
 //! Modulation through the session: lanes, routes onto params, edge gain and mix.
 
+#![allow(
+    unreachable_pub,
+    reason = "a node declared with the cells form is the `Node` of its pub config, so it is pub"
+)]
+
 // The offline sessions the files share.
 mod common;
+#[path = "../support/echo_node.rs"]
+mod echo_node;
 #[path = "../support/offline.rs"]
 mod offline;
 

@@ -1,7 +1,7 @@
 //! The wires of a patch as the patch keeps them: by the keys it declares and
 //! the ports they join, with the options each was declared with.
 
-use tutti_units::Gain;
+use tutti_units::{Gain, Samples};
 
 /// One wire of a patch by its ends: the keys it joins and which port of each,
 /// of the one kind of wire the ends are. What a wire is identified by after
@@ -43,10 +43,41 @@ impl<K> WireEnds<K> {
     }
 }
 
+/// What a patch identifies a wire by: its ends and its delay (`None` for a
+/// direct wire). A wire declared with another delay is another wire.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct WireId<K> {
+    pub(crate) ends: WireEnds<K>,
+    pub(crate) delay: Option<Samples>,
+}
+
+impl<K> WireId<K> {
+    /// The key the wire leaves from.
+    pub(crate) fn source(&self) -> &K {
+        self.ends.source()
+    }
+
+    /// The key the wire arrives at, `None` for the main output.
+    pub(crate) fn sink(&self) -> Option<&K> {
+        self.ends.sink()
+    }
+}
+
 /// One wire of a patch, with its options.
 #[derive(Clone, Debug)]
 pub(crate) struct WireDecl<K> {
     pub(crate) ends: WireEnds<K>,
     pub(crate) unfaded: bool,
     pub(crate) initial: Option<Gain>,
+    /// The feedback delay, `None` for a direct wire.
+    pub(crate) delay: Option<Samples>,
+}
+
+impl<K: Clone> WireDecl<K> {
+    pub(crate) fn id(&self) -> WireId<K> {
+        WireId {
+            ends: self.ends.clone(),
+            delay: self.delay,
+        }
+    }
 }
