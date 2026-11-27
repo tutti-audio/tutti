@@ -296,7 +296,7 @@ mod render_output {
 use render_output::RenderOutput;
 
 /// Where a bounce's output goes: a [`tutti_codec::ToFile`] or a [`ToMemory`] (sealed). Its
-/// [`Output`](RenderOutput::Output) is what the finished bounce holds for that output, so the
+/// `Output` is what the finished bounce holds for that output, so the
 /// caller who chose a file is handed a [`Written`] and one who chose memory a [`Rendered`]
 /// (`D::Output<F>`, at the graph's float).
 ///
@@ -554,7 +554,7 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
     /// The main output into `destination`: a [`ToFile`], written beside its path and renamed
     /// over it when the bounce finishes (so a cancelled or failed bounce leaves what was at
     /// the path as it was), or a [`ToMemory`]. [`Bounced::main_output`] is the destination's
-    /// [`Output`](Destination::Output). A file main output is the one that can be
+    /// `Output`. A file main output is the one that can be
     /// [`normalize`](Bounce::normalize)d, which only a file honours:
     ///
     /// ```compile_fail,E0599
