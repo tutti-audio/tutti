@@ -9,12 +9,14 @@ use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
+#[cfg(feature = "export")]
 use tutti_codec::Encoding;
 use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
+#[cfg(feature = "export")]
 use tutti_session::{ToFile, ToMemory};
 use tutti_units::{SampleRate, Samples};
 
