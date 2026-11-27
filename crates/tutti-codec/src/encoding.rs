@@ -6,10 +6,9 @@ use tutti_units::SampleRate;
 
 /// The pipeline in front of the encoder: the format a file is written as, the
 /// channels it holds, the rate it is converted to and the dither noise it is
-/// quantized with. It names no destination: [`ToFile`](crate::ToFile) is a
-/// path, [`write`](crate::write) and [`encode`](crate::encode) take an
-/// `Encoding` for a whole buffer, and a [`Chain`](crate::Chain) takes one for a
-/// stream.
+/// quantized with. It names no destination: a [`ToFile`](crate::ToFile) pairs one
+/// with a path, [`encode`](crate::encode) takes one for a whole buffer in memory, and a
+/// [`Chain`](crate::Chain) reads the one its file carries.
 ///
 /// The stages run in the order fold, resample, gain, quantize. Quantizing is
 /// last because an integer file's dither is scaled to one least significant bit

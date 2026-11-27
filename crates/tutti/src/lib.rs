@@ -233,8 +233,8 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, ToFile,
-    ToMemory, Written,
+    Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, ToMemory,
+    Written,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -454,8 +454,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, StagedKeep,
+        Asset, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, StagedKeep, WriteTarget,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
@@ -594,7 +594,7 @@ pub mod session {
     pub use tutti_session::{
         BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing, BufferKey,
         Destination, Done, EventLossPolicy, ExportClock, FileKey, NoMainOutput, Normalize, Outcome,
-        PrepareEdit, PreparedGraph, Progress, Stage, StemKey,
+        PrepareEdit, PreparedGraph, Progress, RenderOutput, Stage, StemKey,
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};

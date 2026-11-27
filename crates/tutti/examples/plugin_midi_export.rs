@@ -33,11 +33,10 @@
 mod support;
 
 use std::path::{Path, PathBuf};
-use tutti::ToFile;
 use tutti::codec::Encoding;
 
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, StandardMidiFile, Tick, Timebase, Track};
-use tutti::session::Destination;
+use tutti::session::{Destination, RenderOutput};
 use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
     SampleRate, Samples, Saved, Session, SessionEvent, Written,
@@ -101,7 +100,7 @@ fn load(
 /// Plays `plugin` (restored from `state`, if any)
 /// `midi` into the main output `main_output` names (a file or memory, which `D` says
 /// and the result's type follows).
-fn play<D: Destination>(
+fn play<D: Destination + RenderOutput>(
     main: tutti::plugin::MainThreadMarker,
     plugin: &Path,
     state: Option<Vec<u8>>,
@@ -156,10 +155,13 @@ fn play_to_file(
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
         // `replace`: a rerun overwrites the output of the last one.
-        bounce.main_output(ToFile::new(
-            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
-            tutti::codec::ToFile::new(out).replace(),
-        ))
+        bounce.main_output(
+            tutti::codec::ToFile::new(
+                out,
+                Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+            )
+            .replace(),
+        )
     })
 }
 

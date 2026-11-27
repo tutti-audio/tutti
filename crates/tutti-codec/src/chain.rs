@@ -236,7 +236,7 @@ impl Encode for Counted<'_> {
 }
 
 impl<F: FftFloat> Chain<F> {
-    /// The chain for `encoding` into `to`, from frames of `source` channels at
+    /// The chain into `to`, through its encoding, from frames of `source` channels at
     /// `source_rate`, of which `planned` are expected (at the source's rate).
     ///
     /// # Errors
@@ -247,12 +247,12 @@ impl<F: FftFloat> Chain<F> {
     /// place, [`EncodeError::Resample`] for a rate or width the converter cannot take, and
     /// the errors of [`EncoderOptions::wrap`] otherwise.
     pub fn new(
-        encoding: &Encoding,
         to: &ToFile,
         source: &ChannelSet,
         source_rate: SampleRate,
         planned: Samples,
     ) -> Result<Self> {
+        let encoding = to.encoding();
         let stages = Stages::new(encoding, source, source_rate)?;
         let spec = spec_of(encoding, source, source_rate);
         let encoder = to.create(options_of(&spec, encoding, source_rate, planned))?;

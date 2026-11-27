@@ -130,10 +130,7 @@ file the first one wrote. Then we hand it to the session:
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
 let mut session = tone()?;
-let rendering = session.bounce(two_seconds().main_output(ToFile::new(
-    Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO),
-    tutti::codec::ToFile::new(&path).replace(),
-)))?;
+let rendering = session.bounce(two_seconds().main_output(tutti::codec::ToFile::new(&path, Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO)).replace()))?;
 // The session renders on a thread of its own; we wait for it, then hand
 // what it made back to the session.
 let rendered = block_on(rendering.into_future());

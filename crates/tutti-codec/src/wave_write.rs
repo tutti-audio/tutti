@@ -12,7 +12,7 @@ use tutti_units::Samples;
 /// Frames written to the chain at a time by [`write()`] and [`encode()`].
 const WRITE_CHUNK: usize = 8192;
 
-/// Writes `wave` as a file of `encoding` to `to`: folded onto the encoding's channels,
+/// Writes `wave` to the file `to` names, as its [`Encoding`] says: folded onto the encoding's channels,
 /// resampled, quantized and put in place, as a [`Chain`] does it for a stream.
 ///
 /// - The file is written beside its path and renamed over it when whole, so a failure leaves
@@ -52,32 +52,22 @@ const WRITE_CHUNK: usize = 8192;
 /// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, 0.75]));
 /// let dir = tempfile::tempdir()?;
 /// let path = dir.path().join("ramp.wav");
-/// write(&wave, &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))), &ToFile::new(&path))?;
+/// write(&wave, &ToFile::new(&path, Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))))?;
 /// assert_eq!(read_wave::<f32>(&path)?, wave);
 /// # Ok(())
 /// # }
 /// # }
 /// ```
-pub fn write<S: Sample>(wave: &Wave<S>, encoding: &Encoding, to: &ToFile) -> Result<Landed> {
+pub fn write<S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
     if stages_in_f64::<S>() {
-        write_in::<f64, S>(wave, encoding, to)
+        write_in::<f64, S>(wave, to)
     } else {
-        write_in::<f32, S>(wave, encoding, to)
+        write_in::<f32, S>(wave, to)
     }
 }
 
-fn write_in<F: FftFloat, S: Sample>(
-    wave: &Wave<S>,
-    encoding: &Encoding,
-    to: &ToFile,
-) -> Result<Landed> {
-    let mut chain = Chain::<F>::new(
-        encoding,
-        to,
-        &wave.channel_set(),
-        wave.sample_rate(),
-        wave.len(),
-    )?;
+fn write_in<F: FftFloat, S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
+    let mut chain = Chain::<F>::new(to, &wave.channel_set(), wave.sample_rate(), wave.len())?;
     feed(wave, |block| chain.block(block))?;
     chain.finalize().map_err(Kept::discard)?.commit()
 }

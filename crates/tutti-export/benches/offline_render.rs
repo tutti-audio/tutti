@@ -101,7 +101,7 @@ impl Case {
             Some(resample) => encoding.resample(resample),
             None => encoding,
         };
-        let target = FileTarget::new(encoding, ToFile::new(path));
+        let target = FileTarget::new(ToFile::new(path, encoding));
         match normalize {
             Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,

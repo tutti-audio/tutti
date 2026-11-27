@@ -19,8 +19,8 @@ enum bounce::BounceTail
 enum bounce::Range
 enum bounce::StemGain
 enum bounce::StemKey
+enum bounce::render_output::Landing
 enum builder::Workers
-enum destination::sealed::Landing
 enum device::DeviceEvent
 enum device::RestartOutcome
 enum editor::EditorCallError
@@ -202,7 +202,6 @@ fn builder::SessionBuilder::unresolved_warning
 fn builder::Workers::of
 fn builder::Workers::threads
 fn builder::main_output_width
-fn destination::ToFile::new
 fn destination::ToMemory::channels
 fn destination::ToMemory::new
 fn device::Device::device_name
@@ -893,6 +892,8 @@ struct bounce::ExportClock
 struct bounce::NoMainOutput
 struct bounce::PreparedGraph
 struct bounce::Stem
+struct bounce::render_output::MainShape
+struct bounce::render_output::StemShape
 struct builder::BlockConfig
 struct builder::SessionBuilder
 struct clock::Detached
@@ -902,10 +903,7 @@ struct clock::Offline
 struct clock::OfflineEngine
 struct clock::SystemClock
 struct clock::SystemEngine
-struct destination::ToFile
 struct destination::ToMemory
-struct destination::sealed::MainShape
-struct destination::sealed::StemShape
 struct device::Device
 struct device::DeviceHandle
 struct device::DeviceLatency
@@ -1106,6 +1104,8 @@ trait analyze::feed::sealed::Sealed
 trait analyze::feed::sealed_context::Sealed
 trait apply::Apply
 trait apply::sealed::Sealed
+trait bounce::render_output::RenderOutput
+trait bounce::render_output::StemOutput
 trait clock::Clock
 trait clock::RealTime
 trait clock::SessionFloat
@@ -1114,7 +1114,6 @@ trait clock::sealed::Sealed
 trait clock::sealed::Streaming
 trait destination::Destination
 trait destination::sealed::Sealed
-trait destination::sealed::StemOutput
 trait format::Sealed
 trait handled::Handled
 trait handled::sealed::Sealed

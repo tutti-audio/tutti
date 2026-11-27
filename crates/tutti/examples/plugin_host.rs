@@ -35,7 +35,6 @@
 
 use std::future::IntoFuture as _;
 use std::path::PathBuf;
-use tutti::ToFile;
 use tutti::codec::Encoding;
 
 use futures_lite::future::block_on;
@@ -261,10 +260,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendering = session.bounce(
         Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
-            .main_output(ToFile::new(
-                Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
-                tutti::codec::ToFile::new(out.as_path()).replace(),
-            )),
+            .main_output(
+                tutti::codec::ToFile::new(
+                    out.as_path(),
+                    Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+                )
+                .replace(),
+            ),
     )?;
     let rendered = block_on(rendering.into_future());
     let written = session.apply(rendered)?.into_main_output();

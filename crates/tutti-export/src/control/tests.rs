@@ -173,11 +173,11 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
     use tutti_codec::{Format, Pcm};
     use tutti_units::Db;
     let file = || {
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            "n.wav",
             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-            ToFile::new("n.wav"),
-        )
+        ))
     };
     // Planes in memory never normalize, so a render of them alone has no file to report.
     let streaming: [FileTarget; 0] = [];

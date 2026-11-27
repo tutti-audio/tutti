@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use tutti_midi_file::{MidiFile, SmfDivision, StandardMidiFile, WriteError};
-use tutti_platform::Destination;
+use tutti_platform::WriteTarget;
 
 use crate::common::{encoded, read_bytes, track};
 
@@ -41,7 +41,7 @@ fn create_new_over_an_existing_file_is_exists_keeps_the_old_bytes_and_the_staged
     let path = dir.path().join("a.mid");
     std::fs::write(&path, b"old").unwrap();
     let f = file(480);
-    let err = f.write(Destination::from(&path).create_new()).unwrap_err();
+    let err = f.write(WriteTarget::from(&path).create_new()).unwrap_err();
     let WriteError::Exists {
         path: ref taken,
         ref source,
@@ -72,7 +72,7 @@ fn create_new_on_a_new_path_creates_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.mid");
     file(96)
-        .write(Destination::from(&path).create_new())
+        .write(WriteTarget::from(&path).create_new())
         .unwrap();
     assert_eq!(entries(dir.path()), ["a.mid"]);
     assert!(path.is_file());
@@ -107,7 +107,7 @@ fn a_write_to_a_vec_reads_back_as_the_file() {
 fn a_write_to_a_writer_appends_the_whole_file_and_ignores_create_new() {
     let f = file(96);
     let mut bytes = b"head".to_vec();
-    f.write(Destination::from(&mut bytes).create_new()).unwrap();
+    f.write(WriteTarget::from(&mut bytes).create_new()).unwrap();
     assert_eq!(&bytes[..4], b"head");
     // The SMF header chunk (SMF 1.0 section 2.1) follows what was there, whole.
     assert_eq!(&bytes[4..8], b"MThd");
@@ -169,7 +169,7 @@ fn create_new_over_a_directory_is_exists() {
     let path = dir.path().join("a.mid");
     std::fs::create_dir(&path).unwrap();
     let err = file(96)
-        .write(Destination::from(&path).create_new())
+        .write(WriteTarget::from(&path).create_new())
         .unwrap_err();
     assert!(matches!(err, WriteError::Exists { .. }), "{err:?}");
     assert!(path.is_dir());

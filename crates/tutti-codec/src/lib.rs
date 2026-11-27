@@ -27,9 +27,9 @@
 //!   short is kept, with the first error in `Kept`.
 //! - `Encoding` is the pipeline in front of the encoder: the `Format` plus the `channels` it is
 //!   folded onto (`tutti_buffers::Fold::to_channels`; the source's by default), a `Resample` and
-//!   the dither seed. `ToFile` is a path (`replace`, `in_place`). `write(&wave, &encoding,
-//!   &to_file)` saves a whole `Wave` (folded, resampled, quantized, put in place), `encode(&wave,
-//!   &encoding)` gives the bytes of the same file in memory, and a `Chain` is the streaming form
+//!   the dither seed. `ToFile` is a path and its `Encoding` (`replace`, `in_place`).
+//!   `write(&wave, &to_file)` saves a whole `Wave` (folded, resampled, quantized, put in place),
+//!   `encode(&wave, &encoding)` gives the bytes of the same file in memory, and a `Chain` is the streaming form
 //!   of both: blocks in, then `finalize` and `Closed::commit`, with a gain `set_gain` can apply.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),

@@ -13,11 +13,11 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_codec::Encoding;
 use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
+#[cfg(feature = "export")]
+use tutti_session::ToMemory;
 use tutti_session::{
     Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
-#[cfg(feature = "export")]
-use tutti_session::{ToFile, ToMemory};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -320,10 +320,7 @@ fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
                 tutti_units::Seconds::new(0.0),
                 tutti_units::Seconds::new(0.01),
             ))
-            .main_output(ToFile::new(
-                encoding,
-                tutti_codec::ToFile::new(dir.path().join(name)),
-            ))
+            .main_output(tutti_codec::ToFile::new(dir.path().join(name), encoding))
             .tail(BounceTail::None);
         bounced(&mut session, bounce)
             .expect("renders")

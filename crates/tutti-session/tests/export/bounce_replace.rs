@@ -8,7 +8,6 @@ use tutti_codec::Encoding;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::ToFile;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, MainOutput,
     Range, Session,
@@ -59,9 +58,9 @@ fn a_bounce_onto_an_existing_main_output_is_refused_and_leaves_the_path() {
     session.graph().connect(node, MainOutput).unwrap();
     let error = bounced(
         &mut session,
-        bounce().main_output(ToFile::new(
+        bounce().main_output(tutti_codec::ToFile::new(
+            &main_output,
             Encoding::new(float_wav()),
-            tutti_codec::ToFile::new(&main_output),
         )),
     )
     .map(|_| ())
@@ -91,10 +90,9 @@ fn a_replacing_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside
     session.graph().connect(node, MainOutput).unwrap();
     bounced(
         &mut session,
-        bounce().main_output(ToFile::new(
-            Encoding::new(float_wav()),
-            tutti_codec::ToFile::new(&main_output).replace(),
-        )),
+        bounce().main_output(
+            tutti_codec::ToFile::new(&main_output, Encoding::new(float_wav())).replace(),
+        ),
     )
     .expect("renders");
     let planes = tutti_fixtures::signal::read_wav_f32(&main_output);

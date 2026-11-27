@@ -12,7 +12,6 @@ use tutti_codec::IntPcm;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::ToFile;
 use tutti_session::{Bounce, DitherShape, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
@@ -39,9 +38,9 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     let path = dir.path().join("out.wav");
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .main_output(ToFile::new(
+        .main_output(tutti_codec::ToFile::new(
+            &path,
             Encoding::new(Format::Wav(Pcm::Int(pcm))),
-            tutti_codec::ToFile::new(&path),
         ))
         .tail(tutti_session::BounceTail::None);
     bounced(&mut session, bounce).expect("renders");
@@ -166,25 +165,22 @@ fn the_files_of_a_bounce_are_dithered_with_different_noise() {
     let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)));
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .main_output(ToFile::new(
-            Encoding::new(format),
-            tutti_codec::ToFile::new(&paths[0]),
-        ))
-        .stem_with(Stem::new(silence.erase()).to(ToFile::new(
-            Encoding::new(format),
-            tutti_codec::ToFile::new(&paths[1]),
-        )))
-        .stem_with(Stem::new(silence.erase()).to(ToFile::new(
-            Encoding::new(format),
-            tutti_codec::ToFile::new(&paths[2]),
-        )))
-        .stem_with(Stem::new(silence.erase()).to(ToFile::new(
+        .main_output(tutti_codec::ToFile::new(&paths[0], Encoding::new(format)))
+        .stem_with(
+            Stem::new(silence.erase())
+                .to(tutti_codec::ToFile::new(&paths[1], Encoding::new(format))),
+        )
+        .stem_with(
+            Stem::new(silence.erase())
+                .to(tutti_codec::ToFile::new(&paths[2], Encoding::new(format))),
+        )
+        .stem_with(Stem::new(silence.erase()).to(tutti_codec::ToFile::new(
+            &paths[3],
             Encoding::new(format).dither_seed(7),
-            tutti_codec::ToFile::new(&paths[3]),
         )))
-        .stem_with(Stem::new(silence.erase()).to(ToFile::new(
+        .stem_with(Stem::new(silence.erase()).to(tutti_codec::ToFile::new(
+            &paths[4],
             Encoding::new(format).dither_seed(7),
-            tutti_codec::ToFile::new(&paths[4]),
         )))
         .tail(tutti_session::BounceTail::None);
     bounced(&mut session, bounce).expect("renders");

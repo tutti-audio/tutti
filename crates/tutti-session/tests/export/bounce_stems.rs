@@ -13,7 +13,7 @@ use crate::bounced::bounced;
 use std::collections::HashMap;
 use std::path::Path;
 use tutti_codec::Encoding;
-use tutti_session::{ToFile, ToMemory};
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
@@ -29,7 +29,7 @@ use tutti_session::{
     ExportClock, InputPort, MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain,
     StemKey,
 };
-use tutti_session::{Bounced, Destination};
+use tutti_session::{Bounced, Destination, RenderOutput};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -69,7 +69,7 @@ fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Destination>(
+fn refused<M: Destination + RenderOutput>(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, M>,
 ) -> BounceError {
@@ -304,14 +304,14 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
             .connect(OutputPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
-    let to_mono = Stem::new(wide.erase()).to(ToFile::new(
+    let to_mono = Stem::new(wide.erase()).to(tutti_codec::ToFile::new(
+        dir.path().join("mono.wav"),
         Encoding::new(float_wav()).width(ChannelLayout::MONO),
-        tutti_codec::ToFile::new(dir.path().join("mono.wav")),
     ));
     let wrong_width = Stem::new(wide.erase())
-        .to(ToFile::new(
+        .to(tutti_codec::ToFile::new(
+            dir.path().join("two.wav"),
             Encoding::new(float_wav()),
-            tutti_codec::ToFile::new(dir.path().join("two.wav")),
         ))
         .topology(tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO).unwrap());
     for stem in [to_mono, wrong_width] {
@@ -348,14 +348,14 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     let done = bounced(
         &mut session,
         base(0.25)
-            .main_output(ToFile::new(
+            .main_output(tutti_codec::ToFile::new(
+                &main_output,
                 Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
                     .resample(Resample::to(tutti_units::SampleRate::SR_44K1)),
-                tutti_codec::ToFile::new(&main_output),
             ))
-            .stem_with(Stem::new(node.erase()).to(ToFile::new(
+            .stem_with(Stem::new(node.erase()).to(tutti_codec::ToFile::new(
+                &stem,
                 Encoding::new(float_wav()).resample(Resample::to(tutti_units::SampleRate::SR_44K1)),
-                tutti_codec::ToFile::new(&stem),
             ))),
     )
     .expect("renders");
@@ -409,24 +409,24 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
         let done = bounced(
             session,
             base(0.1)
-                .main_output(ToFile::new(
+                .main_output(tutti_codec::ToFile::new(
+                    &paths[0],
                     Encoding::new(float_wav()),
-                    tutti_codec::ToFile::new(&paths[0]),
                 ))
                 .normalize(target)
                 .stem_with(
                     Stem::new(loud.erase())
-                        .to(ToFile::new(
+                        .to(tutti_codec::ToFile::new(
+                            &paths[1],
                             Encoding::new(float_wav()),
-                            tutti_codec::ToFile::new(&paths[1]),
                         ))
                         .gain(gain),
                 )
                 .stem_with(
                     Stem::new(quiet.erase())
-                        .to(ToFile::new(
+                        .to(tutti_codec::ToFile::new(
+                            &paths[2],
                             Encoding::new(float_wav()),
-                            tutti_codec::ToFile::new(&paths[2]),
                         ))
                         .gain(gain),
                 ),
@@ -501,7 +501,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    fn why<M: Destination>(
+    fn why<M: Destination + RenderOutput>(
         session: &mut DetachedSession,
         b: Bounce<NodeKey, M>,
     ) -> BounceConfigError {
@@ -515,15 +515,15 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         why(
             &mut session,
             base(0.01)
-                .main_output(ToFile::new(
-                    Encoding::new(float_wav()),
-                    tutti_codec::ToFile::new(path("m.wav"))
+                .main_output(tutti_codec::ToFile::new(
+                    path("m.wav"),
+                    Encoding::new(float_wav())
                 ))
                 .stem_with(
                     Stem::new(node.erase())
-                        .to(ToFile::new(
-                            Encoding::new(float_wav()),
-                            tutti_codec::ToFile::new(path("s.wav"))
+                        .to(tutti_codec::ToFile::new(
+                            path("s.wav"),
+                            Encoding::new(float_wav())
                         ))
                         .gain(StemGain::Shared),
                 ),
@@ -534,9 +534,9 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         why(
             &mut session,
             base(0.01)
-                .main_output(ToFile::new(
-                    Encoding::new(float_wav()),
-                    tutti_codec::ToFile::new(path("one.wav"))
+                .main_output(tutti_codec::ToFile::new(
+                    path("one.wav"),
+                    Encoding::new(float_wav())
                 ))
                 .stem(node.erase(), path("one.wav")),
         ),
@@ -546,9 +546,9 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         why(
             &mut session,
             base(0.01)
-                .main_output(ToFile::new(
-                    Encoding::new(float_wav()),
-                    tutti_codec::ToFile::new(path("m.wav"))
+                .main_output(tutti_codec::ToFile::new(
+                    path("m.wav"),
+                    Encoding::new(float_wav())
                 ))
                 .stem(node.erase(), path("two.wav"))
                 .stem(node.erase(), path("two.wav")),

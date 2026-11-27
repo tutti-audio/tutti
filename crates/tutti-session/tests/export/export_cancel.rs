@@ -6,7 +6,7 @@ use crate::bounced::bounced;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
-use tutti_codec::Encoding;
+use tutti_codec::{Encoding, ToFile};
 use tutti_fixtures::block_on;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
@@ -19,7 +19,6 @@ use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_session::{
     Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, Range, Session,
-    ToFile,
 };
 use tutti_units::{Db, Frame, SampleRate, Samples};
 
@@ -94,9 +93,9 @@ fn bounce() -> Bounce {
 }
 
 fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, ToFile> {
-    let bounce = bounce().main_output(ToFile::new(
+    let bounce = bounce().main_output(tutti_codec::ToFile::new(
+        path,
         Encoding::new(FORMAT).width(ChannelLayout::STEREO),
-        tutti_codec::ToFile::new(path),
     ));
     match normalize {
         Some(n) => bounce.normalize(n),
@@ -228,15 +227,15 @@ fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, ToFile> {
         tutti_session::StemGain::None
     };
     let bounce = bounce()
-        .main_output(ToFile::new(
+        .main_output(tutti_codec::ToFile::new(
+            dir.join("main_output.wav"),
             Encoding::new(FORMAT).width(ChannelLayout::STEREO),
-            tutti_codec::ToFile::new(dir.join("main_output.wav")),
         ))
         .stem_with(
             tutti_session::Stem::new(r.node)
-                .to(ToFile::new(
+                .to(tutti_codec::ToFile::new(
+                    dir.join("stem.wav"),
                     Encoding::new(FORMAT),
-                    tutti_codec::ToFile::new(dir.join("stem.wav")),
                 ))
                 .gain(gain),
         );

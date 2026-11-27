@@ -122,8 +122,11 @@ fn main() -> tutti_export::Result<()> {
     // get by forgetting one.
     // `replace` on every file here: a second run overwrites what the first one wrote.
     let target = FileTarget::new(
-        Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ToFile::new(dir.join("tone.flac")).replace(),
+        ToFile::new(
+            dir.join("tone.flac"),
+            Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        )
+        .replace(),
     );
     let written = one_file(&mut tone(), &job, target)?;
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
@@ -141,8 +144,11 @@ fn main() -> tutti_export::Result<()> {
     .into_iter()
     .map(|(format, ext)| {
         outputs.file(Output::main_output(FileTarget::new(
-            Encoding::new(format).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-            ToFile::new(dir.join(format!("tone.{ext}"))).replace(),
+            ToFile::new(
+                dir.join(format!("tone.{ext}")),
+                Encoding::new(format).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+            )
+            .replace(),
         )))
     })
     .collect();
@@ -191,8 +197,11 @@ fn main() -> tutti_export::Result<()> {
     //
     // −14 LUFS with a −1 dBTP ceiling — the usual streaming target.
     let normalized = FileTarget::new(
-        Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ToFile::new(dir.join("tone-normalized.flac")).replace(),
+        ToFile::new(
+            dir.join("tone-normalized.flac"),
+            Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        )
+        .replace(),
     )
     .normalize(Gain::Own(Normalize::lufs(Db::new(-14.0))));
     let written = one_file(&mut tone(), &job, normalized)?;

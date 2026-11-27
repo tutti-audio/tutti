@@ -7,7 +7,5 @@
 # list only shrinks. A spec's own name is a row of umbrella-collisions-allow.txt instead.
 
 crates  Bank  tutti_sf2,tutti_ump
-crates  Destination  tutti_platform,tutti_session
 crates  Error  tutti_session,tutti_sf2
 crates  System  tutti_dsp,tutti_ump
-crates  ToFile  tutti_codec,tutti_session

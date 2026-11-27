@@ -1,26 +1,28 @@
-//! [`ToFile`]: a path, and what happens to what is at it.
+//! [`ToFile`]: a path, what is written there, and what happens to what is at it.
 
-use crate::{EncoderOptions, FileEncoder, Result};
+use crate::{EncoderOptions, Encoding, FileEncoder, Result};
 use std::path::{Path, PathBuf};
 
-/// Where an [`Encoding`](crate::Encoding) is written: a path, and the options of a file
+/// A file: the [`Encoding`] it is written as, the path it lands at, and the options of a file
 /// ([`FileOptions`](crate::FileOptions)'s). An existing file is refused by default
 /// ([`EncodeError::Exists`](crate::EncodeError::Exists)) and replaced with
 /// [`replace`](Self::replace); the file is written beside its path and put in place when whole by
 /// default, and written at its path from the start with [`in_place`](Self::in_place).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use = "a destination does nothing until `write` or a `Chain` takes it"]
 pub struct ToFile {
     path: PathBuf,
+    encoding: Encoding,
     replace: bool,
     in_place: bool,
 }
 
 impl ToFile {
-    /// A file at `path`, staged and refusing an existing path.
-    pub fn new(path: impl Into<PathBuf>) -> Self {
+    /// A file at `path` written as `encoding`, staged and refusing an existing path.
+    pub fn new(path: impl Into<PathBuf>, encoding: Encoding) -> Self {
         Self {
             path: path.into(),
+            encoding,
             replace: false,
             in_place: false,
         }
@@ -42,6 +44,18 @@ impl ToFile {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// How the file is written.
+    #[must_use]
+    pub fn encoding(&self) -> &Encoding {
+        &self.encoding
+    }
+
+    /// The same file, written as `encoding` instead.
+    pub fn with_encoding(mut self, encoding: Encoding) -> Self {
+        self.encoding = encoding;
+        self
     }
 
     /// The file, begun for `spec`, with `options`' length and seed.

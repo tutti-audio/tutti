@@ -51,11 +51,11 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
     };
     let token = crate::CancelToken::new();
     let mut control = Control::new(&token).on_progress(&mut watch);
-    let target = crate::FileTarget::new(
+    let target = crate::FileTarget::new(ToFile::new(
+        &path,
         Encoding::new(tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)))
             .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ToFile::new(&path),
-    )
+    ))
     .normalize(Gain::Own(Normalize::peak(Db::new(-6.0))));
     let mut outputs = Outputs::new();
     let file = outputs.file(Output::main_output(target));
@@ -141,11 +141,11 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
     let target = || {
         let mut outputs = Outputs::new();
         outputs.file(Output::main_output(
-            crate::FileTarget::new(
+            crate::FileTarget::new(ToFile::new(
+                &path,
                 Encoding::new(tutti_codec::Format::Wav(Pcm::Float(FloatWidth::F32)))
                     .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-                ToFile::new(&path),
-            )
+            ))
             .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
         ));
         outputs
