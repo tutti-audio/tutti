@@ -306,7 +306,7 @@ fn file_target(to: ToFile, index: usize, width: ChannelLayout) -> FileTarget {
     } else {
         encoding
     };
-    FileTarget::new(to.with_encoding(encoding))
+    FileTarget::new(to.encoded_as(encoding))
 }
 
 /// A file stem: its target, and whether it takes the main output's gain, which is known once

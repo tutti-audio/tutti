@@ -53,7 +53,7 @@ impl ToFile {
     }
 
     /// The same file, written as `encoding` instead.
-    pub fn with_encoding(mut self, encoding: Encoding) -> Self {
+    pub fn encoded_as(mut self, encoding: Encoding) -> Self {
         self.encoding = encoding;
         self
     }
