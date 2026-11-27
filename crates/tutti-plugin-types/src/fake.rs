@@ -1160,7 +1160,8 @@ impl Processor for FakeProcessor {
         .fetch_add(1, Ordering::Relaxed);
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.drain.publish_applied();
+        let drained = self.drain.swept();
+        self.drain.publish_applied(drained);
         if self.shared.process_fails.load(Ordering::Relaxed) {
             return Err(PluginError::Block("the fake fails its blocks"));
         }
@@ -1217,7 +1218,8 @@ impl Processor for FakeProcessor {
         let log = &self.shared.log;
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.drain.publish_applied();
+        let drained = self.drain.swept();
+        self.drain.publish_applied(drained);
         log.push(Call::FlushParameters(changes.queues.len()));
         Ok(())
     }

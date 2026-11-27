@@ -31,7 +31,7 @@ use tutti_plugin_types::{
     Loaded, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginError, PluginRef,
     ProcessContext, ProcessOutput, Processor, process_block, sanitize,
 };
-use tutti_rt::Rt;
+use tutti_rt::{Generation, Rt};
 
 use arrayvec::ArrayVec;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
@@ -107,6 +107,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// block a Processor renders. `None` for a plugin whose writes do not come
     /// through this node (an out-of-process one's go to its bridge).
     pub(super) edits: Option<EditPort>,
+    /// The generation the last drain of `edits` swept: published once the
+    /// call that took its writes returns.
+    pub(super) drained: Generation,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
@@ -556,6 +559,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             figures,
             reporting: None,
             edits: None,
+            drained: Generation::new(0),
             midi_map,
             descriptor,
             reload,
@@ -710,15 +714,19 @@ impl<L: Loaded> LiveView<L> {
 /// Moves the host's parameter writes since the last call into the block's
 /// changes, at chunk frame `at`: each is sent though the plugin has the value
 /// from this node already, since the write says where it stands, and carries
-/// the epoch it was drained in. Allocation-free, and takes no lock.
-pub(super) fn take_edits(edits: Option<&EditPort>, params: &mut ParamDelivery, at: usize) {
-    let Some(edits) = edits else {
-        return;
-    };
+/// the epoch it was drained in. Returns the generation the drain swept (`None`
+/// when it took nothing: no port, a refused claim or a load in progress), which
+/// is what [`EditPort::publish_applied`] takes once the plugin's call returns.
+/// Allocation-free, and takes no lock.
+pub(super) fn take_edits(
+    edits: Option<&EditPort>,
+    params: &mut ParamDelivery,
+    at: usize,
+) -> Option<Generation> {
     let offset = chunk_offset(at);
-    edits.drain(|id, value, epoch| {
+    edits?.drain(|id, value, epoch| {
         params.write(id, offset, value.get(), epoch);
-    });
+    })
 }
 
 /// Drops the host writes a state or preset load made stale since they were
