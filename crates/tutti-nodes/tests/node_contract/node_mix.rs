@@ -28,6 +28,7 @@ use tutti_nodes::{
     FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
     KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, PlateReverbConfig,
     PlateReverbNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, Stages,
+    Stagger,
 };
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
@@ -257,8 +258,9 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
     check(
         "phaser (stereo, 4 stages)",
         &|| {
-            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4)))
-                .unwrap()
+            PhaserNode::<f32>::from(
+                PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4), Stagger::NONE).unwrap(),
+            )
         },
         2,
         0,
@@ -411,11 +413,13 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     check_io(
         "crossover (stereo, two bands)",
         &|| {
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                ChannelTopology::STEREO,
-                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-            ))
-            .expect("one split")
+            CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
+                    ChannelTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                )
+                .expect("one split"),
+            )
         },
         2,
         4,
@@ -425,11 +429,13 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     let x = vec![noise(90, FRAMES)];
     let dry = rendered(
         &|| {
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                ChannelTopology::MONO,
-                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-            ))
-            .expect("one split")
+            CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
+                    ChannelTopology::MONO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                )
+                .expect("one split"),
+            )
         },
         &x,
         Mix::DRY,

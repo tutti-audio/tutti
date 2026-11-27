@@ -279,7 +279,7 @@
 //!
 
 // The fallible constructions are the crossover's (`CrossoverControls::try_from`,
-// `CrossoverNode::try_from`), all `CrossoverError`; the rest of this crate has no `Error` type.
+// `CrossoverConfig::new`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
 mod buses;
 mod last_good;

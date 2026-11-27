@@ -17,11 +17,13 @@ pub(crate) const ROWS: &[fn()] = &[crossover, multiband];
 fn crossover() {
     let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();
     let node = |cutoffs: &[Hz]| {
-        CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::STEREO,
-            CrossoverControls::try_from(cutoffs).unwrap(),
-        ))
-        .unwrap()
+        CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::STEREO,
+                CrossoverControls::try_from(cutoffs).unwrap(),
+            )
+            .unwrap(),
+        )
     };
     let held = node(&[Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)]);
     gate.run("crossover", held, |_, _| {});

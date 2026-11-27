@@ -18,12 +18,19 @@ pub struct EarlyReflectionsConfig {
 
 impl EarlyReflectionsConfig {
     /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels.
-    #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, taps: TapSet) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// [`EarlyReflectionsError`] for a tap that cannot be realized.
+    pub fn new(
+        width: impl Into<ChannelLayout>,
+        taps: TapSet,
+    ) -> Result<Self, EarlyReflectionsError> {
+        taps.check()?;
+        Ok(Self {
             width: width.into(),
             taps,
-        }
+        })
     }
 }
 
@@ -35,30 +42,35 @@ impl EarlyReflectionsConfig {
 /// delay. The stage is wet only (a tap at delay zero is its direct path); blend it with the
 /// input through the graph's mix. The taps are fixed at construction. No latency; the tail is
 /// the last tap's delay. A [`KernelNode`]. Made from an [`EarlyReflectionsConfig`]
-/// (`EarlyReflectionsNode::try_from`).
+/// (`EarlyReflectionsNode::from`).
 ///
 /// # Panics
 ///
-/// `EarlyReflectionsNode::try_from` panics past 16 channels of input: the input is one bus.
+/// `EarlyReflectionsNode::from` panics past 16 channels of input: the input is one bus.
 pub type EarlyReflectionsNode<F> = KernelNode<EarlyReflectionsKernel<F>>;
 
-impl<F: Float> TryFrom<EarlyReflectionsConfig> for EarlyReflectionsNode<F> {
-    type Error = EarlyReflectionsError;
+kernel_config!(EarlyReflectionsConfig => EarlyReflectionsNode<F> where [F: Float],
+    set(_): NoControls = NoControls,
+    fixed: ());
 
+impl<F: Float> From<EarlyReflectionsConfig> for EarlyReflectionsNode<F> {
     /// Allocates the history ring.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`EarlyReflectionsError`] for a tap that cannot be realized.
-    fn try_from(config: EarlyReflectionsConfig) -> Result<Self, Self::Error> {
-        Ok(Self::with_kernel(
+    /// Never: [`EarlyReflectionsConfig::new`] checked the taps.
+    fn from(config: EarlyReflectionsConfig) -> Self {
+        let stage = EarlyReflections::try_from(&config.taps)
+            .expect("the config's taps were checked where it was made");
+        let (set, controls) = (config.kernel_set(), config.kernel_controls());
+        Self::with_kernel(
             EarlyReflectionsKernel {
                 width: config.width,
-                stage: EarlyReflections::try_from(&config.taps)?,
+                stage,
             },
-            NoControls,
-            (),
-        ))
+            set,
+            controls,
+        )
     }
 }
 

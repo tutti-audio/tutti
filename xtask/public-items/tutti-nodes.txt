@@ -215,7 +215,6 @@ fn modulation::mod_delay::ModDelayConfig::vibrato
 fn modulation::phaser::PhaserConfig::controls
 fn modulation::phaser::PhaserConfig::new
 fn modulation::phaser::PhaserConfig::range
-fn modulation::phaser::PhaserConfig::stagger
 fn noise::NoiseNode::level
 fn oscillator::OscillatorNode::frequency
 fn oscillator::OscillatorNode::level

@@ -56,10 +56,11 @@ fn run(
 #[test]
 fn the_encoder_scales_the_source_by_the_harmonics_of_its_direction() {
     let order = AmbisonicOrder::of(3);
-    let node = AmbisonicEncoderNode::<f64>::try_from(
-        AmbisonicEncoderConfig::new(ambix(order)).direction(aim(90.0, 0.0)),
-    )
-    .unwrap();
+    let node = AmbisonicEncoderNode::<f64>::from(
+        AmbisonicEncoderConfig::new(ambix(order))
+            .unwrap()
+            .direction(aim(90.0, 0.0)),
+    );
     let got = run(node, &[0.5], 3, |_| {});
     for (g, h) in got.iter().zip(harmonics(
         order,
@@ -69,7 +70,7 @@ fn the_encoder_scales_the_source_by_the_harmonics_of_its_direction() {
         assert!((g - 0.5 * h).abs() < 1e-12);
     }
     let node =
-        AmbisonicEncoderNode::<f64>::try_from(AmbisonicEncoderConfig::new(ambix(order))).unwrap();
+        AmbisonicEncoderNode::<f64>::from(AmbisonicEncoderConfig::new(ambix(order)).unwrap());
     let moved = run(node, &[0.5], 3, |controls| {
         assert!(controls.set(UnitParam::Azimuth, -120.0));
         assert!(controls.set(UnitParam::Elevation, 35.0));
@@ -87,10 +88,11 @@ fn the_encoder_scales_the_source_by_the_harmonics_of_its_direction() {
 #[test]
 fn the_n3d_encoder_is_the_sn3d_one_scaled_by_degree() {
     let make = |n| {
-        AmbisonicEncoderNode::<f64>::try_from(
-            AmbisonicEncoderConfig::new(bus(THIRD, n)).direction(aim(37.0, 25.0)),
+        AmbisonicEncoderNode::<f64>::from(
+            AmbisonicEncoderConfig::new(bus(THIRD, n))
+                .unwrap()
+                .direction(aim(37.0, 25.0)),
         )
-        .unwrap()
     };
     let sn3d = run(make(HarmonicNormalization::Sn3d), &[1.0], 2, |_| {});
     let n3d = run(make(HarmonicNormalization::N3d), &[1.0], 2, |_| {});
@@ -107,7 +109,7 @@ fn the_rotator_carries_a_source_ahead_to_the_front_it_is_set_to() {
     let order = AmbisonicOrder::of(2);
     let ahead = harmonics(order, HarmonicNormalization::Sn3d, aim(0.0, 0.0));
     let node =
-        AmbisonicRotatorNode::<f64>::try_from(AmbisonicRotatorConfig::new(ambix(order))).unwrap();
+        AmbisonicRotatorNode::<f64>::from(AmbisonicRotatorConfig::new(ambix(order)).unwrap());
     let got = run(node, &ahead, 3, |controls| {
         assert!(controls.set(UnitParam::Azimuth, 90.0));
         assert!(controls.set(UnitParam::Elevation, 20.0));
@@ -124,10 +126,11 @@ fn the_rotator_carries_a_source_ahead_to_the_front_it_is_set_to() {
 fn the_rotator_rolls_about_the_front_by_the_configured_arc() {
     let order = AmbisonicOrder::of(1);
     let above = harmonics(order, HarmonicNormalization::Sn3d, aim(0.0, 90.0));
-    let node = AmbisonicRotatorNode::<f64>::try_from(
-        AmbisonicRotatorConfig::new(ambix(order)).roll(ArcDegrees::new(90.0)),
-    )
-    .unwrap();
+    let node = AmbisonicRotatorNode::<f64>::from(
+        AmbisonicRotatorConfig::new(ambix(order))
+            .unwrap()
+            .roll(ArcDegrees::new(90.0)),
+    );
     let got = run(node, &above, 2, |_| {});
     // A positive roll takes `z` toward `-y`: the source above ends on the right.
     let expected = harmonics(order, HarmonicNormalization::Sn3d, aim(-90.0, 0.0));
@@ -223,21 +226,18 @@ fn a_decoder_refuses_a_bus_that_is_not_a_bed_and_a_bed_with_one_speaker() {
 /// width, and the decoder is the order's channels in and the bed's out.
 #[test]
 fn the_shapes_are_mono_to_the_order_through_and_the_order_to_the_bed() {
-    let encoder = prepared(
-        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(THIRD))).unwrap(),
-    );
+    let encoder = prepared(AmbisonicEncoderNode::<f32>::from(
+        AmbisonicEncoderConfig::new(ambix(THIRD)).unwrap(),
+    ));
     let shape = encoder.shape();
     assert_eq!(
         (shape.audio_in().count(), shape.audio_out().count()),
         (1, 16)
     );
     assert_eq!(shape.tail, Tail::None);
-    let rotator = prepared(
-        AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
-            AmbisonicOrder::of(2),
-        )))
-        .unwrap(),
-    );
+    let rotator = prepared(AmbisonicRotatorNode::<f32>::from(
+        AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::of(2))).unwrap(),
+    ));
     let shape = rotator.shape();
     assert_eq!(
         (shape.audio_in().count(), shape.audio_out().count()),
@@ -258,12 +258,12 @@ fn the_shapes_are_mono_to_the_order_through_and_the_order_to_the_bed() {
 
 #[test]
 fn forks_share_no_cell() {
-    assert_param_fork(
-        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(THIRD))).unwrap(),
-    );
-    assert_param_fork(
-        AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(THIRD))).unwrap(),
-    );
+    assert_param_fork(AmbisonicEncoderNode::<f32>::from(
+        AmbisonicEncoderConfig::new(ambix(THIRD)).unwrap(),
+    ));
+    assert_param_fork(AmbisonicRotatorNode::<f32>::from(
+        AmbisonicRotatorConfig::new(ambix(THIRD)).unwrap(),
+    ));
 }
 
 /// The nodes run in ACN with SN3D or N3D: a bus that is no ambisonic one, or an ambisonic
@@ -278,11 +278,11 @@ fn the_nodes_refuse_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
     ));
     for bus in [fuma, max_n] {
         assert!(matches!(
-            AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(bus)),
+            AmbisonicEncoderConfig::new(bus),
             Err(AmbisonicError::Unsupported(_))
         ));
         assert!(matches!(
-            AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(bus)),
+            AmbisonicRotatorConfig::new(bus),
             Err(AmbisonicError::Unsupported(_))
         ));
         assert!(matches!(
@@ -293,7 +293,7 @@ fn the_nodes_refuse_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
         ));
     }
     assert!(matches!(
-        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(Bed::Quad)),
+        AmbisonicEncoderConfig::new(Bed::Quad),
         Err(AmbisonicError::NotAmbisonic)
     ));
 }

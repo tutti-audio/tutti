@@ -153,11 +153,13 @@ fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave(
 #[test]
 fn a_crossover_is_6_db_down_at_each_neighbour_at_the_split() {
     let node = || {
-        CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::MONO,
-            CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
-        ))
-        .unwrap()
+        CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+            )
+            .unwrap(),
+        )
     };
     let at_split = gains_db(node(), 300.0, 0.1);
     assert_eq!(at_split.len(), 3, "three bands of one channel");

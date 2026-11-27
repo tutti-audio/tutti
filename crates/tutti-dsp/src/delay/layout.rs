@@ -96,7 +96,7 @@ impl Default for DelayControls {
 /// [`FeedbackRouting`], the others', with the times its channels hold in seconds
 /// ([`ChannelTimes`]) and the notes they hold at a tempo ([`NoteTimes`]); [`DelaySync`] says
 /// which a running delay reads.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelayLayout {
     input: ChannelTopology,
     max_delay: MaxDelay,

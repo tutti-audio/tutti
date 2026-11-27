@@ -269,7 +269,7 @@ fn hysteresis() {
 
 /// 256 blocks of 64 frames cross the window's hop; both targets move.
 fn leveller() {
-    let node = LevellerNode::<f32>::try_from(LevellerConfig::new(ChannelTopology::STEREO)).unwrap();
+    let node = LevellerNode::<f32>::from(LevellerConfig::new(ChannelTopology::STEREO).unwrap());
     let target = |i: usize| alternate(i, -30.0, -16.0);
     let first = |c: &<LevellerNode<f32> as IntoNode>::Controls, i| {
         c.set(UnitAddr::new(UnitParam::Threshold, 0), target(i));
@@ -431,8 +431,8 @@ fn early_reflections_decorrelator() {
         ])
         .unwrap(),
     };
-    let reflections = EarlyReflectionsConfig::new(ChannelLayout::STEREO, taps);
-    let node = EarlyReflectionsNode::<f32>::try_from(reflections).unwrap();
+    let reflections = EarlyReflectionsConfig::new(ChannelLayout::STEREO, taps).unwrap();
+    let node = EarlyReflectionsNode::<f32>::from(reflections);
     gate.run("early reflections", node, |_, _| {});
     let node = DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(ChannelLayout::STEREO));
     gate.run("decorrelator", node, |_, _| {});

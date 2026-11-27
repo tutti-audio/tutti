@@ -25,7 +25,7 @@ use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, LadderSaturation, LadderType,
     ShapeKind, Stages, SvfType, Waveshape,
 };
-use tutti_dsp::{Inline, Tap, TapSet};
+use tutti_dsp::{Inline, Stagger, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
@@ -275,13 +275,14 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
         (settled(render(envelope, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "envelope"
     );
-    let phaser = PhaserNode::<f64>::try_from(
-        PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)).controls(PhaserControls {
-            feedback: Feedback::new(0.0),
-            ..PhaserControls::DEFAULT
-        }),
-    )
-    .unwrap();
+    let phaser = PhaserNode::<f64>::from(
+        PhaserConfig::new(ChannelTopology::MONO, Stages::of(4), Stagger::NONE)
+            .unwrap()
+            .controls(PhaserControls {
+                feedback: Feedback::new(0.0),
+                ..PhaserControls::DEFAULT
+            }),
+    );
     assert!(
         (settled(render(phaser, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "phaser"
@@ -293,11 +294,13 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
 fn the_crossover_bands_sum_to_a_wide_constant() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 16_384;
-    let node = CrossoverNode::<f64>::try_from(CrossoverConfig::new(
-        ChannelTopology::MONO,
-        CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-    ))
-    .unwrap();
+    let node = CrossoverNode::<f64>::from(
+        CrossoverConfig::new(
+            ChannelTopology::MONO,
+            CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+        )
+        .unwrap(),
+    );
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
     let sum = out[0][FRAMES - 1] + out[1][FRAMES - 1];
     assert!((sum - DC).abs() <= F64_TOLERANCE, "{sum} against {DC}");
@@ -365,8 +368,9 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            PhaserNode::<f64>::try_from(PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)))
-                .unwrap()
+            PhaserNode::<f64>::from(
+                PhaserConfig::new(ChannelTopology::MONO, Stages::of(4), Stagger::NONE).unwrap(),
+            )
         },
         RATE,
         1,
@@ -407,25 +411,27 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            EarlyReflectionsNode::<f64>::try_from(EarlyReflectionsConfig::new(
-                ChannelLayout::MONO,
-                TapSet {
-                    taps: Inline::from_slice(&[
-                        Tap {
-                            delay: SampleSpan::new(37.5).unwrap(),
-                            gain: Gain::new(0.7),
-                            channel: 0,
-                        },
-                        Tap {
-                            delay: SampleSpan::new(410.0).unwrap(),
-                            gain: Gain::new(-0.3),
-                            channel: 1,
-                        },
-                    ])
-                    .unwrap(),
-                },
-            ))
-            .unwrap()
+            EarlyReflectionsNode::<f64>::from(
+                EarlyReflectionsConfig::new(
+                    ChannelLayout::MONO,
+                    TapSet {
+                        taps: Inline::from_slice(&[
+                            Tap {
+                                delay: SampleSpan::new(37.5).unwrap(),
+                                gain: Gain::new(0.7),
+                                channel: 0,
+                            },
+                            Tap {
+                                delay: SampleSpan::new(410.0).unwrap(),
+                                gain: Gain::new(-0.3),
+                                channel: 1,
+                            },
+                        ])
+                        .unwrap(),
+                    },
+                )
+                .unwrap(),
+            )
         },
         RATE,
         1,
@@ -457,11 +463,13 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            CrossoverNode::<f64>::try_from(CrossoverConfig::new(
-                ChannelTopology::STEREO,
-                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-            ))
-            .unwrap()
+            CrossoverNode::<f64>::from(
+                CrossoverConfig::new(
+                    ChannelTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                )
+                .unwrap(),
+            )
         },
         RATE,
         2,

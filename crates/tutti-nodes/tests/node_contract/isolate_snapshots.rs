@@ -39,7 +39,7 @@ use tutti_nodes::{
     LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
     ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig,
     PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages,
-    SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig,
+    Stagger, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig,
     TubeStageNode, Waveshape, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
@@ -390,8 +390,9 @@ fn transient_shaper() {
 /// A leveller at `target` with a 40 dB cut and a 9 dB boost, 50 ms times and no gate. The window
 /// reads from its first 100 ms hop, so each row renders long enough for the gain to move.
 fn leveller_at(target: f64) -> LevellerNode<f32> {
-    LevellerNode::<f32>::try_from(
+    LevellerNode::<f32>::from(
         LevellerConfig::new(ChannelTopology::STEREO)
+            .unwrap()
             .target(Db::new(target))
             .max_boost(Db::new(9.0))
             .max_cut(Db::new(40.0))
@@ -399,7 +400,6 @@ fn leveller_at(target: f64) -> LevellerNode<f32> {
             .attack(Seconds::new(0.05))
             .release(Seconds::new(0.05)),
     )
-    .unwrap()
 }
 
 /// The stimulus is loud, so a target of -20 LUFS cuts: the target, the cut and both times show.
@@ -456,10 +456,9 @@ fn auto_pan() {
 
 fn ambisonic_encoder() {
     IsolateRow::new("AmbisonicEncoderNode", || {
-        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
-            AmbisonicOrder::MAX,
-        )))
-        .unwrap()
+        AmbisonicEncoderNode::<f32>::from(
+            AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+        )
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -472,10 +471,9 @@ fn ambisonic_encoder() {
 
 fn ambisonic_rotator() {
     IsolateRow::new("AmbisonicRotatorNode", || {
-        AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
-            AmbisonicOrder::MAX,
-        )))
-        .unwrap()
+        AmbisonicRotatorNode::<f32>::from(
+            AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+        )
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -735,13 +733,14 @@ fn chorus() {
 
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
-        PhaserNode::<f32>::try_from(
-            PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4)).controls(PhaserControls {
-                feedback: Feedback::new(0.3_f64),
-                ..PhaserControls::DEFAULT
-            }),
+        PhaserNode::<f32>::from(
+            PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4), Stagger::NONE)
+                .unwrap()
+                .controls(PhaserControls {
+                    feedback: Feedback::new(0.3_f64),
+                    ..PhaserControls::DEFAULT
+                }),
         )
-        .unwrap()
     })
     .control("rate", |p| assert!(p.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |p| {

@@ -455,22 +455,18 @@ fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
 
 #[test]
 fn ambisonic_encoder_process_is_allocation_free_with_the_direction_moving() {
-    gate_moving(
-        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
-            AmbisonicOrder::MAX,
-        )))
-        .unwrap(),
-    );
+    gate_moving(AmbisonicEncoderNode::<f32>::from(
+        AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+    ));
 }
 
 #[test]
 fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
-    gate_moving(
-        AmbisonicRotatorNode::<f32>::try_from(
-            AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).roll(ArcDegrees::new(30.0)),
-        )
-        .unwrap(),
-    );
+    gate_moving(AmbisonicRotatorNode::<f32>::from(
+        AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX))
+            .unwrap()
+            .roll(ArcDegrees::new(30.0)),
+    ));
 }
 
 #[test]
