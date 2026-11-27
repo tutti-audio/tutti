@@ -20,10 +20,9 @@ use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{
-    Delivery, EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+    Delivery, EndpointBackend, Live, SenderBackend, VirtualProtocol, VirtualSpec,
 };
 use std::sync::Arc;
-use tutti_rt::RwLock;
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -98,14 +97,12 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
 pub(crate) struct AlsaVirtualEndpoint {
     input: AlsaInput,
     port: PortId,
-    /// Read-locked by a send for its whole call and cleared under the write lock
-    /// by `Drop`, so a drop waits for a send in flight and no send follows it.
-    live: Arc<RwLock<bool>>,
+    live: Live,
 }
 
 impl Drop for AlsaVirtualEndpoint {
     fn drop(&mut self) {
-        *self.live.write() = false;
+        self.live.end();
     }
 }
 
@@ -123,15 +120,12 @@ fn delivery(sent: tutti_alsa_ffi::Result<()>) -> Result<Delivery> {
 struct AlsaSender {
     client: ClientHandle,
     port: PortId,
-    live: Arc<RwLock<bool>>,
+    live: Live,
 }
 
 impl SenderBackend for AlsaSender {
     fn send(&self, ump: &Ump) -> Result<Delivery> {
-        let live = self.live.read();
-        if !*live {
-            return Err(MidiHardwareError::EndpointGone);
-        }
+        let _live = self.live.hold()?;
         let sent = self
             .client
             .with(|client| client.send_to_subscribers(self.port, ump))
@@ -145,7 +139,7 @@ impl EndpointBackend for AlsaVirtualEndpoint {
         Arc::new(AlsaSender {
             client: self.input.client(),
             port: self.port,
-            live: Arc::clone(&self.live),
+            live: self.live.clone(),
         })
     }
 
@@ -174,7 +168,7 @@ pub(crate) fn endpoint(
     publish(&client, spec, protocol)?;
     let clock = client.stamp_port(port)?;
     let input = input::start(executor, client, clock, producer)?;
-    let live = Arc::new(RwLock::new(true));
+    let live = Live::new();
     Ok((AlsaVirtualEndpoint { input, port, live }, protocol))
 }
 

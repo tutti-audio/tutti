@@ -28,7 +28,6 @@
 
 use std::sync::{Arc, Weak};
 use std::task::Poll;
-use tutti_rt::RwLock;
 
 use tracing::debug;
 use tutti_coremidi_ffi::{CreateUmpEndpoint, UmpDestination, UmpEndpoint, UmpSender, UmpSource};
@@ -39,7 +38,7 @@ use crate::InputProducerHandle;
 use crate::error::{MidiHardwareError, Result};
 use crate::start::Started;
 use crate::virtual_endpoint::{
-    Delivery, EndpointBackend, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+    Delivery, EndpointBackend, Live, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
 };
 
 /// CoreMIDI's protocol for the spec's.
@@ -68,12 +67,10 @@ pub(crate) struct UmpVirtualEndpoint {
 enum Endpoint {
     /// A source and a destination of one name: no Function Blocks.
     Pair {
-        /// Held by senders only weakly, and only under a read lock of `live`.
+        /// Held by senders only weakly, and only while they hold `live`.
         source: Arc<UmpSource>,
         destination: UmpDestination,
-        /// Read-locked by a send for its whole call and cleared under the write
-        /// lock by `Drop`, so a drop waits for a send in flight and none follows.
-        live: Arc<RwLock<bool>>,
+        live: Live,
     },
     /// A UMP Endpoint that declares blocks.
     WithBlocks(UmpEndpoint),
@@ -91,7 +88,7 @@ impl core::fmt::Debug for UmpVirtualEndpoint {
 impl Drop for UmpVirtualEndpoint {
     fn drop(&mut self) {
         if let Endpoint::Pair { live, .. } = &self.endpoint {
-            *live.write() = false;
+            live.end();
         }
     }
 }
@@ -175,7 +172,7 @@ impl UmpVirtualEndpoint {
                 endpoint: Endpoint::Pair {
                     source: Arc::new(UmpSource::new(client, name, protocol)?),
                     destination: UmpDestination::new(client, name, protocol, on_ump)?,
-                    live: Arc::new(RwLock::new(true)),
+                    live: Live::new(),
                 },
                 name: name.to_string(),
             }))
@@ -260,7 +257,7 @@ impl OpeningBackend for Opening {
 /// A send on a pair's source, which it does not keep alive.
 struct PairSender {
     source: Weak<UmpSource>,
-    live: Arc<RwLock<bool>>,
+    live: Live,
 }
 
 impl SenderBackend for PairSender {
@@ -270,8 +267,8 @@ impl SenderBackend for PairSender {
     /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
     /// `OSStatus`.
     fn send(&self, ump: &Ump) -> Result<Delivery> {
-        let live = self.live.read();
-        let source = self.source.upgrade().filter(|_| *live);
+        let _live = self.live.hold()?;
+        let source = self.source.upgrade();
         source.ok_or(MidiHardwareError::EndpointGone)?.send(ump)?;
         Ok(Delivery::Sent)
     }
@@ -303,7 +300,7 @@ impl EndpointBackend for UmpVirtualEndpoint {
         match &self.endpoint {
             Endpoint::Pair { source, live, .. } => Arc::new(PairSender {
                 source: Arc::downgrade(source),
-                live: Arc::clone(live),
+                live: live.clone(),
             }),
             Endpoint::WithBlocks(endpoint) => Arc::new(EndpointSender(endpoint.sender())),
         }
