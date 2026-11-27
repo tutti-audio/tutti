@@ -4,7 +4,7 @@
 use super::ask::Reply;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{BatchOutcome, Channels, ResponseWriter};
+use super::channels::{BatchOutcome, Channels, Drain, ResponseWriter};
 use super::lifecycle::Lifecycle;
 use super::messages::{
     AudioCommand, AudioResponse, Call, ControlCommand, Lost, Object, Outcome, Received, Setting,
@@ -20,16 +20,17 @@ use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, ModeOutcome, News, ReqId,
     Request, StateReady,
 };
+use std::collections::VecDeque;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{
     MidiIntake, RateRefusal, RateRefusalCause, RenderMode, ServerLosses, Told,
 };
+use tutti_plugin_types::{Offset, epoch_before};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_rt::Generation;
 use tutti_units::SampleRate;
@@ -135,27 +136,33 @@ enum AudioKey {
 /// What an audio-lane request the lane stopped waiting for still has coming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AbandonedAudio {
-    /// A block's `AudioProcessed`: its MIDI is forwarded. It carried `edits`
-    /// parameters of host writes whose drain had swept `swept`.
-    Block { edits: u64, swept: Generation },
-    /// The one `ParametersApplied` of an `ApplyParameters` of `edits`
-    /// parameters whose drain had swept `swept`.
-    Params { edits: u64, swept: Generation },
+    /// A block's `AudioProcessed`: its MIDI is forwarded. The block was request
+    /// `ord` ([`AudioState::answered`]).
+    Block { ord: u64 },
+    /// The one `ParametersApplied` of the `ApplyParameters` that was request
+    /// `ord`.
+    Params { ord: u64 },
 }
 
-/// The server answered a block or a flush that carried `edits` parameters of
-/// host writes, whose drain had swept `swept`, in its window or late. The one
-/// rule for both: when the plugin did not get them (a flush `Refused` or
-/// `Unseated`, a block `refused: true`, whose changes the server drops), they
-/// are counted and not sent again; then the writes up to `swept` are answered
-/// ([`Channels::note_acked`]). The server answers in order, so what is acked is
-/// what the plugin has or what was counted lost, whatever an earlier request
-/// that was forgotten at its ceiling did.
-fn answered(channels: &Channels, got: bool, edits: u64, swept: Generation) {
-    if !got {
-        channels.note_unapplied_edits(edits);
-    }
-    channels.note_acked(swept);
+/// The host's writes one request carried, kept until the server answers it.
+#[derive(Debug)]
+struct Flight {
+    /// The request's number, in the order this lane sent them.
+    ord: u64,
+    /// The table the writes came from, and the generation its drain swept:
+    /// `None` when no drain ran, so the request says nothing of the writes.
+    swept: Option<(u64, Generation)>,
+    /// The writes, newest per parameter, with the epoch each was drained in.
+    writes: Vec<Taken>,
+}
+
+/// A host write the lane took from the slots, to send.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Taken {
+    id: ParamId,
+    value: Normalized,
+    /// The epoch it was drained in: a reset since makes it stale.
+    epoch: u32,
 }
 
 /// The key of the request an audio reply answers.
@@ -204,6 +211,20 @@ pub(super) struct AudioState {
     /// The audio-response ring's writer: the ring is single-producer by
     /// ownership, and this lane's thread is its producer.
     responses: ResponseWriter,
+    /// The number of the last request that carried host writes.
+    last_ord: u64,
+    /// The table the writes kept below were taken from.
+    table: Option<u64>,
+    /// The requests sent and not yet answered, oldest first, with the writes
+    /// each carried.
+    flights: VecDeque<Flight>,
+    /// The host's writes a block or flush the server did not hand over lost,
+    /// newest per parameter: sent again with the next request, unless a reset
+    /// or a newer write has made them stale.
+    owed: Vec<Taken>,
+    /// For each parameter, the last request that carried a write of it: a lost
+    /// request owes only the parameters no later request carried.
+    newest: Vec<(ParamId, u64)>,
 }
 
 impl AudioState {
@@ -218,6 +239,11 @@ impl AudioState {
             carried: Vec::new(),
             intake: MidiIntake::default(),
             responses,
+            last_ord: 0,
+            table: None,
+            flights: VecDeque::new(),
+            owed: Vec::new(),
+            newest: Vec::new(),
         }
     }
 
@@ -254,38 +280,132 @@ impl AudioState {
         }
     }
 
-    /// Keep a host write for the block about to be sent, on its first frame:
-    /// the parameter's latest value, replacing one kept already.
+    /// Opens the next request's flight: the writes `drained` holds (the slots'
+    /// newest of each parameter, from [`Channels::drain_host_edits`] or
+    /// [`Channels::take_host_edits`]) laid over the ones owed, less what a reset
+    /// made stale. Returns the request's number; the writes are the flight's.
     /// Bridge thread: may allocate.
-    fn carry_write(&mut self, id: ParamId, value: Normalized) {
-        let point = ParameterPoint {
-            sample_offset: Offset::ZERO,
-            value,
+    fn begin_flight(&mut self, drained: Option<(Vec<Taken>, Drain)>) -> u64 {
+        self.last_ord += 1;
+        let ord = self.last_ord;
+        let mut writes = Vec::new();
+        let mut swept = None;
+        if let Some((fresh, drain)) = drained {
+            if self.table != Some(drain.table) {
+                self.table = Some(drain.table);
+                self.owed.clear();
+                self.newest.clear();
+            }
+            self.owed.retain(|t| !epoch_before(t.epoch, drain.epoch));
+            writes = std::mem::take(&mut self.owed);
+            for taken in fresh {
+                match writes.iter_mut().find(|w| w.id == taken.id) {
+                    Some(kept) => *kept = taken,
+                    None => writes.push(taken),
+                }
+            }
+            for w in &writes {
+                match self.newest.iter_mut().find(|(id, _)| *id == w.id) {
+                    Some((_, last)) => *last = ord,
+                    None => self.newest.push((w.id, ord)),
+                }
+            }
+            swept = Some((drain.table, drain.swept));
+        }
+        self.flights.push_back(Flight { ord, swept, writes });
+        ord
+    }
+
+    /// Puts the writes of request `ord` on the first frame of the block about
+    /// to be sent, as one change each.
+    fn carry_flight(&mut self, ord: u64) {
+        let Some(flight) = self.flights.iter().find(|f| f.ord == ord) else {
+            return;
         };
-        match self.carried.iter_mut().find(|(a, _)| *a == id) {
-            Some((_, kept)) => *kept = point,
-            None => self.carried.push((id, point)),
+        for w in &flight.writes {
+            let point = ParameterPoint {
+                sample_offset: Offset::ZERO,
+                value: w.value,
+            };
+            match self.carried.iter_mut().find(|(a, _)| *a == w.id) {
+                Some((_, kept)) => *kept = point,
+                None => self.carried.push((w.id, point)),
+            }
+        }
+    }
+
+    /// The server answered request `ord`, in its window or late, and `got` says
+    /// whether it handed the writes the request carried to the plugin (a block
+    /// the server refused, a flush with no Processor or one that refused it, did
+    /// not). The one rule for both:
+    /// - Handed: the writes up to the generation its drain swept are the
+    ///   plugin's, published once for the host's writer
+    ///   ([`Channels::publish_applied`]), unless an earlier request is still
+    ///   open or writes are still owed, whose answer would otherwise be claimed
+    ///   (the server answers in order, so neither is expected).
+    /// - Not handed: the writes are counted lost, and owed again, newest per
+    ///   parameter, except those a later request carried a newer write of.
+    ///   Nothing is published, so the host's writer still reads them as pending.
+    fn answered(&mut self, channels: &Channels, ord: u64, got: bool) {
+        let Some(at) = self.flights.iter().position(|f| f.ord == ord) else {
+            return;
+        };
+        let Some(flight) = self.flights.remove(at) else {
+            return;
+        };
+        if got {
+            let earlier_open = self.flights.iter().any(|f| f.ord < ord);
+            if let Some((table, swept)) = flight.swept
+                && !earlier_open
+                && self.owed.is_empty()
+            {
+                channels.publish_applied(table, swept);
+            }
+            return;
+        }
+        channels.note_unapplied_edits(flight.writes.len() as u64);
+        if flight.swept.map(|(table, _)| table) != self.table {
+            return;
+        }
+        for w in flight.writes {
+            let newest = self.newest.iter().find(|(id, _)| *id == w.id);
+            if newest.is_some_and(|&(_, last)| last == ord) {
+                match self.owed.iter_mut().find(|o| o.id == w.id) {
+                    Some(kept) => *kept = w,
+                    None => self.owed.push(w),
+                }
+            }
         }
     }
 
     /// The writes a flush sends, one change per parameter on the first frame:
-    /// what no block has taken (the slots, newest), preceded by what blocks
-    /// took and kept ([`carry_write`](Self::carry_write)) and have not sent,
-    /// so the answer covers every write up to the generation returned. Audio
-    /// lane's thread: may allocate.
-    pub(super) fn flush_frame(&mut self, channels: &Channels) -> (ParameterChanges, Generation) {
-        let (taken, swept) = channels.take_host_edits();
-        let mut changes = ParameterChanges::reserved_bridged(taken.len() + self.carried.len(), 1);
-        for (id, value) in &taken {
+    /// what no block has taken (the slots, newest) and what is owed, preceded by
+    /// what skipped blocks kept ([`carry`](Self::carry)); the request's number,
+    /// whose answer says what became of them. Audio lane's thread: may allocate.
+    pub(super) fn flush_frame(&mut self, channels: &Channels) -> (ParameterChanges, u64) {
+        let drained = channels.take_host_edits().map(|(taken, drain)| {
+            let fresh = taken
+                .into_iter()
+                .map(|(id, value, epoch)| Taken { id, value, epoch })
+                .collect();
+            (fresh, drain)
+        });
+        let ord = self.begin_flight(drained);
+        let writes = self
+            .flights
+            .back()
+            .map_or(&[][..], |flight| flight.writes.as_slice());
+        let mut changes = ParameterChanges::reserved_bridged(writes.len() + self.carried.len(), 1);
+        for w in writes {
             // A slot per parameter and one change per slot, in a set reserved a
             // queue for each: none is past its room.
-            let _ = changes.add_change(*id, Offset::ZERO, *value);
+            let _ = changes.add_change(w.id, Offset::ZERO, w.value);
         }
         self.merge_carried(&mut changes);
-        (changes, swept)
+        (changes, ord)
     }
 
-    /// Put what [`carry`](Self::carry) and [`carry_write`](Self::carry_write) kept into the block about to be sent,
+    /// Put what [`carry`](Self::carry) and [`carry_flight`](Self::carry_flight) kept into the block about to be sent,
     /// on its first frame: a parameter the block moves itself keeps its own
     /// points, preceded by the carried value when its first point is later
     /// than frame 0.
@@ -357,7 +477,7 @@ impl AudioState {
             Heard::Answer => Err(IpcError::ProtocolError(
                 "an answer to a request this lane is not waiting for",
             )),
-            Heard::Abandoned(AbandonedAudio::Block { edits, swept }) => {
+            Heard::Abandoned(AbandonedAudio::Block { ord }) => {
                 if let AudioReply::AudioProcessed {
                     seq,
                     midi_out,
@@ -367,7 +487,7 @@ impl AudioState {
                     ..
                 } = reply
                 {
-                    answered(channels, writes == BlockWrites::Handed, edits, swept);
+                    self.answered(channels, ord, writes == BlockWrites::Handed);
                     channels.note_outcome(
                         seq,
                         if refused {
@@ -388,9 +508,9 @@ impl AudioState {
                 }
                 Ok(None)
             }
-            Heard::Abandoned(AbandonedAudio::Params { edits, swept }) => {
+            Heard::Abandoned(AbandonedAudio::Params { ord }) => {
                 if let AudioReply::ParametersApplied { outcome, .. } = reply {
-                    answered(channels, outcome == ApplyOutcome::Applied, edits, swept);
+                    self.answered(channels, ord, outcome == ApplyOutcome::Applied);
                 }
                 Ok(None)
             }
@@ -713,8 +833,12 @@ pub(super) fn handle_audio(
             }
 
             // What the host wrote since the last block, on its first frame.
-            let swept = channels.drain_host_edits(|id, value| state.carry_write(id, value));
-            let edits = state.carried.len() as u64;
+            let mut fresh = Vec::new();
+            let drained = channels
+                .drain_host_edits(|id, value, epoch| fresh.push(Taken { id, value, epoch }))
+                .map(|drain| (fresh, drain));
+            let ord = state.begin_flight(drained);
+            state.carry_flight(ord);
             if !state.carried.is_empty() {
                 state.merge_carried(&mut payload.param_changes);
             }
@@ -743,7 +867,7 @@ pub(super) fn handle_audio(
             let key = AudioKey::Block(seq);
             state.conv.open(
                 key,
-                AbandonedAudio::Block { edits, swept },
+                AbandonedAudio::Block { ord },
                 Instant::now(),
                 timeout,
                 timeout,
@@ -808,7 +932,7 @@ pub(super) fn handle_audio(
                             writes,
                             ..
                         } => {
-                            answered(channels, writes == BlockWrites::Handed, edits, swept);
+                            state.answered(channels, ord, writes == BlockWrites::Handed);
                             channels.note_outcome(
                                 seq,
                                 if refused {
@@ -850,8 +974,7 @@ pub(super) fn handle_audio(
             // here is newer than all of it.
             // Sent even when empty: its answer, heard after any earlier
             // request's, acknowledges the writes that request carried.
-            let (changes, swept) = state.flush_frame(channels);
-            let edits = changes.queues.len() as u64;
+            let (changes, ord) = state.flush_frame(channels);
             // On the block connection, behind every block pushed before it, so
             // the server has those blocks' writes before these.
             let id = state.fresh();
@@ -859,7 +982,7 @@ pub(super) fn handle_audio(
             let window = lifecycle.timeouts().param_wait();
             state.conv.open(
                 key,
-                AbandonedAudio::Params { edits, swept },
+                AbandonedAudio::Params { ord },
                 Instant::now(),
                 window,
                 window,
@@ -877,7 +1000,7 @@ pub(super) fn handle_audio(
             let took = match wait_audio(stream, state, channels, key)? {
                 Some(AudioReply::ParametersApplied { outcome, .. }) => {
                     let got = outcome == ApplyOutcome::Applied;
-                    answered(channels, got, edits, swept);
+                    state.answered(channels, ord, got);
                     got
                 }
                 _ => false,
@@ -1311,17 +1434,11 @@ mod tests {
         abandoned(
             &mut state,
             AudioKey::Block(3),
-            AbandonedAudio::Block {
-                edits: 0,
-                swept: Generation::new(0),
-            },
+            AbandonedAudio::Block { ord: 0 },
         );
         state.conv.open(
             AudioKey::Block(4),
-            AbandonedAudio::Block {
-                edits: 0,
-                swept: Generation::new(0),
-            },
+            AbandonedAudio::Block { ord: 0 },
             Instant::now(),
             WINDOW,
             WINDOW,
@@ -1347,17 +1464,173 @@ mod tests {
         );
     }
 
-    /// **A flush carries what blocks took and have not sent**: a write a block
-    /// kept for its next frame (the block was skipped as stale) is in the frame
-    /// a flush sends, so the answer covers it.
+    /// **A flush carries what skipped blocks kept**: a change of a block skipped
+    /// as stale is in the frame a flush sends.
     #[test]
     fn a_flush_frame_carries_what_a_skipped_block_kept() {
         let (mut state, _replies, channels) = audio_state();
-        state.carry_write(ParamId::new(4), unit_value(0.4));
+        let mut skipped = ParameterChanges::reserved_bridged(1, 1);
+        let _ = skipped.add_change(ParamId::new(4), Offset::ZERO, unit_value(0.4));
+        state.carry(&skipped);
         let (frame, _) = state.flush_frame(&channels);
         let queue = frame.queue(ParamId::new(4)).expect("the carried write");
         assert_eq!(queue.points.len(), 1);
         assert!((queue.points[0].value.get() - 0.4).abs() < 1e-12);
+    }
+
+    /// The host's slots on `channels`, and the writer of them.
+    fn host_slots(channels: &Channels) -> tutti_plugin_types::EditWriter {
+        let (writer, reader) = tutti_plugin_types::edit_slots([ParamId::new(1), ParamId::new(2)]);
+        channels.install_host_edits(reader);
+        writer
+    }
+
+    /// One request's drain of the host's slots, as a block takes it: the
+    /// request's number.
+    fn drain_request(state: &mut AudioState, channels: &Channels) -> u64 {
+        let mut fresh = Vec::new();
+        let drained = channels
+            .drain_host_edits(|id, value, epoch| fresh.push(Taken { id, value, epoch }))
+            .map(|drain| (fresh, drain));
+        state.begin_flight(drained)
+    }
+
+    fn write(writer: &mut tutti_plugin_types::EditWriter, id: u32, value: f64) {
+        writer
+            .write(ParamId::new(id), tutti_units::Normalized::of(value))
+            .expect("declared");
+    }
+
+    fn sent(state: &AudioState, ord: u64) -> Vec<(u32, f64)> {
+        let flight = state.flights.iter().find(|f| f.ord == ord).expect("open");
+        flight
+            .writes
+            .iter()
+            .map(|w| (w.id.get(), w.value.get()))
+            .collect()
+    }
+
+    /// **A request the server handed over is applied once it is answered, not
+    /// when it is drained or sent**: the write stays pending until the answer.
+    #[test]
+    fn a_handed_request_applies_its_writes_when_answered() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut writer = host_slots(&channels);
+        write(&mut writer, 1, 0.5);
+        let ord = drain_request(&mut state, &channels);
+        assert_eq!(sent(&state, ord), [(1, 0.5)]);
+        assert_eq!(writer.pending().len(), 1, "drained and sent, not answered");
+        state.answered(&channels, ord, true);
+        assert!(writer.pending().is_empty(), "answered as handed over");
+    }
+
+    /// **A request the server did not hand over loses its writes, counted, and
+    /// owes them again: nothing is called applied, and the next request carries
+    /// them.**
+    #[test]
+    fn a_lost_request_owes_its_writes_to_the_next() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut writer = host_slots(&channels);
+        write(&mut writer, 1, 0.5);
+        let lost = drain_request(&mut state, &channels);
+        state.answered(&channels, lost, false);
+        assert_eq!(channels.unapplied_edits_cell().get(), 1, "counted");
+        assert_eq!(writer.pending().len(), 1, "a lost write is not applied");
+
+        let next = drain_request(&mut state, &channels);
+        assert_eq!(sent(&state, next), [(1, 0.5)], "owed again");
+        state.answered(&channels, next, true);
+        assert!(writer.pending().is_empty());
+    }
+
+    /// **A newer write of a parameter replaces the owed one, whichever request
+    /// carried it**: a request lost after a later one carried the parameter owes
+    /// nothing of it, and a write made since the loss is the one sent.
+    #[test]
+    fn a_newer_write_replaces_an_owed_one() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut writer = host_slots(&channels);
+        write(&mut writer, 1, 0.25);
+        write(&mut writer, 2, 0.75);
+        let first = drain_request(&mut state, &channels);
+        write(&mut writer, 1, 0.5);
+        let second = drain_request(&mut state, &channels);
+        assert_eq!(sent(&state, second), [(1, 0.5)]);
+        // The first request's late answer says it was lost: parameter 1 was
+        // carried since by a newer write, parameter 2 was not.
+        state.answered(&channels, first, false);
+        let third = drain_request(&mut state, &channels);
+        assert_eq!(
+            sent(&state, third),
+            [(2, 0.75)],
+            "only what nothing newer carried"
+        );
+
+        write(&mut writer, 2, 0.125);
+        state.answered(&channels, third, false);
+        let fourth = drain_request(&mut state, &channels);
+        assert_eq!(
+            sent(&state, fourth),
+            [(2, 0.125)],
+            "a write made since the loss replaces the owed one"
+        );
+    }
+
+    /// **A reset voids what is owed**: a write made before it is sent by no
+    /// request after it.
+    #[test]
+    fn a_reset_voids_the_writes_owed() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut writer = host_slots(&channels);
+        write(&mut writer, 1, 0.5);
+        let lost = drain_request(&mut state, &channels);
+        state.answered(&channels, lost, false);
+        writer.reset();
+        let next = drain_request(&mut state, &channels);
+        assert!(sent(&state, next).is_empty(), "the owed write is stale");
+        state.answered(&channels, next, true);
+        assert!(writer.pending().is_empty());
+    }
+
+    /// **An answer for a table the host has replaced publishes nothing and owes
+    /// nothing to the new one**: its generations count from another writer's.
+    #[test]
+    fn an_answer_from_a_replaced_table_is_not_the_new_ones() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut old = host_slots(&channels);
+        write(&mut old, 1, 0.5);
+        let ord = drain_request(&mut state, &channels);
+        let mut new = host_slots(&channels);
+        write(&mut new, 1, 0.75);
+        // The new table is drained after the old request was sent.
+        let next = drain_request(&mut state, &channels);
+        state.answered(&channels, ord, true);
+        assert_eq!(new.pending().len(), 1, "the old table's answer");
+        state.answered(&channels, next, false);
+        let again = drain_request(&mut state, &channels);
+        assert_eq!(sent(&state, again), [(1, 0.75)], "owed from the new table");
+    }
+
+    /// **A write owed is not covered by a later answer**: a request handed over
+    /// while another's writes are owed publishes nothing (one generation cannot
+    /// say that a later write is applied and an earlier is not), so both stay
+    /// pending until the request that carries the owed one is answered.
+    #[test]
+    fn an_answer_does_not_cover_a_write_still_owed() {
+        let (mut state, _replies, channels) = audio_state();
+        let mut writer = host_slots(&channels);
+        write(&mut writer, 1, 0.5);
+        let first = drain_request(&mut state, &channels);
+        write(&mut writer, 2, 0.25);
+        let second = drain_request(&mut state, &channels);
+        state.answered(&channels, first, false);
+        state.answered(&channels, second, true);
+        assert_eq!(writer.pending().len(), 2, "the owed write is not applied");
+
+        let third = drain_request(&mut state, &channels);
+        assert_eq!(sent(&state, third), [(1, 0.5)]);
+        state.answered(&channels, third, true);
+        assert!(writer.pending().is_empty(), "the owed write landed");
     }
 
     /// **A late acknowledgement of `ApplyParameters` is dropped without
@@ -1369,10 +1642,7 @@ mod tests {
         abandoned(
             &mut state,
             AudioKey::Params(id),
-            AbandonedAudio::Params {
-                edits: 2,
-                swept: Generation::new(0),
-            },
+            AbandonedAudio::Params { ord: 0 },
         );
         let heard = state.hear(
             AudioReply::ParametersApplied {
@@ -1394,10 +1664,7 @@ mod tests {
         let (mut state, _replies, channels) = audio_state();
         state.conv.open(
             AudioKey::Block(1),
-            AbandonedAudio::Block {
-                edits: 0,
-                swept: Generation::new(0),
-            },
+            AbandonedAudio::Block { ord: 0 },
             Instant::now(),
             WINDOW,
             WINDOW,
@@ -1427,10 +1694,7 @@ mod tests {
         for seq in [1, 2] {
             state.conv.open(
                 AudioKey::Block(seq),
-                AbandonedAudio::Block {
-                    edits: 0,
-                    swept: Generation::new(0),
-                },
+                AbandonedAudio::Block { ord: 0 },
                 Instant::now(),
                 WINDOW,
                 WINDOW,

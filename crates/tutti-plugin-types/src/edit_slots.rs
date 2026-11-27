@@ -187,7 +187,16 @@ impl EditReader {
     /// has returned, never at drain time; a call that never reached the
     /// target leaves the values to the next one. Wait-free.
     pub fn publish_applied(&mut self) {
-        self.applied.publish(self.slots.swept());
+        self.publish_applied_through(self.slots.swept());
+    }
+
+    /// [`publish_applied`](Self::publish_applied) for the writes up to `through`
+    /// (a [`swept`](Self::swept) taken at an earlier drain), for a holder whose
+    /// target answers a drain's values after later drains have run: a request
+    /// carries the generation its drain swept, and its answer publishes that, not
+    /// the newest. Never moves the published generation back. Wait-free.
+    pub fn publish_applied_through(&mut self, through: Generation) {
+        self.applied.publish(through);
     }
 
     /// The generation of the last drain no write overlapped: once it

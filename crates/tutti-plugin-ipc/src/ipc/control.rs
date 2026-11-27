@@ -35,8 +35,8 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameters_answer()
             }
 
-            /// A served read states no pending write: the host's writes reach the
-            /// server by a flush the read does not wait for or report.
+            /// The host's newest write the server has not answered for rides
+            /// beside the value ([`PluginValue`](tutti_plugin_types::PluginValue)).
             fn parameter_value(
                 &self,
                 id: ParamId,
@@ -119,17 +119,18 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter_value_from_text(id, text)
             }
 
-            /// The bridge flushes the host's writes and saves after them, so the
-            /// bytes hold them and none is stated pending.
+            /// The host's writes the server has not answered for are stated
+            /// beside the bytes, read before the request; the save never waits
+            /// for them.
             fn save_state(
                 &self,
                 state_use: StateUse,
             ) -> Result<tutti_plugin_types::PluginState, StateError> {
-                self.link
-                    .bridge
-                    .audio()
+                let audio = self.link.bridge.audio();
+                let pending = audio.pending_edits();
+                audio
                     .save_state(state_use)
-                    .map(tutti_plugin_types::PluginState::new)
+                    .map(|bytes| tutti_plugin_types::PluginState { bytes, pending })
             }
 
             /// Queued on the command bus as the blocks around it are, so the
@@ -228,11 +229,11 @@ macro_rules! served_control {
                 tutti_rt::tally()
             }
 
-            /// None: the bridge flushes the host's writes before every request
-            /// and saves after them, so none is held back to state (P3b-2 states
-            /// the writes the server has not answered for).
+            /// The host's writes the server has not answered for, from the
+            /// client's own record: a block or flush that was answered
+            /// carried them, one that was lost has not.
             fn pending(&mut self) -> Vec<(ParamId, Normalized)> {
-                Vec::new()
+                self.link.bridge.audio().pending_edits()
             }
 
             fn info(&self) -> &PluginDescriptor {
