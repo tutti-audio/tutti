@@ -2,7 +2,6 @@
 
 use crate::{Format, Resample};
 use tutti_buffers::{ChannelLayout, ChannelSet, Placement};
-use tutti_dsp::DitherNoise;
 use tutti_units::SampleRate;
 
 /// The pipeline in front of the encoder: the format a file is written as, the
@@ -40,18 +39,19 @@ pub struct Encoding {
     format: Format,
     channels: Channels,
     resample: Option<Resample>,
-    seed: u64,
+    seed: Option<u64>,
 }
 
 impl Encoding {
     /// An encoding to `format`, with the channels and the rate of its source
-    /// and the dither of [`DitherNoise::DEFAULT_SEED`].
+    /// and the dither of [`DEFAULT_SEED`](tutti_dsp::DitherNoise::DEFAULT_SEED) until a
+    /// [`dither_seed`](Self::dither_seed) states another.
     pub fn new(format: Format) -> Self {
         Self {
             format,
             channels: Channels::Source,
             resample: None,
-            seed: DitherNoise::DEFAULT_SEED,
+            seed: None,
         }
     }
 
@@ -82,11 +82,14 @@ impl Encoding {
 
     /// The noise sequence an integer file's dither draws from (a float file has none).
     ///
-    /// Files that are summed later (a bounce's stems and its master) take seeds mixed from
-    /// distinct indices ([`SplitMix64::mix`](tutti_rt::SplitMix64::mix)), never one seed, which would add their noise
-    /// coherently.
+    /// Files that are summed later (a bounce's stems and its master) need distinct
+    /// seeds: a bounce mixes one per file
+    /// ([`SplitMix64::mix`](tutti_rt::SplitMix64::mix) of its index) into every encoding that
+    /// states none. A seed stated here is used as given, so one seed given to several files
+    /// gives them correlated dither, which adds coherently when they are summed: that is the
+    /// caller's choice.
     pub fn dither_seed(mut self, seed: u64) -> Self {
-        self.seed = seed;
+        self.seed = Some(seed);
         self
     }
 
@@ -124,9 +127,10 @@ impl Encoding {
         self.resample
     }
 
-    /// The dither seed.
+    /// The dither seed [`dither_seed`](Self::dither_seed) stated; `None` is
+    /// [`DEFAULT_SEED`](tutti_dsp::DitherNoise::DEFAULT_SEED) (or a bounce's per-file seed).
     #[must_use]
-    pub fn seed(&self) -> u64 {
+    pub fn seed(&self) -> Option<u64> {
         self.seed
     }
 

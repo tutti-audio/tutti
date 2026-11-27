@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, Placement as ChannelPlacement};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
-use tutti_codec::{Chain, Converter, Landed};
+use tutti_codec::{Chain, Converter, Kept, Landed};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
@@ -790,7 +790,9 @@ pub(crate) fn finalize_files<F: FftFloat>(
             return Ok(Outcome::Cancelled);
         }
         control.set_output(file.position);
-        closed.push((file.path, file.chain.finalize()?));
+        // A chain keeps a file it could not close whole, and the render has no use
+        // for it: it is removed here, so a failed render leaves nothing beside the paths.
+        closed.push((file.path, file.chain.finalize().map_err(Kept::discard)?));
         if k + 1 < count {
             control.at(Stage::Finalizing, 0.5 * (k + 1) as f32 / count as f32);
         }

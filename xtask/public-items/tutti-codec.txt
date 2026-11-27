@@ -46,6 +46,7 @@ fn encoder::EncoderOptions::planned
 fn encoder::EncoderOptions::wrap
 fn encoder::FileEncoder::clipped
 fn encoder::FileEncoder::finalize
+fn encoder::FileEncoder::finalize_keeping
 fn encoder::FileEncoder::finish
 fn encoder::FileEncoder::finish_keeping
 fn encoder::FileEncoder::write
@@ -53,6 +54,7 @@ fn encoder::FileOptions::create
 fn encoder::FileOptions::in_place
 fn encoder::FileOptions::replace
 fn encoder::FinalizedFile::commit
+fn encoder::Kept::discard
 fn encoder_sink::EncoderSink::frames
 fn encoder_sink::EncoderSink::into_encoder
 fn encoder_sink::EncoderSink::new

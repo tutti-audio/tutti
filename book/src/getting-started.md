@@ -113,25 +113,27 @@ one.
 
 All that is left is to capture the sound. Recording the output of a session
 into a file is called a *bounce* (also known as *export*, or *mixdown*).
-First we describe what we want to keep: the first two seconds, in
-stereo. A bounce never overwrites a file by accident, so we also say that a
-second run of the program may replace the file the first one wrote.
+First we describe what we want to keep: the first two seconds.
 
 ```rust,ignore
 Bounce::new()
-    .replace() // overwrite the file a previous run wrote
     .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
-    .channels(ChannelLayout::STEREO) // left and right
 ```
 
 Then we tell the [`Bounce`](../api/tutti/struct.Bounce.html) where the file
 goes: the *main output*, the file of the whole mix (also known as the *master*,
-*main mix*, or *stereo mix*). Then we hand it to the session:
+*main mix*, or *stereo mix*). It is a `ToFile`: how the sound is written (here
+in stereo, left and right) and where it lands. A bounce never overwrites a file
+by accident, so we also say that a second run of the program may replace the
+file the first one wrote. Then we hand it to the session:
 
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
 let mut session = tone()?;
-let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
+let rendering = session.bounce(two_seconds().main_output(ToFile::new(
+    Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO),
+    tutti::codec::ToFile::new(&path).replace(),
+)))?;
 // The session renders on a thread of its own; we wait for it, then hand
 // what it made back to the session.
 let rendered = block_on(rendering.into_future());

@@ -14,6 +14,7 @@ use tutti::{
     Bounce, ChannelLayout, Clip, Format, Interleaved, MainOutput, MaxBlock, Pcm, Range, SampleRate,
     Samples, Seconds, Session, Wave,
 };
+use tutti_session::ToMemory;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -54,7 +55,7 @@ async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() 
         .add(Clip::new(Arc::new(wave_of(vec![0.25; 2 * 48_000]))).expect("a placeable wave"));
     session.graph().connect(clip, MainOutput).unwrap().unfaded();
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(RATE);
     let rendered = session.bounce(bounce).expect("the bounce starts").await;

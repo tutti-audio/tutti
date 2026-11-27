@@ -5,6 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
+use tutti_session::ToMemory;
 use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
@@ -25,7 +26,7 @@ fn a_session_from_new_bounces_a_node_and_renders() {
     let planes = bounced(
         &mut session,
         Bounce::new()
-            .main_output_buffers()
+            .main_output(ToMemory::new())
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None),

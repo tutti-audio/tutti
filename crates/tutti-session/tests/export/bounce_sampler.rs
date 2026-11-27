@@ -6,6 +6,7 @@
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
@@ -42,7 +43,7 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
 /// tail the bounce picks without being asked.
 fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(RATE));
     bounced(session, bounce)
@@ -102,7 +103,7 @@ fn a_free_running_voice_rings_out_its_wave() {
         .unfaded();
     let cap = Seconds::new(0.5);
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::Graph { cap });
@@ -131,7 +132,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     session.graph().connect(pool, MainOutput).unwrap().unfaded();
 
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
@@ -167,7 +168,7 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
         .expect("queued");
 
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);

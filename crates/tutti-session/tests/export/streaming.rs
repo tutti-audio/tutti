@@ -4,6 +4,7 @@
 use crate::bounced::bounced;
 use std::path::Path;
 use std::time::Duration;
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
@@ -98,8 +99,11 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     let rendered = bounced(
         &mut s,
         Bounce::new()
-            .main_output_buffers()
-            .channels(ChannelLayout::STEREO)
+            .main_output(
+                ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                    ChannelLayout::STEREO,
+                )),
+            )
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
             .sample_rate(SampleRate::of(RATE))
             .latency(BounceLatency::Keep)

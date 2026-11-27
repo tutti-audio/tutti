@@ -9,11 +9,13 @@ use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
+use tutti_codec::Encoding;
 use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
+use tutti_session::{ToFile, ToMemory};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -262,8 +264,11 @@ fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::new()
-            .main_output_buffers()
-            .channels(ChannelLayout::from(6u16))
+            .main_output(
+                ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                    ChannelLayout::from(6u16),
+                )),
+            )
             .range(Range::Seconds(
                 tutti_units::Seconds::new(0.0),
                 tutti_units::Seconds::new(0.01),
@@ -288,8 +293,8 @@ fn an_export_is_placed_from_the_declaration() {
 }
 
 /// A bounced file's placement is stated only when the bounce names its speakers: a file of a
-/// channel count is the default layout for that count and reads `Default`, one given a
-/// `file_topology` reads `Stated`.
+/// channel count is the default layout for that count and reads `Default`, one given
+/// channels with speakers reads `Stated`.
 #[cfg(feature = "export")]
 #[test]
 fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
@@ -301,20 +306,23 @@ fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
     let placement = |name: &str, topology: Option<ChannelTopology>| {
         let mut session = Session::builder().build_detached(RATE).unwrap();
         feed(&mut session, &[0.1, 0.2]);
+        let format = Format::Wav(Pcm::Float(FloatWidth::F32));
+        let encoding = match topology {
+            Some(topology) => {
+                Encoding::new(format).channels(tutti_buffers::ChannelSet::from(topology))
+            }
+            None => Encoding::new(format).width(ChannelLayout::STEREO),
+        };
         let bounce = Bounce::new()
             .range(Range::Seconds(
                 tutti_units::Seconds::new(0.0),
                 tutti_units::Seconds::new(0.01),
             ))
-            .main_output(
-                dir.path().join(name),
-                Format::Wav(Pcm::Float(FloatWidth::F32)),
-            )
+            .main_output(ToFile::new(
+                encoding,
+                tutti_codec::ToFile::new(dir.path().join(name)),
+            ))
             .tail(BounceTail::None);
-        let bounce = match topology {
-            Some(topology) => bounce.file_topology(topology),
-            None => bounce.channels(ChannelLayout::STEREO),
-        };
         bounced(&mut session, bounce)
             .expect("renders")
             .into_main_output()

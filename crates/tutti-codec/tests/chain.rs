@@ -13,8 +13,8 @@ use tutti_buffers::{
     Speaker, Wave,
 };
 use tutti_codec::{
-    Chain, EncodeError, Encoding, Format, IntDepth, IntPcm, Landed, Pcm, Resample, ToFile, encode,
-    write,
+    Chain, EncodeError, Encoding, Format, IntDepth, IntPcm, Kept, Landed, Pcm, Resample, ToFile,
+    encode, write,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -412,6 +412,72 @@ fn the_dither_seed_reaches_the_files_noise() {
     );
     assert_eq!(bytes(1), bytes(1));
     assert_ne!(bytes(1), bytes(2), "two seeds shared one noise sequence");
+    assert_eq!(
+        bytes(tutti_dsp::DitherNoise::DEFAULT_SEED),
+        encode(&silence, &Encoding::new(format)).unwrap(),
+        "an encoding that states no seed is dithered with the default one"
+    );
+}
+
+/// **A chain whose encoder failed mid-file keeps the unfinished file, and the error names
+/// it**: the frames written before the failure are in it, the path is untouched, and
+/// dropping the chain or discarding the kept file removes it.
+#[test]
+fn a_chain_that_failed_mid_file_keeps_the_frames_written_and_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("take.wav");
+    let stereo = ChannelSet::default_for(ChannelLayout::STEREO);
+    let open = || {
+        Chain::<f32>::new(
+            &Encoding::new(float_wav()),
+            &ToFile::new(&path),
+            &stereo,
+            SampleRate::SR_48K,
+            Samples::new(3_000),
+        )
+        .unwrap()
+    };
+    let good = vec![0.25f32; 2 * 3_000];
+    let wrong = [0.0f32; 3];
+
+    let mut chain = open();
+    chain
+        .block(Interleaved::new(&good, ChannelLayout::STEREO).unwrap())
+        .unwrap();
+    chain
+        .block(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+        .expect_err("a block of another width");
+    let Err(Kept::Unfinished { unfinished, .. }) = chain.finalize() else {
+        panic!("not kept unfinished");
+    };
+    assert!(!path.exists(), "the path is untouched");
+    assert!(unfinished.header_describes_frames);
+    let kept = hound::WavReader::open(&unfinished.path).unwrap();
+    assert_eq!(
+        kept.duration(),
+        3_000,
+        "the frames written before the failure"
+    );
+    std::fs::remove_file(&unfinished.path).unwrap();
+
+    drop(open());
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a chain dropped before finalize leaves nothing"
+    );
+
+    let mut chain = open();
+    chain
+        .block(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+        .expect_err("a block of another width");
+    let error = chain.finalize().map_err(Kept::discard).unwrap_err();
+    assert!(matches!(error, EncodeError::BlockWidth { .. }), "{error}");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a caller that discards the kept file leaves nothing"
+    );
 }
 
 /// An existing path is refused by default, with the bytes already there left alone, and

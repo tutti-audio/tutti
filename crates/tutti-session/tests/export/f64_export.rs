@@ -4,10 +4,12 @@
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
+use tutti_codec::Encoding;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
 use tutti_session::{Bounce, BounceTail, MainOutput, Range, Session};
+use tutti_session::{ToFile, ToMemory};
 use tutti_units::{Amplitude, SampleRate, Seconds};
 
 #[path = "../support/f64_nodes.rs"]
@@ -46,8 +48,10 @@ fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
         &mut session(),
         Bounce::new()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
-            .main_output_buffers()
-            .channels(ChannelLayout::MONO)
+            .main_output(
+                ToMemory::new()
+                    .channels(tutti_buffers::ChannelSet::default_for(ChannelLayout::MONO)),
+            )
             .tail(BounceTail::None),
     )
     .expect("the f64 bounce runs")
@@ -71,7 +75,10 @@ fn an_f64_bounce_to_a_float64_file_reads_back_exactly() {
         &mut session(),
         Bounce::new()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
-            .main_output(&path, Format::Wav(Pcm::Float(FloatWidth::F64)))
+            .main_output(ToFile::new(
+                Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))),
+                tutti_codec::ToFile::new(&path),
+            ))
             .tail(BounceTail::None),
     )
     .expect("the f64 bounce runs");

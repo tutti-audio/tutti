@@ -78,6 +78,8 @@ mod bypass;
 #[cfg(feature = "device")]
 mod callback_size;
 mod clock;
+#[cfg(feature = "export")]
+mod destination;
 #[cfg(feature = "device")]
 mod device;
 #[cfg(feature = "plugin")]
@@ -195,9 +197,8 @@ pub use analyze::{
 pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
-    AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
-    BounceRendered, BounceTail, Bounced, Bouncing, BufferMainOutput, BufferStem, ExportClock,
-    FileMainOutput, FileStem, MainOutputKind, NoMainOutput, PrepareEdit, PreparedGraph, Range,
+    Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency, BounceRendered,
+    BounceTail, Bounced, Bouncing, ExportClock, NoMainOutput, PrepareEdit, PreparedGraph, Range,
     Stem, StemGain, StemKey,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
@@ -208,6 +209,8 @@ pub use clock::{
 };
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};
+#[cfg(feature = "export")]
+pub use destination::{Destination, ToFile, ToMemory};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,

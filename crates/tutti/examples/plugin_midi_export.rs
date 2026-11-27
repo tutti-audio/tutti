@@ -33,9 +33,11 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use tutti::ToFile;
+use tutti::codec::Encoding;
 
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, StandardMidiFile, Tick, Timebase, Track};
-use tutti::session::MainOutputKind;
+use tutti::session::Destination;
 use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
     SampleRate, Samples, Saved, Session, SessionEvent, Written,
@@ -97,15 +99,15 @@ fn load(
 }
 
 /// Plays `plugin` (restored from `state`, if any)
-/// `midi` into the main output `main_output` names (a file or memory, which `M` says
+/// `midi` into the main output `main_output` names (a file or memory, which `D` says
 /// and the result's type follows).
-fn play<M: MainOutputKind>(
+fn play<D: Destination>(
     main: tutti::plugin::MainThreadMarker,
     plugin: &Path,
     state: Option<Vec<u8>>,
     midi: &Path,
-    main_output: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
-) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
+    main_output: impl FnOnce(Bounce) -> Bounce<NodeKey, D>,
+) -> Result<D::Output<f32>, Box<dyn std::error::Error>> {
     let mut s = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -154,9 +156,10 @@ fn play_to_file(
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
         // `replace`: a rerun overwrites the output of the last one.
-        bounce
-            .replace()
-            .main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
+        bounce.main_output(ToFile::new(
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+            tutti::codec::ToFile::new(out).replace(),
+        ))
     })
 }
 
@@ -288,7 +291,7 @@ mod tests {
             &plugin,
             Some(state),
             &midi,
-            tutti::Bounce::main_output_buffers,
+            |bounce| bounce.main_output(tutti::ToMemory::new()),
         )
         .expect("the example runs");
         let left: Vec<i32> = rendered.planes()[0].iter().map(|&s| s as i32).collect();

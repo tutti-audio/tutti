@@ -16,6 +16,7 @@
 use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_session::ToMemory;
 
 use std::sync::Arc;
 
@@ -216,8 +217,11 @@ fn an_export_is_the_live_render_on_a_native_param() {
         loop_range: None,
     }));
     let request = Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Frames(
             tutti_units::Frame::new(0),
             tutti_units::Frame::new(total as u64),

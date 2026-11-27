@@ -6,6 +6,7 @@ use crate::bounced::bounced;
 use tracing::Level;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
+use tutti_session::ToMemory;
 use tutti_session::{Bounce, BounceLatency, ExportClock, MainOutput, OutputPort, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
@@ -33,10 +34,13 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
 
     let events = rt_events_on_any_thread(|| {
         let bounce = Bounce::new()
-            .main_output_buffers()
+            .main_output(
+                ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                    ChannelLayout::STEREO,
+                )),
+            )
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .sample_rate(SampleRate::of(48_000.0))
-            .channels(ChannelLayout::STEREO)
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(tutti_session::BounceTail::None);

@@ -6,8 +6,10 @@ use crate::bounced::bounced;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
+use tutti_codec::Encoding;
 use tutti_fixtures::block_on;
 use tutti_session::MainOutput;
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_codec::IntDepth;
@@ -16,8 +18,8 @@ use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_session::{
-    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, FileMainOutput,
-    Range, Session,
+    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, Range, Session,
+    ToFile,
 };
 use tutti_units::{Db, Frame, SampleRate, Samples};
 
@@ -82,7 +84,6 @@ const FORMAT: Format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)));
 /// (the node reports an unbounded one), on a frozen clock.
 fn bounce() -> Bounce {
     Bounce::new()
-        .channels(ChannelLayout::STEREO)
         .range(Range::Frames(
             Frame::new(0),
             Frame::new((BLOCKS * GRAPH_MAX_BLOCK.get()) as u64),
@@ -92,8 +93,11 @@ fn bounce() -> Bounce {
         .tail(BounceTail::None)
 }
 
-fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, FileMainOutput> {
-    let bounce = bounce().main_output(path, FORMAT);
+fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, ToFile> {
+    let bounce = bounce().main_output(ToFile::new(
+        Encoding::new(FORMAT).width(ChannelLayout::STEREO),
+        tutti_codec::ToFile::new(path),
+    ));
     match normalize {
         Some(n) => bounce.normalize(n),
         None => bounce,
@@ -173,7 +177,12 @@ fn a_job_cancelled_before_it_runs_renders_nothing() {
 #[test]
 fn a_buffer_export_cancels() {
     let mut r = rig(2);
-    let job = r.session.bounce(bounce().main_output_buffers()).unwrap();
+    let job = r
+        .session
+        .bounce(bounce().main_output(ToMemory::new().channels(
+            tutti_buffers::ChannelSet::default_for(ChannelLayout::STEREO),
+        )))
+        .unwrap();
     r.handle.set(job.handle()).ok();
     let outcome = r.session.apply(block_on(job));
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
@@ -212,17 +221,23 @@ fn progress_ends_at_one_in_the_finalizing_stage() {
 /// A bounce of the main output and a stem of the node into `dir`, normalized when
 /// `normalize` is set (the stem then takes the main output's gain, so the pass
 /// keeps both for its measurement).
-fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMainOutput> {
+fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, ToFile> {
     let gain = if normalize {
         tutti_session::StemGain::Shared
     } else {
         tutti_session::StemGain::None
     };
     let bounce = bounce()
-        .main_output(dir.join("main_output.wav"), FORMAT)
+        .main_output(ToFile::new(
+            Encoding::new(FORMAT).width(ChannelLayout::STEREO),
+            tutti_codec::ToFile::new(dir.join("main_output.wav")),
+        ))
         .stem_with(
             tutti_session::Stem::new(r.node)
-                .file(dir.join("stem.wav"), FORMAT)
+                .to(ToFile::new(
+                    Encoding::new(FORMAT),
+                    tutti_codec::ToFile::new(dir.join("stem.wav")),
+                ))
                 .gain(gain),
         );
     if normalize {

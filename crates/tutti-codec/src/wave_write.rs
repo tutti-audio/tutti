@@ -3,7 +3,7 @@
 //! Writing a [`Wave`] as a file, or into memory, through an [`Encoding`].
 
 use crate::chain::{Stages, options_of, spec_of};
-use crate::{Chain, Encoding, Landed, Result, ToFile};
+use crate::{Chain, Encoding, Kept, Landed, Result, ToFile};
 use std::io::Cursor;
 use tutti_buffers::{FloatWidth, Interleaved, InterleavedMut, Sample, Wave, interleave};
 use tutti_dsp::FftFloat;
@@ -79,7 +79,7 @@ fn write_in<F: FftFloat, S: Sample>(
         wave.len(),
     )?;
     feed(wave, |block| chain.block(block))?;
-    chain.finalize()?.commit()
+    chain.finalize().map_err(Kept::discard)?.commit()
 }
 
 /// Encodes `wave` into memory as a file of `encoding`: the bytes [`write()`] puts at a path,

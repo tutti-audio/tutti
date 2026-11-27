@@ -15,6 +15,7 @@ use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::MainOutput;
+use tutti_session::ToMemory;
 use tutti_session::{PluginChange, PluginEvent, Replacement};
 
 use std::time::Duration;
@@ -654,8 +655,11 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         loop_range: None,
     }));
     let config = Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(
             Seconds::new(0.0),
             Seconds::new(total as f64 / RATE.get()),

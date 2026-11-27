@@ -1,8 +1,8 @@
 //! [`Chain`]: the streaming pipeline in front of a file's encoder.
 
 use crate::{
-    Converter, EncodeError, Encoder, EncoderOptions, Encoding, FileEncoder, FinalizedFile, Result,
-    Spec, ToFile,
+    Converter, EncodeError, Encoder, EncoderOptions, Encoding, FileEncoder, FinalizedFile, Kept,
+    Result, Spec, ToFile,
 };
 use std::io::{Seek, Write};
 use tutti_buffers::{
@@ -61,9 +61,12 @@ pub(crate) fn options_of<'a>(
     source_rate: SampleRate,
     frames: Samples,
 ) -> EncoderOptions<'a> {
-    EncoderOptions::new(spec)
-        .planned(resampled_frames(source_rate, spec.rate(), frames))
-        .dither_seed(encoding.seed())
+    let options =
+        EncoderOptions::new(spec).planned(resampled_frames(source_rate, spec.rate(), frames));
+    match encoding.seed() {
+        Some(seed) => options.dither_seed(seed),
+        None => options,
+    }
 }
 
 impl<F: FftFloat> Stages<F> {
@@ -198,6 +201,10 @@ fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<F
 /// beside its path, and [`Closed::commit`] puts it in place: all-or-nothing across several
 /// files is the caller's, between those two.
 ///
+/// A chain dropped before `finalize` removes its file. A block that failed is recorded as the
+/// file's first error, and `finalize` then keeps what was written beside the path and
+/// reports it ([`Kept`]): the caller owns the unfinished file, to move or delete.
+///
 /// `F` is the format the converter and the fold run in.
 pub struct Chain<F: FftFloat> {
     stages: Stages<F>,
@@ -274,13 +281,17 @@ impl<F: FftFloat> Chain<F> {
     /// # Errors
     ///
     /// [`EncodeError::Buffer`] for a block of another width than the source's, and the
-    /// encoder's errors.
+    /// encoder's errors. The first failure is kept for [`finalize`](Self::finalize).
     pub fn block<B: Sample>(&mut self, block: Interleaved<'_, B>) -> Result<()> {
         let mut to = Counted {
             encoder: &mut self.encoder,
             frames: &mut self.frames,
         };
-        self.stages.block(block, &mut to)
+        let written = self.stages.block(block, &mut to);
+        if let Err(e) = &written {
+            self.encoder.fail(e);
+        }
+        written
     }
 
     /// Flushes the converter and closes the file beside its path: everything that can
@@ -288,16 +299,20 @@ impl<F: FftFloat> Chain<F> {
     ///
     /// # Errors
     ///
-    /// The encoder's errors; the file is removed.
-    pub fn finalize(mut self) -> Result<Closed> {
+    /// [`Kept::Unfinished`] when the file cannot be closed whole (the first failed block, the
+    /// flush, the header, the close): the file is kept beside its path with the frames written,
+    /// and the error names it.
+    pub fn finalize(mut self) -> std::result::Result<Closed, Kept> {
         let mut to = Counted {
             encoder: &mut self.encoder,
             frames: &mut self.frames,
         };
-        self.stages.flush(&mut to)?;
+        if let Err(e) = self.stages.flush(&mut to) {
+            self.encoder.fail(&e);
+        }
         let clipped = self.encoder.clipped();
         Ok(Closed {
-            file: self.encoder.finalize()?,
+            file: self.encoder.finalize_keeping()?,
             clipped,
             frames: self.frames,
         })
