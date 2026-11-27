@@ -654,7 +654,7 @@ jobs:
           else
             echo "deps=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-ump|tutti-platform)/|Cargo\.lock$|\.github/workflows/ci\.yml$)'; then
+          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-ump|tutti-platform)/|Cargo\.lock$|\.config/nextest\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "midi_services=true" >> "$GITHUB_OUTPUT"
           else
             echo "midi_services=false" >> "$GITHUB_OUTPUT"
