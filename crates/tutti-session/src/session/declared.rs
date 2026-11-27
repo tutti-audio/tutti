@@ -4,30 +4,28 @@
 //! not in them: a patch neither keeps nor removes it.
 
 use std::any::TypeId;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use thiserror::Error;
 use tutti_buffers::Float;
-use tutti_graph::{
-    BusOutputPort, CycleEdge, Edge, EdgeId, GraphSpec, HostValues, Initials, IntoNode, NodeConfig,
-    NodeKey, NodeSpec, PortSink, PortSource, Shape, Shapes,
-};
+use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Shapes};
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
-use crate::key::BusEnd;
 use crate::patch::{
-    Built, Declaration, Declarations, Deps, Fading, IntoPatch, KeyError, PatchTarget,
-    PendingSection, Place, WireDecl, WireEnds, WireId,
+    Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireDecl,
+    WireEnds, WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
-use crate::{
-    AnyAssign, AppKey, BusInputPort, Clock, ConnectError, Graph, Key, ReplaceRefused, Session,
-};
+use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
 
+mod check;
+mod section;
 mod wire;
-use wire::{KeptWire, Ports, Resolved};
+use check::check;
+use section::{Decided, KeptSection, Kind, decide};
+use wire::{KeptWire, Resolved};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
@@ -202,34 +200,6 @@ pub(crate) struct Kept<K, F: Float> {
     sections: BTreeMap<K, KeptSection<K>>,
 }
 
-/// What the last patch made of one section: its deps while it converged, and
-/// the keys, wires and sections its body declared itself (not those of the
-/// sections inside it).
-struct KeptSection<K> {
-    /// `None` when a key of the section's subtree was left unconverged or a
-    /// wire dormant: the next patch runs the body.
-    deps: Option<Box<dyn Deps>>,
-    nodes: Vec<K>,
-    wires: Vec<WireId<K>>,
-    sections: Vec<K>,
-}
-
-/// The record of `key` and of the sections inside it, outermost first.
-fn subtree<'a, K: Ord>(
-    sections: &'a BTreeMap<K, KeptSection<K>>,
-    key: &K,
-) -> Vec<(&'a K, &'a KeptSection<K>)> {
-    let mut found = Vec::new();
-    let mut stack = vec![key];
-    while let Some(key) = stack.pop() {
-        if let Some((name, record)) = sections.get_key_value(key) {
-            found.push((name, record));
-            stack.extend(&record.sections);
-        }
-    }
-    found
-}
-
 impl<K, F: Float> Default for Kept<K, F> {
     fn default() -> Self {
         Self {
@@ -237,125 +207,6 @@ impl<K, F: Float> Default for Kept<K, F> {
             wires: BTreeMap::new(),
             sections: BTreeMap::new(),
         }
-    }
-}
-
-impl<K: Ord + Clone, F: Float> Kept<K, F> {
-    /// Replaces the section records: the carried subtrees keep theirs, the
-    /// evaluated sections get theirs (in the order they ran, so a section's
-    /// inner ones are judged first), and a section the patch does not declare
-    /// loses its record.
-    fn keep_sections(
-        &mut self,
-        carried: &[K],
-        evaluated: Vec<(K, KeptSection<K>)>,
-        patched: &Patched<K>,
-    ) {
-        let mut old = std::mem::take(&mut self.sections);
-        let unconverged: BTreeSet<&K> = patched.unconverged.iter().map(|(key, _)| key).collect();
-        let dormant: BTreeSet<&WireEnds<K>> =
-            patched.dormant.iter().map(|(ends, _)| ends).collect();
-        for key in carried {
-            let names: Vec<K> = subtree(&old, key)
-                .into_iter()
-                .map(|(name, _)| name.clone())
-                .collect();
-            for name in names {
-                if let Some(record) = old.remove(&name) {
-                    self.sections.insert(name, record);
-                }
-            }
-        }
-        for (key, mut record) in evaluated.into_iter().rev() {
-            let converged = record.nodes.iter().all(|key| !unconverged.contains(key))
-                && record.wires.iter().all(|id| !dormant.contains(&id.ends))
-                && record
-                    .sections
-                    .iter()
-                    .all(|inner| self.sections.get(inner).is_some_and(|r| r.deps.is_some()));
-            if !converged {
-                record.deps = None;
-            }
-            self.sections.insert(key, record);
-        }
-    }
-}
-
-/// What a declaration does to the node under its key, judged before any node is
-/// built.
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    Add,
-    Readd,
-    Values,
-    Swap,
-}
-
-/// A patch's parts with its sections decided: the parts of the sections that
-/// ran joined to the patch's own, and the sections carried whole.
-struct Decided<K, F: Float> {
-    nodes: Vec<(K, Declaration<Graph<F>>)>,
-    wires: Vec<WireDecl<K>>,
-    /// The carried sections, the outermost of each carried subtree.
-    carried: Vec<K>,
-    /// The keys and wires the carried subtrees declare.
-    carried_nodes: Vec<K>,
-    carried_wires: Vec<WireId<K>>,
-    /// The records of the sections that ran, in the order they ran.
-    evaluated: Vec<(K, KeptSection<K>)>,
-    /// Sections met and not yet judged.
-    queue: VecDeque<PendingSection<K, Graph<F>>>,
-    /// The section keys met.
-    names: BTreeSet<K>,
-    /// The sections that are carried unless a key they mention fails.
-    candidates: BTreeMap<K, PendingSection<K, Graph<F>>>,
-    /// The node keys of the candidates' subtrees.
-    standing: BTreeSet<K>,
-    /// The index in `nodes` of each key a section that ran declares.
-    declared_at: BTreeMap<K, usize>,
-}
-
-impl<K: AppKey, F: Float> Decided<K, F> {
-    fn new(patch: Declarations<K, Graph<F>>) -> Self {
-        let declared_at = patch
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(at, (key, _))| (key.clone(), at))
-            .collect();
-        Self {
-            nodes: patch.nodes,
-            wires: patch.wires,
-            carried: Vec::new(),
-            carried_nodes: Vec::new(),
-            carried_wires: Vec::new(),
-            evaluated: Vec::new(),
-            queue: patch.sections.into(),
-            names: BTreeSet::new(),
-            candidates: BTreeMap::new(),
-            standing: BTreeSet::new(),
-            declared_at,
-        }
-    }
-
-    /// Runs `section`'s body: what it declares joins the patch, and the
-    /// sections inside it wait to be judged.
-    fn run(&mut self, section: PendingSection<K, Graph<F>>) {
-        let PendingSection { key, deps, body } = section;
-        let inner = body(&*deps);
-        let record = KeptSection {
-            deps: Some(deps),
-            nodes: inner.nodes.iter().map(|(key, _)| key.clone()).collect(),
-            wires: inner.wires.iter().map(WireDecl::id).collect(),
-            sections: inner.sections.iter().map(|s| s.key.clone()).collect(),
-        };
-        for (key, declaration) in inner.nodes {
-            self.declared_at.insert(key.clone(), self.nodes.len());
-            self.nodes.push((key, declaration));
-        }
-        self.wires.extend(inner.wires);
-        self.queue.extend(inner.sections);
-        self.evaluated.push((key, record));
     }
 }
 
@@ -378,52 +229,6 @@ impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
             .entries(self.nodes.iter().map(|(key, s)| (key, s.node)))
             .finish()
     }
-}
-
-/// Takes `gone` out of `spec`: the nodes, and every edge into or out of them
-/// (audio, event, param, gain and bus).
-fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
-    let from_gone =
-        |source: PortSource| matches!(source, PortSource::Node(p) if gone.contains(&p.node()));
-    let edge_gone = |edge: &Edge| match *edge {
-        Edge::Direct(source) => from_gone(source),
-        Edge::Feedback(f) => gone.contains(&f.from.node()),
-    };
-    for node in gone {
-        spec.topology.nodes.remove(node);
-    }
-    spec.topology.edges.retain(|at, edges| {
-        edges.retain(|e| !edge_gone(e));
-        !gone.contains(&at.node()) && !edges.is_empty()
-    });
-    for sources in &mut spec.topology.outputs {
-        sources.retain(|source| !from_gone(*source));
-    }
-    spec.events.retain(|at, edges| {
-        edges.retain(|e| !gone.contains(&e.from().node()));
-        !gone.contains(&at.node()) && !edges.is_empty()
-    });
-    spec.params
-        .retain(|at, from| !gone.contains(&at.node) && !gone.contains(&from.node()));
-    spec.gains.retain(|id, _| {
-        let sink = matches!(id.sink, PortSink::Port(at) if gone.contains(&at.node()));
-        !sink && !edge_gone(&id.from)
-    });
-    let bus_gone = |source: &BusOutputPort| matches!(source, BusOutputPort::Node(bus) if gone.contains(&bus.node()));
-    spec.bus_edges.retain(|at, feeds| {
-        feeds.retain(|feed| !bus_gone(&feed.source));
-        !gone.contains(&at.node()) && !feeds.is_empty()
-    });
-    spec.main_output_sources
-        .retain(|feed| !bus_gone(&feed.source));
-}
-
-/// The edges leaving the graph that would close a cycle with the patch's
-/// wiring: cut at the patch, not faded.
-#[derive(Default)]
-struct Cuts {
-    edges: Vec<EdgeId>,
-    buses: Vec<(BusOutputPort, BusInputPort)>,
 }
 
 /// The assignments of what `new` gives that `old` did not give or gave
@@ -513,11 +318,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             carried_wires,
             evaluated,
             ..
-        } = self.decide(Declarations::of(patch))?;
+        } = decide(&self.graph, &self.declared, Declarations::of(patch))?;
         let mut seen = BTreeSet::new();
         let again = nodes
             .iter()
-            .map(|(key, _)| key)
+            .map(|(key, ..)| key)
             .chain(&carried_nodes)
             .find(|key| !seen.insert((*key).clone()));
         if let Some(key) = again {
@@ -531,7 +336,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 .iter()
                 .all(|(_, raw)| raw.is_finite())
         };
-        if let Some((key, _)) = nodes.iter().find(|(_, d)| !finite(d)) {
+        if let Some((key, ..)) = nodes.iter().find(|(_, d, _)| !finite(d)) {
             return Err(PatchError::NotFinite(key.clone()));
         }
         let mut wires = Self::declared_wires(&declared, &seen)?;
@@ -544,10 +349,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let host = self.host_values();
         let mut kept = std::mem::take(&mut self.declared);
         let planned = self.plan(&kept, nodes, &carried_nodes, &host);
-        let checked = self
-            .check_wires(&planned, &wires)
-            .and_then(|()| self.check_feedback(&planned, &wires, &kept))
-            .and_then(|()| self.check_acyclic(&planned, &wires, &kept));
+        let checked = check(&self.graph, &planned, &wires, &kept);
         let cuts = match checked {
             Ok(cuts) => cuts,
             Err(refused) => {
@@ -625,7 +427,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     fn plan(
         &self,
         kept: &Kept<K, C::Float>,
-        nodes: Vec<(K, Declaration<Graph<C::Float>>)>,
+        nodes: Vec<(K, Declaration<Graph<C::Float>>, Kind)>,
         carried: &[K],
         host: &HostValues,
     ) -> Planned<K, C::Float> {
@@ -637,8 +439,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         for key in carried {
             planned.at.insert(key.clone(), kept.nodes[key].node);
         }
-        for (key, declaration) in nodes {
-            let fate = self.fate(kept, &key, &declaration, host);
+        for (key, declaration, kind) in nodes {
+            let fate = Self::fate(kind, &declaration, host);
             let id = match &fate {
                 Fate::Add(_) | Fate::Readd(_) => NodeKey::fresh(),
                 Fate::Values | Fate::Swap(_) => kept.nodes[&key].node,
@@ -657,386 +459,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         planned
     }
 
-    fn fate(
-        &self,
-        kept: &Kept<K, C::Float>,
-        key: &K,
-        declaration: &Declaration<Graph<C::Float>>,
-        host: &HostValues,
-    ) -> Fate {
+    fn fate(kind: Kind, declaration: &Declaration<Graph<C::Float>>, host: &HostValues) -> Fate {
         let new = &declaration.config;
-        match self.kind(kept, key, declaration) {
+        match kind {
             Kind::Add => Fate::Add(new.build(host)),
             Kind::Readd => Fate::Readd(new.build(host)),
             Kind::Values => Fate::Values,
             Kind::Swap => Fate::Swap(new.build(host)),
-        }
-    }
-
-    /// What `declaration` does to the node under `key`, with nothing built.
-    fn kind(
-        &self,
-        kept: &Kept<K, C::Float>,
-        key: &K,
-        declaration: &Declaration<Graph<C::Float>>,
-    ) -> Kind {
-        let new = &declaration.config;
-        let Some(old) = kept.nodes.get(key) else {
-            return Kind::Add;
-        };
-        let same_type = old.declaration.config.config_type() == new.config_type();
-        if !self.graph.contains(old.node) || !same_type {
-            Kind::Readd
-        } else if old.declaration.config.same_structure(&**new) {
-            Kind::Values
-        } else {
-            Kind::Swap
-        }
-    }
-
-    /// Decides each section of `patch`: carried whole, or run with the parts it
-    /// declares joining the patch. A section is carried only while the keys it
-    /// mentions stand, and running one can make another's keys fall, so the
-    /// judgement repeats until none changes; each section runs at most once.
-    fn decide(
-        &self,
-        patch: Declarations<K, Graph<C::Float>>,
-    ) -> Result<Decided<K, C::Float>, PatchError<K>> {
-        let mut decided = Decided::new(patch);
-        self.settle(&mut decided)?;
-        loop {
-            let falling: Vec<K> = decided
-                .candidates
-                .keys()
-                .filter(|key| !self.stands(&decided, key))
-                .cloned()
-                .collect();
-            if falling.is_empty() {
-                break;
-            }
-            // Running one can restore what another mentions: judge again.
-            for key in falling {
-                if self.stands(&decided, &key) {
-                    continue;
-                }
-                let section = decided
-                    .candidates
-                    .remove(&key)
-                    .expect("a falling section is a candidate");
-                for (_, record) in subtree(&self.declared.sections, &key) {
-                    for node in &record.nodes {
-                        decided.standing.remove(node);
-                    }
-                }
-                decided.run(section);
-                self.settle(&mut decided)?;
-            }
-        }
-        for key in decided.candidates.keys() {
-            decided.carried.push(key.clone());
-            for (name, record) in subtree(&self.declared.sections, key) {
-                if name != key && !decided.names.insert(name.clone()) {
-                    return Err(PatchError::DuplicateSection(name.clone()));
-                }
-                decided.carried_nodes.extend(record.nodes.iter().cloned());
-                decided.carried_wires.extend(record.wires.iter().cloned());
-            }
-        }
-        Ok(decided)
-    }
-
-    /// Judges the sections waiting in `decided`: a section whose record does
-    /// not match runs, one that does becomes a candidate to be carried.
-    fn settle(&self, decided: &mut Decided<K, C::Float>) -> Result<(), PatchError<K>> {
-        while let Some(section) = decided.queue.pop_front() {
-            if !decided.names.insert(section.key.clone()) {
-                return Err(PatchError::DuplicateSection(section.key));
-            }
-            if self.matches(&section) {
-                for (_, record) in subtree(&self.declared.sections, &section.key) {
-                    decided.standing.extend(record.nodes.iter().cloned());
-                }
-                decided.candidates.insert(section.key.clone(), section);
-            } else {
-                decided.run(section);
-            }
-        }
-        Ok(())
-    }
-
-    /// Whether the last patch made `section` from equal deps and the graph still
-    /// holds what it made: every node, every wire, and no key unconverged.
-    fn matches(&self, section: &PendingSection<K, Graph<C::Float>>) -> bool {
-        let kept = &self.declared;
-        let Some(record) = kept.sections.get(&section.key) else {
-            return false;
-        };
-        let equal = record
-            .deps
-            .as_deref()
-            .is_some_and(|last| last.same(&*section.deps));
-        equal
-            && subtree(&kept.sections, &section.key)
-                .into_iter()
-                .all(|(_, record)| {
-                    let nodes = record.nodes.iter().all(|key| {
-                        kept.nodes
-                            .get(key)
-                            .is_some_and(|s| self.graph.contains(s.node))
-                    });
-                    nodes
-                        && record.wires.iter().all(|id| {
-                            let known = [Some(id.source()), id.sink()]
-                                .into_iter()
-                                .flatten()
-                                .all(|key| kept.nodes.contains_key(key));
-                            known && Resolved::of(id, |key| kept.nodes[key].node).held(&self.graph)
-                        })
-                })
-    }
-
-    /// Whether every key the candidate `section`'s wires mention outside it
-    /// is declared by the rest of the patch, with the node it had.
-    fn stands(&self, decided: &Decided<K, C::Float>, section: &K) -> bool {
-        let records = subtree(&self.declared.sections, section);
-        let own: BTreeSet<&K> = records
-            .iter()
-            .flat_map(|(_, record)| &record.nodes)
-            .collect();
-        records
-            .iter()
-            .flat_map(|(_, record)| &record.wires)
-            .flat_map(|id| [Some(id.source()), id.sink()])
-            .flatten()
-            .filter(|key| !own.contains(key))
-            .all(|key| {
-                decided.standing.contains(key)
-                    || decided.declared_at.get(key).is_some_and(|&at| {
-                        let (key, declaration) = &decided.nodes[at];
-                        self.kind(&self.declared, key, declaration) == Kind::Values
-                    })
-            })
-    }
-
-    /// Refuses a wire the declared nodes cannot make, with nothing changed.
-    fn check_wires(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-    ) -> Result<(), PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let mut buses = Vec::new();
-        let mut bus_ends = Vec::new();
-        for id in wires.keys() {
-            let resolved = Resolved::of(id, |key| planned.at[key]);
-            resolved
-                .check(&self.graph, pending)
-                .map_err(|cause| PatchError::Wire {
-                    ends: id.ends.clone(),
-                    cause,
-                })?;
-            if let Resolved::Bus(from, to) = resolved {
-                buses.push((from, to));
-                bus_ends.push(&id.ends);
-            }
-        }
-        if let Some((at, cause)) = self.graph.first_unlowered(pending, &buses) {
-            return Err(PatchError::Wire {
-                ends: bus_ends[at].clone(),
-                cause: ConnectError::Bus(cause),
-            });
-        }
-        Ok(())
-    }
-
-    /// Refuses a feedback wire the graph would not compile, and a wire that
-    /// puts a second edge on ports that hold one, with nothing changed.
-    fn check_feedback(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-        kept: &Kept<K, C::Float>,
-    ) -> Result<(), PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let max_block = self.graph.max_block_samples();
-        // What the patch takes out leaves its ports free for another kind.
-        let mut leaving = BTreeSet::new();
-        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
-            let held = [Some(id.source()), id.sink()]
-                .into_iter()
-                .flatten()
-                .all(|key| kept.nodes.contains_key(key));
-            if held {
-                let resolved = Resolved::of(id, |key| kept.nodes[key].node);
-                leaving.extend(
-                    Ports::of(resolved, &self.graph, None)
-                        .into_iter()
-                        .map(|ports| (ports, id.delay)),
-                );
-            }
-        }
-        let mut declared: BTreeMap<Ports, Option<Samples>> = BTreeMap::new();
-        for id in wires.keys() {
-            if let Some(delay) = id.delay
-                && delay < max_block
-            {
-                return Err(PatchError::FeedbackTooShort {
-                    ends: id.ends.clone(),
-                    delay,
-                    max_block,
-                });
-            }
-            let resolved = Resolved::of(id, |key| planned.at[key]);
-            for ports in Ports::of(resolved, &self.graph, pending) {
-                let twice = declared
-                    .insert(ports, id.delay)
-                    .is_some_and(|other| other != id.delay);
-                let held = ports
-                    .held_delay(&self.graph)
-                    .is_some_and(|held| held != id.delay && !leaving.contains(&(ports, held)));
-                if twice || held {
-                    return Err(PatchError::TwoEdges {
-                        ends: id.ends.clone(),
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Refuses a wire that closes a cycle the graph would not compile, and
-    /// names the edges leaving the graph that must be cut for it not to: the
-    /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle))
-    /// over its whole wiring, the edges it only fades out included (the compile
-    /// counts them), plus the declared wires. A feedback edge is cut by the
-    /// search. An edge that leaves (dropped by this patch, or still fading)
-    /// and closes a cycle is cut; a cycle left through live wires is the
-    /// patch's.
-    fn check_acyclic(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-        kept: &Kept<K, C::Float>,
-    ) -> Result<Cuts, PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let mut spec = self.graph.whole_spec();
-        // The nodes this patch takes out are not in the graph it makes, nor
-        // are the edges into or out of them, hand-made ones included.
-        let gone: BTreeSet<NodeKey> = kept
-            .nodes
-            .iter()
-            .filter(|(key, _)| !planned.at.contains_key(*key))
-            .map(|(_, stored)| stored.node)
-            .chain(
-                planned
-                    .nodes
-                    .iter()
-                    .filter(|p| matches!(p.fate, Fate::Readd(_)))
-                    .filter_map(|p| kept.nodes.get(&p.key).map(|stored| stored.node)),
-            )
-            .collect();
-        forget_nodes(&mut spec, &gone);
-        for (&node, shape) in &planned.shapes {
-            let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
-            spec.topology.nodes.insert(node, declared);
-        }
-        let (mut leaving, mut leaving_buses) = self.graph.fading_edges();
-        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
-            let held = [Some(id.source()), id.sink()]
-                .into_iter()
-                .flatten()
-                .all(|key| kept.nodes.contains_key(key));
-            if !held {
-                continue;
-            }
-            let resolved = Resolved::of(id, |key| kept.nodes[key].node);
-            match resolved {
-                // An event edge is never faded: it goes at once.
-                Resolved::Event(..) => {
-                    resolved.in_spec(&mut spec, &self.graph, None, false);
-                }
-                Resolved::Bus(from, to) => {
-                    leaving_buses.insert((from, to));
-                }
-                Resolved::Channel(..) | Resolved::Main(..) => {
-                    for ports in Ports::of(resolved, &self.graph, None) {
-                        if let Ports::Audio(edge) = ports
-                            && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
-                        {
-                            leaving.insert(edge);
-                        }
-                    }
-                }
-            }
-        }
-        let named: Vec<_> = wires
-            .keys()
-            .map(|id| {
-                let resolved = Resolved::of(id, |key| planned.at[key]);
-                // A declared wire is not leaving, whatever the graph fades.
-                for ports in Ports::of(resolved, &self.graph, pending) {
-                    if let Ports::Audio(edge) = ports
-                        && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
-                    {
-                        leaving.remove(&edge);
-                    }
-                }
-                if let Resolved::Bus(from, to) = resolved {
-                    leaving_buses.remove(&(from, to));
-                }
-                (id, resolved.in_spec(&mut spec, &self.graph, pending, true))
-            })
-            .collect();
-        let mut cuts = Cuts::default();
-        let cycle = loop {
-            let Some(cycle) = spec.cycle() else {
-                break None;
-            };
-            let audio = cycle.iter().find_map(|edge| match edge {
-                CycleEdge::Audio(at) => leaving
-                    .iter()
-                    .find(|id| id.sink == PortSink::Port(*at))
-                    .copied(),
-                _ => None,
-            });
-            if let Some(id) = audio {
-                leaving.remove(&id);
-                if let PortSink::Port(at) = id.sink {
-                    spec.disconnect(at, id.from);
-                }
-                cuts.edges.push(id);
-                continue;
-            }
-            let bus = cycle.iter().find_map(|edge| match edge {
-                CycleEdge::Bus { at, from } => leaving_buses
-                    .iter()
-                    .find(|(f, t)| f == from && t.0 == BusEnd::Node(*at))
-                    .copied(),
-                _ => None,
-            });
-            if let Some((from, to)) = bus {
-                leaving_buses.remove(&(from, to));
-                if let BusEnd::Node(at) = to.0 {
-                    spec.disconnect_bus(from, at);
-                }
-                cuts.buses.push((from, to));
-                continue;
-            }
-            break Some(cycle);
-        };
-        let Some(cycle) = cycle else {
-            return Ok(cuts);
-        };
-        // Only a cycle through a declared wire is the patch's; any other the
-        // commit reports.
-        match named
-            .into_iter()
-            .find(|(_, edges)| edges.iter().any(|edge| cycle.contains(edge)))
-        {
-            Some((id, _)) => Err(PatchError::Cycle {
-                ends: id.ends.clone(),
-            }),
-            None => Ok(cuts),
         }
     }
 
