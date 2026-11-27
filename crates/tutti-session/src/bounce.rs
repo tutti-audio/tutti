@@ -279,6 +279,10 @@ mod render_output {
         /// [`StemGain::Shared`] follows.
         fn file_key(key: &Self::Key) -> Option<&FileKey>;
         /// The main output's result, moved out of the finished render.
+        ///
+        /// # Errors
+        ///
+        /// [`DoneError`] for a key the render did not produce or whose result was taken.
         fn take<F: Float>(
             done: &mut Done<F>,
             key: &Self::Key,
