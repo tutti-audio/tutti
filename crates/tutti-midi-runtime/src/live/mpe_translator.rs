@@ -65,15 +65,18 @@
 //!
 //! # What a manager's messages become
 //!
-//! A manager channel's Damper and Sostenuto pedals, Volume, Expression, Coarse
-//! and Fine Tuning, All Sound Off (where the rules take it there), All Notes
-//! Off and Reset All Controllers apply to the whole zone (M1-100 section 2.3.1,
-//! M2-102 section 2.3.4.1). The transform sends each of them on the manager and
-//! on every member channel of its zone; the instrument
+//! A manager channel's Damper and Sostenuto pedals, Coarse and Fine Tuning, All
+//! Sound Off (where the rules take it there), All Notes Off and Reset All
+//! Controllers apply to the whole zone (M1-100 section 2.3.1, M2-120 section
+//! 4.1), and under the Profile so does Volume (tutti's choice of the first
+//! arrangement of M2-102 section 2.3.4.1). The transform sends each of them on
+//! the manager and on every member channel of its zone; the instrument
 //! (`tutti_voicing::VoiceAllocator`) reads one channel's message as that
-//! channel's own and holds no zone. A pedal, Volume, Expression or tuning
-//! message on a member channel is ignored (M1-100 section 2.3.1, M2-120
-//! section 4.1), so a member never undoes what its manager sent.
+//! channel's own and holds no zone. A pedal or tuning message, and under the
+//! Profile a Volume, on a member channel is ignored (a receiver's "should",
+//! M1-100 section 2.3.1 and M2-120 section 4.1), so a member never undoes what
+//! its manager sent. Under MPE 1.1 Volume and Expression are ordinary messages
+//! on every channel.
 //!
 //! A manager's Pitch Bend moves every note of its zone (RP-053): it goes on and
 //! is copied onto each member channel as that channel's own Pitch Bend, over a
@@ -197,43 +200,6 @@ fn send_zone_defaults(
         zone.member_range.to_rpn_bits(),
         out,
     );
-}
-
-/// Whether `voice` is a Manager-level message: one that affects every sounding
-/// note of a zone, which the Manager Channel alone carries and a Member Channel
-/// ignores (M1-100 section 2.3.1, M2-120 section 4.1). They are the Damper and
-/// Sostenuto pedals, Volume and Expression (M2-102 section 2.3.4.1), and the
-/// Registered Controllers Coarse and Fine Tuning.
-fn manager_level(voice: &Voice2) -> bool {
-    match voice {
-        Voice2::ControlChange { controller, .. } => [
-            CCNumber::SUSTAIN,
-            CCNumber::SOSTENUTO,
-            CCNumber::VOLUME,
-            CCNumber::EXPRESSION,
-        ]
-        .contains(controller),
-        Voice2::Registered { bank, index, .. } => {
-            [Rpn::CHANNEL_COARSE_TUNING, Rpn::CHANNEL_FINE_TUNING]
-                .contains(&Rpn::new(*bank, *index))
-        }
-        _ => false,
-    }
-}
-
-/// Whether `voice` is one of the messages a Manager Channel sends on each
-/// Member Channel of its zone too: the Manager-level messages, and the Channel
-/// Mode messages that stop or reset every note (All Sound Off, which MPE 1.1
-/// prohibits on the Manager Channel and the Profile takes there: `receive` has
-/// dropped it before this asks; Reset All Controllers; All Notes Off).
-fn zone_wide(voice: &Voice2) -> bool {
-    manager_level(voice)
-        || matches!(voice, Voice2::ControlChange { controller, .. } if [
-            CCNumber::ALL_SOUND_OFF,
-            CCNumber::RESET_ALL,
-            CCNumber::ALL_NOTES_OFF,
-        ]
-        .contains(controller))
 }
 
 /// What a receiver does with a message its table has no use for there.
@@ -457,7 +423,8 @@ impl Rules {
     /// Response under the Profile).
     ///
     /// A Manager-level message (`manager_level`) on a Member Channel is ignored
-    /// under both tables (M1-100 section 2.3.1, M2-120 section 4.1).
+    /// under both tables, which is a receiver's "should" (M1-100 section 2.3.1,
+    /// M2-120 section 4.1) and not a row of either table.
     ///
     /// Each table marks a message prohibited (P) for a sender, and for a
     /// receiver on the same row. A receiver ignores a message that is not for
@@ -467,13 +434,52 @@ impl Rules {
     /// with (an All Sound Off on the Manager Channel silencing every member,
     /// say).
     fn receive(self, role: Role, voice: &Voice2, mono: bool) -> Receive {
-        if role == Role::Member && manager_level(voice) {
+        if role == Role::Member && self.manager_level(voice) {
             return Receive::Ignore;
         }
         match self {
             Self::Mpe11 => mpe11_receive(role, voice, mono),
             Self::Profile => profile_receive(role, voice, mono),
         }
+    }
+
+    /// Whether `voice` is a Manager-level message: one that affects every
+    /// sounding note of a zone, which the Manager Channel alone carries and a
+    /// Member Channel ignores. Under both rule sets they are the Damper and
+    /// Sostenuto pedals and the Registered Controllers Coarse and Fine Tuning
+    /// (M1-100 section 2.3.1 gives the Damper Pedal as one, M2-120 section 4.1
+    /// the Damper Pedal, Coarse Tuning and Fine Tuning). Under the Profile
+    /// Volume (CC 7) is one too: of the two arrangements M2-102 section
+    /// 2.3.4.1 allows, tutti takes the Manager's Volume as scaling every
+    /// Member, so the Members ignore their own. Under MPE 1.1 Volume is an
+    /// ordinary optional message on a Member Channel (M1-100 Table 5).
+    fn manager_level(self, voice: &Voice2) -> bool {
+        match voice {
+            Voice2::ControlChange { controller, .. } => {
+                [CCNumber::SUSTAIN, CCNumber::SOSTENUTO].contains(controller)
+                    || (self == Self::Profile && *controller == CCNumber::VOLUME)
+            }
+            Voice2::Registered { bank, index, .. } => {
+                [Rpn::CHANNEL_COARSE_TUNING, Rpn::CHANNEL_FINE_TUNING]
+                    .contains(&Rpn::new(*bank, *index))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether a Manager Channel's `voice` is also sent on each Member Channel
+    /// of its zone: a Manager-level message, and the Channel Mode messages that
+    /// stop or reset every note (All Sound Off, which MPE 1.1 prohibits on the
+    /// Manager Channel and the Profile takes there: `receive` has dropped it
+    /// before this asks; Reset All Controllers; All Notes Off).
+    fn zone_wide(self, voice: &Voice2) -> bool {
+        self.manager_level(voice)
+            || matches!(voice, Voice2::ControlChange { controller, .. } if [
+                CCNumber::ALL_SOUND_OFF,
+                CCNumber::RESET_ALL,
+                CCNumber::ALL_NOTES_OFF,
+            ]
+            .contains(controller))
     }
 
     /// The MIDI Mode a Control Change names, if it is a Mode message that
@@ -773,7 +779,10 @@ impl MpeTranslator {
     /// - a manager-channel pressure/CC74 passes, and also reaches each note
     ///   its zone holds, combined with the note's own (`combined`);
     /// - a manager-channel pitch bend, bend sensitivity and zone-wide message
-    ///   (`zone_wide`) pass, and are also sent on each member channel;
+    ///   (`Rules::zone_wide`) pass, and are also sent on each member channel;
+    /// - a member-channel message that is Manager-level (`Rules::manager_level`)
+    ///   is ignored: a receiver should ignore it (M1-100 section 2.3.1, M2-120
+    ///   section 4.1), though neither table prohibits it;
     /// - a member-channel bend sensitivity (RPN #00/00) becomes a per-note
     ///   bend sensitivity (RPN #00/07) on each of the zone's member channels;
     /// - an MPE Configuration Message is absorbed, the channels it takes into
@@ -1004,7 +1013,7 @@ impl MpeTranslator {
         let slot = usize::from(ch.get());
         let manager = state.told[usize::from(master.get())];
         let at = event.0;
-        if role == Role::Master && zone_wide(&voice) {
+        if role == Role::Master && zone.rules.zone_wide(&voice) {
             // The Manager Channel's message is the whole zone's: it goes on,
             // and each member channel is told it too, so a receiver that reads
             // one channel at a time does the right thing.

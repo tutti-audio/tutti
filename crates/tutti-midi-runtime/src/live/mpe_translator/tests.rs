@@ -1522,13 +1522,12 @@ fn rule_sets() -> [(&'static str, MpeTranslator); 2] {
     ]
 }
 
-/// The Manager-level messages (`manager_level`) as one channel's message.
-fn manager_level_messages() -> [(&'static str, fn(u8) -> UmpAt); 6] {
+/// The Manager-level messages both rule sets share, as one channel's message:
+/// the pedals and the tunings.
+fn manager_level_messages() -> [(&'static str, fn(u8) -> UmpAt); 4] {
     [
         ("Damper", |ch| cc(ch, CCNumber::SUSTAIN, 127)),
         ("Sostenuto", |ch| cc(ch, CCNumber::SOSTENUTO, 127)),
-        ("Volume", |ch| cc(ch, CCNumber::VOLUME, 100)),
-        ("Expression", |ch| cc(ch, CCNumber::EXPRESSION, 100)),
         ("Coarse Tuning", |ch| {
             at(
                 0,
@@ -1546,15 +1545,13 @@ fn manager_level_messages() -> [(&'static str, fn(u8) -> UmpAt); 6] {
 
 /// **A Manager Channel's zone-wide message is every channel of its zone's, and a
 /// Member Channel's own is ignored** (M1-100 section 2.3.1 and M2-120 section
-/// 4.1: certain messages, the Damper Pedal and the tunings for example, affect
-/// all sounding notes and are sent only on the Manager Channel, and a Member
-/// Channel's is ignored; M2-102 section 2.3.4.1: a Manager's Volume reaches
-/// every Member, whose own Volume is ignored). The pedals, Volume, Expression
-/// and the tunings, then All Notes Off and Reset All Controllers, go on from
-/// the manager and are sent on each member channel with the same value, in the
-/// order of the zone, under both receive tables. A member's own pedal, Volume,
-/// Expression and tuning produce nothing.
-/// Spec: m2-120/4.1#2, m2-102/2.3.4.1#7
+/// 4.1: certain messages, the Damper Pedal, Coarse Tuning and Fine Tuning for
+/// example, affect all sounding notes and are sent only on the Manager Channel,
+/// and a Member Channel's is ignored). The pedals and the tunings, then All
+/// Notes Off and Reset All Controllers, go on from the manager and are sent on
+/// each member channel with the same value, in the order of the zone, under both
+/// receive tables. A member's own pedal or tuning produces nothing.
+/// Spec: m2-120/4.1#2
 #[test]
 fn a_managers_zone_wide_message_is_sent_on_every_member_channel() {
     for (table, mut translator) in rule_sets() {
@@ -1590,21 +1587,29 @@ fn a_managers_zone_wide_message_is_sent_on_every_member_channel() {
     }
 }
 
-/// A member's Damper Off after the manager's Damper On is ignored, so the
-/// pedal the manager sent on the member's channel stays down (M2-120 section
-/// 4.1).
-/// Spec: m2-120/4.1#2
+/// **Under the Profile the Manager's Volume is every Member's, and a Member's
+/// own is ignored** (M2-102 section 2.3.4.1: if the Manager's Volume affects the
+/// total output of all Members, they ignore their own). Under MPE 1.1 Volume is
+/// an ordinary message (M1-100 Table 5): a member's passes on its channel and
+/// the manager's is not copied onto the members.
+/// Spec: m2-102/2.3.4.1#7
 #[test]
-fn a_members_damper_off_does_not_release_the_managers_pedal() {
-    for (table, mut translator) in rule_sets() {
-        let down = decoded(&mut translator, &cc(0, CCNumber::SUSTAIN, 127));
-        assert!(down.iter().any(|(c, _)| *c == 2), "{table}");
-        assert_eq!(
-            translator.translated(&cc(2, CCNumber::SUSTAIN, 0)).count(),
-            0,
-            "{table}"
-        );
+fn the_profiles_manager_volume_scales_every_member_and_mpe11_has_no_such_rule() {
+    let [(_, mut mpe11), (_, mut profile)] = rule_sets();
+    let volume = |channel| cc(channel, CCNumber::VOLUME, 100);
+
+    let out = decoded(&mut profile, &volume(0));
+    let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+    assert_eq!(channels, [0, 1, 2, 3]);
+    for member in 1..=3 {
+        assert_eq!(profile.translated(&volume(member)).count(), 0);
     }
+
+    let out = decoded(&mut mpe11, &volume(0));
+    let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+    assert_eq!(channels, [0]);
+    let own = volume(2);
+    assert_eq!(mpe11.translated(&own).collect::<Vec<_>>(), vec![own]);
 }
 
 /// The upper zone counts down from the channel below its manager: a pedal on
