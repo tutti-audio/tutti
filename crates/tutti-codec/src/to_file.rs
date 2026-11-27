@@ -84,12 +84,6 @@ impl ToFile {
         self
     }
 
-    /// A file at `path` written in this one's format, with the channels and the rate of
-    /// whatever it is given, and the options of a new file.
-    pub fn alongside(&self, path: impl Into<PathBuf>) -> Self {
-        Self::new(path, Encoding::new(self.encoding.format()))
-    }
-
     /// The file, begun for `spec`, with `options`' length and seed.
     pub(crate) fn create(&self, options: EncoderOptions<'_>) -> Result<FileEncoder> {
         let options = match self.encoding.seed() {

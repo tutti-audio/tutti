@@ -99,7 +99,6 @@ fn spec::Spec::new
 fn spec::Spec::of_channels
 fn spec::Spec::rate
 fn spec::Spec::topology
-fn to_file::ToFile::alongside
 fn to_file::ToFile::channel_set
 fn to_file::ToFile::format
 fn to_file::ToFile::in_place

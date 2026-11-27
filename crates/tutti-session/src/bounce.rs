@@ -89,7 +89,7 @@ use tutti_dsp::FftFloat;
 use crate::ToMemory;
 use crate::fork::PendingExport;
 use render_output::{Landing, MainShape, StemOutput, StemShape};
-use tutti_codec::ToFile;
+use tutti_codec::{Encoding, ToFile};
 use tutti_rt::SplitMix64;
 
 /// The span of the project a bounce renders, in the unit the caller thinks in.
@@ -722,7 +722,7 @@ impl<N, F: Float> Bounce<N, ToFile, F> {
     /// main output (what a bus or the main output applies downstream is not in it), at
     /// the node's own width.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
-        let to = self.main_output.alongside(path);
+        let to = ToFile::new(path, Encoding::new(self.main_output.format()));
         self.stem_with(Stem::new(node).to(to))
     }
 
