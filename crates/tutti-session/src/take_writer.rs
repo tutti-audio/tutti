@@ -94,17 +94,7 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
                 unfinished: None,
             },
         })?;
-        Ok(Written {
-            bytes: std::fs::metadata(&path).map_or(0, |m| m.len()),
-            path,
-            frames: landed.frames(),
-            dropped_events: 0,
-            clipped_samples: landed.clipped(),
-            gain: None,
-            measured: None,
-            placement,
-            spill_left: None,
-        })
+        Ok(Written::new(path, landed, placement))
     }
 }
 
