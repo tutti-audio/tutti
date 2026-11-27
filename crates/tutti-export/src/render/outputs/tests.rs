@@ -113,9 +113,9 @@ fn a_normalized_output_spills_past_the_budget_and_writes_what_it_would_in_memory
         let samples: Vec<f32> = file.samples::<f32>().map(|s| s.unwrap()).collect();
         assert_eq!(samples.len(), FRAMES * 2, "budget {budget}");
         for (i, frame) in samples.chunks(2).enumerate() {
-            for c in 0..2 {
+            for (c, &sample) in frame.iter().enumerate() {
                 assert_eq!(
-                    frame[c],
+                    sample,
                     planes.at(c, i) * scale as f32,
                     "budget {budget}: frame {i} channel {c}"
                 );
