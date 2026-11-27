@@ -203,7 +203,11 @@ pub(crate) trait SenderBackend: Send + Sync {
 /// [`MidiHardwareError::EndpointGone`]. A clone shares the cell.
 #[derive(Clone, Debug)]
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "winmm"),
+    any(
+        midi_backend = "none",
+        midi_backend = "winmm",
+        midi_backend = "midi_services"
+    ),
     allow(
         dead_code,
         reason = "only the ALSA and CoreMIDI virtual endpoints use it"
@@ -212,7 +216,11 @@ pub(crate) trait SenderBackend: Send + Sync {
 pub(crate) struct Live(Arc<tutti_rt::RwLock<bool>>);
 
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "winmm"),
+    any(
+        midi_backend = "none",
+        midi_backend = "winmm",
+        midi_backend = "midi_services"
+    ),
     allow(
         dead_code,
         reason = "only the ALSA and CoreMIDI virtual endpoints use it"
