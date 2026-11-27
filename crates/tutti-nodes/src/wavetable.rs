@@ -8,7 +8,7 @@ use crate::last_good::LastGood;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::{Wavetable, WavetableOscillator, WavetableStep};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Shared, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 
@@ -77,7 +77,7 @@ pub struct WavetableNode<F: Float> {
 // [`WavetableConfig`] it is made from: its width, its table and its starting params.
 tutti_graph::declare_params!([F: Float] WavetableNode<F>, WavetableConfig<F: Float>,
     WavetableCells<F: Float> {
-    required { width: ChannelLayout, table: Arc<Wavetable<F>> }
+    required { width: ChannelLayout, table: Shared<Wavetable<F>> }
     params {
         Frequency => frequency: Hz = Hz::new(440.0),
         Volume => level: Amplitude = Amplitude::UNITY,
@@ -89,7 +89,7 @@ impl<F: Float> From<WavetableConfig<F>> for WavetableNode<F> {
     fn from(config: WavetableConfig<F>) -> Self {
         Self {
             width: config.width,
-            wave: WavetableOscillator::new(config.table.clone()),
+            wave: WavetableOscillator::new(Arc::clone(config.table.arc())),
             cells: WavetableCells::from_config(&config),
             rate: None,
             good_frequency: LastGood::new(config.frequency.get(), 0.0),

@@ -22,7 +22,7 @@ pub fn vbap_mix(
     sources: &[(NodeKey, Azimuth)],
 ) -> Result<(), VbapError> {
     for &(source, azimuth) in sources {
-        let panner = VbapPannerNode::try_from(VbapPannerConfig::new(bed.into()))?;
+        let panner = VbapPannerNode::try_from(VbapPannerConfig::new(bed))?;
         let (pan, params) = g.add_with_controls(panner);
         params.set(UnitParam::Azimuth, azimuth.get());
         g.connect(source, 0, pan, 0).connect(source, 1, pan, 1);

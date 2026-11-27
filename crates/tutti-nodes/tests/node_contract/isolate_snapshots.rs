@@ -49,7 +49,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
     TransientShaperNode,
 };
-use tutti_nodes::{GranularConfig, GranularNode};
+use tutti_nodes::{GranularConfig, GranularNode, GranularSource};
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -639,13 +639,14 @@ fn granular() {
         let frames: Vec<f32> = (0..2 * 4_800).map(|i| (i as f32 * 0.05).sin()).collect();
         wave.append(Interleaved::new(&frames, ChannelLayout::STEREO).unwrap())
             .unwrap();
-        GranularNode::<f32>::try_from(
-            GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
-                .density(Hz::new(80.0))
-                .jitter([Normalized::of(0.2), Normalized::of(0.3)])
-                .seed(5),
+        GranularNode::<f32>::from(
+            GranularConfig::new(
+                GranularSource::new(ChannelLayout::STEREO, Arc::new(wave)).unwrap(),
+            )
+            .density(Hz::new(80.0))
+            .jitter([Normalized::of(0.2), Normalized::of(0.3)])
+            .seed(5),
         )
-        .unwrap()
     })
     .control("density", |r| {
         assert!(r.param_set().set(UnitParam::Rate, 300.0))
