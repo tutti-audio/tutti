@@ -41,7 +41,7 @@ test-group = 'sequencer'
 # `midiOutOpen` while another test binary holds it fails (`MMSYSERR_ERROR`).
 # The synth tests of every crate run one at a time.
 [[profile.default.overrides]]
-filter = 'test(/^synth_open::/)'
+filter = 'test(/^synth_open::/) | (package(tutti-midi-hardware) & test(/^output::/))'
 test-group = 'gs-synth'
 
 # `cargo xtask conformance` joins each test's result to the spec rows it tags.
