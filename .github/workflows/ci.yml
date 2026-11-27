@@ -281,11 +281,13 @@ jobs:
             }
           } finally { $zip.Dispose() }
       # Two runs, one after the other: the loopback pair is machine-wide, and a hardware test that sends on it
-      # must not overlap an ffi test that asserts exact receipt (nextest's groups hold within one run).
+      # must not overlap an ffi test that asserts exact receipt (nextest's groups hold within one run). Both name
+      # the packages and features the DLL was staged for, so they run those binaries rather than a rebuild with
+      # another feature set, and a filter picks each package's tests.
       - name: Tests (ffi)
-        run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests -E 'package(tutti-winmidi2-ffi)'
       - name: Tests (hardware)
-        run: cargo nextest run --locked -p tutti-midi-hardware --features services-tests
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests -E 'package(tutti-midi-hardware)'
 
   # Every AU crate is macOS-only, so the Linux and Windows jobs compile it to nothing. Lints only: the AU
   # suites need installed audio units and run locally, and the macOS `test` runs on pushes to main.
