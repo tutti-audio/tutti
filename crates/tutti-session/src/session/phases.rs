@@ -18,8 +18,7 @@ use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Phase {
-    /// The bells tick, then what the session's takes reported lands
-    /// ([`TakeEvent`](crate::TakeEvent)s, in arrival order). Then crossfades
+    /// The bells tick. Then crossfades
     /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// an hour of `PhaseCx::now` warned about, once), then
@@ -159,9 +158,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // executor runs what was woken, so what those futures sent lands now.
                 self.sampler.wake();
                 self.background.poll();
-                // First of the landings, so what a take reported is in this update's
-                // events.
-                self.inputs.land_takes(out);
                 // A take's stop the transport's queue refused, sent now that
                 // the renders since have freed room.
                 #[cfg(feature = "capture")]

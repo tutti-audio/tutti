@@ -172,6 +172,8 @@ mod signal_windows;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
+#[cfg(feature = "capture")]
+mod take_writer;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
@@ -213,7 +215,7 @@ pub use clock::{
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "export")]
-pub use destination::ToMemory;
+pub use destination::{ToMemory, ToSink};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
@@ -357,8 +359,8 @@ pub use signal_windows::windows_from_signal;
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
-    TakeEvent, TakeFile, TakePlacement, TakeTarget, Window,
+    Armed, Finishing, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd,
+    TakeError, TakePlacement, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
