@@ -423,7 +423,7 @@ impl<S: Float> Wave<S> {
     /// Multiplies every sample by `gain`: the apply half of a measure-then-apply
     /// normalization.
     pub fn apply_gain(&mut self, gain: Db) {
-        let scale = S::from_f64(gain.to_amplitude().get());
+        let scale = S::from_unit(gain.to_amplitude());
         for sample in self.vec.iter_mut().flatten() {
             *sample *= scale;
         }
