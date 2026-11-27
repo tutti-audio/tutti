@@ -434,13 +434,11 @@ pub struct Graph<F: Float = f32> {
     /// What each node's params are written through: the session's value
     /// table, which the session's `Values` share.
     values: Arc<ValueTable>,
-    /// Edited since the last commit: what `update()` commits on, and what a
-    /// local render commits first.
-    edited: bool,
     /// The refusal reported last, until a commit is sent: a spec that keeps
     /// failing the same way is reported once.
     refused: Option<CommitError>,
-    /// Plans sent, for a host (or a test) asking whether an update sent one.
+    /// Plans sent, for the test seam's `commits_sent`.
+    #[cfg(feature = "testing")]
     commits: u64,
     /// Threads per block, the caller included (`0` for one per core).
     render_workers: crate::Workers,
@@ -463,9 +461,9 @@ pub struct Graph<F: Float = f32> {
     main_output_meter: Option<MeterReader>,
     /// The main output meter's id: the one meter that reads the main output.
     main_output_meter_id: MeterId,
-    /// Each open tap on the main output ([`Taps::open_main_output`]) with its capacity and
-    /// the width its reader has, so a main output of another width opens it again.
-    output_taps: BTreeMap<TapId, (Samples, usize)>,
+    /// Each open tap on the main output ([`Taps::open_main_output`]) with its capacity;
+    /// its width is the spec's, so a main output of another width opens it again.
+    output_taps: BTreeMap<TapId, Samples>,
     /// The readers the main output's width opened again, each held under its id until
     /// claimed ([`Graph::take_reopened`]).
     reopened: BTreeMap<MainOutputReader, observe::Held<F>>,
@@ -574,8 +572,6 @@ impl<F: Float> std::fmt::Debug for Graph<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Graph");
         d.field("editor", &self.editor)
-            .field("edited", &self.edited)
-            .field("commits", &self.commits)
             .field("render_workers", &self.render_workers)
             .field("feeds", &self.feeds)
             .field("fed_edges", &self.fed_edges)
@@ -671,8 +667,8 @@ impl<F: Float> Graph<F> {
             })),
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
-            edited: true,
             refused: None,
+            #[cfg(feature = "testing")]
             commits: 0,
             render_workers: crate::Workers::SERIAL,
             render_worker_start: None,
@@ -1022,7 +1018,6 @@ impl<F: Float> Graph<F> {
         self.editor.insert(id, N::kind(), parts);
         self.nodes.insert(id, Entry { controls: None });
         self.note_pass(id);
-        self.edited = true;
         (Key::new(id), placed)
     }
 }
@@ -1225,7 +1220,6 @@ impl Graph {
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);
         self.write_own_bypass(node);
-        self.edited = true;
         (Key::new(node), rebinder)
     }
 
@@ -1791,7 +1785,6 @@ impl<F: Float> Graph<F> {
         }
         self.note_pass(node);
         self.sweep_gain_targets();
-        self.edited = true;
         Ok(controls)
     }
 
@@ -1933,7 +1926,7 @@ impl<F: Float> Graph<F> {
     /// What the re-inserts since the last call unwired, once the commit that
     /// carries them is sent: nothing while an edit still waits.
     pub(crate) fn take_unwired(&mut self) -> Vec<Unwiring> {
-        if self.edited {
+        if self.editor.edited() {
             return Vec::new();
         }
         std::mem::take(&mut self.unwired)
@@ -2058,7 +2051,6 @@ impl<F: Float> Graph<F> {
             return Ok(false);
         }
         self.connect_event(to, from, delay);
-        self.edited = true;
         Ok(true)
     }
 
@@ -2120,11 +2112,8 @@ impl<F: Float> Graph<F> {
     pub(crate) fn remove_event_edge(&mut self, from: EventOutputPort, to: EventInputPort) -> bool {
         let held = self.held_event_edge(from, to);
         let removed = held.is_some_and(|edge| self.editor.disconnect_events(to, edge));
-        if removed {
-            if let Some(ours) = self.fed_edges.get_mut(&to.node()) {
-                ours.retain(|s| *s != from);
-            }
-            self.edited = true;
+        if removed && let Some(ours) = self.fed_edges.get_mut(&to.node()) {
+            ours.retain(|s| *s != from);
         }
         removed
     }
@@ -2215,7 +2204,6 @@ impl<F: Float> Graph<F> {
                 self.connect_event(at, from, None);
             }
         }
-        self.edited = true;
     }
 
     /// The event outputs feeding `to`, in the graph's order: every edge the
@@ -2295,6 +2283,17 @@ impl<F: Float> Graph<F> {
             .get(&sink)
             .and_then(|f| f.get(&feeder))
             .map_or(&[], Vec::as_slice))
+    }
+
+    /// The sinks `feeder` feeds, each with the sources it feeds it.
+    #[cfg(feature = "midi")]
+    pub(crate) fn feed_sinks(
+        &self,
+        feeder: Feeder,
+    ) -> impl Iterator<Item = (NodeKey, &[EventOutputPort])> {
+        self.feeds
+            .iter()
+            .filter_map(move |(&sink, feeds)| Some((sink, feeds.get(&feeder)?.as_slice())))
     }
 
     /// Every source any feeder feeds `sink`, sorted and without repeats.
@@ -2431,7 +2430,6 @@ impl<F: Float> Graph<F> {
             sources.retain(|s| s.node() != node);
         }
         self.fed_edges.retain(|_, s| !s.is_empty());
-        self.edited = true;
         Ok(Removal::new(self, node))
     }
 
@@ -2440,7 +2438,6 @@ impl<F: Float> Graph<F> {
     pub(crate) fn cut_removal(&mut self, node: NodeKey) {
         if self.editor.is_leaving(node) {
             self.editor.remove(node);
-            self.edited = true;
         }
     }
 
@@ -2558,9 +2555,6 @@ impl<F: Float> Graph<F> {
             &mirror,
             now,
         )?;
-        if applied.commit {
-            self.edited = true;
-        }
         Ok(applied)
     }
 }
@@ -2739,7 +2733,6 @@ impl<F: Float> Graph<F> {
             self.editor
                 .set_edge_fade(id, EdgeFade::In)
                 .expect("the edge was just wired");
-            self.edited = true;
         }
         Ok(added || leaving)
     }
@@ -2783,7 +2776,6 @@ impl<F: Float> Graph<F> {
             self.editor.clear_edge_gain(id);
             self.sweep_gain_targets();
         }
-        self.edited = true;
     }
 
     /// Removes the edge `from -> to`, its gain with it: whether it was there.
@@ -2815,12 +2807,9 @@ impl<F: Float> Graph<F> {
             && self.editor.edge_is_live(id)
             && self.editor.set_edge_fade(id, EdgeFade::Out).is_ok()
         {
-            self.edited = true;
             return true;
         }
-        let removed = self.editor.disconnect_edge(id);
-        self.edited |= removed;
-        removed
+        self.editor.disconnect_edge(id)
     }
 
     /// Every edge of `to`'s sink the session holds and is not fading out.
@@ -3086,7 +3075,6 @@ impl<F: Float> Graph<F> {
         if was.is_none_or(|fade| fade == EdgeFade::Out) {
             self.editor.set_bus_fade(from, at, EdgeFade::In);
         }
-        self.edited = true;
         Ok(())
     }
 
@@ -3112,25 +3100,18 @@ impl<F: Float> Graph<F> {
         }
         if !hard && self.editor.bus_edge_is_live(from, at) {
             self.editor.set_bus_fade(from, at, EdgeFade::Out);
-            self.edited = true;
             return true;
         }
-        let removed = match to.0 {
+        match to.0 {
             BusEnd::Node(to) => self.editor.disconnect_bus(from, to),
             BusEnd::MainOutput => self.editor.disconnect_bus_from_main_output(from),
-        };
-        self.edited |= removed;
-        removed
+        }
     }
 
     /// Makes the bus edge `from -> to` a plain, unfaded one.
     pub(crate) fn harden_bus_edge(&mut self, from: BusOutputPort, to: BusInputPort) {
-        if self
-            .editor
-            .set_bus_fade(from, Self::bus_sink(to), EdgeFade::None)
-        {
-            self.edited = true;
-        }
+        self.editor
+            .set_bus_fade(from, Self::bus_sink(to), EdgeFade::None);
     }
 
     /// What feeds a bus edge's sink (an input bus of a node, or the main output), in
@@ -3179,13 +3160,10 @@ impl<F: Float> Graph<F> {
         if self.fading_out(id) {
             return Ok(());
         }
-        let had = self.editor.spec().gains.contains_key(&id);
         // The wire is in the graph (a connection just made it), and a bus
         // lane is not a wire a connection weights: the only refusal left is
         // the gain, checked above.
-        if self.editor.set_edge_gain(id, gain).is_ok() && !had {
-            self.edited = true;
-        }
+        let _ = self.editor.set_edge_gain(id, gain);
         Ok(())
     }
 
@@ -3265,7 +3243,6 @@ impl<F: Float> Graph<F> {
         } else {
             self.editor.clear_edge_gain(id)
         };
-        self.edited |= cleared;
         self.sweep_gain_targets();
         cleared
     }
@@ -3429,7 +3406,6 @@ impl<F: Float> Graph<F> {
                 }),
                 "no held reader names a pruned tap"
             );
-            self.edited = true;
         }
         pruned
     }
@@ -3441,7 +3417,6 @@ impl<F: Float> Graph<F> {
         if pruned > 0 {
             let open = &self.editor.spec().topology.event_taps;
             self.event_taps.retain(|id, _| open.contains_key(id));
-            self.edited = true;
         }
         pruned
     }
@@ -3460,7 +3435,6 @@ impl<F: Float> Graph<F> {
                 }),
                 "no held reader names a pruned meter"
             );
-            self.edited = true;
         }
         pruned
     }
@@ -3756,14 +3730,8 @@ impl<F: Float> Graph<F> {
             tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
         let spec = self.editor.spec();
-        if spec.main_output != set {
-            // The main output's bus edges fold to the new topology at the next
-            // commit.
-            self.edited |= !spec.main_output_sources.is_empty();
-        }
         let before = spec.topology.outputs.len();
         let id = next.unwrap_or(spec.main_output_id);
-        self.edited |= next.is_some();
         self.editor
             .declare_main_output(set, id)
             .expect("the id is new, or the declaration is the one it holds");
@@ -3771,7 +3739,6 @@ impl<F: Float> Graph<F> {
         if resized {
             // The channels cut took their gain entries with them.
             self.sweep_gain_targets();
-            self.edited = true;
         }
         self.reopen_main_output_readers(resized);
         self.publish_output_facts();
@@ -3783,7 +3750,7 @@ impl<F: Float> Graph<F> {
     /// Whether an edit waits for a commit: what the session's next update
     /// commits on.
     pub fn has_uncommitted_edits(&self) -> bool {
-        self.edited
+        self.editor.edited()
     }
 
     /// What a pass that is a function of the editor compares: its revision,
@@ -3844,10 +3811,7 @@ impl<F: Float> Graph<F> {
             return false;
         }
         match self.editor.set_latency(node, latency) {
-            Ok(()) => {
-                self.edited = true;
-                true
-            }
+            Ok(()) => true,
             Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: latency of {node:?} refused: {e}");
@@ -3882,10 +3846,7 @@ impl<F: Float> Graph<F> {
             return false;
         }
         match self.editor.set_tail(node, tail) {
-            Ok(()) => {
-                self.edited = true;
-                true
-            }
+            Ok(()) => true,
             Err(CommitError::Repreparing) => false,
             Err(e) => {
                 tracing::error!("graph: tail of {node:?} refused: {e}");
@@ -3905,9 +3866,7 @@ impl<F: Float> Graph<F> {
         Self::bury(&mut self.retiring, &retired);
         // An edge whose declick fade has ended leaves the spec (or forgets the
         // fade); the commit that follows compiles it away.
-        if self.editor.finish_fades() {
-            self.edited = true;
-        }
+        self.editor.finish_fades();
         self.apply_pending_main_output();
     }
 
@@ -3924,9 +3883,25 @@ impl<F: Float> Graph<F> {
         self.editor.take_unreported_event_losses()
     }
 
-    /// How many commits have sent a plan: an edit staged before a count is in
-    /// the plan of the commit that moved it past.
-    #[cfg(any(feature = "plugin", feature = "testing"))]
+    /// The plan sent last.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn sent_plan(&self) -> Option<Arc<tutti_graph::Plan>> {
+        self.editor.base().cloned()
+    }
+
+    /// Whether a plan other than `then` has been sent since `then` was the
+    /// plan sent last. Holding `then` keeps its address from being reused.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn sent_since(&self, then: Option<&Arc<tutti_graph::Plan>>) -> bool {
+        match (then, self.editor.base()) {
+            (Some(then), Some(now)) => !Arc::ptr_eq(then, now),
+            (None, None) => false,
+            _ => true,
+        }
+    }
+
+    /// How many commits have sent a plan.
+    #[cfg(feature = "testing")]
     pub(crate) fn commits(&self) -> u64 {
         self.commits
     }
@@ -3939,9 +3914,11 @@ impl<F: Float> Graph<F> {
         match self.editor.commit() {
             Ok(rewired) => {
                 self.note_rewired(rewired);
-                self.edited = false;
                 self.refused = None;
-                self.commits += 1;
+                #[cfg(feature = "testing")]
+                {
+                    self.commits += 1;
+                }
                 for node in std::mem::take(&mut self.gained) {
                     if !self.unapplied.contains(&node) {
                         self.unapplied.push(node);

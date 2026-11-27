@@ -370,6 +370,7 @@ fn edit::editor::Editor::connect_bus
 fn edit::editor::Editor::connect_bus_to_main_output
 fn edit::editor::Editor::disconnect_bus
 fn edit::editor::Editor::disconnect_bus_from_main_output
+fn edit::editor::Editor::edited
 fn edit::editor::Editor::fades_in_flight
 fn edit::editor::Editor::first_unsupported_rate
 fn edit::editor::Editor::in_flight

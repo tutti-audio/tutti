@@ -229,6 +229,9 @@ impl<F: Float> Editor<F> {
         // The re-prepare restarts every unit from silence, so there is
         // nothing to fade from: a pending replace lands as a plain swap.
         self.entries.clear_fades_and_cuts();
+        // The shapes the prepare refreshes are the re-prepare's, not an edit
+        // a commit is owed for.
+        let edited = self.structure.edited;
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for (&key, unit) in &mut pending {
                 if let Some(wake) = self.entries.wake(key) {
@@ -244,6 +247,7 @@ impl<F: Float> Editor<F> {
                 );
             }
         }));
+        self.structure.edited = edited;
         if let Err(p) = prepared {
             let cause = format!("a node panicked in prepare: {}", panic_text(p));
             self.life = Lifecycle::Poisoned {
@@ -286,9 +290,13 @@ impl<F: Float> Editor<F> {
         self.life = Lifecycle::idle(sent);
         self.life.clear_committed();
         let rep = *reprepare;
+        // The shapes the prepare refreshes are the re-prepare's, not an edit a
+        // commit is owed for.
+        let edited = self.structure.edited;
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.finish_reprepare(returned, rep)
         }));
+        self.structure.edited = edited;
         match outcome {
             Ok(Ok((plan, delta, units, weights))) => {
                 self.send(plan, delta, units, &weights, Sending::Resume);
