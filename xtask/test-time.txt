@@ -14,7 +14,6 @@
 0 1 crates/tutti-midi-hardware/src/backend/legacy_port/tests.rs
 0 1 crates/tutti-midi-hardware/src/stamp/tests.rs
 0 2 crates/tutti-midi-hardware/tests/input/listener.rs
-1 0 crates/tutti-midi-hardware/tests/input/output.rs
 0 1 crates/tutti-midi-hardware/tests/input/virtual_endpoint.rs
 0 1 crates/tutti-midi-hardware/tests/input/virtual_loopback.rs
 0 5 crates/tutti-plugin-ipc/src/client/hostile_peer_tests.rs

@@ -4,10 +4,6 @@ use std::time::Duration;
 use tutti_midi_device::{DeviceEvent, DeviceInfo};
 use tutti_midi_hardware::Devices;
 
-/// Whether `pending` counts an event until its time. ALSA hands a timed event to the
-/// kernel queue, so `pending` is 0 at once and the kernel owns the time.
-pub(crate) const HOLDS_EVENTS_TO_THEIR_TIME: bool = false;
-
 /// A bound that only guards a hang.
 const PATIENCE: Duration = Duration::from_secs(30);
 

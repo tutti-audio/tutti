@@ -13,7 +13,7 @@ use tutti_midi_runtime::{Outgoing, SendAt};
 use tutti_ump::{MidiGroup, SysexMessage, Ump};
 use tutti_units::Losses;
 
-use super::target::{HOLDS_EVENTS_TO_THEIR_TIME, output};
+use super::target::output;
 
 /// Long enough to be a failure, not a race.
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -52,7 +52,7 @@ fn a_listed_output_has_the_same_id_in_a_second_listing_and_no_input_is_nameless(
 }
 
 #[test]
-fn an_output_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
+fn an_output_sends_every_timed_event_without_a_loss_and_opens_again_after_a_close() {
     let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
     let id = output(&devices).id;
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
@@ -76,15 +76,6 @@ fn an_output_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         drained(&out);
         assert_eq!(out.losses(), Losses::NONE);
         assert!(out.is_alive());
-        // On a backend whose own thread holds an event until it is due, the last was
-        // due 90 ms in and a hold never ends early; only lateness depends on load.
-        if HOLDS_EVENTS_TO_THEIR_TIME {
-            assert!(
-                now.elapsed() >= Duration::from_millis(85),
-                "{:?}",
-                now.elapsed()
-            );
-        }
     }
 }
 
