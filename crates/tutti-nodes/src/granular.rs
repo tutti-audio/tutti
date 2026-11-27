@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::last_good::LastGood;
 use tutti_buffers::{ChannelLayout, Float, Wave};
 use tutti_dsp::{GrainSettings, Granular, MaxGrains};
-use tutti_graph::{Cx, Io, Node, ParamInput, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, ParamInput, Prepare, Shape, Shared, Status};
 use tutti_rt::Param;
 use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam};
 
@@ -42,16 +42,16 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 /// use std::sync::Arc;
 /// use tutti_buffers::{ChannelLayout, Interleaved, MaxBlock, Wave};
 /// use tutti_graph::{GraphBuilder, Prepare};
-/// use tutti_nodes::{GranularConfig, GranularNode};
+/// use tutti_nodes::{GranularConfig, GranularNode, GranularSource};
 /// use tutti_units::{Hz, SampleRate, Samples, Seconds};
 ///
 /// let mut source = Wave::<f32>::new(1, SampleRate::SR_48K);
 /// source.append(Interleaved::new(&[0.5; 4800], ChannelLayout::MONO)?)?;
-/// let cloud = GranularNode::<f32>::try_from(
-///     GranularConfig::new(ChannelLayout::MONO, Arc::new(source))
+/// let cloud = GranularNode::<f32>::from(
+///     GranularConfig::new(GranularSource::new(ChannelLayout::MONO, Arc::new(source))?)
 ///         .density(Hz::new(100.0))
 ///         .length(Seconds::new(0.01)),
-/// )?;
+/// );
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
 /// let node = g.add_with_controls(cloud);
 /// g.pipe_output(node.0);
@@ -76,11 +76,11 @@ pub struct GranularNode<F: Float> {
 }
 
 // The params a [`GranularNode`] lets the graph modulate, in port order, and the
-// [`GranularConfig`] it is made from: the shared source and the starting values of its
+// [`GranularConfig`] it is made from: the source and the starting values of its
 // params. The jitter is two cells: the position's at 0 and the timing's at 1.
 tutti_graph::declare_params!([F: Float] GranularNode<F>, GranularConfig<F: Float>,
     GranularCells<F: Float> {
-    required { layout: ChannelLayout, source: Arc<Wave<F>> }
+    required { source: GranularSource<F> }
     params {
         Rate => density: Hz = Hz::new(10.0),
         Pitch => rate: Cents = Cents::new(0.0),
@@ -91,7 +91,7 @@ tutti_graph::declare_params!([F: Float] GranularNode<F>, GranularConfig<F: Float
     options { max_grains: MaxGrains = MaxGrains::of(32), seed: u64 = 0 }
 });
 
-/// What a [`GranularConfig`] cannot make a node of.
+/// What a [`GranularSource`] cannot be made of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GranularError {
     /// The source is wider than one channel and not as wide as the output: no channel of it
@@ -107,21 +107,45 @@ pub enum GranularError {
     },
 }
 
-impl<F: Float> TryFrom<GranularConfig<F>> for GranularNode<F> {
-    type Error = GranularError;
+/// The wave a [`GranularNode`] reads and the layout it feeds: a mono wave for any layout,
+/// otherwise a wave with a channel for each of the layout's.
+///
+/// The wave is a [`Shared`]: two sources are equal when they share one wave and one layout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GranularSource<F: Float> {
+    layout: ChannelLayout,
+    wave: Shared<Wave<F>>,
+}
 
-    fn try_from(config: GranularConfig<F>) -> Result<Self, GranularError> {
-        let source_channels = config.source.channels();
-        if source_channels != 1 && source_channels != usize::from(config.layout.count()) {
+impl<F: Float> GranularSource<F> {
+    /// `wave` read into the channels of `layout`.
+    ///
+    /// # Errors
+    ///
+    /// [`GranularError::Width`] when `wave` is neither mono nor as wide as `layout`: the
+    /// validity is the wave's width and the layout's together.
+    pub fn new(
+        layout: impl Into<ChannelLayout>,
+        wave: impl Into<Shared<Wave<F>>>,
+    ) -> Result<Self, GranularError> {
+        let (layout, wave) = (layout.into(), wave.into());
+        let source_channels = wave.channels();
+        if source_channels != 1 && source_channels != usize::from(layout.count()) {
             return Err(GranularError::Width {
                 source_channels,
-                output_channels: config.layout.count(),
+                output_channels: layout.count(),
             });
         }
+        Ok(Self { layout, wave })
+    }
+}
+
+impl<F: Float> From<GranularConfig<F>> for GranularNode<F> {
+    fn from(config: GranularConfig<F>) -> Self {
         let good = |initial: f64, fallback: f64| LastGood::new(initial, fallback);
-        Ok(Self {
-            layout: config.layout,
-            source: Arc::clone(&config.source),
+        Self {
+            layout: config.source.layout,
+            source: Arc::clone(config.source.wave.arc()),
             max_grains: config.max_grains,
             seed: config.seed,
             good: [
@@ -134,7 +158,7 @@ impl<F: Float> TryFrom<GranularConfig<F>> for GranularNode<F> {
             ],
             cells: GranularCells::from_config(&config),
             cloud: None,
-        })
+        }
     }
 }
 

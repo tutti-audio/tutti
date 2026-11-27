@@ -9,25 +9,23 @@ use std::fmt;
 
 use thiserror::Error;
 use tutti_buffers::Float;
-use tutti_graph::{
-    BusOutputPort, CycleEdge, Edge, EdgeId, GraphSpec, HostValues, Initials, IntoNode, NodeConfig,
-    NodeKey, NodeSpec, PortSink, PortSource, Shape, Shapes,
-};
+use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Shapes};
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
-use crate::key::BusEnd;
 use crate::patch::{
-    Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireEnds,
-    WireId,
+    Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireDecl,
+    WireEnds, WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
-use crate::{
-    AnyAssign, AppKey, BusInputPort, Clock, ConnectError, Graph, Key, ReplaceRefused, Session,
-};
+use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
 
+mod check;
+mod section;
 mod wire;
-use wire::{KeptWire, Ports, Resolved};
+use check::check;
+use section::{Decided, KeptSection, Kind, decide};
+use wire::{KeptWire, Resolved};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
@@ -96,6 +94,9 @@ pub enum PatchError<K> {
     /// The key is declared twice in one patch.
     #[error("{0:?} is declared twice in one patch")]
     DuplicateKey(K),
+    /// The key names two sections in one patch.
+    #[error("{0:?} names two sections in one patch")]
+    DuplicateSection(K),
     /// The key's config gives an initial value that is NaN or infinite.
     #[error("{0:?} declares an initial value that is not finite")]
     NotFinite(K),
@@ -195,6 +196,8 @@ pub(crate) struct Kept<K, F: Float> {
     nodes: BTreeMap<K, Stored<F>>,
     /// The wires the last patch made, by their ends and delay.
     wires: BTreeMap<WireId<K>, KeptWire>,
+    /// The sections the last patch evaluated or carried, by their keys.
+    sections: BTreeMap<K, KeptSection<K>>,
 }
 
 impl<K, F: Float> Default for Kept<K, F> {
@@ -202,6 +205,7 @@ impl<K, F: Float> Default for Kept<K, F> {
         Self {
             nodes: BTreeMap::new(),
             wires: BTreeMap::new(),
+            sections: BTreeMap::new(),
         }
     }
 }
@@ -225,52 +229,6 @@ impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
             .entries(self.nodes.iter().map(|(key, s)| (key, s.node)))
             .finish()
     }
-}
-
-/// Takes `gone` out of `spec`: the nodes, and every edge into or out of them
-/// (audio, event, param, gain and bus).
-fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
-    let from_gone =
-        |source: PortSource| matches!(source, PortSource::Node(p) if gone.contains(&p.node()));
-    let edge_gone = |edge: &Edge| match *edge {
-        Edge::Direct(source) => from_gone(source),
-        Edge::Feedback(f) => gone.contains(&f.from.node()),
-    };
-    for node in gone {
-        spec.topology.nodes.remove(node);
-    }
-    spec.topology.edges.retain(|at, edges| {
-        edges.retain(|e| !edge_gone(e));
-        !gone.contains(&at.node()) && !edges.is_empty()
-    });
-    for sources in &mut spec.topology.outputs {
-        sources.retain(|source| !from_gone(*source));
-    }
-    spec.events.retain(|at, edges| {
-        edges.retain(|e| !gone.contains(&e.from().node()));
-        !gone.contains(&at.node()) && !edges.is_empty()
-    });
-    spec.params
-        .retain(|at, from| !gone.contains(&at.node) && !gone.contains(&from.node()));
-    spec.gains.retain(|id, _| {
-        let sink = matches!(id.sink, PortSink::Port(at) if gone.contains(&at.node()));
-        !sink && !edge_gone(&id.from)
-    });
-    let bus_gone = |source: &BusOutputPort| matches!(source, BusOutputPort::Node(bus) if gone.contains(&bus.node()));
-    spec.bus_edges.retain(|at, feeds| {
-        feeds.retain(|feed| !bus_gone(&feed.source));
-        !gone.contains(&at.node()) && !feeds.is_empty()
-    });
-    spec.main_output_sources
-        .retain(|feed| !bus_gone(&feed.source));
-}
-
-/// The edges leaving the graph that would close a cycle with the patch's
-/// wiring: cut at the patch, not faded.
-#[derive(Default)]
-struct Cuts {
-    edges: Vec<EdgeId>,
-    buses: Vec<(BusOutputPort, BusInputPort)>,
 }
 
 /// The assignments of what `new` gives that `old` did not give or gave
@@ -322,6 +280,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// kept one changes only in its initial gain. A wire is checked against
     /// the shapes of the nodes as declared, before anything changes.
     ///
+    /// A [`Section`](crate::Section) whose deps equal the last patch's, whose
+    /// keys converged and whose nodes and wires the graph still holds, is
+    /// carried: its body is not run, nothing of it is compared or written, and
+    /// the node and wires it made stay. A section whose wires mention a key
+    /// outside it that the patch no longer declares, or declares with another
+    /// structure or config type, runs.
+    ///
     /// A node or an edge that [`Graph::add`](crate::Graph::add) or
     /// [`Graph::connect`](crate::Graph::connect) made is not declared: a patch
     /// never removes or changes it. Declaring a wire that `connect` already made
@@ -331,6 +296,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`PatchError::DuplicateKey`] when a key is declared twice in `patch`,
+    /// [`PatchError::DuplicateSection`] when a key names two sections,
     /// [`PatchError::NotFinite`] when a config or a wire gives an initial that
     /// is NaN or infinite, [`PatchError::Undeclared`] for a wire that names a
     /// key `patch` does not declare, and [`PatchError::Wire`] for a wire the
@@ -344,13 +310,22 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         &mut self,
         patch: impl IntoPatch<K, Graph<C::Float>>,
     ) -> Result<Patched<K>, PatchError<K>> {
-        let patch = Declarations::of(patch);
+        let Decided {
+            nodes,
+            wires: declared,
+            carried,
+            carried_nodes,
+            carried_wires,
+            evaluated,
+            ..
+        } = decide(&self.graph, &self.declared, Declarations::of(patch))?;
         let mut seen = BTreeSet::new();
-        if let Some((key, _)) = patch
-            .nodes
+        let again = nodes
             .iter()
-            .find(|(key, _)| !seen.insert(key.clone()))
-        {
+            .map(|(key, ..)| key)
+            .chain(&carried_nodes)
+            .find(|key| !seen.insert((*key).clone()));
+        if let Some(key) = again {
             return Err(PatchError::DuplicateKey(key.clone()));
         }
         let finite = |declaration: &Declaration<Graph<C::Float>>| {
@@ -361,17 +336,20 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 .iter()
                 .all(|(_, raw)| raw.is_finite())
         };
-        if let Some((key, _)) = patch.nodes.iter().find(|(_, d)| !finite(d)) {
+        if let Some((key, ..)) = nodes.iter().find(|(_, d, _)| !finite(d)) {
             return Err(PatchError::NotFinite(key.clone()));
         }
-        let wires = Self::declared_wires(&patch, &seen)?;
+        let mut wires = Self::declared_wires(&declared, &seen)?;
+        // A carried wire is kept as it was made: a carried section converged,
+        // so none of its wires was left dormant out of the kept ones.
+        for id in carried_wires {
+            let kept = self.declared.wires[&id];
+            wires.entry(id).or_insert(kept);
+        }
         let host = self.host_values();
         let mut kept = std::mem::take(&mut self.declared);
-        let planned = self.plan(&kept, patch.nodes, &host);
-        let checked = self
-            .check_wires(&planned, &wires)
-            .and_then(|()| self.check_feedback(&planned, &wires, &kept))
-            .and_then(|()| self.check_acyclic(&planned, &wires, &kept));
+        let planned = self.plan(&kept, nodes, &carried_nodes, &host);
+        let checked = check(&self.graph, &planned, &wires, &kept);
         let cuts = match checked {
             Ok(cuts) => cuts,
             Err(refused) => {
@@ -416,6 +394,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         }
         let old = std::mem::take(&mut kept.wires);
         kept.wires = self.wire(&kept, old, wires, &fresh, &mut patched, &mut writes);
+        kept.keep_sections(&carried, evaluated, &patched);
         self.declared = kept;
         // One call, one gesture: every changed initial lands in one batch.
         self.values
@@ -426,11 +405,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The wires `patch` declares by their ends, each once.
     fn declared_wires(
-        patch: &Declarations<K, Graph<C::Float>>,
+        declarations: &[WireDecl<K>],
         declared: &BTreeSet<K>,
     ) -> Result<BTreeMap<WireId<K>, KeptWire>, PatchError<K>> {
         let mut wires = BTreeMap::new();
-        for wire in &patch.wires {
+        for wire in declarations {
             let ends = [Some(wire.ends.source()), wire.ends.sink()];
             if let Some(key) = ends.into_iter().flatten().find(|k| !declared.contains(k)) {
                 return Err(PatchError::Undeclared(key.clone()));
@@ -444,11 +423,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// What each declaration does, with its node built once when it makes a
-    /// new one.
+    /// new one; a carried key names the node it had.
     fn plan(
         &self,
         kept: &Kept<K, C::Float>,
-        nodes: Vec<(K, Declaration<Graph<C::Float>>)>,
+        nodes: Vec<(K, Declaration<Graph<C::Float>>, Kind)>,
+        carried: &[K],
         host: &HostValues,
     ) -> Planned<K, C::Float> {
         let mut planned = Planned {
@@ -456,8 +436,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             shapes: Shapes::new(),
             at: BTreeMap::new(),
         };
-        for (key, declaration) in nodes {
-            let fate = self.fate(kept, &key, &declaration, host);
+        for key in carried {
+            planned.at.insert(key.clone(), kept.nodes[key].node);
+        }
+        for (key, declaration, kind) in nodes {
+            let fate = Self::fate(kind, &declaration, host);
             let id = match &fate {
                 Fate::Add(_) | Fate::Readd(_) => NodeKey::fresh(),
                 Fate::Values | Fate::Swap(_) => kept.nodes[&key].node,
@@ -476,246 +459,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         planned
     }
 
-    fn fate(
-        &self,
-        kept: &Kept<K, C::Float>,
-        key: &K,
-        declaration: &Declaration<Graph<C::Float>>,
-        host: &HostValues,
-    ) -> Fate {
+    fn fate(kind: Kind, declaration: &Declaration<Graph<C::Float>>, host: &HostValues) -> Fate {
         let new = &declaration.config;
-        let Some(old) = kept.nodes.get(key) else {
-            return Fate::Add(new.build(host));
-        };
-        let same_type = old.declaration.config.config_type() == new.config_type();
-        if !self.graph.contains(old.node) || !same_type {
-            Fate::Readd(new.build(host))
-        } else if old.declaration.config.same_structure(&**new) {
-            Fate::Values
-        } else {
-            Fate::Swap(new.build(host))
-        }
-    }
-
-    /// Refuses a wire the declared nodes cannot make, with nothing changed.
-    fn check_wires(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-    ) -> Result<(), PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let mut buses = Vec::new();
-        let mut bus_ends = Vec::new();
-        for id in wires.keys() {
-            let resolved = Resolved::of(id, |key| planned.at[key]);
-            resolved
-                .check(&self.graph, pending)
-                .map_err(|cause| PatchError::Wire {
-                    ends: id.ends.clone(),
-                    cause,
-                })?;
-            if let Resolved::Bus(from, to) = resolved {
-                buses.push((from, to));
-                bus_ends.push(&id.ends);
-            }
-        }
-        if let Some((at, cause)) = self.graph.first_unlowered(pending, &buses) {
-            return Err(PatchError::Wire {
-                ends: bus_ends[at].clone(),
-                cause: ConnectError::Bus(cause),
-            });
-        }
-        Ok(())
-    }
-
-    /// Refuses a feedback wire the graph would not compile, and a wire that
-    /// puts a second edge on ports that hold one, with nothing changed.
-    fn check_feedback(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-        kept: &Kept<K, C::Float>,
-    ) -> Result<(), PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let max_block = self.graph.max_block_samples();
-        // What the patch takes out leaves its ports free for another kind.
-        let mut leaving = BTreeSet::new();
-        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
-            let held = [Some(id.source()), id.sink()]
-                .into_iter()
-                .flatten()
-                .all(|key| kept.nodes.contains_key(key));
-            if held {
-                let resolved = Resolved::of(id, |key| kept.nodes[key].node);
-                leaving.extend(
-                    Ports::of(resolved, &self.graph, None)
-                        .into_iter()
-                        .map(|ports| (ports, id.delay)),
-                );
-            }
-        }
-        let mut declared: BTreeMap<Ports, Option<Samples>> = BTreeMap::new();
-        for id in wires.keys() {
-            if let Some(delay) = id.delay
-                && delay < max_block
-            {
-                return Err(PatchError::FeedbackTooShort {
-                    ends: id.ends.clone(),
-                    delay,
-                    max_block,
-                });
-            }
-            let resolved = Resolved::of(id, |key| planned.at[key]);
-            for ports in Ports::of(resolved, &self.graph, pending) {
-                let twice = declared
-                    .insert(ports, id.delay)
-                    .is_some_and(|other| other != id.delay);
-                let held = ports
-                    .held_delay(&self.graph)
-                    .is_some_and(|held| held != id.delay && !leaving.contains(&(ports, held)));
-                if twice || held {
-                    return Err(PatchError::TwoEdges {
-                        ends: id.ends.clone(),
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Refuses a wire that closes a cycle the graph would not compile, and
-    /// names the edges leaving the graph that must be cut for it not to: the
-    /// graph's own search ([`GraphSpec::cycle`](tutti_graph::GraphSpec::cycle))
-    /// over its whole wiring, the edges it only fades out included (the compile
-    /// counts them), plus the declared wires. A feedback edge is cut by the
-    /// search. An edge that leaves (dropped by this patch, or still fading)
-    /// and closes a cycle is cut; a cycle left through live wires is the
-    /// patch's.
-    fn check_acyclic(
-        &self,
-        planned: &Planned<K, C::Float>,
-        wires: &BTreeMap<WireId<K>, KeptWire>,
-        kept: &Kept<K, C::Float>,
-    ) -> Result<Cuts, PatchError<K>> {
-        let pending = Some(&planned.shapes);
-        let mut spec = self.graph.whole_spec();
-        // The nodes this patch takes out are not in the graph it makes, nor
-        // are the edges into or out of them, hand-made ones included.
-        let gone: BTreeSet<NodeKey> = kept
-            .nodes
-            .iter()
-            .filter(|(key, _)| !planned.at.contains_key(*key))
-            .map(|(_, stored)| stored.node)
-            .chain(
-                planned
-                    .nodes
-                    .iter()
-                    .filter(|p| matches!(p.fate, Fate::Readd(_)))
-                    .filter_map(|p| kept.nodes.get(&p.key).map(|stored| stored.node)),
-            )
-            .collect();
-        forget_nodes(&mut spec, &gone);
-        for (&node, shape) in &planned.shapes {
-            let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
-            spec.topology.nodes.insert(node, declared);
-        }
-        let (mut leaving, mut leaving_buses) = self.graph.fading_edges();
-        for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
-            let held = [Some(id.source()), id.sink()]
-                .into_iter()
-                .flatten()
-                .all(|key| kept.nodes.contains_key(key));
-            if !held {
-                continue;
-            }
-            let resolved = Resolved::of(id, |key| kept.nodes[key].node);
-            match resolved {
-                // An event edge is never faded: it goes at once.
-                Resolved::Event(..) => {
-                    resolved.in_spec(&mut spec, &self.graph, None, false);
-                }
-                Resolved::Bus(from, to) => {
-                    leaving_buses.insert((from, to));
-                }
-                Resolved::Channel(..) | Resolved::Main(..) => {
-                    for ports in Ports::of(resolved, &self.graph, None) {
-                        if let Ports::Audio(edge) = ports
-                            && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
-                        {
-                            leaving.insert(edge);
-                        }
-                    }
-                }
-            }
-        }
-        let named: Vec<_> = wires
-            .keys()
-            .map(|id| {
-                let resolved = Resolved::of(id, |key| planned.at[key]);
-                // A declared wire is not leaving, whatever the graph fades.
-                for ports in Ports::of(resolved, &self.graph, pending) {
-                    if let Ports::Audio(edge) = ports
-                        && let Some(edge) = Graph::<C::Float>::edge_id(edge, id.delay)
-                    {
-                        leaving.remove(&edge);
-                    }
-                }
-                if let Resolved::Bus(from, to) = resolved {
-                    leaving_buses.remove(&(from, to));
-                }
-                (id, resolved.in_spec(&mut spec, &self.graph, pending, true))
-            })
-            .collect();
-        let mut cuts = Cuts::default();
-        let cycle = loop {
-            let Some(cycle) = spec.cycle() else {
-                break None;
-            };
-            let audio = cycle.iter().find_map(|edge| match edge {
-                CycleEdge::Audio(at) => leaving
-                    .iter()
-                    .find(|id| id.sink == PortSink::Port(*at))
-                    .copied(),
-                _ => None,
-            });
-            if let Some(id) = audio {
-                leaving.remove(&id);
-                if let PortSink::Port(at) = id.sink {
-                    spec.disconnect(at, id.from);
-                }
-                cuts.edges.push(id);
-                continue;
-            }
-            let bus = cycle.iter().find_map(|edge| match edge {
-                CycleEdge::Bus { at, from } => leaving_buses
-                    .iter()
-                    .find(|(f, t)| f == from && t.0 == BusEnd::Node(*at))
-                    .copied(),
-                _ => None,
-            });
-            if let Some((from, to)) = bus {
-                leaving_buses.remove(&(from, to));
-                if let BusEnd::Node(at) = to.0 {
-                    spec.disconnect_bus(from, at);
-                }
-                cuts.buses.push((from, to));
-                continue;
-            }
-            break Some(cycle);
-        };
-        let Some(cycle) = cycle else {
-            return Ok(cuts);
-        };
-        // Only a cycle through a declared wire is the patch's; any other the
-        // commit reports.
-        match named
-            .into_iter()
-            .find(|(_, edges)| edges.iter().any(|edge| cycle.contains(edge)))
-        {
-            Some((id, _)) => Err(PatchError::Cycle {
-                ends: id.ends.clone(),
-            }),
-            None => Ok(cuts),
+        match kind {
+            Kind::Add => Fate::Add(new.build(host)),
+            Kind::Readd => Fate::Readd(new.build(host)),
+            Kind::Values => Fate::Values,
+            Kind::Swap => Fate::Swap(new.build(host)),
         }
     }
 

@@ -337,7 +337,7 @@
 //! another config makes the same node but for its param values, and `initials`
 //! lists those values by address. The `required` and `options` fields, and a
 //! setting with no kind, are structure and must be `PartialEq`; a shared resource in
-//! one is an [`Asset`], equal only to itself. A config with a field that is not
+//! one is a [`Shared`], equal only to itself. A config with a field that is not
 //! `PartialEq` has no `NodeConfig`.
 //!
 //! ## Events in and out
@@ -705,7 +705,7 @@ pub use exec::command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleEr
 pub use exec::lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use model::fade::Fade;
-pub use node::config::{Asset, HostValues, Initials, NodeConfig, PublishedInitial};
+pub use node::config::{HostValues, Initials, NodeConfig, PublishedInitial, Shared};
 pub use node::controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };
