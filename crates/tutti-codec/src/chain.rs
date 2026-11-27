@@ -11,7 +11,7 @@ use tutti_buffers::{
 use tutti_dsp::{FftFloat, resampled_frames};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
-/// The stages every block of an [`Encoding`] goes through, and the buffers they
+/// The stages every block of an [`Encoding`](crate::Encoding) goes through, and the buffers they
 /// run in: fold, resample, gain, then the encoder's own quantize.
 ///
 /// `F` is the float format the stages run in. A block that needs none of them is
@@ -188,7 +188,7 @@ fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<F
     Ok(Some(Fold::to_channels(src, dst).build()?))
 }
 
-/// The streaming file pipeline: blocks of a source go through the [`Encoding`]'s stages
+/// The streaming file pipeline: blocks of a source go through the [`Encoding`](crate::Encoding)'s stages
 /// into a file begun for a [`ToFile`].
 ///
 /// The file is written to a temporary beside its path (which the encoder removes unless it
