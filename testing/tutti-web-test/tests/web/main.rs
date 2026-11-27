@@ -4,6 +4,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use std::sync::Arc;
+use tutti::ToMemory;
 use tutti::codec::{Encoding, encode, read_wave};
 use tutti::measure::PeakConfig;
 use tutti::midi::MidiFile;
@@ -14,7 +15,6 @@ use tutti::{
     Bounce, ChannelLayout, Clip, Format, Interleaved, MainOutput, MaxBlock, Pcm, Range, SampleRate,
     Samples, Seconds, Session, Wave,
 };
-use tutti_session::ToMemory;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 const RATE: SampleRate = SampleRate::SR_48K;
