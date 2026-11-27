@@ -1,6 +1,6 @@
 //! [`CiAction`]: what a MIDI-CI Device and its Responders ask their driver to do.
 
-use super::{CiMessage, Muid, ProfileId, ProfileState, ProfileTarget};
+use super::{CiMessage, DataControl, Muid, ProfileId, ProfileState, ProfileTarget, ReportScope};
 
 /// What the driver does next.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,5 +36,18 @@ pub enum CiAction {
         target: ProfileTarget,
         /// What the Profile is now.
         state: ProfileState,
+    },
+    /// A peer asked for a MIDI Message Report (M2-101 §9.5) of a device that
+    /// declares Process Inquiry. The device answers none of it: the caller owns the
+    /// state to report, and sends the Reply to MIDI Message Report, the messages
+    /// and the End of MIDI Message Report, in that order (§9.6 to §9.8), on the
+    /// scope's Device ID.
+    ReportAsked {
+        /// The peer that asked, the one the report goes to.
+        peer: Muid,
+        /// How much to report.
+        control: DataControl,
+        /// Where, and which kinds of message.
+        scope: ReportScope,
     },
 }
