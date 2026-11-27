@@ -38,6 +38,7 @@ members = [
     "crates/tutti-alsa-ffi",
     "crates/tutti-coremidi-ffi",
     "crates/tutti-winmm-ffi",
+    "crates/tutti-winmidi2-ffi",
     "crates/tutti-midi-hardware",
     "crates/tutti-midi-file",
     "crates/tutti-midi-runtime",
@@ -74,6 +75,9 @@ members = [
     "testing/tutti-plugin-contract",
     # SOFA to tutti HRIR sphere converter: an offline tool, reads AES69 files.
     "testing/tutti-hrir-convert",
+    # Generates `tutti-winmidi2-ffi`'s bindings from the Windows MIDI Services winmd
+    # (`cargo xtask winmidi2-bindings`): an offline tool.
+    "testing/tutti-winmidi2-bindgen",
     # Fuzz targets over the public decoders and parsers (`cargo xtask fuzz`).
     "testing/tutti-fuzz",
 ]

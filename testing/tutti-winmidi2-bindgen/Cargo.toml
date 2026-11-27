@@ -1,0 +1,18 @@
+[package]
+name = "tutti-winmidi2-bindgen"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Generates the Windows MIDI Services bindings `tutti-winmidi2-ffi` checks in"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tutti-audio/tutti"
+# An offline tool, never a library anyone depends on.
+publish = false
+
+[lints]
+workspace = true
+
+# `=0.65.0`: its output is on `windows-core` 0.62, the runtime `tutti-platform`'s `windows`
+# already links. A newer generator brings a second WinRT runtime.
+[dependencies]
+windows-bindgen = "=0.65.0"
