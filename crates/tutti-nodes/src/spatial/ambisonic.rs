@@ -40,18 +40,25 @@ const FRONT: Direction = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
 /// scaling.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmbisonicEncoderConfig {
-    output: ChannelTopology,
+    order: AmbisonicOrder,
+    normalization: HarmonicNormalization,
     direction: Direction,
 }
 
 impl AmbisonicEncoderConfig {
     /// An encoder to `output`, with the source straight ahead.
-    #[must_use]
-    pub fn new(output: impl Into<ChannelTopology>) -> Self {
-        Self {
-            output: output.into(),
+    ///
+    /// # Errors
+    ///
+    /// [`AmbisonicError::NotAmbisonic`] for a bus that is not an ambisonic one and
+    /// [`AmbisonicError::Unsupported`] for a format that is not ACN in SN3D or N3D.
+    pub fn new(output: impl Into<ChannelTopology>) -> Result<Self, AmbisonicError> {
+        let (order, normalization) = format_of(output.into())?;
+        Ok(Self {
+            order,
+            normalization,
             direction: FRONT,
-        }
+        })
     }
 
     /// The direction the source starts at.
@@ -67,28 +74,30 @@ impl AmbisonicEncoderConfig {
 /// The direction is two live cells, `UnitParam::Azimuth` (0 ahead, positive to the left)
 /// and `UnitParam::Elevation`. A cell that moves lands at once and the gains glide to it
 /// over one grid interval ([`COEFF_INTERVAL`] frames). No latency and no tail. A
-/// [`KernelNode`], made from an [`AmbisonicEncoderConfig`] (`AmbisonicEncoderNode::try_from`).
+/// [`KernelNode`], made from an [`AmbisonicEncoderConfig`] (`AmbisonicEncoderNode::from`).
 pub type AmbisonicEncoderNode<F> = KernelNode<AmbisonicEncoderKernel<F>>;
 
-impl<F: Float> TryFrom<AmbisonicEncoderConfig> for AmbisonicEncoderNode<F> {
-    type Error = AmbisonicError;
+kernel_config!(AmbisonicEncoderConfig => AmbisonicEncoderNode<F> where [F: Float],
+    controls = direction,
+    set(_): DirectionSet = DirectionSet);
 
-    /// # Errors
-    ///
-    /// [`AmbisonicError::NotAmbisonic`] for a bus that is not an ambisonic one and
-    /// [`AmbisonicError::Unsupported`] for a format that is not ACN in SN3D or N3D.
-    fn try_from(config: AmbisonicEncoderConfig) -> Result<Self, AmbisonicError> {
-        let (order, normalization) = format_of(config.output)?;
-        Ok(Self::with_kernel(
+impl<F: Float> From<AmbisonicEncoderConfig> for AmbisonicEncoderNode<F> {
+    fn from(config: AmbisonicEncoderConfig) -> Self {
+        let AmbisonicEncoderConfig {
+            order,
+            normalization,
+            direction,
+        } = config;
+        Self::with_kernel(
             AmbisonicEncoderKernel {
-                encoder: AmbisonicEncoder::new(order, normalization, config.direction),
+                encoder: AmbisonicEncoder::new(order, normalization, direction),
                 order,
                 normalization,
                 float: PhantomData,
             },
-            DirectionSet,
-            config.direction,
-        ))
+            config.kernel_set(),
+            direction,
+        )
     }
 }
 
@@ -163,20 +172,26 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
 /// front starts and the roll.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmbisonicRotatorConfig {
-    bus: ChannelTopology,
+    order: AmbisonicOrder,
+    normalization: HarmonicNormalization,
     front: Direction,
     roll: ArcDegrees,
 }
 
 impl AmbisonicRotatorConfig {
     /// A rotator of the channels of `bus` that leaves the field as it is.
-    #[must_use]
-    pub fn new(bus: impl Into<ChannelTopology>) -> Self {
-        Self {
-            bus: bus.into(),
+    ///
+    /// # Errors
+    ///
+    /// As the encoder: [`AmbisonicError::NotAmbisonic`] and [`AmbisonicError::Unsupported`].
+    pub fn new(bus: impl Into<ChannelTopology>) -> Result<Self, AmbisonicError> {
+        let (order, normalization) = format_of(bus.into())?;
+        Ok(Self {
+            order,
+            normalization,
             front: FRONT,
             roll: ArcDegrees::new(0.0),
-        }
+        })
     }
 
     /// Where the front starts: a source straight ahead is carried there.
@@ -198,28 +213,32 @@ impl AmbisonicRotatorConfig {
 ///
 /// A cell that moves lands at once and the matrix glides to it over one grid interval. No
 /// latency and no tail. A [`KernelNode`], made from an [`AmbisonicRotatorConfig`]
-/// (`AmbisonicRotatorNode::try_from`).
+/// (`AmbisonicRotatorNode::from`).
 pub type AmbisonicRotatorNode<F> = KernelNode<AmbisonicRotatorKernel<F>>;
 
-impl<F: Float> TryFrom<AmbisonicRotatorConfig> for AmbisonicRotatorNode<F> {
-    type Error = AmbisonicError;
+kernel_config!(AmbisonicRotatorConfig => AmbisonicRotatorNode<F> where [F: Float],
+    controls = front,
+    set(_): DirectionSet = DirectionSet);
 
-    /// # Errors
-    ///
-    /// As the encoder: [`AmbisonicError::NotAmbisonic`] and [`AmbisonicError::Unsupported`].
-    fn try_from(config: AmbisonicRotatorConfig) -> Result<Self, AmbisonicError> {
-        let (order, normalization) = format_of(config.bus)?;
-        Ok(Self::with_kernel(
+impl<F: Float> From<AmbisonicRotatorConfig> for AmbisonicRotatorNode<F> {
+    fn from(config: AmbisonicRotatorConfig) -> Self {
+        let AmbisonicRotatorConfig {
+            order,
+            normalization,
+            front,
+            roll,
+        } = config;
+        Self::with_kernel(
             AmbisonicRotatorKernel {
-                rotator: AmbisonicRotator::new(Rotation::new(order, config.front, config.roll)),
+                rotator: AmbisonicRotator::new(Rotation::new(order, front, roll)),
                 order,
                 normalization,
-                roll: config.roll,
+                roll,
                 float: PhantomData,
             },
-            DirectionSet,
-            config.front,
-        ))
+            config.kernel_set(),
+            front,
+        )
     }
 }
 

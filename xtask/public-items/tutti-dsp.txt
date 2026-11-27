@@ -473,6 +473,7 @@ fn early_reflections::EarlyReflections::channels
 fn early_reflections::EarlyReflections::process
 fn early_reflections::EarlyReflections::reset
 fn early_reflections::EarlyReflections::tail
+fn early_reflections::TapSet::check
 fn envelope::Envelope::advance
 fn envelope::Envelope::is_idle
 fn envelope::Envelope::level

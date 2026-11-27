@@ -27,7 +27,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope, Polarity};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{ModDelayConfig, PhaserConfig};
+use tutti_nodes::{ModDelayConfig, PhaserConfig, Stagger};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRouteId,
     ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget,
@@ -1239,13 +1239,15 @@ fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let chorus = s.graph().add(tutti_nodes::ModDelayNode::<f32>::from(
         ModDelayConfig::chorus(tutti_buffers::ChannelTopology::STEREO),
     ));
-    let phaser = s.graph().add(
-        tutti_nodes::PhaserNode::<f32>::try_from(
-            PhaserConfig::new(ChannelTopology::STEREO, tutti_nodes::Stages::of(4))
-                .controls(tutti_nodes::PhaserControls::DEFAULT),
+    let phaser = s.graph().add(tutti_nodes::PhaserNode::<f32>::from(
+        PhaserConfig::new(
+            ChannelTopology::STEREO,
+            tutti_nodes::Stages::of(4),
+            Stagger::NONE,
         )
-        .unwrap(),
-    );
+        .unwrap()
+        .controls(tutti_nodes::PhaserControls::DEFAULT),
+    ));
     // The phaser's mix is the graph's (`MixRef`), not a param of the node.
     let targets = [
         ModTarget::from(ParamRef::unit(chorus, UnitParam::Rate)),

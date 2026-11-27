@@ -20,10 +20,11 @@ fn config(width: u16, taps: &[Tap]) -> EarlyReflectionsConfig {
             taps: Inline::from_slice(taps).unwrap(),
         },
     )
+    .unwrap()
 }
 
 fn node(width: u16, taps: &[Tap]) -> EarlyReflectionsNode<f32> {
-    prepared(EarlyReflectionsNode::try_from(config(width, taps)).unwrap())
+    prepared(EarlyReflectionsNode::from(config(width, taps)))
 }
 
 /// The shape is the input's width in and a channel for each one a tap feeds out, with no
@@ -67,8 +68,13 @@ fn an_impulse_through_the_node_is_the_taps() {
 /// A tap that cannot be realized is refused at construction.
 #[test]
 fn a_tap_that_cannot_run_is_refused_at_construction() {
-    let bad = EarlyReflectionsNode::<f32>::try_from(config(1, &[tap(1.0, f64::NAN, 0)]));
-    assert_eq!(bad.err(), Some(EarlyReflectionsError::Gain { index: 0 }));
+    let taps = TapSet {
+        taps: Inline::from_slice(&[tap(1.0, f64::NAN, 0)]).unwrap(),
+    };
+    assert_eq!(
+        EarlyReflectionsConfig::new(1u16, taps).unwrap_err(),
+        EarlyReflectionsError::Gain { index: 0 }
+    );
 }
 
 /// A room's taps make a one-channel stage that rings for the last image: the tail is that
@@ -90,9 +96,9 @@ fn a_rooms_taps_are_a_stage_that_rings_for_its_last_image() {
     .unwrap();
     let taps = room.taps(RATE);
     let last = taps.taps.iter().map(|t| t.delay).next_back().unwrap();
-    let n = prepared(
-        EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(1u16, taps)).unwrap(),
-    );
+    let n = prepared(EarlyReflectionsNode::<f32>::from(
+        EarlyReflectionsConfig::new(1u16, taps).unwrap(),
+    ));
     assert_eq!(n.shape().audio_out().count(), 1);
     assert_eq!(n.shape().tail, Tail::Finite(last.to_samples_ceil()));
 }

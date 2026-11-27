@@ -13,9 +13,10 @@ use tutti_units::{Db, SampleRate, Seconds, Tail};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`LevellerNode`] is made from: the bus it levels and the controls it starts at.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LevellerConfig {
     input: ChannelTopology,
+    weights: ChannelWeights,
     controls: LevellerControls,
 }
 
@@ -23,12 +24,17 @@ impl LevellerConfig {
     /// A leveller of the bus `input`, whose speaker placement weighs its channels, at
     /// [`LevellerControls::DEFAULT`]: -23 LUFS, up to 12 dB of boost and of cut, a gate at
     /// -50 LUFS, a 0.5 s attack and a 2 s release.
-    #[must_use]
-    pub fn new(input: ChannelTopology) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelWeightError`] for an ambisonic bus and for speakers that are not a bed's.
+    pub fn new(input: ChannelTopology) -> Result<Self, ChannelWeightError> {
+        let weights = channel_weights(&input)?;
+        Ok(Self {
             input,
+            weights,
             controls: LevellerControls::DEFAULT,
-        }
+        })
     }
 
     /// The short-term loudness the output is moved to, in LUFS, at the start.
@@ -95,25 +101,23 @@ impl LevellerConfig {
 /// signal unweighted: a graph has no way to refuse a rate at `prepare`.
 ///
 /// No latency and no tail: the gain only scales, so a silent input is a silent output. A
-/// [`KernelNode`]; made from a [`LevellerConfig`] (`LevellerNode::try_from`), which refuses a
-/// bus with no speaker placement to weigh.
+/// [`KernelNode`]; made from a [`LevellerConfig`] (`LevellerNode::from`); [`LevellerConfig::new`]
+/// refuses a bus with no speaker placement to weigh.
 ///
 /// `F` is the float of the graph it runs in, and of the K-weighting and the gain.
 pub type LevellerNode<F> = KernelNode<LevellerKernel<F>>;
 
-impl<F: Float + SimdLanes> TryFrom<LevellerConfig> for LevellerNode<F> {
-    type Error = ChannelWeightError;
+kernel_config!(LevellerConfig => LevellerNode<F> where [F: Float + SimdLanes],
+    set(_): LevellerSet = LevellerSet);
 
-    /// # Errors
-    ///
-    /// [`ChannelWeightError`] for an ambisonic bus and for speakers that are not a bed's.
-    fn try_from(config: LevellerConfig) -> Result<Self, ChannelWeightError> {
-        let weights = channel_weights(&config.input)?;
-        Ok(Self::with_kernel(
-            LevellerKernel::new(config.input, weights),
-            LevellerSet,
+impl<F: Float + SimdLanes> From<LevellerConfig> for LevellerNode<F> {
+    fn from(config: LevellerConfig) -> Self {
+        let set = config.kernel_set();
+        Self::with_kernel(
+            LevellerKernel::new(config.input, config.weights),
+            set,
             config.controls,
-        ))
+        )
     }
 }
 

@@ -233,13 +233,9 @@ fn sweep() {
         let xo = |splits: &[Hz]| {
             let controls = CrossoverControls::try_from(splits)
                 .unwrap_or_else(|_| CrossoverControls::try_from(&[Hz::new(1000.0)][..]).unwrap());
-            Box::new(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    ChannelTopology::STEREO,
-                    controls,
-                ))
-                .unwrap(),
-            ) as Box<dyn Node<f32>>
+            Box::new(CrossoverNode::<f32>::from(
+                CrossoverConfig::new(ChannelTopology::STEREO, controls).unwrap(),
+            )) as Box<dyn Node<f32>>
         };
         add(probe("crossover", b, || xo(&[Hz::new(bz)])));
         add(probe("crossover2", b, || {

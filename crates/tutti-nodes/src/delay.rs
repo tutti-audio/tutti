@@ -32,7 +32,7 @@ use crate::tail_clock::frames_tail;
 /// The layout holds the bus, the longest delay, the interpolation, the routing, the
 /// channel times and the notes, checked against each other where it is built
 /// ([`DelayLayoutBuilder::build`](tutti_dsp::DelayLayoutBuilder::build)).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelayConfig {
     layout: DelayLayout,
     controls: DelayControls,
@@ -145,14 +145,18 @@ impl DelayConfig {
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
 pub type DelayNode<F> = KernelNode<DelayKernel<F>>;
 
+kernel_config!(DelayConfig => DelayNode<F> where [F: Float + Lerp],
+    set(c): DelaySet = DelaySet { sync: Arc::new(AtomicCell::new(c.controls.sync)) });
+
 impl<F: Float + Lerp> From<DelayConfig> for DelayNode<F> {
     /// The lines are sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it,
     /// which is what makes `max_delay` hold at whatever rate the graph runs at. Allocates.
     fn from(config: DelayConfig) -> Self {
-        let set = DelaySet {
-            sync: Arc::new(AtomicCell::new(config.controls.sync)),
-        };
-        Self::with_kernel(DelayKernel::new(config.layout), set, config.controls)
+        Self::with_kernel(
+            DelayKernel::new(config.layout),
+            config.kernel_set(),
+            config.controls,
+        )
     }
 }
 

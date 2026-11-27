@@ -148,11 +148,14 @@ impl SvfFilterConfig {
     }
 }
 
+kernel_config!(SvfFilterConfig => SvfFilterNode<F> where [F: Float + SimdLanes],
+    set(c): SvfSet = SvfSet(c.controls.ty));
+
 impl<F: Float + SimdLanes> From<SvfFilterConfig> for SvfFilterNode<F> {
     fn from(config: SvfFilterConfig) -> Self {
         Self::with_kernel(
             SvfKernel::new(filter_bus(config.width)),
-            SvfSet(config.controls.ty),
+            config.kernel_set(),
             config.controls,
         )
     }

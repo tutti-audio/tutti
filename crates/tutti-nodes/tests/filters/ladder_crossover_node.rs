@@ -54,11 +54,13 @@ impl Cutoff for LadderFilterNode<f32> {
 impl Cutoff for CrossoverNode<f32> {
     const NAME: &'static str = "crossover";
     fn build() -> Self {
-        CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::STEREO,
-            CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
-        ))
-        .unwrap()
+        CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::STEREO,
+                CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+            )
+            .unwrap(),
+        )
     }
     fn set_cutoff(&self, hz: f64) -> bool {
         self.param_set()
@@ -282,11 +284,13 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let bands = splits.len() + 1;
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::default_for(ChannelLayout::from(channels)).unwrap(),
-            CrossoverControls::try_from(&hz[..]).unwrap(),
-        ))
-        .unwrap();
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::default_for(ChannelLayout::from(channels)).unwrap(),
+                CrossoverControls::try_from(&hz[..]).unwrap(),
+            )
+            .unwrap(),
+        );
         assert_eq!(
             usize::from(node.shape().audio_out().count()),
             usize::from(channels) * bands

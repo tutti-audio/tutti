@@ -31,11 +31,14 @@ fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
 
 /// A phaser `width` wide of `stages`, staggered by `step`.
 fn phaser(width: u16, stages: usize, step: f64) -> PhaserNode<f32> {
-    PhaserNode::<f32>::try_from(
-        PhaserConfig::new(bus(width), Stages::of(stages))
-            .stagger(Stagger::of_step(PhaseIncrement::new(step))),
+    PhaserNode::<f32>::from(
+        PhaserConfig::new(
+            bus(width),
+            Stages::of(stages),
+            Stagger::of_step(PhaseIncrement::new(step)),
+        )
+        .expect("a step fits any width"),
     )
-    .expect("a step fits any width")
 }
 
 /// The free-running sine, the random-smooth shape (hashed on its own path, fast enough to
@@ -93,12 +96,9 @@ fn held() {
         ModDelayNode::<f32>::from(general_midi),
         |_, _| {},
     );
-    let four_stage = PhaserConfig::new(ChannelTopology::MONO, Stages::of(4));
-    gate(0.4).run(
-        "phaser",
-        PhaserNode::<f32>::try_from(four_stage).unwrap(),
-        |_, _| {},
-    );
+    let four_stage =
+        PhaserConfig::new(ChannelTopology::MONO, Stages::of(4), Stagger::NONE).unwrap();
+    gate(0.4).run("phaser", PhaserNode::<f32>::from(four_stage), |_, _| {});
 }
 
 /// Every control moves each block: the delay time ramps at its slew, the chorus depth sweeps,

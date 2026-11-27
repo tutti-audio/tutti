@@ -300,11 +300,13 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
         );
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
-    let crossover = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        ChannelTopology::STEREO,
-        CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0)][..]).unwrap(),
-    ))
-    .unwrap();
+    let crossover = CrossoverNode::<f32>::from(
+        CrossoverConfig::new(
+            ChannelTopology::STEREO,
+            CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0)][..]).unwrap(),
+        )
+        .unwrap(),
+    );
     let fork = crossover.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -365,11 +367,13 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let initial: Vec<Hz> = (0..bands - 1)
                     .map(|i| Hz::new(150.0 * 3f64.powi(i as i32)))
                     .collect();
-                let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    ChannelTopology::default_for(ChannelLayout::from(width)).unwrap(),
-                    CrossoverControls::try_from(&initial[..]).unwrap(),
-                ))
-                .unwrap();
+                let node = CrossoverNode::<f32>::from(
+                    CrossoverConfig::new(
+                        ChannelTopology::default_for(ChannelLayout::from(width)).unwrap(),
+                        CrossoverControls::try_from(&initial[..]).unwrap(),
+                    )
+                    .unwrap(),
+                );
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
@@ -414,11 +418,13 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
     ] {
         for shape in [1usize, 3, 4] {
             let hz = [Hz::new(set[0]), Hz::new(set[1])];
-            let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                ChannelTopology::STEREO,
-                CrossoverControls::try_from(&hz[..]).unwrap(),
-            ))
-            .unwrap();
+            let node = CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
+                    ChannelTopology::STEREO,
+                    CrossoverControls::try_from(&hz[..]).unwrap(),
+                )
+                .unwrap(),
+            );
             let cells = node.param_set();
             let mut rig = Direct::new(node, SR, FRAMES);
             fill(&mut rig);

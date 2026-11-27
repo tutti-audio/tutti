@@ -13,7 +13,7 @@ use tutti_buffers::ChannelTopology;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_graph::contract::{drive, prepared};
-use tutti_nodes::{PhaserConfig, PhaserControls, PhaserNode, Stages, SweepRange};
+use tutti_nodes::{PhaserConfig, PhaserControls, PhaserNode, Stages, Stagger, SweepRange};
 use tutti_units::{Amplitude, Bipolar, Feedback, Hz, SampleRate, Samples};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances
@@ -26,16 +26,16 @@ const LEN: usize = 6_000;
 /// The wet output of a depth-0 phaser of `stages` stages parked at `F0`, over a
 /// sine of `hz`, in ragged blocks.
 fn wet(stages: usize, hz: f64) -> Vec<f32> {
-    let node = PhaserNode::<f32>::try_from(
-        PhaserConfig::new(ChannelTopology::MONO, Stages::of(stages))
+    let node = PhaserNode::<f32>::from(
+        PhaserConfig::new(ChannelTopology::MONO, Stages::of(stages), Stagger::NONE)
+            .expect("a step fits any width")
             .range(SweepRange::of(Hz::new(F0), Hz::new(2_000.0)))
             .controls(PhaserControls {
                 rate: Hz::new(0.3),
                 depth: Bipolar::of(0.0),
                 feedback: Feedback::NONE,
             }),
-    )
-    .expect("a step fits any width");
+    );
     let mut node = prepared(node, SR, 64);
     let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples::new(LEN));
     let mut out = Vec::new();

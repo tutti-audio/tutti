@@ -26,7 +26,7 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
     MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
     PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
+    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, Stagger, SvfFilterConfig,
     SvfFilterNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
 };
 use tutti_nodes::{
@@ -82,13 +82,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "crossover",
-            Box::new(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            Box::new(CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
                     ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-                ))
+                )
                 .unwrap(),
-            ),
+            )),
         ),
         (
             // A feedback line of a whole number of frames: one sample circulating in it falls
@@ -232,10 +232,9 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "leveller",
-            Box::new(
-                LevellerNode::<f32>::try_from(LevellerConfig::new(ChannelTopology::STEREO))
-                    .unwrap(),
-            ),
+            Box::new(LevellerNode::<f32>::from(
+                LevellerConfig::new(ChannelTopology::STEREO).unwrap(),
+            )),
         ),
         (
             "gate",
@@ -277,13 +276,9 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "phaser",
-            Box::new(
-                PhaserNode::<f32>::try_from(PhaserConfig::new(
-                    ChannelTopology::MONO,
-                    Stages::of(4),
-                ))
-                .unwrap(),
-            ),
+            Box::new(PhaserNode::<f32>::from(
+                PhaserConfig::new(ChannelTopology::MONO, Stages::of(4), Stagger::NONE).unwrap(),
+            )),
         ),
         (
             "fdn",
@@ -331,21 +326,15 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         // A gain per channel and frame and no state: nothing remembers the sample.
         (
             "ambisonic encoder",
-            Box::new(
-                AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
-                    AmbisonicOrder::MAX,
-                )))
-                .unwrap(),
-            ),
+            Box::new(AmbisonicEncoderNode::<f32>::from(
+                AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+            )),
         ),
         (
             "ambisonic rotator",
-            Box::new(
-                AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
-                    AmbisonicOrder::MAX,
-                )))
-                .unwrap(),
-            ),
+            Box::new(AmbisonicRotatorNode::<f32>::from(
+                AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+            )),
         ),
         (
             "ambisonic decoder",
@@ -396,8 +385,8 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "early reflections",
-            Box::new(
-                EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
+            Box::new(EarlyReflectionsNode::<f32>::from(
+                EarlyReflectionsConfig::new(
                     ChannelLayout::STEREO,
                     TapSet {
                         taps: Inline::from_slice(&[Tap {
@@ -407,9 +396,9 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                         }])
                         .unwrap(),
                     },
-                ))
+                )
                 .unwrap(),
-            ),
+            )),
         ),
         (
             "decorrelator",
