@@ -494,7 +494,7 @@ impl<N: std::fmt::Debug, D: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
 /// - [`topology`](Self::topology) states what the tapped channels are (the
 ///   engine's order for the width without it).
 ///
-/// The width of the stem's file or planes is its destination's: an [`Encoding`] that states
+/// The width of the stem's file or planes is its destination's: an [`Encoding`](tutti_codec::Encoding) that states
 /// channels, or [`ToMemory::channels`]. The tapped channels are folded onto it from their
 /// topology, and a fold that cannot place them refuses the bounce when it renders (nothing
 /// is truncated).
