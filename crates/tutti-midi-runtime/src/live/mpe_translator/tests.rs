@@ -1514,34 +1514,102 @@ fn a_note_on_the_manager_channel_passes() {
     assert!(matches!(out.1.note_key_event(), Some(NoteKeyEvent::On(_))));
 }
 
-/// **A Manager Channel's zone-wide message is every channel of its zone's**
-/// (M1-100 section 2.3.1: certain messages, the Damper Pedal for one, affect
-/// all sounding notes across the Manager Channel and all Member Channels, and
-/// are sent only on the Manager Channel): the pedals, All Notes Off and Reset
-/// All Controllers go on, and are sent on each member channel with the same
-/// value, ahead of nothing and after the manager's own. A channel outside the
-/// zone hears nothing.
+/// A translator per receive table, over a zone of manager 0 and members 1 to 3.
+fn rule_sets() -> [(&'static str, MpeTranslator); 2] {
+    [
+        ("MPE 1.1", MpeTranslator::new(midi::lower_zone(3))),
+        ("Profile", profiled(0, 4)),
+    ]
+}
+
+/// The Manager-level messages both rule sets share, as one channel's message:
+/// the pedals and the tunings.
+fn manager_level_messages() -> [(&'static str, fn(u8) -> UmpAt); 4] {
+    [
+        ("Damper", |ch| cc(ch, CCNumber::SUSTAIN, 127)),
+        ("Sostenuto", |ch| cc(ch, CCNumber::SOSTENUTO, 127)),
+        ("Coarse Tuning", |ch| {
+            at(
+                0,
+                midi::registered(MidiChannel::of(ch), Rpn::CHANNEL_COARSE_TUNING, 0xC000_0000),
+            )
+        }),
+        ("Fine Tuning", |ch| {
+            at(
+                0,
+                midi::registered(MidiChannel::of(ch), Rpn::CHANNEL_FINE_TUNING, 0xC000_0000),
+            )
+        }),
+    ]
+}
+
+/// **A Manager Channel's zone-wide message is every channel of its zone's, and a
+/// Member Channel's own is ignored** (M1-100 section 2.3.1 and M2-120 section
+/// 4.1: certain messages, the Damper Pedal, Coarse Tuning and Fine Tuning for
+/// example, affect all sounding notes and are sent only on the Manager Channel,
+/// and a Member Channel's is ignored). The pedals and the tunings, then All
+/// Notes Off and Reset All Controllers, go on from the manager and are sent on
+/// each member channel with the same value, in the order of the zone, under both
+/// receive tables. A member's own pedal or tuning produces nothing.
+/// Spec: m2-120/4.1#2
 #[test]
 fn a_managers_zone_wide_message_is_sent_on_every_member_channel() {
-    for controller in [
-        CCNumber::SUSTAIN,
-        CCNumber::SOSTENUTO,
-        CCNumber::ALL_NOTES_OFF,
-        CCNumber::RESET_ALL,
-    ] {
-        let mut translator = MpeTranslator::new(midi::lower_zone(3));
-        let sent = cc(0, controller, 127);
-        let out = decoded(&mut translator, &sent);
-        let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
-        assert_eq!(channels, [0, 1, 2, 3], "CC {}", controller.get());
-        assert!(
-            out.iter().all(|(_, v)| matches!(v,
-                Voice2::ControlChange { controller: c, value }
-                    if *c == controller && *value == ControlValue::new(u32::MAX))),
-            "CC {}: {out:?}",
-            controller.get()
-        );
+    for (table, mut translator) in rule_sets() {
+        for (name, message) in manager_level_messages() {
+            let sent = message(0);
+            let Ok(Message::Midi2(_, voice)) = sent.1.decode() else {
+                panic!("a voice message");
+            };
+            let out = decoded(&mut translator, &sent);
+            let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+            assert_eq!(channels, [0, 1, 2, 3], "{table} {name}");
+            assert!(out.iter().all(|(_, v)| *v == voice), "{table} {name}");
+            for member in 1..=3 {
+                assert_eq!(
+                    translator.translated(&message(member)).count(),
+                    0,
+                    "{table} {name} on member {member}"
+                );
+            }
+        }
+        for controller in [CCNumber::ALL_NOTES_OFF, CCNumber::RESET_ALL] {
+            let out = decoded(&mut translator, &cc(0, controller, 127));
+            let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+            assert_eq!(channels, [0, 1, 2, 3], "{table} CC {}", controller.get());
+            assert!(
+                out.iter().all(|(_, v)| matches!(v,
+                    Voice2::ControlChange { controller: c, value }
+                        if *c == controller && *value == ControlValue::new(u32::MAX))),
+                "{table} CC {}: {out:?}",
+                controller.get()
+            );
+        }
     }
+}
+
+/// **Under the Profile the Manager's Volume is every Member's, and a Member's
+/// own is ignored** (M2-102 section 2.3.4.1: if the Manager's Volume affects the
+/// total output of all Members, they ignore their own). Under MPE 1.1 Volume is
+/// an ordinary message (M1-100 Table 5): a member's passes on its channel and
+/// the manager's is not copied onto the members.
+/// Spec: m2-102/2.3.4.1#7
+#[test]
+fn the_profiles_manager_volume_scales_every_member_and_mpe11_has_no_such_rule() {
+    let [(_, mut mpe11), (_, mut profile)] = rule_sets();
+    let volume = |channel| cc(channel, CCNumber::VOLUME, 100);
+
+    let out = decoded(&mut profile, &volume(0));
+    let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+    assert_eq!(channels, [0, 1, 2, 3]);
+    for member in 1..=3 {
+        assert_eq!(profile.translated(&volume(member)).count(), 0);
+    }
+
+    let out = decoded(&mut mpe11, &volume(0));
+    let channels: Vec<u8> = out.iter().map(|(c, _)| *c).collect();
+    assert_eq!(channels, [0]);
+    let own = volume(2);
+    assert_eq!(mpe11.translated(&own).collect::<Vec<_>>(), vec![own]);
 }
 
 /// The upper zone counts down from the channel below its manager: a pedal on
@@ -1554,18 +1622,14 @@ fn the_upper_zones_pedal_reaches_its_own_members_only() {
     assert_eq!(channels, [15, 13, 14]);
 }
 
-/// A member's pedal and panic are its own channel's alone (M1-100 section
-/// 2.3.1: the zone-wide ones are sent only on the Manager Channel), and a
-/// channel in no zone is conventional.
+/// A member's panics are its own channel's alone under MPE 1.1 (its pedal is
+/// ignored, as the test above holds), and a channel in no zone is conventional:
+/// everything passes whole (M1-100 section 2.2.1).
 #[test]
-fn a_members_message_and_a_conventional_channels_stay_on_their_channel() {
+fn a_members_panic_and_a_conventional_channels_messages_stay_on_their_channel() {
     let mut translator = MpeTranslator::new(midi::lower_zone(3));
     for channel in [2, 9] {
-        for controller in [
-            CCNumber::SUSTAIN,
-            CCNumber::ALL_NOTES_OFF,
-            CCNumber::RESET_ALL,
-        ] {
+        for controller in [CCNumber::ALL_NOTES_OFF, CCNumber::RESET_ALL] {
             let sent = cc(channel, controller, 127);
             assert_eq!(
                 translator.translated(&sent).collect::<Vec<_>>(),
@@ -1575,6 +1639,11 @@ fn a_members_message_and_a_conventional_channels_stay_on_their_channel() {
             );
         }
     }
+    let pedal = cc(9, CCNumber::SUSTAIN, 127);
+    assert_eq!(
+        translator.translated(&pedal).collect::<Vec<_>>(),
+        vec![pedal]
+    );
 }
 
 /// The Profile takes All Sounds Off on its Manager (M2-120 Table 15) and it is
