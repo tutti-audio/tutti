@@ -209,10 +209,11 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
+    // No block has run: the -6 dB write is the host's, stated beside the state.
     let state_at_fork = handle
         .save_state(tutti_plugin_types::StateUse::Project)
-        .expect("the probe saves")
-        .bytes;
+        .expect("the probe saves");
+    assert_eq!(state_at_fork.pending.len(), 1, "the write no block applied");
 
     // After the fork: the live instance moves to -15 dB.
     probe
@@ -272,20 +273,25 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         assert_eq!(block, &expected(b, -6.0), "fork block {b}");
     }
 
-    // The live state moved only by its own parameter change: put the gain
-    // back and it is byte for byte what it was at the fork. Through the
-    // handle, the path a host has once the node is in a graph.
+    // The live state moved only by its own parameter change: the blocks of its
+    // run applied -15 dB, and put the gain back (through the handle, the path a
+    // host has once the node is in a graph) it is byte for byte what the run
+    // left, with the -6 dB write stated beside it as it was at the fork.
+    let ran = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
+    assert!(ran.pending.is_empty(), "the run's blocks applied its write");
     handle
         .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
+    let back = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
     assert_eq!(
-        handle
-            .save_state(tutti_plugin_types::StateUse::Project)
-            .expect("the probe saves")
-            .bytes,
-        state_at_fork,
+        back.bytes, ran.bytes,
         "rendering the fork changed the live instance's state"
     );
+    assert_eq!(back.pending, state_at_fork.pending, "the gain put back");
 }
 
 /// **A fresh instance that refuses the live state is a named error**, and
@@ -1407,11 +1413,25 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
         .handle()
         .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
-    let state = probe
-        .handle
-        .save_state(StateUse::Duplicate)
-        .expect("the probe saves")
-        .bytes;
+    // Blocks apply the write, so the state holds the gain.
+    let mut live = Rig::new(
+        probe.client.bind(
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+        ),
+        SAMPLE_RATE,
+        BLOCK,
+    );
+    let saved = loop {
+        let _ = drive_live(&mut live, 4);
+        let saved = probe
+            .handle
+            .save_state(StateUse::Duplicate)
+            .expect("the probe saves");
+        if saved.pending.is_empty() {
+            break saved;
+        }
+    };
+    let state = saved.bytes;
     let dir = tempfile::TempDir::new().expect("a directory");
     let preset = dir.path().join("a.tutti-preset");
     std::fs::write(&preset, b"x").expect("a preset file");

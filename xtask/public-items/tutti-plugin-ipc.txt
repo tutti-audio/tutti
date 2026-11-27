@@ -30,6 +30,7 @@ fn client::audio::AudioBridge::parameter
 fn client::audio::AudioBridge::parameter_answer
 fn client::audio::AudioBridge::parameters
 fn client::audio::AudioBridge::parameters_answer
+fn client::audio::AudioBridge::pending_edits
 fn client::audio::AudioBridge::presets
 fn client::audio::AudioBridge::rate_refusal
 fn client::audio::AudioBridge::save_state
