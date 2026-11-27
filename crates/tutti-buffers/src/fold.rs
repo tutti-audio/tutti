@@ -640,6 +640,44 @@ fn expr<F: Float>(src: &[Speaker], hits: &[Hit<F>], j: usize) -> Expr<F> {
     }
 }
 
+/// A fold built in `f64`, the width a config keeps it at, for the graph's float.
+impl Fold<f64> {
+    /// The same fold with its gains in the float `G`, each rounded once
+    /// ([`from_design`](tutti_units::Real::from_design)); the routing is unchanged.
+    #[must_use]
+    pub fn cast<G: Float>(&self) -> Fold<G> {
+        let gain = G::from_design;
+        let expr = |e: &Expr<f64>| match e {
+            Expr::Zero => Expr::Zero,
+            Expr::Copy(c) => Expr::Copy(*c),
+            Expr::Sum(terms) => Expr::Sum(
+                terms
+                    .iter()
+                    .map(|t| Term {
+                        gain: gain(t.gain),
+                        srcs: t.srcs.clone(),
+                    })
+                    .collect(),
+            ),
+        };
+        Fold {
+            src: self.src,
+            rows: self
+                .rows
+                .iter()
+                .map(|row| match row {
+                    Row::One(e) => Row::One(expr(e)),
+                    Row::Mix { a, b, scale } => Row::Mix {
+                        a: expr(a),
+                        b: expr(b),
+                        scale: gain(*scale),
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
 impl<F: Float> Fold<F> {
     /// Builds the fold from `src` into `dst`.
     ///

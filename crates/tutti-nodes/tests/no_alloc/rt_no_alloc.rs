@@ -38,25 +38,32 @@ fn convolver_process_is_allocation_free() {
 #[test]
 fn zero_latency_convolver_process_is_allocation_free() {
     use std::sync::Arc;
-    use tutti_buffers::ChannelTopology;
+    use tutti_buffers::{ChannelLayout, ChannelTopology};
+    use tutti_dsp::MatrixResponses;
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::{ConvolverConfig, ImpulseResponses, IrLayout};
+    use tutti_nodes::{ConvolverConfig, ImpulseResponses, IrLayout, MatrixLayout};
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     let irs = [Mono::new(&ir); 4];
-    for (bus, layout) in [
-        (ChannelTopology::MONO, false),
-        (ChannelTopology::STEREO, true),
-    ] {
-        let (layout, irs) = if layout {
-            (IrLayout::TrueStereo, &irs[..])
+    for stereo in [false, true] {
+        let config = if stereo {
+            let set =
+                MatrixResponses::new(ChannelLayout::STEREO, ChannelLayout::STEREO, &irs).unwrap();
+            ConvolverConfig::matrix(
+                ChannelTopology::STEREO,
+                MatrixLayout::TrueStereo,
+                Arc::new(set),
+            )
         } else {
-            (IrLayout::PerChannel, &irs[..1])
-        };
-        let config = ConvolverConfig::new(bus, layout, Arc::new(ImpulseResponses::new(irs)))
-            .unwrap()
-            .block_size(Samples::new(128))
-            .zero_latency();
+            ConvolverConfig::new(
+                ChannelTopology::MONO,
+                IrLayout::PerChannel,
+                Arc::new(ImpulseResponses::new(&irs[..1])),
+            )
+        }
+        .unwrap()
+        .block_size(Samples::new(128))
+        .zero_latency();
         gate_at(ConvolverNode::<f32>::from(config), 100);
     }
 }

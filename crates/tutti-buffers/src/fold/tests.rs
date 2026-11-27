@@ -1883,3 +1883,15 @@ fn route_sends_channels_to_channels() {
         Err(FoldError::Buffer(BufferError::WidthMismatch { .. }))
     ));
 }
+
+/// A cast keeps the routing and rounds each gain once: the 5.1 to stereo fold built in `f64`
+/// and cast to `f32` has the ITU table's gains (1 for the front, −3 dB for the centre and the
+/// surround), and cast to `f64` is the fold itself.
+#[test]
+fn a_cast_fold_applies_the_same_gains() {
+    let wide = Fold::<f64>::between(&smpte(6), &smpte(2)).unwrap();
+    assert_eq!(wide.cast::<f64>(), wide);
+    let narrow: Fold<f32> = wide.cast();
+    assert_eq!(narrow.contributions(0), [(0, 1.0), (2, M), (4, M)]);
+    assert_eq!(narrow.contributions(1), [(1, 1.0), (2, M), (5, M)]);
+}

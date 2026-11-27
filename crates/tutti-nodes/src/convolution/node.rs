@@ -15,7 +15,7 @@
 //! running state.
 
 use tutti_buffers::{
-    ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput, MAX_CHANNELS, Mono, MonoMut,
+    Bed, ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput, MAX_CHANNELS, Mono, MonoMut,
     Planes, PlanesMut, Sample,
 };
 use tutti_graph::{
@@ -26,13 +26,14 @@ use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 use tutti_units::{Latency, Tail};
 
-use super::{ImpulseResponses, IrLayout};
+use super::{ImpulseResponses, IrLayout, MatrixLayout};
 use crate::kernel::{slice_in, slice_out};
 use crate::last_good::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 use tutti_dsp::Ramp;
 use tutti_dsp::{
     Convolver, FftFloat, Fir, Lerp, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
+    MatrixResponses,
 };
 
 /// The head partition of a config that states none.
@@ -81,10 +82,24 @@ pub enum ConvolverError {
     /// The number of impulse responses is not what the layout takes.
     #[error("the layout takes {want} impulse responses, not {got}")]
     IrCount {
-        /// What the layout takes ([`IrLayout::ir_count`]).
+        /// What the layout takes: the bus's width, or one shared response.
         want: usize,
         /// What was given.
         got: usize,
+    },
+    /// The matrix responses are for another shape than the layout and bus.
+    #[error(
+        "the layout is {want_inputs} in {want_outputs} out, the responses {inputs} in {outputs} out"
+    )]
+    MatrixShape {
+        /// The layout's input channels.
+        want_inputs: u16,
+        /// The bus's output channels.
+        want_outputs: u16,
+        /// The responses' input channels.
+        inputs: u16,
+        /// The responses' output channels.
+        outputs: u16,
     },
     /// A true-stereo layout on a bus that is not a pair.
     #[error("a true-stereo layout is two channels wide, not {width}")]
@@ -92,9 +107,6 @@ pub enum ConvolverError {
         /// The bus's channels.
         width: u16,
     },
-    /// The matrix of an ambisonic or true stereo layout could not be built.
-    #[error(transparent)]
-    Matrix(#[from] MatrixConvolverError),
     /// A folded node whose width has no fold to mono.
     #[error("a {width}-wide folded ConvolverNode has no fold to mono")]
     NoFold {
@@ -104,6 +116,15 @@ pub enum ConvolverError {
         #[source]
         source: FoldError,
     },
+}
+
+impl From<MatrixConvolverError> for ConvolverError {
+    fn from(error: MatrixConvolverError) -> Self {
+        match error {
+            MatrixConvolverError::NoChannels => Self::NoChannels,
+            MatrixConvolverError::IrCount { want, got, .. } => Self::IrCount { want, got },
+        }
+    }
 }
 
 /// The convolution of a node: one engine per channel, the inputs folded to mono into one
@@ -179,9 +200,10 @@ impl<F: FftFloat> Engine<F> {
 /// config makes ([`From`]) cannot fail. The block is 512 frames unless
 /// [`block_size`](Self::block_size) says otherwise.
 ///
-/// The responses are an [`Shared`]: two configs are equal when they have the same bus, layout,
-/// block and the same [`ImpulseResponses`] (one allocation), and a config over responses
-/// loaded again is a new node.
+/// The responses are a [`Shared`] handle the caller owns: two configs are equal when they have
+/// the same buses, block and the same handle (one allocation), and a config over responses
+/// loaded again is a new node. This holds for every layout, the matrix ones included
+/// ([`matrix`](Self::matrix)).
 ///
 /// An IR carries no rate and nothing resamples it (see [`ConvolverNode`]).
 ///
@@ -203,62 +225,121 @@ impl<F: FftFloat> Engine<F> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConvolverConfig<S: Sample> {
     output: ChannelTopology,
-    layout: IrLayout,
-    irs: Shared<ImpulseResponses<S>>,
+    input: ChannelTopology,
+    paths: Paths<S>,
     block_size: Samples,
     zero_latency: bool,
 }
 
+/// The checked responses of a [`ConvolverConfig`], by what each layout needs to build its
+/// engine: no check is left for the node to make.
+#[derive(Clone, Debug, PartialEq)]
+enum Paths<S: Sample> {
+    /// [`IrLayout::PerChannel`]: the width, or one shared response.
+    PerChannel(Shared<ImpulseResponses<S>>),
+    /// [`IrLayout::Folded`]: the responses and the fold of the input bus to mono, in `f64`
+    /// and cast to the graph's float when the node is built.
+    Folded {
+        irs: Shared<ImpulseResponses<S>>,
+        fold: Fold<f64>,
+    },
+    /// A [`MatrixLayout`]: one response per path, in the caller's checked set.
+    Matrix(Shared<MatrixResponses<S>>),
+}
+
 impl<S: Sample> ConvolverConfig<S> {
     /// A convolver onto the bus `output` with the responses `irs` laid over its channels as
-    /// `layout` says ([`IrLayout`] lists how many responses each layout takes).
+    /// `layout` says: one per channel, or one shared by all ([`IrLayout`]).
     ///
     /// # Errors
     ///
     /// By name, before any convolver is built: [`ConvolverError::NoChannels`] for a bus of
-    /// none, [`ConvolverError::IrCount`] when the responses are not what the layout takes,
-    /// [`ConvolverError::TrueStereoWidth`] for a true-stereo layout off a pair, and
-    /// [`ConvolverError::NoFold`] for a folded width with no fold to mono: only 1, 2, 4, 6, 8
-    /// and 12 have an order ([`Fold::between`] places any other by index and refuses to
+    /// none, [`ConvolverError::IrCount`] when the responses are not the bus's width (or one),
+    /// and [`ConvolverError::NoFold`] for a folded width with no fold to mono: only 1, 2, 4,
+    /// 6, 8 and 12 have an order ([`Fold::between`] places any other by index and refuses to
     /// narrow it). The responses and the layout depend on each other: how many a layout takes
-    /// follows from its bus, a true-stereo layout needs a pair, and a folded one needs a fold
-    /// to mono for its width, so no type of one holds the others.
+    /// follows from its bus, and a folded one needs a fold to mono for its width, so no type
+    /// of one holds the others.
     pub fn new(
         output: ChannelTopology,
         layout: IrLayout,
         irs: impl Into<Shared<ImpulseResponses<S>>>,
     ) -> Result<Self, ConvolverError> {
         let irs = irs.into();
-        let input = layout.input(output);
-        let (n_in, n_out) = (input.width(), output.width());
-        if n_in.count() == 0 || n_out.count() == 0 {
+        let width = output.width();
+        if width.count() == 0 {
             return Err(ConvolverError::NoChannels);
         }
-        if layout == IrLayout::TrueStereo && n_out != ChannelLayout::STEREO {
-            return Err(ConvolverError::TrueStereoWidth {
-                width: n_out.count(),
-            });
-        }
-        let want = layout.ir_count(n_out);
-        let shared = matches!(layout, IrLayout::PerChannel | IrLayout::Folded) && irs.len() == 1;
-        if irs.len() != want && !shared {
+        let want = usize::from(width.count());
+        if irs.len() != want && irs.len() != 1 {
             return Err(ConvolverError::IrCount {
                 want,
                 got: irs.len(),
             });
         }
-        if layout == IrLayout::Folded {
-            Fold::<f32>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
-                |source| ConvolverError::NoFold {
-                    width: n_in.count(),
-                    source,
-                },
-            )?;
+        let paths = match layout {
+            IrLayout::PerChannel => Paths::PerChannel(irs),
+            IrLayout::Folded => {
+                let fold =
+                    Fold::<f64>::between(&output, &Bed::Mono.topology()).map_err(|source| {
+                        ConvolverError::NoFold {
+                            width: width.count(),
+                            source,
+                        }
+                    })?;
+                Paths::Folded { irs, fold }
+            }
+        };
+        Ok(Self {
+            output,
+            input: output,
+            paths,
+            block_size: DEFAULT_BLOCK,
+            zero_latency: false,
+        })
+    }
+
+    /// A convolver onto the bus `output` with one response for each path of `responses`,
+    /// laid over the paths as `layout` says ([`MatrixLayout`]).
+    ///
+    /// The caller owns the checked set (a [`Shared`] of [`MatrixResponses`], whose
+    /// [`new`](MatrixResponses::new) checks the response count against the shape), and the
+    /// config keeps that handle: two configs made from one handle are the same structure.
+    ///
+    /// # Errors
+    ///
+    /// By name: [`ConvolverError::NoChannels`] for a bus of none,
+    /// [`ConvolverError::TrueStereoWidth`] for a true-stereo layout off a pair, and
+    /// [`ConvolverError::MatrixShape`] when the responses are for another number of
+    /// channels in or out than the layout and bus have.
+    pub fn matrix(
+        output: ChannelTopology,
+        layout: MatrixLayout,
+        responses: impl Into<Shared<MatrixResponses<S>>>,
+    ) -> Result<Self, ConvolverError> {
+        let responses = responses.into();
+        let input = layout.input(output);
+        let (n_in, n_out) = (input.width(), output.width());
+        if n_in.count() == 0 || n_out.count() == 0 {
+            return Err(ConvolverError::NoChannels);
+        }
+        if layout == MatrixLayout::TrueStereo && n_out != ChannelLayout::STEREO {
+            return Err(ConvolverError::TrueStereoWidth {
+                width: n_out.count(),
+            });
+        }
+        if responses.inputs() != n_in || responses.outputs() != n_out {
+            return Err(ConvolverError::MatrixShape {
+                want_inputs: n_in.count(),
+                want_outputs: n_out.count(),
+                inputs: responses.inputs().count(),
+                outputs: responses.outputs().count(),
+            });
         }
         Ok(Self {
             output,
-            layout,
-            irs,
+            input,
+            paths: Paths::Matrix(responses),
             block_size: DEFAULT_BLOCK,
             zero_latency: false,
         })
@@ -317,14 +398,13 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     fn over<S: Sample>(config: &ConvolverConfig<S>) -> Self {
         let ConvolverConfig {
             output,
-            layout,
-            irs,
+            input,
+            paths,
             block_size,
             zero_latency,
         } = config;
-        let (output, layout, block_size, zero_latency) =
-            (*output, *layout, *block_size, *zero_latency);
-        let irs = irs.views();
+        let (output, input, block_size, zero_latency) =
+            (*output, *input, *block_size, *zero_latency);
         let convolver = |ir: Mono<'_, S>| {
             if zero_latency {
                 Convolver::zero_latency(ir, block_size)
@@ -332,40 +412,36 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 Convolver::new(ir, block_size)
             }
         };
-        let input = layout.input(output);
-        let (n_in, n_out) = (input.width(), output.width());
-        let shared = matches!(layout, IrLayout::PerChannel | IrLayout::Folded) && irs.len() == 1;
         // One convolver per output channel: a lone response is shared by all of them.
-        let per_channel = || -> Vec<Convolver<F>> {
-            if shared {
+        let per_channel = |irs: &ImpulseResponses<S>| -> Vec<Convolver<F>> {
+            let irs = irs.views();
+            if irs.len() == 1 {
                 let head = convolver(irs[0]);
-                (0..usize::from(n_out.count()))
+                (0..usize::from(output.width().count()))
                     .map(|_| head.fresh())
                     .collect()
             } else {
                 irs.iter().map(|ir| convolver(*ir)).collect()
             }
         };
-        let engine = match layout {
-            IrLayout::PerChannel => Engine::PerChannel(per_channel()),
-            IrLayout::Folded => Engine::Folded {
-                fold: Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology())
-                    .expect("`ConvolverConfig::new` checked the fold to mono"),
-                convolvers: per_channel(),
+        let engine = match paths {
+            Paths::PerChannel(irs) => Engine::PerChannel(per_channel(irs)),
+            Paths::Folded { irs, fold } => Engine::Folded {
+                fold: fold.cast(),
+                convolvers: per_channel(irs),
                 // Sized before `prepare` so an unprepared node renders in pieces rather than
                 // index an empty scratch; `prepare` resizes it to the graph's block.
                 mono: vec![F::ZERO; FOLD_SCRATCH],
             },
-            IrLayout::TrueStereo | IrLayout::Ambisonic(_) => {
-                let matrix = MatrixConvolverConfig::new(n_in, n_out, &irs).block_size(block_size);
+            Paths::Matrix(responses) => {
+                let matrix = MatrixConvolverConfig::new(responses).block_size(block_size);
                 Engine::Matrix(Box::new(
                     if zero_latency {
                         matrix.zero_latency()
                     } else {
                         matrix
                     }
-                    .build()
-                    .expect("`ConvolverConfig::new` checked the responses against the shape"),
+                    .build(),
                 ))
             }
         };
@@ -474,8 +550,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let irs = ImpulseResponses::new(&[Mono::new(&taps)]);
         let layout = ConvolverConfig {
             output: config.input,
-            layout: IrLayout::PerChannel,
-            irs: Shared::new(irs),
+            input: config.input,
+            paths: Paths::PerChannel(Shared::new(irs)),
             block_size: config.block_size,
             zero_latency: false,
         };
@@ -1823,36 +1899,67 @@ mod layouts {
         }
     }
 
-    /// A count of impulse responses the layout does not take, and a true-stereo layout off a
-    /// pair, are each refused by name.
+    /// A count of impulse responses the layout does not take, a true-stereo layout off a
+    /// pair and responses of another shape are each refused by name.
     #[test]
     fn a_layout_that_does_not_fit_is_refused_by_name() {
         let one = [1.0f32];
         let irs = |n: usize| vec![Mono::new(&one[..]); n];
         let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
-        let build = |output: ChannelTopology, layout: IrLayout, n: usize| {
-            let irs = irs(n);
-            ConvolverConfig::new(output, layout, Arc::new(ImpulseResponses::new(&irs))).err()
+        let per_channel = |n: usize| {
+            ConvolverConfig::new(
+                ChannelTopology::STEREO,
+                IrLayout::PerChannel,
+                Arc::new(ImpulseResponses::new(&irs(n))),
+            )
+            .err()
+        };
+        let responses = |inputs: u16, outputs: u16, n: usize| {
+            MatrixResponses::new(inputs.into(), outputs.into(), &irs(n))
+        };
+        let matrix = |output: ChannelTopology, layout: MatrixLayout, set: MatrixResponses<f32>| {
+            ConvolverConfig::matrix(output, layout, Arc::new(set)).err()
         };
 
         assert_eq!(
-            build(ChannelTopology::STEREO, IrLayout::PerChannel, 3),
+            per_channel(3),
             Some(ConvolverError::IrCount { want: 2, got: 3 })
         );
         assert_eq!(
-            build(ChannelTopology::STEREO, IrLayout::TrueStereo, 2),
+            responses(2, 2, 2).map_err(ConvolverError::from).err(),
             Some(ConvolverError::IrCount { want: 4, got: 2 })
         );
         assert_eq!(
-            build(ChannelTopology::STEREO, IrLayout::Ambisonic(foa), 4),
+            responses(4, 2, 4).map_err(ConvolverError::from).err(),
             Some(ConvolverError::IrCount { want: 8, got: 4 })
         );
         assert_eq!(
-            build(ChannelTopology::MONO, IrLayout::TrueStereo, 1),
+            matrix(
+                ChannelTopology::MONO,
+                MatrixLayout::TrueStereo,
+                responses(1, 1, 1).unwrap()
+            ),
             Some(ConvolverError::TrueStereoWidth { width: 1 })
         );
         assert_eq!(
-            build(ChannelTopology::STEREO, IrLayout::TrueStereo, 4),
+            matrix(
+                ChannelTopology::STEREO,
+                MatrixLayout::Ambisonic(foa),
+                responses(2, 2, 4).unwrap()
+            ),
+            Some(ConvolverError::MatrixShape {
+                want_inputs: 4,
+                want_outputs: 2,
+                inputs: 2,
+                outputs: 2
+            })
+        );
+        assert_eq!(
+            matrix(
+                ChannelTopology::STEREO,
+                MatrixLayout::TrueStereo,
+                responses(2, 2, 4).unwrap()
+            ),
             None
         );
     }

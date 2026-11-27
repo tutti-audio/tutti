@@ -71,6 +71,7 @@ fn edge::Pull::ready
 fn edge::Pull::stop
 fn fold::Fold::between
 fn fold::Fold::by_index
+fn fold::Fold::cast
 fn fold::Fold::contributions
 fn fold::Fold::dst_layout
 fn fold::Fold::fold
