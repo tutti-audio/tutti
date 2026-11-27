@@ -10,6 +10,7 @@ use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_session::MainOutput;
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
@@ -18,7 +19,6 @@ use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Node, Offset};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem, StemKey,
 };
@@ -39,10 +39,13 @@ const PRESET: U7 = U7::of(24);
 
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
-fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMainOutput> {
+fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, ToMemory> {
     Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .clock(clock)
@@ -50,10 +53,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn render(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMainOutput>,
-) -> Vec<Vec<f32>> {
+fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
@@ -62,10 +62,7 @@ fn render(
 
 /// The planes of the one stem `bounce` names, in memory: the main output is
 /// rendered beside it and dropped.
-fn render_stem(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMainOutput>,
-) -> Vec<Vec<f32>> {
+fn render_stem(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
@@ -171,7 +168,7 @@ fn timeline(rate: f64) -> Arc<OfflineTimeline> {
 }
 
 /// Export the mix for 0.8 s at `rate` against [`timeline`].
-fn request(rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
+fn request(rate: f64) -> Bounce<NodeKey, ToMemory> {
     bounce_of(0.8, rate, ExportClock::timeline(timeline(rate)))
 }
 

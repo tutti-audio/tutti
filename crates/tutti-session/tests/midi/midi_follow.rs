@@ -7,6 +7,7 @@ use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks, play, tap};
 use std::sync::Arc;
 use tutti_platform::Instant;
+use tutti_session::ToMemory;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
@@ -606,7 +607,7 @@ fn a_bounce_while_following_renders_the_base_tempo() {
     );
 
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)));
     let planes = crate::bounced::bounced(&mut s, bounce)
         .expect("renders")

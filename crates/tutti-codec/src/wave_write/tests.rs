@@ -87,7 +87,7 @@ fn a_written_wave_reads_back_as_itself() {
         // Past one write chunk, so the chunking is exercised too.
         let wave = ramp_wave(topology, 44_100.0, 20_000);
         let path = dir.path().join(name);
-        write(&wave, &Encoding::new(format), &ToFile::new(&path)).unwrap();
+        write(&wave, &ToFile::new(&path, Encoding::new(format))).unwrap();
         let back = read_wave::<f32>(&path).unwrap();
         assert_eq!(back.sample_rate(), wave.sample_rate(), "{name}: rate");
         assert_eq!(back.topology(), wave.topology(), "{name}: topology");
@@ -120,7 +120,7 @@ fn an_integer_wave_writes_the_integers_it_holds() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ints.wav");
     let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16).no_dither()));
-    write(&wave, &Encoding::new(format), &ToFile::new(&path)).unwrap();
+    write(&wave, &ToFile::new(&path, Encoding::new(format))).unwrap();
     let back = read_wave::<i16>(&path).unwrap();
     assert!(back.channel(0).iter().eq(&samples));
 }
@@ -192,7 +192,7 @@ fn an_i32_wave_keeps_its_low_bits_through_a_stage() {
     let encoding = Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))).channels(swapped);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("swapped.wav");
-    write(&wave, &encoding, &ToFile::new(&path)).unwrap();
+    write(&wave, &ToFile::new(&path, encoding.clone())).unwrap();
     for back in [
         read_wave::<f64>(&path).unwrap(),
         read_wave::<f64>(encode(&wave, &encoding).unwrap()).unwrap(),
@@ -224,7 +224,7 @@ fn a_path_refuses_an_existing_file_unless_it_replaces() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
     std::fs::write(&path, b"old").unwrap();
-    let refused = write(&wave, &encoding, &ToFile::new(&path));
+    let refused = write(&wave, &ToFile::new(&path, encoding.clone()));
     assert!(
         matches!(&refused, Err(EncodeError::Exists { path: p }) if *p == path),
         "an existing file is refused: {refused:?}"
@@ -232,11 +232,11 @@ fn a_path_refuses_an_existing_file_unless_it_replaces() {
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 
-    write(&wave, &encoding, &ToFile::new(&path).replace()).unwrap();
+    write(&wave, &ToFile::new(&path, encoding.clone()).replace()).unwrap();
     assert_eq!(&std::fs::read(&path).unwrap()[..4], b"RIFF");
 
     let fresh = dir.path().join("fresh.wav");
-    write(&wave, &encoding, &ToFile::new(&fresh)).unwrap();
+    write(&wave, &ToFile::new(&fresh, encoding.clone())).unwrap();
     assert_eq!(&std::fs::read(&fresh).unwrap()[..4], b"RIFF");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
 }

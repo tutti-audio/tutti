@@ -1,26 +1,30 @@
-//! [`ToFile`]: a path, and what happens to what is at it.
+//! [`ToFile`]: a path, what is written there, and what happens to what is at it.
 
-use crate::{EncoderOptions, FileEncoder, Result};
+use crate::{EncoderOptions, Encoding, FileEncoder, Format, Resample, Result};
 use std::path::{Path, PathBuf};
+use tutti_buffers::{ChannelSet, Placement};
+use tutti_units::SampleRate;
 
-/// Where an [`Encoding`](crate::Encoding) is written: a path, and the options of a file
+/// A file: the [`Encoding`] it is written as, the path it lands at, and the options of a file
 /// ([`FileOptions`](crate::FileOptions)'s). An existing file is refused by default
 /// ([`EncodeError::Exists`](crate::EncodeError::Exists)) and replaced with
 /// [`replace`](Self::replace); the file is written beside its path and put in place when whole by
 /// default, and written at its path from the start with [`in_place`](Self::in_place).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use = "a destination does nothing until `write` or a `Chain` takes it"]
 pub struct ToFile {
     path: PathBuf,
+    encoding: Encoding,
     replace: bool,
     in_place: bool,
 }
 
 impl ToFile {
-    /// A file at `path`, staged and refusing an existing path.
-    pub fn new(path: impl Into<PathBuf>) -> Self {
+    /// A file at `path` written as `encoding`, staged and refusing an existing path.
+    pub fn new(path: impl Into<PathBuf>, encoding: Encoding) -> Self {
         Self {
             path: path.into(),
+            encoding,
             replace: false,
             in_place: false,
         }
@@ -44,8 +48,48 @@ impl ToFile {
         &self.path
     }
 
+    /// The container and its settings.
+    #[must_use]
+    pub fn format(&self) -> Format {
+        self.encoding.format()
+    }
+
+    /// The channels the file holds, when its encoding states them ([`Encoding::channel_set`]).
+    #[must_use]
+    pub fn channel_set(&self) -> Option<ChannelSet> {
+        self.encoding.channel_set()
+    }
+
+    /// Whether the encoding states the file's speakers ([`Encoding::placement`]).
+    #[must_use]
+    pub fn placement(&self) -> Placement {
+        self.encoding.placement()
+    }
+
+    /// The resample of the file's encoding, when it has one.
+    #[must_use]
+    pub fn resampling(&self) -> Option<Resample> {
+        self.encoding.resampling()
+    }
+
+    /// The rate the file is written at for a source at `source` ([`Encoding::rate`]).
+    #[must_use]
+    pub fn rate(&self, source: SampleRate) -> SampleRate {
+        self.encoding.rate(source)
+    }
+
+    /// The same file, written as `f` makes of its encoding.
+    pub fn map_encoding(mut self, f: impl FnOnce(Encoding) -> Encoding) -> Self {
+        self.encoding = f(self.encoding);
+        self
+    }
+
     /// The file, begun for `spec`, with `options`' length and seed.
     pub(crate) fn create(&self, options: EncoderOptions<'_>) -> Result<FileEncoder> {
+        let options = match self.encoding.seed() {
+            Some(seed) => options.dither_seed(seed),
+            None => options,
+        };
         let file = options.file(&self.path);
         let file = if self.replace { file.replace() } else { file };
         let file = if self.in_place { file.in_place() } else { file };

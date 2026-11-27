@@ -8,7 +8,7 @@ use crate::Staged;
 
 /// Where a one-shot write goes: a file at a path, or a writer the caller lends.
 ///
-/// A destination is written once, so it needs no reopening and no `Seek`: a
+/// A write target is written once, so it needs no reopening and no `Seek`: a
 /// writer that must seek is wrapped by the writing code in a buffer of its own,
 /// which it hands over whole with `write_all`.
 ///
@@ -23,15 +23,15 @@ use crate::Staged;
 ///
 /// ```
 /// use std::path::Path;
-/// use tutti_platform::Destination;
+/// use tutti_platform::WriteTarget;
 ///
 /// let mut bytes: Vec<u8> = Vec::new();
-/// let to_vec = Destination::from(&mut bytes);
-/// let to_file = Destination::from(Path::new("out.wav"));
-/// let to_new_file = Destination::from(Path::new("take.wav")).create_new();
+/// let to_vec = WriteTarget::from(&mut bytes);
+/// let to_file = WriteTarget::from(Path::new("out.wav"));
+/// let to_new_file = WriteTarget::from(Path::new("take.wav")).create_new();
 /// # let _ = (to_vec, to_file, to_new_file);
 /// ```
-pub enum Destination<'a> {
+pub enum WriteTarget<'a> {
     /// A file at a path, written through its staging: the path is the
     /// staging's [`target`](Staged::target), and [`create_new`](Self::create_new)
     /// is the staging's.
@@ -40,7 +40,7 @@ pub enum Destination<'a> {
     Writer(&'a mut dyn Write),
 }
 
-impl Destination<'_> {
+impl WriteTarget<'_> {
     /// Refuses a file already at a path instead of replacing it, as
     /// [`OpenOptions::create_new`](std::fs::OpenOptions::create_new) does: the
     /// commit fails with [`AlreadyExists`](std::io::ErrorKind::AlreadyExists)
@@ -55,7 +55,7 @@ impl Destination<'_> {
     }
 }
 
-impl fmt::Debug for Destination<'_> {
+impl fmt::Debug for WriteTarget<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Path(staged) => f.debug_tuple("Path").field(staged).finish(),
@@ -64,37 +64,37 @@ impl fmt::Debug for Destination<'_> {
     }
 }
 
-impl From<&Path> for Destination<'_> {
+impl From<&Path> for WriteTarget<'_> {
     fn from(path: &Path) -> Self {
         Self::Path(Staged::new(path))
     }
 }
 
-impl From<&PathBuf> for Destination<'_> {
+impl From<&PathBuf> for WriteTarget<'_> {
     fn from(path: &PathBuf) -> Self {
         Self::Path(Staged::new(path))
     }
 }
 
-impl From<PathBuf> for Destination<'_> {
+impl From<PathBuf> for WriteTarget<'_> {
     fn from(path: PathBuf) -> Self {
         Self::Path(Staged::new(&path))
     }
 }
 
-impl From<&str> for Destination<'_> {
+impl From<&str> for WriteTarget<'_> {
     fn from(path: &str) -> Self {
         Self::Path(Staged::new(Path::new(path)))
     }
 }
 
-impl<'a> From<&'a mut dyn Write> for Destination<'a> {
+impl<'a> From<&'a mut dyn Write> for WriteTarget<'a> {
     fn from(writer: &'a mut dyn Write) -> Self {
         Self::Writer(writer)
     }
 }
 
-impl<'a, W: Write> From<&'a mut W> for Destination<'a> {
+impl<'a, W: Write> From<&'a mut W> for WriteTarget<'a> {
     fn from(writer: &'a mut W) -> Self {
         Self::Writer(writer)
     }

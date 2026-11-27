@@ -4,6 +4,7 @@
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
+use tutti_codec::Encoding;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
@@ -57,7 +58,10 @@ fn a_bounce_onto_an_existing_main_output_is_refused_and_leaves_the_path() {
     session.graph().connect(node, MainOutput).unwrap();
     let error = bounced(
         &mut session,
-        bounce().main_output(&main_output, float_wav()),
+        bounce().main_output(tutti_codec::ToFile::new(
+            &main_output,
+            Encoding::new(float_wav()),
+        )),
     )
     .map(|_| ())
     .expect_err("the path exists");
@@ -86,7 +90,9 @@ fn a_replacing_bounce_replaces_an_existing_main_output_and_leaves_nothing_beside
     session.graph().connect(node, MainOutput).unwrap();
     bounced(
         &mut session,
-        bounce().main_output(&main_output, float_wav()).replace(),
+        bounce().main_output(
+            tutti_codec::ToFile::new(&main_output, Encoding::new(float_wav())).replace(),
+        ),
     )
     .expect("renders");
     let planes = tutti_fixtures::signal::read_wav_f32(&main_output);

@@ -42,10 +42,10 @@
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
 //!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
 //!   source that opens again and again, with an [`Identity`] to cache by (a
-//!   path's carries its [`FileStamp`]). [`Destination`] is where one write goes: a
+//!   path's carries its [`FileStamp`]). [`WriteTarget`] is where one write goes: a
 //!   path, written staged and replacing by default (or refusing an existing file
-//!   with [`create_new`](Destination::create_new)), or a borrowed writer;
-//!   [`Staged`] opens the temporary beside a path that a destination writes
+//!   with [`create_new`](WriteTarget::create_new)), or a borrowed writer;
+//!   [`Staged`] opens the temporary beside a path that a write target writes
 //!   through, a [`StagedFile`] that syncs, closes and renames on `commit`, keeping the file in a [`StagedCommitError`] if that fails. The path implementations fail at `open` on
 //!   the web.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
@@ -101,8 +101,8 @@ mod sleep;
 mod thread;
 
 pub use asset::{
-    Asset, Destination, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
-    StagedKeep,
+    Asset, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile, StagedKeep,
+    WriteTarget,
 };
 pub use clock::{instant_of_monotonic_ns, monotonic_ns, monotonic_ns_of};
 pub use denormals::with_no_denormals;

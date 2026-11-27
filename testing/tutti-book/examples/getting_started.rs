@@ -5,6 +5,7 @@
 //! ```
 
 use std::path::Path;
+use tutti::codec::Encoding;
 
 // ANCHOR: imports
 use futures_lite::future::block_on;
@@ -40,12 +41,9 @@ fn tone() -> Result<Session, tutti::Error> {
 // ANCHOR_END: session
 
 // ANCHOR: bounce
-/// The first two seconds of the session, in stereo.
+/// The first two seconds of the session.
 fn two_seconds() -> Bounce {
-    Bounce::new()
-        .replace() // overwrite the file a previous run wrote
-        .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
-        .channels(ChannelLayout::STEREO) // left and right
+    Bounce::new().range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
 }
 // ANCHOR_END: bounce
 
@@ -57,7 +55,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The file's name picks its format: `.flac` is FLAC.
     let mut session = tone()?;
-    let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
+    let rendering = session.bounce(
+        two_seconds().main_output(
+            tutti::codec::ToFile::new(
+                &path, // Left and right.
+                Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO),
+            )
+            .replace(),
+        ),
+    )?;
     // The session renders on a thread of its own; we wait for it, then hand
     // what it made back to the session.
     let rendered = block_on(rendering.into_future());
@@ -71,13 +77,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti::ToMemory;
 
     /// After the connection's fade-in, both channels carry the sine at its
     /// level: a peak of 0.25 and an RMS of 0.25 / √2.
     #[test]
     fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
         let mut session = tone().unwrap();
-        let rendering = session.bounce(two_seconds().main_output_buffers()).unwrap();
+        let rendering = session
+            .bounce(two_seconds().main_output(ToMemory::new()))
+            .unwrap();
         let rendered = session
             .apply(block_on(rendering.into_future()))
             .unwrap()

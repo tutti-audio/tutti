@@ -135,7 +135,7 @@ fn run_many(
                     Some(resample) => encoding.resample(resample),
                     None => encoding,
                 };
-                FileTarget::new(encoding, ToFile::new(path).replace())
+                FileTarget::new(ToFile::new(path, encoding).replace())
             };
             let gain = normalize.map(|n| match &first {
                 None => Gain::Own(n),

@@ -12,6 +12,7 @@
 
 use crate::loading::{LoadPlugin, Perform, Spec};
 use crate::support;
+use tutti_session::ToMemory;
 
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
@@ -24,8 +25,8 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, BufferMainOutput, ExportClock, MainOutput, OutputPort,
-    PHASES, Phase, PhaseCx, Range, Replacement, Session, SessionEvent,
+    Bounce, BounceLatency, BounceTail, ExportClock, MainOutput, OutputPort, PHASES, Phase, PhaseCx,
+    Range, Replacement, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_units::{SampleRate, Samples};
@@ -142,10 +143,13 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
 
 /// A short offline bounce into memory: the render mode a plugin is told
 /// Offline for as long as it is in flight.
-fn request() -> Bounce<tutti_graph::NodeKey, BufferMainOutput> {
+fn request() -> Bounce<tutti_graph::NodeKey, ToMemory> {
     Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(
             tutti_units::Seconds::new(0.0),
             tutti_units::Seconds::new(0.05),

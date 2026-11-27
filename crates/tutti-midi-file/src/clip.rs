@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tutti_midi_ci::ProfileOnRequest;
 use tutti_music::MeterMap;
-use tutti_platform::Destination;
+use tutti_platform::WriteTarget;
 use tutti_tempo::TempoMap;
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, NoteNumber, Stream, System,
@@ -427,7 +427,7 @@ impl ClipFile {
         )?)
     }
 
-    /// Writes the file to `dst` (any `impl Into<Destination>`: a path, or a
+    /// Writes the file to `dst` (any `impl Into<WriteTarget>`: a path, or a
     /// `&mut` [`Write`](std::io::Write) such as a `Vec<u8>`): every packet
     /// written back at its tick, the spelling of a Delta Clockstamp possibly
     /// different from the file it was read from; a read of the result is
@@ -438,7 +438,7 @@ impl ClipFile {
     /// # Errors
     ///
     /// [`WriteError`], as [`StandardMidiFile::write`](crate::StandardMidiFile::write).
-    pub fn write<'a>(&self, dst: impl Into<Destination<'a>>) -> Result<(), WriteError> {
+    pub fn write<'a>(&self, dst: impl Into<WriteTarget<'a>>) -> Result<(), WriteError> {
         let bytes = clip_file::write(
             self.ticks_per_quarter,
             self.header.messages(),

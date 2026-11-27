@@ -123,7 +123,7 @@
 //!
 //! [`MidiFile::read`] takes a path, bytes or an app's own source (any
 //! `impl Into<Asset>`) and [`StandardMidiFile::write`] and [`ClipFile::write`] a
-//! path or a writer (any `impl Into<Destination>`). [`MidiFileKind::detect`] tells
+//! path or a writer (any `impl Into<WriteTarget>`). [`MidiFileKind::detect`] tells
 //! the two kinds apart by magic, not by extension. Nothing here touches an OS MIDI
 //! API.
 //!

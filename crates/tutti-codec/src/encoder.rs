@@ -607,6 +607,14 @@ impl FileEncoder {
         self.encoder.clipped()
     }
 
+    /// Records a failure of the stages in front of the encoder as the file's first error, so
+    /// that closing it (as [`finalize`](Self::finalize) does) reports it.
+    pub(crate) fn fail(&mut self, error: &EncodeError) {
+        self.encoder
+            .first_error
+            .get_or_insert_with(|| error.duplicate());
+    }
+
     /// As [`Encoder::write`].
     ///
     /// # Errors
@@ -666,6 +674,34 @@ impl FileEncoder {
     ///
     /// [`Kept`], with the error [`finish`](Self::finish) would give.
     pub fn finish_keeping(self) -> std::result::Result<(), Kept> {
+        let (file, path) = self.close_keeping()?;
+        match file.file {
+            FileSink::Staged(file) => file.commit().map_err(Kept::from),
+            // Whole and at its path: a failed sync keeps it there.
+            FileSink::InPlace(file) => file.sync_all().map_err(|e| Kept::Unfinished {
+                source: EncodeError::Io(e),
+                unfinished: Unfinished {
+                    path,
+                    header_describes_frames: true,
+                },
+            }),
+        }
+    }
+
+    /// As [`finalize`](Self::finalize), for a file that must not be lost: when it cannot be
+    /// closed whole (a failed `write`, the header, the close) it is **kept** beside its path
+    /// as [`finish_keeping`](Self::finish_keeping) keeps it, and the error is
+    /// [`Kept::Unfinished`], naming it. The caller owns a kept file, to move or delete.
+    ///
+    /// # Errors
+    ///
+    /// [`Kept::Unfinished`].
+    pub fn finalize_keeping(self) -> std::result::Result<FinalizedFile, Kept> {
+        self.close_keeping().map(|(file, _)| file)
+    }
+
+    /// The file closed, or kept unfinished; with the path it was written at.
+    fn close_keeping(self) -> std::result::Result<(FinalizedFile, PathBuf), Kept> {
         let Self {
             encoder,
             keep,
@@ -681,17 +717,7 @@ impl FileEncoder {
                 if let Some(keep) = &keep {
                     keep.release();
                 }
-                match file.file {
-                    FileSink::Staged(file) => file.commit().map_err(Kept::from),
-                    // Whole and at its path: a failed sync keeps it there.
-                    FileSink::InPlace(file) => file.sync_all().map_err(|e| Kept::Unfinished {
-                        source: EncodeError::Io(e),
-                        unfinished: Unfinished {
-                            path,
-                            header_describes_frames: true,
-                        },
-                    }),
-                }
+                Ok((file, path))
             }
             Err(source) => Err(Kept::Unfinished {
                 source,
@@ -747,6 +773,22 @@ pub enum Kept {
         /// The file kept.
         unfinished: Unfinished,
     },
+}
+
+impl Kept {
+    /// Gives the file up: removes an unfinished file (a complete one a commit could not put
+    /// in place is the caller's, and stays) and returns what failed, for a caller whose
+    /// result must be whole or nothing.
+    pub fn discard(self) -> EncodeError {
+        match self {
+            Self::Commit(e) => EncodeError::Commit(e),
+            Self::Unfinished { source, unfinished } => {
+                // Best effort: the failure being reported is the file's own.
+                let _ = std::fs::remove_file(&unfinished.path);
+                source
+            }
+        }
+    }
 }
 
 /// The unfinished file [`FileEncoder::finish_keeping`] kept.

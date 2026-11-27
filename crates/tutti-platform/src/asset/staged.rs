@@ -1,4 +1,4 @@
-//! A file written beside its destination and put in place when whole.
+//! A file written beside its target and put in place when whole.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -12,7 +12,7 @@ use crate::SystemTime;
 
 /// A file to be written beside a target path, and put in place when whole.
 ///
-/// This is how a path [`Destination`](crate::Destination) is written: the bytes go
+/// This is how a path [`WriteTarget`](crate::WriteTarget) is written: the bytes go
 /// to a temporary in the target's directory, so the rename is within one file
 /// system and the target holds either what it held before or the whole new
 /// file, never a part. [`open`](Self::open) creates the temporary and hands out

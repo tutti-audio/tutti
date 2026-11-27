@@ -33,12 +33,12 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use tutti::codec::Encoding;
 
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, StandardMidiFile, Tick, Timebase, Track};
-use tutti::session::MainOutputKind;
 use tutti::{
-    Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
-    SampleRate, Samples, Saved, Session, SessionEvent, Written,
+    Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, Pcm, PeerState, Range, SampleRate,
+    Samples, Saved, Session, SessionEvent, Written,
 };
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
@@ -96,16 +96,14 @@ fn load(
     Ok(s.apply(loaded)?)
 }
 
-/// Plays `plugin` (restored from `state`, if any)
-/// `midi` into the main output `main_output` names (a file or memory, which `M` says
-/// and the result's type follows).
-fn play<M: MainOutputKind>(
+/// A session that plays `plugin` (restored from `state`, if any) `midi`, and the bounce of
+/// it that has no main output yet.
+fn play(
     main: tutti::plugin::MainThreadMarker,
     plugin: &Path,
     state: Option<Vec<u8>>,
     midi: &Path,
-    main_output: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
-) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
+) -> Result<(Session, Bounce), Box<dyn std::error::Error>> {
     let mut s = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -137,11 +135,7 @@ fn play<M: MainOutputKind>(
     // Everything else is derived: the clock is the project's tempo map from
     // beat 0, the latency is the plan's, the tail is the plugin's declared
     // one, and the file is as wide as the main output.
-    let job = s.bounce(main_output(
-        Bounce::new().range(Range::Beats(Beat::new(0.0), end)),
-    ))?; // the plugin hears Offline from here
-    let bounced = s.apply(tutti_fixtures::block_on(job))?; // and Realtime from the next update
-    Ok(bounced.into_main_output())
+    Ok((s, Bounce::new().range(Range::Beats(Beat::new(0.0), end))))
 }
 
 /// [`play`] into a 24-bit WAV at `out`.
@@ -152,12 +146,16 @@ fn play_to_file(
     midi: &Path,
     out: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
-    play(main, plugin, state, midi, |bounce| {
-        // `replace`: a rerun overwrites the output of the last one.
-        bounce
-            .replace()
-            .main_output(out, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))))
-    })
+    let (mut s, bounce) = play(main, plugin, state, midi)?;
+    // `replace`: a rerun overwrites the output of the last one.
+    let to = tutti::codec::ToFile::new(
+        out,
+        Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+    )
+    .replace();
+    let job = s.bounce(bounce.main_output(to))?; // the plugin hears Offline from here
+    let bounced = s.apply(tutti_fixtures::block_on(job))?; // and Realtime from the next update
+    Ok(bounced.into_main_output())
 }
 
 /// Two bars: a note on each beat, 120 BPM for the first four beats and 60
@@ -283,14 +281,16 @@ mod tests {
         let (plugin, state) = super::notes_plugin();
         // Into buffers, not the file: the plugin's output is a key number,
         // far past full scale, which a WAV clips.
-        let rendered = super::play(
-            tutti_fixtures::main_thread(),
-            &plugin,
-            Some(state),
-            &midi,
-            tutti::Bounce::main_output_buffers,
-        )
-        .expect("the example runs");
+        let (mut session, bounce) =
+            super::play(tutti_fixtures::main_thread(), &plugin, Some(state), &midi)
+                .expect("the example runs");
+        let job = session
+            .bounce(bounce.main_output(tutti::ToMemory::new()))
+            .unwrap();
+        let rendered = session
+            .apply(tutti_fixtures::block_on(job))
+            .unwrap()
+            .into_main_output();
         let left: Vec<i32> = rendered.planes()[0].iter().map(|&s| s as i32).collect();
 
         let onsets: Vec<(usize, i32)> = (0..left.len())

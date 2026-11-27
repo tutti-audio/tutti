@@ -3,10 +3,10 @@
 use tutti_dsp::FftFloat;
 use tutti_fixtures::block_on;
 use tutti_graph::NodeKey;
-use tutti_session::{AppKey, Bounce, BounceError, Bounced, Clock, MainOutputKind, Session};
+use tutti_session::{AppKey, Bounce, BounceError, Bounced, Clock, Destination, Session};
 
 /// `bounce` rendered on the session's executor and applied to `session`.
-pub(crate) fn bounced<K: AppKey, C: Clock, M: MainOutputKind>(
+pub(crate) fn bounced<K: AppKey, C: Clock, M: Destination>(
     session: &mut Session<K, C>,
     bounce: Bounce<NodeKey, M, C::Float>,
 ) -> Result<Bounced<M, C::Float>, BounceError>

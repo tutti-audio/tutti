@@ -119,19 +119,26 @@ fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
         float => float,
     };
     FileTarget::new(
-        Encoding::new(Format::Wav(pcm)).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ToFile::new(path).replace(),
+        ToFile::new(
+            path,
+            Encoding::new(Format::Wav(pcm))
+                .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        )
+        .replace(),
     )
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
     FileTarget::new(
-        Encoding::new(Format::Flac {
-            pcm: IntPcm::new(depth).no_dither(),
-            level: FlacLevel::default(),
-        })
-        .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ToFile::new(path).replace(),
+        ToFile::new(
+            path,
+            Encoding::new(Format::Flac {
+                pcm: IntPcm::new(depth).no_dither(),
+                level: FlacLevel::default(),
+            })
+            .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        )
+        .replace(),
     )
 }
 
@@ -308,12 +315,12 @@ fn each_output_is_dithered_with_its_own_seed() {
     let dir = tempfile::tempdir().unwrap();
     let paths = ["a.wav", "b.wav", "c.wav"].map(|name| dir.path().join(name));
     let dithered = |path: &std::path::Path, seed: u64| {
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            path,
             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO))
                 .dither_seed(seed),
-            ToFile::new(path),
-        )
+        ))
     };
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let silence = g.add(Const::frame(&[0.0, 0.0]));
@@ -546,11 +553,11 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
         // Two unassigned feeds onto a mono file: unassigned channels are
         // not downmixed, so there is no place for them.
         Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            dir.path().join("t.wav"),
             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
                 .channels(ChannelSet::default_for(ChannelLayout::MONO)),
-            ToFile::new(dir.path().join("t.wav")),
-        ),
+        )),
     ));
     let err = render(
         &mut graph,
@@ -598,11 +605,11 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .map(|n| dir.path().join(n))
         .collect();
     let float = |path: &std::path::Path, gain| {
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            path,
             Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-            ToFile::new(path),
-        )
+        ))
         .normalize(gain)
     };
     let mut outputs = Outputs::new();
@@ -927,21 +934,21 @@ fn an_unmeasurable_output_names_its_index() {
 
     let mut outputs = Outputs::new();
     outputs.file(Output::main_output(
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            dir.path().join("m.wav"),
             Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-            ToFile::new(dir.path().join("m.wav")),
-        )
+        ))
         .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
     ));
     outputs.file(Output::tap(
         reader,
         stereo_placement(),
-        FileTarget::new(
+        FileTarget::new(ToFile::new(
+            dir.path().join("s.wav"),
             Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-            ToFile::new(dir.path().join("s.wav")),
-        )
+        ))
         .normalize(Gain::Own(Normalize::peak(Db::new(-6.0)))),
     ));
     let err = render(
@@ -978,9 +985,12 @@ fn wide(width: u16) -> RenderGraph {
 
 fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
     FileTarget::new(
-        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
-            .channels(ChannelSet::default_for(ChannelLayout::from(width))),
-        ToFile::new(path).replace(),
+        ToFile::new(
+            path,
+            Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+                .channels(ChannelSet::default_for(ChannelLayout::from(width))),
+        )
+        .replace(),
     )
 }
 
@@ -991,21 +1001,21 @@ fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
 fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
     let dir = tempfile::tempdir().unwrap();
     let placement = |target: FileTarget| render_file(&mut wide(6), &job(2_000), target).placement;
-    let unstated = FileTarget::new(
+    let unstated = FileTarget::new(ToFile::new(
+        dir.path().join("a.wav"),
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
-        ToFile::new(dir.path().join("a.wav")),
-    );
+    ));
     assert_eq!(placement(unstated), tutti_buffers::Placement::Default);
-    let counted = FileTarget::new(
+    let counted = FileTarget::new(ToFile::new(
+        dir.path().join("c.wav"),
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))).width(ChannelLayout::STEREO),
-        ToFile::new(dir.path().join("c.wav")),
-    );
+    ));
     assert_eq!(placement(counted), tutti_buffers::Placement::Default);
-    let stated = FileTarget::new(
+    let stated = FileTarget::new(ToFile::new(
+        dir.path().join("b.wav"),
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
             .channels(ChannelSet::from(Bed::Surround51.topology())),
-        ToFile::new(dir.path().join("b.wav")),
-    );
+    ));
     assert_eq!(placement(stated), tutti_buffers::Placement::Stated);
 }
 
@@ -1088,10 +1098,10 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
 fn a_peak_output_with_a_default_layout_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
     // The encoding names no channels: the file has the graph's, the default 5.1.
-    let target = FileTarget::new(
+    let target = FileTarget::new(ToFile::new(
+        dir.path().join("p.wav"),
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
-        ToFile::new(dir.path().join("p.wav")),
-    )
+    ))
     .normalize(Gain::Own(Normalize::peak(Db::new(-12.0))));
     let written = render_file(&mut tone(6), &job(48_000), target);
     assert_eq!(written.placement, tutti_buffers::Placement::Default);
