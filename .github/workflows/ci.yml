@@ -269,8 +269,11 @@ jobs:
           try {
             $entry = $zip.GetEntry('runtimes/win-arm64/native/Windows.Devices.Midi2.dll')
             if (-not $entry) { throw 'the package has no arm64 DLL' }
-            # Nextest runs the test binaries from `target/debug/deps`; the loader looks beside the executable.
-            $dll = Join-Path (Get-Location) 'target/debug/deps/Windows.Devices.Midi2.dll'
+            # Nextest runs the test binaries from `<target dir>/debug/deps`; the loader looks beside the executable.
+            # The target directory is cargo's answer, since the runner image may move it.
+            $target = (cargo metadata --locked --format-version 1 --no-deps | ConvertFrom-Json).target_directory
+            $dll = Join-Path $target 'debug/deps/Windows.Devices.Midi2.dll'
+            if (-not (Test-Path (Split-Path $dll))) { throw "no test binaries under $target" }
             [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dll, $true)
           } finally { $zip.Dispose() }
       - name: Tests
