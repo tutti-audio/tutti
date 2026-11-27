@@ -194,7 +194,7 @@ impl Normalize {
     /// Measured by a [`Measurer`] a chunk at a time, so `control` is checked
     /// between chunks and each chunk reads as [`Stage::Measuring`]: `done`
     /// frames of `total` were already spent in that stage (the conversion
-    /// before it), and this reading counts `rendered.frames()` more.
+    /// before it), and this reading counts `rendered.len()` more.
     ///
     /// # Errors
     ///
