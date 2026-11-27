@@ -269,12 +269,14 @@ jobs:
           try {
             $entry = $zip.GetEntry('runtimes/win-arm64/native/Windows.Devices.Midi2.dll')
             if (-not $entry) { throw 'the package has no arm64 DLL' }
-            # Nextest runs the test binaries from `<target dir>/debug/deps`; the loader looks beside the executable.
-            # The target directory is cargo's answer, since the runner image may move it.
-            $target = (cargo metadata --locked --format-version 1 --no-deps | ConvertFrom-Json).target_directory
-            $dll = Join-Path $target 'debug/deps/Windows.Devices.Midi2.dll'
-            if (-not (Test-Path (Split-Path $dll))) { throw "no test binaries under $target" }
-            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dll, $true)
+            # The loader looks beside each executable: nextest names every test binary it runs.
+            $list = cargo nextest list --locked -p tutti-winmidi2-ffi --features services-tests --list-type binaries-only --message-format json | ConvertFrom-Json
+            $dirs = @($list.'rust-binaries'.PSObject.Properties.Value | ForEach-Object { Split-Path $_.'binary-path' } | Sort-Object -Unique)
+            if ($dirs.Count -eq 0) { throw 'nextest lists no test binaries' }
+            foreach ($dir in $dirs) {
+              [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $dir 'Windows.Devices.Midi2.dll'), $true)
+              Write-Output "staged the DLL in $dir"
+            }
           } finally { $zip.Dispose() }
       - name: Tests
         run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests
