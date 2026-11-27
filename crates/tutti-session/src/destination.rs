@@ -9,6 +9,7 @@
 //! key, the result it takes out of the finished render) is the sealed supertrait's.
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, Float};
 use tutti_codec::Encoding;
@@ -63,9 +64,13 @@ impl ToFile {
         Self { encoding, file }
     }
 
-    /// The encoding the file is written as.
-    pub(crate) fn encoding(&self) -> &Encoding {
-        &self.encoding
+    /// A file at `path` written as this one is: the same format, and the channels and rate of
+    /// whatever it is given.
+    pub(crate) fn beside(&self, path: impl Into<PathBuf>) -> Self {
+        Self::new(
+            Encoding::new(self.encoding.format()),
+            tutti_codec::ToFile::new(path),
+        )
     }
 
     /// The file of output number `index` of a bounce, `width` channels wide unless the encoding

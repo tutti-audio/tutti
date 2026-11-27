@@ -68,7 +68,6 @@ use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_codec::Encoding;
 use tutti_export::{
     BufferKey, CancelToken, Control, Done, DoneError, EventLossPolicy, FileKey, GRAPH_MAX_BLOCK,
     Gain, Job, JobError, Normalize, Outcome, Output, Outputs, Placement, Progress, TailPolicy,
@@ -448,8 +447,7 @@ impl<N, F: Float> Bounce<N, ToFile, F> {
     /// main output (what a bus or the main output applies downstream is not in it), at
     /// the node's own width.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
-        let encoding = Encoding::new(self.main_output.encoding().format());
-        let to = ToFile::new(encoding, tutti_codec::ToFile::new(path));
+        let to = self.main_output.beside(path);
         self.stem_with(Stem::new(node).to(to))
     }
 
