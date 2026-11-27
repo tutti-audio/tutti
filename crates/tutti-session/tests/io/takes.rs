@@ -715,7 +715,8 @@ fn a_file_take_makes_a_clip() {
     assert!(from_file.is_ok(), "{:?}", from_file.err());
 }
 
-/// **A take records and finishes, and the file holds the frames the input played.** The
+/// **A take records and finishes, and the file holds the frames the input played; it is at its
+/// path while it rolls.** The
 /// pump runs on tutti's thread, woken by the tap's bell: the ramp the test pushed (frame `i` is `[i, -i]`) comes back frame for frame from the
 /// first frame the take kept.
 #[test]
@@ -729,6 +730,11 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
         .record(Record::new(&rig.input, to_wav(path.clone())))
         .expect("armed");
     let take = rig.rolling(take);
+    assert!(
+        path.exists(),
+        "the take is written at its path while it rolls"
+    );
+    assert_eq!(names(&dir), [std::ffi::OsString::from("ramp.wav")]);
     for _ in 0..16 {
         rig.step(BLOCK);
     }

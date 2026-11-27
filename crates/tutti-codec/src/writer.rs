@@ -2,6 +2,39 @@
 
 use crate::error::Result;
 use tutti_buffers::{Interleaved, Sample};
+use tutti_units::{SampleRate, Samples, Seconds};
+
+/// The audio a WAV or AIFF writer takes between two back-patches of its sizes.
+const REFRESH_PERIOD: Seconds = Seconds::new(2.0);
+
+/// Counts the frames written since a file's sizes were last back-patched, in
+/// frames at the file's rate and never in wall-clock time.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Refresh {
+    period: Samples,
+    since: Samples,
+}
+
+impl Refresh {
+    /// A counter that comes due after [`REFRESH_PERIOD`] of audio at `rate`.
+    pub(crate) fn new(rate: SampleRate) -> Self {
+        Self {
+            period: REFRESH_PERIOD.to_samples(rate),
+            since: Samples::ZERO,
+        }
+    }
+
+    /// Counts `frames` more; true, and the count restarts, when a period of
+    /// audio has gone by since the last refresh.
+    pub(crate) fn add(&mut self, frames: Samples) -> bool {
+        self.since += frames;
+        let due = self.since >= self.period;
+        if due {
+            self.since = Samples::ZERO;
+        }
+        due
+    }
+}
 
 /// A `FormatWriter` writes blocks of interleaved samples into its sink as one
 /// file of its format.
@@ -16,7 +49,10 @@ use tutti_buffers::{Interleaved, Sample};
 /// closed exactly once, and it closes what was written even after a failed
 /// `write`, handing the sink back. A writer dropped before `finish` leaves the
 /// sink as it is (WAV also back-patches its sizes, best effort, so the take
-/// stays readable).
+/// stays readable). A WAV or AIFF writer also back-patches its sizes and
+/// flushes its sink every 2 s of audio written, so a process that dies without
+/// unwinding leaves a file that describes the frames up to the last refresh;
+/// a power loss can still lose what the OS had not written.
 ///
 /// The sink bounds belong to each implementation, not to the trait: a format
 /// that needs more of its sink asks for more on its own `impl`.

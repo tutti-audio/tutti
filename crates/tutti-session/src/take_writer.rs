@@ -38,8 +38,8 @@ pub trait Writer<F: Float>: Send + 'static {
     fn close(self) -> Result<Self::Output, TakeError>;
 }
 
-/// A file: the frames go through the encoding's stages into a file beside its path, which the
-/// close puts in place.
+/// A file: the frames go through the encoding's stages into a file at its path, written in
+/// place from the start; the close finishes it.
 #[derive(Debug)]
 pub struct FileWriter<F: FftFloat> {
     chain: Chain<F>,
@@ -71,8 +71,8 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
         self.chain.block(frames).map_err(|_| SinkFailed)
     }
 
-    /// A file that cannot be closed whole is kept unfinished beside its path
-    /// ([`TakeError::Sink`]), and one that cannot be put in place is kept whole
+    /// A file that cannot be closed whole is kept unfinished at its path
+    /// ([`TakeError::Sink`]), and one that cannot be committed is kept whole
     /// ([`TakeError::Commit`]): a take never deletes its recording.
     fn close(self) -> Result<Written, TakeError> {
         let Self {

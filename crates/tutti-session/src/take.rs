@@ -561,11 +561,11 @@ pub enum TakeError {
     /// The sink failed: a write, or closing it. What was written before the
     /// failure is in the sink.
     ///
-    /// A take written to a file keeps the file beside its path in `unfinished`
-    /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
-    /// there, and the app owns the file, to move or delete. It is unfinished:
-    /// a FLAC file may end in a cut frame, and a WAV's or
-    /// AIFF's header states the whole frames on disk only if
+    /// A take written to a file keeps the file in `unfinished` (a full disk on a write, a
+    /// failed header or close): the take is written in place, so `unfinished` names the path
+    /// itself, with the frames so far, and the app owns the file, to move or delete. It is
+    /// unfinished: a FLAC file may end in a cut frame, and a WAV's or AIFF's header states the
+    /// whole frames on disk only if
     /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
     /// `unfinished` is `None` for a destination that is not a file.
     #[error("the take's sink failed")]
