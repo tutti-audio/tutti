@@ -727,7 +727,7 @@ impl<D: Destination, F: Float> Bounced<D, F> {
     /// The key of each stem, in the order the bounce named them.
     ///
     /// ```no_run
-    /// # use tutti_session::{Bounce, Session, Stem, StemKey};
+    /// # use tutti_session::{Bounce, Session, Stem, StemKey, ToMemory};
     /// # use tutti_graph::NodeKey;
     /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let rendered = session
