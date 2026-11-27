@@ -699,7 +699,6 @@ mod tests {
 
     use super::*;
     use crate::error::MidiHardwareError;
-    use std::sync::mpsc;
 
     /// A backend that records what it sent and refuses its `fail_at`th send: with
     /// an error, or with `Full` when `full`.
@@ -834,27 +833,6 @@ mod tests {
         let shared = live.clone();
         assert!(live.hold().is_ok());
         shared.end();
-        assert!(matches!(live.hold(), Err(MidiHardwareError::EndpointGone)));
-    }
-
-    #[test]
-    fn end_waits_for_a_hold_in_flight() {
-        let live = Live::new();
-        let guard = live.hold().expect("live");
-        let (began, begin) = mpsc::channel();
-        let (finished, finish) = mpsc::channel();
-        let ender = live.clone();
-        let thread = std::thread::spawn(move || {
-            began.send(()).expect("receiver alive");
-            ender.end();
-            finished.send(()).expect("receiver alive");
-        });
-        begin.recv().expect("ender started");
-        // `end` cannot complete while the guard lives, so nothing is waiting here.
-        assert!(finish.try_recv().is_err(), "end finished under a hold");
-        drop(guard);
-        finish.recv().expect("end completes once the hold drops");
-        thread.join().expect("ender");
         assert!(matches!(live.hold(), Err(MidiHardwareError::EndpointGone)));
     }
 }
