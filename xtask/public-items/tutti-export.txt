@@ -88,7 +88,6 @@ fn rendered::Rendered::layout
 fn rendered::Rendered::new
 fn rendered::Rendered::planes
 fn rendered::Rendered::sample_rate
-fn sink_target::SinkTarget::layout
 fn sink_target::SinkTarget::new
 struct Written
 struct control::CancelToken

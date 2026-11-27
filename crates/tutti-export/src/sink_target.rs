@@ -72,7 +72,7 @@ impl<F: Float> SinkTarget<F> {
 
     /// The sink's width.
     #[must_use]
-    pub fn layout(&self) -> ChannelLayout {
+    pub(crate) fn layout(&self) -> ChannelLayout {
         self.sink.layout()
     }
 
