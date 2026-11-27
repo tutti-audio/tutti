@@ -45,9 +45,11 @@ impl Session {
 
     /// Opens a connection to the endpoint with device id `endpoint_id` (an `Endpoint::id`).
     /// `on_message` receives each message the endpoint sends: its time on the service's
-    /// clock as an `Instant`, `None` where the timestamp is not one, and the message. It
-    /// runs on a thread of the service, one message at a time, and a panic in it is
-    /// caught and dropped. `on_message` is dropped on whichever thread releases the service's
+    /// clock as an `Instant`, `None` where the timestamp is not one, and the message. A
+    /// message the service delivered that cannot be read is the `Err` it receives in its
+    /// place (`Error::Call` for a failed read, `Error::NotAMessage` for a word count that is
+    /// not a whole message), so a caller counts each drop. It runs on a thread of the
+    /// service, one message at a time, and a panic in it is caught and dropped. `on_message` is dropped on whichever thread releases the service's
     /// handler last, which is a thread of the service when the connection closes while a
     /// message is delivered.
     ///
@@ -57,7 +59,7 @@ impl Session {
     /// not open it, and `Error::Call` when the handler's registration fails.
     pub fn connect<F>(&self, endpoint_id: &str, on_message: F) -> Result<Connection, Error>
     where
-        F: FnMut(Option<Instant>, Ump) + Send + 'static,
+        F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
     {
         Connection::open(&self.session, self.clock, endpoint_id, on_message)
     }

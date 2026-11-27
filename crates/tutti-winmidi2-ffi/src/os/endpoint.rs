@@ -50,6 +50,52 @@ pub fn ensure_service_available() -> Result<(), Error> {
     }
 }
 
+/// The ids of the two diagnostic loopback endpoints, which tell an endpoint's `loopback`.
+#[derive(Clone, Debug)]
+pub(super) struct LoopbackIds {
+    a: HSTRING,
+    b: HSTRING,
+}
+
+impl LoopbackIds {
+    /// Reads the two ids from the service's API.
+    pub(super) fn read() -> Result<Self, Error> {
+        let diagnostics = statics::<MidiDiagnostics, IMidiDiagnosticsStatics>()?;
+        Ok(Self {
+            a: call!(
+                "DiagnosticsLoopbackAEndpointDeviceId",
+                diagnostics,
+                DiagnosticsLoopbackAEndpointDeviceId() -> HSTRING
+            )?,
+            b: call!(
+                "DiagnosticsLoopbackBEndpointDeviceId",
+                diagnostics,
+                DiagnosticsLoopbackBEndpointDeviceId() -> HSTRING
+            )?,
+        })
+    }
+
+    /// The endpoint `information` describes.
+    pub(super) fn describe(
+        &self,
+        information: &MidiEndpointDeviceInformation,
+    ) -> Result<Endpoint, Error> {
+        let id =
+            call!("EndpointDeviceId", *information, EndpointDeviceId() -> HSTRING)?.to_string();
+        let name = call!("Name", *information, Name() -> HSTRING)?.to_string();
+        // Device interface paths compare without regard to case.
+        let is = |loopback: &HSTRING| id.eq_ignore_ascii_case(&loopback.to_string());
+        let loopback = if is(&self.a) {
+            Some(Loopback::A)
+        } else if is(&self.b) {
+            Some(Loopback::B)
+        } else {
+            None
+        };
+        Ok(Endpoint { id, name, loopback })
+    }
+}
+
 /// The endpoints the service lists now: the standard UMP and MIDI 1.0 endpoints and the
 /// diagnostic loopback pair, by endpoint device id.
 ///
@@ -58,17 +104,7 @@ pub fn ensure_service_available() -> Result<(), Error> {
 /// `Error::ApiMissing` when the API is not present, `Error::Call` when a read fails and
 /// `Error::Refused` when the service answers with no list.
 pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
-    let diagnostics = statics::<MidiDiagnostics, IMidiDiagnosticsStatics>()?;
-    let loopback_a = call!(
-        "DiagnosticsLoopbackAEndpointDeviceId",
-        diagnostics,
-        DiagnosticsLoopbackAEndpointDeviceId() -> HSTRING
-    )?;
-    let loopback_b = call!(
-        "DiagnosticsLoopbackBEndpointDeviceId",
-        diagnostics,
-        DiagnosticsLoopbackBEndpointDeviceId() -> HSTRING
-    )?;
+    let loopbacks = LoopbackIds::read()?;
     let information =
         statics::<MidiEndpointDeviceInformation, IMidiEndpointDeviceInformationStatics>()?;
     let list = call!(
@@ -81,21 +117,7 @@ pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
         ) -> Option<IVectorView<MidiEndpointDeviceInformation>>
     )?
     .ok_or(Error::Refused { call: "FindAll" })?;
-    // Device interface paths compare without regard to case.
-    let is = |id: &str, loopback: &HSTRING| id.eq_ignore_ascii_case(&loopback.to_string());
     list.into_iter()
-        .map(|endpoint| {
-            let id =
-                call!("EndpointDeviceId", endpoint, EndpointDeviceId() -> HSTRING)?.to_string();
-            let name = call!("Name", endpoint, Name() -> HSTRING)?.to_string();
-            let loopback = if is(&id, &loopback_a) {
-                Some(Loopback::A)
-            } else if is(&id, &loopback_b) {
-                Some(Loopback::B)
-            } else {
-                None
-            };
-            Ok(Endpoint { id, name, loopback })
-        })
+        .map(|endpoint| loopbacks.describe(&endpoint))
         .collect()
 }
