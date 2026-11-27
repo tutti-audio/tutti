@@ -53,8 +53,5 @@ mod virtual_endpoint;
     all(target_os = "macos", feature = "coremidi")
 ))]
 mod virtual_loopback;
-#[cfg(any(
-    all(midi_backend = "winmm", feature = "synth-tests"),
-    all(midi_backend = "midi_services", feature = "services-tests")
-))]
+#[cfg(all(midi_backend = "winmm", feature = "synth-tests"))]
 mod virtual_unsupported;
