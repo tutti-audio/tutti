@@ -23,6 +23,7 @@ use tutti_measure::Loudness;
 use tutti_timeline::RenderClock;
 use tutti_units::{Db, SampleRate, Samples};
 
+use crate::SinkTarget;
 use crate::control::{Control, Outcome, Stage, Weights};
 use crate::normalize::{Measurer, Normalize, Reading, chunk_frames};
 use crate::output::{BufferTarget, FileTarget, Gain, TargetError};
@@ -30,6 +31,7 @@ use crate::outputs::{Parts, Placed};
 use crate::render::{
     FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
 };
+use crate::sink_target::DynSink;
 use crate::spill::{Spill, SpillBudget};
 use crate::{
     ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Rendered, Result, Unmeasured,
@@ -93,6 +95,50 @@ struct BufferLane<F: FftFloat> {
     planes: Vec<Vec<F>>,
 }
 
+/// A sink output of the pass: the caller's sink, which takes the gated frames at the
+/// feed's width.
+struct SinkLane<F: FftFloat> {
+    lane: Lane<F>,
+    /// `None` once it was finished for a failed write.
+    sink: Option<Box<dyn DynSink<F>>>,
+}
+
+impl<F: FftFloat> SinkLane<F> {
+    /// Writes one block. A failed write finishes the sink, which reports the detail of
+    /// the first failure, and fails the render with it.
+    fn write(
+        position: usize,
+        slot: &mut Option<Box<dyn DynSink<F>>>,
+        block: Interleaved<'_, F>,
+    ) -> Result<()> {
+        let Some(sink) = slot.as_mut() else {
+            return Ok(());
+        };
+        let Err(failed) = sink.write(block) else {
+            return Ok(());
+        };
+        let source: Box<dyn std::error::Error + Send + Sync> = match slot.take() {
+            Some(sink) => sink.finish().err().unwrap_or_else(|| Box::new(failed)),
+            None => Box::new(failed),
+        };
+        Err(RenderError::Sink {
+            output: position,
+            source,
+        })
+    }
+
+    /// Closes the sink once the last block is written.
+    fn finish(self) -> Result<()> {
+        match self.sink {
+            Some(sink) => sink.finish().map_err(|source| RenderError::Sink {
+                output: self.lane.position,
+                source,
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
 impl<F: FftFloat> Lane<F> {
     /// Drains the feed, folds the window of this block onto the target's
     /// layout and returns it; `None` when the gate keeps nothing of the block.
@@ -145,9 +191,10 @@ pub(crate) fn render_outputs<F: FftFloat>(
     let plan = RenderPlan::of(job);
     let (done, _lost) = with_source(graph, job.rate(), clock, |src| {
         check_outputs(&parts, src.main_output())?;
-        let (mut files, mut buffers) = open_lanes(
+        let (mut files, mut buffers, mut sinks) = open_lanes(
             parts.files,
             parts.buffers,
+            parts.sinks,
             job,
             &plan,
             src.outputs(),
@@ -180,6 +227,12 @@ pub(crate) fn render_outputs<F: FftFloat>(
                         crate::planar::append(block, &mut buffer.planes)?;
                     }
                 }
+                for out in &mut sinks {
+                    let position = out.lane.position;
+                    if let Some(block) = out.lane.block(graph_planes, n, &window)? {
+                        SinkLane::write(position, &mut out.sink, block)?;
+                    }
+                }
                 Ok(())
             },
         )?;
@@ -193,7 +246,7 @@ pub(crate) fn render_outputs<F: FftFloat>(
         let lost = src.lost_events();
         check_loss(job.on_event_loss(), lost)?;
 
-        finish(files, buffers, job, lost, control)
+        finish(files, buffers, sinks, job, lost, control)
     })?;
     Ok(done.map(|(files, buffers)| stamp.done(files, buffers)))
 }
@@ -203,8 +256,23 @@ pub(crate) fn render_outputs<F: FftFloat>(
 /// output that does not measure or from another `Outputs`, and two files with
 /// one path.
 fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result<()> {
-    if parts.files.is_empty() && parts.buffers.is_empty() {
+    if parts.files.is_empty() && parts.buffers.is_empty() && parts.sinks.is_empty() {
         return Err(RenderError::NoOutputs);
+    }
+    for placed in &parts.sinks {
+        let target_error = |why| RenderError::Target {
+            output: placed.position,
+            why,
+        };
+        let feed = channels_of(placed.output.feed(), None, main_output);
+        check_feed(placed, &feed, target_error)?;
+        let sink = placed.output.target().layout();
+        if sink != feed.width() {
+            return Err(target_error(TargetError::SinkWidth {
+                sink,
+                feed: feed.width(),
+            }));
+        }
     }
     for placed in &parts.buffers {
         let target_error = |why| RenderError::Target {
@@ -310,12 +378,13 @@ fn channels_of<F: Float>(
 fn open_lanes<F: FftFloat>(
     file_outputs: Vec<Placed<FileTarget, F>>,
     buffer_outputs: Vec<Placed<BufferTarget, F>>,
+    sink_outputs: Vec<Placed<SinkTarget<F>, F>>,
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
     main_output: &ChannelSet,
     max_block: usize,
-) -> Result<(Vec<FileLane<F>>, Vec<BufferLane<F>>)> {
+) -> Result<(Vec<FileLane<F>>, Vec<BufferLane<F>>, Vec<SinkLane<F>>)> {
     let mut files = Vec::with_capacity(file_outputs.len());
     for Placed { position, output } in file_outputs {
         let (feed, file) = output.into_parts();
@@ -368,7 +437,25 @@ fn open_lanes<F: FftFloat>(
         let planes = reserve_planes(plan, lane.layout)?;
         buffers.push(BufferLane { lane, planes });
     }
-    Ok((files, buffers))
+    let mut sinks = Vec::with_capacity(sink_outputs.len());
+    for Placed { position, output } in sink_outputs {
+        let (feed, target) = output.into_parts();
+        let set = channels_of(&feed, None, main_output);
+        let lane = open_lane(
+            position,
+            feed,
+            set,
+            ChannelPlacement::Default,
+            graph_outputs,
+            main_output,
+            max_block,
+        )?;
+        sinks.push(SinkLane {
+            lane,
+            sink: Some(target.into_sink()),
+        });
+    }
+    Ok((files, buffers, sinks))
 }
 
 /// The lane of one output onto `set`: its fold and the block it folds into.
@@ -465,6 +552,7 @@ struct Chosen {
 fn finish<F: FftFloat>(
     mut files: Vec<FileLane<F>>,
     buffers: Vec<BufferLane<F>>,
+    sinks: Vec<SinkLane<F>>,
     job: &Job,
     lost: u64,
     control: &mut Control<'_>,
@@ -604,6 +692,15 @@ fn finish<F: FftFloat>(
             path: file.path,
             chain: *chain,
         });
+    }
+    // The sinks close before any file is put in place: a sink that fails lands no file. A
+    // closed sink cannot be undone, so a later failure leaves it as it was closed.
+    if control.is_cancelled() {
+        return Ok(Outcome::Cancelled);
+    }
+    for sink in sinks {
+        control.set_output(sink.lane.position);
+        sink.finish()?;
     }
     let Outcome::Finished(landed) = finalize_files(pending, control)? else {
         return Ok(Outcome::Cancelled);

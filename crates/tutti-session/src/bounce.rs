@@ -67,11 +67,11 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Sink};
 use tutti_export::{
     BufferKey, BufferTarget, CancelToken, Control, Done, DoneError, EventLossPolicy, FileKey,
     FileTarget, GRAPH_MAX_BLOCK, Gain, Job, JobError, Normalize, Outcome, Output, Outputs,
-    Placement, Progress, Rendered, TailPolicy, Written,
+    Placement, Progress, Rendered, SinkTarget, TailPolicy, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
 use tutti_rt::Mutex;
@@ -83,11 +83,14 @@ use crate::apply::{Cut, Sealed as ApplySealed};
 use crate::format::Sealed;
 use crate::unblocked::{Unanswered, Unblocked};
 use crate::{Session, SessionFloat};
-use tutti_buffers::Float;
 use tutti_dsp::FftFloat;
 
-use crate::ToMemory;
+#[cfg(feature = "capture")]
+use crate::TakeError;
 use crate::fork::PendingExport;
+#[cfg(feature = "capture")]
+use crate::take_writer::{FileWriter, MemoryWriter, SinkWriter};
+use crate::{ToMemory, ToSink};
 use render_output::{Landing, MainShape, StemOutput, StemShape};
 use tutti_codec::{Encoding, ToFile};
 use tutti_rt::SplitMix64;
@@ -203,9 +206,10 @@ impl Default for BounceTail {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoMainOutput;
 
-mod render_output {
+pub(crate) mod render_output {
     use super::{BounceConfigError, StemGain, StemKey};
-    use tutti_buffers::{ChannelLayout, Float};
+    use tutti_buffers::ChannelLayout;
+    use tutti_dsp::FftFloat;
     use tutti_export::{
         BufferTarget, Done, DoneError, FileKey, FileTarget, Gain, Output, Outputs, Placement,
     };
@@ -237,10 +241,11 @@ mod render_output {
     pub enum Landing<'a> {
         File(&'a FileTarget),
         Buffers(&'a BufferTarget),
+        Sink,
     }
 
     /// A stem's output, built: what the bounce checks of it and how it joins the render.
-    pub trait StemOutput<F: Float>: Send + std::fmt::Debug {
+    pub trait StemOutput<F: FftFloat>: Send + std::fmt::Debug {
         /// Where it lands.
         fn landing(&self) -> Landing<'_>;
 
@@ -260,12 +265,14 @@ mod render_output {
         ) -> Result<StemKey, BounceConfigError>;
     }
 
-    /// What turns a destination into an output of a render: its target, the key the render
-    /// adds it under, and the result taken out of the finished render by that key.
-    pub trait Sealed: Send + Sized + 'static {
-        /// What the output is once rendered, at the graph's float.
-        type Output<F: Float>: std::fmt::Debug + Send;
-        /// What the main output becomes: a `FileTarget` or a `BufferTarget`.
+    /// What turns a destination into the output of a render or the writer of a take, at the
+    /// graph's float `F`. The render half: its target, the key the render adds it under, and
+    /// the result taken out of the finished render by that key. The take half: the writer it
+    /// opens for the source, whose closing is the same `Output`.
+    pub trait Sealed<F: FftFloat>: Send + Sized + 'static {
+        /// What the output is once rendered or recorded.
+        type Output: std::fmt::Debug + Send;
+        /// What the main output becomes: a `FileTarget`, a `BufferTarget` or a `SinkTarget`.
         type Target: Send + 'static;
         /// The key the main output was added under.
         type Key: Send + 'static;
@@ -275,7 +282,7 @@ mod render_output {
         /// What `target` lands as.
         fn landing(target: &Self::Target) -> Landing<'_>;
         /// Adds the main output to the render.
-        fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<Self::Target, F>) -> Self::Key;
+        fn add(outputs: &mut Outputs<F>, output: Output<Self::Target, F>) -> Self::Key;
         /// The key of the main output's file, when it is one: the gain
         /// [`StemGain::Shared`] follows.
         fn file_key(key: &Self::Key) -> Option<&FileKey>;
@@ -284,27 +291,47 @@ mod render_output {
         /// # Errors
         ///
         /// [`DoneError`] for a key the render did not produce or whose result was taken.
-        fn take<F: Float>(
-            done: &mut Done<F>,
-            key: &Self::Key,
-        ) -> Result<Self::Output<F>, DoneError>;
+        fn take(done: &mut Done<F>, key: &Self::Key) -> Result<Self::Output, DoneError>;
         /// A stem's output, built once the bounce knows its figures.
-        fn stem<F: Float>(self, shape: StemShape) -> Box<dyn StemOutput<F>>;
+        fn stem(self, shape: StemShape) -> Box<dyn StemOutput<F>>;
+
+        /// What the pump writes a take's frames into.
+        #[cfg(feature = "capture")]
+        type Writer: crate::take_writer::Writer<F, Output = Self::Output>;
+        /// The writer for a source of `layout` at `rate`, whose noise is seeded from `seed`
+        /// unless the destination states one.
+        ///
+        /// # Errors
+        ///
+        /// The [`TakeError`](crate::TakeError) of what the destination refuses of the source,
+        /// before anything is written.
+        #[cfg(feature = "capture")]
+        fn open(
+            self,
+            layout: ChannelLayout,
+            rate: tutti_units::SampleRate,
+            seed: u64,
+        ) -> Result<Self::Writer, crate::TakeError>;
     }
 }
 
-/// Where a bounce's output goes: a [`tutti_codec::ToFile`] or a [`ToMemory`] (sealed). Its
-/// `Output` is what the finished bounce holds for that output, so the
-/// caller who chose a file is handed a [`Written`] and one who chose memory a [`Rendered`]
-/// (`D::Output<F>`, at the graph's float).
+/// What the destination `D` holds of a finished output, at the graph's float `F`.
+pub(crate) type OutputOf<D, F> = <D as render_output::Sealed<F>>::Output;
+
+/// Where a bounce's output or a take goes: a [`tutti_codec::ToFile`], a [`ToMemory`] or a
+/// [`ToSink`] (sealed). `F` is the graph's float. Its `Output` is what the finished bounce or take
+/// holds for that output, so the caller who chose a file is handed a [`Written`], one who
+/// chose memory a [`Rendered`], and one who chose a sink of their own `()` (the sink has what
+/// it was given).
 ///
 /// A file is written beside its path and put in place when the bounce finishes, so a
 /// cancelled or failed bounce leaves what was at the path as it was, and nothing beside it.
 /// The encoding's channels are the width of the file, and without them the output's own (a
-/// main output's, or the width of the tapped channels of a stem). The dither seed of an
-/// encoding that states none is mixed from the output's index, so files that are summed later
-/// do not share one noise sequence; a seed stated with
-/// [`Encoding::dither_seed`](tutti_codec::Encoding::dither_seed) is used as given.
+/// main output's, or the width of the tapped channels of a stem, or a take's input). The
+/// dither seed of an encoding that states none is mixed from the output's index (a take's
+/// from its id), so files that are summed later do not share one noise sequence; a seed
+/// stated with [`Encoding::dither_seed`](tutti_codec::Encoding::dither_seed) is used as
+/// given.
 ///
 /// ```no_run
 /// # use tutti_session::Bounce;
@@ -315,25 +342,40 @@ mod render_output {
 ///     ToFile::new("out/mix.wav", Encoding::new(wav).width(ChannelLayout::STEREO)).replace(),
 /// );
 /// ```
-pub trait Destination: render_output::Sealed {}
+pub trait Destination<F: FftFloat>: render_output::Sealed<F> {}
 
-impl Destination for ToFile {}
+impl<F: FftFloat> Destination<F> for ToFile {}
 
-impl Destination for ToMemory {}
+impl<F: FftFloat> Destination<F> for ToMemory {}
 
-/// The file of output number `index` of the bounce: `to`, `width` channels wide unless its
-/// encoding states its channels. The outputs are summed later (the stems and the master), so
-/// each is dithered with the seed [`SplitMix64::mix`] of its index unless the encoding states
-/// one, never one shared seed: two files with one noise sequence would add it coherently.
-fn file_target(to: ToFile, index: usize, width: ChannelLayout) -> FileTarget {
-    FileTarget::new(to.map_encoding(|encoding| {
-        let encoding = if encoding.channel_set().is_none() {
-            encoding.width(width)
+impl<F, S> Destination<F> for ToSink<S>
+where
+    F: FftFloat,
+    S: Sink<Sample = F> + Send + 'static,
+    S::Error: Send + Sync + 'static,
+{
+}
+
+/// The encoding `to` writes, its dither seeded from `index` unless it states one: the
+/// outputs of a bounce are summed later (the stems and the master), and a take is summed
+/// with the others, so each is dithered with the seed [`SplitMix64::mix`] of its index, never
+/// one shared seed: two files with one noise sequence would add it coherently.
+pub(crate) fn seeded(to: ToFile, index: u64) -> ToFile {
+    to.map_encoding(|encoding| {
+        if encoding.seed().is_none() {
+            encoding.dither_seed(SplitMix64::mix(index))
         } else {
             encoding
-        };
-        if encoding.seed().is_none() {
-            encoding.dither_seed(SplitMix64::mix(index as u64))
+        }
+    })
+}
+
+/// The file of output number `index` of the bounce: `to`, `width` channels wide unless its
+/// encoding states its channels, seeded as [`seeded`] says.
+fn file_target(to: ToFile, index: usize, width: ChannelLayout) -> FileTarget {
+    FileTarget::new(seeded(to, index as u64).map_encoding(|encoding| {
+        if encoding.channel_set().is_none() {
+            encoding.width(width)
         } else {
             encoding
         }
@@ -348,7 +390,7 @@ struct FileStem {
     shared: bool,
 }
 
-impl<F: Float> StemOutput<F> for FileStem {
+impl<F: FftFloat> StemOutput<F> for FileStem {
     fn landing(&self) -> Landing<'_> {
         Landing::File(&self.target)
     }
@@ -379,7 +421,7 @@ impl<F: Float> StemOutput<F> for FileStem {
 #[derive(Debug)]
 struct MemoryStem(BufferTarget);
 
-impl<F: Float> StemOutput<F> for MemoryStem {
+impl<F: FftFloat> StemOutput<F> for MemoryStem {
     fn landing(&self) -> Landing<'_> {
         Landing::Buffers(&self.0)
     }
@@ -397,8 +439,8 @@ impl<F: Float> StemOutput<F> for MemoryStem {
     }
 }
 
-impl render_output::Sealed for ToFile {
-    type Output<F: Float> = Written;
+impl<F: FftFloat> render_output::Sealed<F> for ToFile {
+    type Output = Written;
     type Target = FileTarget;
     type Key = FileKey;
 
@@ -414,7 +456,7 @@ impl render_output::Sealed for ToFile {
         Landing::File(target)
     }
 
-    fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<FileTarget, F>) -> FileKey {
+    fn add(outputs: &mut Outputs<F>, output: Output<FileTarget, F>) -> FileKey {
         outputs.file(output)
     }
 
@@ -422,11 +464,11 @@ impl render_output::Sealed for ToFile {
         Some(key)
     }
 
-    fn take<F: Float>(done: &mut Done<F>, key: &FileKey) -> Result<Written, DoneError> {
+    fn take(done: &mut Done<F>, key: &FileKey) -> Result<Written, DoneError> {
         done.take_file(key)
     }
 
-    fn stem<F: Float>(self, shape: StemShape) -> Box<dyn StemOutput<F>> {
+    fn stem(self, shape: StemShape) -> Box<dyn StemOutput<F>> {
         let target = file_target(self, shape.index, shape.lanes);
         Box::new(match shape.gain {
             StemGain::None => FileStem {
@@ -443,10 +485,23 @@ impl render_output::Sealed for ToFile {
             },
         })
     }
+
+    #[cfg(feature = "capture")]
+    type Writer = FileWriter<F>;
+
+    #[cfg(feature = "capture")]
+    fn open(
+        self,
+        layout: ChannelLayout,
+        rate: SampleRate,
+        seed: u64,
+    ) -> Result<FileWriter<F>, TakeError> {
+        FileWriter::open(seeded(self, seed), layout, rate)
+    }
 }
 
-impl render_output::Sealed for ToMemory {
-    type Output<F: Float> = Rendered<F>;
+impl<F: FftFloat> render_output::Sealed<F> for ToMemory {
+    type Output = Rendered<F>;
     type Target = BufferTarget;
     type Key = BufferKey;
 
@@ -458,7 +513,7 @@ impl render_output::Sealed for ToMemory {
         Landing::Buffers(target)
     }
 
-    fn add<F: Float>(outputs: &mut Outputs<F>, output: Output<BufferTarget, F>) -> BufferKey {
+    fn add(outputs: &mut Outputs<F>, output: Output<BufferTarget, F>) -> BufferKey {
         outputs.buffers(output)
     }
 
@@ -466,12 +521,94 @@ impl render_output::Sealed for ToMemory {
         None
     }
 
-    fn take<F: Float>(done: &mut Done<F>, key: &BufferKey) -> Result<Rendered<F>, DoneError> {
+    fn take(done: &mut Done<F>, key: &BufferKey) -> Result<Rendered<F>, DoneError> {
         done.take_buffers(key)
     }
 
-    fn stem<F: Float>(self, shape: StemShape) -> Box<dyn StemOutput<F>> {
+    fn stem(self, shape: StemShape) -> Box<dyn StemOutput<F>> {
         Box::new(MemoryStem(self.planes(shape.lanes)))
+    }
+
+    #[cfg(feature = "capture")]
+    type Writer = MemoryWriter<F>;
+
+    #[cfg(feature = "capture")]
+    fn open(
+        self,
+        layout: ChannelLayout,
+        rate: SampleRate,
+        _seed: u64,
+    ) -> Result<MemoryWriter<F>, TakeError> {
+        MemoryWriter::open(&self, layout, rate)
+    }
+}
+
+/// A stem streamed into a caller's sink.
+#[derive(Debug)]
+struct SinkStem<F: FftFloat>(SinkTarget<F>);
+
+impl<F: FftFloat> StemOutput<F> for SinkStem<F> {
+    fn landing(&self) -> Landing<'_> {
+        Landing::Sink
+    }
+
+    fn add(
+        self: Box<Self>,
+        outputs: &mut Outputs<F>,
+        reader: tutti_graph::TapReader<F>,
+        placement: Placement,
+        _main: Option<&FileKey>,
+    ) -> Result<StemKey, BounceConfigError> {
+        outputs.sink(Output::tap(reader, placement, self.0));
+        Ok(StemKey::Sink)
+    }
+}
+
+impl<F, S> render_output::Sealed<F> for ToSink<S>
+where
+    F: FftFloat,
+    S: Sink<Sample = F> + Send + 'static,
+    S::Error: Send + Sync + 'static,
+{
+    type Output = ();
+    type Target = SinkTarget<F>;
+    type Key = ();
+
+    fn target(self, _: MainShape) -> SinkTarget<F> {
+        SinkTarget::new(self.0)
+    }
+
+    fn landing(_: &SinkTarget<F>) -> Landing<'_> {
+        Landing::Sink
+    }
+
+    fn add(outputs: &mut Outputs<F>, output: Output<SinkTarget<F>, F>) {
+        outputs.sink(output);
+    }
+
+    fn file_key(_: &()) -> Option<&FileKey> {
+        None
+    }
+
+    fn take(_: &mut Done<F>, _: &()) -> Result<(), DoneError> {
+        Ok(())
+    }
+
+    fn stem(self, _: StemShape) -> Box<dyn StemOutput<F>> {
+        Box::new(SinkStem(SinkTarget::new(self.0)))
+    }
+
+    #[cfg(feature = "capture")]
+    type Writer = SinkWriter<S>;
+
+    #[cfg(feature = "capture")]
+    fn open(
+        self,
+        layout: ChannelLayout,
+        _rate: SampleRate,
+        _seed: u64,
+    ) -> Result<SinkWriter<S>, TakeError> {
+        SinkWriter::open(self.0, layout)
     }
 }
 
@@ -505,7 +642,7 @@ impl render_output::Sealed for ToMemory {
 /// handle that [`map`](Self::map) resolves to one before the bounce
 /// starts.
 #[must_use = "a bounce renders nothing until the session starts it"]
-pub struct Bounce<N = NodeKey, D = NoMainOutput, F: Float = f32> {
+pub struct Bounce<N = NodeKey, D = NoMainOutput, F: FftFloat = f32> {
     main_output: D,
     stems: Vec<StemRequest<N, F>>,
     range: Option<Range>,
@@ -520,13 +657,13 @@ pub struct Bounce<N = NodeKey, D = NoMainOutput, F: Float = f32> {
     edit: Option<PrepareEdit<F>>,
 }
 
-impl<N, F: Float> Default for Bounce<N, NoMainOutput, F> {
+impl<N, F: FftFloat> Default for Bounce<N, NoMainOutput, F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, F: Float> Bounce<N, NoMainOutput, F> {
+impl<N, F: FftFloat> Bounce<N, NoMainOutput, F> {
     /// A bounce of the project's mix, with nothing chosen: a main output
     /// ([`main_output`](Self::main_output), without which it does not start) and a range
     /// when no loop is set. Name nodes as stems with [`stem`](Self::stem) or
@@ -563,7 +700,7 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
     ///     .main_output(ToMemory::new())
     ///     .normalize(Normalize::Peak { target: Db::new(-1.0) });
     /// ```
-    pub fn main_output<D: Destination>(self, destination: D) -> Bounce<N, D, F> {
+    pub fn main_output<D: Destination<F>>(self, destination: D) -> Bounce<N, D, F> {
         let Self {
             main_output: _,
             stems,
@@ -595,10 +732,10 @@ impl<N, F: Float> Bounce<N, NoMainOutput, F> {
     }
 }
 
-impl<N, D, F: Float> Bounce<N, D, F> {
+impl<N, D, F: FftFloat> Bounce<N, D, F> {
     /// Also writes the stem `stem` describes, to the destination it names
     /// ([`Stem::to`]); a [`Stem::new`] one is held in memory.
-    pub fn stem_with<S: Destination>(mut self, stem: Stem<N, S>) -> Self {
+    pub fn stem_with<S: Destination<F>>(mut self, stem: Stem<N, S>) -> Self {
         self.stems.push(StemRequest::of(stem));
         self
     }
@@ -712,7 +849,7 @@ impl<N, D, F: Float> Bounce<N, D, F> {
 }
 
 /// What only a file honours: a normalize, and the stems that share the main output's format.
-impl<N, F: Float> Bounce<N, ToFile, F> {
+impl<N, F: FftFloat> Bounce<N, ToFile, F> {
     /// Also writes `node`'s own outputs into a file at `path` in the main output's
     /// format, in the same pass as the main output: see [`Stem`]
     /// ([`stem_with`](Self::stem_with) for one that places its channels, resamples or
@@ -738,7 +875,7 @@ impl<N, F: Float> Bounce<N, ToFile, F> {
     }
 }
 
-impl<N: std::fmt::Debug, D: std::fmt::Debug, F: Float> std::fmt::Debug for Bounce<N, D, F> {
+impl<N: std::fmt::Debug, D: std::fmt::Debug, F: FftFloat> std::fmt::Debug for Bounce<N, D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Bounce")
             .field("main_output", &self.main_output)
@@ -820,7 +957,7 @@ impl<N> Stem<N, ToMemory> {
     /// [`StemGain::None`] until [`gain`](Stem::gain); a [`ToMemory`] states the planes'
     /// channels.
     #[must_use]
-    pub fn to<D: Destination>(self, destination: D) -> Stem<N, D> {
+    pub fn to<D>(self, destination: D) -> Stem<N, D> {
         let Self {
             node,
             channels,
@@ -896,7 +1033,7 @@ impl<N, D> Stem<N, D> {
 
 /// A [`Stem`] of any destination, as the bounce holds it: its destination is built into an
 /// output when the bounce starts and knows the stem's width.
-struct StemRequest<N, F: Float> {
+struct StemRequest<N, F: FftFloat> {
     node: N,
     channels: Option<Vec<u16>>,
     topology: Option<ChannelTopology>,
@@ -904,8 +1041,8 @@ struct StemRequest<N, F: Float> {
     output: Box<dyn FnOnce(StemShape) -> Box<dyn StemOutput<F>> + Send>,
 }
 
-impl<N, F: Float> StemRequest<N, F> {
-    fn of<D: Destination>(stem: Stem<N, D>) -> Self {
+impl<N, F: FftFloat> StemRequest<N, F> {
+    fn of<D: Destination<F>>(stem: Stem<N, D>) -> Self {
         let Stem {
             node,
             channels,
@@ -940,7 +1077,7 @@ impl<N, F: Float> StemRequest<N, F> {
     }
 }
 
-impl<N: std::fmt::Debug, F: Float> std::fmt::Debug for StemRequest<N, F> {
+impl<N: std::fmt::Debug, F: FftFloat> std::fmt::Debug for StemRequest<N, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StemRequest")
             .field("node", &self.node)
@@ -979,6 +1116,9 @@ pub enum StemKey {
     File(FileKey),
     /// A stem in memory: read its [`Rendered`] with [`Done::buffers`].
     Buffers(BufferKey),
+    /// A stem streamed into a caller's sink ([`ToSink`]): the sink has what it was given, and
+    /// there is no result to read.
+    Sink,
 }
 
 /// What a finished bounce produced: the main output's result, which is what the
@@ -987,17 +1127,17 @@ pub enum StemKey {
 /// [`stem_results`](Self::stem_results) by the [`StemKey`] each stem has, in the
 /// order the bounce named them.
 #[derive(Debug)]
-pub struct Bounced<D: Destination, F: Float = f32> {
-    main_output: D::Output<F>,
+pub struct Bounced<D: Destination<F>, F: FftFloat = f32> {
+    main_output: OutputOf<D, F>,
     /// The render's results, the main output's moved out.
     done: Done<F>,
     stems: Vec<StemKey>,
 }
 
-impl<D: Destination, F: Float> Bounced<D, F> {
+impl<D: Destination<F>, F: FftFloat> Bounced<D, F> {
     /// The main output's result.
     #[must_use]
-    pub fn main_output(&self) -> &D::Output<F> {
+    pub fn main_output(&self) -> &OutputOf<D, F> {
         &self.main_output
     }
 
@@ -1036,22 +1176,22 @@ impl<D: Destination, F: Float> Bounced<D, F> {
 
     /// The main output's result, owned.
     #[must_use]
-    pub fn into_main_output(self) -> D::Output<F> {
+    pub fn into_main_output(self) -> OutputOf<D, F> {
         self.main_output
     }
 
     /// The main output's result, the stems' results and their keys, owned.
     #[must_use]
-    pub fn into_parts(self) -> (D::Output<F>, Done<F>, Vec<StemKey>) {
+    pub fn into_parts(self) -> (OutputOf<D, F>, Done<F>, Vec<StemKey>) {
         (self.main_output, self.done, self.stems)
     }
 }
 
-impl<D: Destination, F: Float> Bounced<D, F> {
+impl<D: Destination<F>, F: FftFloat> Bounced<D, F> {
     /// The pipeline's results, with the main output's taken out by its key.
     fn new(
         mut done: Done<F>,
-        main: &<D as render_output::Sealed>::Key,
+        main: &<D as render_output::Sealed<F>>::Key,
         stems: Vec<StemKey>,
     ) -> Result<Self, DoneError> {
         Ok(Self {
@@ -1588,7 +1728,7 @@ const PREPARING_STEPS: u32 = 4;
 /// [`Session::bounce`] is refused with [`BounceError::InFlight`].
 /// Nothing else reports it; the session warns once after an hour.
 #[must_use = "a bounce renders nothing until it is awaited"]
-pub struct BounceJob<D: Destination, F: FftFloat = f32> {
+pub struct BounceJob<D: Destination<F>, F: FftFloat = f32> {
     cut: Cut,
     executor: WeakExecutor,
     pending: ToMain<PendingExport<F>>,
@@ -1605,7 +1745,7 @@ pub struct BounceJob<D: Destination, F: FftFloat = f32> {
     kind: PhantomData<fn() -> D>,
 }
 
-impl<D: Destination, F: FftFloat> std::fmt::Debug for BounceJob<D, F> {
+impl<D: Destination<F>, F: FftFloat> std::fmt::Debug for BounceJob<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BounceJob")
             .field("ctx", &self.ctx)
@@ -1617,7 +1757,7 @@ impl<D: Destination, F: FftFloat> std::fmt::Debug for BounceJob<D, F> {
     }
 }
 
-impl<D: Destination, F: FftFloat> BounceJob<D, F> {
+impl<D: Destination<F>, F: FftFloat> BounceJob<D, F> {
     /// The handle that cancels this job and reads its progress.
     #[must_use]
     pub fn handle(&self) -> BounceHandle {
@@ -1654,7 +1794,7 @@ impl<D: Destination, F: FftFloat> BounceJob<D, F> {
                 .chain(stems.iter().map(|stem| stem.output.landing()))
                 .filter_map(|landing| match landing {
                     Landing::File(file) => Some(file),
-                    Landing::Buffers(_) => None,
+                    Landing::Buffers(_) | Landing::Sink => None,
                 })
         };
         control.preparing(files(), 1, PREPARING_STEPS);
@@ -1754,7 +1894,7 @@ impl<D: Destination, F: FftFloat> BounceJob<D, F> {
     }
 }
 
-impl<D: Destination, F: FftFloat> IntoFuture for BounceJob<D, F> {
+impl<D: Destination<F>, F: FftFloat> IntoFuture for BounceJob<D, F> {
     type Output = BounceRendered<D, F>;
     type IntoFuture = Bouncing<D, F>;
 
@@ -1820,20 +1960,20 @@ impl crate::unblocked::sealed::Sealed for BounceError {
 ///
 /// When polled after it resolved.
 #[must_use = "a bounce renders nothing unless it is awaited"]
-pub struct Bouncing<D: Destination, F: FftFloat = f32> {
+pub struct Bouncing<D: Destination<F>, F: FftFloat = f32> {
     render: Unblocked<Box<BounceJob<D, F>>, BounceRendered<D, F>, BounceError>,
     /// What the answer carries when the render gives none; taken on resolving.
     held: Option<Held>,
     handle: BounceHandle,
 }
 
-impl<D: Destination, F: FftFloat> std::fmt::Debug for Bouncing<D, F> {
+impl<D: Destination<F>, F: FftFloat> std::fmt::Debug for Bouncing<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Bouncing").finish_non_exhaustive()
     }
 }
 
-impl<D: Destination, F: FftFloat> Future for Bouncing<D, F> {
+impl<D: Destination<F>, F: FftFloat> Future for Bouncing<D, F> {
     type Output = BounceRendered<D, F>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1844,7 +1984,7 @@ impl<D: Destination, F: FftFloat> Future for Bouncing<D, F> {
     }
 }
 
-impl<D: Destination, F: FftFloat> Drop for Bouncing<D, F> {
+impl<D: Destination<F>, F: FftFloat> Drop for Bouncing<D, F> {
     fn drop(&mut self) {
         if self.held.is_some() {
             self.handle.cancel();
@@ -1921,7 +2061,7 @@ fn open_stem_taps<F: Float>(
 /// [`Phase::RenderMode`](crate::Phase::RenderMode) tells them Realtime. An app
 /// that plays live after a bounce updates right after applying.
 #[must_use = "a bounce is finished only when the session applies its render"]
-pub struct BounceRendered<D: Destination, F: Float = f32> {
+pub struct BounceRendered<D: Destination<F>, F: FftFloat = f32> {
     result: Result<Bounced<D, F>, BounceError>,
     /// Declared before `graph`: dropping this releases the token, then the graph
     /// goes back to the session, so a session that finds the graph back finds the
@@ -1931,7 +2071,7 @@ pub struct BounceRendered<D: Destination, F: Float = f32> {
     graph: Option<ToMain<Box<dyn Send>>>,
 }
 
-impl<D: Destination, F: Float> BounceRendered<D, F> {
+impl<D: Destination<F>, F: FftFloat> BounceRendered<D, F> {
     fn cancelled(graph: Option<ToMain<Box<dyn Send>>>, held: Held) -> Self {
         Self::failed(BounceError::Cancelled, graph, held)
     }
@@ -1945,7 +2085,7 @@ impl<D: Destination, F: Float> BounceRendered<D, F> {
     }
 }
 
-impl<D: Destination, F: SessionFloat> ApplySealed<F> for BounceRendered<D, F> {
+impl<D: Destination<F>, F: SessionFloat + FftFloat> ApplySealed<F> for BounceRendered<D, F> {
     type Applied = Bounced<D, F>;
     type Error = BounceError;
 
@@ -1980,7 +2120,7 @@ impl<D: Destination, F: SessionFloat> ApplySealed<F> for BounceRendered<D, F> {
     }
 }
 
-impl<D: Destination, F: Float> std::fmt::Debug for BounceRendered<D, F> {
+impl<D: Destination<F>, F: FftFloat> std::fmt::Debug for BounceRendered<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BounceRendered")
             .field(
@@ -2096,7 +2236,7 @@ where
     /// range, whose range keeps no frame, or for a graph with no outputs (all
     /// before anything is forked); [`BounceError::NotForkable`] and
     /// [`BounceError::Fork`] for a node the fork cannot copy.
-    pub fn bounce<D: Destination>(
+    pub fn bounce<D: Destination<C::Float>>(
         &mut self,
         bounce: Bounce<NodeKey, D, C::Float>,
     ) -> Result<BounceJob<D, C::Float>, BounceError> {
@@ -2211,7 +2351,7 @@ where
         // first target kept in memory.
         let held_in_memory = all().find_map(|t| match t {
             Landing::Buffers(b) => Some(b.channels()),
-            Landing::File(_) => None,
+            Landing::File(_) | Landing::Sink => None,
         });
         let figures = Figures {
             rate,
@@ -2320,7 +2460,7 @@ mod tests {
     }
 
     /// Starts `bounce`, awaits it and applies the render.
-    fn bounced<M: Destination>(
+    fn bounced<M: Destination<f32>>(
         session: &mut crate::DetachedSession,
         bounce: Bounce<NodeKey, M, f32>,
     ) -> Result<Bounced<M>, BounceError> {
@@ -2496,7 +2636,7 @@ mod tests {
     #[test]
     fn a_bounce_that_misses_what_it_needs_is_refused_before_it_forks() {
         let mut session = session();
-        fn refused<M: Destination>(
+        fn refused<M: Destination<f32>>(
             session: &mut crate::DetachedSession,
             b: Bounce<NodeKey, M, f32>,
         ) -> BounceConfigError {

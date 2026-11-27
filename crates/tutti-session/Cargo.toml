@@ -99,7 +99,7 @@ device = ["dep:tutti-cpal"]
 record = ["dep:tutti-dsp"]
 # Live audio input from the sound card: `Session::add_input`, takes, mic capture;
 # implies `device` and `record`.
-capture = ["device", "record", "tutti-cpal/capture", "encode-wav", "dep:futures-lite"]
+capture = ["device", "record", "export", "tutti-cpal/capture", "encode-wav", "dep:futures-lite"]
 midi = [
     "dep:futures-channel",
     "dep:tutti-midi-protocol",

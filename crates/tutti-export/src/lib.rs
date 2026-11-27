@@ -12,10 +12,10 @@
 //! - An `Output` is a `Feed` (the graph's outputs, or a plan tap, `Feed::Tap`, read
 //!   after every block and placed by a `Placement`) and a target: a file
 //!   (`FileTarget`: a `tutti_codec::Encoding`, a `ToFile` and the normalize) or planes in
-//!   memory (`BufferTarget`, returned as a `Rendered`).
+//!   memory (`BufferTarget`, returned as a `Rendered`) or a caller's sink (`SinkTarget`).
 //!   `Outputs` holds them by kind: `Outputs::file` and `Outputs::buffers` each return the key
 //!   (`FileKey`, `BufferKey`) its result is read by, from the `Done` that `render` returns
-//!   (`Done::file`, `Done::buffers`).
+//!   (`Done::file`, `Done::buffers`); `Outputs::sink` returns none, its result is the sink.
 //! - A file output that does not normalize **streams**: each block goes through
 //!   its resample, dither and encoder as it arrives and no PCM is held.
 //! - A file output that normalizes keeps what the graph rendered for it (in memory
@@ -192,6 +192,9 @@ pub use rendered::{Rendered, RenderedError};
 
 mod output;
 pub use output::{BufferTarget, Feed, FileTarget, Gain, Output, Placement, TargetError};
+
+mod sink_target;
+pub use sink_target::SinkTarget;
 
 mod outputs;
 pub use outputs::{BufferKey, Done, DoneError, FileKey, Outputs};

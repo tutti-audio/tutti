@@ -3,21 +3,20 @@
 //! figure `f32` cannot hold survives the whole way.
 
 use std::any::Any;
+use std::future::{Future, IntoFuture};
 use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, SampleFormat};
-use tutti_codec::{Format, Pcm};
+use tutti_codec::{Encoding, Format, Pcm, ToFile};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
-use tutti_session::{
-    InputConfig, InputOpener, MainOutput, OpenedInput, Punch, Record, Session, SessionEvent,
-    TakeEvent, TakeFile,
-};
+use tutti_session::{InputConfig, InputOpener, MainOutput, OpenedInput, Punch, Record, Session};
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::f64_device::f64_nodes::FINE;
@@ -77,7 +76,10 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
         .record(
             Record::new(
                 &input,
-                TakeFile::new(&path, Format::Wav(Pcm::Float(FloatWidth::F64))),
+                ToFile::new(
+                    &path,
+                    Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))),
+                ),
             )
             .punch(
                 Punch::new(Frame::new(1_000))
@@ -88,37 +90,28 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
         .expect("armed");
 
     let frame = [FINE, -FINE].repeat(BLOCK);
-    let mut events: Vec<SessionEvent> = Vec::new();
+    let mut taking = Box::pin(take.into_future());
+    let mut cx = Context::from_waker(Waker::noop());
     let deadline = Instant::now() + Duration::from_secs(20);
-    let finished = |events: &[SessionEvent]| {
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Take(TakeEvent::Finished { .. })))
-    };
-    while !finished(&events) {
-        assert!(Instant::now() < deadline, "never finished: {events:?}");
+    let done = loop {
+        if let Poll::Ready(answer) = taking.as_mut().poll(&mut cx) {
+            break answer.expect("recorded");
+        }
+        assert!(Instant::now() < deadline, "never finished");
         let mut guard = writer.lock();
         guard
             .as_mut()
             .expect("opened")
             .push_interleaved(Interleaved::new(&frame, ChannelLayout::STEREO).unwrap());
         drop(guard);
-        events.extend(session.update());
+        let _ = session.update();
         stream.render_block(Samples::new(BLOCK)).expect("open");
-        events.extend(session.update());
+        let _ = session.update();
         std::thread::yield_now();
-    }
-    drop(take);
-    let done = events
-        .iter()
-        .find_map(|e| match e {
-            SessionEvent::Take(TakeEvent::Finished { recorded, .. }) => Some(recorded),
-            _ => None,
-        })
-        .expect("finished");
+    };
     assert_eq!(done.frames(), Samples::new(200));
 
-    let wave = tutti_codec::read_wave::<f64>(done.path().expect("a file")).expect("reads");
+    let wave = tutti_codec::read_wave::<f64>(&done.output().path).expect("reads");
     assert_eq!(wave.len(), Samples::new(200));
     assert!((0..200).all(|i| wave.at(0, i) == FINE && wave.at(1, i) == -FINE));
 

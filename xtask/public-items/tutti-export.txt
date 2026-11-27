@@ -75,6 +75,7 @@ fn outputs::Done::take_file
 fn outputs::Outputs::buffers
 fn outputs::Outputs::file
 fn outputs::Outputs::new
+fn outputs::Outputs::sink
 fn render
 fn rendered::Rendered::apply_gain
 fn rendered::Rendered::channels
@@ -87,6 +88,7 @@ fn rendered::Rendered::layout
 fn rendered::Rendered::new
 fn rendered::Rendered::planes
 fn rendered::Rendered::sample_rate
+fn sink_target::SinkTarget::new
 struct Written
 struct control::CancelToken
 struct control::Control
@@ -103,5 +105,6 @@ struct outputs::Done
 struct outputs::FileKey
 struct outputs::Outputs
 struct rendered::Rendered
+struct sink_target::SinkTarget
 trait graph::RtLogSink
 type error::Result
