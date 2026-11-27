@@ -15,7 +15,8 @@
 
 use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_buffers::{InterleavedMut, PlanesMut};
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
 use tutti_fixtures::WavePlanes;
 #[cfg(feature = "export")]
 use tutti_session::ToMemory;
