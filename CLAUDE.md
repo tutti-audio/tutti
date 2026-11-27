@@ -54,6 +54,10 @@ std only. A rule the compiler already enforces is not a gate.
   required; no other job runs tests on Windows).
   The synth suites open the GS Wavetable Synth, which needs an audio endpoint: the job
   installs a virtual audio driver first (`.github/scripts/install-virtual-audio.ps1`).
+  `tutti-winmidi2-ffi`'s `services-tests` run in the `midi services (windows arm64)` job,
+  the one hosted runner that has the MIDI service; it stages Microsoft's preview
+  `Windows.Devices.Midi2.dll` beside the test binaries. `cargo xtask winmidi2-bindings`
+  regenerates the checked-in `src/bindings.rs`.
   A vst3 SDK enum constant
   is `c_uint` on unix and `c_int` on Windows: cast it with `helpers::sdk_enum_i32`. Read
   the engineering notes before touching `tutti-plugin-ipc`'s transport or plugin loading.
@@ -231,7 +235,7 @@ stated where the value is declared:
 - A library with no `unsafe` carries `#![forbid(unsafe_code)]` (`cargo xtask check-ffi`).
 - Plugin FFI `unsafe` lives only in `tutti-clap-ffi`, `tutti-vst3-ffi`, `tutti-au-ffi` and
   `tutti-vst2-ffi`; the process edge's in `tutti-plugin-ipc-ffi`; MIDI's OS calls in
-  `tutti-alsa-ffi`, `tutti-coremidi-ffi` and `tutti-winmm-ffi`; the OS calls (clock, thread
+  `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi` and `tutti-winmidi2-ffi`; the OS calls (clock, thread
   priority, main-thread detection, denormal control) in `tutti-platform`. Everything above
   them forbids `unsafe`. Test-only `unsafe` is `tutti-fixtures`'.
 - Time, threads, thread priority, the main thread and denormal control come from
@@ -404,8 +408,8 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 1. `tutti-units`, `tutti-plugin-ipc-ffi`
 2. `tutti-music`, `tutti-buffers`
 3. `tutti-ump`, `tutti-tempo`
-4. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
-   `tutti-midi-ci`, `tutti-curve`
+4. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-winmidi2-ffi`,
+   `tutti-midi-protocol`, `tutti-midi-ci`, `tutti-curve`
 5. `tutti-rt`, `tutti-midi-device`
 6. `tutti-midi-network`, `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-voicing`,
    `tutti-sf2`
