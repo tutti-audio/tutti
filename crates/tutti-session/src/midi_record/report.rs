@@ -641,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_report_of_notes_covers_the_keys_down_and_a_released_key_is_not_one() {
+    fn a_full_report_of_notes_reports_only_the_keys_down() {
         let mut record = Record::default();
         let at = addr(0, 0);
         say1(

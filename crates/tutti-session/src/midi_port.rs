@@ -1915,7 +1915,8 @@ impl OutputPort {
     /// Answers `ask` with the report of what the port has said: the Reply, the
     /// messages and the End, as one batch on the open device, so nothing the port
     /// drains lands between them (M2-101 §9.8.2), and what the device refuses is
-    /// counted. The ask comes back when the device is away: the caller answers it.
+    /// counted. A refusal can drop the End, as it can any part of a catch-up; the
+    /// ask comes back when the device is away: the caller answers it.
     fn answer_report(&mut self, ask: &ReportInquiry) -> Option<ReportInquiry> {
         let Some(out) = self.link.open_mut() else {
             return Some(*ask);
