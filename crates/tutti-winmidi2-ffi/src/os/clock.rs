@@ -55,25 +55,20 @@ impl Clock {
 
 #[cfg(all(test, feature = "services-tests"))]
 mod tests {
-    use tutti_platform::{Instant, instant_of_monotonic_ns};
-
     use super::*;
 
-    /// **The service's clock is the clock `Instant` reads**: a reading, mapped through the
-    /// clock's frequency, lies between two reads of `Instant::now`.
+    /// **The service's clock is the OS monotonic clock `Instant` is paired with**: a
+    /// reading, in nanoseconds through the clock's frequency, lies between two reads of
+    /// `tutti_platform::monotonic_ns`. Both sides floor the same `QueryPerformanceCounter`
+    /// count, so the comparison needs no tolerance and no `Instant` pairing.
     #[test]
-    fn the_services_clock_is_the_instant_clock() {
+    fn the_services_clock_is_the_monotonic_clock() {
         let clock = Clock::new().expect("the API's clock");
         let service = statics::<MidiClock, IMidiClockStatics>().expect("the clock's statics");
-        // The pairing of the two clocks is made at its first use: make it before the reads.
-        let _ = instant_of_monotonic_ns(0);
-        let before = Instant::now();
+        let before = tutti_platform::monotonic_ns();
         let ticks = call!("Now", service, Now() -> u64).expect("a reading");
-        let after = Instant::now();
-        let now = clock.instant(ticks).expect("a reading is an Instant");
-        assert!(
-            before <= now && now <= after,
-            "{before:?} {now:?} {after:?}"
-        );
+        let after = tutti_platform::monotonic_ns();
+        let now = clock.frequency.nanos(ticks).expect("a reading is in range");
+        assert!(before <= now && now <= after, "{before} {now} {after}");
     }
 }
