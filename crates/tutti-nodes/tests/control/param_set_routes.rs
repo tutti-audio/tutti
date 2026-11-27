@@ -854,7 +854,10 @@ fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     ir: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ir])),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }

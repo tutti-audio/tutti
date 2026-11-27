@@ -1,5 +1,7 @@
 //! [`FirConvolverConfig`]: a linear-phase filter through the convolver.
 
+use std::sync::Arc;
+
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{Fir, LinearPhaseDesign, MatchedBell, Sos, Tilt};
 use tutti_graph::Node;
@@ -34,10 +36,11 @@ fn bus(width: u16) -> ChannelTopology {
 }
 
 fn node(width: u16, fir: &Fir) -> ConvolverNode<f64> {
-    ConvolverNode::try_from(
-        FirConvolverConfig::new(bus(width), fir).block_size(Samples::new(BLOCK)),
+    ConvolverNode::from(
+        FirConvolverConfig::new(bus(width), Arc::new(fir.clone()))
+            .unwrap()
+            .block_size(Samples::new(BLOCK)),
     )
-    .unwrap()
 }
 
 /// The node's output for a unit impulse at frame 0 of each channel in `on`, over `frames`.
@@ -139,10 +142,7 @@ fn channels_do_not_couple() {
 fn a_bus_of_no_channels_is_refused_by_name() {
     let fir = design(&bands());
     assert_eq!(
-        ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(ChannelTopology::EMPTY, &fir).block_size(Samples::new(BLOCK))
-        )
-        .unwrap_err(),
+        FirConvolverConfig::new(ChannelTopology::EMPTY, Arc::new(fir)).unwrap_err(),
         ConvolverError::NoChannels
     );
 }

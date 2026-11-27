@@ -37,9 +37,10 @@ fn convolver_process_is_allocation_free() {
 /// levels.
 #[test]
 fn zero_latency_convolver_process_is_allocation_free() {
+    use std::sync::Arc;
     use tutti_buffers::ChannelTopology;
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverConfig;
+    use tutti_nodes::{ConvolverConfig, ImpulseResponses, IrLayout};
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     let irs = [Mono::new(&ir); 4];
@@ -47,11 +48,16 @@ fn zero_latency_convolver_process_is_allocation_free() {
         (ChannelTopology::MONO, false),
         (ChannelTopology::STEREO, true),
     ] {
-        let config = ConvolverConfig::new(bus, if layout { &irs[..] } else { &irs[..1] })
+        let (layout, irs) = if layout {
+            (IrLayout::TrueStereo, &irs[..])
+        } else {
+            (IrLayout::PerChannel, &irs[..1])
+        };
+        let config = ConvolverConfig::new(bus, layout, Arc::new(ImpulseResponses::new(irs)))
+            .unwrap()
             .block_size(Samples::new(128))
             .zero_latency();
-        let config = if layout { config.true_stereo() } else { config };
-        gate_at(ConvolverNode::<f32>::try_from(config).unwrap(), 100);
+        gate_at(ConvolverNode::<f32>::from(config), 100);
     }
 }
 
@@ -89,13 +95,14 @@ fn fir_convolver_process_is_allocation_free() {
     let fir = LinearPhaseDesign::new(Hz::new(100.0))
         .design(SampleRate::SR_48K, &[bell])
         .unwrap();
-    gate(
-        ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::ChannelTopology::STEREO, &fir)
-                .block_size(Samples::new(64)),
+    gate(ConvolverNode::<f32>::from(
+        FirConvolverConfig::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            std::sync::Arc::new(fir.clone()),
         )
-        .unwrap(),
-    );
+        .unwrap()
+        .block_size(Samples::new(64)),
+    ));
 }
 #[test]
 fn dual_mono_convolver_process_is_allocation_free() {
@@ -353,11 +360,15 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     ir: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
-            .block_size(block_size),
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::MONO,
+            tutti_nodes::IrLayout::PerChannel,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ir])),
+        )
+        .expect("one response on a mono bus")
+        .block_size(block_size),
     )
-    .expect("one response on a mono bus")
 }
 
 /// One response per channel, at as many unassigned channels as responses.
@@ -366,9 +377,12 @@ fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// Every input folded to mono, then one response per output, at the engine's placement of
@@ -379,9 +393,10 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
     let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(bus, irs)
-            .folded()
-            .block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        bus,
+        tutti_nodes::IrLayout::Folded,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }

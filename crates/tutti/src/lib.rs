@@ -288,9 +288,11 @@ pub use tutti_session::{ParamRef, RouteSpec};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
-///     .unwrap();
-/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// let latency = 512 + (fir.len().get() - 1) / 2;
+/// let node = ConvolverNode::<f32>::from(
+///     FirConvolverConfig::new(ChannelTopology::STEREO, std::sync::Arc::new(fir)).unwrap(),
+/// );
+/// assert_eq!(node.latency_samples().get(), latency);
 /// ```
 pub mod nodes {
     pub use tutti_nodes::automation::{
@@ -318,8 +320,8 @@ pub mod nodes {
         FmConfig, FmNode, FreeverbConfig, FreeverbNode, FrequencyShifterConfig,
         FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
         GranularSource, GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig,
-        HrtfBinauralNode, HysteresisConfig, HysteresisNode, InterpolationMode, IrLayout,
-        KarplusStrongConfig, KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig,
+        HrtfBinauralNode, HysteresisConfig, HysteresisNode, ImpulseResponses, InterpolationMode,
+        IrLayout, KarplusStrongConfig, KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig,
         LadderFilterNode, LadderType, LevellerConfig, LevellerNode, LfoConfig, LfoNode, LfoSync,
         LimiterConfig, LimiterNode, MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig,
         ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig, ModalBankNode,
