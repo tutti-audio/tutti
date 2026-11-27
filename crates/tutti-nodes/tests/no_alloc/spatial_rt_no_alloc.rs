@@ -6,6 +6,7 @@
 
 use crate::harness::Gate;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MaxBlock};
+use tutti_dsp::HarmonicNormalization;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
@@ -435,7 +436,7 @@ fn hrtf<F: tutti_dsp::FftFloat>(
 /// `node` alone in a graph at 48 kHz in 64-frame blocks, its direction moved before every
 /// block: 16 warm-up blocks, then 256 under `RtScope`. The inputs carry a
 /// non-trivial signal and the output is checked to sound.
-fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
+fn check_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
     Gate::new(|c, i| 0.1 * (c as f32 + 1.0) * (((i * 7 + c) % 13) as f32 - 6.0))
         .warm(16)
         .blocks(256)
@@ -455,16 +456,15 @@ fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
 
 #[test]
 fn ambisonic_encoder_process_is_allocation_free_with_the_direction_moving() {
-    gate_moving(AmbisonicEncoderNode::<f32>::from(
-        AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+    check_moving(AmbisonicEncoderNode::<f32>::from(
+        AmbisonicEncoderConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
     ));
 }
 
 #[test]
 fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
-    gate_moving(AmbisonicRotatorNode::<f32>::from(
-        AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX))
-            .unwrap()
+    check_moving(AmbisonicRotatorNode::<f32>::from(
+        AmbisonicRotatorConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d)
             .roll(ArcDegrees::new(30.0)),
     ));
 }

@@ -59,11 +59,14 @@ impl DcBlockerConfig {
 /// `F` is the float of the graph it runs in, and of the recursion and the pole.
 pub type DcBlockerNode<F> = KernelNode<DcBlockerKernel<F>>;
 
+kernel_config!(DcBlockerConfig => DcBlockerNode<F> where [F: Float + Lerp],
+    set(_): DcBlockerSet = DcBlockerSet);
+
 impl<F: Float + Lerp> From<DcBlockerConfig> for DcBlockerNode<F> {
     fn from(config: DcBlockerConfig) -> Self {
         Self::with_kernel(
             DcBlockerKernel::<F>::new(config.width),
-            DcBlockerSet,
+            config.kernel_set(),
             config.controls,
         )
     }

@@ -16,9 +16,10 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, ChannelLayout, ChannelTopology};
+use tutti_buffers::{AmbisonicOrder, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
+use tutti_dsp::HarmonicNormalization;
 use tutti_dsp::Wavetable;
 use tutti_dsp::{
     Algorithm, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Partial,
@@ -456,9 +457,10 @@ fn auto_pan() {
 
 fn ambisonic_encoder() {
     IsolateRow::new("AmbisonicEncoderNode", || {
-        AmbisonicEncoderNode::<f32>::from(
-            AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
-        )
+        AmbisonicEncoderNode::<f32>::from(AmbisonicEncoderConfig::new(
+            AmbisonicOrder::MAX,
+            HarmonicNormalization::Sn3d,
+        ))
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -471,9 +473,10 @@ fn ambisonic_encoder() {
 
 fn ambisonic_rotator() {
     IsolateRow::new("AmbisonicRotatorNode", || {
-        AmbisonicRotatorNode::<f32>::from(
-            AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
-        )
+        AmbisonicRotatorNode::<f32>::from(AmbisonicRotatorConfig::new(
+            AmbisonicOrder::MAX,
+            HarmonicNormalization::Sn3d,
+        ))
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -894,11 +897,6 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
-}
-
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 fn tube_stage() {

@@ -73,12 +73,15 @@ impl KarplusStrongConfig {
 /// is one bus.
 pub type KarplusStrongNode<F> = KernelNode<KarplusStrongKernel<F>>;
 
+kernel_config!(KarplusStrongConfig => KarplusStrongNode<F> where [F: Float],
+    set(_): KarplusStrongSet = KarplusStrongSet);
+
 impl<F: Float> From<KarplusStrongConfig> for KarplusStrongNode<F> {
     /// The line is sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it.
     fn from(config: KarplusStrongConfig) -> Self {
         Self::with_kernel(
             KarplusStrongKernel::new(config.width, config.lowest),
-            KarplusStrongSet,
+            config.kernel_set(),
             config.controls,
         )
     }

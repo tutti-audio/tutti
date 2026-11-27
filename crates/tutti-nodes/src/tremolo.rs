@@ -69,6 +69,9 @@ impl TremoloConfig {
 /// `TremoloNode::from` panics past 16 channels, where the node's shape is built: a tremolo is one bus.
 pub type TremoloNode<F> = KernelNode<TremoloKernel<F>>;
 
+kernel_config!(TremoloConfig => TremoloNode<F> where [F: Float],
+    set(_): TremoloSet = TremoloSet);
+
 impl<F: Float> From<TremoloConfig> for TremoloNode<F> {
     fn from(config: TremoloConfig) -> Self {
         // A placeholder rate: an unprepared node renders nothing.
@@ -78,7 +81,7 @@ impl<F: Float> From<TremoloConfig> for TremoloNode<F> {
             tremolo: Tremolo::new(config.wave, SampleRate::SR_48K),
             float: core::marker::PhantomData,
         };
-        Self::with_kernel(kernel, TremoloSet, config.controls)
+        Self::with_kernel(kernel, config.kernel_set(), config.controls)
     }
 }
 

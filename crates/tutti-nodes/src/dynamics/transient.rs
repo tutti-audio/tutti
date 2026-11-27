@@ -84,11 +84,14 @@ impl TransientShaperConfig {
 /// `TransientShaperNode::from` panics past 16 channels: a shaper is one bus.
 pub type TransientShaperNode<F> = KernelNode<TransientShaperKernel<F>>;
 
+kernel_config!(TransientShaperConfig => TransientShaperNode<F> where [F: Float + Lerp],
+    set(_): TransientShaperSet = TransientShaperSet);
+
 impl<F: Float + Lerp> From<TransientShaperConfig> for TransientShaperNode<F> {
     fn from(config: TransientShaperConfig) -> Self {
         Self::with_kernel(
             TransientShaperKernel::new(&config),
-            TransientShaperSet,
+            config.kernel_set(),
             config.controls,
         )
     }

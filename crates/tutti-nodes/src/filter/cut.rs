@@ -68,11 +68,14 @@ impl CutFilterConfig {
 /// `CutFilterNode::from` panics past 16 channels: a filter is one bus.
 pub type CutFilterNode<F> = KernelNode<CutFilterKernel<F>>;
 
+kernel_config!(CutFilterConfig => CutFilterNode<F> where [F: Float + SimdLanes],
+    set(_): CutFilterSet = CutFilterSet);
+
 impl<F: Float + SimdLanes> From<CutFilterConfig> for CutFilterNode<F> {
     fn from(config: CutFilterConfig) -> Self {
         Self::with_kernel(
             CutFilterKernel::new(filter_bus(config.width), &config),
-            CutFilterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

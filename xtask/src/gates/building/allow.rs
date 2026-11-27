@@ -212,18 +212,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a stagger that names an offset for each channel is valid for the bus it names them for: no single value's type holds it",
     ),
     ty(
-        "crates/tutti-nodes/src/spatial/ambisonic.rs",
-        "AmbisonicEncoderConfig::new",
-        CTOR,
-        "the bus is valid as a whole (an ambisonic bus in ACN order, in SN3D or N3D): a `ChannelTopology` holds any bus",
-    ),
-    ty(
-        "crates/tutti-nodes/src/spatial/ambisonic.rs",
-        "AmbisonicRotatorConfig::new",
-        CTOR,
-        "the bus is valid as a whole (an ambisonic bus in ACN order, in SN3D or N3D): a `ChannelTopology` holds any bus",
-    ),
-    ty(
         "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
         "HrirSphere::new",
         CTOR,
@@ -446,6 +434,18 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
     ty("crates/tutti-nodes/", "FmConfig", WIDTH, FIXED_SOURCE),
+    ty(
+        "crates/tutti-nodes/src/spatial/ambisonic.rs",
+        "AmbisonicEncoderConfig::new",
+        WIDTH,
+        "the order states the width: an ACN bus of order `n` has `(n + 1)^2` channels, so a width argument could only disagree with it",
+    ),
+    ty(
+        "crates/tutti-nodes/src/spatial/ambisonic.rs",
+        "AmbisonicRotatorConfig::new",
+        WIDTH,
+        "the order states the width: an ACN bus of order `n` has `(n + 1)^2` channels, so a width argument could only disagree with it",
+    ),
     ty("crates/tutti-nodes/", "AdditiveConfig", WIDTH, FIXED_SOURCE),
     ty(
         "crates/tutti-nodes/",

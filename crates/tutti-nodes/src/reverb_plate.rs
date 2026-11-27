@@ -105,9 +105,12 @@ impl Default for PlateReverbConfig {
 /// paper's lengths scaled to the rate, so an `f32` graph halves the memory of an `f64` one.
 pub type PlateReverbNode<F> = KernelNode<PlateKernel<F>>;
 
+kernel_config!(PlateReverbConfig => PlateReverbNode<F> where [F: Float + Lerp],
+    set(_): PlateSet = PlateSet);
+
 impl<F: Float + Lerp> From<PlateReverbConfig> for PlateReverbNode<F> {
     fn from(config: PlateReverbConfig) -> Self {
-        Self::with_kernel(PlateKernel::new(), PlateSet, config.controls)
+        Self::with_kernel(PlateKernel::new(), config.kernel_set(), config.controls)
     }
 }
 
