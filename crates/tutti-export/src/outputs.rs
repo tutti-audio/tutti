@@ -1,7 +1,7 @@
 //! The outputs of one render, by kind, and the results read back by key.
 //!
-//! [`Outputs`] holds a list of file outputs and a list of buffer outputs.
-//! Adding one returns its key, a [`FileKey`] or a [`BufferKey`]; the finished
+//! [`Outputs`] holds a list of file outputs, of buffer outputs and of sink outputs.
+//! Adding a file or buffers returns its key, a [`FileKey`] or a [`BufferKey`]; a sink has none; the finished
 //! render ([`Done`]) gives each result by the key it was added under, so what
 //! comes back is typed by what went in. A key is branded by the `Outputs` that
 //! made it: another render's key is a named error where it is used.
@@ -10,6 +10,7 @@ use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
 
+use crate::SinkTarget;
 use crate::output::{BufferTarget, FileTarget, Output};
 use crate::{Rendered, Written};
 
@@ -68,7 +69,7 @@ pub(crate) struct Placed<T, F: Float> {
     pub(crate) output: Output<T, F>,
 }
 
-/// The outputs one render feeds: files and buffers, each added by its kind.
+/// The outputs one render feeds: files, buffers and sinks, each added by its kind.
 ///
 /// ```
 /// # use tutti_export::{BufferTarget, Output, Outputs};
@@ -82,6 +83,7 @@ pub struct Outputs<F: Float = f32> {
     id: Arc<()>,
     files: Vec<Placed<FileTarget, F>>,
     buffers: Vec<Placed<BufferTarget, F>>,
+    sinks: Vec<Placed<SinkTarget<F>, F>>,
 }
 
 impl<T, F: Float> std::fmt::Debug for Placed<T, F> {
@@ -106,6 +108,7 @@ impl<F: Float> Outputs<F> {
             id: Arc::new(()),
             files: Vec::new(),
             buffers: Vec::new(),
+            sinks: Vec::new(),
         }
     }
 
@@ -131,9 +134,16 @@ impl<F: Float> Outputs<F> {
         key
     }
 
-    /// How many outputs, of both kinds: the position the next one is added at.
+    /// Adds an output streamed into a caller's sink. It has no key: its result is the sink
+    /// itself, and a sink that fails fails the render.
+    pub fn sink(&mut self, output: Output<SinkTarget<F>, F>) {
+        let position = self.len();
+        self.sinks.push(Placed { position, output });
+    }
+
+    /// How many outputs, of every kind: the position the next one is added at.
     fn len(&self) -> usize {
-        self.files.len() + self.buffers.len()
+        self.files.len() + self.buffers.len() + self.sinks.len()
     }
 
     fn brand(&self) -> Brand {
@@ -146,6 +156,7 @@ impl<F: Float> Outputs<F> {
             brand: self.brand(),
             files: self.files,
             buffers: self.buffers,
+            sinks: self.sinks,
         }
     }
 }
@@ -155,6 +166,7 @@ pub(crate) struct Parts<F: Float> {
     brand: Brand,
     pub(crate) files: Vec<Placed<FileTarget, F>>,
     pub(crate) buffers: Vec<Placed<BufferTarget, F>>,
+    pub(crate) sinks: Vec<Placed<SinkTarget<F>, F>>,
 }
 
 /// The brand of the [`Outputs`] a render was given, which its [`Done`] carries.

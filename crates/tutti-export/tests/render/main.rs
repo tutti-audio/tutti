@@ -14,3 +14,4 @@ mod fork_failure;
 mod gain;
 mod outputs;
 mod render;
+mod sink;
