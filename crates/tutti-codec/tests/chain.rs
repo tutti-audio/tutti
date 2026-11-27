@@ -430,7 +430,7 @@ fn a_chain_that_failed_mid_file_keeps_the_frames_written_and_names_the_file() {
             &ToFile::new(&path, Encoding::new(float_wav())),
             &stereo,
             SampleRate::SR_48K,
-            Samples::new(3_000),
+            Some(Samples::new(3_000)),
         )
         .unwrap()
     };
@@ -486,7 +486,8 @@ fn a_destination_refuses_an_existing_path_unless_it_replaces() {
     std::fs::write(&path, b"sentinel").unwrap();
     let encoding = Encoding::new(float_wav());
     let source = ChannelSet::default_for(ChannelLayout::MONO);
-    let chain = |to: &ToFile| Chain::<f32>::new(to, &source, SampleRate::SR_48K, Samples::new(8));
+    let chain =
+        |to: &ToFile| Chain::<f32>::new(to, &source, SampleRate::SR_48K, Some(Samples::new(8)));
 
     let err = chain(&ToFile::new(&path, encoding.clone())).expect_err("the path exists");
     assert!(
@@ -521,7 +522,7 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
         ),
         &ChannelSet::default_for(ChannelLayout::MONO),
         SampleRate::of(1_000.0),
-        Samples::new(1 << 32),
+        Some(Samples::new(1 << 32)),
     )
     .map(drop)
     .expect_err("2^32 mono 16-bit frames do not fit a WAV file");
@@ -536,6 +537,30 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     );
 }
 
+/// **An open-ended source has no plan to refuse**: the file that a plan of 2^32 mono 16-bit
+/// frames cannot start, starts without one, and the format's limit is left to its writes.
+#[test]
+fn an_open_ended_chain_starts_where_a_plan_past_the_limit_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let to = ToFile::new(
+        dir.path().join("take.wav"),
+        Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+    );
+    let mono = ChannelSet::default_for(ChannelLayout::MONO);
+    let rate = SampleRate::of(1_000.0);
+    let refused = Chain::<f32>::new(&to, &mono, rate, Some(Samples::new(1 << 32))).map(drop);
+    assert!(
+        matches!(refused, Err(EncodeError::WavTooLarge { .. })),
+        "{refused:?}"
+    );
+    let mut chain = Chain::<f32>::new(&to, &mono, rate, None).expect("no plan, no refusal");
+    chain
+        .block(Interleaved::new(&[0.5f32; 8], ChannelLayout::MONO).unwrap())
+        .unwrap();
+    let landed = chain.finalize().unwrap().commit().unwrap();
+    assert_eq!(landed.frames(), Samples::new(8));
+}
+
 /// The limit is judged on the frames the file will hold, which a resample to a higher rate
 /// raises: 2^31 - 1000 frames fit a mono 16-bit WAV at the source rate, and do not once they
 /// are written at twice the rate.
@@ -547,13 +572,23 @@ fn the_limit_is_judged_at_the_output_rate() {
     let rate = SampleRate::of(1_000.0);
     let mono = ChannelSet::default_for(ChannelLayout::MONO);
     let encoding = Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
-    Chain::<f32>::new(&ToFile::new(&path, encoding.clone()), &mono, rate, plan)
-        .map(drop)
-        .expect("2^31 - 1000 mono 16-bit frames fit");
+    Chain::<f32>::new(
+        &ToFile::new(&path, encoding.clone()),
+        &mono,
+        rate,
+        Some(plan),
+    )
+    .map(drop)
+    .expect("2^31 - 1000 mono 16-bit frames fit");
     let doubled = encoding.resample(Resample::to(SampleRate::of(2_000.0)));
-    let err = Chain::<f32>::new(&ToFile::new(&path, doubled.clone()), &mono, rate, plan)
-        .map(drop)
-        .expect_err("twice the frames do not");
+    let err = Chain::<f32>::new(
+        &ToFile::new(&path, doubled.clone()),
+        &mono,
+        rate,
+        Some(plan),
+    )
+    .map(drop)
+    .expect_err("twice the frames do not");
     assert!(matches!(err, EncodeError::WavTooLarge { .. }), "{err}");
 }
 
@@ -585,7 +620,7 @@ fn the_topology_reaches_the_file() {
             ),
             &set,
             SampleRate::of(1_000.0),
-            Samples::new(8),
+            Some(Samples::new(8)),
         )
         .unwrap();
         chain
