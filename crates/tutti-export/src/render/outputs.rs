@@ -227,7 +227,11 @@ fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result
             output: placed.position,
             why,
         };
-        let channels = channels_of(placed.output.feed(), file.channel_set(), main_output);
+        let channels = channels_of(
+            placed.output.feed(),
+            file.to_file().channel_set(),
+            main_output,
+        );
         check_feed(placed, &channels, target_error)?;
         if let Some(Gain::Own(Normalize::Lufs { .. })) = file.normalize {
             // Loudness is weighted by placement: refused here, not after the render.
@@ -315,12 +319,12 @@ fn open_lanes<F: FftFloat>(
     let mut files = Vec::with_capacity(file_outputs.len());
     for Placed { position, output } in file_outputs {
         let (feed, file) = output.into_parts();
-        let set = channels_of(&feed, file.channel_set(), main_output);
+        let set = channels_of(&feed, file.to_file().channel_set(), main_output);
         let lane = open_lane(
             position,
             feed,
             set,
-            file.placement(),
+            file.to_file().placement(),
             graph_outputs,
             main_output,
             max_block,
@@ -557,7 +561,7 @@ fn finish<F: FftFloat>(
             if let Some(chosen) = chosen[i] {
                 chain.set_gain(chosen.gain);
             }
-            let block = if waiting.target.resampling().is_some() {
+            let block = if waiting.target.to_file().resampling().is_some() {
                 chunk_frames(rate).get()
             } else {
                 REPLAY_BLOCK
@@ -645,7 +649,7 @@ fn measure<F: FftFloat>(
     total: Samples,
     control: &mut Control<'_>,
 ) -> Result<Outcome<(Reading, Samples)>> {
-    let out_rate = waiting.target.rate(rate);
+    let out_rate = waiting.target.to_file().rate(rate);
     let unmeasurable = |reason: Unmeasured| RenderError::Unmeasurable {
         output: Some(output),
         channels: layout,
@@ -657,7 +661,7 @@ fn measure<F: FftFloat>(
         .topology()
         .ok_or_else(|| unmeasurable(Unmeasured::Placement))?;
     let mut measurer = Measurer::new(out_rate, topology, normalize).map_err(unmeasurable)?;
-    let mut converter: Option<Converter<F>> = match waiting.target.resampling() {
+    let mut converter: Option<Converter<F>> = match waiting.target.to_file().resampling() {
         Some(resample) => resample.converter(layout, rate)?,
         None => None,
     };

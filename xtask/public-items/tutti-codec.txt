@@ -100,12 +100,16 @@ fn spec::Spec::of_channels
 fn spec::Spec::rate
 fn spec::Spec::topology
 fn to_file::ToFile::alongside
-fn to_file::ToFile::encoding
+fn to_file::ToFile::channel_set
+fn to_file::ToFile::format
 fn to_file::ToFile::in_place
 fn to_file::ToFile::map_encoding
 fn to_file::ToFile::new
 fn to_file::ToFile::path
+fn to_file::ToFile::placement
+fn to_file::ToFile::rate
 fn to_file::ToFile::replace
+fn to_file::ToFile::resampling
 fn wave_write::encode
 fn wave_write::write
 struct chain::Chain

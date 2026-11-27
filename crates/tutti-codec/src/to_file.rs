@@ -1,7 +1,9 @@
 //! [`ToFile`]: a path, what is written there, and what happens to what is at it.
 
-use crate::{EncoderOptions, Encoding, FileEncoder, Result};
+use crate::{EncoderOptions, Encoding, FileEncoder, Format, Resample, Result};
 use std::path::{Path, PathBuf};
+use tutti_buffers::{ChannelSet, Placement};
+use tutti_units::SampleRate;
 
 /// A file: the [`Encoding`] it is written as, the path it lands at, and the options of a file
 /// ([`FileOptions`](crate::FileOptions)'s). An existing file is refused by default
@@ -46,9 +48,38 @@ impl ToFile {
         &self.path
     }
 
-    /// How the file is written.
+    /// The container and its settings.
     #[must_use]
-    pub fn encoding(&self) -> &Encoding {
+    pub fn format(&self) -> Format {
+        self.encoding.format()
+    }
+
+    /// The channels the file holds, when its encoding states them ([`Encoding::channel_set`]).
+    #[must_use]
+    pub fn channel_set(&self) -> Option<ChannelSet> {
+        self.encoding.channel_set()
+    }
+
+    /// Whether the encoding states the file's speakers ([`Encoding::placement`]).
+    #[must_use]
+    pub fn placement(&self) -> Placement {
+        self.encoding.placement()
+    }
+
+    /// The resample of the file's encoding, when it has one.
+    #[must_use]
+    pub fn resampling(&self) -> Option<Resample> {
+        self.encoding.resampling()
+    }
+
+    /// The rate the file is written at for a source at `source` ([`Encoding::rate`]).
+    #[must_use]
+    pub fn rate(&self, source: SampleRate) -> SampleRate {
+        self.encoding.rate(source)
+    }
+
+    /// The pipeline in front of the encoder, for the chain that writes the file.
+    pub(crate) fn encoding(&self) -> &Encoding {
         &self.encoding
     }
 

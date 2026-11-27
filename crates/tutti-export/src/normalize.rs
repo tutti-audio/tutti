@@ -276,7 +276,7 @@ fn finished<T>(outcome: Outcome<T>) -> T {
 /// `render_rate` is the rate the file's frames are rendered at; the shaping filter
 /// is designed for the file's, after any resample.
 fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> {
-    let pcm = target.int_pcm()?;
+    let pcm = target.to_file().format().int_pcm()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = pcm.depth().lsb().get();
     let dither_peak = match pcm.dither_shape() {
@@ -288,7 +288,7 @@ fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> 
     // recorded error is at most the dither plus half a step of rounding, and the
     // filter passes at most `feedback_gain` times that.
     let feedback_peak = if pcm.is_noise_shaped() {
-        let rate = target.rate(render_rate);
+        let rate = target.to_file().rate(render_rate);
         NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
     } else {
         0.0

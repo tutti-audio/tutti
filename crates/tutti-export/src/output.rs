@@ -10,9 +10,8 @@ use std::path::Path;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
-use tutti_codec::{IntPcm, Resample, ToFile};
+use tutti_codec::ToFile;
 use tutti_graph::TapReader;
-use tutti_units::SampleRate;
 
 use crate::FileKey;
 use crate::normalize::Normalize;
@@ -112,31 +111,6 @@ impl FileTarget {
     #[must_use]
     pub fn path(&self) -> &Path {
         self.to.path()
-    }
-
-    /// The channels the file holds, when its encoding states them.
-    pub(crate) fn channel_set(&self) -> Option<ChannelSet> {
-        self.to.encoding().channel_set()
-    }
-
-    /// Whether the file's encoding states its speakers.
-    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
-        self.to.encoding().placement()
-    }
-
-    /// The resample of the file's encoding, when it has one.
-    pub(crate) fn resampling(&self) -> Option<Resample> {
-        self.to.encoding().resampling()
-    }
-
-    /// The rate the file is written at for a render at `source`.
-    pub(crate) fn rate(&self, source: SampleRate) -> SampleRate {
-        self.to.encoding().rate(source)
-    }
-
-    /// The integer format the file quantizes to, when its format is one.
-    pub(crate) fn int_pcm(&self) -> Option<IntPcm> {
-        self.to.encoding().format().int_pcm()
     }
 
     pub(crate) fn to_file(&self) -> &ToFile {
