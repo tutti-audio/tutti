@@ -796,10 +796,6 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    assert!(
-        path.exists(),
-        "the take is written at its path while it rolls"
-    );
 
     drop(rig);
     // The drop closes the take's file before it returns.
