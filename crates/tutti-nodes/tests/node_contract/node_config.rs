@@ -12,24 +12,25 @@ use tutti_dsp::{
     CrossoverControls, CutAlignment, CutResponse, DynamicMode, FdnControls, FdnLayout, FmPatch,
     FreeverbControls, FreezeControls, GateControls, GraphicBands, HarmonicNormalization, HopSize,
     HrirSphere, HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType,
-    LimiterControls, Lookahead, LowestPitch, MaxDecay, MaxGrains, ModDelayControls, Mode, Modes,
-    OperatorCount, OperatorFrequency, OperatorSpec, OscillatorWave, OversamplingFactor, PanLaw,
-    Partial, Partials, PeakDetection, PhaserControls, ReferenceDistance, ShapeKind,
-    ShimmerControls, ShimmerLayout, SpringLength, SpringStages, Stages, Tap, TapSet, TubeDrive,
-    VelvetDensity, Waveshape, Wavetable,
+    LimiterControls, LinearPhaseDesign, Lookahead, LowestPitch, MaxDecay, MaxGrains,
+    ModDelayControls, Mode, Modes, OperatorCount, OperatorFrequency, OperatorSpec, OscillatorWave,
+    OversamplingFactor, PanLaw, Partial, Partials, PeakDetection, PhaserControls,
+    ReferenceDistance, ShapeKind, ShimmerControls, ShimmerLayout, SpringLength, SpringStages,
+    Stages, Tap, TapSet, Tilt, TubeDrive, VelvetDensity, Waveshape, Wavetable,
 };
 use tutti_graph::{HostValues, IntoNode, NodeConfig, ParamSet};
 use tutti_nodes::{
     AdditiveConfig, AmbisonicEncoderConfig, AmbisonicRotatorConfig, AutoPanConfig,
     BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, ClickNodeConfig, ClickSettings,
-    CombFilterConfig, CompressorConfig, CrossoverConfig, CutFilterConfig, DcBlockerConfig,
-    DecorrelatorConfig, DelayConfig, DelayControls, DelayLayout, DelaySync, DiodeClipperConfig,
-    DistanceConfig, DistortionConfig, DynamicEqConfig, EarlyReflectionsConfig,
-    EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FmConfig, FreeverbConfig,
-    FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource, GraphicEqConfig,
-    HrtfBinauralConfig, HysteresisConfig, InterpolationMode, KarplusStrongConfig,
-    LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay, MidSideConfig, ModDelayConfig,
-    ModalBankConfig, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
+    CombFilterConfig, CompressorConfig, ConvolverConfig, CrossoverConfig, CutFilterConfig,
+    DcBlockerConfig, DecorrelatorConfig, DelayConfig, DelayControls, DelayLayout, DelaySync,
+    DiodeClipperConfig, DistanceConfig, DistortionConfig, DynamicEqConfig, EarlyReflectionsConfig,
+    EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FirConvolverConfig, FmConfig,
+    FreeverbConfig, FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource,
+    GraphicEqConfig, HrtfBinauralConfig, HysteresisConfig, ImpulseResponses, InterpolationMode,
+    IrLayout, KarplusStrongConfig, LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay,
+    MidSideConfig, ModDelayConfig, ModalBankConfig, MultibandBands, MultibandCompressorConfig,
+    MultibandControls, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
     RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger, StereoWidthConfig, SvfFilterConfig,
     SvfType, SweepRange, TiltFilterConfig, TransientShaperConfig, TremoloConfig, TubeStageConfig,
     WaveguideStringConfig, WavetableConfig,
@@ -43,6 +44,23 @@ use tutti_units::{
 
 use tutti_fixtures::hrir::synthetic_hrir_sphere;
 
+/// The params a built node's controls address.
+trait Params {
+    fn params(&self) -> &ParamSet;
+}
+
+impl Params for ParamSet {
+    fn params(&self) -> &ParamSet {
+        self
+    }
+}
+
+impl Params for MultibandControls {
+    fn params(&self) -> &ParamSet {
+        MultibandControls::params(self)
+    }
+}
+
 /// One config's row: `base`, a variant `values` that moves every value it has (each
 /// param and each kinded setting; `None` for a config that holds none), and variants that
 /// each change one structure field.
@@ -55,11 +73,13 @@ use tutti_fixtures::hrir::synthetic_hrir_sphere;
 fn check<C>(name: &str, base: &C, values: Option<&C>, structures: &[C])
 where
     C: NodeConfig<f64> + Debug,
-    C::Node: IntoNode<f64, Controls = ParamSet>,
+    C::Node: IntoNode<f64>,
+    <C::Node as IntoNode<f64>>::Controls: Params,
 {
     for config in std::iter::once(base).chain(values) {
         let initials = config.initials();
         let (_, controls) = config.build(&HostValues::new()).into_node();
+        let controls = controls.params();
         assert_eq!(
             controls.params().count(),
             initials.params().len(),
@@ -906,5 +926,52 @@ fn each_config_lists_its_values_and_compares_its_structure() {
                 .blend(Mix::new(0.5)),
         ),
         &[HrtfBinauralConfig::new(sphere(48_000))],
+    );
+
+    // Rows form and owned assets: all structure, with the declared params at their starts.
+    let multiband = |input, bands| MultibandCompressorConfig::new(input, MultibandBands::of(bands));
+    check(
+        "multiband",
+        &multiband(bus(2), 3),
+        None,
+        &[multiband(bus(1), 3), multiband(bus(2), 2)],
+    );
+    let responses = Arc::new(ImpulseResponses::new(&[Mono::new(&[1.0_f64, 0.5])]));
+    let convolver = |output, layout, responses: &Arc<ImpulseResponses<f64>>| {
+        ConvolverConfig::new(output, layout, Arc::clone(responses)).unwrap()
+    };
+    let base = convolver(ChannelTopology::MONO, IrLayout::PerChannel, &responses);
+    check(
+        "convolver",
+        &base,
+        None,
+        &[
+            convolver(ChannelTopology::STEREO, IrLayout::PerChannel, &responses),
+            convolver(
+                ChannelTopology::MONO,
+                IrLayout::PerChannel,
+                &Arc::new(ImpulseResponses::new(&[Mono::new(&[1.0_f64, 0.5])])),
+            ),
+            base.clone().block_size(Samples::new(64)),
+            base.clone().zero_latency(),
+        ],
+    );
+    let tilt = Tilt::new(Db::new(6.0))
+        .design(Hz::new(2_000.0), SampleRate::SR_48K)
+        .unwrap();
+    let fir = Arc::new(
+        LinearPhaseDesign::new(Hz::new(200.0))
+            .design(SampleRate::SR_48K, &[tilt])
+            .unwrap(),
+    );
+    let fir_config = FirConvolverConfig::new(ChannelTopology::MONO, Arc::clone(&fir)).unwrap();
+    check(
+        "fir convolver",
+        &fir_config,
+        None,
+        &[
+            FirConvolverConfig::new(ChannelTopology::STEREO, fir).unwrap(),
+            fir_config.clone().block_size(Samples::new(64)),
+        ],
     );
 }

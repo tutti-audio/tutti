@@ -20,12 +20,12 @@ use tutti_dsp::{
     MultibandBands, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
 };
 use tutti_graph::{
-    Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
-    Status,
+    Cost, Cx, HostValues, Initials, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeConfig, NodeParts,
+    ParamNode, ParamSet, Prepare, Shape, Status,
 };
 use tutti_rt::Param;
 use tutti_units::{CompressionRatio, Db, Hz, SampleRate, Samples};
-use tutti_units::{Seconds, Tail, UnitParam};
+use tutti_units::{Seconds, Tail, UnitAddr, UnitParam};
 
 use crate::filter::Splits;
 use crate::kernel::{
@@ -346,6 +346,44 @@ impl<F: Float + SimdLanes + Lerp> From<MultibandCompressorConfig> for MultibandC
             },
             tuned: None,
         }
+    }
+}
+
+/// A multiband compressor's config holds its bus and band count, its structure; every band's
+/// controls and the crossovers start at the defaults [`new`](MultibandCompressorConfig::new) lists.
+impl<F: Float + SimdLanes + Lerp> NodeConfig<F> for MultibandCompressorConfig {
+    type Node = MultibandCompressorNode<F>;
+
+    fn build(&self, _: &HostValues) -> MultibandCompressorNode<F> {
+        MultibandCompressorNode::from(*self)
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn initials(&self) -> Initials {
+        let band = |kind, value: f64| (kind, value);
+        let per_band = [
+            band(UnitParam::Threshold, DEFAULT_THRESHOLD.get()),
+            band(UnitParam::Knee, 0.0),
+            band(UnitParam::Ratio, DEFAULT_RATIO.get()),
+            band(UnitParam::Attack, DEFAULT_ATTACK.get()),
+            band(UnitParam::Release, DEFAULT_RELEASE.get()),
+            band(UnitParam::GainDb, 0.0),
+            band(UnitParam::Bypass, 0.0),
+            band(UnitParam::Solo, 0.0),
+        ];
+        let mut initials = Initials::new();
+        for b in 0..self.bands.get() {
+            for (kind, value) in per_band {
+                initials = initials.param(UnitAddr::new(kind, b), value);
+            }
+        }
+        for (i, split) in (0u8..).zip(default_crossovers(self.bands)) {
+            initials = initials.param(UnitAddr::new(UnitParam::Cutoff, i), split.get());
+        }
+        initials
     }
 }
 

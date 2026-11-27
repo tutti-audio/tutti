@@ -15,18 +15,18 @@
 //! running state.
 
 use tutti_buffers::{
-    AmbisonicFormat, ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput, MAX_CHANNELS,
-    Mono, MonoMut, Planes, PlanesMut, Sample,
+    ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput, MAX_CHANNELS, Mono, MonoMut,
+    Planes, PlanesMut, Sample,
 };
 use tutti_graph::{
-    Buses, Cx, Inputs, IntoNode, Io, MAX_PORTS, Node, NodeParts, Outputs, ParamNode, ParamSet,
-    Prepare, Shape, Status,
+    Buses, Cx, HostValues, Initials, Inputs, IntoNode, Io, MAX_PORTS, Node, NodeConfig, NodeParts,
+    Outputs, ParamNode, ParamSet, Prepare, Shape, Shared, Status,
 };
 use tutti_rt::Param;
-use tutti_units::{Amplitude, Samples, UnitParam};
+use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 use tutti_units::{Latency, Tail};
 
-use super::IrLayout;
+use super::{ImpulseResponses, IrLayout};
 use crate::kernel::{slice_in, slice_out};
 use crate::last_good::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -172,84 +172,96 @@ impl<F: FftFloat> Engine<F> {
     }
 }
 
-/// What a [`ConvolverNode`] is made from: the bus it convolves onto, the impulse responses,
-/// and how they lay over the channels ([`IrLayout`]).
+/// What a [`ConvolverNode`] is made from: the bus it convolves onto, how the impulse responses
+/// lay over the channels ([`IrLayout`]), and the responses.
 ///
-/// [`new`](Self::new) is the per-channel layout: one response for each channel of the bus, or
-/// one alone, shared by every channel. [`true_stereo`](Self::true_stereo),
-/// [`ambisonic`](Self::ambisonic) and [`folded`](Self::folded) choose another layout. The
-/// block is 512 frames unless [`block_size`](Self::block_size) says otherwise.
-/// [`TryFrom`] makes the node.
+/// [`new`](Self::new) checks the responses against the layout and the bus, so the node a
+/// config makes ([`From`]) cannot fail. The block is 512 frames unless
+/// [`block_size`](Self::block_size) says otherwise.
 ///
-/// The conversion is fallible because the responses and the layout depend on each other:
-/// how many responses a layout takes follows from its bus, a true-stereo layout needs a
-/// pair, and a folded one needs a fold to mono for its width. No type of one of those
-/// holds the others.
+/// The responses are an [`Shared`]: two configs are equal when they have the same bus, layout,
+/// block and the same [`ImpulseResponses`] (one allocation), and a config over responses
+/// loaded again is a new node.
 ///
 /// An IR carries no rate and nothing resamples it (see [`ConvolverNode`]).
 ///
 /// ```
+/// use std::sync::Arc;
 /// use tutti_buffers::{ChannelTopology, Mono};
-/// use tutti_nodes::{ConvolverConfig, ConvolverNode};
+/// use tutti_nodes::{ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout};
 /// use tutti_units::Samples;
 ///
 /// let ir = [1.0_f32, 0.5, 0.25];
-/// let node = ConvolverNode::<f32>::try_from(
-///     ConvolverConfig::new(ChannelTopology::STEREO, &[Mono::new(&ir)]).block_size(Samples::new(64)),
-/// )
-/// .unwrap();
+/// let responses = Arc::new(ImpulseResponses::new(&[Mono::new(&ir)]));
+/// let node = ConvolverNode::<f32>::from(
+///     ConvolverConfig::new(ChannelTopology::STEREO, IrLayout::PerChannel, responses)
+///         .unwrap()
+///         .block_size(Samples::new(64)),
+/// );
 /// assert_eq!(node.latency_samples().get(), 64);
 /// ```
-#[derive(Clone, Copy, Debug)]
-pub struct ConvolverConfig<'a, S: Sample> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConvolverConfig<S: Sample> {
     output: ChannelTopology,
-    irs: &'a [Mono<'a, S>],
     layout: IrLayout,
+    irs: Shared<ImpulseResponses<S>>,
     block_size: Samples,
     zero_latency: bool,
 }
 
-impl<'a, S: Sample> ConvolverConfig<'a, S> {
-    /// A convolver onto the bus `output`, one channel to one channel: `irs` is one response
-    /// for each channel, or one response alone, which every channel shares.
-    #[must_use]
-    pub fn new(output: ChannelTopology, irs: &'a [Mono<'a, S>]) -> Self {
-        Self {
+impl<S: Sample> ConvolverConfig<S> {
+    /// A convolver onto the bus `output` with the responses `irs` laid over its channels as
+    /// `layout` says ([`IrLayout`] lists how many responses each layout takes).
+    ///
+    /// # Errors
+    ///
+    /// By name, before any convolver is built: [`ConvolverError::NoChannels`] for a bus of
+    /// none, [`ConvolverError::IrCount`] when the responses are not what the layout takes,
+    /// [`ConvolverError::TrueStereoWidth`] for a true-stereo layout off a pair, and
+    /// [`ConvolverError::NoFold`] for a folded width with no fold to mono: only 1, 2, 4, 6, 8
+    /// and 12 have an order ([`Fold::between`] places any other by index and refuses to
+    /// narrow it). The responses and the layout depend on each other: how many a layout takes
+    /// follows from its bus, a true-stereo layout needs a pair, and a folded one needs a fold
+    /// to mono for its width, so no type of one holds the others.
+    pub fn new(
+        output: ChannelTopology,
+        layout: IrLayout,
+        irs: impl Into<Shared<ImpulseResponses<S>>>,
+    ) -> Result<Self, ConvolverError> {
+        let irs = irs.into();
+        let input = layout.input(output);
+        let (n_in, n_out) = (input.width(), output.width());
+        if n_in.count() == 0 || n_out.count() == 0 {
+            return Err(ConvolverError::NoChannels);
+        }
+        if layout == IrLayout::TrueStereo && n_out != ChannelLayout::STEREO {
+            return Err(ConvolverError::TrueStereoWidth {
+                width: n_out.count(),
+            });
+        }
+        let want = layout.ir_count(n_out);
+        let shared = matches!(layout, IrLayout::PerChannel | IrLayout::Folded) && irs.len() == 1;
+        if irs.len() != want && !shared {
+            return Err(ConvolverError::IrCount {
+                want,
+                got: irs.len(),
+            });
+        }
+        if layout == IrLayout::Folded {
+            Fold::<f32>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
+                |source| ConvolverError::NoFold {
+                    width: n_in.count(),
+                    source,
+                },
+            )?;
+        }
+        Ok(Self {
             output,
+            layout,
             irs,
-            layout: IrLayout::PerChannel,
             block_size: DEFAULT_BLOCK,
             zero_latency: false,
-        }
-    }
-
-    /// True stereo ([`IrLayout::TrueStereo`]): `irs` is `[LL, LR, RL, RR]` over a bus of a pair.
-    #[must_use]
-    pub fn true_stereo(self) -> Self {
-        Self {
-            layout: IrLayout::TrueStereo,
-            ..self
-        }
-    }
-
-    /// An ambisonic set of `input` in and the bus out ([`IrLayout::Ambisonic`]): `irs` is one
-    /// response for each (input, output) path, input-major.
-    #[must_use]
-    pub fn ambisonic(self, input: AmbisonicFormat) -> Self {
-        Self {
-            layout: IrLayout::Ambisonic(input),
-            ..self
-        }
-    }
-
-    /// Every input folded to mono, then convolved with one response per output channel
-    /// ([`IrLayout::Folded`]). The inputs are folded as the bus's placement says.
-    #[must_use]
-    pub fn folded(self) -> Self {
-        Self {
-            layout: IrLayout::Folded,
-            ..self
-        }
+        })
     }
 
     /// The convolver's head partition, rounded up to a power of two: the node's latency.
@@ -270,27 +282,49 @@ impl<'a, S: Sample> ConvolverConfig<'a, S> {
     }
 }
 
-impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for ConvolverNode<F> {
-    type Error = ConvolverError;
-
+impl<F: FftFloat + Lerp, S: Sample> From<ConvolverConfig<S>> for ConvolverNode<F> {
     /// The node, in the float `F` of the graph it runs in.
-    ///
-    /// # Errors
-    ///
-    /// By name, before any convolver is built: [`ConvolverError::NoChannels`] for a bus of
-    /// none, [`ConvolverError::IrCount`] when the responses are not what the layout takes,
-    /// [`ConvolverError::TrueStereoWidth`] for a true-stereo layout off a pair, and
-    /// [`ConvolverError::NoFold`] for a folded width with no fold to mono: only 1, 2, 4, 6, 8
-    /// and 12 have an order ([`Fold::between`] places any other by index and refuses to
-    /// narrow it).
-    fn try_from(config: ConvolverConfig<'_, S>) -> Result<Self, ConvolverError> {
+    fn from(config: ConvolverConfig<S>) -> Self {
+        Self::over(&config)
+    }
+}
+
+/// A convolver's wet gain is its only param, and a config has no value for it: the config is
+/// all structure, and the gain starts at unity.
+impl<F: FftFloat + Lerp, S: Sample> NodeConfig<F> for ConvolverConfig<S> {
+    type Node = ConvolverNode<F>;
+
+    fn build(&self, _: &HostValues) -> ConvolverNode<F> {
+        ConvolverNode::over(self)
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn initials(&self) -> Initials {
+        wet_gain_initials()
+    }
+}
+
+/// The initial values of a convolver: its wet gain at unity.
+fn wet_gain_initials() -> Initials {
+    Initials::new().param(UnitAddr::first(UnitParam::Volume), Amplitude::UNITY.get())
+}
+
+impl<F: FftFloat + Lerp> ConvolverNode<F> {
+    /// The node of a checked `config`.
+    fn over<S: Sample>(config: &ConvolverConfig<S>) -> Self {
         let ConvolverConfig {
             output,
-            irs,
             layout,
+            irs,
             block_size,
             zero_latency,
         } = config;
+        let (output, layout, block_size, zero_latency) =
+            (*output, *layout, *block_size, *zero_latency);
+        let irs = irs.views();
         let convolver = |ir: Mono<'_, S>| {
             if zero_latency {
                 Convolver::zero_latency(ir, block_size)
@@ -300,22 +334,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
         };
         let input = layout.input(output);
         let (n_in, n_out) = (input.width(), output.width());
-        if n_in.count() == 0 || n_out.count() == 0 {
-            return Err(ConvolverError::NoChannels);
-        }
-        if layout == IrLayout::TrueStereo && n_out != ChannelLayout::STEREO {
-            return Err(ConvolverError::TrueStereoWidth {
-                width: n_out.count(),
-            });
-        }
-        let want = layout.ir_count(n_out);
         let shared = matches!(layout, IrLayout::PerChannel | IrLayout::Folded) && irs.len() == 1;
-        if irs.len() != want && !shared {
-            return Err(ConvolverError::IrCount {
-                want,
-                got: irs.len(),
-            });
-        }
         // One convolver per output channel: a lone response is shared by all of them.
         let per_channel = || -> Vec<Convolver<F>> {
             if shared {
@@ -330,35 +349,32 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
         let engine = match layout {
             IrLayout::PerChannel => Engine::PerChannel(per_channel()),
             IrLayout::Folded => Engine::Folded {
-                fold: Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
-                    |source| ConvolverError::NoFold {
-                        width: n_in.count(),
-                        source,
-                    },
-                )?,
+                fold: Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology())
+                    .expect("`ConvolverConfig::new` checked the fold to mono"),
                 convolvers: per_channel(),
                 // Sized before `prepare` so an unprepared node renders in pieces rather than
                 // index an empty scratch; `prepare` resizes it to the graph's block.
                 mono: vec![F::ZERO; FOLD_SCRATCH],
             },
             IrLayout::TrueStereo | IrLayout::Ambisonic(_) => {
-                let matrix = MatrixConvolverConfig::new(n_in, n_out, irs).block_size(block_size);
+                let matrix = MatrixConvolverConfig::new(n_in, n_out, &irs).block_size(block_size);
                 Engine::Matrix(Box::new(
                     if zero_latency {
                         matrix.zero_latency()
                     } else {
                         matrix
                     }
-                    .build()?,
+                    .build()
+                    .expect("`ConvolverConfig::new` checked the responses against the shape"),
                 ))
             }
         };
-        Ok(Self::assemble(engine, input, output))
+        Self::assemble(engine, input, output)
     }
 }
 
 /// What a linear-phase [`ConvolverNode`] is made from: its bus and the [`Fir`] it applies, and
-/// optionally the convolver's block; [`TryFrom`] makes the node.
+/// optionally the convolver's block; [`From`] makes the node.
 ///
 /// The taps of `fir` (odd and symmetric, so the delay of its peak is `fir.delay()`) are applied
 /// independently to each channel of the bus, like a shared response of a [`ConvolverConfig`],
@@ -367,8 +383,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
 /// and the response peaks at exactly the declared latency. A band that moves is a new [`Fir`]
 /// and a new node.
 ///
-/// The conversion is refused only for a bus of no channels
-/// ([`ConvolverError::NoChannels`]).
+/// The filter is an [`Shared`]: two configs are equal when they share one [`Fir`].
 ///
 /// # Example
 ///
@@ -384,26 +399,38 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
-///     .unwrap();
-/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// let latency = 512 + (fir.len().get() - 1) / 2;
+/// let node = ConvolverNode::<f32>::from(
+///     FirConvolverConfig::new(ChannelTopology::STEREO, std::sync::Arc::new(fir)).unwrap(),
+/// );
+/// assert_eq!(node.latency_samples().get(), latency);
 /// ```
-#[derive(Clone, Copy, Debug)]
-pub struct FirConvolverConfig<'a> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct FirConvolverConfig {
     input: ChannelTopology,
-    fir: &'a Fir,
+    fir: Shared<Fir>,
     block_size: Samples,
 }
 
-impl<'a> FirConvolverConfig<'a> {
+impl FirConvolverConfig {
     /// A filter on the bus `input` applying `fir`, with a block of 512 frames.
-    #[must_use]
-    pub fn new(input: ChannelTopology, fir: &'a Fir) -> Self {
-        Self {
-            input,
-            fir,
-            block_size: DEFAULT_BLOCK,
+    ///
+    /// # Errors
+    ///
+    /// [`ConvolverError::NoChannels`] for a bus of no channels: a node has at least one in
+    /// and one out, which no `ChannelTopology` holds.
+    pub fn new(
+        input: ChannelTopology,
+        fir: impl Into<Shared<Fir>>,
+    ) -> Result<Self, ConvolverError> {
+        if input.width().count() == 0 {
+            return Err(ConvolverError::NoChannels);
         }
+        Ok(Self {
+            input,
+            fir: fir.into(),
+            block_size: DEFAULT_BLOCK,
+        })
     }
 
     /// The convolver's head partition, rounded up to a power of two: the latency the engine
@@ -414,20 +441,45 @@ impl<'a> FirConvolverConfig<'a> {
     }
 }
 
-impl<F: FftFloat + Lerp> TryFrom<FirConvolverConfig<'_>> for ConvolverNode<F> {
-    type Error = ConvolverError;
-
+impl<F: FftFloat + Lerp> From<FirConvolverConfig> for ConvolverNode<F> {
     /// The node, in the float `F` of the graph it runs in.
-    ///
-    /// # Errors
-    ///
-    /// [`ConvolverError::NoChannels`] for a bus of no channels.
-    fn try_from(config: FirConvolverConfig<'_>) -> Result<Self, ConvolverError> {
+    fn from(config: FirConvolverConfig) -> Self {
+        Self::over_fir(&config)
+    }
+}
+
+/// A convolver's wet gain is its only param, and a config has no value for it: the config is
+/// all structure, and the gain starts at unity.
+impl<F: FftFloat + Lerp> NodeConfig<F> for FirConvolverConfig {
+    type Node = ConvolverNode<F>;
+
+    fn build(&self, _: &HostValues) -> ConvolverNode<F> {
+        ConvolverNode::over_fir(self)
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn initials(&self) -> Initials {
+        wet_gain_initials()
+    }
+}
+
+impl<F: FftFloat + Lerp> ConvolverNode<F> {
+    /// The node of a checked `config`: its taps as one shared response, and the filter's
+    /// delay declared as latency.
+    fn over_fir(config: &FirConvolverConfig) -> Self {
         let taps: Vec<f64> = config.fir.taps().collect();
-        let node = Self::try_from(
-            ConvolverConfig::new(config.input, &[Mono::new(&taps)]).block_size(config.block_size),
-        )?;
-        Ok(node.with_declared_delay(config.fir.delay()))
+        let irs = ImpulseResponses::new(&[Mono::new(&taps)]);
+        let layout = ConvolverConfig {
+            output: config.input,
+            layout: IrLayout::PerChannel,
+            irs: Shared::new(irs),
+            block_size: config.block_size,
+            zero_latency: false,
+        };
+        Self::over(&layout).with_declared_delay(config.fir.delay())
     }
 }
 
@@ -458,9 +510,8 @@ impl<F: FftFloat + Lerp> TryFrom<FirConvolverConfig<'_>> for ConvolverNode<F> {
 ///
 /// # In a graph
 ///
-/// A graph node ([`IntoNode`]): inserted, it offers no param to the graph (its
-/// [`ParamSet`] is empty); the wet gain has no address and is set through
-/// [`gain`](Self::gain). A fork has the gain as
+/// A graph node ([`IntoNode`]): inserted, it offers the wet gain as its one param
+/// ([`UnitParam::Volume`]), also set through [`gain`](Self::gain). A fork has the gain as
 /// it is when forked, shares no cell with the live node, and shares its IR
 /// spectra, which are read-only.
 ///
@@ -912,7 +963,7 @@ impl<F: FftFloat + Lerp> ParamNode<F> for ConvolverNode<F> {
     }
 }
 
-/// Inserted with its (empty) [`ParamSet`] as its controls and a fork that
+/// Inserted with its [`ParamSet`] as its controls and a fork that
 /// detaches the gain ([`tutti_graph::param_parts`]).
 impl<F: FftFloat + Lerp> IntoNode<F> for ConvolverNode<F> {
     type Controls = ParamSet;
@@ -936,15 +987,24 @@ mod tests {
     /// A node has a channel: a bus of none, or no IR for it, is refused by name.
     #[test]
     fn a_node_of_no_channels_is_refused() {
-        let empty = |irs: &[Mono<'_, f32>], folded: bool| {
-            let config = ConvolverConfig::new(ChannelTopology::EMPTY, irs);
-            let config = if folded { config.folded() } else { config };
-            ConvolverNode::<f32>::try_from(config).err()
+        let empty = |irs: &[Mono<'_, f32>], layout: IrLayout| {
+            ConvolverConfig::new(
+                ChannelTopology::EMPTY,
+                layout,
+                Arc::new(ImpulseResponses::new(irs)),
+            )
+            .err()
         };
-        assert_eq!(empty(&[], false), Some(ConvolverError::NoChannels));
-        assert_eq!(empty(&[], true), Some(ConvolverError::NoChannels));
         assert_eq!(
-            empty(&[Mono::new(&[1.0])], false),
+            empty(&[], IrLayout::PerChannel),
+            Some(ConvolverError::NoChannels)
+        );
+        assert_eq!(
+            empty(&[], IrLayout::Folded),
+            Some(ConvolverError::NoChannels)
+        );
+        assert_eq!(
+            empty(&[Mono::new(&[1.0])], IrLayout::PerChannel),
             Some(ConvolverError::NoChannels)
         );
     }
@@ -960,8 +1020,12 @@ mod tests {
         assert_eq!(build(3), None);
         assert_eq!(build(1), None);
         let config = |n: usize| {
-            ConvolverNode::<f32>::try_from(ConvolverConfig::new(ChannelTopology::STEREO, &irs(n)))
-                .err()
+            ConvolverConfig::new(
+                ChannelTopology::STEREO,
+                IrLayout::PerChannel,
+                Arc::new(ImpulseResponses::new(&irs(n))),
+            )
+            .err()
         };
         assert_eq!(config(2), None);
         assert_eq!(config(1), None);
@@ -1554,6 +1618,7 @@ mod layouts {
     use super::*;
     use crate::convolution::test_nodes;
     use crate::test_support::{RATE, noise, prepared};
+    use std::sync::Arc;
     use tutti_buffers::{AmbisonicFormat, Bed, ChannelTopology};
     use tutti_graph::contract::drive;
 
@@ -1697,13 +1762,15 @@ mod layouts {
     fn per_channel_stereo_is_dual_mono() {
         let (l, r) = (tap(4, 0.5), tap(11, -0.75));
         let make = || {
-            prepared(
-                ConvolverNode::<f32>::try_from(
-                    ConvolverConfig::new(ChannelTopology::STEREO, &views(&[l.clone(), r.clone()]))
-                        .block_size(Samples::new(BLOCK)),
+            prepared(ConvolverNode::<f32>::from(
+                ConvolverConfig::new(
+                    ChannelTopology::STEREO,
+                    IrLayout::PerChannel,
+                    Arc::new(ImpulseResponses::new(&views(&[l.clone(), r.clone()]))),
                 )
-                .unwrap(),
-            )
+                .unwrap()
+                .block_size(Samples::new(BLOCK)),
+            ))
         };
         let lat = make().latency_samples().get();
         let on_l = render(&mut make(), &impulse_on(2, 0, 200), &[BLOCK]);
@@ -1765,14 +1832,7 @@ mod layouts {
         let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let build = |output: ChannelTopology, layout: IrLayout, n: usize| {
             let irs = irs(n);
-            let config = ConvolverConfig::new(output, &irs);
-            let config = match layout {
-                IrLayout::PerChannel => config,
-                IrLayout::Folded => config.folded(),
-                IrLayout::TrueStereo => config.true_stereo(),
-                IrLayout::Ambisonic(format) => config.ambisonic(format),
-            };
-            ConvolverNode::<f32>::try_from(config).err()
+            ConvolverConfig::new(output, layout, Arc::new(ImpulseResponses::new(&irs))).err()
         };
 
         assert_eq!(

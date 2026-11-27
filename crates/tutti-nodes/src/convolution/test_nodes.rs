@@ -4,7 +4,20 @@ use tutti_buffers::{ChannelLayout, ChannelTopology, Mono, Sample};
 use tutti_dsp::{FftFloat, Lerp};
 use tutti_units::Samples;
 
-use super::{ConvolverConfig, ConvolverError, ConvolverNode};
+use tutti_graph::Shared;
+
+use super::{ConvolverConfig, ConvolverError, ConvolverNode, ImpulseResponses, IrLayout};
+
+/// A config of `layout` over `irs` at `output`, for `block_size`.
+fn config<S: Sample>(
+    output: ChannelTopology,
+    layout: IrLayout,
+    irs: &[Mono<'_, S>],
+    block_size: Samples,
+) -> Result<ConvolverConfig<S>, ConvolverError> {
+    ConvolverConfig::new(output, layout, Shared::new(ImpulseResponses::new(irs)))
+        .map(|config| config.block_size(block_size))
+}
 
 /// `width` channels that feed no speaker, as a bus.
 pub(crate) fn unassigned_bus(width: impl Into<ChannelLayout>) -> ChannelTopology {
@@ -16,10 +29,15 @@ pub(crate) fn mono_node<F: FftFloat + Lerp, S: Sample>(
     ir: Mono<'_, S>,
     block_size: Samples,
 ) -> ConvolverNode<F> {
-    ConvolverNode::try_from(
-        ConvolverConfig::new(ChannelTopology::MONO, &[ir]).block_size(block_size),
+    ConvolverNode::from(
+        config(
+            ChannelTopology::MONO,
+            IrLayout::PerChannel,
+            &[ir],
+            block_size,
+        )
+        .expect("one response on a mono bus"),
     )
-    .expect("one response on a mono bus")
 }
 
 /// `width` unassigned channels sharing the response `ir`.
@@ -28,9 +46,13 @@ pub(crate) fn shared_ir_node<F: FftFloat + Lerp, S: Sample>(
     ir: Mono<'_, S>,
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
-    ConvolverNode::try_from(
-        ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    config(
+        unassigned_bus(width),
+        IrLayout::PerChannel,
+        &[ir],
+        block_size,
     )
+    .map(ConvolverNode::from)
 }
 
 /// One response per channel, at as many unassigned channels as responses.
@@ -39,7 +61,7 @@ pub(crate) fn per_channel_node<F: FftFloat + Lerp, S: Sample>(
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
     let width = ChannelLayout::try_from(irs.len()).expect("a test width fits a layout");
-    ConvolverNode::try_from(ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size))
+    config(unassigned_bus(width), IrLayout::PerChannel, irs, block_size).map(ConvolverNode::from)
 }
 
 /// Every input folded to mono, then one response per output, at the engine's placement of
@@ -50,11 +72,7 @@ pub(crate) fn folded_node<F: FftFloat + Lerp, S: Sample>(
 ) -> Result<ConvolverNode<F>, ConvolverError> {
     let width = ChannelLayout::try_from(irs.len()).expect("a test width fits a layout");
     let bus = ChannelTopology::default_for(width).expect("a test width fits a bus");
-    ConvolverNode::try_from(
-        ConvolverConfig::new(bus, irs)
-            .folded()
-            .block_size(block_size),
-    )
+    config(bus, IrLayout::Folded, irs, block_size).map(ConvolverNode::from)
 }
 
 /// True stereo from `[LL, LR, RL, RR]`.
@@ -65,12 +83,15 @@ pub(crate) fn true_stereo_node<F: FftFloat + Lerp, S: Sample>(
     rr: Mono<'_, S>,
     block_size: Samples,
 ) -> ConvolverNode<F> {
-    ConvolverNode::try_from(
-        ConvolverConfig::new(ChannelTopology::STEREO, &[ll, lr, rl, rr])
-            .true_stereo()
-            .block_size(block_size),
+    ConvolverNode::from(
+        config(
+            ChannelTopology::STEREO,
+            IrLayout::TrueStereo,
+            &[ll, lr, rl, rr],
+            block_size,
+        )
+        .expect("four responses on a stereo pair"),
     )
-    .expect("four responses on a stereo pair")
 }
 
 /// An ambisonic set of `input` in, `output` out.
@@ -80,9 +101,5 @@ pub(crate) fn ambisonic_node<F: FftFloat + Lerp, S: Sample>(
     irs: &[Mono<'_, S>],
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
-    ConvolverNode::try_from(
-        ConvolverConfig::new(output, irs)
-            .ambisonic(input)
-            .block_size(block_size),
-    )
+    config(output, IrLayout::Ambisonic(input), irs, block_size).map(ConvolverNode::from)
 }
