@@ -61,13 +61,9 @@ fn os(error: Error) -> MidiHardwareError {
 /// id read without regard to case (device interface paths compare so), the same in every
 /// listing. A collision would name one endpoint as another, at odds of 2^-64 a pair.
 fn endpoint_id(id: &str) -> EndpointId {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let hash = id
-        .bytes()
-        .map(|b| b.to_ascii_lowercase())
-        .fold(OFFSET, |h, b| (h ^ u64::from(b)).wrapping_mul(PRIME));
-    EndpointId::from_raw(hash)
+    EndpointId::from_raw(super::fnv1a::fnv1a(
+        id.bytes().map(|b| b.to_ascii_lowercase()),
+    ))
 }
 
 /// An endpoint the service lists, as the endpoint it describes.

@@ -53,12 +53,7 @@ const FINGERPRINT_SHIFT: u32 = 32;
 /// that collide are numbered apart by their occurrence, so a collision costs
 /// nothing but a possible swap of two ports' ids across an unplug.
 pub(in crate::backend) fn fingerprint(device: &WinMmDevice) -> u32 {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let hash = device
-        .to_string()
-        .bytes()
-        .fold(OFFSET, |h, b| (h ^ u64::from(b)).wrapping_mul(PRIME));
+    let hash = crate::backend::fnv1a::fnv1a(device.to_string().bytes());
     ((hash >> 32) ^ hash) as u32 & ((1 << FINGERPRINT_BITS) - 1)
 }
 

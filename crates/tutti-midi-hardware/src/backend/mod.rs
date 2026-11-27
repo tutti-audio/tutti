@@ -65,6 +65,10 @@ mod hub;
 )]
 mod legacy_port;
 
+// The digest the Windows backends name a device by: always compiled, as `legacy_port`
+// (which uses it) is.
+mod fnv1a;
+
 // The loop of a backend that sends one message at a time: always compiled so
 // its tests run everywhere; only `alsa`, `coremidi` and `midi_services` use it.
 #[cfg_attr(

@@ -11,13 +11,12 @@ fn endpoint(id: &str) -> Endpoint {
     }
 }
 
-/// **The id is FNV-1a's 64-bit digest of the path**: its published vector for "a" (and for
-/// the empty input, which is the offset), whatever the case of the path.
+/// **The id is FNV-1a's 64-bit digest of the path, whatever its case**: its published
+/// vector for "a", for "A" too.
 #[test]
 fn an_endpoint_id_is_the_fnv1a_digest_of_the_lowercased_path() {
     assert_eq!(endpoint_id("a").raw(), 0xaf63_dc4c_8601_ec8c);
     assert_eq!(endpoint_id("A"), endpoint_id("a"));
-    assert_eq!(endpoint_id("").raw(), 0xcbf2_9ce4_8422_2325);
 }
 
 /// **Two endpoints have two ids, and an endpoint has the same id in every listing.**
