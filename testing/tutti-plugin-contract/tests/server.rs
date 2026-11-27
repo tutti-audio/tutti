@@ -263,11 +263,13 @@ fn clap_gesture_from_a_flush_crosses_the_process_boundary_in_order() {
     use tutti_plugin_types::AnyThread;
     let (mut a, heard) = served::<Clap>(clap_path());
     select::<Clap, _>(a.controller_mut(), 0, spec::NOTICE_GESTURE_ON_LOAD);
-    let main = tutti_fixtures::main_thread();
     AnyThread::set_parameter_value(a.controller(), Param::Level.id(), Normalized::of(0.5))
         .expect("a declared parameter");
-    // The read sends the write ahead of itself, as a flush.
-    let _ = a.controller().parameter(main, Param::Level.id());
+    // The read, asked as an answer, sends the write ahead of itself, as a flush.
+    drop(AnyThread::parameter_value(
+        a.controller(),
+        Param::Level.id(),
+    ));
     tutti_fixtures::wait_until(
         "the gesture the flush raised to arrive",
         HangGuard::LIMIT,

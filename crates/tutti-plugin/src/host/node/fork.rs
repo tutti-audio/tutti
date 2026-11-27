@@ -25,6 +25,11 @@
 //!    save causes. (Blocks it misses meanwhile read as silence, as for any
 //!    late reply.)
 //!
+//!    **The host writes no block has applied** (what a save states as
+//!    pending) are read before the state and written to the fork after it
+//!    loads, so its first block applies them: an undriven live graph forks the
+//!    same, and nothing waits for a block.
+//!
 //!    **Whether a parameter set just before the fork is in the state depends
 //!    on the write reaching the plugin, not on the fork.** The save goes down
 //!    the same command queue as `set_parameter`, after it, so the ordering is
@@ -267,6 +272,10 @@ impl ServedFork {
         // the fork once, harmlessly. Read after, a value delivered in between
         // would be recorded as the fork's though its state predates it.
         let delivered = self.controls.delivered();
+        // The host writes the server has not answered for, read before the
+        // state like the record above: what the state may not hold, which the
+        // fork is written after it loads.
+        let pending = live.audio().pending_edits();
         // A plugin with no presets has none to carry (and would refuse the
         // current one's id).
         let preset = if self.features.contains(Features::PRESET_LOAD) {
@@ -284,6 +293,7 @@ impl ServedFork {
         Ok(Capture {
             snapshot,
             delivered,
+            pending,
             origin: self.origin.clone(),
             sample_rate: self.controls.sample_rate(),
             sources: self.controls.sources_now(),
@@ -307,6 +317,9 @@ struct Capture {
     /// is not sent to the fork either, and the export renders what live
     /// playback plays.
     delivered: Vec<(tutti_units::ParamId, f64)>,
+    /// The host writes the live plugin had not applied when the state was
+    /// saved: the fork's wanted values over the state it loads.
+    pending: Vec<(tutti_units::ParamId, tutti_units::Normalized)>,
     origin: LaunchSpec,
     /// The live node's rate, which the fresh instance is launched at.
     sample_rate: SampleRate,
@@ -369,6 +382,13 @@ impl Capture {
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
+        // The writes the live plugin had not applied are the fork's wanted
+        // values too: its first block applies them over the state it was
+        // loaded with, and an undriven live graph forks the same. An id the
+        // fork's plugin does not declare was refused at its load too.
+        for &(id, value) in &self.pending {
+            let _ = tutti_plugin_types::AnyThread::set_parameter_value(&fork.served, id, value);
+        }
         // Handed to the fork's own plugin, which answers for itself.
         if let Some(app) = &self.midi_map {
             let served = fork.served.clone();

@@ -2708,7 +2708,7 @@ fn unapplied_after_flush(answer: crate::ApplyOutcome) -> u64 {
         .expect("declared");
     // The read asks the audio lane to flush first; the control lane then waits
     // for the lane to end the flush.
-    let _ = audio.parameter(id);
+    drop(audio.parameter_answer(id));
     tutti_fixtures::wait_until("the flush to end", NOTICE_TIMEOUT, || {
         answer == crate::ApplyOutcome::Applied || audio.unapplied_edits() > 0
     });
@@ -2726,12 +2726,31 @@ fn a_flush_the_server_did_not_apply_is_counted() {
     assert_eq!(unapplied_after_flush(Unseated), 1, "no Processor");
 }
 
-/// A flush of one host write whose answer, `outcome`, the server holds back
-/// until the lane's window has passed, then sends; and the writes the bridge
-/// counted as not delivered once a second flush has been answered behind it.
-fn unapplied_after_late_answer(outcome: crate::ApplyOutcome) -> u64 {
+/// What a scripted server saw of the host's writes: the first value of
+/// parameter 1 in each request that carried one, in the order they arrived.
+type Seen = Arc<Mutex<Vec<f64>>>;
+
+/// The value of parameter 1 `changes` carries on its first frame, if any.
+fn carried_value(changes: &tutti_plugin_types::ParameterChanges) -> Option<f64> {
+    let queue = changes.queue(ParamId::new(1))?;
+    queue.points.first().map(|point| point.value.get())
+}
+
+/// A bridge over a server that answers its `n`th block (from 0) with
+/// `blocks(n)`, holds the answer to its first request of the kind
+/// `held` names until `release`, and answers its first flush `outcome` and
+/// every later one applied. It records the
+/// writes each request carried. Its audio lane's window is short, so a held
+/// request is given up on and answered late.
+fn scripted_server(
+    outcome: crate::ApplyOutcome,
+    held: Held,
+    blocks: impl Fn(u64) -> (bool, crate::BlockWrites) + Send + 'static,
+) -> (MockServer, std::sync::mpsc::SyncSender<()>, Seen) {
     let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
-    let first = std::sync::atomic::AtomicBool::new(true);
+    let seen = Seen::default();
+    let recorded = Arc::clone(&seen);
+    let (flushes, nth) = (AtomicU64::new(0), AtomicU64::new(0));
     let timeouts = {
         let mut t = Timeouts::default();
         t.param = Duration::from_millis(50);
@@ -2739,55 +2758,255 @@ fn unapplied_after_late_answer(outcome: crate::ApplyOutcome) -> u64 {
         t
     };
     let mock = MockServer::start_lanes_under(
-        "late-flush-outcome",
+        "scripted-writes",
         timeouts,
         move |msg| match msg {
-            AudioRequest::ApplyParameters { id, .. } => {
-                let outcome = if first.swap(false, Ordering::SeqCst) {
+            AudioRequest::ProcessAudio(data) => {
+                recorded.lock().extend(carried_value(&data.param_changes));
+                let n = nth.fetch_add(1, Ordering::SeqCst);
+                if held == Held::FirstBlock && n == 0 {
                     let _ = release.recv();
+                }
+                let (refused, writes) = blocks(n);
+                Action::Audio(Box::new(AudioReply::AudioProcessed {
+                    latency_us: 0,
+                    seq: data.seq,
+                    midi_out: Default::default(),
+                    status: Default::default(),
+                    refused,
+                    writes,
+                }))
+            }
+            AudioRequest::ApplyParameters { id, param_changes } => {
+                recorded.lock().extend(carried_value(&param_changes));
+                let n = flushes.fetch_add(1, Ordering::SeqCst);
+                if held == Held::FirstFlush && n == 0 {
+                    let _ = release.recv();
+                }
+                let answer = if n == 0 {
                     outcome
                 } else {
                     crate::ApplyOutcome::Applied
                 };
-                Action::Audio(Box::new(AudioReply::ParametersApplied { id, outcome }))
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: answer,
+                }))
             }
-            other => answer_blocks(other),
+            _ => Action::Silent,
         },
         |_| Action::Silent,
     );
+    mock.bridge.audio().declare_host_edits([ParamId::new(1)]);
+    (mock, release_tx, seen)
+}
+
+/// Which request of a scripted server's the answer is held back for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Held {
+    None,
+    FirstBlock,
+    FirstFlush,
+}
+
+/// A block answered as handed over, and not refused.
+fn handed(_: u64) -> (bool, crate::BlockWrites) {
+    (false, crate::BlockWrites::Handed)
+}
+
+/// One host write of 0.5 to parameter 1, which a read then asks the audio lane
+/// to flush.
+fn write_and_ask_flush(audio: &super::audio::AudioBridge) {
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    drop(audio.parameter_answer(ParamId::new(1)));
+}
+
+fn pending(audio: &super::audio::AudioBridge) -> usize {
+    audio.pending_edits().len()
+}
+
+/// **A served write is applied when the server answers the flush that carried
+/// it**, not before: the write is pending while the answer is held, and the
+/// answer ends it.
+#[test]
+fn a_served_write_is_applied_when_its_flush_is_answered() {
+    let (mock, release, seen) =
+        scripted_server(crate::ApplyOutcome::Applied, Held::FirstFlush, handed);
     let audio = mock.bridge.audio();
-    let id = ParamId::new(1);
-    audio.declare_host_edits([id]);
-    let write = || {
-        audio
-            .write_parameter(id, tutti_units::Normalized::of(0.5))
-            .expect("declared")
-    };
-    write();
-    let _ = audio.parameter(id);
-    // The settle runs behind the flush on the audio lane: once it returns, the
-    // lane has given the flush up.
+    write_and_ask_flush(audio);
+    tutti_fixtures::wait_until("the flush to reach the server", NOTICE_TIMEOUT, || {
+        !seen.lock().is_empty()
+    });
+    assert_eq!(pending(audio), 1, "the flush is not answered");
+    release.send(()).expect("the server waits");
+    tutti_fixtures::wait_until("the flush's answer", NOTICE_TIMEOUT, || pending(audio) == 0);
+    assert_eq!(audio.unapplied_edits(), 0);
+    assert_eq!(*seen.lock(), [0.5]);
+}
+
+/// **A flush the server refused is a loss, not an application**: counted, still
+/// pending, and sent again by the next block, whose answer ends it.
+#[test]
+fn a_refused_flush_leaves_the_write_pending_until_a_block_carries_it() {
+    let (mock, release, seen) =
+        scripted_server(crate::ApplyOutcome::Refused, Held::FirstFlush, handed);
+    let audio = mock.bridge.audio();
+    write_and_ask_flush(audio);
+    // The lane gives the flush up before the refusal comes: a late refusal
+    // counts like one in the window.
     audio.settle();
     assert_eq!(
         audio.unapplied_edits(),
         0,
         "nothing is counted at the timeout"
     );
-    release_tx.send(()).expect("the server waits");
-    // The lane hears the late answer while it waits for the next flush's.
-    write();
-    let _ = audio.parameter(id);
-    audio.unapplied_edits()
+    release.send(()).expect("the server waits");
+    hold_replies(&mock);
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the refusal to be counted", NOTICE_TIMEOUT, || {
+        audio.unapplied_edits() == 1
+    });
+    assert_eq!(pending(audio), 1, "a lost write is not applied");
+    submit_block(&mock.bridge, 2);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || pending(audio) == 0);
+    assert_eq!(
+        *seen.lock(),
+        [0.5, 0.5],
+        "the flush, then the first block after the loss was heard"
+    );
+    assert_eq!(audio.unapplied_edits(), 1, "counted once");
 }
 
-/// **A flush's answer that comes after the lane's window counts like one in
-/// it**: refused, it leaves the writes it carried undelivered; applied, it
-/// leaves nothing, so a slow flush that landed is not a loss.
+/// **A flush that timed out leaves the write pending, and its late answer ends
+/// it**: the write may not be in the plugin, so it is not called applied at the
+/// window's end.
 #[test]
-fn a_late_flush_answer_is_counted_as_one_in_the_window_is() {
-    use crate::ApplyOutcome::{Applied, Refused};
-    assert_eq!(unapplied_after_late_answer(Refused), 1, "late and refused");
-    assert_eq!(unapplied_after_late_answer(Applied), 0, "late and applied");
+fn a_timed_out_flush_leaves_the_write_pending_until_its_late_answer() {
+    let (mock, release, _seen) =
+        scripted_server(crate::ApplyOutcome::Applied, Held::FirstFlush, handed);
+    let audio = mock.bridge.audio();
+    write_and_ask_flush(audio);
+    // The settle runs behind the flush on the audio lane: once it returns, the
+    // lane has given the flush up.
+    audio.settle();
+    assert_eq!(pending(audio), 1, "a timeout is no answer");
+    release.send(()).expect("the server waits");
+    // The lane hears a late answer while it waits for the next request's.
+    hold_replies(&mock);
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the late answer", NOTICE_TIMEOUT, || pending(audio) == 0);
+}
+
+/// **A write a held block took is pending until the block is answered**: the
+/// block's drain swept the write, the answer missed its window, and nothing
+/// that is not an answer to it ends the wait.
+#[test]
+fn a_write_a_held_block_took_is_applied_when_the_block_is_answered() {
+    let (mock, release, _seen) =
+        scripted_server(crate::ApplyOutcome::Applied, Held::FirstBlock, handed);
+    let audio = mock.bridge.audio();
+    audio.set_reply_wait(Some(Duration::from_millis(50)));
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    submit_block(&mock.bridge, 1);
+    audio.settle();
+    assert_eq!(pending(audio), 1, "the block that took it is unanswered");
+    release.send(()).expect("the server waits");
+    // The lane hears a late answer while it waits for the next block's.
+    hold_replies(&mock);
+    submit_block(&mock.bridge, 2);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || pending(audio) == 0);
+}
+
+/// **A write a refused block carried is lost, counted, sent again and lands**:
+/// the server drops a refused block's changes, so the next block carries the
+/// write and its answer applies it.
+#[test]
+fn a_write_a_refused_block_carried_is_sent_again_and_lands() {
+    let (mock, _release, seen) = scripted_server(crate::ApplyOutcome::Applied, Held::None, |n| {
+        if n == 0 {
+            (true, crate::BlockWrites::Dropped)
+        } else {
+            handed(n)
+        }
+    });
+    let audio = mock.bridge.audio();
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the loss to be counted", NOTICE_TIMEOUT, || {
+        audio.unapplied_edits() == 1
+    });
+    assert_eq!(pending(audio), 1, "a lost write is not applied");
+    submit_block(&mock.bridge, 2);
+    tutti_fixtures::wait_until("the second block's answer", NOTICE_TIMEOUT, || {
+        pending(audio) == 0
+    });
+    assert_eq!(*seen.lock(), [0.5, 0.5], "sent again");
+    assert_eq!(audio.unapplied_edits(), 1, "counted once");
+}
+
+/// **A block whose audio was refused after the plugin took its changes counts
+/// no write lost**: `refused` is about the audio, `writes` about the changes,
+/// and a plugin that was handed them has them.
+#[test]
+fn a_write_a_handed_block_carried_is_applied_when_its_audio_is_refused() {
+    let (mock, _release, _seen) = scripted_server(crate::ApplyOutcome::Applied, Held::None, |_| {
+        (true, crate::BlockWrites::Handed)
+    });
+    let audio = mock.bridge.audio();
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block's answer", NOTICE_TIMEOUT, || pending(audio) == 0);
+    assert_eq!(audio.unapplied_edits(), 0);
+}
+
+/// **A write made before a reset is sent by no request after it**: the block
+/// that carried it was lost and owes it, the load that replaced the value resets,
+/// and the next block carries nothing of it.
+#[test]
+fn a_write_from_before_a_reset_is_not_sent_after_it() {
+    let (mut mock, _release, seen) =
+        scripted_server(crate::ApplyOutcome::Applied, Held::None, |n| {
+            if n == 0 {
+                (true, crate::BlockWrites::Dropped)
+            } else {
+                handed(n)
+            }
+        });
+    let audio = mock.bridge.audio().clone();
+    audio
+        .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
+        .expect("declared");
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the loss to be counted", NOTICE_TIMEOUT, || {
+        audio.unapplied_edits() == 1
+    });
+    audio.reset_host_edits();
+    assert_eq!(pending(&audio), 0, "a stale write is not wanted");
+    submit_block(&mock.bridge, 2);
+    tutti_fixtures::wait_until("the second block's answer", NOTICE_TIMEOUT, || {
+        answered(&mut mock, 2)
+    });
+    assert_eq!(*seen.lock(), [0.5], "only the first block carried it");
+}
+
+/// **A crashed plugin reads its pending writes as lost, not as delivered**: the
+/// write is still listed, so a save or a recovery replays it.
+#[test]
+fn a_crashed_plugin_still_states_its_pending_writes() {
+    let (mock, _release, _seen) =
+        scripted_server(crate::ApplyOutcome::Applied, Held::FirstFlush, handed);
+    let audio = mock.bridge.audio();
+    write_and_ask_flush(audio);
+    audio.mark_crashed(tutti_plugin_types::PluginFailure::StreamClosed);
+    assert_eq!(pending(audio), 1);
 }
 
 /// **A shutdown ends a setting's wait through its reply.** The control lane is
