@@ -18,8 +18,8 @@ use tutti_codec::IntPcm;
 use tutti_codec::ToFile;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
-    BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Produced,
-    RenderGraph, Setup, TailPolicy, render, render_one,
+    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph,
+    Rendered, Setup, TailPolicy, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
@@ -59,6 +59,37 @@ fn mono_tone() -> RenderGraph {
     built(g)
 }
 
+/// The file `target` of one render of `graph`.
+fn one_file(
+    graph: &mut RenderGraph,
+    job: &Job,
+    target: FileTarget,
+) -> tutti_export::Result<Written> {
+    let mut outputs = Outputs::new();
+    let file = outputs.file(Output::main_output(target));
+    let done = render(graph, job, &FrozenClock, outputs, &mut Control::none())?
+        .into_finished()
+        .expect("nothing cancels a control with no token");
+    Ok(done.file(&file).expect("the key of these outputs").clone())
+}
+
+/// The planes `target` of one render of `graph`.
+fn one_buffer(
+    graph: &mut RenderGraph,
+    job: &Job,
+    target: BufferTarget,
+) -> tutti_export::Result<Rendered> {
+    let mut outputs = Outputs::new();
+    let planes = outputs.buffers(Output::main_output(target));
+    let done = render(graph, job, &FrozenClock, outputs, &mut Control::none())?
+        .into_finished()
+        .expect("nothing cancels a control with no token");
+    Ok(done
+        .buffers(&planes)
+        .expect("the key of these outputs")
+        .clone())
+}
+
 fn main() -> tutti_export::Result<()> {
     let dir = std::env::args()
         .nth(1)
@@ -94,16 +125,7 @@ fn main() -> tutti_export::Result<()> {
         Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
         ToFile::new(dir.join("tone.flac")).replace(),
     );
-    let written = render_one(
-        &mut tone(),
-        &job,
-        &FrozenClock,
-        Output::main_output(target),
-        &mut Control::none(),
-    )?
-    .into_finished()
-    .and_then(Produced::into_file)
-    .expect("nothing cancels a control with no token");
+    let written = one_file(&mut tone(), &job, target)?;
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
 
     // ---- 2. one render, several files ------------------------------------
@@ -111,19 +133,20 @@ fn main() -> tutti_export::Result<()> {
     // The graph is stepped once per block however many outputs there are; each
     // output has its own format, resample, dither and normalize. Every format
     // is written block by block through `tutti-codec`'s encoder.
-    let outputs: Vec<Output> = [
+    let mut outputs = Outputs::new();
+    let keys: Vec<_> = [
         (Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24))), "wav"),
         (Format::Aiff(Pcm::Int(IntPcm::new(IntDepth::Int24))), "aiff"),
     ]
     .into_iter()
     .map(|(format, ext)| {
-        Output::main_output(FileTarget::new(
+        outputs.file(Output::main_output(FileTarget::new(
             Encoding::new(format).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
             ToFile::new(dir.join(format!("tone.{ext}"))).replace(),
-        ))
+        )))
     })
     .collect();
-    let produced = render(
+    let done = render(
         &mut tone(),
         &job,
         &FrozenClock,
@@ -132,8 +155,8 @@ fn main() -> tutti_export::Result<()> {
     )?
     .into_finished()
     .expect("nothing cancels a control with no token");
-    for p in produced {
-        let w = p.into_file().expect("a file output");
+    for key in &keys {
+        let w = done.file(key).expect("a key of these outputs");
         println!("wrote {} ({} bytes)", w.path.display(), w.bytes);
     }
 
@@ -143,16 +166,11 @@ fn main() -> tutti_export::Result<()> {
     // mono graph asked for as quad is placed by the engine's order: the front
     // pair carries the signal and the rears are silent — not four copies of the
     // same thing.
-    let quad = render_one(
+    let quad = one_buffer(
         &mut mono_tone(),
         &job,
-        &FrozenClock,
-        Output::main_output(BufferTarget::new(ChannelLayout::QUAD)),
-        &mut Control::none(),
-    )?
-    .into_finished()
-    .and_then(Produced::into_buffers)
-    .expect("nothing cancels a control with no token");
+        BufferTarget::new(ChannelLayout::QUAD),
+    )?;
     let frames = quad.frames().get();
     let peaks: Vec<f32> = quad
         .into_planes()
@@ -176,17 +194,8 @@ fn main() -> tutti_export::Result<()> {
         Encoding::new(flac).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
         ToFile::new(dir.join("tone-normalized.flac")).replace(),
     )
-    .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0))));
-    let written = render_one(
-        &mut tone(),
-        &job,
-        &FrozenClock,
-        Output::main_output(normalized),
-        &mut Control::none(),
-    )?
-    .into_finished()
-    .and_then(Produced::into_file)
-    .expect("nothing cancels a control with no token");
+    .normalize(Gain::Own(Normalize::lufs(Db::new(-14.0))));
+    let written = one_file(&mut tone(), &job, normalized)?;
     println!(
         "normalize: gain {:.2} dB, measured {:.2} LUFS before",
         written
@@ -198,16 +207,7 @@ fn main() -> tutti_export::Result<()> {
 
     // The measurement is also a plain function over planes, when a caller
     // wants to hold the audio and decide for itself.
-    let audio = render_one(
-        &mut tone(),
-        &job,
-        &FrozenClock,
-        Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-        &mut Control::none(),
-    )?
-    .into_finished()
-    .and_then(Produced::into_buffers)
-    .expect("nothing cancels a control with no token");
+    let audio = one_buffer(&mut tone(), &job, BufferTarget::new(ChannelLayout::STEREO))?;
     let cfg = LoudnessConfig::new(Bed::Stereo.topology());
     let flat = audio.interleaved();
     let before = measure_loudness(

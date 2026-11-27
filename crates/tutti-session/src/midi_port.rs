@@ -93,9 +93,9 @@ pub enum PortCause {
     ReopenFailed,
     /// The device returned and is the one a load would bind, but another output
     /// port of this session, saved under another identity that resolves to the same
-    /// device, has it open. The first port in order takes a device; this one is tried
-    /// again when the device next appears in the device list, and takes it once the
-    /// other has closed.
+    /// device, has it open. The first port in order takes a device; this one takes it
+    /// on the update the other closes, and is tried again when the device next appears
+    /// in the device list.
     InUse,
     /// The reader of an open input died while its device stayed listed, for
     /// the [`InputFault`] it carries. The session reopens it at once, and the
@@ -1224,6 +1224,9 @@ pub(crate) struct Ports {
     retiring_outputs: Vec<Retiring<OutputPort>>,
     /// The notices of leases whose port went, for the next step to report.
     notices: Vec<SessionEvent>,
+    /// The devices whose retiring output closed, which an away port may now take
+    /// ([`reopen_released`](Self::reopen_released)).
+    released: Vec<MidiDeviceId>,
 }
 
 impl std::fmt::Debug for Ports {
@@ -1489,6 +1492,7 @@ impl Ports {
     ) -> Edits {
         let mut edits = Edits::default();
         edits |= self.retire(io, graph);
+        self.reopen_released(io, out);
         for event in events {
             out.push(MidiEvent::of_device(event.clone()).into());
             match event {
@@ -1570,7 +1574,8 @@ impl Ports {
     /// `arrived` was added to the list: the lost ports it is open again (it is
     /// what a load would bind: surely the saved device, or the only one of its
     /// name), and a port that fails to open reads [`PortCause::ReopenFailed`] and
-    /// is tried again when a device next arrives.
+    /// is tried again when a device next arrives. An output is opened as
+    /// [`reopen_outputs`](Self::reopen_outputs) does.
     fn restore<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
@@ -1614,6 +1619,27 @@ impl Ports {
             }
             edits.graph = true;
         }
+        self.reopen_outputs(io, arrived, out);
+        edits
+    }
+
+    /// The away output ports that `device`, present, is the device of, open on it:
+    /// the first in port order takes it and a later one reads
+    /// [`PortCause::InUse`]; a port that fails to open reads
+    /// [`PortCause::ReopenFailed`]. A device that arrived and one a closing port
+    /// released are opened the same way.
+    fn reopen_outputs(
+        &mut self,
+        io: &mut MidiSession,
+        arrived: &DeviceInfo,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
+            matches!(
+                io.devices().resolve(saved),
+                Resolved::Exact(found) | Resolved::SameName(found) if found.id == arrived.id
+            )
+        };
         for at in 0..self.outputs.len() {
             let OutLink::Away { stream, .. } = self.outputs[at].link else {
                 continue;
@@ -1642,7 +1668,24 @@ impl Ports {
             port.refresh(out);
             port.publish(out);
         }
-        edits
+    }
+
+    /// Opens the away output ports on the devices closing output ports released
+    /// since the last call: the drain of an update closes them, and the poll after it
+    /// in the same update opens the next port.
+    fn reopen_released(&mut self, io: &mut MidiSession, out: &mut Vec<SessionEvent>) {
+        for id in std::mem::take(&mut self.released) {
+            if let Some(device) = io.devices().list().into_iter().find(|d| d.id == id) {
+                self.reopen_outputs(io, &device, out);
+            }
+        }
+    }
+
+    /// Whether a held output port, open or away, is saved under `saved`.
+    fn holds_saved(&self, saved: &MidiDeviceId) -> bool {
+        self.outputs
+            .iter()
+            .any(|port| port.claim.is_held() && port.saved.id == *saved)
     }
 
     /// Answers a peer's report inquiry on `device` from the held output port that has
@@ -2210,12 +2253,36 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) {
-        crate::midi::settle(
+        self.settle_outputs(graph, timing, |port| {
+            port.link.device().is_some_and(|open| open.id() == device)
+        });
+    }
+
+    /// Takes out the retiring output ports that are done (or `force` names), and
+    /// notes the devices they closed as released.
+    fn settle_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        graph: &mut crate::graph::Graph<F>,
+        timing: Option<&crate::midi::OutputTiming>,
+        force: impl FnMut(&OutputPort) -> bool,
+    ) -> bool {
+        let open = |ports: &[Retiring<OutputPort>]| -> Vec<MidiDeviceId> {
+            ports
+                .iter()
+                .filter_map(|going| going.going.link.device().map(|d| d.id().clone()))
+                .collect()
+        };
+        let before = open(&self.retiring_outputs);
+        let edited = crate::midi::settle(
             &mut self.retiring_outputs,
             graph,
             |port| port.drain(timing),
-            |port| port.link.device().is_some_and(|open| open.id() == device),
+            force,
         );
+        let after = open(&self.retiring_outputs);
+        self.released
+            .extend(before.into_iter().filter(|id| !after.contains(id)));
+        edited
     }
 
     /// The output ports whose handles were all dropped, retired: each is sent
@@ -2228,12 +2295,7 @@ impl Ports {
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
         crate::midi::sweep_dropped(&mut self.outputs, &mut self.retiring_outputs, |_| {});
-        crate::midi::settle(
-            &mut self.retiring_outputs,
-            graph,
-            |port| port.drain(timing),
-            |_| false,
-        )
+        self.settle_outputs(graph, timing, |_| false)
     }
 }
 

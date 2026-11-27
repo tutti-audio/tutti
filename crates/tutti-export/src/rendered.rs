@@ -8,7 +8,7 @@ use tutti_units::{SampleRate, Samples};
 /// Rendered audio held in memory, one `Vec` per channel.
 ///
 /// Returned by a [`BufferTarget`](crate::BufferTarget) output of
-/// [`render`](crate::render()) ([`Produced::Buffers`](crate::Produced::Buffers)); written with
+/// [`render`](crate::render()) ([`Done::buffers`](crate::Done::buffers)); written with
 /// `tutti_codec::write` (it converts into a `Wave`). Planes rather than a
 /// `(left, right)` pair, so a surround render keeps every channel.
 ///

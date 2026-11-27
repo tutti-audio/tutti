@@ -168,7 +168,7 @@
 //!   for the caller, who answers from what its output sent, or hands it to
 //!   [`MidiSession::decline_report`](crate::MidiSession::decline_report), which sends the Reply
 //!   with empty bitmaps and the End (§9.6, §9.8). A Channel is never refused as not in use
-//!   (§9.5): a request reaches a device on a Group of its Function Block.
+//!   (§9.5): a request reaches a device on the first Group of its Function Block.
 //! - **Receivable Maximum SysEx Message Size**: [`MAX_SYSEX`], 512 bytes, the
 //!   floor of a device that will initiate Profile Configuration or Property
 //!   Exchange (§5.5.3); the reassembler is sized for it, delimiters included.
@@ -476,10 +476,21 @@ fn expire_all<I: Initiator>(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Block {
     first: MidiGroup,
+    /// Never past the last Group: `first + span <= 16`.
     span: GroupSpan,
 }
 
 impl Block {
+    /// The block from `first` over `span` Groups, cut at Group 16: the one place a
+    /// span is brought to the wire's Groups.
+    pub(crate) fn clipped(first: MidiGroup, span: GroupSpan) -> Option<Self> {
+        let room = MidiGroup::COUNT - first.get();
+        Some(Self {
+            first,
+            span: GroupSpan::new(span.get().min(room))?,
+        })
+    }
+
     /// A block of one Group.
     pub(crate) const fn single(first: MidiGroup) -> Self {
         Self {
@@ -547,10 +558,7 @@ pub(crate) fn blocks_after_settle(stream: &DeviceStream) -> Vec<Block> {
         .function_blocks()
         .filter(|block| block.midi_ci_version().is_some())
         .filter_map(|block| {
-            Some(Block {
-                first: MidiGroup::new(block.first_group().get())?,
-                span: block.groups(),
-            })
+            Block::clipped(MidiGroup::new(block.first_group().get())?, block.groups())
         })
         .collect();
     blocks.sort_unstable();

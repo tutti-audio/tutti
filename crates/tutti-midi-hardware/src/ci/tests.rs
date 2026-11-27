@@ -440,3 +440,60 @@ fn a_request_for_a_peer_that_is_gone_is_reported_not_dropped() {
         );
     }
 }
+
+/// M2-101 section 3.3.2: a block that changes its number of Groups invalidates its MUID:
+/// the device of the old block ends with an Invalidate MUID and a device with a new MUID
+/// starts with its first Discovery, though the first Group is the same.
+#[test]
+fn a_block_that_changes_its_span_is_a_new_device_with_a_new_muid() {
+    let (mut out, counters) = output();
+    let raw = EndpointId::from_raw(7);
+    let (mut running, _) =
+        Running::start(&[B0], identity(), &mut entropy, Instant::now(), &mut out);
+    let before = running.members[0].device.muid();
+    let _ = counters.take_sent(raw);
+    let wider = Block {
+        first: G0,
+        span: GroupSpan::of(2),
+    };
+    let mut changes = CiChanges::default();
+    running.reconcile(
+        &[wider],
+        &mut entropy,
+        Instant::now(),
+        &mut out,
+        &mut changes,
+    );
+    assert_eq!(running.members.len(), 1);
+    assert_eq!(running.members[0].block(), wider);
+    assert_ne!(running.members[0].device.muid(), before);
+    // The Sub-ID#2 of each message that began: Invalidate MUID (7E), then Discovery (70).
+    let began: Vec<u8> = counters
+        .take_sent(raw)
+        .iter()
+        .filter_map(|ump| match ump.decode() {
+            Ok(tutti_ump::Message::Sysex7(_, packet))
+                if matches!(
+                    packet.status(),
+                    tutti_ump::SysexStatus::Start | tutti_ump::SysexStatus::Complete
+                ) =>
+            {
+                Some(packet.data()[3])
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(began, [0x7E, 0x70]);
+}
+
+/// A block's Groups end at Group 16: a span past it is cut, and one that fits is kept.
+#[test]
+fn a_blocks_span_is_cut_at_the_last_group() {
+    let span = |first, span| {
+        Block::clipped(MidiGroup::of(first), GroupSpan::of(span)).map(|block| block.span.get())
+    };
+    assert_eq!(span(14, 4), Some(2));
+    assert_eq!(span(15, 16), Some(1));
+    assert_eq!(span(0, 16), Some(16));
+    assert_eq!(span(3, 2), Some(2));
+}

@@ -66,7 +66,7 @@
 //!   answered here: the device holds no MIDI state, so it is the caller's to report, and
 //!   [`CiAction::ReportAsked`] hands it the asker, the Message Data Control and the scope.
 //!   A Channel Device ID is never refused as not in use (§9.5): an inquiry reaches the device
-//!   on the Group it runs on, which is a Group of its Function Block, so every Channel the
+//!   on the Group it runs on, which is the first Group of its Function Block, so every Channel the
 //!   Device ID can name is one of the block's. A device that does not declare the category NAKs
 //!   both inquiries with Status `0x01`, message not supported. A Reply or an End is the
 //!   Initiator's to read ([`ProcessInitiator`](super::ProcessInitiator)) and is ignored here.

@@ -112,11 +112,11 @@ impl ReportInquiry {
     }
 
     /// The Groups of the Function Block the request covers at Device ID `0x7F`,
-    /// in ascending order (§9.7.1): those of the block that are Groups of the
-    /// wire.
+    /// in ascending order (§9.7.1). The block was clipped to the wire's Groups when
+    /// the device started, so each is a Group.
     pub fn groups(&self) -> impl Iterator<Item = MidiGroup> {
         let first = self.group.get();
-        (first..first.saturating_add(self.groups.get())).filter_map(MidiGroup::new)
+        (first..first + self.groups.get()).filter_map(MidiGroup::new)
     }
 
     /// How much to report.
@@ -127,8 +127,8 @@ impl ReportInquiry {
 
     /// Where, and which kinds of message.
     #[must_use]
-    pub const fn scope(&self) -> &ReportScope {
-        &self.scope
+    pub const fn scope(&self) -> ReportScope {
+        self.scope
     }
 
     /// The Reply to MIDI Message Report that begins the report, on the request's
@@ -201,6 +201,6 @@ mod tests {
             |first, span| -> Vec<u8> { asked(first, span).groups().map(MidiGroup::get).collect() };
         assert_eq!(groups(3, 3), [3, 4, 5]);
         assert_eq!(groups(0, 1), [0]);
-        assert_eq!(groups(14, 4), [14, 15]);
+        assert_eq!(groups(14, 2), [14, 15]);
     }
 }

@@ -19,7 +19,6 @@ use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
-use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
@@ -29,7 +28,7 @@ use tutti_sampler::{
 use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session,
-    Stem,
+    Stem, StemKey,
 };
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
@@ -68,11 +67,11 @@ fn render_stem(
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
     session.graph().connect(node, MainOutput).unwrap();
-    let (_, mut stems) = bounced(session, bounce.stem_with(Stem::new(node)))
+    let (_, mut done, keys) = bounced(session, bounce.stem_with(Stem::new(node)))
         .expect("the bounce renders")
         .into_parts();
-    match stems.pop() {
-        Some(Produced::Buffers(rendered)) if stems.is_empty() => rendered.into_planes(),
+    match keys.as_slice() {
+        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").into_planes(),
         other => panic!("expected one stem held in memory, got {other:?}"),
     }
 }

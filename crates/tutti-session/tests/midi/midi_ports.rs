@@ -1927,15 +1927,39 @@ fn two_identities_for_one_arriving_device_open_the_first_and_the_second_when_it_
     assert_eq!(second.presence(), Presence::Lost(PortCause::InUse));
     assert_eq!(fake.connected_outputs().len(), 1, "one connection");
 
+    // The device stays plugged in: the second takes it on the update the first's
+    // device closes, with no arrival between.
     drop(first);
     let _ = s.update();
-    unplug(&fake, 12);
+    let mut updates = 0;
+    while second.presence() != Presence::Live {
+        assert!(
+            updates < 4,
+            "the first's device closes within a few updates"
+        );
+        blocks(&mut s, 1);
+        let _ = s.update();
+        updates += 1;
+        // The device is never left closed between the first's close and the
+        // second's open.
+        assert_eq!(fake.connected_outputs().len(), 1, "update {updates}");
+    }
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection");
+    let mut keys = s
+        .midi()
+        .input(second.node())
+        .expect("the node takes events");
     let _ = s.update();
-    fake.plug(unit(12), PortDirection::Output);
+    let _ = fake.take_sent(EndpointId::from_raw(12));
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(64),
+        NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&mut s, 3);
     let _ = s.update();
-    assert_eq!(
-        second.presence(),
-        Presence::Live,
-        "it takes the device once the first closed"
-    );
+    let sent = fake.take_sent(EndpointId::from_raw(12));
+    assert!(sent.iter().any(|u| is_on(u, 64)), "{sent:?}");
 }

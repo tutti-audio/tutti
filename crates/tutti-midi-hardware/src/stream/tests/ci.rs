@@ -2298,7 +2298,7 @@ fn a_report_inquiry_is_handed_on_unanswered_with_who_asked_and_where() {
         assert_eq!(ask.group(), GROUP_0);
         assert_eq!(ask.groups().collect::<Vec<_>>(), [GROUP_0]);
         assert_eq!(ask.control(), DataControl::NonDefault);
-        assert_eq!(*ask.scope(), scope);
+        assert_eq!(ask.scope(), scope);
     }
 }
 

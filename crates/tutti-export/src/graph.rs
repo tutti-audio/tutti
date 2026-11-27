@@ -146,7 +146,7 @@ impl Setup {
 /// ```
 /// use tutti_timeline::FrozenClock;
 /// use tutti_units::{Hz, SampleRate, Samples, Seconds};
-/// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
+/// use tutti_export::{render, BufferTarget, Control, Job, Output, Outputs, RenderGraph, Setup, TailPolicy};
 /// use tutti_graph::GraphBuilder;
 /// use tutti_nodes::testing::Osc;
 /// use tutti_buffers::ChannelLayout;
@@ -159,17 +159,13 @@ impl Setup {
 /// let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together, so paired");
 ///
 /// let job = Job::new(rate, Seconds::new(0.1).to_samples(rate), Samples::new(0), TailPolicy::Frames(Samples::ZERO)).expect("a render");
-/// let out = render_one(
-///     &mut graph,
-///     &job,
-///     &FrozenClock,
-///     Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
-///     &mut Control::none(),
-/// )
-/// .expect("renders")
-/// .into_finished()
-/// .and_then(Produced::into_buffers)
-/// .expect("nothing cancels it");
+/// let mut outputs = Outputs::new();
+/// let planes = outputs.buffers(Output::main_output(BufferTarget::new(ChannelLayout::STEREO)));
+/// let done = render(&mut graph, &job, &FrozenClock, outputs, &mut Control::none())
+///     .expect("renders")
+///     .into_finished()
+///     .expect("nothing cancels it");
+/// let out = done.buffers(&planes).expect("a key of these outputs");
 /// assert_eq!(out.frames().get(), 4_800);
 /// ```
 #[derive(Debug)]
