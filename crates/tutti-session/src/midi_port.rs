@@ -1688,10 +1688,22 @@ impl Ports {
             .any(|port| port.claim.is_held() && port.saved.id == *saved)
     }
 
-    /// Answers a peer's report inquiry on `device` from the held output port that has
+    /// Answers a peer's report inquiry on `device`: from the held output port that has
     /// it open, or, when none does or its device is away, as a device that declares
-    /// nothing ([`MidiSession::decline_report`]).
+    /// nothing ([`MidiSession::decline_report`]). The one call site of the decline.
     fn answer_report(&mut self, io: &mut MidiSession, device: &MidiDeviceId, ask: &ReportInquiry) {
+        if let Some(ask) = self.route_report(device, ask) {
+            io.decline_report(device, &ask);
+        }
+    }
+
+    /// Has the held output port of `device` answer `ask`; the ask comes back when
+    /// there is no such port or its device is away.
+    fn route_report(
+        &mut self,
+        device: &MidiDeviceId,
+        ask: &ReportInquiry,
+    ) -> Option<ReportInquiry> {
         let mut holders = self.outputs.iter_mut().filter(|port| {
             port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
         });
@@ -1699,12 +1711,9 @@ impl Ports {
         // A device has one output port (`open_output_port`).
         let second = holders.next().is_some();
         debug_assert!(!second, "two held output ports have one device open");
-        let unanswered = match holder {
+        match holder {
             Some(port) => port.answer_report(ask),
             None => Some(*ask),
-        };
-        if let Some(ask) = unanswered {
-            io.decline_report(device, &ask);
         }
     }
 
@@ -1916,24 +1925,19 @@ impl OutputPort {
             _ => vec![ask.group()],
         };
         let report = self.record.report(ask.control(), &ask.scope(), groups);
-        let frames = |message: tutti_midi_ci::CiMessage| {
+        // A Reply and an End encode: their fields are range-checked types, so no
+        // byte is past 7 bits (`CiMessage::packets` fails only for one that is).
+        let frames = |message: tutti_midi_ci::CiMessage| -> Vec<(Frame, tutti_ump::Ump)> {
             message
                 .packets(ask.group())
-                .map(|packets| packets.map(|ump| (Frame::ZERO, ump)).collect::<Vec<_>>())
+                .expect("a MIDI-CI message of range-checked fields is 7-bit")
+                .map(|ump| (Frame::ZERO, ump))
+                .collect()
         };
-        let (reply, end) = (frames(ask.reply(report.declared)), frames(ask.end()));
-        let mut refused = 0;
-        let mut events = Vec::new();
-        match reply {
-            Ok(packets) => events.extend(packets),
-            Err(_) => refused += 1,
-        }
+        let mut events = frames(ask.reply(report.declared));
         events.extend(report.messages.into_iter().map(|ump| (Frame::ZERO, ump)));
-        match end {
-            Ok(packets) => events.extend(packets),
-            Err(_) => refused += 1,
-        }
-        refused += out.send_frames(&events, None) as u64;
+        events.extend(frames(ask.end()));
+        let refused = out.send_frames(&events, None) as u64;
         self.losses.refused(refused);
         None
     }

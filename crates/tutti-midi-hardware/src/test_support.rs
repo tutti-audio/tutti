@@ -50,6 +50,7 @@ use tutti_ump::Protocol;
 pub struct FakeBackend {
     devices: Arc<Mutex<FakeDevices>>,
     sent: Arc<AtomicUsize>,
+    batches: Arc<AtomicUsize>,
     opens: Arc<AtomicUsize>,
     watchers: Arc<AtomicUsize>,
     outputs: OutputConnections,
@@ -134,6 +135,8 @@ impl FakeDevices {
 pub struct FakeCounters {
     /// Events handed to the fake sink, across every batch.
     pub sent: Arc<AtomicUsize>,
+    /// Batches handed to the fake sink: one per `queue_timed` call.
+    pub batches: Arc<AtomicUsize>,
     /// Input ports opened. Counts *opens*, not connections, which is what makes
     /// a duplicate open detectable.
     pub opens: Arc<AtomicUsize>,
@@ -369,6 +372,7 @@ type OutputConnections = Arc<Mutex<OutputLedger>>;
 /// therefore make `send`'s accepted count untestable.
 struct FakeSink {
     sent: Arc<AtomicUsize>,
+    batches: Arc<AtomicUsize>,
     accepts: usize,
     refusing: Arc<AtomicBool>,
     id: EndpointId,
@@ -390,6 +394,7 @@ impl DeviceOut for FakeSink {}
 impl MidiOut for FakeSink {
     fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> Taken {
         self.sent.fetch_add(events.len(), Ordering::SeqCst);
+        self.batches.fetch_add(1, Ordering::SeqCst);
         let accepts = if self.refusing.load(Ordering::SeqCst) {
             0
         } else {
@@ -478,6 +483,7 @@ impl FakeBackend {
             producers: Arc::clone(&producers),
             log: Arc::clone(&log),
             sent: Arc::new(AtomicUsize::new(0)),
+            batches: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
             watchers: Arc::new(AtomicUsize::new(0)),
             outputs: OutputConnections::default(),
@@ -490,6 +496,7 @@ impl FakeBackend {
         let backend = FakeBackend {
             devices: Arc::clone(&counters.devices),
             sent: Arc::clone(&counters.sent),
+            batches: Arc::clone(&counters.batches),
             opens: Arc::clone(&counters.opens),
             watchers: Arc::clone(&counters.watchers),
             outputs: Arc::clone(&counters.outputs),
@@ -602,6 +609,7 @@ impl MidiEndpoints for FakeBackend {
         }
         Ok(Box::new(FakeSink {
             sent: Arc::clone(&self.sent),
+            batches: Arc::clone(&self.batches),
             accepts: self.accepts,
             refusing: Arc::clone(&self.refusing),
             id,

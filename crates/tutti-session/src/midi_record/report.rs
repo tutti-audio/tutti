@@ -26,7 +26,15 @@
 //! - Program Change: on a MIDI 1.0 lane the bank in force (MSB, LSB) first, then the
 //!   program; a MIDI 2.0 Program Change carries its bank.
 //! - Notes: each key down as the Note On it was sent with (velocity and attribute), then,
-//!   once everything else is reported, a Note Off for each of them.
+//!   once everything else is reported, a Note Off for each of them. The record keeps a
+//!   Note On in MIDI 2.0 form and the report hands it on so; the device's output converts
+//!   to the Protocol in use, so a MIDI 1.0 device is sent a MIDI 1.0 Note On with its
+//!   velocity (section 9.7.2) and a MIDI 2.0 device the attribute too. A report reports
+//!   the notes that are active (0x7F as well as 0x01): the record of what was sent holds
+//!   no inactive ones.
+//!
+//! A report leaves the device's bank select and RPN/NRPN select at what the report sent
+//! last, which is not necessarily what the stream had selected.
 //!
 //! **How much** ([`DataControl`]). `Capabilities` reports nothing and declares what could
 //! be; `Full` reports everything held; `NonDefault` leaves out the Control Changes at their
@@ -497,7 +505,7 @@ mod tests {
         assert_eq!(tags(&report), ["g0c0:cc125=0", "g0c0:cc126=4"]);
     }
 
-    /// Spec: m2-101/9.7.2#7, m2-101/9.7.2#8
+    /// Spec: m2-101/9.7.2#8
     #[test]
     fn bank_select_and_parameter_numbers_are_not_reported_as_plain_control_changes() {
         // In MIDI 1.0 Protocol, CC 0, 6, 32, 38 and 98 to 101 in use as Bank Select, RPN
@@ -588,7 +596,7 @@ mod tests {
         assert_eq!(tags(&full(&record, &everything())), ["g0c0:m2pc8b1.2"]);
     }
 
-    /// Spec: m2-101/9.7.2#14, m2-101/9.7.2#15, m2-101/9.7.2#16
+    /// Spec: m2-101/9.7.2#15, m2-101/9.7.2#16
     #[test]
     fn each_key_down_is_a_note_on_as_sent_and_each_has_a_note_off_after_everything_else() {
         let mut record = Record::default();
@@ -632,7 +640,6 @@ mod tests {
         assert_eq!(tags(&full(&record, &controllers)), ["g0c1:cc7=50"]);
     }
 
-    /// Spec: m2-101/9.5.1#1
     #[test]
     fn a_full_report_of_notes_covers_the_keys_down_and_a_released_key_is_not_one() {
         let mut record = Record::default();
@@ -655,6 +662,28 @@ mod tests {
         let names = tags(&full(&record, &everything()));
         assert_eq!(names.len(), 2, "{names:?}");
         assert!(names[0].contains("m2on61") && names[1] == "g0c0:m2off61");
+    }
+
+    /// MIDI 2.0 Registered and Assignable Controllers are messages of their own: no Null
+    /// Function Value follows them.
+    #[test]
+    fn a_midi_2_parameter_is_sent_whole_with_no_null_function_value() {
+        let mut record = Record::default();
+        say2(
+            &mut record,
+            addr(0, 0),
+            Voice2::Registered {
+                bank: U7::of(0),
+                index: U7::of(2),
+                value: ControlValue::new(0x1234_0000),
+            },
+        );
+        let report = full(&record, &everything());
+        assert_eq!(report.messages.len(), 1, "{:?}", tags(&report));
+        assert!(matches!(
+            report.messages[0].decode(),
+            Ok(Message::Midi2(_, Voice2::Registered { .. }))
+        ));
     }
 
     #[test]
