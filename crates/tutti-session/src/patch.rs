@@ -3,6 +3,9 @@
 //! - [`NodeDecl`] names one node: an app key and the config it is built from.
 //! - The wires between declared nodes are parts too, made by `connect` on a
 //!   [`WireStart`](crate::WireStart); [`WireEnds`] names one.
+//! - [`Section`] names a subtree of the patch by an app key and the value it is
+//!   computed from; a patch whose value is equal to the last one's carries what
+//!   the session made of it without evaluating it.
 //! - [`Declarations`] is the declarations of one
 //!   [`Session::patch`](crate::Session::patch) call, and [`IntoPatch`] is
 //!   everything that can be part of one: a declaration, a tuple, array, `Vec`
@@ -92,6 +95,86 @@ impl<K: fmt::Debug, C> fmt::Debug for NodeDecl<K, C> {
             .field("fading", &self.fading)
             .finish_non_exhaustive()
     }
+}
+
+/// A subtree of a patch, named by an app key and computed from `deps`: while
+/// the value is equal to the last patch's, the body is not run and its parts
+/// are not compared, and the session keeps what it made of them.
+///
+/// The body is handed the deps, and is the only thing that makes the parts: what
+/// it reads beside them has to be moved in, where it is seen. A handle the body
+/// names (a [`Key`](crate::Key), a plugin) belongs in the deps: a re-applied
+/// handle is another value, so deps that hold it are unequal.
+///
+/// A section is carried, its body not run, only when the last successful patch
+/// ran or carried it under the same key with deps of the same type that compare
+/// equal; its keys converged (no swap refused, no wire dormant) and its nodes and
+/// wires are still in the graph; and every key its wires mention outside the
+/// section is declared by the rest of the patch with the node it had (not
+/// readded, not swapped). Otherwise the body runs, and what it declares joins
+/// the patch like any other part.
+///
+/// Deps are compared by [`PartialEq`]: `Arc<T>` compares contents (short-cut by
+/// pointer when `T: Eq`), so a revision number is the cheap form. Deps of
+/// another type than the last patch's are unequal.
+///
+/// Section keys are a namespace apart from node keys; a key names at most one
+/// section per patch ([`PatchError::DuplicateSection`](crate::PatchError)).
+/// Sections nest: a carried section carries the ones inside it, and an
+/// evaluated one judges each inner section by the same rule.
+#[must_use = "a section is part of a patch only once `Session::patch` takes it"]
+pub struct Section<K, D, B> {
+    key: K,
+    deps: D,
+    body: B,
+}
+
+impl<K, D, B> Section<K, D, B> {
+    /// The section named `key`, whose parts are `body` of `deps`.
+    pub fn new<P>(key: K, deps: D, body: B) -> Self
+    where
+        D: PartialEq + Send + 'static,
+        B: FnOnce(&D) -> P + Send + 'static,
+    {
+        Self { key, deps, body }
+    }
+}
+
+impl<K: fmt::Debug, D, B> fmt::Debug for Section<K, D, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Section")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The value a section is computed from, held erased: equal to another of its
+/// own type when the values are.
+pub(crate) trait Deps: Send {
+    fn as_any(&self) -> &dyn Any;
+    /// Whether `other` is a value of this one's type that compares equal.
+    fn same(&self, other: &dyn Deps) -> bool;
+}
+
+impl<D: PartialEq + Send + 'static> Deps for D {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn same(&self, other: &dyn Deps) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<D>()
+            .is_some_and(|other| self == other)
+    }
+}
+
+/// A section of a patch not yet evaluated: its key, its deps, and the body that
+/// makes its parts from them.
+pub(crate) struct PendingSection<K, G: PatchTarget> {
+    pub(crate) key: K,
+    pub(crate) deps: Box<dyn Deps>,
+    pub(crate) body: Box<dyn FnOnce(&dyn Deps) -> Declarations<K, G> + Send>,
 }
 
 /// Where declarations are placed: the session's [`Graph`](crate::Graph). What
@@ -222,6 +305,7 @@ pub(crate) struct Declaration<G: PatchTarget> {
 pub struct Declarations<K, G: PatchTarget> {
     pub(crate) nodes: Vec<(K, Declaration<G>)>,
     pub(crate) wires: Vec<WireDecl<K>>,
+    pub(crate) sections: Vec<PendingSection<K, G>>,
 }
 
 impl<K, G: PatchTarget> Default for Declarations<K, G> {
@@ -229,6 +313,7 @@ impl<K, G: PatchTarget> Default for Declarations<K, G> {
         Self {
             nodes: Vec::new(),
             wires: Vec::new(),
+            sections: Vec::new(),
         }
     }
 }
@@ -271,12 +356,13 @@ impl<K, G: PatchTarget, P: IntoPatch<K, G>> Extend<P> for Declarations<K, G> {
 #[derive(Clone, Copy, Debug)]
 pub struct Sealed(());
 
-/// A value that can be part of a patch: a [`NodeDecl`], a tuple of up to 16
-/// parts, an array, `Vec` or `Option` of parts, or a [`Declarations`]. Sealed.
+/// A value that can be part of a patch: a [`NodeDecl`], a [`Section`], a tuple
+/// of up to 16 parts, an array, `Vec` or `Option` of parts, or a
+/// [`Declarations`]. Sealed.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not part of a patch",
     label = "not a declaration or a container of declarations",
-    note = "a patch is made of `NodeDecl::new(..)`, tuples, arrays, `Vec`s and `Option`s of parts, and `Declarations`",
+    note = "a patch is made of `NodeDecl::new(..)`, `Section::new(..)`, tuples, arrays, `Vec`s and `Option`s of parts, and `Declarations`",
     note = "collect an iterator of parts with `.collect::<Declarations<_, _>>()`",
     note = "in a tuple, every element must be a part"
 )]
@@ -306,6 +392,31 @@ impl<K, G: PatchTarget> IntoPatch<K, G> for Declarations<K, G> {
     fn add_to(self, patch: &mut Declarations<K, G>, _: Sealed) {
         patch.nodes.extend(self.nodes);
         patch.wires.extend(self.wires);
+        patch.sections.extend(self.sections);
+    }
+}
+
+impl<K, G, D, B, P> IntoPatch<K, G> for Section<K, D, B>
+where
+    K: Send + 'static,
+    G: PatchTarget + 'static,
+    D: PartialEq + Send + 'static,
+    B: FnOnce(&D) -> P + Send + 'static,
+    P: IntoPatch<K, G>,
+{
+    fn add_to(self, patch: &mut Declarations<K, G>, _: Sealed) {
+        let body = self.body;
+        patch.sections.push(PendingSection {
+            key: self.key,
+            deps: Box::new(self.deps),
+            body: Box::new(move |deps| {
+                let deps = deps
+                    .as_any()
+                    .downcast_ref::<D>()
+                    .expect("a section's body is handed the deps it was made with");
+                Declarations::of(body(deps))
+            }),
+        });
     }
 }
 

@@ -44,6 +44,7 @@ mod output_policy;
 mod patch_nodes;
 #[cfg(feature = "midi")]
 mod patch_published;
+mod patch_sections;
 mod patch_wires;
 mod replace_seeding;
 mod rewired;

@@ -329,7 +329,7 @@ use hang::HangDetector;
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
-pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, WireEnds};
+pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, Section, WireEnds};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
