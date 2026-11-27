@@ -1,13 +1,22 @@
-//! Takes: a recording that knows where it belongs on the timeline (design 030
-//! section 5).
+//! Takes: a recording that knows where it belongs on the timeline.
 //!
-//! [`Session::record`] arms a take on an [`Input`]. It opens a plan tap on the
-//! input's inlet node, so the take is made of what the graph was given, frame
-//! for frame on the graph's own clock ([`TapReader::next_frame`]), and runs the
-//! pump into a sink on the session's executor, which the audio thread wakes by a
-//! bell as the tap fills. Nothing is resampled or shifted
-//! in the file: where the take belongs is metadata, a [`TakePlacement`] the take
+//! [`Session::record`] arms a take on an [`Input`] into a [`Destination`]: a
+//! [`ToFile`](tutti_codec::ToFile), [`ToMemory`](crate::ToMemory) or
+//! [`ToSink`](crate::ToSink). It opens a plan tap on the input's inlet node, so the take
+//! is made of what the graph was given, frame for frame on the graph's own clock
+//! ([`TapReader::next_frame`]), and runs the pump into the destination on the session's
+//! executor, which the audio thread wakes by a bell as the tap fills. Nothing is shifted in
+//! what the take holds: where the take belongs is metadata, a [`TakePlacement`] the take
 //! states term by term.
+//!
+//! # The handle is the take's end
+//!
+//! A [`Take`] is awaited: its future resolves, once, to the [`Recorded`] the take holds
+//! or to the [`TakeError`] that ended it. `take.await` waits for the take's own end (its
+//! punch-out, or its input's removal) and [`finish`](Take::finish) stops the take and
+//! returns the same future. Dropping the handle or the future stops the take; the pump
+//! still closes the destination and commits on the executor, and a failure nobody is left
+//! to receive is logged by the pump.
 //!
 //! # Where the take is placed
 //!
@@ -44,30 +53,34 @@
 //! silence the inlet played.
 
 use std::fmt;
+use std::future::{Future, IntoFuture};
 use std::panic::AssertUnwindSafe;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll};
 use tutti_rt::Mutex;
 
+use futures_channel::oneshot;
 use futures_lite::FutureExt;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, OnceLock};
-
 use thiserror::Error;
-use tutti_buffers::{
-    ChannelLayout, ChannelSet, Float, FloatWidth, Interleaved, InterleavedMut, Sink, SinkFailed,
-};
-use tutti_codec::{EncoderOptions, EncoderSink, Format, Kept, Spec};
+use tutti_buffers::{ChannelLayout, Float, FoldError, Interleaved, InterleavedMut};
+use tutti_dsp::FftFloat;
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::StagedCommitError;
-use tutti_rt::{Bell, Listener, SplitMix64};
+use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{Recording, TakeId};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
+use crate::bounce::{OutputOf, render_output::Sealed};
+use crate::take_writer::Writer;
 use crate::transport_handle::When;
-use crate::{Input, Session, SessionEvent, Start, TakeLatency, TransportHandle, Trim};
+use crate::{Destination, Input, Session, Start, TakeLatency, TransportHandle, Trim};
+
+/// What the pump of a take of `D` writes into.
+type WriterOf<D, F> = <D as Sealed<F>>::Writer;
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
@@ -167,134 +180,6 @@ pub struct Window {
     pub start: Frame,
     /// The first frame not kept, or `None` for an open-ended take.
     pub end: Option<Frame>,
-}
-
-/// A file a take is written to: encoded in the format given and staged, so it
-/// is written to a temporary file beside its path and put in place when the
-/// take ends, and the path holds either what it held before or the whole take.
-/// A take that fails before then removes the temporary. A commit that fails
-/// ends the take with [`TakeError::Commit`], which keeps the whole file at
-/// [`kept`](StagedCommitError::kept) and leaves the path alone; the app owns
-/// the kept file, and nothing removes it.
-///
-/// A file of an integer type is quantized by the encoder as the format's
-/// [`IntPcm`](tutti_codec::IntPcm) says (triangular dither unless it says otherwise), and
-/// each take draws its own noise: takes armed together are summed later, and one noise
-/// sequence would add coherently. A float format has nothing to quantize and takes the frames
-/// as they are.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TakeFile {
-    path: PathBuf,
-    format: Format,
-    replace: bool,
-}
-
-impl TakeFile {
-    /// A file at `path`, in `format`, as wide as the input and at the graph's
-    /// rate.
-    #[must_use]
-    pub fn new(path: impl Into<PathBuf>, format: Format) -> Self {
-        Self {
-            path: path.into(),
-            format,
-            replace: false,
-        }
-    }
-
-    /// A WAV file of 32-bit float at `path`. An `f64` session keeps its frames
-    /// whole with [`new`](Self::new) and `Pcm::Float(FloatWidth::F64)`.
-    #[must_use]
-    pub fn wav(path: impl Into<PathBuf>) -> Self {
-        Self::new(path, Format::Wav(tutti_codec::Pcm::Float(FloatWidth::F32)))
-    }
-
-    /// Replaces a path that already exists instead of refusing it. A take refuses an existing
-    /// path by default, with [`TakeError::Open`] of [`tutti_codec::EncodeError::Exists`] when
-    /// it starts. The take is written beside the path, so a path that appears by the time it
-    /// ends fails the commit with [`TakeError::Commit`] of kind
-    /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists): the path is left alone and the
-    /// whole take is kept at the error's [`kept`](StagedCommitError::kept), the app's to move
-    /// or delete.
-    #[must_use]
-    pub fn replace(mut self) -> Self {
-        self.replace = true;
-        self
-    }
-}
-
-/// Where a take goes: a [`TakeFile`], or a sink of the caller's.
-///
-/// A sink dithers itself: put a [`tutti_dsp::Quantizer`] in front of your own integer sink and
-/// give it to [`sink`](Self::sink). Such a take has no path, so no
-/// `Recorded::clip`.
-pub struct TakeTarget<F: Float = f32> {
-    kind: TargetKind<F>,
-}
-
-enum TargetKind<F: Float> {
-    File(TakeFile),
-    Sink(Box<dyn DynSink<F>>),
-}
-
-impl<F: Float> fmt::Debug for TakeTarget<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            TargetKind::File(file) => f.debug_tuple("TakeTarget::File").field(file).finish(),
-            TargetKind::Sink(_) => f.debug_struct("TakeTarget::Sink").finish_non_exhaustive(),
-        }
-    }
-}
-
-impl<F: Float> From<TakeFile> for TakeTarget<F> {
-    fn from(file: TakeFile) -> Self {
-        Self {
-            kind: TargetKind::File(file),
-        }
-    }
-}
-
-impl<F: Float> TakeTarget<F> {
-    /// A sink of the caller's. It must be as wide as the input and at the
-    /// graph's rate (a sink carries no rate to check); a width that differs is
-    /// [`TakeError::Width`].
-    pub fn sink<S>(sink: S) -> Self
-    where
-        S: Sink<Sample = F> + Send + 'static,
-        S::Error: Send + Sync + 'static,
-    {
-        Self {
-            kind: TargetKind::Sink(Box::new(sink)),
-        }
-    }
-}
-
-/// A sink's [`Error`](Sink::Error) behind the trait object that forces its type
-/// to be erased.
-type SinkClosed = Arc<dyn std::error::Error + Send + Sync>;
-
-/// A [`Sink`] that can be finalized through a box.
-trait DynSink<F: Float>: Send {
-    fn layout(&self) -> ChannelLayout;
-    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed>;
-    fn finalize(self: Box<Self>) -> Result<(), SinkClosed>;
-}
-
-impl<F: Float, S> DynSink<F> for S
-where
-    S: Sink<Sample = F> + Send,
-    S::Error: Send + Sync + 'static,
-{
-    fn layout(&self) -> ChannelLayout {
-        Sink::layout(self)
-    }
-
-    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
-        Sink::write(self, frames)
-    }
-
-    fn finalize(self: Box<Self>) -> Result<(), SinkClosed> {
-        Sink::finalize(*self).map_err(|e| Arc::new(e) as SinkClosed)
-    }
 }
 
 /// What the device reports of its delay, read when a take starts: the
@@ -398,92 +283,53 @@ impl Anchor {
     }
 }
 
-/// The takes of a session: the channel their pumps report through to
-/// [`Session::update`]. Unbounded, read only by the control thread, so a pump never
-/// waits.
-#[derive(Debug)]
-pub(crate) struct Takes {
-    tx: Sender<TakeEvent>,
-    rx: Receiver<TakeEvent>,
-}
-
-impl Takes {
-    pub(crate) fn new() -> Self {
-        let (tx, rx) = channel();
-        Self { tx, rx }
-    }
-
-    /// Pushes every event the pumps sent since the last call onto `out`, in the order
-    /// sent.
-    pub(crate) fn land(&mut self, out: &mut Vec<SessionEvent>) {
-        out.extend(self.rx.try_iter().map(SessionEvent::Take));
-    }
-}
-
-/// What one take's pump reports through: its events, in order, and exactly one end.
+/// What one take's pump reports through: its one end, to the handle's future.
 ///
-/// A report dropped without [`end`](Self::end) (the executor dropped the pump's future
-/// unrun or part-way) ends the take with [`TakeError::Dropped`].
-struct Report {
-    tx: Sender<TakeEvent>,
-    id: TakeId,
-    /// Set when the session drops: nothing sent lands.
+/// A report dropped without [`end`](Self::end) (the executor dropped the pump's future unrun or
+/// part-way) leaves the future without an answer, which it reads as [`TakeError::Dropped`].
+struct Report<D: Destination<F>, F: FftFloat> {
+    reply: Option<oneshot::Sender<Result<Recorded<D, F>, TakeError>>>,
+    /// Set when the session drops: the pump stops.
     closed: Arc<AtomicBool>,
     /// Stops the transport recording this take once the pump is done with it.
     recorder: Recorder,
-    ended: bool,
 }
 
-impl Report {
-    fn new(takes: &Takes, id: TakeId, closed: Arc<AtomicBool>, recorder: Recorder) -> Self {
+impl<D: Destination<F>, F: FftFloat> Report<D, F> {
+    fn new(
+        reply: oneshot::Sender<Result<Recorded<D, F>, TakeError>>,
+        closed: Arc<AtomicBool>,
+        recorder: Recorder,
+    ) -> Self {
         Self {
-            tx: takes.tx.clone(),
-            id,
+            reply: Some(reply),
             closed,
             recorder,
-            ended: false,
         }
     }
 
-    /// The session is gone: nothing sent will land.
+    /// The session is gone: the pump stops and closes.
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 
-    /// The first frame is in. Never blocks; the session may be gone, and then there is
-    /// no one to tell.
-    fn started(&self, placement: TakePlacement) {
-        let _ = self.tx.send(TakeEvent::Started {
-            id: self.id,
-            placement,
-        });
-    }
-
-    /// The take's end, after every event it sent.
-    fn end(mut self, result: Result<Recorded, TakeError>) {
-        self.ended = true;
-        let _ = self.tx.send(match result {
-            Ok(recorded) => TakeEvent::Finished {
-                id: self.id,
-                recorded,
-            },
-            Err(error) => TakeEvent::Failed { id: self.id, error },
-        });
+    /// The take's end. Never blocks. A failure with no handle or future left to receive it
+    /// is logged here, the one place it can be.
+    fn end(mut self, result: Result<Recorded<D, F>, TakeError>) {
+        let Some(reply) = self.reply.take() else {
+            return;
+        };
+        if let Err(Err(error)) = reply.send(result) {
+            tracing::warn!("a take ended with no one to tell and did not commit: {error}");
+        }
     }
 }
 
-impl Drop for Report {
+impl<D: Destination<F>, F: FftFloat> Drop for Report<D, F> {
     fn drop(&mut self) {
         // However the pump ended (its punch-out, a finish, the input's
         // removal, a failure, a drop), the transport stops recording the take.
         self.recorder.stop();
-        if !self.ended {
-            // The session may be gone; then nothing waits for this end.
-            let _ = self.tx.send(TakeEvent::Failed {
-                id: self.id,
-                error: TakeError::Dropped,
-            });
-        }
     }
 }
 
@@ -532,14 +378,49 @@ struct Shared {
     placement: OnceLock<TakePlacement>,
 }
 
-/// A recording that has ended: what it holds and where it belongs.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Recorded {
-    path: Option<PathBuf>,
+/// A recording that has ended: what it holds and where it belongs. Its
+/// [`output`](Self::output) is what the take's [`Destination`] holds: a [`Written`](tutti_export::Written) for a
+/// [`ToFile`](tutti_codec::ToFile), the [`Rendered`](tutti_export::Rendered) planes for a [`ToMemory`](crate::ToMemory),
+/// and `()` for a [`ToSink`](crate::ToSink), which has what it was given.
+///
+/// Only a take written to a file is a clip: a take into memory or a sink has no file to
+/// read back.
+///
+/// ```compile_fail,E0599
+/// # use tutti_session::{Recorded, ToMemory};
+/// fn f(done: Recorded<ToMemory>) {
+///     let _ = done.clip::<f32>();
+/// }
+/// ```
+///
+/// ```compile_fail,E0599
+/// # use tutti_session::{Recorded, ToSink};
+/// # use tutti_buffers::Sink;
+/// fn f<S: Sink<Sample = f32> + Send + 'static>(done: Recorded<ToSink<S>>)
+/// where
+///     S::Error: Send + Sync + 'static,
+/// {
+///     let _ = done.clip::<f32>();
+/// }
+/// ```
+pub struct Recorded<D: Destination<F>, F: FftFloat = f32> {
+    output: OutputOf<D, F>,
     placement: TakePlacement,
     frames: Samples,
     lost: Samples,
     end: TakeEnd,
+}
+
+impl<D: Destination<F>, F: FftFloat> fmt::Debug for Recorded<D, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Recorded")
+            .field("output", &self.output)
+            .field("placement", &self.placement)
+            .field("frames", &self.frames)
+            .field("lost", &self.lost)
+            .field("end", &self.end)
+            .finish()
+    }
 }
 
 /// Why a take ended ([`Recorded::end`]).
@@ -553,17 +434,24 @@ pub enum TakeEnd {
     InputRemoved,
 }
 
-impl Recorded {
+impl<D: Destination<F>, F: FftFloat> Recorded<D, F> {
     /// Why the take ended.
     #[must_use]
     pub fn end(&self) -> TakeEnd {
         self.end
     }
 
-    /// The file the take was written to; `None` for a sink of the caller's.
+    /// What the destination holds.
     #[must_use]
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+    pub fn output(&self) -> &OutputOf<D, F> {
+        &self.output
+    }
+
+    /// What the destination holds, owned: the planes of a take into memory move out
+    /// without a copy.
+    #[must_use]
+    pub fn into_output(self) -> OutputOf<D, F> {
+        self.output
     }
 
     /// Where it belongs.
@@ -591,12 +479,15 @@ impl Recorded {
     }
 
     /// The frames the tap lost and the take filled with silence: zero means
-    /// the file is the whole take.
+    /// the output is the whole take.
     #[must_use]
     pub fn lost(&self) -> Samples {
         self.lost
     }
+}
 
+#[cfg(all(feature = "sampler", codec))]
+impl<F: FftFloat> Recorded<tutti_codec::ToFile, F> {
     /// The take as a clip, in the session's float, that starts where it
     /// belongs ([`TakePlacement::start_beat`]): add it to the graph, in place of
     /// the input if you like (`graph.replace(input.node(), done.clip()?)`), and
@@ -605,51 +496,14 @@ impl Recorded {
     ///
     /// # Errors
     ///
-    /// [`TakeError::NoFile`] for a take written to a sink of the caller's;
     /// [`Error::Decode`](crate::Error::Decode) when the file cannot be read
     /// back (a format whose decoder is not built in);
     /// [`Error::Place`](crate::Error::Place) for a wave the sampler cannot
     /// place.
-    #[cfg(all(feature = "sampler", codec))]
-    pub fn clip<F: tutti_sampler::SamplerFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
-        let path = self.path().ok_or(TakeError::NoFile)?;
-        let wave = tutti_codec::read_wave::<F>(path)?;
+    pub fn clip<G: tutti_sampler::SamplerFloat>(&self) -> crate::Result<tutti_sampler::Clip<G>> {
+        let wave = tutti_codec::read_wave::<G>(&self.output.path)?;
         Ok(tutti_sampler::Clip::new(wave)?.at(self.placement.start_beat))
     }
-}
-
-/// What a take reports to [`Session::update`] ([`SessionEvent::Take`]).
-///
-/// An event is reported only while the session lives: a session dropped before a take's
-/// [`Finished`](Self::Finished) lands loses it, as does a [`Take`] that outlives its
-/// session, whose stop ring finds no bells.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum TakeEvent {
-    /// The first frame of the take arrived (the punch-in was reached).
-    Started {
-        /// The take.
-        id: TakeId,
-        /// Where it belongs.
-        placement: TakePlacement,
-    },
-    /// The take ended, by its punch-out, by [`Take::finish`] or because its
-    /// input was removed ([`Recorded::end`]), and its sink closed. Reported
-    /// once.
-    Finished {
-        /// The take.
-        id: TakeId,
-        /// What it holds and where it belongs.
-        recorded: Recorded,
-    },
-    /// The take failed: its sink, its job, or a transport it never reached.
-    /// Reported once, instead of [`Finished`](Self::Finished).
-    Failed {
-        /// The take.
-        id: TakeId,
-        /// Why.
-        error: TakeError,
-    },
 }
 
 /// Why a take could not be armed or did not end cleanly. Convertible into the
@@ -691,9 +545,13 @@ pub enum TakeError {
         /// The sink's.
         sink: ChannelLayout,
     },
-    /// The file could not be created.
+    /// The file could not be created, or its encoding cannot take the input (a fold or a
+    /// resample it cannot make).
     #[error("the take's file could not be created: {0}")]
     Open(#[source] Arc<tutti_codec::EncodeError>),
+    /// The planes' channels cannot be folded from the input's.
+    #[error("the take's channels cannot be folded from the input's: {0}")]
+    Fold(#[from] FoldError),
     /// The finished file could not be put in place (a path appeared after the take was
     /// armed, or the file system refused the move). The
     /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
@@ -709,7 +567,7 @@ pub enum TakeError {
     /// a FLAC file may end in a cut frame, and a WAV's or
     /// AIFF's header states the whole frames on disk only if
     /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
-    /// `unfinished` is `None` for a sink of the caller's.
+    /// `unfinished` is `None` for a destination that is not a file.
     #[error("the take's sink failed")]
     Sink {
         /// The sink's own error.
@@ -719,7 +577,7 @@ pub enum TakeError {
         unfinished: Option<tutti_codec::Unfinished>,
     },
     /// The sink refused a write, yet its `finalize` reported no error: it broke
-    /// [`Sink`]'s contract, which has `finalize` report the first failure.
+    /// [`Sink`](tutti_buffers::Sink)'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
     SinkRefused,
     /// The executor refused to start the take's pump (a thread the OS would not
@@ -740,10 +598,6 @@ pub enum TakeError {
     /// reached: it holds nothing.
     #[error("the take ended before its punch-in")]
     NeverStarted,
-    /// A take written to a sink of the caller's has no file to make a clip
-    /// from.
-    #[error("the take was not written to a file")]
-    NoFile,
 }
 
 /// A take that is in flight: [`Armed`] or [`Rolling`].
@@ -794,22 +648,32 @@ impl Drop for StopOnDrop {
 }
 
 /// A take in flight, in the state `S`: [`Armed`] until its first frame arrives
-/// ([`rolling`](Take::rolling)), [`Rolling`] after.
+/// ([`rolling`](Take::rolling)), [`Rolling`] after, into the destination `D` at the graph's
+/// float `F`.
 ///
-/// Both states [`finish`](Take::finish), which stops it at once; a take with a
-/// punch-out ends by itself. **Dropping the handle stops the take too**, without
-/// waiting: the pump closes its sink on the executor and the end is still
-/// reported ([`TakeEvent::Finished`]), in a later [`update`](Session::update).
+/// **The handle is the take's one entry.** It is awaited (`take.await`): the take's future
+/// resolves, once, to the [`Recorded`] the take holds or to the [`TakeError`] that ended it,
+/// when the take ends by itself (its punch-out, or its input's removal), without stopping
+/// it. [`finish`](Take::finish) stops the take and returns the same future. Neither needs
+/// [`Session::update`]: the pump runs on the session's executor, and the future is answered
+/// when the pump has closed the destination.
+///
+/// **Dropping the handle or the future stops the take**, without waiting: the pump closes
+/// the destination on the executor and commits, and a failure that no one is left to receive
+/// is logged by the pump (`tracing`, on the executor's thread, never the audio thread). A
+/// take whose session is dropped first commits in the session's drop, and its future still
+/// receives the result when it is polled.
 #[must_use = "dropping a take stops it; keep it while it records, or finish it"]
-pub struct Take<S> {
+pub struct Take<S, D: Destination<F>, F: FftFloat = f32> {
     id: TakeId,
     window: Window,
     shared: Arc<Shared>,
     stop: StopOnDrop,
+    reply: oneshot::Receiver<Result<Recorded<D, F>, TakeError>>,
     state: std::marker::PhantomData<fn() -> S>,
 }
 
-impl<S> fmt::Debug for Take<S> {
+impl<S, D: Destination<F>, F: FftFloat> fmt::Debug for Take<S, D, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Take")
             .field("id", &self.id)
@@ -818,8 +682,8 @@ impl<S> fmt::Debug for Take<S> {
     }
 }
 
-impl<S> Take<S> {
-    /// The take's id, the one its events carry.
+impl<S, D: Destination<F>, F: FftFloat> Take<S, D, F> {
+    /// The take's id, the one the transport records it by.
     #[must_use]
     pub fn id(&self) -> TakeId {
         self.id
@@ -831,25 +695,26 @@ impl<S> Take<S> {
         self.window
     }
 
-    fn into_state<T>(self) -> Take<T> {
+    fn into_state<T>(self) -> Take<T, D, F> {
         Take {
             id: self.id,
             window: self.window,
             shared: self.shared,
             stop: self.stop,
+            reply: self.reply,
             state: std::marker::PhantomData,
         }
     }
 }
 
-impl Take<Armed> {
+impl<D: Destination<F>, F: FftFloat> Take<Armed, D, F> {
     /// This take as [`Rolling`] once its first frame has arrived; the armed
     /// take back, unchanged, before.
     ///
     /// # Errors
     ///
     /// The take itself, while it is still waiting for its punch-in.
-    pub fn rolling(self) -> Result<Take<Rolling>, Self> {
+    pub fn rolling(self) -> Result<Take<Rolling, D, F>, Self> {
         if self.shared.placement.get().is_some() {
             Ok(self.into_state())
         } else {
@@ -858,7 +723,7 @@ impl Take<Armed> {
     }
 }
 
-impl Take<Rolling> {
+impl<D: Destination<F>, F: FftFloat> Take<Rolling, D, F> {
     /// Where the take belongs: known once it is rolling.
     ///
     /// # Panics
@@ -873,49 +738,95 @@ impl Take<Rolling> {
     }
 }
 
-impl<S: InFlight> Take<S> {
-    /// Stops the take at once and returns without waiting. The pump sees the stop on
-    /// its next wake and closes its sink; what the take holds arrives in a later
-    /// [`Session::update`] as [`TakeEvent::Finished`], or [`TakeEvent::Failed`] when the
-    /// sink failed or the pump ended without a result. A take with a punch-out that
-    /// already ended reports the same way.
+impl<S: InFlight, D: Destination<F>, F: FftFloat> Take<S, D, F> {
+    /// Stops the take at once and returns the future of its end, without waiting. The pump
+    /// sees the stop on its next wake, closes the destination and answers the future with
+    /// the [`Recorded`] it holds, or with the [`TakeError`] when the destination failed or
+    /// the pump ended without a result. A take with a punch-out that already ended answers
+    /// the same way.
     ///
-    /// Never blocks and never joins: the pump closes the sink on its own thread.
+    /// Never blocks and never joins: the pump closes the destination on its own thread.
     ///
-    /// A session dropped before the take's [`TakeEvent::Finished`] lands commits the
-    /// take in its own drop, and the result reaches no one. On a `Take` that outlives
-    /// its session this does nothing: that drop already ended the take.
-    pub fn finish(self) {
+    /// A session dropped before the future is answered commits the take in its own drop. On
+    /// a `Take` that outlives its session the stop does nothing: that drop already ended it.
+    pub fn finish(self) -> Finishing<D, F> {
         self.stop.stop();
+        self.into_future()
     }
 }
 
-/// A request to arm a take: record `input` into `target`, from a [`Punch`].
+impl<S: InFlight, D: Destination<F>, F: FftFloat> IntoFuture for Take<S, D, F> {
+    type Output = Result<Recorded<D, F>, TakeError>;
+    type IntoFuture = Finishing<D, F>;
+
+    /// Awaits the take's own end (its punch-out, or its input's removal), without stopping it.
+    fn into_future(self) -> Finishing<D, F> {
+        Finishing {
+            reply: self.reply,
+            _stop: self.stop,
+        }
+    }
+}
+
+/// The end of a take ([`Take::finish`], or `take.await`): resolves, once, to what the take
+/// holds or to the error that ended it. Dropped before it resolves, it stops the take.
+///
+/// The pump answers it through a oneshot, so no [`Session::update`] is needed to wake it.
+/// The answer is [`TakeError::Dropped`] when the executor dropped the pump without a result.
+#[must_use = "a take ends whether or not its end is awaited, but its result is only here"]
+pub struct Finishing<D: Destination<F>, F: FftFloat = f32> {
+    reply: oneshot::Receiver<Result<Recorded<D, F>, TakeError>>,
+    /// Stops the take when this future is dropped, ended or not.
+    _stop: StopOnDrop,
+}
+
+impl<D: Destination<F>, F: FftFloat> Future for Finishing<D, F> {
+    type Output = Result<Recorded<D, F>, TakeError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let answered = std::task::ready!(Pin::new(&mut self.reply).poll(cx));
+        // A sender dropped unanswered: the executor dropped the pump before it ended.
+        Poll::Ready(answered.unwrap_or(Err(TakeError::Dropped)))
+    }
+}
+
+impl<D: Destination<F>, F: FftFloat> fmt::Debug for Finishing<D, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Finishing").finish_non_exhaustive()
+    }
+}
+
+/// A request to arm a take: record `input` into a [`Destination`], from a [`Punch`].
 ///
 /// [`Session::record`] takes it. The punch is [`Punch::new`] at
 /// [`At::NextBlock`] (a take that starts at once) until [`punch`](Self::punch).
-/// `target` is a [`TakeFile`] (an integer format dithered as its `IntPcm` says) or a sink ([`TakeTarget::sink`]).
+/// The destination is a [`ToFile`](tutti_codec::ToFile) (an integer format dithered as its
+/// `IntPcm` says), a [`ToMemory`](crate::ToMemory) or a [`ToSink`](crate::ToSink).
 ///
 /// ```no_run
-/// # use tutti_session::{Input, Punch, Record, TakeFile};
+/// # use tutti_session::{Input, Punch, Record};
+/// # use tutti_codec::{Encoding, Format, Pcm, ToFile};
+/// # use tutti_buffers::FloatWidth;
 /// # use tutti_units::Beat;
-/// # fn go(input: &Input, file: TakeFile) {
-/// let _ = Record::new(&input, file).punch(Punch::new(Beat::new(16.0)));
+/// # fn go(input: &Input) {
+/// let wav = Format::Wav(Pcm::Float(FloatWidth::F32));
+/// let _ = Record::new(input, ToFile::new("vox.wav", Encoding::new(wav)))
+///     .punch(Punch::new(Beat::new(16.0)));
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Record<F: Float = f32> {
+pub struct Record<D, F: Float = f32> {
     input: Input<F>,
-    target: TakeTarget<F>,
+    destination: D,
     punch: Punch,
 }
 
-impl<F: Float> Record<F> {
-    /// A take of `input` into `target`, starting at once.
-    pub fn new(input: &Input<F>, target: impl Into<TakeTarget<F>>) -> Self {
+impl<D: Destination<F>, F: FftFloat> Record<D, F> {
+    /// A take of `input` into `destination`, starting at once.
+    pub fn new(input: &Input<F>, destination: D) -> Self {
         Self {
             input: *input,
-            target: target.into(),
+            destination,
             punch: Punch::new(At::NextBlock),
         }
     }
@@ -928,9 +839,12 @@ impl<F: Float> Record<F> {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
+where
+    C::Float: FftFloat,
+{
     /// Arms the take `request` describes: opens a plan tap on its input's inlet
-    /// node and runs the pump into its target on the session's executor. The take records what the
+    /// node and runs the pump into its destination on the session's executor. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
     /// device does; the module docs say where it is placed.
     ///
@@ -939,9 +853,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// thread of its own, whether or not the app calls [`update`](Self::update).
     ///
     /// The tap compiles in the next [`update`](Self::update). The pump drops
-    /// what comes before the punch-in; [`TakeEvent::Started`] lands in the
-    /// update after its first frame, and [`TakeEvent::Finished`] or
-    /// [`TakeEvent::Failed`] once at the end.
+    /// what comes before the punch-in; [`Take::rolling`] turns once its first frame
+    /// has arrived, and the take's future ([`Take::finish`], or the take awaited) answers
+    /// once at the end.
     ///
     /// # Errors
     ///
@@ -951,12 +865,16 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`TakeError::Past`] for a punch that cannot be resolved;
     /// [`TakeError::TransportFull`] when the transport refuses the take's
     /// recording; [`TakeError::NotStarted`] when the executor refuses the pump, before any file
-    /// or tap exists; [`TakeError::Open`] and [`TakeError::Width`] for the target.
+    /// or tap exists; [`TakeError::Open`], [`TakeError::Fold`] and [`TakeError::Width`] for
+    /// the destination.
     /// Nothing is left open on an error.
-    pub fn record(&mut self, request: Record<C::Float>) -> Result<Take<Armed>, TakeError> {
+    pub fn record<D: Destination<C::Float>>(
+        &mut self,
+        request: Record<D, C::Float>,
+    ) -> Result<Take<Armed, D, C::Float>, TakeError> {
         let Record {
             input,
-            target,
+            destination,
             punch,
         } = request;
         let node = input.node();
@@ -985,11 +903,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
         // The pump starts first, before any file or tap exists, so a refused start is
         // this call's error and leaves nothing open. It waits for its parts, which come
-        // through `parts` once the target and the tap are open; a take that fails
+        // through `parts` once the destination and the tap are open; a take that fails
         // before then stops it, by the stop flag and a ring.
         let (bell, mut listener) = self.background.bells().bell();
         let stop = Arc::new(AtomicBool::new(false));
-        let parts: Arc<Mutex<Option<Parts<C::Float>>>> = Arc::default();
+        let parts: Arc<Mutex<Option<Parts<D, C::Float>>>> = Arc::default();
         let (waiting, stopping) = (Arc::clone(&parts), Arc::clone(&stop));
         let pump_bell = bell.clone();
         self.background
@@ -1006,13 +924,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
                             message: tutti_platform::panic_message(payload.as_ref()),
                         })
                     });
-                // The session's drop closed the report: no event carries a failed
-                // commit, so it is logged here.
-                if let Err(error) = &ended
-                    && report.is_closed()
-                {
-                    tracing::warn!("a take ended with the session and did not commit: {error}");
-                }
                 report.end(ended);
             })
             .map_err(|error| TakeError::NotStarted(error.kind()))?;
@@ -1025,7 +936,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         // The id seeds the file's dither, so it is minted before the open; an open that
         // fails leaves a gap in the ids, which only need to be unique.
         let id = self.transport.handle.next_take_id();
-        let (sink, path) = open_target(target, layout, rate, SplitMix64::mix(id.get()))?;
+        let writer = destination.open(layout, rate, id.get())?;
 
         let ports: Vec<_> = (0..width).map(|channel| node.output(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
@@ -1055,8 +966,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let shared = Arc::new(Shared::default());
         let pump = Pump {
             reader,
-            sink,
-            path,
+            writer,
             window,
             terms: (lead, offset),
             probe: self.inputs.latency_probe(),
@@ -1064,7 +974,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             shared: Arc::clone(&shared),
             stop: Arc::clone(&stop.stop),
         };
-        let report = Report::new(self.inputs.takes(), id, self.background.closed(), recorder);
+        let (reply, answer) = oneshot::channel();
+        let report = Report::new(reply, self.background.closed(), recorder);
         *parts.lock() = Some((pump, report));
         stop.bell.ring();
         Ok(Take {
@@ -1072,20 +983,21 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             window,
             shared,
             stop,
+            reply: answer,
             state: std::marker::PhantomData,
         })
     }
 }
 
 /// What the pump future waits for: the pump and what it reports through.
-type Parts<F> = (Pump<F>, Report);
+type Parts<D, F> = (Pump<D, F>, Report<D, F>);
 
 /// Awaits the pump's parts: `None` when the take stopped before they came.
-async fn await_parts<F: Float>(
+async fn await_parts<D: Destination<F>, F: FftFloat>(
     listener: &mut Listener,
-    parts: &Mutex<Option<Parts<F>>>,
+    parts: &Mutex<Option<Parts<D, F>>>,
     stop: &AtomicBool,
-) -> Option<Parts<F>> {
+) -> Option<Parts<D, F>> {
     loop {
         if let Some(found) = parts.lock().take() {
             return Some(found);
@@ -1129,61 +1041,11 @@ fn resolve(punch: &Punch, anchor: &Anchor, rolling: bool) -> Result<Window, Take
     Ok(Window { start, end })
 }
 
-/// The target as a sink at the input's width, and the file it writes if it is
-/// one.
-fn open_target<F: Float>(
-    target: TakeTarget<F>,
-    layout: ChannelLayout,
-    rate: SampleRate,
-    seed: u64,
-) -> Result<(Box<dyn DynSink<F>>, Option<PathBuf>), TakeError> {
-    match target.kind {
-        TargetKind::File(TakeFile {
-            path,
-            format,
-            replace,
-        }) => {
-            let spec = Spec::of_channels(format, ChannelSet::default_for(layout), rate);
-            let options = EncoderOptions::new(&spec).dither_seed(seed).file(&path);
-            let options = if replace { options.replace() } else { options };
-            let encoder = options.create().map_err(|e| TakeError::Open(Arc::new(e)))?;
-            let file: Box<dyn DynSink<F>> = Box::new(EncoderSink::<F>::new(encoder));
-            Ok((file, Some(path)))
-        }
-        TargetKind::Sink(sink) => {
-            if sink.layout() != layout {
-                return Err(TakeError::Width {
-                    input: layout,
-                    sink: sink.layout(),
-                });
-            }
-            Ok((sink, None))
-        }
-    }
-}
-
-/// A sink's failure to finalize as the take's: a commit's is
-/// [`TakeError::Commit`], which names the file it kept.
-fn closing_failed(error: SinkClosed) -> TakeError {
-    match error.downcast_ref::<Kept>() {
-        Some(Kept::Commit(commit)) => TakeError::Commit(commit.clone()),
-        Some(Kept::Unfinished { unfinished, .. }) => TakeError::Sink {
-            unfinished: Some(unfinished.clone()),
-            source: error,
-        },
-        None => TakeError::Sink {
-            source: error,
-            unfinished: None,
-        },
-    }
-}
-
-/// The pump of one take: the tap's reader into the sink, between the
+/// The pump of one take: the tap's reader into the destination's writer, between the
 /// punch-in and the punch-out, on the graph's frames.
-struct Pump<F: Float> {
+struct Pump<D: Destination<F>, F: FftFloat> {
     reader: TapReader<F>,
-    sink: Box<dyn DynSink<F>>,
-    path: Option<PathBuf>,
+    writer: WriterOf<D, F>,
     window: Window,
     /// The inlet's lead and the input's trim.
     terms: (Samples, Trim),
@@ -1193,8 +1055,12 @@ struct Pump<F: Float> {
     stop: Arc<AtomicBool>,
 }
 
-impl<F: Float> Pump<F> {
-    async fn run(mut self, report: &Report, stop: &mut Listener) -> Result<Recorded, TakeError> {
+impl<D: Destination<F>, F: FftFloat> Pump<D, F> {
+    async fn run(
+        mut self,
+        report: &Report<D, F>,
+        stop: &mut Listener,
+    ) -> Result<Recorded<D, F>, TakeError> {
         let layout = self.reader.layout();
         let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
         let silence = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
@@ -1255,7 +1121,7 @@ impl<F: Float> Pump<F> {
                 // place as silence so the take stays aligned.
                 if let Some(next) = cursor {
                     let gap = lo.since(next).map_or(0, Samples::get);
-                    if !write_silence(&mut *self.sink, silence, gap) {
+                    if !write_silence(&mut self.writer, silence, gap) {
                         failed = true;
                         break 'pump;
                     }
@@ -1265,7 +1131,6 @@ impl<F: Float> Pump<F> {
                     let found = self.place(lo);
                     placement = Some(found);
                     let _ = self.shared.placement.set(found);
-                    report.started(found);
                 }
                 let from = lo.since(first).map_or(0, Samples::get);
                 let to = hi.since(first).map_or(0, Samples::get);
@@ -1278,7 +1143,7 @@ impl<F: Float> Pump<F> {
                     break 'pump;
                 };
                 let kept = popped_view.slice(Samples::new(from)..Samples::new(to));
-                if self.sink.write(kept).is_err() {
+                if self.writer.write(kept).is_err() {
                     failed = true;
                     break 'pump;
                 }
@@ -1297,24 +1162,21 @@ impl<F: Float> Pump<F> {
             && self.reader.next_frame() >= end
         {
             let gap = end.since(next).map_or(0, Samples::get);
-            if write_silence(&mut *self.sink, silence, gap) {
+            if write_silence(&mut self.writer, silence, gap) {
                 written += gap;
                 lost += gap;
             } else {
                 failed = true;
             }
         }
-        let closed = self.sink.finalize();
-        if let Err(error) = closed {
-            return Err(closing_failed(error));
-        }
+        let output = self.writer.close()?;
         if failed {
             return Err(TakeError::SinkRefused);
         }
         // A take finished before its punch-in has nothing to place.
         let placement = placement.ok_or(TakeError::NeverStarted)?;
         Ok(Recorded {
-            path: self.path,
+            output,
             placement,
             frames: Samples::new(written),
             lost: Samples::new(lost),
@@ -1342,17 +1204,17 @@ impl<F: Float> Pump<F> {
     }
 }
 
-/// Writes `frames` frames of silence, a pass at a time. `false`: the sink
+/// Writes `frames` frames of silence, a pass at a time. `false`: the writer
 /// refused.
 fn write_silence<F: Float>(
-    sink: &mut dyn DynSink<F>,
+    writer: &mut impl Writer<F>,
     silence: Interleaved<'_, F>,
     frames: usize,
 ) -> bool {
     let mut left = frames;
     while left > 0 {
         let now = left.min(silence.frames().get());
-        if sink
+        if writer
             .write(silence.slice(Samples::ZERO..Samples::new(now)))
             .is_err()
         {
@@ -1366,6 +1228,9 @@ fn write_silence<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ToSink;
+    use crate::take_writer::SinkWriter;
+    use tutti_buffers::{Sink, SinkFailed};
     use tutti_units::Bpm;
 
     /// A sink that keeps what it is written.
@@ -1400,10 +1265,9 @@ mod tests {
 
         let kept = Arc::new(Mutex::new(Vec::new()));
         let map = Arc::new(TempoMap::constant(Bpm::of(120.0)).unwrap());
-        let pump = Pump {
+        let pump = Pump::<ToSink<Keep>, f32> {
             reader,
-            sink: Box::new(Keep(Arc::clone(&kept))),
-            path: None,
+            writer: SinkWriter::open(Keep(Arc::clone(&kept)), ChannelLayout::MONO).unwrap(),
             window: Window {
                 start: Frame::new(0),
                 end: Some(Frame::new(250)),
@@ -1419,32 +1283,19 @@ mod tests {
             shared: Arc::default(),
             stop: Arc::default(),
         };
-        let mut takes = Takes::new();
         let handle = TransportHandle::new(tutti_timeline::Transport::new(SampleRate::SR_48K));
         let id = handle.next_take_id();
-        let report = Report::new(&takes, id, Arc::default(), Recorder::new(handle, id));
+        let (reply, _answer) = oneshot::channel();
+        let report = Report::new(reply, Arc::default(), Recorder::new(handle, id));
         let executor = tutti_platform::Executor::new();
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (_bell, mut listener) = bells.bell();
         // Every frame is in the tap and the punch-out is inside them: the pump runs to
         // its end in one poll, with nothing to await.
-        let mut pumping = Box::pin(async move {
-            let ended = pump.run(&report, &mut listener).await;
-            report.end(ended);
-        });
+        let mut pumping = Box::pin(pump.run(&report, &mut listener));
         let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-        assert!(
-            pumping.as_mut().poll(&mut cx).is_ready(),
-            "the pump awaited a tap that held every frame it needed"
-        );
-        let mut events = Vec::new();
-        takes.land(&mut events);
-        let [
-            SessionEvent::Take(TakeEvent::Started { .. }),
-            SessionEvent::Take(TakeEvent::Finished { recorded, .. }),
-        ] = events.as_slice()
-        else {
-            panic!("not a start then a finish: {events:?}");
+        let Poll::Ready(Ok(recorded)) = pumping.as_mut().poll(&mut cx) else {
+            panic!("the pump awaited a tap that held every frame it needed");
         };
         let kept = kept.lock();
         assert_eq!(kept.len(), 250);
