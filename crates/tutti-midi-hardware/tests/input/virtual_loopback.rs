@@ -57,10 +57,20 @@ fn listed(io: &MidiSession, spec: &VirtualSpec, input: bool) -> DeviceInfo {
     })
 }
 
+/// A note on key `key`: MIDI 1.0 on Windows MIDI Services, MIDI 2.0 elsewhere.
+#[cfg_attr(
+    midi_backend = "midi_services",
+    allow(unused_variables, reason = "MIDI 1.0 velocity does not vary")
+)]
+fn note(key: u8, step: u16) -> Ump {
+    #[cfg(midi_backend = "midi_services")]
+    return tutti_fixtures::midi::m1_note_on(MidiChannel::of(1), key, tutti_ump::U7::of(0x40));
+    #[cfg(not(midi_backend = "midi_services"))]
+    note_on(MidiChannel::of(1), key, 0x8000 + step)
+}
+
 fn notes() -> Vec<Ump> {
-    (0..5)
-        .map(|n| note_on(MidiChannel::of(1), 60 + n, 0x8000 + u16::from(n)))
-        .collect()
+    (0..5).map(|n| note(60 + n, u16::from(n))).collect()
 }
 
 /// What a virtual endpoint is sent arrives at a session input connected to it, in
@@ -82,7 +92,7 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
     };
     graph.attach(inlet);
     // A probe on a key no test asserts on, so a late one is never a test note.
-    let probe = note_on(MidiChannel::of(1), 59, 0x8000);
+    let probe = note(59, 0);
     graph.ready(|| endpoint.send(probe).expect("sends"), PATIENCE);
 
     let sent = notes();
@@ -95,9 +105,8 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
 /// What a session output sends to a virtual endpoint arrives at the
 /// endpoint's producer, in order, as the events of a device input.
 ///
-/// Not on Windows MIDI Services, which describes every endpoint as MIDI 1.0 for now: the
-/// session's output translates the MIDI 2.0 notes to MIDI 1.0 for it.
-#[cfg(not(midi_backend = "midi_services"))]
+/// Windows MIDI Services sends MIDI 1.0 notes: until MS-4 every MIDI Services endpoint is
+/// listed as MIDI 1.0, so the session output translates MIDI 2.0 ones.
 #[test]
 fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     let executor = Executor::new();
@@ -113,7 +122,7 @@ fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
         .expect("connects");
     graph.ready(
         || {
-            let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8000))]);
+            let _ = out.queue(&[(Offset::ZERO, note(59, 0))]);
         },
         PATIENCE,
     );
@@ -122,7 +131,10 @@ fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     for ump in &sent {
         assert_eq!(out.queue(&[(Offset::ZERO, *ump)]).packets(), 1);
     }
-    assert_eq!(graph.hear(sent.len(), PATIENCE), sent);
+    // The service may deliver messages of its own to the endpoint: only the notes sent count.
+    let heard = graph.hear(sent.len(), PATIENCE);
+    let heard: Vec<Ump> = heard.into_iter().filter(|ump| sent.contains(ump)).collect();
+    assert_eq!(heard, sent);
     assert!(endpoint.is_alive());
 }
 

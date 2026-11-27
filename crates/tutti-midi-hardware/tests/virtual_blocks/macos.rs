@@ -15,7 +15,10 @@ use tutti_ump::{
 };
 
 use super::common::listener::Listener;
-use super::common::{INSTANCE, PATIENCE, main_thread, open, opening, started, two_blocks};
+
+/// A bound that only guards a hang.
+const PATIENCE: Duration = Duration::from_secs(30);
+use super::common::{INSTANCE, main_thread, open, opening, started, two_blocks};
 
 fn has_ump_endpoints() -> bool {
     tutti_fixtures::macos_major().expect("sw_vers names the macOS version") >= 15

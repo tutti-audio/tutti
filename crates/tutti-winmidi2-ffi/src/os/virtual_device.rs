@@ -43,11 +43,11 @@ pub struct VirtualDeviceSpec<'a> {
 /// A published virtual device and the app's connection to it.
 ///
 /// The connection is the device's side of the endpoint: what it sends, other applications
-/// receive, and what they send, its handler receives. Dropping it closes the connection,
-/// which removes the endpoint from the service.
+/// receive, and what they send, its handler receives. Dropping the device removes the
+/// endpoint from the service.
 #[derive(Debug)]
 pub struct VirtualDevice {
-    // Dropped first: closing the connection is what removes the endpoint.
+    // Dropped first, so the connection closes before the device object is released.
     connection: Connection,
     _device: MidiVirtualDevice,
 }

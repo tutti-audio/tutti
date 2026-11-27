@@ -56,9 +56,9 @@ impl Connection {
         .ok_or(Error::Refused {
             call: "CreateEndpointConnection",
         })?;
-        // The id is read once, so that closing never has a call to fail. A failure here leaves
-        // the connection the session made registered with it until the session closes: with no
-        // id there is nothing to disconnect it by.
+        // The id is read once, so that closing never has a call to fail. The API gives it only
+        // through the connection, so a failure here leaves the session's unopened connection
+        // registered until the session closes: with no id there is nothing to disconnect it by.
         let source: IMidiEndpointConnectionSource = windows_core::Interface::cast(&connection)
             .map_err(super::error::call("QueryInterface"))?;
         let id = call!("ConnectionId", source, ConnectionId() -> windows_core::GUID)?;

@@ -1,7 +1,6 @@
 //! What the cases of the platforms that publish Function Blocks share: the spec they
 //! declare, the endpoint they open and the session they open it beside.
 
-use std::time::Duration;
 use tutti_graph::EventInletNode;
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_hardware::{MidiHardwareError, MidiSession, VirtualEndpoint, VirtualSpec};
@@ -16,10 +15,12 @@ use tutti_ump::{BlockName, EndpointName};
 )]
 pub(crate) mod listener;
 #[path = "../input/opening.rs"]
+#[allow(
+    dead_code,
+    reason = "the opening helpers are shared with the input tests, which use more of them"
+)]
 pub(crate) mod opening;
 
-/// A bound that only guards a hang.
-pub(crate) const PATIENCE: Duration = Duration::from_secs(30);
 pub(crate) const INSTANCE: &str = "tutti-test-instance";
 
 /// `session` once its backend has started: a backend may make its client on a thread of its
