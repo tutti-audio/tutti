@@ -501,11 +501,8 @@ impl RenderLink {
     /// Drops what the render thread handed back, logging a block's failure.
     pub(crate) fn reap(&mut self) {
         while let Some(back) = self.back.pop() {
-            match back {
-                Back::Failure(BlockFault(reason)) => {
-                    tracing::warn!("the plugin failed a block: {reason}");
-                }
-                _ => {}
+            if let Back::Failure(BlockFault(reason)) = back {
+                tracing::warn!("the plugin failed a block: {reason}");
             }
         }
     }
