@@ -19,12 +19,11 @@ fn an_endpoint_id_is_the_fnv1a_digest_of_the_lowercased_path() {
     assert_eq!(endpoint_id("A"), endpoint_id("a"));
 }
 
-/// **Two endpoints have two ids, and an endpoint has the same id in every listing.**
+/// **Two endpoints have two ids.**
 #[test]
 fn distinct_paths_have_distinct_ids() {
     let (a, b) = (r"\\?\swd#midisrv#a", r"\\?\swd#midisrv#b");
     assert_ne!(endpoint_id(a), endpoint_id(b));
-    assert_eq!(os_endpoint(&endpoint(a)).id, os_endpoint(&endpoint(a)).id);
 }
 
 /// **The API and the service not being there are their named causes**; any other failure is

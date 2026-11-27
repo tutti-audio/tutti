@@ -2,8 +2,9 @@
 
 use super::{devices, endpoint_id, os, os_endpoint};
 use crate::devices::ChangeSink;
+use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{MidiHardwareError, Result};
+use crate::error::Result;
 use tutti_midi_device::{OsChange, OsDevice, PortDirection};
 use tutti_winmidi2_ffi::{Change, Error, Watcher, ensure_service_available};
 
@@ -44,13 +45,17 @@ pub(super) fn change_of(change: Change) -> OsChange {
 /// The named cause of the API or the service not being there, or the platform's own error.
 pub(super) fn start(sink: ChangeSink) -> Result<Box<dyn Watch>> {
     ensure_service_available().map_err(os)?;
-    sink.seed(devices()?)?;
+    let mut reporter = Reporter::new(sink.clone());
+    reporter.seed(devices()?)?;
     let watcher = Watcher::start(
         move |change: core::result::Result<Change, Error>| match change {
             Ok(change) => sink.send(change_of(change)),
-            Err(error) => sink.fail(MidiHardwareError::Os(error)),
+            Err(error) => sink.fail(os(error)),
         },
     )
     .map_err(os)?;
+    // The watcher replays only what is present, so an endpoint that left between the seed and
+    // its start is reported gone by the whole list.
+    reporter.report(devices()?, |_| false);
     Ok(Box::new(MidiServicesWatch { _watcher: watcher }))
 }

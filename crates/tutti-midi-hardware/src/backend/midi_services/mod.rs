@@ -156,17 +156,36 @@ impl MidiEndpoints for MidiServicesEndpoints {
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        let endpoint = resolve(id)?;
-        Ok(Box::new(input::open(
-            self.session()?,
-            &endpoint.id,
-            producer,
-        )?))
+        let input = self.connect(id, |session, endpoint| {
+            input::open(session, endpoint, producer)
+        })?;
+        Ok(Box::new(input))
     }
 
     fn open_output(&self, _started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+        let output = self.connect(id, output::open)?;
+        Ok(Box::new(output))
+    }
+}
+
+impl MidiServicesEndpoints {
+    /// Opens a connection to the endpoint `id` names with `open`, given the session and the
+    /// endpoint's device id. A failed open drops the cached session, so the next open makes
+    /// a new one (the service may have restarted), and is
+    /// [`NotFound::Endpoint`] when the endpoint left since it was resolved.
+    fn connect<T>(
+        &self,
+        id: EndpointId,
+        open: impl FnOnce(Arc<Session>, &str) -> Result<T>,
+    ) -> Result<T> {
         let endpoint = resolve(id)?;
-        Ok(Box::new(output::open(self.session()?, &endpoint.id)?))
+        open(self.session()?, &endpoint.id).map_err(|error| {
+            *self.session.lock() = None;
+            match resolve(id) {
+                Err(gone @ MidiHardwareError::NotFound(_)) => gone,
+                _ => error,
+            }
+        })
     }
 }
 
