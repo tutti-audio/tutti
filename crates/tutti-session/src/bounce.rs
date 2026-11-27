@@ -721,6 +721,10 @@ impl<N, F: Float> Bounce<N, ToFile, F> {
     /// A stem is the node's output as it leaves the node, aligned with the
     /// main output (what a bus or the main output applies downstream is not in it), at
     /// the node's own width.
+    ///
+    /// The stem's file takes only the main output's format: not its `replace`, its
+    /// resample or its seed. A re-bounce over an existing stem file needs
+    /// [`stem_with`](Self::stem_with) and a `ToFile` that states `replace`.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
         let to = ToFile::new(path, Encoding::new(self.main_output.format()));
         self.stem_with(Stem::new(node).to(to))
