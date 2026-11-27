@@ -1915,7 +1915,7 @@ impl OutputPort {
             ReportScope::FunctionBlock { .. } => ask.groups().collect(),
             _ => vec![ask.group()],
         };
-        let report = self.record.report(ask.control(), ask.scope(), groups);
+        let report = self.record.report(ask.control(), &ask.scope(), groups);
         let frames = |message: tutti_midi_ci::CiMessage| {
             message
                 .packets(ask.group())
