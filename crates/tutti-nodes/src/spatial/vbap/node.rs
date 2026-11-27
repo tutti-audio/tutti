@@ -72,7 +72,7 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// use tutti_graph::{ParamNode, Prepare, Renderer};
 /// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 ///
-/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad.into())).unwrap();
+/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
 /// let (mut renderer, ..) = Renderer::alone(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));

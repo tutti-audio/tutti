@@ -702,8 +702,8 @@ pub fn input<'a, F: Float>(
 ///
 /// - `Cells`, with a sharing `Clone`, `detached()` (own cells at the values the
 ///   cells hold now) and `from_config(&Config)`;
-/// - `Config::new(required..)`, taking the `required` entries in order (none
-///   when the block is left out), and a chained option per param, option and
+/// - `Config::new(required..)`, taking the `required` entries in order, each as
+///   `impl Into<its type>` (none when the block is left out), and a chained option per param, option and
 ///   setting (`.field(value)`; `.field([a, b])` for a counted param) for its
 ///   initial value;
 /// - the params' ports, [`ParamSet`] and [`HasParam`] impls the rows form writes;
@@ -1101,9 +1101,9 @@ macro_rules! declare_params {
             /// The configuration from its required values, every param, option and setting at its declared default.
             #[must_use]
             #[allow(clippy::new_without_default)]
-            pub fn new($($req: $rty),*) -> Self {
+            pub fn new($($req: impl ::core::convert::Into<$rty>),*) -> Self {
                 Self {
-                    $($req,)*
+                    $($req: $req.into(),)*
                     $($field: $crate::declare_params!(@fill [$($count)?] $default),)*
                     $($oname: $odefault,)*
                     $($sname: $sdefault,)*
