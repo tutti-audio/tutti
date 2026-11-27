@@ -1593,8 +1593,12 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
-    // A read of the plugin sends what no block has carried, ahead of itself.
-    let _ = ipc.parameter(main, ParamId::new(3));
+    // A read of the plugin as an answer sends what no block has carried, ahead
+    // of itself.
+    drop(tutti_plugin_types::AnyThread::parameter_value(
+        &ipc,
+        ParamId::new(3),
+    ));
     assert!(
         server.wait_for(|got| sets(got) == 1),
         "the first write reaches the server"
@@ -1964,8 +1968,8 @@ fn a_loaded_state_reaches_the_server_as_one_object() {
     );
 }
 
-/// **A read after writes no block has carried asks the audio lane to send
-/// them, in order with the blocks**: a block pushed before the write reaches the
+/// **A read answered as an `Answer` after writes no block has carried asks the
+/// audio lane to send them, in order with the blocks**: a block pushed before the write reaches the
 /// server first, and the parameters follow it as their own message. The read
 /// never waits for them.
 #[test]
@@ -1980,7 +1984,7 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.5)),
         Ok(())
     );
-    let _ = ipc.parameter(main_thread(), ParamId::new(1));
+    let read = AnyThread::parameter_value(&ipc, ParamId::new(1));
     tutti_fixtures::wait_until(
         "the flush to reach the server",
         Duration::from_secs(30),
@@ -2006,6 +2010,7 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         unreachable!()
     };
     assert_eq!(last_change(param_changes, ParamId::new(1)), Some(0.5));
+    drop(read);
 }
 
 /// The editor instance's mirror, on a scripted stand-in for the plugin's

@@ -2708,7 +2708,7 @@ fn unapplied_after_flush(answer: crate::ApplyOutcome) -> u64 {
         .expect("declared");
     // The read asks the audio lane to flush first; the control lane then waits
     // for the lane to end the flush.
-    let _ = audio.parameter(id);
+    drop(audio.parameter_answer(id));
     tutti_fixtures::wait_until("the flush to end", NOTICE_TIMEOUT, || {
         answer == crate::ApplyOutcome::Applied || audio.unapplied_edits() > 0
     });
@@ -2820,7 +2820,7 @@ fn write_and_ask_flush(audio: &super::audio::AudioBridge) {
     audio
         .write_parameter(ParamId::new(1), tutti_units::Normalized::of(0.5))
         .expect("declared");
-    let _ = audio.parameter_answer(ParamId::new(1));
+    drop(audio.parameter_answer(ParamId::new(1)));
 }
 
 fn pending(audio: &super::audio::AudioBridge) -> usize {

@@ -541,7 +541,7 @@ impl AudioBridge {
     /// The host's writes the plugin has not applied, newest per parameter: from
     /// the writer's own record, so it never waits for the server
     /// ([`EditWriter::pending`]). Empty before the first write.
-    pub(crate) fn pending_edits(&self) -> Vec<(ParamId, Normalized)> {
+    pub fn pending_edits(&self) -> Vec<(ParamId, Normalized)> {
         self.host_edits
             .lock()
             .as_ref()
@@ -798,10 +798,9 @@ impl AudioBridge {
     ///
     /// The plugin is dead, refused, or the transfer stalled.
     pub fn save_state(&self, state_use: StateUse) -> std::result::Result<Vec<u8>, StateError> {
-        // The writes no block has carried ride the audio lane ahead of the
-        // request, never waited for: the caller states what is not yet applied
-        // ([`pending_edits`](Self::pending_edits)).
-        let _ = self.request_flush();
+        // The writes no block has applied are not in the bytes: the caller
+        // states them beside it ([`pending_edits`](Self::pending_edits)), read
+        // before the request.
         // A refusal to answer is not an empty state: collapsing it to `vec![]`
         // is what let an unsaved preset look like a plugin that had nothing to
         // save.
@@ -1278,9 +1277,8 @@ impl AudioBridge {
     /// query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn parameter(&self, param_id: ParamId) -> Option<Normalized> {
-        // Asked of the audio lane, never waited for: a read states what is not
-        // yet applied ([`pending_edits`](Self::pending_edits)).
-        let _ = self.request_flush();
+        // A read answers the plugin's own value: the writes no block has
+        // applied are stated beside it ([`pending_edits`](Self::pending_edits)).
         let read = self.call(GetParameter { param_id }, Deadline::Query, Object::None);
         read.ok().and_then(|read| read.value)
     }
