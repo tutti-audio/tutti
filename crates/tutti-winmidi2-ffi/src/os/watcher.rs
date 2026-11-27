@@ -57,6 +57,10 @@ impl Watcher {
     ///
     /// The service reports every endpoint already present as an `Added` first.
     ///
+    /// `on_change` is dropped when the service releases the last reference to its handlers,
+    /// which can be on a thread of the service after the watcher is dropped, so its `Drop`
+    /// must not panic.
+    ///
     /// # Errors
     ///
     /// `Error::ApiMissing` when the API is not present, `Error::Call` when a call fails and
@@ -110,6 +114,15 @@ impl Watcher {
                                 .map(Change::Added);
                             deliver(&sink, change);
                         });
+                    } else {
+                        contained(|| {
+                            deliver(
+                                &sink,
+                                Err(Error::Refused {
+                                    call: "event arguments",
+                                }),
+                            )
+                        });
                     }
                     Ok(())
                 },
@@ -136,6 +149,15 @@ impl Watcher {
                                 .map(|id| Change::Removed(id.to_string()));
                             deliver(&sink, change);
                         });
+                    } else {
+                        contained(|| {
+                            deliver(
+                                &sink,
+                                Err(Error::Refused {
+                                    call: "event arguments",
+                                }),
+                            )
+                        });
                     }
                     Ok(())
                 },
@@ -160,6 +182,15 @@ impl Watcher {
                                 .and_then(|device| loopbacks.describe(&device))
                                 .map(Change::Updated);
                             deliver(&sink, change);
+                        });
+                    } else {
+                        contained(|| {
+                            deliver(
+                                &sink,
+                                Err(Error::Refused {
+                                    call: "event arguments",
+                                }),
+                            )
                         });
                     }
                     Ok(())

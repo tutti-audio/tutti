@@ -67,6 +67,13 @@ impl Connection {
         >::new(move |_, args: Ref<MidiMessageReceivedEventArgs>| {
             if let Some(args) = args.as_ref() {
                 contained(|| deliver(&handler, clock, args));
+            } else {
+                contained(|| {
+                    let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
+                    (*handler)(Err(Error::Refused {
+                        call: "message arguments",
+                    }));
+                });
             }
             Ok(())
         });
