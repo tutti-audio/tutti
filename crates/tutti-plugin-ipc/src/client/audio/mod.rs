@@ -521,19 +521,32 @@ impl AudioBridge {
     }
 
     /// Makes every write made so far stale: a state or preset load replaced the
-    /// values they were written against, so none still in its slot lands after it.
+    /// values they were written against, so none still in its slot lands after it,
+    /// and none the lane owes again (a request the server did not hand over) is
+    /// sent: the lane voids what it drained in an earlier epoch before it builds
+    /// the next request.
     ///
     /// **The overlap window:** a write the audio lane has already taken into a
-    /// block it is sending, or kept in `carry_write` for the next, is past the
-    /// slots and is not voided. The load rides the control lane, which waits for
-    /// the blocks pushed before it, so such a write reaches the server before the
-    /// load and the load replaces it; one in a block the lane sends after the
-    /// load was asked for can land after it, as a block overlaps any host call
-    /// (the in-process path has the same window).
+    /// request it is sending is past the slots and is not voided. The load rides
+    /// the control lane, which waits for the blocks pushed before it, so such a
+    /// write reaches the server before the load and the load replaces it; one in
+    /// a block the lane sends after the load was asked for can land after it, as
+    /// a block overlaps any host call (the in-process path has the same window).
     pub(crate) fn reset_host_edits(&self) {
         if let Some(table) = self.host_edits.lock().as_mut() {
             table.writer.reset();
         }
+    }
+
+    /// The host's writes the plugin has not applied, newest per parameter: from
+    /// the writer's own record, so it never waits for the server
+    /// ([`EditWriter::pending`]). Empty before the first write.
+    pub fn pending_edits(&self) -> Vec<(ParamId, Normalized)> {
+        self.host_edits
+            .lock()
+            .as_ref()
+            .map(|table| table.writer.pending())
+            .unwrap_or_default()
     }
 
     /// Asks the audio lane to send the writes no block has carried yet, in order
@@ -563,19 +576,6 @@ impl AudioBridge {
                 table.written = true;
             }
             None
-        }
-    }
-
-    /// Has the plugin apply the writes no block has carried yet, before the
-    /// caller's next request: they go on the audio lane, in order with the
-    /// blocks pushed before them, and the server applies them through the
-    /// format's own route between blocks. Waits up to a query's wait for the
-    /// answer. Control side.
-    fn flush_host_edits(&self) {
-        if let Some(applied) = self.request_flush() {
-            // The audio lane counts a flush that did not deliver
-            // ([`Channels::note_unapplied_edits`]); this waits for it to end.
-            let _ = await_reply(applied, self.lifecycle.timeouts().param_wait());
         }
     }
 
@@ -798,8 +798,9 @@ impl AudioBridge {
     ///
     /// The plugin is dead, refused, or the transfer stalled.
     pub fn save_state(&self, state_use: StateUse) -> std::result::Result<Vec<u8>, StateError> {
-        // What the host wrote and no block has carried is in the state.
-        self.flush_host_edits();
+        // The writes no block has applied are not in the bytes: the caller
+        // states them beside it ([`pending_edits`](Self::pending_edits)), read
+        // before the request.
         // A refusal to answer is not an empty state: collapsing it to `vec![]`
         // is what let an unsaved preset look like a plugin that had nothing to
         // save.
@@ -1071,17 +1072,23 @@ impl AudioBridge {
         &self,
         state_use: StateUse,
     ) -> Answer<std::result::Result<tutti_plugin_types::PluginState, StateError>> {
-        // The lane waits for the flush, as a blocking save waits for it itself.
+        // The lane sends the flush ahead of the save and does not wait for the
+        // writes to apply: what is pending is stated beside the bytes, read
+        // before the request.
+        let pending = self.pending_edits();
         let flush = self.request_flush();
         self.answer_with(
             SaveState { state_use },
             Deadline::State,
             flush,
             Object::State,
-            |outcome| {
+            move |outcome| {
                 Some(
                     outcome
-                        .map(|received| tutti_plugin_types::PluginState::new(received.object))
+                        .map(|received| tutti_plugin_types::PluginState {
+                            bytes: received.object,
+                            pending,
+                        })
                         .map_err(state_lost),
                 )
             },
@@ -1144,17 +1151,21 @@ impl AudioBridge {
         &self,
         param_id: ParamId,
     ) -> Answer<Option<tutti_plugin_types::PluginValue>> {
+        let pending = self
+            .pending_edits()
+            .into_iter()
+            .find_map(|(id, value)| (id == param_id).then_some(value));
         let flush = self.request_flush();
         self.call_answer(
             GetParameter { param_id },
             Deadline::Query,
             flush,
             Object::None,
-            |read| {
+            move |read| {
                 unless_refused(read).map(|read| {
                     read.ok()
                         .and_then(|read| read.value)
-                        .map(tutti_plugin_types::PluginValue::new)
+                        .map(|plugin| tutti_plugin_types::PluginValue { plugin, pending })
                 })
             },
         )
@@ -1266,8 +1277,8 @@ impl AudioBridge {
     /// query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn parameter(&self, param_id: ParamId) -> Option<Normalized> {
-        // What the host wrote and no block has carried is read back.
-        self.flush_host_edits();
+        // A read answers the plugin's own value: the writes no block has
+        // applied are stated beside it ([`pending_edits`](Self::pending_edits)).
         let read = self.call(GetParameter { param_id }, Deadline::Query, Object::None);
         read.ok().and_then(|read| read.value)
     }

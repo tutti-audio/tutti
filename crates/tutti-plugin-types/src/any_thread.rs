@@ -124,7 +124,11 @@ pub trait AnyThread: Send + Sync {
     /// not wait for it. It never waits for the plugin, is never dropped for a
     /// locked instance or for lack of room, and a newer write to the same
     /// parameter replaces one no block has taken. **A served** plugin's is
-    /// stored in its slot on the client and sent with the next block.
+    /// stored in its slot on the client and sent with the next block; it is
+    /// applied once the server answers the block (or flush) that carried it as
+    /// handed to the plugin, and one the server did not hand over is sent again
+    /// with the next, unless a newer write or a state or preset load has
+    /// replaced it.
     ///
     /// A write to a plugin that is lost is refused with
     /// [`ParamWriteError::Lost`], in both hostings, and is not counted in
