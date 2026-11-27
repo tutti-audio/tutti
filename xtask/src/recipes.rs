@@ -377,6 +377,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "line coverage of the workspace as HTML (needs cargo-llvm-cov)",
     ),
     (
+        "winmidi2-bindings",
+        "",
+        "regenerate tutti-winmidi2-ffi's bindings from the Windows MIDI Services winmd (downloads the preview nupkg with curl, checks its SHA-256, needs unzip)",
+    ),
+    (
         "conformance-inventory",
         "[clap|vst3|midi|sf2]",
         "regenerate an inventory's generated columns from the spec source (vst3: the vendored SDK; midi: TUTTI_MIDI_SPECS; sf2: TUTTI_SF2_SPEC)",
@@ -547,6 +552,14 @@ struct Planner<'a> {
 
 const TARGET: &str = "x86_64-pc-windows-msvc";
 
+/// The Windows MIDI Services API's metadata: Preview 11 (`0.99.92-preview.11`), the preview
+/// the API is locked at, from microsoft/MIDI's `inbox-preview-11` release (not on nuget.org),
+/// and the package's SHA-256.
+const WINMIDI2_URL: &str = "https://github.com/microsoft/MIDI/releases/download/inbox-preview-11/Windows.Devices.Midi2.0.99.92-preview.11.nupkg";
+const WINMIDI2_SHA256: &str = "13afc6e6da2adac309ab8c174352f46f1c0ebe2d79e65475bd6274defb73df74";
+/// The winmd's path in the package.
+const WINMIDI2_WINMD: &str = "ref/native/Windows.Devices.Midi2.winmd";
+
 /// The dated nightly CI pins for the docs.rs build; `public-api` reads rustdoc
 /// JSON from the same one.
 const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
@@ -625,6 +638,37 @@ impl Planner<'_> {
                 Step::RunAll(cmd)
             });
         }
+    }
+
+    /// The Windows MIDI Services bindings: the preview release's package, checked against
+    /// its hash before anything in it is read, then the one winmd out of it to the
+    /// generator. Nothing is kept in the repo.
+    fn winmidi2_bindings(&mut self) {
+        let dir = self.ctx.target.join("winmidi2-bindings");
+        let package = dir.join("Windows.Devices.Midi2.nupkg");
+        let hashes = dir.join("nupkg.sha256");
+        let winmd = dir.join("x").join(WINMIDI2_WINMD);
+        // Written first: it creates the directory the download goes in.
+        self.out.push(Step::WriteFile {
+            path: hashes.clone(),
+            contents: format!("{WINMIDI2_SHA256}  {}\n", package.display()),
+        });
+        let quoted = |p: &std::path::Path| format!("'{}'", p.display());
+        let check = if cfg!(target_os = "macos") {
+            "shasum -a 256 --check"
+        } else {
+            "sha256sum --check --strict"
+        };
+        self.lines(&[
+            format!("curl --fail --silent --show-error --location --output {} {WINMIDI2_URL}", quoted(&package)),
+            format!("{check} {}", quoted(&hashes)),
+            format!("unzip -o -q {} {WINMIDI2_WINMD} -d {}", quoted(&package), quoted(&dir.join("x"))),
+            format!(
+                "cargo run --locked -p tutti-winmidi2-bindgen -- {} crates/tutti-winmidi2-ffi/src/bindings.rs",
+                quoted(&winmd)
+            ),
+            "cargo fmt -p tutti-winmidi2-ffi".to_owned(),
+        ]);
     }
 
     /// A dependency: planned once per invocation, with no arguments.
@@ -814,6 +858,7 @@ impl Planner<'_> {
                 let [f] = Self::params(name, args, ["clap"])?;
                 self.out.push(Step::ConformanceInventory(f));
             }
+            "winmidi2-bindings" => self.winmidi2_bindings(),
             "prune-building" => self.out.push(Step::PruneBuilding),
             "write-public-items" => self.out.push(Step::WritePublicItems),
             "fmt" => self.lines(&["cargo fmt --all --check"]),
@@ -989,6 +1034,7 @@ const WINDOWS: &[&str] = &[
     "-p tutti-vst2-host --all-targets",
     "-p tutti-vst3-host -p tutti-plugin-server -p tutti-plugin-probe --lib --bins",
     "-p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
+    "-p tutti-winmidi2-ffi --features services-tests --all-targets",
 ];
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.

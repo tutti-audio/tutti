@@ -46,6 +46,11 @@ pub(super) const HOMES: &[(&str, &str, Option<&str>)] = &[
         None,
     ),
     ("tutti-winmm-ffi", "all winmm MIDI unsafe", None),
+    (
+        "tutti-winmidi2-ffi",
+        "all Windows MIDI Services unsafe",
+        None,
+    ),
     ("tutti-clap-ffi", "all CLAP unsafe", None),
     ("tutti-vst3-ffi", "all VST3 unsafe", None),
     ("tutti-au-ffi", "all AU unsafe", None),
@@ -258,7 +263,7 @@ mod tests {
         let r = check(&clean());
         assert!(r.passed(), "{:?}", r.findings);
         assert!(
-            r.out[0].starts_with("check-ffi: ok (32 crates"),
+            r.out[0].starts_with("check-ffi: ok (33 crates"),
             "{:?}",
             r.out
         );

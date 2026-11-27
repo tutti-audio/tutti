@@ -1,0 +1,16 @@
+# The public items of tutti-winmidi2-ffi: one row per `pub` item its source declares, `<kind> <path>`,
+# sorted (`cargo xtask write-public-items` rewrites this file from the tree).
+# A new public item needs its row in the change that adds it, argued in the pull request;
+# a row with no item is deleted, so the list only shrinks on its own.
+enum os::endpoint::Loopback
+enum os::error::Error
+fn os::connection::Connection::close
+fn os::connection::Connection::send
+fn os::endpoint::endpoints
+fn os::endpoint::ensure_service_available
+fn os::session::Session::close
+fn os::session::Session::connect
+fn os::session::Session::create
+struct os::connection::Connection
+struct os::endpoint::Endpoint
+struct os::session::Session

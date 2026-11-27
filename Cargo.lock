@@ -3809,6 +3809,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutti-winmidi2-bindgen"
+version = "0.0.0"
+dependencies = [
+ "windows-bindgen",
+]
+
+[[package]]
+name = "tutti-winmidi2-ffi"
+version = "0.0.1"
+dependencies = [
+ "thiserror 2.0.21",
+ "tutti-platform",
+ "tutti-ump",
+ "windows-collections",
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "tutti-winmm-ffi"
 version = "0.0.1"
 dependencies = [
@@ -4064,6 +4082,17 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-future",
  "windows-numerics",
+]
+
+[[package]]
+name = "windows-bindgen"
+version = "0.65.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5308a9704923cabf7c090f0c00a8328dec5551cee858b0b6347e5465e622a6f1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows-threading",
 ]
 
 [[package]]

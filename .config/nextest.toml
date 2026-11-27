@@ -32,6 +32,7 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [test-groups]
 sequencer = { max-threads = 4 }
 gs-synth = { max-threads = 1 }
+midi-services-loopback = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'package(tutti-midi-hardware) and test(/backend::alsa::tests::/)'
@@ -44,6 +45,13 @@ test-group = 'sequencer'
 [[profile.default.overrides]]
 filter = 'test(/^synth_open::/) | (package(tutti-midi-hardware) & test(/^output::/))'
 test-group = 'gs-synth'
+
+# Windows MIDI Services' two diagnostic loopback endpoints are one system-wide
+# pair: every session listening on an endpoint receives everything sent to it.
+# The loopback suite runs one test at a time, so a test reads only its own words.
+[[profile.default.overrides]]
+filter = 'package(tutti-winmidi2-ffi) & binary(winmidi2)'
+test-group = 'midi-services-loopback'
 
 # `cargo xtask conformance` joins each test's result to the spec rows it tags.
 # CI runs the plugin test tiers with this profile and uploads the file per OS.

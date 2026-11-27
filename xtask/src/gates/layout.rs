@@ -20,7 +20,8 @@
 //! the point (a layer alone would let a layer-1 crate depend on any layer-0
 //! one), and a few named bans follow in [`check`].
 //!
-//! The codec libraries are `tutti-codec`'s alone, `coreaudio_sys` is named in
+//! The codec libraries are `tutti-codec`'s alone, the WinRT runtime libraries are
+//! `tutti-winmidi2-ffi`'s alone, `coreaudio_sys` is named in
 //! [`COREAUDIO_HOMES`]'s library code alone, and `winnow` is named in
 //! [`WINNOW_HOMES`]'s parser modules alone; in `tutti-codec`'s manifest a
 //! `decode-*` feature enables no encoder library and an `encode-*` feature no
@@ -55,6 +56,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
         "tutti-winmm-ffi",
+        "tutti-winmidi2-ffi",
         "tutti-midi-protocol",
         "tutti-midi-ci",
         "tutti-curve",
@@ -129,6 +131,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-alsa-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-coremidi-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-winmm-ffi", &["tutti-ump", "tutti-platform"]),
+    ("tutti-winmidi2-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-ump", &["tutti-units", "tutti-music"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
@@ -316,6 +319,13 @@ const ONLY: &[(&str, &[&str])] = &[
 const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc"];
 /// The platform libraries `tutti-platform` alone names, in either spelling.
 const PLATFORM_LIBS: &[&str] = &["web-time", "web_time", "thread-priority", "thread_priority"];
+/// The WinRT runtime libraries `tutti-winmidi2-ffi` alone names, in either spelling.
+const WINRT_LIBS: &[&str] = &[
+    "windows-core",
+    "windows_core",
+    "windows-collections",
+    "windows_collections",
+];
 const ENCODERS: &[&str] = &["flacenc", "aifc", "md-5"];
 
 /// A crate that names `winnow`, and the parser modules that may.
@@ -540,6 +550,19 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
             if PLATFORM_LIBS.contains(&dep.as_str()) {
                 bad.push(format!(
                     "{dep} is a {} dependency of {}; the platform libraries are tutti-platform's alone",
+                    kind.label(),
+                    p.name
+                ));
+            }
+        }
+    }
+
+    // The WinRT runtime libraries stay behind tutti-winmidi2-ffi, for every kind of dependency.
+    for p in pkgs.iter().filter(|p| p.name != "tutti-winmidi2-ffi") {
+        for (dep, kind) in &p.deps {
+            if WINRT_LIBS.contains(&dep.as_str()) {
+                bad.push(format!(
+                    "{dep} is a {} dependency of {}; the WinRT runtime libraries are tutti-winmidi2-ffi's alone",
                     kind.label(),
                     p.name
                 ));
@@ -953,7 +976,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (8 members, 51 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (8 members, 52 ranked)");
     }
 
     #[test]
@@ -1137,6 +1160,7 @@ mod tests {
         for (dir, krate) in [
             ("crates/tutti-alsa-ffi", "tutti-alsa-ffi"),
             ("crates/tutti-coremidi-ffi", "tutti-coremidi-ffi"),
+            ("crates/tutti-winmidi2-ffi", "tutti-winmidi2-ffi"),
         ] {
             let r = os(
                 dir,
@@ -1193,6 +1217,31 @@ mod tests {
             "crates/tutti-platform",
             "tutti-platform",
             "[dependencies]\nweb-time = \"1\"\nthread-priority = \"3\"\n",
+        ));
+        let r = run(&v);
+        assert!(r.passed(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn the_winrt_libraries_are_the_winmidi2_crates_alone() {
+        let r = with((
+            "crates/tutti-graph",
+            "tutti-graph",
+            "[dependencies]\nwindows-core = \"0.62\"\n[dev-dependencies]\nwindows-collections = \"0.3\"\n",
+        ));
+        for lib in ["windows-core is a normal", "windows-collections is a dev"] {
+            assert!(
+                r.findings.iter().any(|l| l.contains(lib)
+                    && l.contains("the WinRT runtime libraries are tutti-winmidi2-ffi's alone")),
+                "{lib}: {:?}",
+                r.findings
+            );
+        }
+        let mut v = base();
+        v.push((
+            "crates/tutti-winmidi2-ffi",
+            "tutti-winmidi2-ffi",
+            "[dependencies]\nwindows-core = \"0.62\"\nwindows-collections = \"0.3\"\n",
         ));
         let r = run(&v);
         assert!(r.passed(), "{:?}", r.findings);
