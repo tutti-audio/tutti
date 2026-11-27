@@ -744,8 +744,8 @@ fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
 #[test]
 fn a_report_inquiry_to_us_is_handed_to_the_caller_unanswered_whatever_its_address() {
     // §9.5: the report is of state the caller holds, so the device sends nothing;
-    // a Channel is never refused, as an inquiry reaches the device on a Group of
-    // its Function Block.
+    // a Channel is never refused, as an inquiry reaches the device on the first
+    // Group of its Function Block.
     for control in [
         DataControl::Capabilities,
         DataControl::NonDefault,
