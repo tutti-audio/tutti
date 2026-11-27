@@ -3,8 +3,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, channel};
-use std::time::Duration;
 
+use crate::deadline::Deadline;
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, EndpointInfoNotification, EndpointName,
     FunctionBlockCount, FunctionBlockInfo, FunctionBlocks, ManufacturerId, Message,
@@ -15,9 +15,6 @@ use tutti_winmidi2_ffi::{
     Block, Change, Connection, Endpoint, Session, VirtualDevice, VirtualDeviceSpec, Watcher,
     endpoints, ensure_service_available,
 };
-
-/// Only a hang guard: it bounds a wait for an event that never comes, and is not a speed.
-const HANG_GUARD: Duration = Duration::from_secs(60);
 
 /// The blocks declared: block 0 an output over Groups 2 and 3, block 1 a bidirectional
 /// MIDI 1.0 port over Group 5, both named.
@@ -131,15 +128,17 @@ fn listed(name: &str) -> (Endpoint, Watcher, Receiver<Change>) {
         }
     })
     .expect("the watcher starts");
+    let deadline = Deadline::start();
+    let mut seen = Vec::new();
     loop {
-        match changes
-            .recv_timeout(HANG_GUARD)
-            .unwrap_or_else(|e| panic!("{name} is never listed: {e}"))
+        match deadline
+            .recv(&changes)
+            .unwrap_or_else(|e| panic!("{name} is never listed among {seen:?}: {e}"))
         {
             Change::Added(endpoint) | Change::Updated(endpoint) if endpoint.name == name => {
                 return (endpoint, watcher, changes);
             }
-            _ => {}
+            change => seen.push(change),
         }
     }
 }
@@ -167,10 +166,11 @@ fn notes() -> Vec<Ump> {
 /// The first `want` of `sent` that arrive on `arrived`, in the order they do: the service's
 /// own messages among them are not notes.
 fn hear(arrived: &Receiver<Ump>, sent: &[Ump]) -> Vec<Ump> {
+    let deadline = Deadline::start();
     let mut heard = Vec::new();
     while heard.len() < sent.len() {
-        let ump = arrived
-            .recv_timeout(HANG_GUARD)
+        let ump = deadline
+            .recv(arrived)
             .unwrap_or_else(|e| panic!("{} of {} notes arrived: {e}", heard.len(), sent.len()));
         if sent.contains(&ump) {
             heard.push(ump);
@@ -212,15 +212,18 @@ fn a_peer_discovers_the_function_blocks_as_declared() {
     )
     .expect("the service takes the discovery");
 
+    let deadline = Deadline::start();
     let mut infos: BTreeMap<u8, FunctionBlockInfo> = BTreeMap::new();
     let mut names: BTreeMap<u8, String> = BTreeMap::new();
+    let mut heard = Vec::new();
     while infos.len() < published.declared.len() || names.len() < published.declared.len() {
-        let ump = arrived.recv_timeout(HANG_GUARD).unwrap_or_else(|e| {
+        let ump = deadline.recv(&arrived).unwrap_or_else(|e| {
             panic!(
-                "{infos:?} and {names:?} are the blocks heard of {:?}: {e}",
+                "{infos:?} and {names:?} are the blocks heard of {:?}, in {heard:x?}: {e}",
                 published.declared
             )
         });
+        heard.push(ump);
         match ump.decode() {
             Ok(Message::Stream(Stream::FunctionBlockInfo(info))) => {
                 if let Some(id) = info.id.value() {
@@ -271,9 +274,10 @@ fn dropping_the_device_removes_its_endpoint() {
     let published = publish("dropped");
     let (endpoint, _watcher, changes) = listed(&published.name);
     drop(published.device);
+    let deadline = Deadline::start();
     loop {
-        match changes
-            .recv_timeout(HANG_GUARD)
+        match deadline
+            .recv(&changes)
             .unwrap_or_else(|e| panic!("{} is never removed: {e}", published.name))
         {
             Change::Removed(id) if id.eq_ignore_ascii_case(&endpoint.id) => break,

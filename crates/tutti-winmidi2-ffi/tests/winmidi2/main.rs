@@ -4,6 +4,8 @@
 //! binary, and a missing one is a failure with its name, never a skip.
 
 #[cfg(all(windows, feature = "services-tests"))]
+mod deadline;
+#[cfg(all(windows, feature = "services-tests"))]
 mod loopback;
 #[cfg(all(windows, feature = "services-tests"))]
 mod virtual_device;
