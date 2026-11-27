@@ -314,6 +314,15 @@ pub enum TargetError {
         /// The output's width.
         channels: ChannelLayout,
     },
+    /// A [`SinkTarget`](crate::SinkTarget) whose sink is not as wide as the audio the output
+    /// reads. A sink takes the output's width unconverted, so it is refused, never folded.
+    #[error("the sink is {sink:?} wide and the audio it is fed {feed:?}")]
+    SinkWidth {
+        /// The sink's width.
+        sink: ChannelLayout,
+        /// The width of the audio the output reads.
+        feed: ChannelLayout,
+    },
     /// Another output writes the same path.
     #[error("output {other} writes the same path")]
     SamePath {

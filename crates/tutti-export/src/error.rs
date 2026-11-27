@@ -147,6 +147,17 @@ pub enum RenderError {
         why: TargetError,
     },
 
+    /// A caller's sink ([`SinkTarget`](crate::SinkTarget)) failed on a write or on closing,
+    /// and `source` is its own error, type-erased. No file of the render is put in place;
+    /// what the sink already received stays with it.
+    #[error("output {output}'s sink failed: {source}")]
+    Sink {
+        /// The output's index.
+        output: usize,
+        /// The sink's error.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// A render was given no outputs.
     #[error("a render needs at least one output")]
     NoOutputs,
