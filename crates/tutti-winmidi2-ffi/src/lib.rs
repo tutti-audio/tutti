@@ -3,9 +3,9 @@
 //! `tutti-midi-hardware` makes into the `Windows.Devices.Midi2` API lives here, behind
 //! safe handles; the backend above it is `#![forbid(unsafe_code)]` and holds the logic.
 //!
-//! The crate takes and returns `tutti-ump`'s `Ump` for a message and `tutti-platform`'s
-//! `Instant` for a time: the service carries UMP words as they are, and its timestamps are
-//! points on the clock `Instant` reads.
+//! The crate takes and returns `tutti-ump`'s `Ump` for a message, its field types for what a
+//! virtual device declares, and `tutti-platform`'s `Instant` for a time: the service carries
+//! UMP words as they are, and its timestamps are points on the clock `Instant` reads.
 //!
 //! The crate is empty off Windows, except the timestamp arithmetic, which has no OS call
 //! and is tested on every target.
@@ -19,7 +19,8 @@
 //! | `Session` | the app's session with the service, closed by `close` or by dropping it |
 //! | `Connection` | an open connection to an endpoint, made by `Session::connect`: `send` a `Ump` now or at an `Instant`, and a callback that receives each `Ump` with its `Instant`, or the `Error` that kept a message from being read, on the service's thread behind a panic guard; `close`, or dropping it, removes the handler and disconnects it, and a closed connection refuses a send with `Error::Closed` |
 //! | `Watcher`, `Change` | the service's endpoint list followed: each endpoint added, removed or updated, on the service's thread behind a panic guard, and the watcher stopping on its own as an `Error`; dropping it removes its handlers and stops it |
-//! | `Error` | the named causes: the API missing, the service unavailable, a call that failed or was refused, a closed connection, a full buffer, a time that is not a timestamp, a message that is not whole, a watcher that stopped |
+//! | `VirtualDeviceSpec`, `Block`, `VirtualDevice` | a virtual device the app publishes: `Session::publish` declares the endpoint (its name, Device Identity, Product Instance Id, Endpoint Info) and its Function Blocks as `tutti-ump`'s types, and connects to the device's side of it, where `send` goes to the peers and the handler receives what they send; dropping it closes the connection, which removes the endpoint |
+//! | `Error` | the named causes: the API missing, the service unavailable, a call that failed or was refused, a closed connection, a full buffer, a time that is not a timestamp, a message that is not whole, a watcher that stopped, a declaration the service has no number for (`Refusal`) |
 //!
 //! The bindings in `bindings.rs` are generated from the API's metadata by
 //! `cargo xtask winmidi2-bindings`. Each `unsafe` block here carries one `// SAFETY:`
@@ -55,8 +56,8 @@ mod bindings;
 
 // The OS-free arithmetic: tested everywhere, and used by `os`.
 #[cfg(any(windows, test))]
-// Off Windows only the tests reach it: the `os` half that uses it is absent.
-#[cfg_attr(not(windows), allow(dead_code))]
+// Off Windows only the tests reach it: the `os` half that uses and exports it is absent.
+#[cfg_attr(not(windows), allow(dead_code, unreachable_pub))]
 mod checks;
 
 // The one platform seam: the Windows half, or nothing.

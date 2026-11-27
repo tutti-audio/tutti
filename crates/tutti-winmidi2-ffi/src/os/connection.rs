@@ -11,8 +11,9 @@ use super::call::{abi, call, contained};
 use super::{Clock, Error};
 use crate::bindings::Windows::Devices::Midi2::IMidiEndpointConnectionSource;
 use crate::bindings::Windows::Devices::Midi2::{
-    IMidiMessageReceivedEventSource, MidiEndpointConnection, MidiMessageReceivedEventArgs,
-    MidiSendMessageResults, MidiSession,
+    IMidiEndpointMessageProcessingPlugin, IMidiMessageReceivedEventSource, MidiEndpointConnection,
+    MidiMessageProcessingPluginAddResult, MidiMessageReceivedEventArgs, MidiSendMessageResults,
+    MidiSession,
 };
 use crate::bindings::Windows::Foundation::TypedEventHandler;
 
@@ -34,12 +35,13 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Creates the connection, registers the handler, then opens it: the service sends
-    /// nothing before the open.
+    /// Creates the connection, adds `plugin` if there is one, registers the handler, then
+    /// opens it: the service sends nothing before the open, and takes a plugin before it.
     pub(super) fn open<F>(
         session: &MidiSession,
         clock: Clock,
         endpoint_id: &str,
+        plugin: Option<&IMidiEndpointMessageProcessingPlugin>,
         on_message: F,
     ) -> Result<Self, Error>
     where
@@ -60,6 +62,23 @@ impl Connection {
         let source: IMidiEndpointConnectionSource = windows_core::Interface::cast(&connection)
             .map_err(super::error::call("QueryInterface"))?;
         let id = call!("ConnectionId", source, ConnectionId() -> windows_core::GUID)?;
+        if let Some(plugin) = plugin {
+            let added = call!(
+                "AddMessageProcessingPlugin",
+                connection,
+                AddMessageProcessingPlugin(windows_core::Interface::as_raw(plugin))
+                    -> MidiMessageProcessingPluginAddResult
+            );
+            match added {
+                Ok(MidiMessageProcessingPluginAddResult::Succeeded) => {}
+                refused => {
+                    disconnect(session, id);
+                    return Err(refused.err().unwrap_or(Error::Refused {
+                        call: "AddMessageProcessingPlugin",
+                    }));
+                }
+            }
+        }
         let handler = Mutex::new(on_message);
         let received = TypedEventHandler::<
             IMidiMessageReceivedEventSource,
@@ -80,12 +99,8 @@ impl Connection {
         let token = match connection.MessageReceived(&received) {
             Ok(token) => token,
             Err(e) => {
-                // Best effort: the registration's error is the one to report.
-                let _ = call!(
-                    "DisconnectEndpointConnection",
-                    *session,
-                    DisconnectEndpointConnection(id)
-                );
+                // The registration's error is the one to report.
+                disconnect(session, id);
                 return Err(super::error::call("MessageReceived")(e));
             }
         };
@@ -160,12 +175,18 @@ impl Connection {
         // left to undo and a failure must neither panic nor be reported. A handler whose removal
         // failed receives nothing once the session has disconnected the connection.
         let _ = self.connection.RemoveMessageReceived(self.token);
-        let _ = call!(
-            "DisconnectEndpointConnection",
-            self.session,
-            DisconnectEndpointConnection(self.id)
-        );
+        disconnect(&self.session, self.id);
     }
+}
+
+/// Has the session disconnect the connection `id`. A failure is dropped: it runs on the
+/// paths that are already ending, where there is nothing left to undo.
+fn disconnect(session: &MidiSession, id: windows_core::GUID) {
+    let _ = call!(
+        "DisconnectEndpointConnection",
+        *session,
+        DisconnectEndpointConnection(id)
+    );
 }
 
 impl Drop for Connection {

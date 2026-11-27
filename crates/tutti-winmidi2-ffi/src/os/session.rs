@@ -14,8 +14,8 @@ use crate::bindings::Windows::Devices::Midi2::{IMidiSessionStatics, MidiSession}
 /// Dropping it closes it, and with it every connection made from it.
 #[derive(Debug)]
 pub struct Session {
-    session: MidiSession,
-    clock: Clock,
+    pub(super) session: MidiSession,
+    pub(super) clock: Clock,
     closed: bool,
 }
 
@@ -61,7 +61,7 @@ impl Session {
     where
         F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
     {
-        Connection::open(&self.session, self.clock, endpoint_id, on_message)
+        Connection::open(&self.session, self.clock, endpoint_id, None, on_message)
     }
 
     /// Closes the session and its connections.

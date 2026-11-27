@@ -20,6 +20,12 @@ windows-core = "0.62"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
+# The OS-free checks derive their errors and read `tutti-ump`'s fields on every target the
+# tests run on.
+[dev-dependencies]
+thiserror = { workspace = true, features = ["std"] }
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+
 [features]
 # The suites that open the diagnostic loopback endpoints, which need the service
 # running and the API's DLL beside the test binary. Off by default.
