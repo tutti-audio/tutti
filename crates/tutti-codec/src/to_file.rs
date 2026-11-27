@@ -78,9 +78,10 @@ impl ToFile {
         self.encoding.rate(source)
     }
 
-    /// The pipeline in front of the encoder, for the chain that writes the file.
-    pub(crate) fn encoding(&self) -> &Encoding {
-        &self.encoding
+    /// What `f` makes of the pipeline in front of the encoder: the chain that writes the file
+    /// builds its stages, spec and options from it.
+    pub(crate) fn through<R>(&self, f: impl FnOnce(&Encoding) -> R) -> R {
+        f(&self.encoding)
     }
 
     /// The same file, written as `f` makes of its encoding.

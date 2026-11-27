@@ -252,10 +252,10 @@ impl<F: FftFloat> Chain<F> {
         source_rate: SampleRate,
         planned: Samples,
     ) -> Result<Self> {
-        let encoding = to.encoding();
-        let stages = Stages::new(encoding, source, source_rate)?;
-        let spec = spec_of(encoding, source, source_rate);
-        let encoder = to.create(options_of(&spec, encoding, source_rate, planned))?;
+        let stages = to.through(|encoding| Stages::new(encoding, source, source_rate))?;
+        let spec = to.through(|encoding| spec_of(encoding, source, source_rate));
+        let options = to.through(|encoding| options_of(&spec, encoding, source_rate, planned));
+        let encoder = to.create(options)?;
         Ok(Self {
             stages,
             encoder,
