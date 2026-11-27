@@ -78,8 +78,9 @@ fn open() -> Loopback {
 /// What only this process sends: a channel and a run of ten notes derived from
 /// the process id, so that a note another process puts into the kernel-wide
 /// loopback is told from this test's. Ids are mapped to 96 distinct
-/// (channel, run) pairs, so any 96 consecutive process ids never share one. The
-/// notes sit above the probe's 59.
+/// (channel, run) pairs, so any 96 consecutive process ids never share one; Windows
+/// ids are multiples of 4, so there the suite runs one test at a time instead
+/// (`.config/nextest.toml`). The notes sit above the probe's 59.
 struct Marker {
     channel: MidiChannel,
     base: u8,
