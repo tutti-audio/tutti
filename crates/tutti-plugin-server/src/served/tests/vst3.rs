@@ -586,6 +586,40 @@ fn a_vst3_program_loads_and_reads_back() {
     );
 }
 
+/// **A save after a program load states the program's write pending and applies
+/// nothing.** The load writes the program-change parameter; no block has applied
+/// it, so the save states it beside the bytes and waits for no block.
+#[test]
+fn a_save_after_a_vst3_program_load_states_the_program_write_pending() {
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+    let mut instance = Vst3Instance::load_first(
+        main_thread(),
+        Path::new(multi_program_sample()),
+        44_100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("the multiple-program-changes sample loads");
+    let wanted = instance.presets(main_thread())[2].id.clone();
+    assert!(instance.load_preset(main_thread(), &wanted));
+    let PresetId::Program { list_id, index } = &wanted else {
+        unreachable!("VST3 ids are programs")
+    };
+    let (param_id, step_count) = instance
+        .vst3_loaded()
+        .program_change_parameter(main_thread(), *list_id)
+        .expect("the list has a program-change parameter");
+    let saved = instance
+        .save_state(main_thread(), StateUse::Project)
+        .expect("saves");
+    let expected = f64::from(*index) / f64::from(step_count);
+    let [(id, value)] = saved.pending[..] else {
+        panic!("one write pending, got {:?}", saved.pending);
+    };
+    assert_eq!(id, param_id, "the program-change parameter");
+    assert!((value.get() - expected).abs() < 1e-9, "wrote {value:?}");
+}
+
 /// An id from another format is refused rather than coerced.
 ///
 /// `Number` and `Location` name nothing in VST3's `(list, index)` space.

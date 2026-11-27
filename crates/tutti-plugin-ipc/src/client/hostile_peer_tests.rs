@@ -224,6 +224,11 @@ pub(crate) enum Action {
     /// Answer a `SaveState` with a `StateReady` frame that declares `len`, and
     /// the object holding `bytes`: an honest server's `len` is `bytes.len()`.
     State { len: u64, bytes: Vec<u8> },
+    /// Answer a `SaveState` honestly, stating `pending` beside the bytes.
+    StatePending {
+        bytes: Vec<u8>,
+        pending: Vec<(ParamId, tutti_units::Normalized)>,
+    },
     /// Answer a `SaveState` with a `StateReady` frame and no object after it.
     StateWithoutObject,
     /// Advertise `len`, then dribble one byte every `gap` — forever.
@@ -286,6 +291,20 @@ fn serve_lane<Req: Wire>(
                 let reply = ControlReply::StateReady {
                     len,
                     blob: blob.wire(),
+                    pending: Vec::new(),
+                };
+                if send_reply(&stream, id, &reply).is_err()
+                    || blob.send(crate::transport::connection(&stream)).is_err()
+                {
+                    return;
+                }
+            }
+            Action::StatePending { bytes, pending } => {
+                let blob = Blob::create(&bytes).expect("the mock's state object");
+                let reply = ControlReply::StateReady {
+                    len: bytes.len() as u64,
+                    blob: blob.wire(),
+                    pending,
                 };
                 if send_reply(&stream, id, &reply).is_err()
                     || blob.send(crate::transport::connection(&stream)).is_err()
@@ -298,6 +317,7 @@ fn serve_lane<Req: Wire>(
                 let reply = ControlReply::StateReady {
                     len: 0,
                     blob: blob.wire(),
+                    pending: Vec::new(),
                 };
                 if send_reply(&stream, id, &reply).is_err() {
                     return;
@@ -1860,8 +1880,15 @@ fn a_state_larger_than_one_frame_arrives_whole() {
             expected.len()
         )
     });
-    assert_eq!(got.len(), expected.len(), "the state has the wrong length");
-    assert!(got == expected, "the state does not match what was sent");
+    assert_eq!(
+        got.bytes.len(),
+        expected.len(),
+        "the state has the wrong length"
+    );
+    assert!(
+        got.bytes == expected,
+        "the state does not match what was sent"
+    );
 }
 
 /// **A state object shorter than its frame declared is rejected, by the plugin's
@@ -2227,6 +2254,61 @@ fn an_awaited_save_state_is_filled_with_the_servers_state() {
         await_answer(answer),
         Some(Ok(tutti_plugin_types::PluginState::new(bytes)))
     );
+}
+
+/// **A save states the server's pending writes and the host's together, the
+/// host's the newer**, in both forms: a parameter both hold reads the host's
+/// value, and one only the server holds is kept. Nothing waits for either to
+/// apply.
+#[test]
+fn a_save_merges_the_servers_pending_writes_under_the_hosts() {
+    use tutti_units::Normalized;
+    let server = vec![
+        (ParamId::new(1), Normalized::of(0.2)),
+        (ParamId::new(2), Normalized::of(0.1)),
+    ];
+    let mock = MockServer::start_lanes_under(
+        "save-pending",
+        Timeouts::default(),
+        |msg| match msg {
+            // The answer form's flush, which the save is ordered behind.
+            AudioRequest::ApplyParameters { id, .. } => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id,
+                    outcome: crate::ApplyOutcome::Refused,
+                }))
+            }
+            _ => Action::Silent,
+        },
+        {
+            let server = server.clone();
+            move |msg| match msg {
+                ControlRequest::SaveState { .. } => Action::StatePending {
+                    bytes: vec![1, 2, 3],
+                    pending: server.clone(),
+                },
+                _ => Action::Silent,
+            }
+        },
+    );
+    let audio = mock.bridge.audio();
+    audio.declare_host_edits([ParamId::new(1), ParamId::new(2)]);
+    audio
+        .write_parameter(ParamId::new(1), Normalized::of(0.5))
+        .expect("declared");
+    let merged = vec![
+        (ParamId::new(1), Normalized::of(0.5)),
+        (ParamId::new(2), Normalized::of(0.1)),
+    ];
+    let plain = audio
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saves");
+    assert_eq!(plain.bytes, [1, 2, 3]);
+    assert_eq!(plain.pending, merged, "the plain form");
+    let answered = await_answer(audio.save_state_answer(tutti_plugin_types::StateUse::Project))
+        .expect("answered")
+        .expect("saves");
+    assert_eq!(answered.pending, merged, "the answer form");
 }
 
 /// **A server that never answers a save is cut off by the control lane's

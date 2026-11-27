@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     ChannelTable, EditReader, ParamAccess, ParamEdit, ParamWriteError, PluginError, PluginIo,
     PluginResult, Processor, ReportSink, RtMidiEvents,
 };
-use tutti_rt::{TallyWriter, tally};
+use tutti_rt::{Generation, TallyWriter, tally};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -345,7 +345,9 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// Moves what the slots hold into `pending`, the latest write to each
     /// parameter winning. Allocation-free: `pending` is reserved for every
     /// declared parameter.
-    fn drain_slots(&mut self) {
+    /// Returns the generation the drain swept: what the caller publishes once the
+    /// plugin's call returns.
+    fn drain_slots(&mut self) -> Generation {
         let Self {
             drain,
             pending,
@@ -354,6 +356,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             ..
         } = self;
         drain.drain(|id, value| stage_write(pending, refused, declared, id, value));
+        drain.swept()
     }
 
     /// Runs one realtime processing block.
@@ -407,7 +410,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // The Controller's writes since the last block, put ahead of this
         // block's automation below, so where both set one parameter the
         // automation has the last word.
-        self.drain_slots();
+        let drained = self.drain_slots();
 
         // MIDI learn (IMidiLearn): when armed, capture each incoming controller
         // the plugin node did not map (a mapped one is a parameter change by
@@ -538,7 +541,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // The plugin has the values the drain took once its call returned,
         // whatever it answered; a block that left before the call leaves them
         // in `pending` for the next one.
-        self.drain.publish_applied();
+        self.drain.publish_applied(drained);
         if let Err(error) = result {
             buffer.output().silence();
             return Err(ProcessFailed { error });
@@ -596,9 +599,9 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         if self.processing {
             return Ok(false);
         }
-        self.drain_slots();
+        let drained = self.drain_slots();
         if self.pending.is_empty() {
-            self.drain.publish_applied();
+            self.drain.publish_applied(drained);
             return Ok(false);
         }
         let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
@@ -619,7 +622,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
-        self.drain.publish_applied();
+        self.drain.publish_applied(drained);
         result
             .map(|()| true)
             .map_err(|error| ProcessFailed { error })
@@ -642,7 +645,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         changes: &ParameterChanges,
     ) -> std::result::Result<(), ProcessFailed> {
         use tutti_vst3_ffi::Vst3Error;
-        self.drain_slots();
+        let drained = self.drain_slots();
         if !self.processing {
             // The SDK has the host call `setProcessing(true)` before `process`,
             // and a flush must not toggle it: the writes wait in `pending` and
@@ -698,7 +701,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             input_params: &self.audio.input.param_changes,
             output_params: &self.audio.output.param_changes,
         });
-        self.drain.publish_applied();
+        self.drain.publish_applied(drained);
         result.map_err(|error| ProcessFailed { error })
     }
 

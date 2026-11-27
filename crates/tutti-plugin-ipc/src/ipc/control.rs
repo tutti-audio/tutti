@@ -119,18 +119,14 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter_value_from_text(id, text)
             }
 
-            /// The host's writes the server has not answered for are stated
-            /// beside the bytes, read before the request; the save never waits
-            /// for them.
+            /// The host's writes the server has not answered for, and the
+            /// server's own control's, are stated beside the bytes; the save
+            /// never waits for them.
             fn save_state(
                 &self,
                 state_use: StateUse,
             ) -> Result<tutti_plugin_types::PluginState, StateError> {
-                let audio = self.link.bridge.audio();
-                let pending = audio.pending_edits();
-                audio
-                    .save_state(state_use)
-                    .map(|bytes| tutti_plugin_types::PluginState { bytes, pending })
+                self.link.bridge.audio().save_state(state_use)
             }
 
             /// Queued on the command bus as the blocks around it are, so the
@@ -330,6 +326,7 @@ macro_rules! served_control {
                     .bridge
                     .audio()
                     .save_state(state_use)
+                    .map(|state| state.bytes)
                     .map_err(PluginError::StateFailed)
             }
 

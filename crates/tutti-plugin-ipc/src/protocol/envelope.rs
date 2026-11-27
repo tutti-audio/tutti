@@ -339,6 +339,10 @@ messages! {
         /// What the frame carries of the object, as for
         /// [`ControlRequest::LoadState`].
         blob: BlobWire,
+        /// The writes the server's own control made that no block has applied
+        /// (a preset load's, say), read before the state: what the bytes may
+        /// not hold, never waited for.
+        pending: Vec<(ParamId, Normalized)>,
     } => Result<SavedState, ServerError>;
     /// Restore a plugin state, which follows this frame as a memory object of its
     /// own (`send_attached` writes both, and the server's transport reads both
