@@ -7,12 +7,15 @@ use tutti_graph::{
     BusOutputPort, CycleEdge, EdgeId, EventInputPort, EventOutputPort, GraphSpec, NodeBus, NodeKey,
     PortSink,
 };
-use tutti_units::Gain;
+use tutti_units::{Gain, Samples};
 
 use crate::graph::Pending;
 use crate::key::{BusEnd, Inlet, MainSink, Outlet};
-use crate::patch::{WireDecl, WireEnds};
-use crate::{BusInputPort, ChannelEdge, ConnectError, Graph, InputPort, MainOutput, OutputPort};
+use crate::patch::{WireDecl, WireEnds, WireId};
+use crate::{
+    BusInputPort, ChannelEdge, ChannelWire, ConnectError, Connection, EventEdge, Graph, InputPort,
+    MainBusWire, MainOutput, OutputPort, Wire,
+};
 
 /// What a patch last made of one wire: the options it was declared with.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,31 +33,72 @@ impl KeptWire {
     }
 }
 
-/// A wire as the graph names it.
+/// The pair of ports an edge joins, whatever the edge's kind: what a pair of
+/// ports holds at most one edge of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Ports {
+    Audio(ChannelEdge),
+    Event(EventEdge),
+}
+
+impl Ports {
+    /// The pairs of ports `wire`'s edges join: none for a bus wire.
+    pub(crate) fn of<F: Float>(
+        wire: Resolved,
+        graph: &Graph<F>,
+        pending: Pending<'_>,
+    ) -> Vec<Self> {
+        match wire {
+            Resolved::Event(from, to, _) => vec![Self::Event(EventEdge::new(from, to))],
+            Resolved::Channel(..) | Resolved::Main(..) => wire
+                .edges(graph, pending)
+                .into_iter()
+                .map(Self::Audio)
+                .collect(),
+            Resolved::Bus(..) => Vec::new(),
+        }
+    }
+
+    /// The delay of the edge the graph holds on these ports: `None` for no
+    /// edge, `Some(None)` for a direct one.
+    pub(crate) fn held_delay<F: Float>(self, graph: &Graph<F>) -> Option<Option<Samples>> {
+        match self {
+            Self::Audio(edge) => graph.held_delay(edge),
+            Self::Event(edge) => graph.held_event_delay(edge.source(), edge.sink()),
+        }
+    }
+}
+
+/// A wire as the graph names it, with its feedback delay (`None` for a direct
+/// wire). A bus wire has no delayed edge.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Resolved {
-    Channel(OutputPort, InputPort),
-    Main(NodeKey, MainSink),
+    Channel(OutputPort, InputPort, Option<Samples>),
+    Main(NodeKey, MainSink, Option<Samples>),
     Bus(BusOutputPort, BusInputPort),
-    Event(EventOutputPort, EventInputPort),
+    Event(EventOutputPort, EventInputPort, Option<Samples>),
 }
 
 impl Resolved {
-    /// The graph's wire for `ends`, its keys named by `node`.
-    pub(crate) fn of<K>(ends: &WireEnds<K>, node: impl Fn(&K) -> NodeKey) -> Self {
-        match ends {
+    /// The graph's wire for `id`, its keys named by `node`.
+    pub(crate) fn of<K>(id: &WireId<K>, node: impl Fn(&K) -> NodeKey) -> Self {
+        let delay = id.delay;
+        match &id.ends {
             WireEnds::Main(from, to) => Self::Main(
                 node(from),
                 to.as_ref()
                     .map_or(MainSink::MainOutput, |to| MainSink::Node(node(to))),
+                delay,
             ),
             WireEnds::Channel(from, out, to, input) => Self::Channel(
                 OutputPort::new(node(from), *out),
                 InputPort::new(node(to), *input),
+                delay,
             ),
             WireEnds::Event(from, out, to, input) => Self::Event(
                 EventOutputPort::new(node(from), *out),
                 EventInputPort::new(node(to), *input),
+                delay,
             ),
             WireEnds::Bus(from, out, to) => Self::Bus(
                 BusOutputPort::Node(NodeBus::new(node(from), *out)),
@@ -73,10 +117,10 @@ impl Resolved {
         pending: Pending<'_>,
     ) -> Result<(), ConnectError> {
         match self {
-            Self::Channel(o, i) => graph.check_wire(pending, o, i),
-            Self::Main(from, to) => graph.main_wires(pending, from, to).map(drop),
+            Self::Channel(o, i, _) => graph.check_wire(pending, o, i),
+            Self::Main(from, to, _) => graph.main_wires(pending, from, to).map(drop),
             Self::Bus(o, i) => graph.check_bus_nodes(pending, o, i),
-            Self::Event(o, i) => graph.check_event_wire(pending, o, i),
+            Self::Event(o, i, _) => graph.check_event_wire(pending, o, i),
         }
     }
 
@@ -88,8 +132,8 @@ impl Resolved {
         pending: Pending<'_>,
     ) -> Vec<ChannelEdge> {
         match self {
-            Self::Channel(o, i) => vec![ChannelEdge::new(o, i)],
-            Self::Main(from, to) => graph
+            Self::Channel(o, i, _) => vec![ChannelEdge::new(o, i)],
+            Self::Main(from, to, _) => graph
                 .main_wires(pending, from, to)
                 .map(|wires| {
                     wires
@@ -99,6 +143,14 @@ impl Resolved {
                 })
                 .unwrap_or_default(),
             Self::Bus(..) | Self::Event(..) => Vec::new(),
+        }
+    }
+
+    /// The feedback delay of the wire, `None` for a direct one.
+    fn delay(self) -> Option<Samples> {
+        match self {
+            Self::Channel(.., delay) | Self::Main(.., delay) | Self::Event(.., delay) => delay,
+            Self::Bus(..) => None,
         }
     }
 
@@ -118,7 +170,7 @@ impl Resolved {
                     let Some(EdgeId {
                         sink: PortSink::Port(at),
                         from,
-                    }) = Graph::<F>::edge_id(edge)
+                    }) = Graph::<F>::edge_id(edge, self.delay())
                     else {
                         continue;
                     };
@@ -130,9 +182,15 @@ impl Resolved {
                     named.push(CycleEdge::Audio(at));
                 }
             }
-            Self::Event(from, at) => {
+            Self::Event(from, at, delay) => {
                 if connect {
-                    spec.connect_events(at, tutti_graph::EventEdge::Direct(from));
+                    spec.connect_events(
+                        at,
+                        match delay {
+                            None => tutti_graph::EventEdge::Direct(from),
+                            Some(delay) => tutti_graph::EventEdge::Feedback { from, delay },
+                        },
+                    );
                 } else {
                     spec.disconnect_events(at, from);
                 }
@@ -159,17 +217,17 @@ impl Resolved {
         named
     }
 
-    /// Whether the graph holds the wire: every edge of it, or for an event or
-    /// bus wire the edge itself.
+    /// Whether the graph holds the wire: every edge of it, of its delay, or
+    /// for a bus wire the edge itself.
     pub(crate) fn held<F: Float>(self, graph: &Graph<F>) -> bool {
         match self {
-            Self::Channel(..) | Self::Main(..) => {
-                let edges = self.edges(graph, None);
-                !edges.is_empty() && edges.into_iter().all(|edge| graph.holds_edge(edge))
+            Self::Channel(..) | Self::Main(..) | Self::Event(..) => {
+                let ports = Ports::of(self, graph, None);
+                !ports.is_empty()
+                    && ports
+                        .into_iter()
+                        .all(|ports| ports.held_delay(graph) == Some(self.delay()))
             }
-            Self::Event(from, to) => graph
-                .sources(to)
-                .is_ok_and(|sources| sources.contains(&from)),
             Self::Bus(from, to) => graph.holds_bus_edge(from, to),
         }
     }
@@ -183,11 +241,25 @@ impl Resolved {
         initial: Option<Gain>,
     ) -> Result<(), ConnectError> {
         let edges = match self {
-            Self::Channel(o, i) => made(graph, o, i, unfaded)?,
-            Self::Main(o, MainSink::Node(i)) => made(graph, o, i, unfaded)?,
-            Self::Main(o, MainSink::MainOutput) => made(graph, o, MainOutput, unfaded)?,
-            Self::Bus(o, i) => made(graph, o, i, unfaded)?,
-            Self::Event(o, i) => made(graph, o, i, unfaded)?,
+            Self::Channel(o, i, d) => {
+                let edges = graph.add_channel_wire(o, i, d)?;
+                finished(
+                    Connection::<ChannelWire, F>::new(graph, edges, o, i),
+                    unfaded,
+                )
+            }
+            Self::Main(o, to, d) => {
+                let edges = graph.add_main_wire(o, to, d)?;
+                finished(
+                    Connection::<MainBusWire, F>::new(graph, edges, o, to),
+                    unfaded,
+                )
+            }
+            Self::Bus(o, i) => finished(graph.connect(o, i)?, unfaded),
+            Self::Event(o, i, d) => {
+                graph.add_event_edge(o, i, d)?;
+                Vec::new()
+            }
         };
         if let Some(gain) = initial {
             for edge in edges {
@@ -206,28 +278,26 @@ impl Resolved {
         unfaded: bool,
     ) -> Result<(), ConnectError> {
         match self {
-            Self::Channel(o, i) => cut(graph, o, i, unfaded),
-            Self::Main(o, MainSink::Node(i)) => cut(graph, o, i, unfaded),
-            Self::Main(o, MainSink::MainOutput) => cut(graph, o, MainOutput, unfaded),
+            Self::Channel(o, i, _) => cut(graph, o, i, unfaded),
+            Self::Main(o, MainSink::Node(i), _) => cut(graph, o, i, unfaded),
+            Self::Main(o, MainSink::MainOutput, _) => cut(graph, o, MainOutput, unfaded),
             Self::Bus(o, i) => cut(graph, o, i, unfaded),
-            Self::Event(o, i) => cut(graph, o, i, unfaded),
+            Self::Event(o, i, _) => cut(graph, o, i, unfaded),
         }
     }
 }
 
-fn made<F: Float, O: Outlet, T: Inlet<O::Wire>>(
-    graph: &mut Graph<F>,
-    from: O,
-    to: T,
+/// The edges of `connection`, hardened when `unfaded`.
+fn finished<F: Float, W: Wire>(
+    connection: Connection<'_, W, F>,
     unfaded: bool,
-) -> Result<Vec<ChannelEdge>, ConnectError> {
-    let connection = graph.connect(from, to)?;
+) -> Vec<ChannelEdge> {
     let connection = if unfaded {
         connection.unfaded()
     } else {
         connection
     };
-    Ok(connection.edges())
+    connection.edges()
 }
 
 fn cut<F: Float, O: Outlet, T: Inlet<O::Wire>>(

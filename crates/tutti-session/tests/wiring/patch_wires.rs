@@ -4,13 +4,19 @@
 //! the declared nodes cannot make is refused before anything changes, and an
 //! edge `Graph::connect` made is never the patch's.
 
-use tutti_buffers::{ChannelLayout, InterleavedMut};
-use tutti_graph::{Cx, EventInputPort, Io, Node, Prepare, Shape, Status, declare_params};
+use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_graph::{
+    Cx, Edge, EventInputPort, FeedbackFrom, Io, Node, Prepare, Shape, Status, declare_params,
+};
 use tutti_session::{
     ChangedBy, ConnectError, InputPort, MainOutput, Mention, NodeDecl, OutputPort, PatchError,
-    Session, WireStart,
+    Session, WireEnds, WireStart,
 };
-use tutti_units::{Gain, Hz};
+use tutti_units::{Gain, Hz, Samples};
+
+#[path = "../support/echo_node.rs"]
+mod echo_node;
+use echo_node::EchoConfig;
 
 /// A constant source `level / 4` wide `layout`, with a cutoff to give a patch
 /// a param to change beside a gain.
@@ -486,4 +492,405 @@ fn an_event_or_bus_cycle_is_refused_with_nothing_changed() {
     let refused = s.patch((a, b, buses));
     assert!(matches!(refused.unwrap_err(), PatchError::Cycle { .. }));
     assert_eq!(s.graph_ref().node_count(), empty);
+}
+
+/// **A node the patch drops takes its hand-made edges out of the cycle
+/// search**: `c -> b -> a` is wired by hand, `b` is dropped, and the declared
+/// `a -> c` closes no cycle once `b` is gone.
+#[test]
+fn a_dropped_nodes_hand_made_edges_close_no_cycle() {
+    let mut s = session();
+    let nodes = || {
+        (
+            NodeDecl::new("a", pass()),
+            NodeDecl::new("b", pass()),
+            NodeDecl::new("c", pass()),
+        )
+    };
+    s.patch(nodes()).unwrap();
+    let node = |s: &Session, key| s.key::<PassConfig>(&key).unwrap().erase();
+    let (a, b, c) = (node(&s, "a"), node(&s, "b"), node(&s, "c"));
+    s.graph().connect(c, b).unwrap();
+    s.graph().connect(b, a).unwrap();
+
+    let patched = s.patch((
+        NodeDecl::new("a", pass()),
+        NodeDecl::new("c", pass()),
+        Mention::new("a").connect(Mention::new("c")),
+    ));
+
+    assert_eq!(patched.unwrap().removed, ["b"]);
+}
+
+/// The block of the loop sessions, and a delay of two of them.
+const BLOCK: usize = 64;
+const DELAY: usize = 2 * BLOCK;
+
+/// A mono session whose largest block is `BLOCK` frames.
+fn looped() -> Session {
+    Session::builder()
+        .outputs(ChannelLayout::MONO)
+        .outputs_floor(ChannelLayout::MONO)
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
+        .build()
+        .expect("builds")
+}
+
+/// `echo -> pass` direct and `pass -> echo` fed back by `delay` frames, at
+/// gain `gain`, the pass on the main output: every wire unfaded.
+fn echo_loop(
+    delay: usize,
+    gain: f64,
+) -> impl tutti_session::IntoPatch<&'static str, tutti_session::Graph> {
+    (
+        NodeDecl::new("echo", EchoConfig::new(ChannelLayout::MONO)),
+        NodeDecl::new("pass", pass()),
+        Mention::new("echo").connect(Mention::new("pass")).unfaded(),
+        Mention::new("pass")
+            .connect(Mention::new("echo"))
+            .feedback(Samples::new(delay))
+            .unfaded()
+            .initial_gain(amp(gain)),
+        Mention::new("pass").connect(MainOutput).unfaded(),
+    )
+}
+
+/// `blocks` blocks of the mono main output, after an update.
+fn rendered(s: &mut Session, blocks: usize) -> Vec<f32> {
+    let _ = s.update();
+    let mut out = Vec::new();
+    for _ in 0..blocks {
+        let mut block = vec![f32::NAN; BLOCK];
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
+        out.extend(block);
+    }
+    out
+}
+
+/// The feedback edges into the echo's input 0, as the graph holds them.
+fn feedback_into_echo(s: &Session) -> Vec<(OutputPort, Samples)> {
+    let echo = s.key::<EchoConfig>(&"echo").unwrap().erase();
+    let at = tutti_graph::InputPort::new(echo, 0);
+    let testing = s.graph_ref().testing();
+    let topology = testing.topology();
+    topology.edges[&at]
+        .iter()
+        .filter_map(|edge| match edge {
+            Edge::Feedback(FeedbackFrom { from, delay }) => Some((
+                OutputPort::new(from.node(), usize::from(from.port())),
+                *delay,
+            )),
+            Edge::Direct(_) => None,
+        })
+        .collect()
+}
+
+/// **A feedback wire closes a loop that renders its analytic echo.** `echo`
+/// adds a unit impulse at frame 0 and `pass` carries it to the output; `pass`
+/// fed back into `echo` by `DELAY` frames at gain `g` (no node of the loop has
+/// latency) is a train of impulses at `k * DELAY` of amplitude `g^k`, and
+/// nothing between.
+#[test]
+fn a_feedback_wire_closes_a_loop_that_echoes_at_its_delay() {
+    let mut s = looped();
+    s.patch(echo_loop(DELAY, 0.5)).unwrap();
+
+    let out = rendered(&mut s, 6);
+
+    let mut want = vec![0.0f32; 6 * BLOCK];
+    want[0] = 1.0;
+    want[DELAY] = 0.5;
+    want[2 * DELAY] = 0.25;
+    assert_eq!(out, want);
+}
+
+/// **`initial_gain` on a feedback wire is the loop gain, and a set on its
+/// target moves it**: the target of the ports resolves to the feedback edge.
+#[test]
+fn a_feedback_wires_gain_target_moves_the_loop_gain() {
+    let mut s = looped();
+    s.patch(echo_loop(DELAY, 0.5)).unwrap();
+    let echo = s.key::<EchoConfig>(&"echo").unwrap().erase();
+    let pass = s.key::<PassConfig>(&"pass").unwrap().erase();
+    let target = s
+        .graph_ref()
+        .gain_target(OutputPort::new(pass, 0), InputPort::new(echo, 0))
+        .unwrap();
+    assert_eq!(s.get(target).unwrap(), amp(0.5));
+    s.set(target.to(amp(0.25))).unwrap();
+
+    let out = rendered(&mut s, 4);
+
+    assert_eq!(out[DELAY], 0.25);
+}
+
+/// **A changed delay makes the wire again**: the edge of the old delay is
+/// gone and the sink holds the one of the new, and the render echoes at it.
+#[test]
+fn a_changed_delay_remakes_the_edge() {
+    let mut s = looped();
+    s.patch(echo_loop(DELAY, 0.5)).unwrap();
+    let _ = s.update();
+    let pass = OutputPort::new(s.key::<PassConfig>(&"pass").unwrap().erase(), 0);
+    assert_eq!(feedback_into_echo(&s), [(pass, Samples::new(DELAY))]);
+
+    s.patch(echo_loop(3 * BLOCK, 0.5)).unwrap();
+
+    assert_eq!(feedback_into_echo(&s), [(pass, Samples::new(3 * BLOCK))]);
+    let out = rendered(&mut s, 7);
+    assert_eq!(out[DELAY], 0.0, "nothing at the old delay");
+    assert_eq!(out[3 * BLOCK], 0.5);
+}
+
+/// **A delay shorter than the largest block is refused at the patch**, naming
+/// the wire, and nothing changes.
+#[test]
+fn a_delay_shorter_than_the_block_is_refused_with_nothing_changed() {
+    let mut s = looped();
+    let nodes = s.graph_ref().node_count();
+
+    let refused = s.patch(echo_loop(BLOCK - 1, 0.5));
+
+    let PatchError::FeedbackTooShort {
+        ends,
+        delay,
+        max_block,
+    } = refused.unwrap_err()
+    else {
+        panic!("a feedback refusal");
+    };
+    assert_eq!(ends, WireEnds::Main("pass", Some("echo")));
+    assert_eq!(
+        (delay, max_block),
+        (Samples::new(BLOCK - 1), Samples::new(BLOCK))
+    );
+    assert_eq!(s.graph_ref().node_count(), nodes);
+    s.patch(echo_loop(BLOCK, 0.5))
+        .expect("a delay of one block is the shortest");
+}
+
+/// **A pair of ports holds one edge**: a direct and a feedback wire on the
+/// same ports are refused, declared together or against an edge the graph
+/// holds, with nothing changed.
+#[test]
+fn a_direct_and_a_feedback_wire_on_one_pair_of_ports_are_refused() {
+    let mut s = looped();
+    let nodes = || {
+        (
+            NodeDecl::new("echo", EchoConfig::new(ChannelLayout::MONO)),
+            NodeDecl::new("pass", pass()),
+        )
+    };
+    let direct = || Mention::new("echo").connect(Mention::new("pass"));
+    let delayed = || {
+        Mention::new("echo")
+            .connect(Mention::new("pass"))
+            .feedback(Samples::new(DELAY))
+    };
+    let empty = s.graph_ref().node_count();
+
+    let refused = s.patch((nodes(), direct(), delayed()));
+    assert!(matches!(refused.unwrap_err(), PatchError::TwoEdges { .. }));
+    let refused = s.patch((
+        nodes(),
+        delayed(),
+        Mention::new("echo")
+            .connect(Mention::new("pass"))
+            .feedback(Samples::new(DELAY + 1)),
+    ));
+    assert!(matches!(refused.unwrap_err(), PatchError::TwoEdges { .. }));
+    assert_eq!(s.graph_ref().node_count(), empty);
+
+    // An edge made by hand holds the ports too.
+    s.patch(nodes()).unwrap();
+    let echo = s.key::<EchoConfig>(&"echo").unwrap().erase();
+    let pass = s.key::<PassConfig>(&"pass").unwrap().erase();
+    s.graph().connect(echo, pass).unwrap().unfaded();
+    let refused = s.patch((nodes(), delayed()));
+    assert!(matches!(refused.unwrap_err(), PatchError::TwoEdges { .. }));
+    assert_eq!(
+        s.graph_ref().sources(InputPort::new(pass, 0)).unwrap(),
+        [OutputPort::new(echo, 0)]
+    );
+
+    // A patch that takes the direct wire out may put the feedback one there.
+    s.graph().disconnect(echo, pass).unwrap().unfaded();
+    s.patch((nodes(), delayed())).unwrap();
+}
+
+/// **A feedback wire is a source of its sink**: `Graph::sources` lists the
+/// source of the edge the loop closes.
+#[test]
+fn a_feedback_wire_is_listed_as_a_source() {
+    let mut s = looped();
+    s.patch(echo_loop(DELAY, 1.0)).unwrap();
+    let echo = s.key::<EchoConfig>(&"echo").unwrap().erase();
+    let pass = s.key::<PassConfig>(&"pass").unwrap().erase();
+
+    let sources = s.graph_ref().sources(InputPort::new(echo, 0)).unwrap();
+
+    assert_eq!(sources, [OutputPort::new(pass, 0)]);
+}
+
+/// **An event wire can be fed back**: `src -> pass` by event and `pass ->
+/// src` by event is a cycle of direct edges, refused, unless one is a
+/// feedback wire; with one the patch is taken.
+#[test]
+fn an_event_feedback_wire_closes_an_event_loop() {
+    let mut s = session();
+    let (a, b) = (NodeDecl::new("src", src()), NodeDecl::new("pass", pass()));
+    let forward = a.event_output(0).connect(b.event_input(0));
+    let back = b
+        .event_output(0)
+        .connect(a.event_input(0))
+        .feedback(Samples::new(1_024));
+    let looped = (
+        a.event_output(0).connect(b.event_input(0)),
+        b.event_output(0).connect(a.event_input(0)),
+    );
+
+    assert!(matches!(
+        s.patch((
+            NodeDecl::new("src", src()),
+            NodeDecl::new("pass", pass()),
+            looped
+        ))
+        .unwrap_err(),
+        PatchError::Cycle { .. }
+    ));
+    s.patch((a, b, forward, back)).unwrap();
+
+    let sink = EventInputPort::new(src_node(&s), 0);
+    let source = tutti_graph::EventOutputPort::new(pass_node(&s), 0);
+    assert_eq!(s.graph_ref().sources(sink).unwrap(), [source]);
+}
+
+/// The edges the graph holds into `node`'s input 0, faded out or not.
+fn edges_into(s: &Session, node: tutti_graph::NodeKey) -> usize {
+    let at = tutti_graph::InputPort::new(node, 0);
+    let testing = s.graph_ref().testing();
+    testing.topology().edges.get(&at).map_or(0, Vec::len)
+}
+
+/// **A patch that turns a wire around is valid, and cuts the old edge**: the
+/// compile counts an edge that is only fading out, so `a -> b` left to fade
+/// beside the new `b -> a` would be a cycle the commit refuses. The old edge
+/// goes at once, the new one is live, and the next update commits.
+#[test]
+fn turning_a_wire_around_cuts_the_old_edge_and_commits() {
+    let mut s = session();
+    let nodes = || (NodeDecl::new("a", pass()), NodeDecl::new("b", pass()));
+    s.patch((nodes(), Mention::new("a").connect(Mention::new("b"))))
+        .unwrap();
+    let _ = s.update();
+    let node = |s: &Session, key| s.key::<PassConfig>(&key).unwrap().erase();
+    let (a, b) = (node(&s, "a"), node(&s, "b"));
+    assert_eq!(edges_into(&s, b), 1);
+
+    s.patch((nodes(), Mention::new("b").connect(Mention::new("a"))))
+        .unwrap();
+
+    assert_eq!(edges_into(&s, b), 0, "the old edge is cut, not fading");
+    let events = s.update();
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, tutti_session::SessionEvent::CommitRefused(_))),
+        "{events:?}"
+    );
+    assert_eq!(
+        s.graph_ref().sources(InputPort::new(a, 0)).unwrap(),
+        [OutputPort::new(b, 0)]
+    );
+}
+
+/// **Swapping which wire of a loop is the feedback one is valid**: `a -> b`
+/// direct and `b -> a` fed back, then `a -> b` fed back and `b -> a` direct.
+/// The old direct edge, fading, would close a cycle with the new direct one,
+/// so it is cut.
+#[test]
+fn swapping_the_feedback_wire_of_a_loop_cuts_the_old_direct_edge_and_commits() {
+    let mut s = looped();
+    let patch = |forward_delayed: bool| {
+        let forward = Mention::new("a").connect(Mention::new("b"));
+        let back = Mention::new("b").connect(Mention::new("a"));
+        let delayed = Samples::new(DELAY);
+        let (forward, back) = if forward_delayed {
+            (forward.feedback(delayed), back)
+        } else {
+            (forward, back.feedback(delayed))
+        };
+        (
+            NodeDecl::new("a", pass()),
+            NodeDecl::new("b", pass()),
+            forward,
+            back,
+        )
+    };
+    s.patch(patch(false)).unwrap();
+    let _ = s.update();
+
+    s.patch(patch(true)).unwrap();
+
+    let events = s.update();
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, tutti_session::SessionEvent::CommitRefused(_))),
+        "{events:?}"
+    );
+}
+
+/// **A removed feedback wire fades out**, like a direct one: its echo decays
+/// along the declick instead of cutting. The loop echoes a unit impulse at
+/// frame 0 into frame `DELAY`; the wire is removed before the first frame
+/// is rendered, so frame `j` of the render is frame `j` of the fade, and the
+/// echo at `DELAY` is weighted `1 - s((DELAY + 1) / 241)`, `s` the declick's
+/// smootherstep (240 frames at 48 kHz), rendered a frame at a time. The next echo is past the fade: none.
+#[test]
+fn a_removed_feedback_wire_fades_its_echo_out() {
+    const SPAN: usize = 240;
+    let smooth = |j: usize| {
+        let x = (j + 1) as f64 / (SPAN + 1) as f64;
+        x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
+    };
+    let mut s = looped();
+    let patch = |feedback: Option<bool>| {
+        (
+            NodeDecl::new("echo", EchoConfig::new(ChannelLayout::MONO)),
+            NodeDecl::new("pass", pass()),
+            Mention::new("echo").connect(Mention::new("pass")).unfaded(),
+            feedback.map(|unfaded| {
+                let wire = Mention::new("pass")
+                    .connect(Mention::new("echo"))
+                    .feedback(Samples::new(DELAY));
+                if unfaded { wire.unfaded() } else { wire }
+            }),
+            Mention::new("pass").connect(MainOutput).unfaded(),
+        )
+    };
+    // Made with no fade in, declared again with the fade out it will leave by.
+    s.patch(patch(Some(true))).unwrap();
+    s.patch(patch(Some(false))).unwrap();
+    let _ = s.update();
+
+    s.patch(patch(None)).unwrap();
+    let _ = s.update();
+
+    let out: Vec<f32> = (0..3 * DELAY)
+        .map(|_| {
+            let mut frame = [f32::NAN];
+            s.render(&mut InterleavedMut::new(&mut frame, ChannelLayout::MONO).unwrap());
+            frame[0]
+        })
+        .collect();
+    assert_eq!(out[0], 1.0);
+    let want = 1.0 - smooth(DELAY);
+    assert!(
+        (f64::from(out[DELAY]) - want).abs() < 1e-6,
+        "{} against {want}",
+        out[DELAY]
+    );
+    assert!(out[DELAY] > 0.0 && out[DELAY] < 1.0);
+    assert_eq!(out[2 * DELAY], 0.0, "the next echo is past the fade");
 }

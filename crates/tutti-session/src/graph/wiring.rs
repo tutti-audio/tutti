@@ -1,14 +1,19 @@
 //! What a wire is checked against: the graph, and the shapes of nodes a patch
 //! is about to place (or swap in) that it does not hold yet.
 
+use std::collections::BTreeSet;
 use tutti_buffers::Float;
 use tutti_graph::{
-    BusError, BusOutputPort, Buses, EdgeFade, EdgeId, EventInputPort, EventOutputPort, GraphSpec,
-    NodeKey, Shape, Shapes,
+    BusError, BusOutputPort, Buses, EdgeFade, EdgeId, EventEdge, EventInputPort, EventOutputPort,
+    GraphSpec, NodeKey, Shape, Shapes,
 };
+#[cfg(feature = "device")]
+use tutti_graph::{CycleEdge, Edge};
+
+use tutti_units::Samples;
 
 use crate::key::{BusEnd, BusInputPort, InEnd, MainSink};
-use crate::{ChannelEdge, ConnectError, InputPort, MainOutput, NoSuchNode, OutputPort};
+use crate::{ConnectError, InputPort, MainOutput, NoSuchNode, OutputPort};
 
 use super::Graph;
 
@@ -18,26 +23,74 @@ use super::Graph;
 pub(crate) type Pending<'a> = Option<&'a Shapes>;
 
 impl<F: Float> Graph<F> {
-    /// The graph's spec without the edges it is only fading out: the wiring
-    /// a new wire is searched for a cycle against.
-    pub(crate) fn live_spec(&self) -> GraphSpec {
-        let mut spec = self.editor.spec().clone();
-        spec.topology.edges.retain(|at, edges| {
-            edges.retain(|&e| !self.fading_out(EdgeId::into_port(*at, e)));
-            !edges.is_empty()
-        });
-        for feeds in spec.bus_edges.values_mut() {
-            feeds.retain(|feed| feed.fade != EdgeFade::Out);
-        }
-        spec.main_output_sources
-            .retain(|feed| feed.fade != EdgeFade::Out);
-        spec
+    /// The graph's spec, fading edges included: the compile counts them, so
+    /// a new wire is searched for a cycle against all of it.
+    pub(crate) fn whole_spec(&self) -> GraphSpec {
+        self.editor.spec().clone()
     }
 
-    /// Whether the graph holds `edge` and is not fading it out.
-    pub(crate) fn holds_edge(&self, edge: ChannelEdge) -> bool {
-        Self::edge_id(edge)
-            .is_some_and(|id| self.editor.spec().has_edge(id) && !self.fading_out(id))
+    /// The edges the graph is only fading out: audio edges, and bus edges
+    /// (not into the main output).
+    pub(crate) fn fading_edges(
+        &self,
+    ) -> (BTreeSet<EdgeId>, BTreeSet<(BusOutputPort, BusInputPort)>) {
+        let spec = self.editor.spec();
+        let audio = spec
+            .topology
+            .edges
+            .iter()
+            .flat_map(|(&at, edges)| edges.iter().map(move |&e| EdgeId::into_port(at, e)))
+            .filter(|&id| self.fading_out(id))
+            .collect();
+        let buses = spec
+            .bus_edges
+            .iter()
+            .flat_map(|(&at, feeds)| {
+                feeds
+                    .iter()
+                    .filter(|feed| feed.fade == EdgeFade::Out)
+                    .map(move |feed| (feed.source, BusInputPort::node(at)))
+            })
+            .collect();
+        (audio, buses)
+    }
+
+    /// The graph's largest block, the shortest delay a feedback edge may have.
+    pub(crate) fn max_block_samples(&self) -> Samples {
+        self.editor.prepare().max_block().samples()
+    }
+
+    /// The delay of the event edge `from -> to` the graph holds: `None` for
+    /// no edge, `Some(None)` for a direct one.
+    pub(crate) fn held_event_delay(
+        &self,
+        from: EventOutputPort,
+        to: EventInputPort,
+    ) -> Option<Option<Samples>> {
+        self.held_event_edge(from, to).map(|edge| match edge {
+            EventEdge::Direct(_) => None,
+            EventEdge::Feedback { delay, .. } => Some(delay),
+        })
+    }
+
+    /// The graph's shortest feedback delay, and the edge that has it: what a
+    /// re-prepare to a longer block would fail to compile.
+    #[cfg(feature = "device")]
+    pub(crate) fn shortest_feedback(&self) -> Option<(CycleEdge, Samples)> {
+        let spec = self.editor.spec();
+        let audio = spec.topology.edges.iter().flat_map(|(&at, edges)| {
+            edges.iter().filter_map(move |edge| match edge {
+                Edge::Feedback(f) => Some((CycleEdge::Audio(at), f.delay)),
+                Edge::Direct(_) => None,
+            })
+        });
+        let events = spec.events.iter().flat_map(|(&at, edges)| {
+            edges.iter().filter_map(move |edge| match *edge {
+                EventEdge::Feedback { from, delay } => Some((CycleEdge::Event { at, from }, delay)),
+                EventEdge::Direct(_) => None,
+            })
+        });
+        audio.chain(events).min_by_key(|&(_, delay)| delay)
     }
 
     /// Whether the graph holds the bus edge `from -> to` and is not fading it

@@ -15,7 +15,7 @@
 
 use std::marker::PhantomData;
 
-use tutti_units::Gain;
+use tutti_units::{Gain, Samples};
 
 use crate::patch::{Declarations, IntoPatch, NodeDecl, PatchTarget, WireDecl, WireEnds};
 use crate::{BusWire, ChannelWire, EventWire, MainBusWire, MainOutput, Weighted, Wire};
@@ -39,7 +39,7 @@ pub(crate) mod sealed {
 
         pub trait Sealed<K, W: crate::Wire> {
             /// What the wire into this end gives: a chain toward a node, a
-            /// connection toward a port.
+            /// connection toward a port or the main output.
             type Joined;
             fn end(self) -> InputEnd<K, W>;
             fn joined(wires: Chain<K>) -> Self::Joined;
@@ -221,6 +221,7 @@ pub trait WireStart<K>: sealed::start::Sealed<K> + Sized {
             ends: join(from, to.end()),
             unfaded: false,
             initial: None,
+            delay: None,
         });
         E::joined(chain)
     }
@@ -290,11 +291,11 @@ impl<K: Clone, C> sealed::end::Sealed<K, MainBusWire> for &NodeDecl<K, C> {
 }
 
 impl<K, W: Wire> sealed::end::Sealed<K, W> for InputEnd<K, W> {
-    type Joined = Connected<K, W>;
+    type Joined = Connected<K, W, ToNode>;
     fn end(self) -> InputEnd<K, W> {
         self
     }
-    fn joined(chain: Chain<K>) -> Connected<K, W> {
+    fn joined(chain: Chain<K>) -> Connected<K, W, ToNode> {
         chain.ended()
     }
 }
@@ -309,11 +310,11 @@ impl MainEnd for MainOutput {}
 macro_rules! main_end {
     ($($wire:ty),+) => {$(
         impl<K, T: MainEnd> sealed::end::Sealed<K, $wire> for T {
-            type Joined = Connected<K, $wire>;
+            type Joined = Connected<K, $wire, ToOutput>;
             fn end(self) -> InputEnd<K, $wire> {
                 InputEnd::of(None, In::Main)
             }
-            fn joined(chain: Chain<K>) -> Connected<K, $wire> {
+            fn joined(chain: Chain<K>) -> Connected<K, $wire, ToOutput> {
                 chain.ended()
             }
         }
@@ -337,14 +338,23 @@ pub struct Chain<K> {
     wires: Vec<WireDecl<K>>,
 }
 
-/// Wires that end at a port or at the main output, the last of kind `W`. A
-/// part of a patch.
+/// Wires that end at a port or at the main output, the last of kind `W` and
+/// arriving at `E` ([`ToNode`] or [`ToOutput`]). A part of a patch.
 #[must_use = "a wire is part of a patch only once `Session::patch` takes it"]
 #[derive(Clone, Debug)]
-pub struct Connected<K, W: Wire> {
+pub struct Connected<K, W: Wire, E> {
     wires: Vec<WireDecl<K>>,
-    kind: PhantomData<fn() -> W>,
+    kind: PhantomData<fn() -> (W, E)>,
 }
+
+/// What a [`Connected`] arrives at: a port of a node.
+#[derive(Clone, Copy, Debug)]
+pub struct ToNode;
+
+/// What a [`Connected`] arrives at: the main output, which no feedback wire
+/// ends at.
+#[derive(Clone, Copy, Debug)]
+pub struct ToOutput;
 
 impl<K> Chain<K> {
     /// The start of a chain: no wire yet, which `connect` makes the first.
@@ -353,7 +363,7 @@ impl<K> Chain<K> {
     }
 
     /// The chain's wires, ended by a wire of kind `W`.
-    fn ended<W: Wire>(self) -> Connected<K, W> {
+    fn ended<W: Wire, E>(self) -> Connected<K, W, E> {
         Connected {
             wires: self.wires,
             kind: PhantomData,
@@ -381,7 +391,30 @@ macro_rules! last_wire_options {
 }
 
 last_wire_options!([K] Chain<K>);
-last_wire_options!([K, W: Wire] Connected<K, W>);
+last_wire_options!([K, W: Wire, E] Connected<K, W, E>);
+
+/// `feedback`, on the wires that can close a cycle: a main bus into a node, a
+/// channel or an event port into a port of a node. A bus wire has no delayed
+/// edge and a wire into the main output is never a cycle, so neither has it.
+macro_rules! feedback_option {
+    ([$($g:tt)*] $ty:ty) => {
+        impl<$($g)*> $ty {
+            /// Makes the last wire a feedback wire: its sink reads the
+            /// source `delay` frames late, which lets the wire close a cycle.
+            /// `delay` is part of the wire's identity: a patch that changes
+            /// it makes the wire again. A delay shorter than the graph's
+            /// largest block is [`PatchError::FeedbackTooShort`](crate::PatchError::FeedbackTooShort).
+            pub fn feedback(mut self, delay: Samples) -> Self {
+                self.last().delay = Some(delay);
+                self
+            }
+        }
+    };
+}
+
+feedback_option!([K] Chain<K>);
+feedback_option!([K] Connected<K, ChannelWire, ToNode>);
+feedback_option!([K] Connected<K, EventWire, ToNode>);
 
 impl<K> Chain<K> {
     /// Gives the last wire a gain lane at `gain`: an initial, as a config's
@@ -393,7 +426,7 @@ impl<K> Chain<K> {
     }
 }
 
-impl<K, W: Weighted> Connected<K, W> {
+impl<K, W: Weighted, E> Connected<K, W, E> {
     /// Gives the last wire a gain lane at `gain`: an initial, as a config's
     /// is. A patch that changes it writes the new value, and a `set` on the
     /// wire's [`GainTarget`](crate::GainTarget) wins until then.
@@ -409,7 +442,7 @@ impl<K, G: PatchTarget> IntoPatch<K, G> for Chain<K> {
     }
 }
 
-impl<K, W: Wire, G: PatchTarget> IntoPatch<K, G> for Connected<K, W> {
+impl<K, W: Wire, E, G: PatchTarget> IntoPatch<K, G> for Connected<K, W, E> {
     fn add_to(self, patch: &mut Declarations<K, G>, _: crate::patch::Sealed) {
         patch.wires.extend(self.wires);
     }

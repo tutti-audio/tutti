@@ -452,8 +452,7 @@ impl Wire for ChannelWire {
         from: OutputPort,
         to: InputPort,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        let added = graph.add_edge(from, to)?;
-        Ok(vec![(ChannelEdge::new(from, to), added)])
+        graph.add_channel_wire(from, to, None)
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
@@ -484,13 +483,7 @@ impl Wire for MainBusWire {
         from: NodeKey,
         to: MainSink,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        let wires = graph.main_wires(None, from, to)?;
-        let mut edges = Vec::with_capacity(wires.len());
-        for (out, input) in wires {
-            let added = graph.add_edge(out, input)?;
-            edges.push((ChannelEdge::new(out, input), added));
-        }
-        Ok(edges)
+        graph.add_main_wire(from, to, None)
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
@@ -561,7 +554,7 @@ impl Wire for EventWire {
         from: EventOutputPort,
         to: EventInputPort,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
-        graph.add_event_edge(from, to)?;
+        graph.add_event_edge(from, to, None)?;
         Ok(Vec::new())
     }
     fn disconnect<F: Float>(
