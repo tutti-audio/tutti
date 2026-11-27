@@ -89,7 +89,7 @@ use tutti_dsp::FftFloat;
 use crate::ToMemory;
 use crate::fork::PendingExport;
 use render_output::{Landing, MainShape, StemOutput, StemShape};
-use tutti_codec::{Encoding, ToFile};
+use tutti_codec::ToFile;
 use tutti_rt::SplitMix64;
 
 /// The span of the project a bounce renders, in the unit the caller thinks in.
@@ -326,18 +326,18 @@ impl Destination for ToMemory {}
 /// each is dithered with the seed [`SplitMix64::mix`] of its index unless the encoding states
 /// one, never one shared seed: two files with one noise sequence would add it coherently.
 fn file_target(to: ToFile, index: usize, width: ChannelLayout) -> FileTarget {
-    let encoding = to.encoding().clone();
-    let encoding = if encoding.channel_set().is_none() {
-        encoding.width(width)
-    } else {
-        encoding
-    };
-    let encoding = if encoding.seed().is_none() {
-        encoding.dither_seed(SplitMix64::mix(index as u64))
-    } else {
-        encoding
-    };
-    FileTarget::new(to.encoded_as(encoding))
+    FileTarget::new(to.map_encoding(|encoding| {
+        let encoding = if encoding.channel_set().is_none() {
+            encoding.width(width)
+        } else {
+            encoding
+        };
+        if encoding.seed().is_none() {
+            encoding.dither_seed(SplitMix64::mix(index as u64))
+        } else {
+            encoding
+        }
+    }))
 }
 
 /// A file stem: its target, and whether it takes the main output's gain, which is known once
@@ -722,8 +722,7 @@ impl<N, F: Float> Bounce<N, ToFile, F> {
     /// main output (what a bus or the main output applies downstream is not in it), at
     /// the node's own width.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
-        let format = self.main_output.encoding().format();
-        let to = ToFile::new(path, Encoding::new(format));
+        let to = self.main_output.alongside(path);
         self.stem_with(Stem::new(node).to(to))
     }
 
@@ -770,7 +769,7 @@ impl<N: std::fmt::Debug, D: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
 /// - [`topology`](Self::topology) states what the tapped channels are (the
 ///   engine's order for the width without it).
 ///
-/// The width of the stem's file or planes is its destination's: an [`Encoding`] that states
+/// The width of the stem's file or planes is its destination's: an [`Encoding`](tutti_codec::Encoding) that states
 /// channels, or [`ToMemory::channels`]. The tapped channels are folded onto it from their
 /// topology, and a fold that cannot place them refuses the bounce when it renders (nothing
 /// is truncated).

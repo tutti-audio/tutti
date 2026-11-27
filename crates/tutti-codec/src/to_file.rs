@@ -52,10 +52,16 @@ impl ToFile {
         &self.encoding
     }
 
-    /// The same file, written as `encoding` instead.
-    pub fn encoded_as(mut self, encoding: Encoding) -> Self {
-        self.encoding = encoding;
+    /// The same file, written as `f` makes of its encoding.
+    pub fn map_encoding(mut self, f: impl FnOnce(Encoding) -> Encoding) -> Self {
+        self.encoding = f(self.encoding);
         self
+    }
+
+    /// A file at `path` written in this one's format, with the channels and the rate of
+    /// whatever it is given, and the options of a new file.
+    pub fn alongside(&self, path: impl Into<PathBuf>) -> Self {
+        Self::new(path, Encoding::new(self.encoding.format()))
     }
 
     /// The file, begun for `spec`, with `options`' length and seed.
