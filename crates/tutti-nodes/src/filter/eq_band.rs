@@ -76,7 +76,8 @@ impl<F: Float + SimdLanes> From<EqBandConfig> for EqBandNode<F> {
     }
 }
 
-/// The band's values and structure are its filter's.
+/// The band's values and structure are its filter's: its controls are the filter's cells, and
+/// only the ports are left out.
 impl<F: Float + SimdLanes> NodeConfig<F> for EqBandConfig {
     type Node = EqBandNode<F>;
 
