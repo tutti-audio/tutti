@@ -274,9 +274,9 @@ fn apply_gain_scales_every_sample_by_the_amplitude() {
         SampleRate::SR_48K,
         Interleaved::new(&[1.0f64, -0.5, 0.25, 0.75], STEREO).unwrap(),
     );
-    w.apply_gain(tutti_units::Db::from_amplitude(tutti_units::Amplitude::new(
-        0.5,
-    )));
+    w.apply_gain(tutti_units::Db::from_amplitude(
+        tutti_units::Amplitude::new(0.5),
+    ));
     assert_eq!(w.channel(0).samples(), &[0.5, 0.125]);
     assert_eq!(w.channel(1).samples(), &[-0.25, 0.375]);
     assert_eq!(w.len(), Samples::new(2));
