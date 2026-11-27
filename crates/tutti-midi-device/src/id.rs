@@ -59,6 +59,9 @@ pub enum OsEndpointIdentity {
     /// A Windows Multimedia (WinMM) output port; see
     /// [`WinMmInput`](Self::WinMmInput).
     WinMmOutput(WinMmDevice),
+    /// A Windows MIDI Services endpoint, by the service's endpoint device id: the device
+    /// interface path, which survives a replug. One id names both directions of the endpoint.
+    MidiServices(String),
 }
 
 impl OsEndpointIdentity {
@@ -174,6 +177,7 @@ impl fmt::Display for MidiDeviceId {
             OsEndpointIdentity::Alsa { client, port } => write!(f, "alsa:{client}/{port}")?,
             OsEndpointIdentity::WinMmInput(device) => write!(f, "winmm-in:{device}")?,
             OsEndpointIdentity::WinMmOutput(device) => write!(f, "winmm-out:{device}")?,
+            OsEndpointIdentity::MidiServices(id) => write!(f, "midi-services:{id}")?,
         }
         write!(f, "#{}", self.ordinal)
     }
