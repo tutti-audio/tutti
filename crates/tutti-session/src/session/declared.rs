@@ -340,11 +340,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             return Err(PatchError::NotFinite(key.clone()));
         }
         let mut wires = Self::declared_wires(&declared, &seen)?;
-        // A carried wire is kept as it was made.
+        // A carried wire is kept as it was made: a carried section converged,
+        // so none of its wires was left dormant out of the kept ones.
         for id in carried_wires {
-            if let Some(&kept) = self.declared.wires.get(&id) {
-                wires.entry(id).or_insert(kept);
-            }
+            let kept = self.declared.wires[&id];
+            wires.entry(id).or_insert(kept);
         }
         let host = self.host_values();
         let mut kept = std::mem::take(&mut self.declared);

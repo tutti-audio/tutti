@@ -112,7 +112,9 @@ impl<K: fmt::Debug, C> fmt::Debug for NodeDecl<K, C> {
 /// wires are still in the graph; and every key its wires mention outside the
 /// section is declared by the rest of the patch with the node it had (not
 /// readded, not swapped). Otherwise the body runs, and what it declares joins
-/// the patch like any other part.
+/// the patch like any other part. A body runs before the patch is checked, so
+/// it may run for a patch that is then refused: it makes parts and does nothing
+/// else.
 ///
 /// Deps are compared by [`PartialEq`]: `Arc<T>` compares contents (short-cut by
 /// pointer when `T: Eq`), so a revision number is the cheap form. Deps of
