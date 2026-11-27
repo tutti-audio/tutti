@@ -229,6 +229,58 @@ jobs:
       - name: Plugin IPC transport tests
         run: cargo nextest run --locked -p tutti-plugin-ipc-ffi -p tutti-plugin-ipc --lib -E "package(tutti-plugin-ipc-ffi) | test(/^transport::/)"
 
+  # Windows MIDI Services against the real service: the one job on `windows-11-arm`, the one hosted runner that has
+  # the service (the Server images do not; `MidiSrv` is installed there and `EnsureServiceAvailable` starts it).
+  # The API's DLL is not in the box yet: the job downloads Microsoft's preview package, checks its hash, and puts the
+  # arm64 DLL beside the test binaries, where the loader finds it. The package is the one `cargo xtask
+  # winmidi2-bindings` generates from. A missing service or DLL fails the tests by name.
+  midi-services:
+    name: midi services (windows arm64)
+    needs: changes
+    if: needs.changes.outputs.midi_services == 'true'
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+      - name: Lint
+        run: cargo clippy --locked -p tutti-winmidi2-ffi --features services-tests --all-targets -- -D warnings
+      - name: Build the tests
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests --no-run
+      - name: Windows MIDI Services API
+        shell: pwsh
+        env:
+          # Preview 11 (`0.99.92-preview.11`), the API's locked preview; the same package and hash as `cargo xtask
+          # winmidi2-bindings`.
+          PACKAGE_URL: https://github.com/microsoft/MIDI/releases/download/inbox-preview-11/Windows.Devices.Midi2.0.99.92-preview.11.nupkg
+          PACKAGE_SHA256: 13afc6e6da2adac309ab8c174352f46f1c0ebe2d79e65475bd6274defb73df74
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'Windows.Devices.Midi2.nupkg'
+          Invoke-WebRequest -Uri $env:PACKAGE_URL -OutFile $package
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $package).Hash
+          if ($actual -ne $env:PACKAGE_SHA256) { throw "the package hashes to $actual" }
+          # Only the arm64 DLL, out of the 103 MB package.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($package)
+          try {
+            $entry = $zip.GetEntry('runtimes/win-arm64/native/Windows.Devices.Midi2.dll')
+            if (-not $entry) { throw 'the package has no arm64 DLL' }
+            # The loader looks beside each executable: nextest names every test binary it runs.
+            $list = cargo nextest list --locked -p tutti-winmidi2-ffi --features services-tests --list-type binaries-only --message-format json | ConvertFrom-Json
+            $dirs = @($list.'rust-binaries'.PSObject.Properties.Value | ForEach-Object { Split-Path $_.'binary-path' } | Sort-Object -Unique)
+            if ($dirs.Count -eq 0) { throw 'nextest lists no test binaries' }
+            foreach ($dir in $dirs) {
+              [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $dir 'Windows.Devices.Midi2.dll'), $true)
+              Write-Output "staged the DLL in $dir"
+            }
+          } finally { $zip.Dispose() }
+      - name: Tests
+        run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests
+
   # Every AU crate is macOS-only, so the Linux and Windows jobs compile it to nothing. Lints only: the AU
   # suites need installed audio units and run locally, and the macOS `test` runs on pushes to main.
   clippy-macos:
@@ -542,6 +594,7 @@ jobs:
       code: ${{ steps.diff.outputs.code }}
       loom: ${{ steps.diff.outputs.loom }}
       macos: ${{ steps.diff.outputs.macos }}
+      midi_services: ${{ steps.diff.outputs.midi_services }}
       test_os: ${{ steps.diff.outputs.test_os }}
       test_more_os: ${{ steps.diff.outputs.test_more_os }}
       deps: ${{ steps.diff.outputs.deps }}
@@ -562,6 +615,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "loom=true" >> "$GITHUB_OUTPUT"
             echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "midi_services=true" >> "$GITHUB_OUTPUT"
             echo 'test_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo 'test_more_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo "deps=true" >> "$GITHUB_OUTPUT"
@@ -599,6 +653,11 @@ jobs:
             echo "deps=true" >> "$GITHUB_OUTPUT"
           else
             echo "deps=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-ump|tutti-platform)/|Cargo\.lock$|\.config/nextest\.toml$|\.github/workflows/ci\.yml$)'; then
+            echo "midi_services=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "midi_services=false" >> "$GITHUB_OUTPUT"
           fi
           if echo "$changed" | grep -qE '^(crates/(tutti-rt|tutti-cpal|tutti-midi-hardware|tutti-coremidi-ffi|tutti-au-[a-z]+|tutti-vst2-[a-z]+|tutti-vst3-[a-z]+|tutti-clap-[a-z]+|tutti-plugin[a-z-]*)/|crates/tutti-session/(src|tests)/plugin|testing/tutti-(shared-plugin[a-z0-9-]*|clap-test-plugin|vst2-[a-z]+|vst2-test-plugin|plugin-contract|fixtures)/|vendor/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
@@ -703,6 +762,7 @@ jobs:
       - clippy
       - clippy-windows
       - clippy-macos
+      - midi-services
       - contract-windows
       - features
       - bench-smoke

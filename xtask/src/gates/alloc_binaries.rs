@@ -34,6 +34,10 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
         "Windows-only tests whose tutti-fixtures dev-dependency is Windows-only; calls winmm, never enters an RtScope",
     ),
     (
+        "crates/tutti-winmidi2-ffi/tests/winmidi2/main.rs",
+        "Windows-only tests; calls the MIDI service, never enters an RtScope",
+    ),
+    (
         "crates/tutti/tests/error_bounds/main.rs",
         "compile-time trait-bound checks that run no test; never enters an RtScope",
     ),

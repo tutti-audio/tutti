@@ -1,0 +1,29 @@
+[package]
+name = "tutti-winmidi2-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Safe bindings to the Windows MIDI Services API (Windows.Devices.Midi2), for tutti"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["midi", "midi2", "windows", "ffi"]
+categories = ["external-ffi-bindings", "multimedia::audio", "os::windows-apis"]
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.dependencies]
+thiserror = { workspace = true, features = ["std"] }
+windows-collections = "0.3"
+windows-core = "0.62"
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+
+[features]
+# The suites that open the diagnostic loopback endpoints, which need the service
+# running and the API's DLL beside the test binary. Off by default.
+services-tests = []
+
+[package.metadata.docs.rs]
+targets = ["x86_64-pc-windows-msvc"]

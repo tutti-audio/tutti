@@ -16,6 +16,7 @@ pub(crate) const SKIPPED: &[(&str, &str)] = &[
     ("tutti-au-ffi", "compiled only on macOS"),
     ("tutti-coremidi-ffi", "compiled only on macOS"),
     ("tutti-winmm-ffi", "compiled only on Windows"),
+    ("tutti-winmidi2-ffi", "compiled only on Windows"),
 ];
 
 /// Whether `krate` is a row of [`SKIPPED`].
@@ -70,7 +71,8 @@ mod tests {
                 "public-api: b  5",
                 "public-api: total  7",
                 "public-api: not counted on this host: tutti-au-ffi (compiled only on macOS), \
-                 tutti-coremidi-ffi (compiled only on macOS), tutti-winmm-ffi (compiled only on Windows) \
+                 tutti-coremidi-ffi (compiled only on macOS), tutti-winmm-ffi (compiled only on Windows), \
+                 tutti-winmidi2-ffi (compiled only on Windows) \
                  (`xtask/public-items/` lists them)",
             ]
         );
