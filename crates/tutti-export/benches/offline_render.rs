@@ -101,7 +101,8 @@ impl Case {
             Some(resample) => encoding.resample(resample),
             None => encoding,
         };
-        let target = FileTarget::new(ToFile::new(path, encoding));
+        // Every iteration writes the same path again, so it replaces the last one.
+        let target = FileTarget::new(ToFile::new(path, encoding).replace());
         match normalize {
             Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,
