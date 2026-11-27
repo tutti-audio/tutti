@@ -114,13 +114,13 @@ fn crossover_row() -> Row {
     Row::new(
         "CrossoverNode<f32> (stereo, 2 bands, right low band)",
         || {
-            Box::new(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            Box::new(CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
                     ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-                ))
+                )
                 .unwrap(),
-            )
+            ))
         },
         impulse(1),
         Detect::Threshold(0.0),

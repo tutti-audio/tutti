@@ -77,7 +77,7 @@ impl Splits {
 ///
 /// `channels` inputs, `bands * channels` outputs, band-major: output
 /// `band * channels + channel`. That layout is fixed, and `bands * channels`
-/// is at most the graph's 64 ports (converting a [`CrossoverConfig`] refuses more). The
+/// is at most the graph's 64 ports ([`CrossoverConfig::new`] refuses more). The
 /// bands are not delayed and the node adds no
 /// latency; the sum of the bands has flat magnitude and the phase of the
 /// crossovers' all-pass (see [`CrossoverModel`] for why, and for
@@ -101,44 +101,38 @@ impl Splits {
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
 /// its splits no lower than the one before, and a non-finite write reads as unchanged.
 ///
-/// Made from a [`CrossoverConfig`] (`CrossoverNode::try_from`).
+/// Made from a [`CrossoverConfig`] (`CrossoverNode::from`).
 ///
 /// `F` is the float of the graph it runs in, and of the sections.
 pub type CrossoverNode<F> = KernelNode<CrossoverKernel<F>>;
 
-/// What a [`CrossoverNode`] is made from: its width and the frequency of each split.
+/// What a [`CrossoverNode`] is made from: its bus and the frequency of each split.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CrossoverConfig {
     input: ChannelTopology,
+    bands: CrossoverBands,
     crossovers: CrossoverControls,
 }
 
 impl CrossoverConfig {
     /// A crossover over the bus `input` with the splits `crossovers`, one more band than
     /// [`CrossoverControls::splits`].
-    #[must_use]
-    pub fn new(input: ChannelTopology, crossovers: CrossoverControls) -> Self {
-        Self { input, crossovers }
-    }
-}
-
-/// A crossover node from its config.
-///
-/// The refusal depends on the bus and the splits together (`bands * channels` against the
-/// graph's ports), so it is a conversion and not a type. The splits' count and order are
-/// [`CrossoverControls`]'s `TryFrom`, and the bus holds its own width limit.
-///
-/// # Errors
-///
-/// [`CrossoverError`] if the bus has no channels, `bands * channels` exceeds the graph's 64
-/// ports, or the controls have no split (a set [`CrossoverControls`]'s `TryFrom` made always
-/// has one). A frequency at or above the prepared rate's Nyquist is not refused: the design
-/// holds it under that rate.
-impl<F: Float + SimdLanes> TryFrom<CrossoverConfig> for CrossoverNode<F> {
-    type Error = CrossoverError;
-
-    fn try_from(config: CrossoverConfig) -> Result<Self, CrossoverError> {
-        let CrossoverConfig { input, crossovers } = config;
+    ///
+    /// The refusal depends on the bus and the splits together (`bands * channels` against the
+    /// graph's ports), so it is made here and not by a type. The splits' count and order are
+    /// [`CrossoverControls`]'s `TryFrom`, and the bus holds its own width limit. A frequency at
+    /// or above the prepared rate's Nyquist is not refused: the design holds it under that
+    /// rate.
+    ///
+    /// # Errors
+    ///
+    /// [`CrossoverError`] if the bus has no channels, `bands * channels` exceeds the graph's 64
+    /// ports, or the controls have no split (a set [`CrossoverControls`]'s `TryFrom` made
+    /// always has one).
+    pub fn new(
+        input: ChannelTopology,
+        crossovers: CrossoverControls,
+    ) -> Result<Self, CrossoverError> {
         let splits = crossovers.splits();
         let channels = usize::from(input.width().count());
         let bands = CrossoverBands::new(splits + 1).ok_or(CrossoverError::Bands {
@@ -146,15 +140,28 @@ impl<F: Float + SimdLanes> TryFrom<CrossoverConfig> for CrossoverNode<F> {
             min: 2,
             max: CrossoverModel::MAX_BANDS,
         })?;
-        let kernel = CrossoverKernel::new(input, bands, &crossovers)?;
-        if channels * kernel.bands() > tutti_graph::MAX_PORTS {
+        if channels == 0 || channels * bands.get() > tutti_graph::MAX_PORTS {
             return Err(CrossoverError::Channels { channels });
         }
-        Ok(Self::with_kernel(
-            kernel,
-            CrossoverSet { splits },
+        Ok(Self {
+            input,
+            bands,
             crossovers,
-        ))
+        })
+    }
+}
+
+kernel_config!(CrossoverConfig => CrossoverNode<F> where [F: Float + SimdLanes],
+    controls = crossovers,
+    set(c): CrossoverSet = CrossoverSet { splits: c.crossovers.splits() });
+
+impl<F: Float + SimdLanes> From<CrossoverConfig> for CrossoverNode<F> {
+    fn from(config: CrossoverConfig) -> Self {
+        Self::with_kernel(
+            CrossoverKernel::new(config.input, config.bands, &config.crossovers),
+            config.kernel_set(),
+            config.crossovers,
+        )
     }
 }
 
@@ -181,27 +188,16 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
     /// A crossover of `bands` bands on the bus `input`, each band where it is. Allocates the
     /// state. Its model until the first retarget is `controls` at 48 kHz: an unprepared node
     /// renders nothing, and the first block designs for the rate `prepare` was given.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Channels`] for no channels.
-    fn new(
-        input: ChannelTopology,
-        bands: CrossoverBands,
-        controls: &CrossoverControls,
-    ) -> Result<Self, CrossoverError> {
-        if input.width().count() == 0 {
-            return Err(CrossoverError::Channels { channels: 0 });
-        }
+    fn new(input: ChannelTopology, bands: CrossoverBands, controls: &CrossoverControls) -> Self {
         let rate = SampleRate::SR_48K;
         let model = CrossoverModel::designed(bands, controls, rate);
-        Ok(Self {
+        Self {
             input,
             bank: CrossoverBank::new(input.width()),
             blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
             rate,
-        })
+        }
     }
 
     /// How many bands it makes.
@@ -321,13 +317,13 @@ mod tests {
     /// and a moderate cost.
     #[test]
     fn the_node_writes_bands_band_major_per_channel() {
-        let mut node = prepared(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        let mut node = prepared(CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
                 ChannelTopology::STEREO,
                 CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
-            ))
+            )
             .unwrap(),
-        );
+        ));
         let shape = node.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -352,11 +348,13 @@ mod tests {
     /// -6.02 dB there), where the 500 Hz split passes almost none of it.
     #[test]
     fn a_param_write_moves_the_split() {
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::MONO,
-            CrossoverControls::try_from(&[Hz::new(500.0), Hz::new(4_000.0)][..]).unwrap(),
-        ))
-        .unwrap();
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(500.0), Hz::new(4_000.0)][..]).unwrap(),
+            )
+            .unwrap(),
+        );
         let set = node.param_set();
         let mut node = prepared(node);
         assert!(set.set(Splits::addr(0), 2_000.0));
@@ -370,12 +368,16 @@ mod tests {
     /// port's base is its cell.
     #[test]
     fn the_ports_are_the_indexed_cutoffs() {
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::STEREO,
-            CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0), Hz::new(9_000.0)][..])
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::STEREO,
+                CrossoverControls::try_from(
+                    &[Hz::new(200.0), Hz::new(2_000.0), Hz::new(9_000.0)][..],
+                )
                 .unwrap(),
-        ))
-        .unwrap();
+            )
+            .unwrap(),
+        );
         let want: Vec<UnitAddr> = (0..3)
             .map(|i| UnitAddr::new(UnitParam::Cutoff, i))
             .collect();
@@ -395,13 +397,13 @@ mod tests {
     #[test]
     fn a_driven_port_moves_its_crossover() {
         use tutti_graph::contract::drive;
-        let mut node = prepared(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        let mut node = prepared(CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
                 ChannelTopology::MONO,
                 CrossoverControls::try_from(&[Hz::new(500.0), Hz::new(4_000.0)][..]).unwrap(),
-            ))
+            )
             .unwrap(),
-        );
+        ));
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
         let signal = [2_000.0f32; 512];
         let mut low = Vec::new();
@@ -418,48 +420,42 @@ mod tests {
         assert!((amp - 0.5).abs() < TOL, "{amp}");
     }
 
-    /// The node refuses a bus it has no ports for and controls with no split. The splits' count
+    /// The config refuses a bus it has no ports for and controls with no split. The splits' count
     /// and order are `CrossoverControls`'s own check.
     #[test]
-    fn the_node_validates_its_bus_and_its_splits() {
+    fn the_config_validates_its_bus_and_its_splits() {
         assert!(matches!(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            CrossoverConfig::new(
                 ChannelTopology::EMPTY,
                 CrossoverControls::try_from(&[Hz::new(100.0)][..]).unwrap()
-            )),
+            ),
             Err(CrossoverError::Channels { channels: 0 })
         ));
+        let five = || {
+            CrossoverControls::try_from(
+                &[
+                    Hz::new(1.0),
+                    Hz::new(2.0),
+                    Hz::new(3.0),
+                    Hz::new(4.0),
+                    Hz::new(5.0),
+                ][..],
+            )
+            .unwrap()
+        };
         // 11 channels x 6 bands = 66 ports.
         assert!(matches!(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            CrossoverConfig::new(
                 ChannelTopology::default_for(ChannelLayout::from_count(11)).unwrap(),
-                CrossoverControls::try_from(
-                    &[
-                        Hz::new(1.0),
-                        Hz::new(2.0),
-                        Hz::new(3.0),
-                        Hz::new(4.0),
-                        Hz::new(5.0)
-                    ][..]
-                )
-                .unwrap()
-            )),
+                five()
+            ),
             Err(CrossoverError::Channels { channels: 11 })
         ));
         assert!(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            CrossoverConfig::new(
                 ChannelTopology::default_for(ChannelLayout::from_count(10)).unwrap(),
-                CrossoverControls::try_from(
-                    &[
-                        Hz::new(1.0),
-                        Hz::new(2.0),
-                        Hz::new(3.0),
-                        Hz::new(4.0),
-                        Hz::new(5.0)
-                    ][..]
-                )
-                .unwrap()
-            ))
+                five()
+            )
             .is_ok()
         );
         // Controls with no split are a crossover of one band.
@@ -467,7 +463,7 @@ mod tests {
             frequencies: [Hz::ZERO; MAX_SPLITS],
         };
         assert!(matches!(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(ChannelTopology::MONO, none)),
+            CrossoverConfig::new(ChannelTopology::MONO, none),
             Err(CrossoverError::Bands { bands: 1, .. })
         ));
     }
@@ -477,11 +473,13 @@ mod tests {
     /// frozen.
     #[test]
     fn a_frequency_above_the_rate_does_not_freeze_the_others() {
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::MONO,
-            CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(15_000.0)][..]).unwrap(),
-        ))
-        .unwrap();
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(15_000.0)][..]).unwrap(),
+            )
+            .unwrap(),
+        );
         let set = node.param_set();
         let rate = 22_050.0;
         let mut node = tutti_graph::contract::prepared(node, SampleRate::of(rate), 1024);
@@ -512,11 +510,13 @@ mod tests {
     /// effect on a render.
     #[test]
     fn prepare_reads_the_cells() {
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::MONO,
-            CrossoverControls::try_from(&[Hz::new(500.0)][..]).unwrap(),
-        ))
-        .unwrap();
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(500.0)][..]).unwrap(),
+            )
+            .unwrap(),
+        );
         node.param_set().set(Splits::addr(0), 2_000.0);
         let mut node = prepared(node);
         let out = render(&mut node, &[sine(200.0, RATE, 480)]);

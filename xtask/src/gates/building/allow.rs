@@ -188,6 +188,42 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "the changes are valid together (no chord, and no scale, shares a beat with another): no single change's type holds it",
     ),
     ty(
+        "crates/tutti-nodes/src/dynamics/leveller.rs",
+        "LevellerConfig::new",
+        CTOR,
+        "the bus is valid as a whole (an ambisonic bus, and speakers that are not a bed's, have no weights): a `ChannelTopology` holds any bus",
+    ),
+    ty(
+        "crates/tutti-nodes/src/early_reflections.rs",
+        "EarlyReflectionsConfig::new",
+        CTOR,
+        "the taps are valid against the limits of the stage realized from them (a finite gain, a channel a stage has, a delay a ring holds): a `TapSet` holds any tap",
+    ),
+    ty(
+        "crates/tutti-nodes/src/filter/crossover.rs",
+        "CrossoverConfig::new",
+        CTOR,
+        "the bus and the splits are valid together (`bands * channels` within the graph's ports): no single value's type holds it",
+    ),
+    ty(
+        "crates/tutti-nodes/src/modulation/phaser.rs",
+        "PhaserConfig::new",
+        CTOR,
+        "a stagger that names an offset for each channel is valid for the bus it names them for: no single value's type holds it",
+    ),
+    ty(
+        "crates/tutti-nodes/src/spatial/ambisonic.rs",
+        "AmbisonicEncoderConfig::new",
+        CTOR,
+        "the bus is valid as a whole (an ambisonic bus in ACN order, in SN3D or N3D): a `ChannelTopology` holds any bus",
+    ),
+    ty(
+        "crates/tutti-nodes/src/spatial/ambisonic.rs",
+        "AmbisonicRotatorConfig::new",
+        CTOR,
+        "the bus is valid as a whole (an ambisonic bus in ACN order, in SN3D or N3D): a `ChannelTopology` holds any bus",
+    ),
+    ty(
         "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
         "HrirSphere::new",
         CTOR,

@@ -379,11 +379,14 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
         Box::new(move |block| {
             let signals = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    ChannelTopology::STEREO,
-                    CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
-                ))
-                .unwrap(),
+                CrossoverNode::<f32>::from(
+                    CrossoverConfig::new(
+                        ChannelTopology::STEREO,
+                        CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..])
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                ),
                 block,
                 &inputs,
                 &signals,
@@ -395,11 +398,14 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    ChannelTopology::STEREO,
-                    CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
-                ))
-                .unwrap(),
+                CrossoverNode::<f32>::from(
+                    CrossoverConfig::new(
+                        ChannelTopology::STEREO,
+                        CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..])
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                ),
                 block,
                 &inputs,
                 &[None, Some(sweep(2_500.0, 9_000.0))],
@@ -431,11 +437,13 @@ fn a_crossover_signal_step_is_held_to_the_next_grid_point_then_ramps() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let signals = [Some(held.unwrap_or_else(|| signal.clone()))];
-        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            ChannelTopology::MONO,
-            CrossoverControls::try_from(&[Hz::new(old)][..]).unwrap(),
-        ))
-        .unwrap();
+        let node = CrossoverNode::<f32>::from(
+            CrossoverConfig::new(
+                ChannelTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(old)][..]).unwrap(),
+            )
+            .unwrap(),
+        );
         let out = render(node, 64, &[x], &signals, |_| {});
         f64::from(out[0][at])
     };

@@ -116,6 +116,26 @@ pub enum MidiHardwareError {
     #[error(transparent)]
     Os(#[from] crate::backend::OsError),
 
+    /// The Windows MIDI Services API is not present: its activation failed. Until Windows
+    /// has the API in the box, the app ships `Windows.Devices.Midi2.dll` beside its
+    /// executable, or builds with the `winmm` feature for a PC that has no MIDI Services.
+    #[error(
+        "the Windows MIDI Services API is not present (activation returned {code:#010x}); \
+         `Windows.Devices.Midi2.dll` must be beside the executable until Windows has it, \
+         or the app must build with the `winmm` feature"
+    )]
+    MidiServicesApiMissing {
+        /// The activation's `HRESULT`.
+        code: i32,
+    },
+
+    /// The Windows MIDI Services API is there and the service is not running: it is
+    /// disabled, or the PC is in its Legacy API mode.
+    #[error(
+        "the Windows MIDI service is not available (disabled, or the PC is in its Legacy API mode)"
+    )]
+    MidiServicesNotRunning,
+
     /// An output's pool has fewer free cells than a message of several packets
     /// needs, so none of it was sent.
     #[error("MIDI output pool has {free} free cells, and the message needs {needed}")]

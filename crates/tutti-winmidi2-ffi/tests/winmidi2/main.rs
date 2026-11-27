@@ -5,3 +5,5 @@
 
 #[cfg(all(windows, feature = "services-tests"))]
 mod loopback;
+#[cfg(all(windows, feature = "services-tests"))]
+mod watcher;

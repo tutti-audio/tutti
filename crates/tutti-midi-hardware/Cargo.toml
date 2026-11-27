@@ -3,7 +3,7 @@ name = "tutti-midi-hardware"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "MIDI device input and output through CoreMIDI on macOS, ALSA on Linux and Windows Multimedia on Windows, for tutti"
+description = "MIDI device input and output through CoreMIDI on macOS, ALSA on Linux and Windows MIDI Services (or Windows Multimedia) on Windows, for tutti"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
@@ -12,14 +12,20 @@ categories = ["multimedia::audio", "hardware-support"]
 
 [features]
 # One backend per OS, each a no-op off its OS: it enables that OS's ffi crate, and
-# `build.rs` names the backend from the target and these features. With none of the
-# three, the backend is the stub, which lists no device.
-default = ["alsa", "coremidi", "winmm"]
+# `build.rs` names the backend from the target and these features. With none of them,
+# the backend is the stub, which lists no device.
+default = ["alsa", "coremidi", "midi-services"]
 # The ALSA UMP sequencer on Linux (needs alsa-lib >= 1.2.10, else the stub).
 alsa = ["dep:tutti-alsa-ffi"]
 # CoreMIDI on macOS.
 coremidi = ["dep:tutti-coremidi-ffi"]
-# Windows Multimedia on Windows.
+# Windows MIDI Services on Windows 11 25H2 and later (or with the API's DLL beside the
+# executable): UMP end to end. A PC without the service fails to open with
+# `MidiHardwareError::MidiServicesNotRunning` or `MidiServicesApiMissing`.
+midi-services = ["dep:tutti-winmidi2-ffi"]
+# Windows Multimedia on Windows, for a PC that has no MIDI Services: MIDI 1.0 bytes. It
+# replaces `midi-services` rather than joining it: with both on, the Windows backend is
+# winmm, so only the app turns it on.
 winmm = ["dep:tutti-winmm-ffi"]
 # `Serialize`/`Deserialize` on `MidiHardwareConfig` and `InputTiming`.
 serde = ["dep:serde", "tutti-ump/serde"]
@@ -31,6 +37,9 @@ sequencer-tests = ["alsa", "tutti-alsa-ffi/testing"]
 # The suites that open Windows' GS Wavetable Synth, which needs an audio
 # endpoint; Windows only.
 synth-tests = ["winmm"]
+# The suites that open the diagnostic loopback endpoints of Windows MIDI Services, which
+# need the service running and the API's DLL beside the test binary; Windows only.
+services-tests = ["midi-services", "tutti-winmidi2-ffi/services-tests"]
 
 [lints]
 workspace = true
@@ -67,6 +76,7 @@ tutti-coremidi-ffi = { version = "0.0.1", path = "../tutti-coremidi-ffi", option
 
 [target.'cfg(windows)'.dependencies]
 tutti-winmm-ffi = { version = "0.0.1", path = "../tutti-winmm-ffi", optional = true }
+tutti-winmidi2-ffi = { version = "0.0.1", path = "../tutti-winmidi2-ffi", optional = true }
 
 [dev-dependencies]
 tutti-midi-hardware = { path = ".", default-features = false, features = ["testing"] }

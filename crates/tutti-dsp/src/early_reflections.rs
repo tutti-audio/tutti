@@ -75,6 +75,37 @@ pub struct EarlyReflections<F: Float> {
     tail: Samples,
 }
 
+impl TapSet {
+    /// Whether every tap can be realized as a stage ([`EarlyReflections::try_from`] then
+    /// succeeds). No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`EarlyReflectionsError`] for the first tap whose gain is not finite, whose channel
+    /// is past [`MAX_CHANNELS`] or whose delay is past [`MAX_TAP_DELAY`].
+    pub fn check(&self) -> Result<(), EarlyReflectionsError> {
+        for (index, tap) in self.taps.iter().enumerate() {
+            if !tap.gain.get().is_finite() {
+                return Err(EarlyReflectionsError::Gain { index });
+            }
+            if usize::from(tap.channel) >= MAX_CHANNELS {
+                return Err(EarlyReflectionsError::Channel {
+                    index,
+                    channel: tap.channel,
+                });
+            }
+            if tap.delay.to_samples_ceil() > MAX_TAP_DELAY {
+                return Err(EarlyReflectionsError::Delay {
+                    index,
+                    delay: tap.delay,
+                    longest: MAX_TAP_DELAY,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 impl<F: Float> TryFrom<&TapSet> for EarlyReflections<F> {
     type Error = EarlyReflectionsError;
 
@@ -85,30 +116,13 @@ impl<F: Float> TryFrom<&TapSet> for EarlyReflections<F> {
     ///
     /// # Errors
     ///
-    /// [`EarlyReflectionsError`] for a tap whose gain is not finite, whose channel is past
-    /// [`MAX_CHANNELS`] or whose delay is past [`MAX_TAP_DELAY`].
+    /// As [`TapSet::check`].
     fn try_from(taps: &TapSet) -> Result<Self, Self::Error> {
-        let longest = MAX_TAP_DELAY;
+        taps.check()?;
         let mut list = Vec::with_capacity(taps.taps.len());
         let (mut channels, mut last) = (1, SampleSpan::ZERO);
-        for (index, tap) in taps.taps.iter().enumerate() {
-            if !tap.gain.get().is_finite() {
-                return Err(EarlyReflectionsError::Gain { index });
-            }
+        for tap in taps.taps.iter() {
             let channel = usize::from(tap.channel);
-            if channel >= MAX_CHANNELS {
-                return Err(EarlyReflectionsError::Channel {
-                    index,
-                    channel: tap.channel,
-                });
-            }
-            if tap.delay.to_samples_ceil() > longest {
-                return Err(EarlyReflectionsError::Delay {
-                    index,
-                    delay: tap.delay,
-                    longest,
-                });
-            }
             let (whole, frac) = F::split_position(ReadPosition::from_span(tap.delay));
             list.push(Reflection {
                 whole: whole.get(),

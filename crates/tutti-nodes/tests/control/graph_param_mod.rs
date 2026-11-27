@@ -40,7 +40,7 @@ use tutti_nodes::{
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, KeySource,
     LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages,
+    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages, Stagger,
     SvfFilterConfig, SvfFilterNode, SvfType, Waveshape,
 };
 use tutti_rt::ParamCell;
@@ -236,12 +236,17 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
 
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
 fn phaser_of_width(w: usize) -> PhaserNode<f32> {
-    PhaserNode::<f32>::try_from(PhaserConfig::new(
-        ChannelTopology::default_for(ChannelLayout::try_from(w).expect("a test width is small"))
+    PhaserNode::<f32>::from(
+        PhaserConfig::new(
+            ChannelTopology::default_for(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+            )
             .expect("at most one bus wide"),
-        Stages::of(4),
-    ))
-    .expect("a step fits any width")
+            Stages::of(4),
+            Stagger::NONE,
+        )
+        .expect("a step fits any width"),
+    )
 }
 
 /// A node's parts, its controls dropped.

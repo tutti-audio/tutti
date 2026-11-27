@@ -192,6 +192,8 @@ pub struct InputProducerHandle {
     jr: JrInput,
     /// Rung after a write to `stream`, for whoever waits to read it.
     bell: Option<Bell>,
+    /// Counts the events the driver delivered that could not be read.
+    driver_lost: CounterWriter<Losses>,
 }
 
 /// How many UMP Stream messages a port holds between two looks of the control
@@ -290,6 +292,14 @@ impl InputProducerHandle {
             .map(|()| Delivered::Sent)
     }
 
+    /// Counts one event the driver delivered that could not be read, so it never reached
+    /// [`push`](Self::push): it is lost, in [`PortInfo::losses`](super::PortInfo::losses).
+    /// Lock-free and allocation-free, like `push`.
+    #[inline]
+    pub fn count_lost(&mut self) {
+        self.driver_lost.add(Losses::lost(1));
+    }
+
     /// Rings the bell, if the port has one: the stream ring has something to read.
     #[inline]
     fn ring(&self) {
@@ -352,6 +362,8 @@ pub(crate) struct HardwareMidiInput {
     hear_sysex: Arc<AtomicBool>,
     timing: Arc<SharedTiming>,
     jr_counts: JrCounts,
+    /// The events the driver delivered that never reached the handle.
+    driver_lost: Counter<Losses>,
 }
 
 impl HardwareMidiInput {
@@ -365,6 +377,7 @@ impl HardwareMidiInput {
         let hear_sysex = Arc::new(AtomicBool::new(false));
         let timing = Arc::new(SharedTiming::new());
         let (jr_counts, jr_writers) = JrCounts::new();
+        let (driver_writer, driver_lost) = counter();
         let (stream_in, stream_out) = ring(STREAM_CAPACITY, Overflow::DropNewest);
         (
             Self {
@@ -374,6 +387,7 @@ impl HardwareMidiInput {
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
                 jr_counts,
+                driver_lost,
             },
             InputProducerHandle {
                 input,
@@ -383,6 +397,7 @@ impl HardwareMidiInput {
                 timing,
                 jr: JrInput::new(jr_writers),
                 bell,
+                driver_lost: driver_writer,
             },
         )
     }
@@ -402,10 +417,11 @@ impl HardwareMidiInput {
         self.jr_counts.restarted.get()
     }
 
-    /// The port's losses: the Stream messages the ring had no room for, and
-    /// the JR Clock messages ignored as late.
+    /// The port's losses: the Stream messages the ring had no room for, the
+    /// JR Clock messages ignored as late, and the events the driver delivered
+    /// that could not be read.
     pub(crate) fn losses(&self) -> Losses {
-        Losses::lost(self.stream_lost()) + self.jr_counts.late.get()
+        Losses::lost(self.stream_lost()) + self.jr_counts.late.get() + self.driver_lost.get()
     }
 
     /// Where the port's event times come from from now on.

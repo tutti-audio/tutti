@@ -7,9 +7,11 @@ mod connection;
 mod endpoint;
 mod error;
 mod session;
+mod watcher;
 
 use clock::Clock;
 pub use connection::Connection;
 pub use endpoint::{Endpoint, Loopback, endpoints, ensure_service_available};
 pub use error::Error;
 pub use session::Session;
+pub use watcher::{Change, Watcher};

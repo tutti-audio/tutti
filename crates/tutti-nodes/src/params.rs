@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
-use tutti_graph::{DeclaredUnit, ErasedSetting, Io, MAX_PARAM_PORTS, ParamSetBuilder};
+use tutti_graph::{DeclaredUnit, ErasedSetting, Initials, Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::UnitAddr;
 
 use crate::kernel::MAX_SIGNALS;
@@ -26,6 +26,138 @@ use crate::last_good::LastGood;
 /// The most controls a kernel has: as many as a node has param ports, which the 31-band
 /// graphic equalizer's gains fill but for one.
 const MAX_CONTROLS: usize = MAX_PARAM_PORTS;
+
+/// The initials of a kernel config whose cells `set` addresses at `controls`: each
+/// cell's raw at its address, and each setting the set holds as its word.
+pub(crate) fn kernel_initials<S: ControlSet>(set: &S, controls: &S::Controls) -> Initials {
+    let addrs = set.addrs();
+    let mut raw = vec![0.0; addrs.len()];
+    set.flatten(controls, &mut raw);
+    let initials = addrs
+        .iter()
+        .zip(raw)
+        .fold(Initials::new(), |initials, (addr, raw)| {
+            initials.param(*addr, raw)
+        });
+    set.settings().iter().fold(initials, |initials, setting| {
+        initials.setting(setting.kind(), setting.cell().load_word())
+    })
+}
+
+/// `own`'s controls with every value of `other`'s written over them: `other`'s cells
+/// and settings, assembled over `own`'s base, which keeps `own`'s structure words.
+/// `None` when the two sets address different cells or hold different settings, which
+/// only two structures do.
+pub(crate) fn values_over<S: ControlSet>(
+    own: &S,
+    other: &S,
+    other_controls: &S::Controls,
+) -> Option<S::Controls> {
+    let addrs = own.addrs();
+    if addrs != other.addrs() {
+        return None;
+    }
+    let (mine, theirs) = (own.settings(), other.settings());
+    if mine.len() != theirs.len() {
+        return None;
+    }
+    for (m, t) in mine.iter().zip(&theirs) {
+        if m.kind() != t.kind() || !m.cell().store_word(t.cell().load_word()) {
+            return None;
+        }
+    }
+    let mut raw = vec![0.0; addrs.len()];
+    other.flatten(other_controls, &mut raw);
+    Some(own.assemble(&raw))
+}
+
+/// Writes the [`NodeConfig`](tutti_graph::NodeConfig) of a kernel node's config, and
+/// the config's `kernel_set`, the one place its [`ControlSet`] is made (the node's
+/// `From` calls it too).
+///
+/// `kernel_config!(Config => Node<F> where [F: bounds], set(c): Set = expr);`: the
+/// config's controls are its `controls` field, and its structure is every other
+/// field with the set's structure words. `build` is the node's `From`; `initials`
+/// reads [`kernel_initials`]; `same_structure` is whether `self` with `other`'s
+/// values ([`values_over`]) equals `other`. Needs `flatten` and `assemble` to
+/// round-trip exactly, which each config's table row pins.
+///
+/// Two more forms: `controls = field` names a controls field that is not `controls`,
+/// and a trailing `fixed: expr` says the config holds no values, so the controls it
+/// starts at are `expr` (also its `kernel_controls`) and `same_structure` is equality.
+macro_rules! kernel_config {
+    ($config:ty => $node:ty $(where [$($bounds:tt)+])?, set($c:pat): $set:ty = $make:expr $(,)?) => {
+        kernel_config!($config => $node $(where [$($bounds)+])?, controls = controls, set($c): $set = $make);
+    };
+    ($config:ty => $node:ty $(where [$($bounds:tt)+])?, controls = $field:ident, set($c:pat): $set:ty = $make:expr $(,)?) => {
+        impl $config {
+            /// The cells this config's node is addressed by.
+            fn kernel_set(&self) -> $set {
+                let $c = self;
+                $make
+            }
+        }
+
+        impl<F> tutti_graph::NodeConfig<F> for $config
+        $(where $($bounds)+)?
+        {
+            type Node = $node;
+
+            fn build(&self, _: &tutti_graph::HostValues) -> $node {
+                <$node>::from(self.clone())
+            }
+
+            fn same_structure(&self, other: &Self) -> bool {
+                let mut own = self.clone();
+                match $crate::params::values_over(&self.kernel_set(), &other.kernel_set(), &other.$field) {
+                    Some(controls) => {
+                        own.$field = controls;
+                        own == *other
+                    }
+                    None => false,
+                }
+            }
+
+            fn initials(&self) -> tutti_graph::Initials {
+                $crate::params::kernel_initials(&self.kernel_set(), &self.$field)
+            }
+        }
+    };
+    ($config:ty => $node:ty $(where [$($bounds:tt)+])?, set($c:pat): $set:ty = $make:expr, fixed: $controls:expr $(,)?) => {
+        impl $config {
+            /// The cells this config's node is addressed by.
+            fn kernel_set(&self) -> $set {
+                let $c = self;
+                $make
+            }
+
+            /// The controls its node starts at.
+            #[allow(unused_variables)]
+            fn kernel_controls(&self) -> <$set as $crate::params::ControlSet>::Controls {
+                let $c = self;
+                $controls
+            }
+        }
+
+        impl<F> tutti_graph::NodeConfig<F> for $config
+        $(where $($bounds)+)?
+        {
+            type Node = $node;
+
+            fn build(&self, _: &tutti_graph::HostValues) -> $node {
+                <$node>::from(self.clone())
+            }
+
+            fn same_structure(&self, other: &Self) -> bool {
+                self == other
+            }
+
+            fn initials(&self) -> tutti_graph::Initials {
+                $crate::params::kernel_initials(&self.kernel_set(), &self.kernel_controls())
+            }
+        }
+    };
+}
 
 /// A kernel's controls as a list of `f64` cells.
 pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {

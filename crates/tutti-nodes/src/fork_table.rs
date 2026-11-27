@@ -177,16 +177,16 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
             )))
         }),
         ("crossover", || {
-            assert_param_fork(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            assert_param_fork(CrossoverNode::<f32>::from(
+                CrossoverConfig::new(
                     ChannelTopology::MONO,
                     CrossoverControls::try_from(
                         &[Hz::new(500.0), Hz::new(900.0), Hz::new(3_000.0)][..],
                     )
                     .unwrap(),
-                ))
+                )
                 .unwrap(),
-            )
+            ))
         }),
         ("modal_bank", || {
             let modes: Vec<Mode> = [(440.0, 0.2, 1.0), (1_130.0, 0.1, -0.5)]

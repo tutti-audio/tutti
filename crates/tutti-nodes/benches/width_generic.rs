@@ -24,7 +24,7 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     DelayConfig, DelayControls, DelayLayout, DelayNode, LadderFilterConfig, LadderFilterNode,
-    LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages,
+    LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, Stagger,
     SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
@@ -155,14 +155,17 @@ fn phaser(c: &mut Criterion) {
             c,
             "phaser",
             w,
-            PhaserNode::<f32>::try_from(PhaserConfig::new(
-                ChannelTopology::default_for(
-                    ChannelLayout::try_from(w).expect("a test width is small"),
+            PhaserNode::<f32>::from(
+                PhaserConfig::new(
+                    ChannelTopology::default_for(
+                        ChannelLayout::try_from(w).expect("a test width is small"),
+                    )
+                    .expect("a test width is one bus"),
+                    Stages::of(6),
+                    Stagger::NONE,
                 )
-                .expect("a test width is one bus"),
-                Stages::of(6),
-            ))
-            .expect("a step fits any width"),
+                .expect("a step fits any width"),
+            ),
             None,
         );
     }

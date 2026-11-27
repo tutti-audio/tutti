@@ -1342,12 +1342,15 @@ fn the_phaser_corners_are_allocation_free() {
         ),
         (2, 12, SweepRange::DEFAULT, 0.25, 192_000.0),
     ] {
-        let node = PhaserNode::<f32>::try_from(
-            PhaserConfig::new(bus(width), Stages::of(stages))
-                .range(range)
-                .stagger(Stagger::of_step(PhaseIncrement::new(step))),
-        )
-        .expect("a step fits any width");
+        let node = PhaserNode::<f32>::from(
+            PhaserConfig::new(
+                bus(width),
+                Stages::of(stages),
+                Stagger::of_step(PhaseIncrement::new(step)),
+            )
+            .expect("a step fits any width")
+            .range(range),
+        );
         let rate = SampleRate::of(sample_rate);
         let write = |cells: &ParamSet, i: usize| {
             assert!(cells.set(UnitParam::Rate, if i & 1 == 1 { 400.0 } else { 0.01 }));

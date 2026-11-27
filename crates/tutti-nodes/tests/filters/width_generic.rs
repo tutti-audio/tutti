@@ -195,17 +195,18 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
 }
 
 fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
-    PhaserNode::<f32>::try_from(
+    PhaserNode::<f32>::from(
         PhaserConfig::new(
             ChannelTopology::default_for(layout).expect("a test width is one bus"),
             Stages::of(6),
+            Stagger::NONE,
         )
+        .expect("a step fits any width")
         .controls(PhaserControls {
             rate: Hz::new(2.0),
             ..PhaserControls::DEFAULT
         }),
     )
-    .expect("a step fits any width")
 }
 
 /// The SVF's channels are independent whether its cutoff is held, swept by a

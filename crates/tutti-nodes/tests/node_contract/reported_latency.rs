@@ -107,11 +107,13 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 /// the summed output answers well above zero.
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
-    let xo = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        ChannelTopology::MONO,
-        CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
-    ))
-    .unwrap();
+    let xo = CrossoverNode::<f32>::from(
+        CrossoverConfig::new(
+            ChannelTopology::MONO,
+            CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+        )
+        .unwrap(),
+    );
     assert_eq!(declared(&xo), Latency::ZERO);
     for (b, band) in impulse_response(xo, 64).iter().enumerate() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");
@@ -144,11 +146,9 @@ fn early_reflections_and_the_decorrelator_report_zero_latency() {
         }])
         .unwrap(),
     };
-    let er = EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
-        ChannelLayout::MONO,
-        taps,
-    ))
-    .unwrap();
+    let er = EarlyReflectionsNode::<f32>::from(
+        EarlyReflectionsConfig::new(ChannelLayout::MONO, taps).unwrap(),
+    );
     assert_eq!(declared(&er), Latency::ZERO);
     let out = impulse_response(er, 512);
     assert_eq!(onsets(&out[0]), vec![300]);

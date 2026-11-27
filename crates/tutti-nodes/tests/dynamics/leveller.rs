@@ -44,12 +44,12 @@ fn tail_peak_dbfs(channel: &[f32]) -> f64 {
 }
 
 fn stereo(config: LevellerConfig) -> LevellerNode<f32> {
-    prepared(LevellerNode::try_from(config).unwrap(), SR, BLOCK)
+    prepared(LevellerNode::from(config), SR, BLOCK)
 }
 
 #[test]
 fn a_stereo_sine_settles_at_the_target_loudness() {
-    let mut n = stereo(LevellerConfig::new(ChannelTopology::STEREO));
+    let mut n = stereo(LevellerConfig::new(ChannelTopology::STEREO).unwrap());
     let x = tone(-29.0, 30);
     let y = run(&mut n, &[x.clone(), x]);
     let peak = tail_peak_dbfs(&y[0]);
@@ -61,7 +61,11 @@ fn a_stereo_sine_settles_at_the_target_loudness() {
 /// -23 default's, inside the 12 dB boost), the output settles at -17 dBFS.
 #[test]
 fn the_threshold_param_at_index_0_is_the_target() {
-    let mut n = stereo(LevellerConfig::new(ChannelTopology::STEREO).max_boost(Db::new(20.0)));
+    let mut n = stereo(
+        LevellerConfig::new(ChannelTopology::STEREO)
+            .unwrap()
+            .max_boost(Db::new(20.0)),
+    );
     assert!(
         n.param_set()
             .set(UnitAddr::new(UnitParam::Threshold, 0), -17.0)
@@ -75,7 +79,11 @@ fn the_threshold_param_at_index_0_is_the_target() {
 /// The configured boost is the limit: -40 dBFS in, 6 dB of boost at most, -34 dBFS out.
 #[test]
 fn the_configured_boost_limits_the_gain() {
-    let mut n = stereo(LevellerConfig::new(ChannelTopology::STEREO).max_boost(Db::new(6.0)));
+    let mut n = stereo(
+        LevellerConfig::new(ChannelTopology::STEREO)
+            .unwrap()
+            .max_boost(Db::new(6.0)),
+    );
     let x = tone(-40.0, 30);
     let y = run(&mut n, &[x.clone(), x]);
     let peak = tail_peak_dbfs(&y[0]);
@@ -88,7 +96,7 @@ fn the_configured_boost_limits_the_gain() {
 #[test]
 fn a_surround_bus_lfe_adds_no_loudness() {
     let mut n = prepared(
-        LevellerNode::<f32>::try_from(LevellerConfig::new(Bed::Surround51.into())).unwrap(),
+        LevellerNode::<f32>::from(LevellerConfig::new(Bed::Surround51.into()).unwrap()),
         SR,
         BLOCK,
     );
@@ -109,14 +117,14 @@ fn a_surround_bus_lfe_adds_no_loudness() {
 fn a_bus_with_no_placement_is_refused() {
     let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap();
     assert_eq!(
-        LevellerNode::<f32>::try_from(LevellerConfig::new(unplaced)).unwrap_err(),
+        LevellerConfig::new(unplaced).unwrap_err(),
         ChannelWeightError::Unplaced {
             width: ChannelLayout::from(3u16)
         }
     );
     let ambisonic = ChannelTopology::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
     assert_eq!(
-        LevellerNode::<f32>::try_from(LevellerConfig::new(ambisonic)).unwrap_err(),
+        LevellerConfig::new(ambisonic).unwrap_err(),
         ChannelWeightError::Ambisonic
     );
 }

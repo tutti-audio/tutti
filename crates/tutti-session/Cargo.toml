@@ -110,9 +110,11 @@ midi = [
 midi-network = ["midi", "dep:tutti-midi-network", "dep:tutti-midi-device"]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci"]
 # The OS MIDI backends of `tutti-midi-hardware`, each a no-op off its OS. Without one,
-# `midi-hardware` lists no device.
+# `midi-hardware` lists no device. `winmm` is not a default: it replaces `midi-services` on
+# Windows, so only the app turns it on.
 alsa = ["tutti-midi-hardware?/alsa"]
 coremidi = ["tutti-midi-hardware?/coremidi"]
+midi-services = ["tutti-midi-hardware?/midi-services"]
 winmm = ["tutti-midi-hardware?/winmm"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`; and for

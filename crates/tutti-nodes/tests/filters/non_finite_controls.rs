@@ -24,7 +24,7 @@ use tutti_nodes::{
     ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayConfig, DelayControls,
     DelayLayout, DelayNode, GateConfig, GateControls, GateNode, KeySource, LadderFilterConfig,
     LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
-    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    Stages, Stagger, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -213,8 +213,9 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "phaser",
         || {
-            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::STEREO, Stages::of(6)))
-                .unwrap()
+            PhaserNode::<f32>::from(
+                PhaserConfig::new(ChannelTopology::STEREO, Stages::of(6), Stagger::NONE).unwrap(),
+            )
         },
         |n| {
             vec![

@@ -31,8 +31,8 @@ use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
     CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterConfig,
     LadderFilterNode, LadderType, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
-    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode,
-    SvfType,
+    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, Stagger, SvfFilterConfig,
+    SvfFilterNode, SvfType,
 };
 use tutti_units::UnitParam;
 use tutti_units::{
@@ -617,8 +617,9 @@ fn a_phaser_driven_past_its_depth_range_stays_stable() {
         // Knob 0.5 plus `depth` of the 16-wide range: 8.5 (held at the
         // range's 8) and -7.5.
         let out = render_driven(
-            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)))
-                .unwrap(),
+            PhaserNode::<f32>::from(
+                PhaserConfig::new(ChannelTopology::MONO, Stages::of(4), Stagger::NONE).unwrap(),
+            ),
             UnitParam::Depth,
             ParamRange::of(-8.0, 8.0),
             depth,
