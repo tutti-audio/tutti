@@ -3,7 +3,7 @@
 //! Writing a [`Wave`] as a file, or into memory, through an [`Encoding`].
 
 use crate::chain::{Stages, options_of, spec_of};
-use crate::{Chain, Encoding, Landed, Result, ToFile};
+use crate::{Chain, Encoding, Kept, Landed, Result, ToFile};
 use std::io::Cursor;
 use tutti_buffers::{FloatWidth, Interleaved, InterleavedMut, Sample, Wave, interleave};
 use tutti_dsp::FftFloat;
@@ -12,7 +12,7 @@ use tutti_units::Samples;
 /// Frames written to the chain at a time by [`write()`] and [`encode()`].
 const WRITE_CHUNK: usize = 8192;
 
-/// Writes `wave` as a file of `encoding` to `to`: folded onto the encoding's channels,
+/// Writes `wave` to the file `to` names, as its [`Encoding`] says: folded onto the encoding's channels,
 /// resampled, quantized and put in place, as a [`Chain`] does it for a stream.
 ///
 /// - The file is written beside its path and renamed over it when whole, so a failure leaves
@@ -52,34 +52,24 @@ const WRITE_CHUNK: usize = 8192;
 /// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, 0.75]));
 /// let dir = tempfile::tempdir()?;
 /// let path = dir.path().join("ramp.wav");
-/// write(&wave, &Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))), &ToFile::new(&path))?;
+/// write(&wave, &ToFile::new(&path, Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))))?;
 /// assert_eq!(read_wave::<f32>(&path)?, wave);
 /// # Ok(())
 /// # }
 /// # }
 /// ```
-pub fn write<S: Sample>(wave: &Wave<S>, encoding: &Encoding, to: &ToFile) -> Result<Landed> {
+pub fn write<S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
     if stages_in_f64::<S>() {
-        write_in::<f64, S>(wave, encoding, to)
+        write_in::<f64, S>(wave, to)
     } else {
-        write_in::<f32, S>(wave, encoding, to)
+        write_in::<f32, S>(wave, to)
     }
 }
 
-fn write_in<F: FftFloat, S: Sample>(
-    wave: &Wave<S>,
-    encoding: &Encoding,
-    to: &ToFile,
-) -> Result<Landed> {
-    let mut chain = Chain::<F>::new(
-        encoding,
-        to,
-        &wave.channel_set(),
-        wave.sample_rate(),
-        wave.len(),
-    )?;
+fn write_in<F: FftFloat, S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
+    let mut chain = Chain::<F>::new(to, &wave.channel_set(), wave.sample_rate(), wave.len())?;
     feed(wave, |block| chain.block(block))?;
-    chain.finalize()?.commit()
+    chain.finalize().map_err(Kept::discard)?.commit()
 }
 
 /// Encodes `wave` into memory as a file of `encoding`: the bytes [`write()`] puts at a path,
@@ -116,10 +106,20 @@ pub fn encode<S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Result<Vec<u8>>
 fn encode_in<F: FftFloat, S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Result<Vec<u8>> {
     let source = wave.channel_set();
     let rate = wave.sample_rate();
-    let mut stages = Stages::<F>::new(encoding, &source, rate)?;
-    let spec = spec_of(encoding, &source, rate);
-    let mut encoder =
-        options_of(&spec, encoding, rate, wave.len()).wrap(Cursor::new(Vec::new()))?;
+    let mut stages =
+        Stages::<F>::new(encoding.channel_set(), encoding.resampling(), &source, rate)?;
+    let spec = spec_of(
+        encoding.format(),
+        encoding.channel_set(),
+        &source,
+        encoding.rate(rate),
+    );
+    let options = options_of(&spec, rate, wave.len());
+    let options = match encoding.seed() {
+        Some(seed) => options.dither_seed(seed),
+        None => options,
+    };
+    let mut encoder = options.wrap(Cursor::new(Vec::new()))?;
     feed(wave, |block| stages.block(block, &mut encoder))?;
     stages.flush(&mut encoder)?;
     Ok(encoder.finish()?.into_inner())

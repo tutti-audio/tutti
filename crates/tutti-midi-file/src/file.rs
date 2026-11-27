@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tutti_midi_protocol::{MtcRate, channel_voice};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_platform::Destination;
+use tutti_platform::WriteTarget;
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{
     Address, FlexTimeSignature, ManufacturerId, Message, MidiChannel, MidiGroup, NoteKeyEvent,
@@ -1394,7 +1394,7 @@ impl StandardMidiFile {
         )
     }
 
-    /// Writes the file to `dst` (any `impl Into<Destination>`: a path, or a
+    /// Writes the file to `dst` (any `impl Into<WriteTarget>`: a path, or a
     /// `&mut` [`Write`](std::io::Write) such as a `Vec<u8>`): every event
     /// written back at its tick. Running status and the spelling of a Delta
     /// Clockstamp may differ from the file it was read from; a read of the
@@ -1404,20 +1404,20 @@ impl StandardMidiFile {
     /// beside the path and are put in place when whole, so a crash leaves no
     /// partial file under it and what was there intact. It replaces a file
     /// already there, as [`std::fs::write`] does;
-    /// [`Destination::create_new`] refuses it instead, atomically. A writer
+    /// [`WriteTarget::create_new`] refuses it instead, atomically. A writer
     /// receives the whole file in one `write_all`, and `create_new` does not
     /// apply to it.
     ///
     /// ```
     /// # use tutti_midi_file::{LeadTrack, Layout, SmfDivision, StandardMidiFile, Track, WriteError};
-    /// # use tutti_platform::Destination;
+    /// # use tutti_platform::WriteTarget;
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("song.mid");
     /// let file = StandardMidiFile::new(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(Track::new())))?;
     /// file.write(&path)?;
     /// file.write(&path)?; // replaces
     /// assert!(matches!(
-    ///     file.write(Destination::from(&path).create_new()),
+    ///     file.write(WriteTarget::from(&path).create_new()),
     ///     Err(WriteError::Exists { .. })
     /// ));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1431,7 +1431,7 @@ impl StandardMidiFile {
     /// created or written; [`WriteError::Commit`] if the sync or the move
     /// fails (the staged file is kept); for a writer, [`WriteError::Writer`]
     /// if it fails.
-    pub fn write<'a>(&self, dst: impl Into<Destination<'a>>) -> Result<(), WriteError> {
+    pub fn write<'a>(&self, dst: impl Into<WriteTarget<'a>>) -> Result<(), WriteError> {
         write_bytes(&self.encode(), dst.into())
     }
 

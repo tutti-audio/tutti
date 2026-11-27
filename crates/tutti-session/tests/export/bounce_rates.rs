@@ -3,6 +3,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, ForkError, Io, Node, Prepare, SampleRates, Shape, Status};
+use tutti_session::ToMemory;
 use tutti_session::{Bounce, BounceError, DetachedSession, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
@@ -27,7 +28,7 @@ impl Node for Rated {
 
 fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, BounceError> {
     let bounce = Bounce::new()
-        .main_output_buffers()
+        .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
         .sample_rate(rate);
     Ok(bounced(session, bounce)?.into_main_output().into_planes()[0].len())

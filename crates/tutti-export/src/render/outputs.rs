@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, Placement as ChannelPlacement};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
-use tutti_codec::{Chain, Converter, Landed};
+use tutti_codec::{Chain, Converter, Kept, Landed};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
@@ -229,7 +229,7 @@ fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result
         };
         let channels = channels_of(
             placed.output.feed(),
-            file.encoding().channel_set(),
+            file.to_file().channel_set(),
             main_output,
         );
         check_feed(placed, &channels, target_error)?;
@@ -319,12 +319,12 @@ fn open_lanes<F: FftFloat>(
     let mut files = Vec::with_capacity(file_outputs.len());
     for Placed { position, output } in file_outputs {
         let (feed, file) = output.into_parts();
-        let set = channels_of(&feed, file.encoding().channel_set(), main_output);
+        let set = channels_of(&feed, file.to_file().channel_set(), main_output);
         let lane = open_lane(
             position,
             feed,
             set,
-            file.encoding().placement(),
+            file.to_file().placement(),
             graph_outputs,
             main_output,
             max_block,
@@ -332,7 +332,6 @@ fn open_lanes<F: FftFloat>(
         // The blocks the chain is given are folded onto the file's channels by the
         // lane, which also holds them for a normalize: its source is the file's.
         let chain = Box::new(Chain::new(
-            file.encoding(),
             file.to_file(),
             &set,
             job.rate(),
@@ -562,7 +561,7 @@ fn finish<F: FftFloat>(
             if let Some(chosen) = chosen[i] {
                 chain.set_gain(chosen.gain);
             }
-            let block = if waiting.target.encoding().resampling().is_some() {
+            let block = if waiting.target.to_file().resampling().is_some() {
                 chunk_frames(rate).get()
             } else {
                 REPLAY_BLOCK
@@ -650,7 +649,7 @@ fn measure<F: FftFloat>(
     total: Samples,
     control: &mut Control<'_>,
 ) -> Result<Outcome<(Reading, Samples)>> {
-    let out_rate = waiting.target.encoding().rate(rate);
+    let out_rate = waiting.target.to_file().rate(rate);
     let unmeasurable = |reason: Unmeasured| RenderError::Unmeasurable {
         output: Some(output),
         channels: layout,
@@ -662,7 +661,7 @@ fn measure<F: FftFloat>(
         .topology()
         .ok_or_else(|| unmeasurable(Unmeasured::Placement))?;
     let mut measurer = Measurer::new(out_rate, topology, normalize).map_err(unmeasurable)?;
-    let mut converter: Option<Converter<F>> = match waiting.target.encoding().resampling() {
+    let mut converter: Option<Converter<F>> = match waiting.target.to_file().resampling() {
         Some(resample) => resample.converter(layout, rate)?,
         None => None,
     };
@@ -790,7 +789,9 @@ pub(crate) fn finalize_files<F: FftFloat>(
             return Ok(Outcome::Cancelled);
         }
         control.set_output(file.position);
-        closed.push((file.path, file.chain.finalize()?));
+        // A chain keeps a file it could not close whole, and the render has no use
+        // for it: it is removed here, so a failed render leaves nothing beside the paths.
+        closed.push((file.path, file.chain.finalize().map_err(Kept::discard)?));
         if k + 1 < count {
             control.at(Stage::Finalizing, 0.5 * (k + 1) as f32 / count as f32);
         }

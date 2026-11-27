@@ -13,8 +13,8 @@ use tutti_buffers::{
     Speaker, Wave,
 };
 use tutti_codec::{
-    Chain, EncodeError, Encoding, Format, IntDepth, IntPcm, Landed, Pcm, Resample, ToFile, encode,
-    write,
+    Chain, EncodeError, Encoding, Format, IntDepth, IntPcm, Kept, Landed, Pcm, Resample, ToFile,
+    encode, write,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -39,8 +39,7 @@ fn written<F: Float>(planes: Vec<Vec<F>>, format: Format) -> (Vec<u8>, Landed) {
     let path = dir.path().join("out.wav");
     let landed = write(
         &wave(SampleRate::SR_48K, &planes),
-        &Encoding::new(format),
-        &ToFile::new(&path),
+        &ToFile::new(&path, Encoding::new(format)),
     )
     .unwrap();
     (std::fs::read(&path).unwrap(), landed)
@@ -189,8 +188,7 @@ fn an_f64_resample_holds_f64_precision_against_the_analytic_sine() {
         Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F64))).resample(Resample::to(OUT));
     write(
         &wave(SampleRate::SR_48K, &[plane.clone(), plane]),
-        &encoding,
-        &ToFile::new(&path),
+        &ToFile::new(&path, encoding.clone()),
     )
     .unwrap();
 
@@ -234,8 +232,7 @@ fn a_folded_resampled_wave_reads_back_at_the_encodings_rate_and_channels() {
         .resample(Resample::to(SampleRate::SR_48K));
     let landed = write(
         &wave(SampleRate::SR_96K, &planes),
-        &encoding,
-        &ToFile::new(&path),
+        &ToFile::new(&path, encoding.clone()),
     )
     .unwrap();
     let reader = hound::WavReader::open(&path).unwrap();
@@ -300,8 +297,10 @@ fn a_width_it_cannot_place_is_an_error_not_a_drop() {
     let path = dir.path().join("refused.wav");
     let err = write(
         &wave(SampleRate::SR_48K, &constants(&[0.1; 5])),
-        &Encoding::new(float_wav()).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        &ToFile::new(&path),
+        &ToFile::new(
+            &path,
+            Encoding::new(float_wav()).channels(ChannelSet::default_for(ChannelLayout::STEREO)),
+        ),
     )
     .expect_err("five unordered channels have no place in two");
     assert!(matches!(err, EncodeError::Fold(_)), "{err:?}");
@@ -325,7 +324,7 @@ fn a_same_width_reorder_reaches_the_file() {
     wave.append_planes(Planes::from_vecs(&planes).unwrap())
         .unwrap();
     let encoding = Encoding::new(float_wav()).channels(ChannelSet::from(default));
-    write(&wave, &encoding, &ToFile::new(&path)).unwrap();
+    write(&wave, &ToFile::new(&path, encoding.clone())).unwrap();
     let samples: Vec<f32> = hound::WavReader::open(&path)
         .unwrap()
         .into_samples::<f32>()
@@ -358,8 +357,7 @@ fn first_frame(planes: &[Vec<f32>], encoding: &Encoding, width: u16) -> Vec<f32>
     let path = dir.path().join("out.wav");
     write(
         &wave(SampleRate::SR_48K, planes),
-        encoding,
-        &ToFile::new(&path),
+        &ToFile::new(&path, encoding.clone()),
     )
     .unwrap();
     let reader = hound::WavReader::open(&path).unwrap();
@@ -391,7 +389,7 @@ fn encode_and_write_of_one_wave_give_equal_bytes() {
         .dither_seed(7);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("same.wav");
-    write(&wave, &encoding, &ToFile::new(&path)).unwrap();
+    write(&wave, &ToFile::new(&path, encoding.clone())).unwrap();
     assert_eq!(
         std::fs::read(&path).unwrap(),
         encode(&wave, &encoding).unwrap()
@@ -412,6 +410,71 @@ fn the_dither_seed_reaches_the_files_noise() {
     );
     assert_eq!(bytes(1), bytes(1));
     assert_ne!(bytes(1), bytes(2), "two seeds shared one noise sequence");
+    assert_eq!(
+        bytes(tutti_dsp::DitherNoise::DEFAULT_SEED),
+        encode(&silence, &Encoding::new(format)).unwrap(),
+        "an encoding that states no seed is dithered with the default one"
+    );
+}
+
+/// **A chain whose encoder failed mid-file keeps the unfinished file, and the error names
+/// it**: the frames written before the failure are in it, the path is untouched, and
+/// dropping the chain or discarding the kept file removes it.
+#[test]
+fn a_chain_that_failed_mid_file_keeps_the_frames_written_and_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("take.wav");
+    let stereo = ChannelSet::default_for(ChannelLayout::STEREO);
+    let open = || {
+        Chain::<f32>::new(
+            &ToFile::new(&path, Encoding::new(float_wav())),
+            &stereo,
+            SampleRate::SR_48K,
+            Samples::new(3_000),
+        )
+        .unwrap()
+    };
+    let good = vec![0.25f32; 2 * 3_000];
+    let wrong = [0.0f32; 3];
+
+    let mut chain = open();
+    chain
+        .block(Interleaved::new(&good, ChannelLayout::STEREO).unwrap())
+        .unwrap();
+    chain
+        .block(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+        .expect_err("a block of another width");
+    let Err(Kept::Unfinished { unfinished, .. }) = chain.finalize() else {
+        panic!("not kept unfinished");
+    };
+    assert!(!path.exists(), "the path is untouched");
+    assert!(unfinished.header_describes_frames);
+    let kept = hound::WavReader::open(&unfinished.path).unwrap();
+    assert_eq!(
+        kept.duration(),
+        3_000,
+        "the frames written before the failure"
+    );
+    std::fs::remove_file(&unfinished.path).unwrap();
+
+    drop(open());
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a chain dropped before finalize leaves nothing"
+    );
+
+    let mut chain = open();
+    chain
+        .block(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+        .expect_err("a block of another width");
+    let error = chain.finalize().map_err(Kept::discard).unwrap_err();
+    assert!(matches!(error, EncodeError::BlockWidth { .. }), "{error}");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a caller that discards the kept file leaves nothing"
+    );
 }
 
 /// An existing path is refused by default, with the bytes already there left alone, and
@@ -423,18 +486,16 @@ fn a_destination_refuses_an_existing_path_unless_it_replaces() {
     std::fs::write(&path, b"sentinel").unwrap();
     let encoding = Encoding::new(float_wav());
     let source = ChannelSet::default_for(ChannelLayout::MONO);
-    let chain = |to: &ToFile| {
-        Chain::<f32>::new(&encoding, to, &source, SampleRate::SR_48K, Samples::new(8))
-    };
+    let chain = |to: &ToFile| Chain::<f32>::new(to, &source, SampleRate::SR_48K, Samples::new(8));
 
-    let err = chain(&ToFile::new(&path)).expect_err("the path exists");
+    let err = chain(&ToFile::new(&path, encoding.clone())).expect_err("the path exists");
     assert!(
         matches!(&err, EncodeError::Exists { path: p } if *p == path),
         "{err}"
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"sentinel");
 
-    let mut open = chain(&ToFile::new(&path).replace()).unwrap();
+    let mut open = chain(&ToFile::new(&path, encoding.clone()).replace()).unwrap();
     open.block(Interleaved::new(&[0.5f32; 8], ChannelLayout::MONO).unwrap())
         .unwrap();
     open.finalize().unwrap().commit().unwrap();
@@ -454,8 +515,10 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     let path = dir.path().join("keep.wav");
     std::fs::write(&path, b"sentinel").unwrap();
     let err = Chain::<f32>::new(
-        &Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
-        &ToFile::new(&path),
+        &ToFile::new(
+            &path,
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))),
+        ),
         &ChannelSet::default_for(ChannelLayout::MONO),
         SampleRate::of(1_000.0),
         Samples::new(1 << 32),
@@ -484,11 +547,11 @@ fn the_limit_is_judged_at_the_output_rate() {
     let rate = SampleRate::of(1_000.0);
     let mono = ChannelSet::default_for(ChannelLayout::MONO);
     let encoding = Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))));
-    Chain::<f32>::new(&encoding, &ToFile::new(&path), &mono, rate, plan)
+    Chain::<f32>::new(&ToFile::new(&path, encoding.clone()), &mono, rate, plan)
         .map(drop)
         .expect("2^31 - 1000 mono 16-bit frames fit");
     let doubled = encoding.resample(Resample::to(SampleRate::of(2_000.0)));
-    let err = Chain::<f32>::new(&doubled, &ToFile::new(&path), &mono, rate, plan)
+    let err = Chain::<f32>::new(&ToFile::new(&path, doubled.clone()), &mono, rate, plan)
         .map(drop)
         .expect_err("twice the frames do not");
     assert!(matches!(err, EncodeError::WavTooLarge { .. }), "{err}");
@@ -516,8 +579,10 @@ fn the_topology_reaches_the_file() {
         let path = dir.path().join(format!("m{case}.wav"));
         let layout = ChannelLayout::from(channels);
         let mut chain = Chain::<f32>::new(
-            &Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
-            &ToFile::new(&path),
+            &ToFile::new(
+                &path,
+                Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+            ),
             &set,
             SampleRate::of(1_000.0),
             Samples::new(8),

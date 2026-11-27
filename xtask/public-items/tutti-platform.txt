@@ -2,12 +2,11 @@
 # sorted (`cargo xtask write-public-items` rewrites this file from the tree).
 # A new public item needs its row in the change that adds it, argued in the pull request;
 # a row with no item is deleted, so the list only shrinks on its own.
-enum asset::destination::Destination
+enum asset::write_target::WriteTarget
 enum executor::Unjoined
 enum priority::PriorityOutcome
 enum priority::PriorityRequest
 enum priority::Scheduling
-fn asset::destination::Destination::create_new
 fn asset::file_stamp::FileStamp::of
 fn asset::source::Asset::extension
 fn asset::source::Asset::hint
@@ -29,6 +28,7 @@ fn asset::staged::StagedFile::keeper
 fn asset::staged::StagedFile::temp
 fn asset::staged::StagedKeep::keep
 fn asset::staged::StagedKeep::release
+fn asset::write_target::WriteTarget::create_new
 fn clock::instant_of_monotonic_ns
 fn clock::monotonic_ns
 fn clock::monotonic_ns_of

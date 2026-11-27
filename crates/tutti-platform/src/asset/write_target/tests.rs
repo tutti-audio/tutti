@@ -1,11 +1,11 @@
 use std::io::Write;
 use std::path::Path;
 
-use super::Destination;
+use super::WriteTarget;
 
 #[test]
 fn a_str_is_a_path_as_it_is_for_an_asset() {
-    let Destination::Path(staged) = Destination::from("out.wav") else {
+    let WriteTarget::Path(staged) = WriteTarget::from("out.wav") else {
         panic!("a &str is a path");
     };
     assert_eq!(staged.target(), Path::new("out.wav"));
@@ -21,11 +21,11 @@ fn create_new_refuses_an_existing_file_and_leaves_a_writer_alone() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("out.bin");
     std::fs::write(&target, b"old").unwrap();
-    for (destination, refused) in [
-        (Destination::from(&target), false),
-        (Destination::from(&target).create_new(), true),
+    for (write_to, refused) in [
+        (WriteTarget::from(&target), false),
+        (WriteTarget::from(&target).create_new(), true),
     ] {
-        let Destination::Path(staged) = destination else {
+        let WriteTarget::Path(staged) = write_to else {
             panic!("a path is a path");
         };
         let mut file = staged.open().unwrap();
@@ -44,8 +44,8 @@ fn create_new_refuses_an_existing_file_and_leaves_a_writer_alone() {
     }
     let mut bytes = Vec::new();
     assert!(matches!(
-        Destination::from(&mut bytes).create_new(),
-        Destination::Writer(_)
+        WriteTarget::from(&mut bytes).create_new(),
+        WriteTarget::Writer(_)
     ));
 }
 
@@ -54,11 +54,11 @@ fn a_dyn_writer_and_a_sized_one_are_both_writers_that_receive_the_bytes() {
     let mut sized = Vec::new();
     let mut unsized_backing = Vec::new();
     let dyn_writer: &mut dyn Write = &mut unsized_backing;
-    for (destination, bytes) in [
-        (Destination::from(&mut sized), b"ab".as_slice()),
-        (Destination::from(dyn_writer), b"cd".as_slice()),
+    for (write_to, bytes) in [
+        (WriteTarget::from(&mut sized), b"ab".as_slice()),
+        (WriteTarget::from(dyn_writer), b"cd".as_slice()),
     ] {
-        let Destination::Writer(writer) = destination else {
+        let WriteTarget::Writer(writer) = write_to else {
             panic!("a writer is a writer");
         };
         writer.write_all(bytes).unwrap();

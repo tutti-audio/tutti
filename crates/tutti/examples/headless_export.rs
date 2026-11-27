@@ -19,6 +19,8 @@
 
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
+use tutti::ToMemory;
+use tutti::codec::Encoding;
 use tutti::graph::{ForkByClone, Node};
 use tutti::{
     Amplitude, Bounce, ChannelLayout, Format, Hz, Interleaved, MainOutput, Pcm, Range, SampleRate,
@@ -60,11 +62,9 @@ fn mono_tone() -> Session {
 /// The format of every file here.
 const FORMAT: Format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)));
 
-/// The first `seconds` of the project, replacing the file an earlier run of this example wrote.
+/// The first `seconds` of the project.
 fn first(seconds: f64) -> Bounce {
-    Bounce::new()
-        .replace()
-        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
+    Bounce::new().range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -79,7 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = tone();
     let rendered = block_on(
         session
-            .bounce(first(1.0).main_output(&path, FORMAT))?
+            .bounce(
+                first(1.0)
+                    .main_output(tutti::codec::ToFile::new(&path, Encoding::new(FORMAT)).replace()),
+            )?
             .into_future(),
     );
     let written = session.apply(rendered)?.into_main_output();
@@ -89,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = tone();
     let rendered = block_on(
         session
-            .bounce(first(1.0).main_output_buffers())?
+            .bounce(first(1.0).main_output(ToMemory::new()))?
             .into_future(),
     );
     let rendered = session.apply(rendered)?.into_main_output();
@@ -116,9 +119,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendered = block_on(
         session
             .bounce(
-                first(0.5)
-                    .channels(ChannelLayout::STEREO)
-                    .main_output(&mono_path, FORMAT),
+                first(0.5).main_output(
+                    tutti::codec::ToFile::new(
+                        &mono_path,
+                        Encoding::new(FORMAT).width(ChannelLayout::STEREO),
+                    )
+                    .replace(),
+                ),
             )?
             .into_future(),
     );

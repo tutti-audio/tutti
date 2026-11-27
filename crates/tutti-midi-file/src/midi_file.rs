@@ -3,7 +3,7 @@
 
 use std::io::{ErrorKind, Write as _};
 
-use tutti_platform::{Asset, Destination};
+use tutti_platform::{Asset, WriteTarget};
 
 use crate::{ClipFile, MidiFileKind, ReadError, StandardMidiFile, WriteError};
 
@@ -96,9 +96,9 @@ impl MidiFile {
 ///
 /// A path is written through [`Staged`](tutti_platform::Staged): the bytes go
 /// to a temporary file beside the path and are put in place when whole.
-pub(crate) fn write_bytes(bytes: &[u8], dst: Destination<'_>) -> Result<(), WriteError> {
+pub(crate) fn write_bytes(bytes: &[u8], dst: WriteTarget<'_>) -> Result<(), WriteError> {
     match dst {
-        Destination::Path(staged) => {
+        WriteTarget::Path(staged) => {
             let path = staged.target().to_path_buf();
             let mut file = staged.open().map_err(WriteError::Stage)?;
             file.write_all(bytes).map_err(WriteError::Stage)?;
@@ -111,6 +111,6 @@ pub(crate) fn write_bytes(bytes: &[u8], dst: Destination<'_>) -> Result<(), Writ
                 }
             })
         }
-        Destination::Writer(writer) => writer.write_all(bytes).map_err(WriteError::Writer),
+        WriteTarget::Writer(writer) => writer.write_all(bytes).map_err(WriteError::Writer),
     }
 }

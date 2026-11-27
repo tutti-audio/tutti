@@ -102,7 +102,7 @@ impl Case {
             None => encoding,
         };
         // Every iteration writes the same path again, so it replaces the last one.
-        let target = FileTarget::new(encoding, ToFile::new(path).replace());
+        let target = FileTarget::new(ToFile::new(path, encoding).replace());
         match normalize {
             Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,

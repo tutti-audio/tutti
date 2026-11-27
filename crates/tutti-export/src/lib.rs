@@ -127,15 +127,15 @@
 //! let dir = tempfile::tempdir().expect("temp dir");
 //! let mut outputs = Outputs::new();
 //! let files = [
-//!     outputs.file(Output::main_output(FileTarget::new(
+//!     outputs.file(Output::main_output(FileTarget::new(ToFile::new(
+//!         dir.path().join("main_output.flac"),
 //!         Encoding::new(Format::Flac { pcm: IntPcm::new(IntDepth::Int24), level: FlacLevel::Standard }),
-//!         ToFile::new(dir.path().join("main_output.flac")),
-//!     ))),
-//!     outputs.file(Output::main_output(FileTarget::new(
+//!     )))),
+//!     outputs.file(Output::main_output(FileTarget::new(ToFile::new(
+//!         dir.path().join("main_output.wav"),
 //!         Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16))))
 //!             .dither_seed(SplitMix64::mix(1)),
-//!         ToFile::new(dir.path().join("main_output.wav")),
-//!     ))),
+//!     )))),
 //! ];
 //! let done = render(&mut tone(), &job, &FrozenClock, outputs, &mut Control::none())
 //!     .expect("flac and wav encode")

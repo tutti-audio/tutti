@@ -7,6 +7,7 @@
 
 use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
+use tutti_codec::Encoding;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
@@ -37,7 +38,10 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     let path = dir.path().join("out.wav");
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .main_output(&path, Format::Wav(Pcm::Int(pcm)))
+        .main_output(tutti_codec::ToFile::new(
+            &path,
+            Encoding::new(Format::Wav(Pcm::Int(pcm))),
+        ))
         .tail(tutti_session::BounceTail::None);
     bounced(&mut session, bounce).expect("renders");
     hound::WavReader::open(&path)
@@ -132,7 +136,8 @@ fn noise_shaping_feeds_the_rounding_error_back() {
 
 /// **Each file of a bounce has its own dither noise.** The master and its stems are summed
 /// later, and one noise sequence in two of them would add coherently. Silence into a dithered
-/// 16-bit file is the dither alone, so equal files would be equal noise.
+/// 16-bit file is the dither alone, so equal files would be equal noise. **A seed the caller
+/// states is used as given**: two stems stating one seed hold equal noise.
 #[test]
 fn the_files_of_a_bounce_are_dithered_with_different_noise() {
     use tutti_session::Stem;
@@ -149,16 +154,37 @@ fn the_files_of_a_bounce_are_dithered_with_different_noise() {
         .unwrap()
         .unfaded();
     let dir = tempfile::tempdir().expect("dir");
-    let paths = ["main.wav", "one.wav", "two.wav"].map(|name| dir.path().join(name));
+    let paths = [
+        "main.wav",
+        "one.wav",
+        "two.wav",
+        "seven.wav",
+        "seven_again.wav",
+    ]
+    .map(|name| dir.path().join(name));
     let format = Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)));
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .main_output(&paths[0], format)
-        .stem_with(Stem::new(silence.erase()).file(&paths[1], format))
-        .stem_with(Stem::new(silence.erase()).file(&paths[2], format))
+        .main_output(tutti_codec::ToFile::new(&paths[0], Encoding::new(format)))
+        .stem_with(
+            Stem::new(silence.erase())
+                .to(tutti_codec::ToFile::new(&paths[1], Encoding::new(format))),
+        )
+        .stem_with(
+            Stem::new(silence.erase())
+                .to(tutti_codec::ToFile::new(&paths[2], Encoding::new(format))),
+        )
+        .stem_with(Stem::new(silence.erase()).to(tutti_codec::ToFile::new(
+            &paths[3],
+            Encoding::new(format).dither_seed(7),
+        )))
+        .stem_with(Stem::new(silence.erase()).to(tutti_codec::ToFile::new(
+            &paths[4],
+            Encoding::new(format).dither_seed(7),
+        )))
         .tail(tutti_session::BounceTail::None);
     bounced(&mut session, bounce).expect("renders");
-    let [main, one, two] = paths.map(|path| {
+    let [main, one, two, seven, seven_again] = paths.map(|path| {
         hound::WavReader::open(path)
             .expect("readable")
             .samples::<i16>()
@@ -169,4 +195,6 @@ fn the_files_of_a_bounce_are_dithered_with_different_noise() {
     assert_ne!(main, one, "the master and a stem shared one noise sequence");
     assert_ne!(main, two, "the master and a stem shared one noise sequence");
     assert_ne!(one, two, "two stems shared one noise sequence");
+    assert_eq!(seven, seven_again, "a stated seed was replaced");
+    assert_ne!(seven, one, "a stated seed matched a mixed one");
 }

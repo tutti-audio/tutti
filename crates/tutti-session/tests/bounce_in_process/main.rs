@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginRef;
+use tutti_session::ToMemory;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, MainOutput, PeerState, Range, Session, Stem,
     StemKey,
@@ -87,8 +88,11 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         loop_range: None,
     }));
     let bounce = Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.5)))
         .sample_rate(RATE)
         .clock(ExportClock::timeline(timeline))

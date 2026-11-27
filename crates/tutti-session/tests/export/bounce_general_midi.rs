@@ -9,6 +9,7 @@ use tutti_fixtures::midi;
 use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_nodes::FreeverbControls;
+use tutti_session::ToMemory;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, LIVE_MAX_BLOCK, MainOutput, OutputPort, Range,
     Session, Stem, StemKey,
@@ -104,8 +105,11 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
     let (main, mut done, keys) = bounced(
         &mut session,
         Bounce::new()
-            .main_output_buffers()
-            .channels(ChannelLayout::STEREO)
+            .main_output(
+                ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                    ChannelLayout::STEREO,
+                )),
+            )
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.7)))
             .sample_rate(SampleRate::of(RATE))
             .clock(ExportClock::timeline(timeline))

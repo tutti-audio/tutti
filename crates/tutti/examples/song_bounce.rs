@@ -13,6 +13,7 @@
 
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
+use tutti::codec::Encoding;
 use tutti::modulation::Lfo;
 use tutti::nodes::{FreeverbConfig, FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
@@ -121,9 +122,14 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     // `replace`: a second run overwrites the file the first one wrote.
     let rendering = s.bounce(
         Bounce::new()
-            .replace()
             .range(Beat::new(0.0)..Beat::new(8.0))
-            .main_output(&path, Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+            .main_output(
+                tutti::codec::ToFile::new(
+                    &path,
+                    Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
+                )
+                .replace(),
+            ),
     )?;
     // The render runs on a thread the session starts; an app awaits it on its own
     // executor, here the simplest one.

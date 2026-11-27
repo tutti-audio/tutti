@@ -1,8 +1,8 @@
 //! [`Chain`]: the streaming pipeline in front of a file's encoder.
 
 use crate::{
-    Converter, EncodeError, Encoder, EncoderOptions, Encoding, FileEncoder, FinalizedFile, Result,
-    Spec, ToFile,
+    Converter, EncodeError, Encoder, EncoderOptions, FileEncoder, FinalizedFile, Format, Kept,
+    Resample, Result, Spec, ToFile,
 };
 use std::io::{Seek, Write};
 use tutti_buffers::{
@@ -11,7 +11,7 @@ use tutti_buffers::{
 use tutti_dsp::{FftFloat, resampled_frames};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
-/// The stages every block of an [`Encoding`] goes through, and the buffers they
+/// The stages every block of an [`Encoding`](crate::Encoding) goes through, and the buffers they
 /// run in: fold, resample, gain, then the encoder's own quantize.
 ///
 /// `F` is the float format the stages run in. A block that needs none of them is
@@ -46,36 +46,39 @@ impl<W: Write + Seek> Encode for Encoder<W> {
     }
 }
 
-/// What a file of `encoding` is written as, from a source of `source` channels at
-/// `source_rate`.
-pub(crate) fn spec_of(encoding: &Encoding, source: &ChannelSet, source_rate: SampleRate) -> Spec {
-    let channels = encoding.channel_set().unwrap_or(*source);
-    Spec::of_channels(encoding.format(), channels, encoding.rate(source_rate))
+/// What a file of `format` is written as, with `channels` when stated and else the source's,
+/// at `rate`.
+pub(crate) fn spec_of(
+    format: Format,
+    channels: Option<ChannelSet>,
+    source: &ChannelSet,
+    rate: SampleRate,
+) -> Spec {
+    Spec::of_channels(format, channels.unwrap_or(*source), rate)
 }
 
 /// The options of an encoder of `spec` for `frames` source frames at `source_rate`: the
 /// length the file will hold is judged at the file's rate.
-pub(crate) fn options_of<'a>(
-    spec: &'a Spec,
-    encoding: &Encoding,
+pub(crate) fn options_of(
+    spec: &Spec,
     source_rate: SampleRate,
     frames: Samples,
-) -> EncoderOptions<'a> {
-    EncoderOptions::new(spec)
-        .planned(resampled_frames(source_rate, spec.rate(), frames))
-        .dither_seed(encoding.seed())
+) -> EncoderOptions<'_> {
+    EncoderOptions::new(spec).planned(resampled_frames(source_rate, spec.rate(), frames))
 }
 
 impl<F: FftFloat> Stages<F> {
-    /// The stages for `encoding`, from `source` channels at `source_rate`.
+    /// The stages onto `channels` (the source's when not stated) and through `resample`,
+    /// from `source` channels at `source_rate`.
     pub(crate) fn new(
-        encoding: &Encoding,
+        channels: Option<ChannelSet>,
+        resample: Option<Resample>,
         source: &ChannelSet,
         source_rate: SampleRate,
     ) -> Result<Self> {
-        let dst = encoding.channel_set().unwrap_or(*source);
+        let dst = channels.unwrap_or(*source);
         let layout = dst.width();
-        let converter = match encoding.resampling() {
+        let converter = match resample {
             Some(resample) => resample.converter(layout, source_rate)?,
             None => None,
         };
@@ -185,7 +188,7 @@ fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<F
     Ok(Some(Fold::to_channels(src, dst).build()?))
 }
 
-/// The streaming file pipeline: blocks of a source go through the [`Encoding`]'s stages
+/// The streaming file pipeline: blocks of a source go through the [`Encoding`](crate::Encoding)'s stages
 /// into a file begun for a [`ToFile`].
 ///
 /// The file is written to a temporary beside its path (which the encoder removes unless it
@@ -197,6 +200,10 @@ fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<F
 /// [`block`](Self::block) takes the blocks, [`finalize`](Self::finalize) closes the file
 /// beside its path, and [`Closed::commit`] puts it in place: all-or-nothing across several
 /// files is the caller's, between those two.
+///
+/// A chain dropped before `finalize` removes its file. A block that failed is recorded as the
+/// file's first error, and `finalize` then keeps what was written beside the path and
+/// reports it ([`Kept`]): the caller owns the unfinished file, to move or delete.
 ///
 /// `F` is the format the converter and the fold run in.
 pub struct Chain<F: FftFloat> {
@@ -229,7 +236,7 @@ impl Encode for Counted<'_> {
 }
 
 impl<F: FftFloat> Chain<F> {
-    /// The chain for `encoding` into `to`, from frames of `source` channels at
+    /// The chain into `to`, through its encoding, from frames of `source` channels at
     /// `source_rate`, of which `planned` are expected (at the source's rate).
     ///
     /// # Errors
@@ -240,15 +247,14 @@ impl<F: FftFloat> Chain<F> {
     /// place, [`EncodeError::Resample`] for a rate or width the converter cannot take, and
     /// the errors of [`EncoderOptions::wrap`] otherwise.
     pub fn new(
-        encoding: &Encoding,
         to: &ToFile,
         source: &ChannelSet,
         source_rate: SampleRate,
         planned: Samples,
     ) -> Result<Self> {
-        let stages = Stages::new(encoding, source, source_rate)?;
-        let spec = spec_of(encoding, source, source_rate);
-        let encoder = to.create(options_of(&spec, encoding, source_rate, planned))?;
+        let stages = Stages::new(to.channel_set(), to.resampling(), source, source_rate)?;
+        let spec = spec_of(to.format(), to.channel_set(), source, to.rate(source_rate));
+        let encoder = to.create(options_of(&spec, source_rate, planned))?;
         Ok(Self {
             stages,
             encoder,
@@ -274,13 +280,17 @@ impl<F: FftFloat> Chain<F> {
     /// # Errors
     ///
     /// [`EncodeError::Buffer`] for a block of another width than the source's, and the
-    /// encoder's errors.
+    /// encoder's errors. The first failure is kept for [`finalize`](Self::finalize).
     pub fn block<B: Sample>(&mut self, block: Interleaved<'_, B>) -> Result<()> {
         let mut to = Counted {
             encoder: &mut self.encoder,
             frames: &mut self.frames,
         };
-        self.stages.block(block, &mut to)
+        let written = self.stages.block(block, &mut to);
+        if let Err(e) = &written {
+            self.encoder.fail(e);
+        }
+        written
     }
 
     /// Flushes the converter and closes the file beside its path: everything that can
@@ -288,16 +298,20 @@ impl<F: FftFloat> Chain<F> {
     ///
     /// # Errors
     ///
-    /// The encoder's errors; the file is removed.
-    pub fn finalize(mut self) -> Result<Closed> {
+    /// [`Kept::Unfinished`] when the file cannot be closed whole (the first failed block, the
+    /// flush, the header, the close): the file is kept beside its path with the frames written,
+    /// and the error names it.
+    pub fn finalize(mut self) -> std::result::Result<Closed, Kept> {
         let mut to = Counted {
             encoder: &mut self.encoder,
             frames: &mut self.frames,
         };
-        self.stages.flush(&mut to)?;
+        if let Err(e) = self.stages.flush(&mut to) {
+            self.encoder.fail(&e);
+        }
         let clipped = self.encoder.clipped();
         Ok(Closed {
-            file: self.encoder.finalize()?,
+            file: self.encoder.finalize_keeping()?,
             clipped,
             frames: self.frames,
         })

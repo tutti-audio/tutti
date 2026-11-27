@@ -16,6 +16,7 @@
 use crate::bounced::bounced;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_session::ToMemory;
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -32,7 +33,6 @@ use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_rt::Mutex;
 use tutti_rt::Param;
-use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InputPort,
     MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemKey,
@@ -61,26 +61,26 @@ fn session_with_outputs(outputs: usize) -> DetachedSession {
 /// A bounce of the mix into memory for `seconds`: stereo at `rate`, on a
 /// frozen clock, trimming nothing and keeping no tail (what the figures it
 /// does not name come to is each test's to ask for).
-fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
+fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, ToMemory> {
     Bounce::new()
-        .main_output_buffers()
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
-        .channels(ChannelLayout::STEREO)
         .clock(ExportClock::frozen())
         .latency(BounceLatency::Keep)
         .tail(tutti_session::BounceTail::None)
 }
 
-fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
+fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
     bounce_at(seconds, RATE)
 }
 
 /// The planes `bounce` renders, run on this thread.
-fn render(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMainOutput>,
-) -> Vec<Vec<f32>> {
+fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
@@ -91,7 +91,7 @@ fn render(
 /// thread: the main output is rendered with them and not returned.
 fn render_stems(
     session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMainOutput>,
+    bounce: Bounce<NodeKey, ToMemory>,
 ) -> Vec<Vec<Vec<f32>>> {
     let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
@@ -112,10 +112,7 @@ fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Ve
 }
 
 /// What the session refuses `bounce` with, started and run on this thread.
-fn refused(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMainOutput>,
-) -> BounceError {
+fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> BounceError {
     match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!(
@@ -484,8 +481,7 @@ fn an_unrenderable_stem_is_refused_by_name() {
     let orphan = session.graph().add(ForkByClone(Sink::mono()));
     let loose = session.graph().add(ForkByClone(Const::mono(0.25)));
     let gone = NodeKey::fresh();
-    let refusal = |session: &mut DetachedSession,
-                   stem: Stem<NodeKey, tutti_session::BufferStem>| {
+    let refusal = |session: &mut DetachedSession, stem: Stem<NodeKey, tutti_session::ToMemory>| {
         match refused(session, buffers(0.01).stem_with(stem)) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),
@@ -533,7 +529,7 @@ fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
     (session, node.erase())
 }
 
-fn short() -> Bounce<NodeKey, BufferMainOutput> {
+fn short() -> Bounce<NodeKey, ToMemory> {
     bounce_at(0.05, 44_100.0)
 }
 
@@ -1294,7 +1290,7 @@ impl Drop for EditWitness {
 
 /// A request for the mix whose `prepare` edit captures an
 /// [`EditWitness`] recording into `drops`.
-fn witnessed(drops: &tutti_fixtures::Record<ThreadId>) -> Bounce<NodeKey, BufferMainOutput> {
+fn witnessed(drops: &tutti_fixtures::Record<ThreadId>) -> Bounce<NodeKey, ToMemory> {
     let witness = EditWitness(drops.clone());
     buffers(0.05).edit(Box::new(move |_prepared: PreparedGraph<'_>| {
         let _ = &witness;

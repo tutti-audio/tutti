@@ -20,6 +20,7 @@ use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
 use tutti_session::InputPort;
 use tutti_session::MainOutput;
+use tutti_session::ToMemory;
 use tutti_session::{AnyPlugin, Key, PluginChange, PluginEvent};
 
 use std::sync::atomic::Ordering;
@@ -37,7 +38,6 @@ use tutti_graph::NodeKey;
 use tutti_plugin_types::PluginFailure;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::RenderMode;
-use tutti_session::BufferMainOutput;
 use tutti_session::Peer as _;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
@@ -137,10 +137,13 @@ fn stays_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
 
 /// A render of `seconds` into memory: stereo at `RATE`, trimming nothing and
 /// keeping no tail, on a frozen clock.
-fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
+fn request_for(seconds: f64) -> Bounce<NodeKey, ToMemory> {
     Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(
             tutti_units::Seconds::new(0.0),
             tutti_units::Seconds::new(seconds),
@@ -152,7 +155,7 @@ fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
 }
 
 /// A short render into memory.
-fn request() -> Bounce<NodeKey, BufferMainOutput> {
+fn request() -> Bounce<NodeKey, ToMemory> {
     request_for(0.05)
 }
 

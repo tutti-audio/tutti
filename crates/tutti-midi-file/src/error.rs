@@ -171,7 +171,7 @@ pub enum ClipRefusal {
 pub enum WriteError {
     /// Something (a file, a directory or a symlink) is at the path and the
     /// destination was told to
-    /// [`create_new`](tutti_platform::Destination::create_new); it is
+    /// [`create_new`](tutti_platform::WriteTarget::create_new); it is
     /// untouched. The complete file stays at
     /// [`kept`](tutti_platform::StagedCommitError::kept) of the source.
     #[error("{} already exists", path.display())]

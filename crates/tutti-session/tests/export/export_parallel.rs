@@ -20,6 +20,7 @@ use crate::bounced::bounced;
 use std::collections::HashSet;
 use std::thread::ThreadId;
 use tutti_session::MainOutput;
+use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_export::Rendered;
@@ -148,8 +149,11 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     session.graph().connect(sum, MainOutput).unwrap();
 
     let mut bounce = Bounce::new()
-        .main_output_buffers()
-        .channels(ChannelLayout::STEREO)
+        .main_output(
+            ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
+                ChannelLayout::STEREO,
+            )),
+        )
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(RATE)
         .clock(ExportClock::frozen())

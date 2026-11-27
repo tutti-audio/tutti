@@ -113,7 +113,7 @@ impl ExportConfig {
         normalize: Option<Normalize>,
     ) -> FileTarget {
         // A test renders over its scratch path again and again.
-        let target = FileTarget::new(self.encoding(), ToFile::new(path).replace());
+        let target = FileTarget::new(ToFile::new(path, self.encoding()).replace());
         match normalize {
             Some(normalize) => target.normalize(Gain::Own(normalize)),
             None => target,
@@ -143,8 +143,7 @@ pub(crate) fn write_rendered(
     let wave = Wave::from(rendered.clone());
     tutti_codec::write(
         &wave,
-        &config.encoding(),
-        &ToFile::new(path.as_ref()).replace(),
+        &ToFile::new(path.as_ref(), config.encoding()).replace(),
     )
 }
 

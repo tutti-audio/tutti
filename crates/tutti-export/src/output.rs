@@ -10,7 +10,7 @@ use std::path::Path;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
-use tutti_codec::{Encoding, ToFile};
+use tutti_codec::ToFile;
 use tutti_graph::TapReader;
 
 use crate::FileKey;
@@ -64,12 +64,12 @@ impl Width {
     }
 }
 
-/// A file one output is written to: how it is encoded ([`Encoding`]: format, channels,
-/// resample, dither seed), where it lands ([`ToFile`]) and how it is normalized. An integer
+/// A file one output is written to: how it is encoded ([`Encoding`](tutti_codec::Encoding): format, channels,
+/// resample, dither seed) and where it lands (both in its [`ToFile`]), and how it is normalized. An integer
 /// format's dither and noise shaping are those of its `tutti_codec::IntPcm`.
 ///
 /// Outputs of one render are summed later (a bounce's stems and its master), so each takes its
-/// own dither seed ([`Encoding::dither_seed`], `SplitMix64::mix` of its index): two files with
+/// own dither seed ([`Encoding::dither_seed`](tutti_codec::Encoding::dither_seed), `SplitMix64::mix` of its index): two files with
 /// one noise sequence would add it coherently.
 ///
 /// A format and width the encoder cannot take, and a topology the fold cannot
@@ -77,18 +77,16 @@ impl Width {
 /// until then), before any frame is rendered and before the path is touched.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileTarget {
-    encoding: Encoding,
     to: ToFile,
     pub(crate) normalize: Option<Gain>,
 }
 
 impl FileTarget {
-    /// The file `encoding` is written to at `to`, with no normalize. An encoding that states no
-    /// channels has the feed's.
+    /// The file `to` names, with no normalize. An encoding that states no channels has the
+    /// feed's.
     #[must_use]
-    pub fn new(encoding: Encoding, to: ToFile) -> Self {
+    pub fn new(to: ToFile) -> Self {
         Self {
-            encoding,
             to,
             normalize: None,
         }
@@ -99,7 +97,7 @@ impl FileTarget {
     ///
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
     /// stands, so it needs a placement: the topology of the file's channels
-    /// ([`Encoding::channels`], else the feed's). A width with no placement
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels), else the feed's). A width with no placement
     /// (3, 5, 7 or 9 channels, say) is refused when the render
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
@@ -113,10 +111,6 @@ impl FileTarget {
     #[must_use]
     pub fn path(&self) -> &Path {
         self.to.path()
-    }
-
-    pub(crate) fn encoding(&self) -> &Encoding {
-        &self.encoding
     }
 
     pub(crate) fn to_file(&self) -> &ToFile {
@@ -310,7 +304,7 @@ pub enum TargetError {
     /// is weighted by each speaker's placement, and a file with no stated
     /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
     /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
-    /// ([`Encoding::channels`]) that is a known bed, or normalize by
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels)) that is a known bed, or normalize by
     /// [`Normalize::Peak`].
     #[error(
         "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \

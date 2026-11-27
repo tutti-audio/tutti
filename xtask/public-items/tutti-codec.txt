@@ -46,6 +46,7 @@ fn encoder::EncoderOptions::planned
 fn encoder::EncoderOptions::wrap
 fn encoder::FileEncoder::clipped
 fn encoder::FileEncoder::finalize
+fn encoder::FileEncoder::finalize_keeping
 fn encoder::FileEncoder::finish
 fn encoder::FileEncoder::finish_keeping
 fn encoder::FileEncoder::write
@@ -53,6 +54,7 @@ fn encoder::FileOptions::create
 fn encoder::FileOptions::in_place
 fn encoder::FileOptions::replace
 fn encoder::FinalizedFile::commit
+fn encoder::Kept::discard
 fn encoder_sink::EncoderSink::frames
 fn encoder_sink::EncoderSink::into_encoder
 fn encoder_sink::EncoderSink::new
@@ -97,10 +99,16 @@ fn spec::Spec::new
 fn spec::Spec::of_channels
 fn spec::Spec::rate
 fn spec::Spec::topology
+fn to_file::ToFile::channel_set
+fn to_file::ToFile::format
 fn to_file::ToFile::in_place
+fn to_file::ToFile::map_encoding
 fn to_file::ToFile::new
 fn to_file::ToFile::path
+fn to_file::ToFile::placement
+fn to_file::ToFile::rate
 fn to_file::ToFile::replace
+fn to_file::ToFile::resampling
 fn wave_write::encode
 fn wave_write::write
 struct chain::Chain

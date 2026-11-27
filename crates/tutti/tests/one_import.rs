@@ -5,6 +5,7 @@
 //! block, and an assertion that the block is not silence. The vocabulary tests
 //! below prove each group of names arrives at the root.
 
+use tutti::ToMemory;
 use tutti::graph::Node;
 use tutti::{
     At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionCommand,
@@ -93,7 +94,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         session
             .bounce(
                 Bounce::new()
-                    .main_output_buffers()
+                    .main_output(ToMemory::new())
                     .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
             )
             .expect("a DC graph starts"),
