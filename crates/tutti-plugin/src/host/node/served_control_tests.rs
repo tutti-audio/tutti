@@ -278,3 +278,49 @@ fn a_normal_teardown_leaves_the_forks_watch_alive() {
     );
     assert!(wait.death().is_none());
 }
+
+/// **A served read and save made after a write no block has applied state it**:
+/// the server is never asked to wait for the write, and the read answers the
+/// plugin's value with the write beside it, the save the bytes with it.
+#[test]
+fn a_served_read_and_save_after_a_write_state_it_pending() {
+    use tutti_units::Normalized;
+    let _lock = machine_lock();
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
+    let Launched { ipc, .. } = Ipc::launch(
+        IpcConfig::new(),
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
+        tutti_fixtures::executor(),
+    )
+    .expect("the probe launches in a real plugin-server");
+    let any = ipc.controller();
+
+    let own = futures_lite::future::block_on(AnyThread::parameter_value(&any, GAIN))
+        .flatten()
+        .expect("the probe answers a value");
+    assert_eq!(own.pending, None, "nothing was written");
+
+    let wanted = Normalized::of(if own.plugin.get() > 0.3 { 0.125 } else { 0.875 });
+    assert_eq!(AnyThread::set_parameter_value(&any, GAIN, wanted), Ok(()));
+    let read = futures_lite::future::block_on(AnyThread::parameter_value(&any, GAIN))
+        .flatten()
+        .expect("the probe answers a value");
+    assert_eq!(read.pending, Some(wanted), "no block has applied the write");
+    assert_eq!(read.wanted(), wanted);
+    // The read asked the audio lane to flush its write, which the answer may
+    // have applied: a later write is pending when the save is asked.
+    let later = Normalized::of(0.5);
+    assert_eq!(AnyThread::set_parameter_value(&any, GAIN, later), Ok(()));
+    let state = AnyThread::save_state(&any, StateUse::Project).expect("the probe saves");
+    assert_eq!(state.pending, [(GAIN, later)], "the save states it too");
+}

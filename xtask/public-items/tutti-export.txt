@@ -18,6 +18,7 @@ enum output::Gain
 enum output::TargetError
 enum outputs::DoneError
 enum rendered::RenderedError
+fn Written::new
 fn control::CancelToken::cancel
 fn control::CancelToken::is_cancelled
 fn control::CancelToken::new

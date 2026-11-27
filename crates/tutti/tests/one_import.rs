@@ -5,7 +5,6 @@
 //! block, and an assertion that the block is not silence. The vocabulary tests
 //! below prove each group of names arrives at the root.
 
-use tutti::ToMemory;
 use tutti::graph::Node;
 use tutti::{
     At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionCommand,
@@ -78,7 +77,7 @@ fn the_dsp_library_and_the_node_contract_are_reachable() {
 #[test]
 fn a_session_bounces_to_buffers_through_the_umbrella() {
     use tutti::graph::ForkByClone;
-    use tutti::{Bounce, MainOutput, Range, Session};
+    use tutti::{Bounce, MainOutput, Range, Session, ToMemory};
 
     let mut session = Session::builder()
         .sample_rate(SampleRate::SR_48K)

@@ -709,7 +709,10 @@ fn finish<F: FftFloat>(
         .into_iter()
         .enumerate()
         .map(|(i, (path, file))| {
-            let mut w = self::written(&path, file, lost, placements[i]);
+            let mut w = Written {
+                dropped_events: lost,
+                ..Written::new(&path, file, placements[i])
+            };
             w.spill_left = spill_left[i].take();
             if let Some(c) = chosen[i] {
                 w.gain = Some(c.gain);
@@ -792,27 +795,6 @@ fn measure<F: FftFloat>(
     let reading = measurer.finish();
     reading.check().map_err(unmeasurable)?;
     Ok(Outcome::Finished((reading, done)))
-}
-
-/// What a landed file is, for the caller: its size on disk, `0` if it cannot
-/// be stat'd.
-fn written(
-    path: &std::path::Path,
-    landed: Landed,
-    dropped_events: u64,
-    placement: tutti_buffers::Placement,
-) -> Written {
-    Written {
-        path: path.to_path_buf(),
-        bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
-        frames: landed.frames(),
-        dropped_events,
-        clipped_samples: landed.clipped(),
-        gain: None,
-        measured: None,
-        placement,
-        spill_left: None,
-    }
 }
 
 /// Reads `replay` back through `chain`: the write pass of a normalized output
