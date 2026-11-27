@@ -335,7 +335,7 @@ fn open_lanes<F: FftFloat>(
             file.to_file(),
             &set,
             job.rate(),
-            plan.output_length,
+            Some(plan.output_length),
         )?);
         let path = file.path().to_path_buf();
         let sink = match file.normalize.clone() {

@@ -57,14 +57,19 @@ pub(crate) fn spec_of(
     Spec::of_channels(format, channels.unwrap_or(*source), rate)
 }
 
-/// The options of an encoder of `spec` for `frames` source frames at `source_rate`: the
-/// length the file will hold is judged at the file's rate.
+/// The options of an encoder of `spec` for `frames` source frames at `source_rate`, when
+/// they are known: the length the file will hold is judged at the file's rate. Without a
+/// plan, the format's limit is judged on each write.
 pub(crate) fn options_of(
     spec: &Spec,
     source_rate: SampleRate,
-    frames: Samples,
+    frames: Option<Samples>,
 ) -> EncoderOptions<'_> {
-    EncoderOptions::new(spec).planned(resampled_frames(source_rate, spec.rate(), frames))
+    let options = EncoderOptions::new(spec);
+    match frames {
+        Some(frames) => options.planned(resampled_frames(source_rate, spec.rate(), frames)),
+        None => options,
+    }
 }
 
 impl<F: FftFloat> Stages<F> {
@@ -195,7 +200,8 @@ fn fold_between<F: Float>(src: &ChannelSet, dst: &ChannelSet) -> Result<Option<F
 /// is finalized and committed) unless the destination is `in_place`. A render the format
 /// cannot hold is refused by [`new`](Self::new), before the temporary exists: the encoder
 /// judges the frames the file will hold, which are the planned frames at the output rate
-/// ([`tutti_dsp::resampled_frames`]).
+/// ([`tutti_dsp::resampled_frames`]). An open-ended source (no plan) is judged on each
+/// write instead: the write past the format's limit fails.
 ///
 /// [`block`](Self::block) takes the blocks, [`finalize`](Self::finalize) closes the file
 /// beside its path, and [`Closed::commit`] puts it in place: all-or-nothing across several
@@ -237,7 +243,8 @@ impl Encode for Counted<'_> {
 
 impl<F: FftFloat> Chain<F> {
     /// The chain into `to`, through its encoding, from frames of `source` channels at
-    /// `source_rate`, of which `planned` are expected (at the source's rate).
+    /// `source_rate`, of which `planned` are expected (at the source's rate), or `None` for a
+    /// source whose length is not known when it starts.
     ///
     /// # Errors
     ///
@@ -250,7 +257,7 @@ impl<F: FftFloat> Chain<F> {
         to: &ToFile,
         source: &ChannelSet,
         source_rate: SampleRate,
-        planned: Samples,
+        planned: Option<Samples>,
     ) -> Result<Self> {
         let stages = Stages::new(to.channel_set(), to.resampling(), source, source_rate)?;
         let spec = spec_of(to.format(), to.channel_set(), source, to.rate(source_rate));
