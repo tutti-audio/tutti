@@ -860,7 +860,8 @@ impl<N, F: FftFloat> Bounce<N, ToFile, F> {
     /// the node's own width.
     ///
     /// The stem's file takes the main output's format, resample and `replace`; its
-    /// channels are the node's and its noise is seeded per file.
+    /// channels are the node's, its noise is seeded per file, and it is staged
+    /// beside its path, a `ToFile`'s default.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
         let main = &self.main_output;
         let encoding = Encoding::new(main.format());

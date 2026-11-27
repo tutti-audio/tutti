@@ -378,13 +378,6 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     assert!(middle.iter().all(|&s| (s - 0.5).abs() < 1e-3));
 }
 
-/// **Shared gain keeps the balance; each measures its own.** Two constants
-/// 0.5 and 0.25 feed the outputs (a main output of 0.75). With `Shared` the stems
-/// are written with the main output's gain: the files are 0.5 and 0.25 times it,
-/// still summing to the main output's samples, and all three report one gain. With
-/// `Each` each stem is measured alone: the quieter one is given twice the
-/// loud one's gain (the same shape at half the level), and both land on the
-/// same peak. `None` writes them as rendered.
 /// **A quick stem follows the main output's resample and `replace`**: with a
 /// main output resampled to 44.1 kHz that replaces its path, `stem(node, path)`
 /// is written at 44.1 kHz and the same bounce runs twice over the same paths.
@@ -415,6 +408,13 @@ fn a_quick_stem_follows_the_main_outputs_resample_and_replace() {
     assert_eq!(spec.sample_rate, 44_100, "the main output's resample");
 }
 
+/// **Shared gain keeps the balance; each measures its own.** Two constants
+/// 0.5 and 0.25 feed the outputs (a main output of 0.75). With `Shared` the stems
+/// are written with the main output's gain: the files are 0.5 and 0.25 times it,
+/// still summing to the main output's samples, and all three report one gain. With
+/// `Each` each stem is measured alone: the quieter one is given twice the
+/// loud one's gain (the same shape at half the level), and both land on the
+/// same peak. `None` writes them as rendered.
 #[test]
 fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let mut session = session();
