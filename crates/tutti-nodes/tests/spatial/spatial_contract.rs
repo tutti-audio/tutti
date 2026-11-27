@@ -11,7 +11,7 @@
 //! output leaves on it, wherever in the step and in the graph's block the
 //! impulse falls.
 
-use super::hrir_sphere::synthetic_hrir_sphere;
+use tutti_fixtures::hrir::synthetic_hrir_sphere;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{Detect, Excite, Row, SAMPLE_RATE};
 use tutti_graph::contract_tests;

@@ -33,9 +33,9 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use super::hrir_sphere::{push_f32, push_u32};
 use approx::assert_abs_diff_eq;
 use tutti_buffers::Planes;
+use tutti_fixtures::hrir::{push_f32, push_u32};
 use tutti_fixtures::signal::peak as peak_value;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;

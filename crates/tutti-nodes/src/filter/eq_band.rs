@@ -3,7 +3,8 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cx, HasParam, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
+    Cx, HasParam, HostValues, Initials, IntoNode, Io, Node, NodeConfig, NodeParts, ParamNode,
+    ParamSet, Prepare, Shape, Status,
 };
 use tutti_units::{Db, Hz, Q};
 
@@ -72,6 +73,23 @@ impl<F: Float + SimdLanes> From<EqBandConfig> for EqBandNode<F> {
         Self {
             svf: SvfFilterNode::from(config.svf),
         }
+    }
+}
+
+/// The band's values and structure are its filter's.
+impl<F: Float + SimdLanes> NodeConfig<F> for EqBandConfig {
+    type Node = EqBandNode<F>;
+
+    fn build(&self, _: &HostValues) -> EqBandNode<F> {
+        EqBandNode::from(*self)
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        NodeConfig::<F>::same_structure(&self.svf, &other.svf)
+    }
+
+    fn initials(&self) -> Initials {
+        NodeConfig::<F>::initials(&self.svf)
     }
 }
 

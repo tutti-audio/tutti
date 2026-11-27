@@ -159,7 +159,7 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed.into())) else {
+        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed)) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
@@ -256,19 +256,6 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
     }
 }
 
-/// Minimal format-valid HRIR sphere (a tetrahedron with delta impulse
-/// responses) — enough for the crate to parse and convolve without a dataset.
-fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
-    let verts: [[f32; 3]; 4] = [
-        [1.0, 1.0, 1.0],
-        [-1.0, -1.0, 1.0],
-        [-1.0, 1.0, -1.0],
-        [1.0, -1.0, -1.0],
-    ];
-    let faces: [[u32; 3]; 4] = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
-    sphere_bytes(sample_rate, ir_len, &verts, &faces)
-}
-
 /// A sphere in the HRIR byte format whose every response is a unit delta.
 fn sphere_bytes(
     sample_rate: u32,
@@ -302,7 +289,7 @@ fn sphere_bytes(
 
 #[test]
 fn hrtf_binaural_process_is_allocation_free() {
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // Three blocks: past the first step's latency, so the gate sees signal.
@@ -316,7 +303,7 @@ fn hrtf_binaural_process_is_allocation_free() {
 /// after insertion.
 #[test]
 fn hrtf_binaural_moving_source_is_allocation_free() {
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
@@ -366,7 +353,7 @@ fn hrtf_binaural_nearest_vertex_fallback_is_allocation_free() {
 fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
     use tutti_graph::Prepare;
 
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
@@ -386,7 +373,7 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
     use tutti_units::{Samples, Tail};
 
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     node.prepare(&Prepare::new(
@@ -417,7 +404,7 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
         .expect("a bed with speakers to pan between")
 }
 

@@ -190,6 +190,7 @@ fn fm::FmConfig::new
 fn fm::FmConfig::oversampling
 fn frequency_shifter::FrequencyShifterConfig::new
 fn frequency_shifter::FrequencyShifterConfig::shift
+fn granular::GranularSource::new
 fn hysteresis::HysteresisConfig::coercivity
 fn hysteresis::HysteresisConfig::drive
 fn hysteresis::HysteresisConfig::new
@@ -222,7 +223,7 @@ fn params::Params::new
 fn pitch_shifter::PitchShifterConfig::hop
 fn pitch_shifter::PitchShifterConfig::new
 fn pitch_shifter::PitchShifterConfig::pitch
-fn polarity::PolarityConfig::new
+fn polarity::PolarityConfig::all
 fn polarity::PolarityConfig::only
 fn reverb_fdn::FdnConfig::controls
 fn reverb_fdn::FdnConfig::layout
@@ -410,6 +411,7 @@ struct frequency_shifter::FrequencyShifterConfig
 struct frequency_shifter::FrequencyShifterKernel
 struct frequency_shifter::FrequencyShifterSet
 struct granular::GranularNode
+struct granular::GranularSource
 struct hysteresis::HysteresisConfig
 struct hysteresis::HysteresisKernel
 struct hysteresis::HysteresisSet
