@@ -184,6 +184,7 @@ fn test_support::FakeCounters::watchers
 fn test_support::endpoint
 fn test_support::persistent_endpoint
 fn test_support::property_peer
+fn test_support::report_inquiry
 fn virtual_endpoint::OpeningVirtualEndpoint::deadline
 fn virtual_endpoint::OpeningVirtualEndpoint::poll
 fn virtual_endpoint::VirtualEndpoint::blocks

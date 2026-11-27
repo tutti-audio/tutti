@@ -37,11 +37,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tutti_graph::{EventTapReader, NodeKey};
-use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
+use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState, ReportScope};
 use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, OpenOutput, PeerProfiles,
-    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
+    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, ReportInquiry, Start, Started,
 };
 use tutti_midi_protocol::Mpe11Zones;
 use tutti_midi_runtime::{
@@ -1688,6 +1688,35 @@ impl Ports {
             .any(|port| port.claim.is_held() && port.saved.id == *saved)
     }
 
+    /// Answers a peer's report inquiry on `device`: from the held output port that has
+    /// it open, or, when none does or its device is away, as a device that declares
+    /// nothing ([`MidiSession::decline_report`]). The one call site of the decline.
+    fn answer_report(&mut self, io: &mut MidiSession, device: &MidiDeviceId, ask: &ReportInquiry) {
+        if let Some(ask) = self.route_report(device, ask) {
+            io.decline_report(device, &ask);
+        }
+    }
+
+    /// Has the held output port of `device` answer `ask`; the ask comes back when
+    /// there is no such port or its device is away.
+    fn route_report(
+        &mut self,
+        device: &MidiDeviceId,
+        ask: &ReportInquiry,
+    ) -> Option<ReportInquiry> {
+        let mut holders = self.outputs.iter_mut().filter(|port| {
+            port.claim.is_held() && port.link.device().is_some_and(|open| open.id() == device)
+        });
+        let holder = holders.next();
+        // A device has one output port (`open_output_port`).
+        let second = holders.next().is_some();
+        debug_assert!(!second, "two held output ports have one device open");
+        match holder {
+            Some(port) => port.answer_report(ask),
+            None => Some(*ask),
+        }
+    }
+
     /// Whether a held output port has `device` open.
     fn holds_output(&self, device: &MidiDeviceId) -> bool {
         self.outputs.iter().any(|port| {
@@ -1776,10 +1805,8 @@ impl Ports {
                     }
                     device.clone()
                 }
-                // The report this session declares is the empty one of a device
-                // that declares nothing (M2-101 §9.6).
                 tutti_midi_hardware::Polled::ReportInquiry(device, ask) => {
-                    io.decline_report(device, ask);
+                    self.answer_report(io, device, ask);
                     continue;
                 }
                 // A kind of report this session does not know is not one.
@@ -1883,6 +1910,37 @@ impl OutputPort {
             .collect();
         let refused = out.send_frames(&events, None) as u64;
         self.losses.refused(refused);
+    }
+
+    /// Answers `ask` with the report of what the port has said: the Reply, the
+    /// messages and the End, as one batch on the open device, so nothing the port
+    /// drains lands between them (M2-101 §9.8.2), and what the device refuses is
+    /// counted. A refusal can drop the End, as it can any part of a catch-up; the
+    /// ask comes back when the device is away: the caller answers it.
+    fn answer_report(&mut self, ask: &ReportInquiry) -> Option<ReportInquiry> {
+        let Some(out) = self.link.open_mut() else {
+            return Some(*ask);
+        };
+        let groups = match ask.scope() {
+            ReportScope::FunctionBlock { .. } => ask.groups().collect(),
+            _ => vec![ask.group()],
+        };
+        let report = self.record.report(ask.control(), &ask.scope(), groups);
+        // A Reply and an End encode: their fields are range-checked types, so no
+        // byte is past 7 bits (`CiMessage::packets` fails only for one that is).
+        let frames = |message: tutti_midi_ci::CiMessage| -> Vec<(Frame, tutti_ump::Ump)> {
+            message
+                .packets(ask.group())
+                .expect("a MIDI-CI message of range-checked fields is 7-bit")
+                .map(|ump| (Frame::ZERO, ump))
+                .collect()
+        };
+        let mut events = frames(ask.reply(report.declared));
+        events.extend(report.messages.into_iter().map(|ump| (Frame::ZERO, ump)));
+        events.extend(frames(ask.end()));
+        let refused = out.send_frames(&events, None) as u64;
+        self.losses.refused(refused);
+        None
     }
 
     /// Sends the open device the MPE 1.1 zones written since the last call; with
