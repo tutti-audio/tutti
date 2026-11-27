@@ -128,7 +128,6 @@ impl TransportSettings {
     /// A reader of the project's meter, registered here on the control side
     /// ([`ProjectMeter::reader`]), for the one engine that lends it once per
     /// block.
-    #[must_use]
     pub fn meter_reader(&self) -> Reader<MeterMap> {
         self.meter.reader()
     }
