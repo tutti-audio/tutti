@@ -230,10 +230,10 @@ where
                 // The host's writes since the last piece, on this piece's
                 // first frame; a node with no Processor leaves them in their
                 // slots.
-                if processor.is_some() {
-                    if let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, phase) {
-                        this.drained = swept;
-                    }
+                if processor.is_some()
+                    && let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, phase)
+                {
+                    this.drained = swept;
                 }
                 this.midi.clear();
                 this.chords.changes.clear();
