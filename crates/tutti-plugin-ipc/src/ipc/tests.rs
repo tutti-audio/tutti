@@ -1964,10 +1964,10 @@ fn a_loaded_state_reaches_the_server_as_one_object() {
     );
 }
 
-/// **A read after writes no block has carried sends them on the audio lane,
-/// in order with the blocks**: a block pushed before the write reaches the
-/// server first, and the parameters follow it as their own message, before the
-/// request that asked.
+/// **A read after writes no block has carried asks the audio lane to send
+/// them, in order with the blocks**: a block pushed before the write reaches the
+/// server first, and the parameters follow it as their own message. The read
+/// never waits for them.
 #[test]
 fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
     use tutti_plugin_types::AnyThread;
@@ -1981,6 +1981,17 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         Ok(())
     );
     let _ = ipc.parameter(main_thread(), ParamId::new(1));
+    tutti_fixtures::wait_until(
+        "the flush to reach the server",
+        Duration::from_secs(30),
+        || {
+            server
+                .received
+                .lock()
+                .iter()
+                .any(|m| matches!(m, Sent::Audio(AudioRequest::ApplyParameters { .. })))
+        },
+    );
     let log = server.received.lock();
     let block = log
         .iter()
@@ -1990,11 +2001,7 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         .iter()
         .position(|m| matches!(m, Sent::Audio(AudioRequest::ApplyParameters { .. })))
         .expect("the parameters sent between blocks");
-    let read = log
-        .iter()
-        .position(|m| matches!(m, Sent::Control(ControlRequest::GetParameter { .. })))
-        .expect("the read");
-    assert!(block < flush && flush < read, "{block} {flush} {read}");
+    assert!(block < flush, "{block} {flush}");
     let Sent::Audio(AudioRequest::ApplyParameters { param_changes, .. }) = &log[flush] else {
         unreachable!()
     };

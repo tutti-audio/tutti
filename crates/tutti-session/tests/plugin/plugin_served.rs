@@ -1000,6 +1000,67 @@ fn block_on_save(save: SaveState) -> PeerState {
         .into_state()
 }
 
+/// **A served save after a write no block has applied states the write in
+/// `pending`, and a restore of a save with writes pending replays them through
+/// the session's ledger once the state has loaded.** No block runs for the
+/// first save (the node has no output), so the write is the host's alone; the
+/// restore is of a state that does not hold a value and names it pending, and
+/// the plugin holds that value once a block has run.
+#[test]
+fn a_served_save_states_a_pending_write_and_a_restore_replays_it() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let own = |saved: &tutti_session::Saved| {
+        tutti_clap_test_plugin::saved_normalized(saved.state().bytes(), CUTOFF.get())
+            .expect("the state holds the parameter")
+    };
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let save = |s: &Session| {
+        let SaveState::OutOfProcess(save) = s.save_state(&node, StateUse::Project).unwrap() else {
+            panic!("a served plugin's save is awaited");
+        };
+        tutti_fixtures::block_on(save).expect("a state")
+    };
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .expect("the plugin declares the parameter")
+        .target();
+
+    assert!(save(&s).pending().is_empty(), "nothing was written");
+    s.set(target.to(Normalized::of(0.9))).unwrap();
+    assert_eq!(
+        save(&s).pending(),
+        [(CUTOFF, Normalized::of(0.9))],
+        "no block has applied the write"
+    );
+
+    // A state that holds the plugin's own value, with another write pending.
+    s.graph().connect(node, tutti_session::MainOutput).unwrap();
+    for _ in 0..4 {
+        let _ = pump(&mut s);
+    }
+    let held = save(&s);
+    assert!((own(&held) - 0.9).abs() < 1e-4, "blocks applied the write");
+    assert!(held.pending().is_empty(), "so nothing is pending");
+    let stated =
+        tutti_session::Saved::with_pending(held.into_state(), vec![(CUTOFF, Normalized::of(0.2))]);
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, stated).unwrap() else {
+        panic!("a served plugin's restore is awaited");
+    };
+    let restored = tutti_fixtures::block_on(restore).expect("the plugin takes the state");
+    s.apply(restored).expect("the node hosts the plugin");
+    pump_until(&mut s, "the replayed write reaches the plugin", |s| {
+        for _ in 0..2 {
+            let _ = pump(s);
+        }
+        (own(&save(s)) - 0.2).abs() < 1e-4
+    });
+}
+
 /// **A save awaited on a spawned thread returns the plugin's state**, which a
 /// new plugin loaded from it holds: no main thread ran the round trip.
 #[test]
