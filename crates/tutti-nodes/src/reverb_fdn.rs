@@ -85,10 +85,17 @@ impl Default for FdnConfig {
     }
 }
 
+kernel_config!(FdnConfig => FdnNode<F> where [F: FftFloat + Lerp],
+    set(_): FdnSet = FdnSet);
+
 impl<F: FftFloat + Lerp> From<FdnConfig> for FdnNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: FdnConfig) -> Self {
-        Self::with_kernel(FdnKernel::new(config.layout), FdnSet, config.controls)
+        Self::with_kernel(
+            FdnKernel::new(config.layout),
+            config.kernel_set(),
+            config.controls,
+        )
     }
 }
 

@@ -86,7 +86,7 @@ pub type ModDelayNode<F> = KernelNode<ModDelayKernel<F>>;
 /// [`chorus`](Self::chorus), [`flanger`](Self::flanger) and
 /// [`general_midi_chorus`](Self::general_midi_chorus) take the layout and the controls
 /// together, as [`ModDelayLayout`]'s presets and [`ModDelayControls`]' constants have them.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModDelayConfig {
     layout: ModDelayLayout,
     controls: ModDelayControls,
@@ -150,6 +150,9 @@ impl ModDelayConfig {
     }
 }
 
+kernel_config!(ModDelayConfig => ModDelayNode<F> where [F: Float + Lerp],
+    set(_): ModDelaySet = ModDelaySet);
+
 impl<F: Float + Lerp> From<ModDelayConfig> for ModDelayNode<F> {
     /// The lines are sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it,
     /// which is what makes the longest delay hold at whatever rate the graph runs at.
@@ -157,7 +160,7 @@ impl<F: Float + Lerp> From<ModDelayConfig> for ModDelayNode<F> {
     fn from(config: ModDelayConfig) -> Self {
         Self::with_kernel(
             ModDelayKernel::new(config.layout),
-            ModDelaySet,
+            config.kernel_set(),
             config.controls,
         )
     }

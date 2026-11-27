@@ -105,10 +105,17 @@ impl Default for ShimmerConfig {
     }
 }
 
+kernel_config!(ShimmerConfig => ShimmerNode<F> where [F: FftFloat + Lerp],
+    set(_): ShimmerSet = ShimmerSet);
+
 impl<F: FftFloat + Lerp> From<ShimmerConfig> for ShimmerNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: ShimmerConfig) -> Self {
-        Self::with_kernel(FdnKernel::new(config.layout), ShimmerSet, config.controls)
+        Self::with_kernel(
+            FdnKernel::new(config.layout),
+            config.kernel_set(),
+            config.controls,
+        )
     }
 }
 

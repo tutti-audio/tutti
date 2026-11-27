@@ -55,11 +55,14 @@ impl FrequencyShifterConfig {
 /// shifter is one bus.
 pub type FrequencyShifterNode<F> = KernelNode<FrequencyShifterKernel<F>>;
 
+kernel_config!(FrequencyShifterConfig => FrequencyShifterNode<F> where [F: Float],
+    set(_): FrequencyShifterSet = FrequencyShifterSet);
+
 impl<F: Float> From<FrequencyShifterConfig> for FrequencyShifterNode<F> {
     fn from(config: FrequencyShifterConfig) -> Self {
         Self::with_kernel(
             FrequencyShifterKernel::new(config.width),
-            FrequencyShifterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

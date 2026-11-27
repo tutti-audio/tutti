@@ -139,11 +139,14 @@ impl LimiterConfig {
     }
 }
 
+kernel_config!(LimiterConfig => LimiterNode<F> where [F: Float],
+    set(_): LimiterSet = LimiterSet);
+
 impl<F: Float> From<LimiterConfig> for LimiterNode<F> {
     fn from(config: LimiterConfig) -> Self {
         let mut kernel = LimiterKernel::new(config.input, config.lookahead);
         kernel.detection = config.detection;
-        Self::with_kernel(kernel, LimiterSet, config.controls)
+        Self::with_kernel(kernel, config.kernel_set(), config.controls)
     }
 }
 

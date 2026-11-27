@@ -51,6 +51,9 @@ impl RingModConfig {
 /// `RingModNode::from` panics past 16 channels, where the node's shape is built: a ring modulator is one bus.
 pub type RingModNode<F> = KernelNode<RingModKernel<F>>;
 
+kernel_config!(RingModConfig => RingModNode<F> where [F: Float],
+    set(_): RingModSet = RingModSet);
+
 impl<F: Float> From<RingModConfig> for RingModNode<F> {
     fn from(config: RingModConfig) -> Self {
         // A placeholder rate: an unprepared node renders nothing.
@@ -59,7 +62,7 @@ impl<F: Float> From<RingModConfig> for RingModNode<F> {
             modulator: RingModulator::new(SampleRate::SR_48K),
             float: core::marker::PhantomData,
         };
-        Self::with_kernel(kernel, RingModSet, config.controls)
+        Self::with_kernel(kernel, config.kernel_set(), config.controls)
     }
 }
 

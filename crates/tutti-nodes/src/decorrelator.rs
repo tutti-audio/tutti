@@ -70,9 +70,14 @@ impl DecorrelatorConfig {
 /// `DecorrelatorNode::from` panics past 16 channels: a decorrelator is one bus.
 pub type DecorrelatorNode<F> = KernelNode<DecorrelatorKernel<F>>;
 
+kernel_config!(DecorrelatorConfig => DecorrelatorNode<F> where [F: Float],
+    set(_): NoControls = NoControls,
+    fixed: ());
+
 impl<F: Float> From<DecorrelatorConfig> for DecorrelatorNode<F> {
     fn from(config: DecorrelatorConfig) -> Self {
-        Self::with_kernel(DecorrelatorKernel::new(config), NoControls, ())
+        let (set, controls) = (config.kernel_set(), config.kernel_controls());
+        Self::with_kernel(DecorrelatorKernel::new(config), set, controls)
     }
 }
 
