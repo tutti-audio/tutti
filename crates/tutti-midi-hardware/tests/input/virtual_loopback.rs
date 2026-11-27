@@ -94,6 +94,10 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
 
 /// What a session output sends to a virtual endpoint arrives at the
 /// endpoint's producer, in order, as the events of a device input.
+///
+/// Not on Windows MIDI Services, which describes every endpoint as MIDI 1.0 for now: the
+/// session's output translates the MIDI 2.0 notes to MIDI 1.0 for it.
+#[cfg(not(midi_backend = "midi_services"))]
 #[test]
 fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     let executor = Executor::new();

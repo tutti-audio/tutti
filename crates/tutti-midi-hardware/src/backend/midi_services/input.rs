@@ -10,7 +10,8 @@ use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
 use tutti_rt::FaultLatch;
-use tutti_winmidi2_ffi::{Connection, Session};
+use tutti_ump::Ump;
+use tutti_winmidi2_ffi::{Connection, Error, Session};
 
 /// An open input. Dropping it closes the connection.
 pub(super) struct MidiServicesInput {
@@ -27,6 +28,28 @@ impl InputConnection for MidiServicesInput {
     }
 }
 
+/// The handler a connection delivers into `producer` with: a message goes in as the input
+/// port's would, one that could not be read is counted, and a panic is caught by a
+/// [`Guard`] that raises `died`.
+///
+/// The service calls it on a thread of its own, so a full inlet counts the drop itself (the
+/// input's `lost` cell) and a log line would run on the service's thread.
+pub(super) fn handler(
+    mut producer: InputProducerHandle,
+    died: Arc<FaultLatch<InputFault>>,
+) -> impl FnMut(core::result::Result<(Option<Instant>, Ump), Error>) + Send + 'static {
+    let guard = Guard::new(died);
+    move |received| {
+        guard.run(|| match received {
+            Ok((at, ump)) => {
+                // A timestamp that is not an `Instant` is placed at its arrival.
+                let _ = producer.push(ump, at.unwrap_or_else(Instant::now));
+            }
+            Err(_) => producer.count_lost(),
+        });
+    }
+}
+
 /// Connects to the endpoint with device id `endpoint` and delivers what it sends into
 /// `producer`.
 ///
@@ -36,24 +59,11 @@ impl InputConnection for MidiServicesInput {
 pub(super) fn open(
     session: Arc<Session>,
     endpoint: &str,
-    mut producer: InputProducerHandle,
+    producer: InputProducerHandle,
 ) -> Result<MidiServicesInput> {
     let died = Arc::new(FaultLatch::<InputFault>::new());
-    let guard = Guard::new(Arc::clone(&died));
-    // The service calls this on a thread of its own, and a panic must not leave it: the
-    // guard catches it and ends the input. A full inlet counts the drop itself (the input's
-    // `lost` cell), a message that could not be read is counted here, and a log line would
-    // run on the service's thread.
     let connection = session
-        .connect(endpoint, move |received| {
-            guard.run(|| match received {
-                Ok((at, ump)) => {
-                    // A timestamp that is not an `Instant` is placed at its arrival.
-                    let _ = producer.push(ump, at.unwrap_or_else(Instant::now));
-                }
-                Err(_) => producer.count_lost(),
-            });
-        })
+        .connect(endpoint, handler(producer, Arc::clone(&died)))
         .map_err(os)?;
     Ok(MidiServicesInput {
         died,

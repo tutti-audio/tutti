@@ -19,8 +19,9 @@
 //! - **The device watch** is the service's endpoint watcher: an endpoint added, removed or
 //!   updated reaches the list from the notification, with no re-list. A watcher that
 //!   stops, or a change it cannot read, ends the watch with the cause.
-//! - **Virtual endpoints** are
-//!   [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported) here.
+//! - **Virtual endpoints** are the service's virtual devices: one UMP Endpoint with the
+//!   declared Function Blocks, published on a session of its own and removed when the
+//!   endpoint is dropped (`virtual_endpoint`).
 //! - **Availability.** One session with the service is made on first use and shared by the
 //!   connections. A PC without the API, or with the service stopped, fails at open
 //!   ([`MidiHardwareError::MidiServicesApiMissing`],
@@ -29,6 +30,7 @@
 
 mod input;
 mod output;
+pub(super) mod virtual_endpoint;
 mod watch;
 
 use std::sync::Arc;
@@ -55,6 +57,17 @@ fn os(error: Error) -> MidiHardwareError {
         Error::ServiceUnavailable => MidiHardwareError::MidiServicesNotRunning,
         other => MidiHardwareError::Os(other),
     }
+}
+
+/// A new session with the service, which is started if it is stopped.
+///
+/// # Errors
+///
+/// The named cause of the API or the service not being there, or the platform's own error
+/// from making the session.
+fn new_session() -> Result<Session> {
+    ensure_service_available().map_err(os)?;
+    Session::create(SESSION).map_err(os)
 }
 
 /// The [`EndpointId`] of the endpoint with device id `id`: a 64-bit FNV-1a digest of the
@@ -130,8 +143,7 @@ impl MidiServicesEndpoints {
         if let Some(session) = &*held {
             return Ok(Arc::clone(session));
         }
-        ensure_service_available().map_err(os)?;
-        let session = Arc::new(Session::create(SESSION).map_err(os)?);
+        let session = Arc::new(new_session()?);
         *held = Some(Arc::clone(&session));
         Ok(session)
     }

@@ -11,9 +11,9 @@
 use tutti_alsa_ffi::{
     Client, ClientHandle, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
 };
-use tutti_midi_device::{FunctionBlock, UMP_VERSION};
+use tutti_midi_device::FunctionBlock;
 use tutti_platform::Executor;
-use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol, Ump};
+use tutti_ump::{Protocol, Ump};
 
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
@@ -64,29 +64,19 @@ fn ump_block(block: &FunctionBlock) -> UmpBlock {
 /// Publishes the endpoint record on `client`: the protocol it carries, the spec's
 /// Device Identity and Product Instance Id, and its blocks.
 fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Result<()> {
-    let (in_use, midi1, midi2) = match protocol {
-        VirtualProtocol::Midi1 => (Protocol::Midi1, true, false),
-        VirtualProtocol::Midi2 => (Protocol::Midi2, false, true),
+    let in_use = match protocol {
+        VirtualProtocol::Midi1 => Protocol::Midi1,
+        VirtualProtocol::Midi2 => Protocol::Midi2,
     };
-    let blocks: Vec<UmpBlock> = spec.function_blocks().iter().map(ump_block).collect();
     // The record names the MIDI protocol only: it offers no JR Timestamps in
-    // either direction, so the endpoint declares that it sends and receives none
-    // (the spec has no JR support).
+    // either direction (the spec has no JR support).
     client.publish_ump_endpoint(&UmpEndpoint {
         protocol: in_use,
-        offered: EndpointInfoNotification {
-            version: UMP_VERSION,
-            static_function_blocks: true,
-            function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(blocks.len())),
-            midi2,
-            midi1,
-            rx_jr: false,
-            tx_jr: false,
-        },
+        offered: spec.endpoint_info(protocol),
         name: Some(spec.name().as_str().to_owned()),
         device: Some(*spec.device()),
         instance: spec.instance().copied(),
-        blocks,
+        blocks: spec.function_blocks().iter().map(ump_block).collect(),
     })?;
     Ok(())
 }
