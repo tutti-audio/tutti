@@ -20,55 +20,8 @@ fn tick(node: &mut HrtfBinauralNode<f32>, input: [f32; 2]) -> [f32; 2] {
     [out[0][0], out[1][0]]
 }
 
-/// Serialize a minimal but format-valid HRIR sphere: a tetrahedron of 4
-/// vertices with unit-impulse HRIRs (left = identity delta, right scaled).
-/// Enough to parse, triangulate, and convolve — no dataset file needed to
-/// exercise the renderer.
-fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
-    fn push_u32(b: &mut Vec<u8>, v: u32) {
-        b.extend_from_slice(&v.to_le_bytes());
-    }
-    fn push_f32(b: &mut Vec<u8>, v: f32) {
-        b.extend_from_slice(&v.to_le_bytes());
-    }
-
-    let verts: [[f32; 3]; 4] = [
-        [1.0, 1.0, 1.0],
-        [-1.0, -1.0, 1.0],
-        [-1.0, 1.0, -1.0],
-        [1.0, -1.0, -1.0],
-    ];
-    let faces: [[u32; 3]; 4] = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
-
-    let mut b = Vec::new();
-    b.extend_from_slice(b"HRIR");
-    push_u32(&mut b, sample_rate);
-    push_u32(&mut b, ir_len as u32);
-    push_u32(&mut b, verts.len() as u32);
-    push_u32(&mut b, (faces.len() * 3) as u32);
-    for f in faces {
-        for idx in f {
-            push_u32(&mut b, idx);
-        }
-    }
-    for (vi, v) in verts.iter().enumerate() {
-        push_f32(&mut b, v[0]);
-        push_f32(&mut b, v[1]);
-        push_f32(&mut b, v[2]);
-        // Left HRIR: unit delta at t=0.
-        for i in 0..ir_len {
-            push_f32(&mut b, if i == 0 { 1.0 } else { 0.0 });
-        }
-        // Right HRIR: delta scaled per-vertex so L and R differ.
-        for i in 0..ir_len {
-            push_f32(&mut b, if i == 0 { 0.5 + 0.1 * vi as f32 } else { 0.0 });
-        }
-    }
-    b
-}
-
 fn make_node() -> HrtfBinauralNode<f32> {
-    let bytes = synthetic_hrir_sphere(44_100, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(44_100, 64);
     let node = hrtf::<f32>(&bytes).expect("synthetic sphere should parse");
     prepared(node, RATE, BLOCK)
 }
@@ -405,7 +358,8 @@ fn clone_shares_the_position_atomics() {
 #[test]
 fn a_prepare_above_the_ceiling_retunes_the_ramp() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
-    let mut node = hrtf::<f32>(&synthetic_hrir_sphere(48_000, 4)).expect("parses");
+    let mut node =
+        hrtf::<f32>(&tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 4)).expect("parses");
     node.prepare(&Prepare::new(
         SampleRate::of(1_024_000.0),
         MaxBlock::of(Samples::new(64)),
@@ -529,7 +483,7 @@ fn a_signal_drives_each_param_as_its_cell_would() {
 /// In an `f64` graph the panner is linear in its input to the rounding of `f64`.
 #[test]
 fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
-    let bytes = synthetic_hrir_sphere(44_100, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(44_100, 64);
     crate::test_support::assert_linear(
         || hrtf::<f64>(&bytes).expect("synthetic sphere should parse"),
         RATE,
@@ -553,7 +507,7 @@ fn hrtf<F: tutti_dsp::FftFloat>(
 /// stale or panicking.
 #[test]
 fn an_unprepared_node_renders_silence() {
-    let bytes = synthetic_hrir_sphere(44_100, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(44_100, 64);
     let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere should parse");
     let ones = [1.0f32; BLOCK];
     let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);

@@ -3,7 +3,10 @@
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::MidSide;
-use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
+use tutti_graph::{
+    Cost, Cx, ForkByClone, HostValues, Initials, IntoNode, Io, Node, NodeConfig, NodeParts,
+    Prepare, Shape, Status,
+};
 
 use crate::kernel::through_planes;
 
@@ -49,6 +52,23 @@ impl From<MidSideConfig> for MidSideNode {
         Self {
             direction: config.direction,
         }
+    }
+}
+
+/// A mid/side converter has no param: its direction is its structure.
+impl<F: Float> NodeConfig<F> for MidSideConfig {
+    type Node = MidSideNode;
+
+    fn build(&self, _: &HostValues) -> MidSideNode {
+        MidSideNode::from(*self)
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }
 

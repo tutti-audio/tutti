@@ -655,8 +655,6 @@ fn node::bus::Buses::width
 fn node::bus::Buses::with
 fn node::bus::InBus::width
 fn node::bus::OutBus::width
-fn node::config::Asset::arc
-fn node::config::Asset::new
 fn node::config::HostValues::new
 fn node::config::HostValues::provide
 fn node::config::HostValues::reader
@@ -668,6 +666,8 @@ fn node::config::Initials::published_values
 fn node::config::Initials::setting
 fn node::config::Initials::settings
 fn node::config::PublishedInitial::value
+fn node::config::Shared::arc
+fn node::config::Shared::new
 fn node::controls::DeclaredUnit::of
 fn node::controls::DeclaredUnit::value
 fn node::controls::ParamFork::fork_node
@@ -1088,10 +1088,10 @@ struct node::bus::InBus
 struct node::bus::InEvents
 struct node::bus::OutBus
 struct node::bus::OutEvents
-struct node::config::Asset
 struct node::config::HostValues
 struct node::config::Initials
 struct node::config::PublishedInitial
+struct node::config::Shared
 struct node::controls::DeclaredUnit
 struct node::controls::ParamFork
 struct node::controls::ParamSet

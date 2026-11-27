@@ -17,14 +17,18 @@ fn source(channels: &[f32], frames: usize) -> Arc<Wave<f32>> {
     Arc::new(wave)
 }
 
+/// A config over `wave` read into `layout`.
+fn config(layout: ChannelLayout, wave: Arc<Wave<f32>>) -> GranularConfig<f32> {
+    GranularConfig::new(GranularSource::new(layout, wave).unwrap())
+}
+
 /// A single grain of `length` frames: the density is one a second, so the next is a second on.
 fn one_grain(channels: &[f32], length: usize) -> GranularNode<f32> {
-    GranularNode::try_from(
-        GranularConfig::new(layout(channels.len()), source(channels, 64))
+    GranularNode::from(
+        config(layout(channels.len()), source(channels, 64))
             .density(Hz::new(1.0))
             .length(Seconds::new(length as f64 / 48_000.0)),
     )
-    .unwrap()
 }
 
 fn hann(n: usize, length: usize) -> f32 {
@@ -92,12 +96,11 @@ fn a_driven_grain_length_sets_the_window() {
 #[test]
 fn a_non_finite_driven_density_holds_the_last_finite_one() {
     let mut d = Direct::new(
-        GranularNode::try_from(
-            GranularConfig::new(ChannelLayout::MONO, source(&[1.0], 64))
+        GranularNode::from(
+            config(ChannelLayout::MONO, source(&[1.0], 64))
                 .density(Hz::new(2_400.0))
                 .length(Seconds::new(20.0 / 48_000.0)),
-        )
-        .unwrap(),
+        ),
         RATE,
         40,
     );
@@ -130,12 +133,11 @@ fn a_reset_starts_the_first_grain_again() {
 /// A mono source feeds every output channel the same grain.
 #[test]
 fn a_mono_source_feeds_every_output_channel() {
-    let node = GranularNode::try_from(
-        GranularConfig::new(ChannelLayout::STEREO, source(&[0.5], 64))
+    let node = GranularNode::from(
+        config(ChannelLayout::STEREO, source(&[0.5], 64))
             .density(Hz::new(1.0))
             .length(Seconds::new(8.0 / 48_000.0)),
-    )
-    .unwrap();
+    );
     let mut d = Direct::new(node, RATE, 8);
     d.block();
     for c in 0..2 {
@@ -149,9 +151,8 @@ fn a_mono_source_feeds_every_output_channel() {
 #[test]
 fn a_source_neither_mono_nor_as_wide_as_the_output_is_refused() {
     for width in [1, 3] {
-        let config = GranularConfig::new(layout(width), source(&[0.5, 0.25], 64));
         assert_eq!(
-            GranularNode::try_from(config).err(),
+            GranularSource::new(layout(width), source(&[0.5, 0.25], 64)).err(),
             Some(GranularError::Width {
                 source_channels: 2,
                 output_channels: width as u16
