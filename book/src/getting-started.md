@@ -116,8 +116,7 @@ into a file is called a *bounce* (also known as *export*, or *mixdown*).
 First we describe what we want to keep: the first two seconds.
 
 ```rust,ignore
-Bounce::new()
-    .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
+Bounce::new().range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
 ```
 
 Then we tell the [`Bounce`](../api/tutti/struct.Bounce.html) where the file
@@ -130,7 +129,15 @@ file the first one wrote. Then we hand it to the session:
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
 let mut session = tone()?;
-let rendering = session.bounce(two_seconds().main_output(tutti::codec::ToFile::new(&path, Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO)).replace()))?;
+let rendering = session.bounce(
+    two_seconds().main_output(
+        tutti::codec::ToFile::new(
+            &path, // Left and right.
+            Encoding::new(Format::from_path(&path)?).width(ChannelLayout::STEREO),
+        )
+        .replace(),
+    ),
+)?;
 // The session renders on a thread of its own; we wait for it, then hand
 // what it made back to the session.
 let rendered = block_on(rendering.into_future());
