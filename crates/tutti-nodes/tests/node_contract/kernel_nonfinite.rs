@@ -7,6 +7,7 @@ use tutti_buffers::{
 };
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
+use tutti_dsp::HarmonicNormalization;
 use tutti_dsp::{
     FdnLayout, FreeverbControls, LadderType, SecondOrderShape, ShapeKind, Stages, SvfType,
     Waveshape,
@@ -327,13 +328,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "ambisonic encoder",
             Box::new(AmbisonicEncoderNode::<f32>::from(
-                AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+                AmbisonicEncoderConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
             )),
         ),
         (
             "ambisonic rotator",
             Box::new(AmbisonicRotatorNode::<f32>::from(
-                AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+                AmbisonicRotatorConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
             )),
         ),
         (

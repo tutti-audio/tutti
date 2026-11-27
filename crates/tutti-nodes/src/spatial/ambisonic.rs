@@ -46,19 +46,15 @@ pub struct AmbisonicEncoderConfig {
 }
 
 impl AmbisonicEncoderConfig {
-    /// An encoder to `output`, with the source straight ahead.
-    ///
-    /// # Errors
-    ///
-    /// [`AmbisonicError::NotAmbisonic`] for a bus that is not an ambisonic one and
-    /// [`AmbisonicError::Unsupported`] for a format that is not ACN in SN3D or N3D.
-    pub fn new(output: impl Into<ChannelTopology>) -> Result<Self, AmbisonicError> {
-        let (order, normalization) = format_of(output.into())?;
-        Ok(Self {
+    /// An encoder to the ACN bus of `order` scaled by `normalization`, with the source
+    /// straight ahead.
+    #[must_use]
+    pub const fn new(order: AmbisonicOrder, normalization: HarmonicNormalization) -> Self {
+        Self {
             order,
             normalization,
             direction: FRONT,
-        })
+        }
     }
 
     /// The direction the source starts at.
@@ -179,19 +175,16 @@ pub struct AmbisonicRotatorConfig {
 }
 
 impl AmbisonicRotatorConfig {
-    /// A rotator of the channels of `bus` that leaves the field as it is.
-    ///
-    /// # Errors
-    ///
-    /// As the encoder: [`AmbisonicError::NotAmbisonic`] and [`AmbisonicError::Unsupported`].
-    pub fn new(bus: impl Into<ChannelTopology>) -> Result<Self, AmbisonicError> {
-        let (order, normalization) = format_of(bus.into())?;
-        Ok(Self {
+    /// A rotator of the ACN bus of `order` scaled by `normalization` that leaves the field
+    /// as it is.
+    #[must_use]
+    pub const fn new(order: AmbisonicOrder, normalization: HarmonicNormalization) -> Self {
+        Self {
             order,
             normalization,
             front: FRONT,
             roll: ArcDegrees::new(0.0),
-        })
+        }
     }
 
     /// Where the front starts: a source straight ahead is carried there.

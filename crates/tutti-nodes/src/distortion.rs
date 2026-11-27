@@ -118,12 +118,15 @@ impl DistortionConfig {
     }
 }
 
+kernel_config!(DistortionConfig => DistortionNode<F> where [F: Float + Lerp],
+    set(_): DistortionSet = DistortionSet);
+
 impl<F: Float + Lerp> From<DistortionConfig> for DistortionNode<F> {
     fn from(config: DistortionConfig) -> Self {
         let input = unassigned_bus(config.width, "a waveshaper");
         Self::with_kernel(
             DistortionKernel::<F>::new(&config, input),
-            DistortionSet,
+            config.kernel_set(),
             config.controls,
         )
     }

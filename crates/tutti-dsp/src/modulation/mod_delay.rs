@@ -134,7 +134,7 @@ pub struct SweepDesign {
 /// A chorus is [`ModDelayLayout::chorus`] and a flanger [`flanger`](Self::flanger): the same
 /// layout at different numbers. [`general_midi_chorus`](Self::general_midi_chorus) is the
 /// chorus send of a General MIDI synthesizer, with no feedback.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModDelayLayout {
     input: ChannelTopology,
     sweep: Sweep,

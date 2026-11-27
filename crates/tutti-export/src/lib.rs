@@ -279,6 +279,31 @@ pub struct Written {
     pub spill_left: Option<PathBuf>,
 }
 
+impl Written {
+    /// The file `landed` put at `path`, its channels placed as `placement`: as rendered (no
+    /// gain, no reading, no spill left) and with no events lost. Its size is read from disk,
+    /// `0` if the file cannot be stat'd.
+    #[must_use]
+    pub fn new(
+        path: impl Into<PathBuf>,
+        landed: tutti_codec::Landed,
+        placement: tutti_buffers::Placement,
+    ) -> Self {
+        let path = path.into();
+        Self {
+            bytes: std::fs::metadata(&path).map_or(0, |m| m.len()),
+            path,
+            frames: landed.frames(),
+            dropped_events: 0,
+            clipped_samples: landed.clipped(),
+            gain: None,
+            measured: None,
+            placement,
+            spill_left: None,
+        }
+    }
+}
+
 /// Renders `graph` once into every one of `outputs`, and writes or returns
 /// what each becomes ([`Done`], read by the key each output was added under).
 ///

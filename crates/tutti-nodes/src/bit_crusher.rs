@@ -76,11 +76,14 @@ impl BitCrusherConfig {
 /// `F` is the float of the graph it runs in, and of the held values and the quantizer.
 pub type BitCrusherNode<F> = KernelNode<BitCrusherKernel<F>>;
 
+kernel_config!(BitCrusherConfig => BitCrusherNode<F> where [F: Float],
+    set(_): BitCrusherSet = BitCrusherSet);
+
 impl<F: Float> From<BitCrusherConfig> for BitCrusherNode<F> {
     fn from(config: BitCrusherConfig) -> Self {
         Self::with_kernel(
             BitCrusherKernel::<F>::new(config.width, config.controls),
-            BitCrusherSet,
+            config.kernel_set(),
             config.controls,
         )
     }

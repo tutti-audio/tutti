@@ -84,6 +84,9 @@ impl FmConfig {
 /// made from an [`FmConfig`] (`FmNode::from`).
 pub type FmNode<F> = KernelNode<FmKernel<F>>;
 
+kernel_config!(FmConfig => FmNode<F> where [F: Float],
+    set(_): FmSet = FmSet);
+
 impl<F: Float> From<FmConfig> for FmNode<F> {
     fn from(config: FmConfig) -> Self {
         KernelNode::from(
@@ -93,7 +96,7 @@ impl<F: Float> From<FmConfig> for FmNode<F> {
                     oversampling: Oversampling::new(config.oversampling),
                     voice: None,
                 },
-                FmSet,
+                config.kernel_set(),
             )
             .controls(config.controls),
         )

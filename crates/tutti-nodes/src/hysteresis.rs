@@ -99,12 +99,15 @@ impl HysteresisConfig {
 /// `F` is the float of the graph it runs in, and of the solve.
 pub type HysteresisNode<F> = KernelNode<HysteresisKernel<F>>;
 
+kernel_config!(HysteresisConfig => HysteresisNode<F> where [F: Float + Lerp],
+    set(_): HysteresisSet = HysteresisSet);
+
 impl<F: Float + Lerp> From<HysteresisConfig> for HysteresisNode<F> {
     fn from(config: HysteresisConfig) -> Self {
         let input = unassigned_bus(config.width, "a hysteresis stage");
         Self::with_kernel(
             HysteresisKernel::<F>::new(&config, input),
-            HysteresisSet,
+            config.kernel_set(),
             config.controls,
         )
     }

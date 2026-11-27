@@ -54,15 +54,19 @@ impl AdditiveConfig {
 /// [`KernelNode`]; made from an [`AdditiveConfig`] (`AdditiveNode::from`).
 pub type AdditiveNode<F> = KernelNode<AdditiveKernel<F>>;
 
+kernel_config!(AdditiveConfig => AdditiveNode<F> where [F: Float],
+    set(_): AdditiveSet = AdditiveSet);
+
 impl<F: Float> From<AdditiveConfig> for AdditiveNode<F> {
     fn from(config: AdditiveConfig) -> Self {
+        let set = config.kernel_set();
         KernelNode::from(
             KernelConfig::new(
                 AdditiveKernel {
                     partials: config.partials,
                     bank: None,
                 },
-                AdditiveSet,
+                set,
             )
             .controls(config.controls),
         )
