@@ -22,8 +22,10 @@
 //! seeded generator.
 
 use crate::support;
-use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_rendered};
-use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Interleaved, MaxBlock, Mono};
+use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_wave};
+use tutti_buffers::{
+    Bed, ChannelLayout, ChannelTopology, Float, Interleaved, MaxBlock, Mono, Wave,
+};
 
 use std::sync::Arc;
 use tutti_units::Seconds;
@@ -33,9 +35,8 @@ use tutti_buffers::FloatWidth;
 use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm, Resample};
-use tutti_export::{
-    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Setup, TailPolicy,
-};
+use tutti_export::{GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Setup, TailPolicy};
+use tutti_fixtures::WavePlanes;
 use tutti_fixtures::signal::amplitude_at;
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::LimiterConfig;
@@ -88,7 +89,7 @@ fn forked(g: GraphBuilder) -> RenderGraph {
 }
 
 /// `graph` into buffers under `config`.
-fn buffers(graph: RenderGraph, config: &ExportConfig) -> Rendered {
+fn buffers(graph: RenderGraph, config: &ExportConfig) -> Wave {
     render_to_buffers(graph, config, &FrozenClock).expect("graph renders")
 }
 
@@ -252,13 +253,13 @@ fn same_file(
     graph: impl Fn() -> GraphBuilder,
     config: &ExportConfig,
     write: impl Fn(RenderGraph, &std::path::Path) -> tutti_export::Result<tutti_export::Written>,
-    prepare: impl Fn(Rendered) -> tutti_export::Result<Rendered>,
+    prepare: impl Fn(Wave) -> tutti_export::Result<Wave>,
 ) -> Vec<u8> {
     let d = tempfile::tempdir().unwrap();
     let (pf, pb) = (d.path().join("file.wav"), d.path().join("buffers.wav"));
     write(built(graph()), &pf).expect("the graph writes");
     let planes = prepare(buffers(built(graph()), config)).expect("prepares");
-    write_rendered(&planes, config, &pb).expect("its planes write");
+    write_wave(&planes, config, &pb).expect("its planes write");
     let (a, b) = (std::fs::read(&pf).unwrap(), std::fs::read(&pb).unwrap());
     assert_eq!(a.len(), b.len(), "the two files differ in length");
     assert!(a == b, "the file is not its planes");
@@ -280,7 +281,7 @@ fn float_samples(bytes: &[u8]) -> Vec<f32> {
 #[test]
 fn a_sine_renders_its_closed_form() {
     let cfg = config(Pcm::Float(FloatWidth::F32), ChannelLayout::STEREO);
-    let planes = buffers(built(sine(1000.0)), &cfg).into_planes();
+    let planes = buffers(built(sine(1000.0)), &cfg).to_planes();
     assert_eq!(planes.len(), 2);
     assert_eq!(planes[0].len(), FRAMES);
     for (c, plane) in planes.iter().enumerate() {
@@ -292,12 +293,12 @@ fn a_sine_renders_its_closed_form() {
             );
         }
     }
-    let forked = buffers(forked(sine(1000.0)), &cfg).into_planes();
+    let forked = buffers(forked(sine(1000.0)), &cfg).to_planes();
     assert_same("forked against built", &planes, &forked);
 }
 
 /// The resample case (48 k → 44.1 k), to a file: the file is the render's
-/// planes through the same conversion and encoder (`write_rendered`), byte
+/// planes through the same conversion and encoder (`write_wave`), byte
 /// for byte, at 44.1 kHz. The resampler's carry makes its output independent
 /// of the block partition; `oracle_resample.rs` holds the conversion to first
 /// principles, and the analytic figures it must satisfy (frequency, level, DC,
@@ -321,8 +322,8 @@ fn a_resampled_export_writes_its_render() {
 }
 
 /// The dBTP case: a peak-normalized export (render, measure, gain, write)
-/// is its render normalized and written (`Normalize::gain_for_rendered`,
-/// then `write_rendered`), byte for byte; its sample peak sits at the
+/// is its render normalized and written (`Normalize::gain_for_wave`,
+/// then `write_wave`), byte for byte; its sample peak sits at the
 /// -1 dBTP target or just under it (the true peak, between samples, is
 /// what reaches -1 dB).
 #[test]
@@ -337,7 +338,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
         // `render_normalized_to_file`'s own steps on planes already rendered:
         // measure, apply (no resample here to convert first).
         |mut r| {
-            r.apply_gain(normalize.gain_for_rendered(&r, &Bed::Stereo.topology())?);
+            r.apply_gain(normalize.gain_for_wave(&r, &Bed::Stereo.topology())?);
             Ok(r)
         },
     );
@@ -351,7 +352,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
 
 /// The dither case: triangular dither to 16 bits, on a DC level between two
 /// codes, so every sample is perturbed. The file is its planes dithered and
-/// written (`write_rendered`), byte for byte; its samples scatter around the
+/// written (`write_wave`), byte for byte; its samples scatter around the
 /// level's code (8 192.3) within the dither's two codes and average onto it.
 #[test]
 fn a_dithered_export_writes_its_dithered_render() {
@@ -398,7 +399,7 @@ fn a_surround_mix_folds_to_every_width() {
         built(quad_vbap()),
         &config(Pcm::Float(FloatWidth::F32), ChannelLayout::QUAD),
     )
-    .into_planes();
+    .to_planes();
     assert_audible(&quad);
     // Not vacuous: the rear-left source put energy in channel 2, and the
     // front-left one in channel 0.
@@ -411,7 +412,7 @@ fn a_surround_mix_folds_to_every_width() {
             built(quad_vbap()),
             &config(Pcm::Float(FloatWidth::F32), width),
         )
-        .into_planes();
+        .to_planes();
         let n = width.count() as usize;
         // The ITU quad fold, written out: `Lo = FL + f32::MINUS_3_DB·BL`, `Ro = FR + f32::MINUS_3_DB·BR`,
         // and the mono file is `(Lo + Ro)·f32::MINUS_3_DB`.
@@ -434,7 +435,7 @@ fn a_surround_mix_folds_to_every_width() {
         forked(quad_vbap()),
         &config(Pcm::Float(FloatWidth::F32), ChannelLayout::QUAD),
     )
-    .into_planes();
+    .to_planes();
     assert_vbap_energy("forked", &fork, 0);
 }
 
@@ -459,7 +460,7 @@ fn a_convolver_renders_the_direct_convolution_at_the_graph_block() {
         graph,
         &config(Pcm::Float(FloatWidth::F32), ChannelLayout::MONO),
     )
-    .into_planes();
+    .to_planes();
     assert_audible(&planes);
     assert_eq!(planes[0].len(), FRAMES);
     let ir = ir();
@@ -486,7 +487,7 @@ fn the_latency_trim_drops_the_lookahead() {
 
     let mut trimmed = config(Pcm::Float(FloatWidth::F32), ChannelLayout::STEREO);
     trimmed.render.latency = latency;
-    let a = buffers(built(limited()), &trimmed).into_planes();
+    let a = buffers(built(limited()), &trimmed).to_planes();
     assert_eq!(a[0].len(), FRAMES, "the trim does not shorten the output");
     assert_audible(&a);
 
@@ -494,7 +495,7 @@ fn the_latency_trim_drops_the_lookahead() {
     // span shifted.
     let mut whole = config(Pcm::Float(FloatWidth::F32), ChannelLayout::STEREO);
     whole.render.tail = TailPolicy::Frames(latency);
-    let b = buffers(built(limited()), &whole).into_planes();
+    let b = buffers(built(limited()), &whole).to_planes();
     let shifted: Vec<Vec<f32>> = b.iter().map(|p| p[240..].to_vec()).collect();
     assert_same("trimmed against untrimmed from 240", &a, &shifted);
 }
@@ -518,7 +519,7 @@ fn a_limiter_adds_no_tail_to_the_render() {
     let mut cfg = config(Pcm::Float(FloatWidth::F32), ChannelLayout::STEREO);
     cfg.render.latency = latency;
     cfg.render.tail = TailPolicy::Frames(graph.declared_tail().samples().unwrap());
-    let planes = buffers(built(limited()), &cfg).into_planes();
+    let planes = buffers(built(limited()), &cfg).to_planes();
     assert_eq!(
         planes[0].len(),
         FRAMES,
@@ -527,7 +528,7 @@ fn a_limiter_adds_no_tail_to_the_render() {
 
     let mut whole = config(Pcm::Float(FloatWidth::F32), ChannelLayout::STEREO);
     whole.render.tail = TailPolicy::Frames(latency + graph.declared_tail().samples().unwrap());
-    let planes = buffers(built(limited()), &whole).into_planes();
+    let planes = buffers(built(limited()), &whole).to_planes();
     let n = latency.get();
     assert_eq!(planes[0].len(), FRAMES + n, "the duration plus the latency");
     for p in &planes {
@@ -554,7 +555,7 @@ fn the_tail_extends_the_render_by_the_ring_out() {
     cfg.render.tail = TailPolicy::Frames(graph.declared_tail().samples().unwrap());
     // The latency trim too, so both halves of the gate run together.
     cfg.render.latency = graph.reported_latency();
-    let planes = buffers(built(convolved()), &cfg).into_planes();
+    let planes = buffers(built(convolved()), &cfg).to_planes();
     assert_eq!(planes[0].len(), FRAMES + 2999);
     let ir = ir();
     for (n, &s) in planes[0].iter().enumerate() {
@@ -622,9 +623,9 @@ fn the_graph_reads_the_render_clocks_transport() {
     )
     .expect("renders");
 
-    let frames = out.frames().get();
+    let frames = out.len().get();
     for i in 0..frames {
-        let beat = f64::from(out.planes()[0][i]) + f64::from(out.planes()[1][i]);
+        let beat = f64::from(out.at(0, i)) + f64::from(out.at(1, i));
         let want = start + bps * i as f64;
         assert!(
             (beat - want).abs() < 1e-5,
@@ -713,7 +714,7 @@ fn render_under(
 ) -> Vec<Vec<f32>> {
     render_to_buffers(graph, &config(Pcm::Float(FloatWidth::F32), width), clock)
         .expect("renders")
-        .into_planes()
+        .to_planes()
 }
 
 /// The dominant frequency of `x[from..]` between 500 and 900 Hz: the peak of

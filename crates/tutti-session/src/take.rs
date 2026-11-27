@@ -380,7 +380,7 @@ struct Shared {
 
 /// A recording that has ended: what it holds and where it belongs. Its
 /// [`output`](Self::output) is what the take's [`Destination`] holds: a [`Written`](tutti_export::Written) for a
-/// [`ToFile`](tutti_codec::ToFile), the [`Rendered`](tutti_export::Rendered) planes for a [`ToMemory`](crate::ToMemory),
+/// [`ToFile`](tutti_codec::ToFile), the [`Wave`](tutti_buffers::Wave) for a [`ToMemory`](crate::ToMemory),
 /// and `()` for a [`ToSink`](crate::ToSink), which has what it was given.
 ///
 /// Only a take written to a file is a clip: a take into memory or a sink has no file to

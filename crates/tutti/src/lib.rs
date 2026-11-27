@@ -543,8 +543,7 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, DoneError, JobError, RenderError, Rendered, RenderedError, TargetError,
-        Unmeasured,
+        ConfigError, DoneError, JobError, RenderError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,

@@ -54,7 +54,7 @@
 //! no main output ([`NoMainOutput`]) into one with a [`Destination`] ([`ToFile`] or
 //! [`ToMemory`]), and only one with a main output starts: a bounce with no main output is not
 //! writable. The destination rides through [`BounceJob`] and [`BounceRendered`] to
-//! [`Bounced`], whose main output is a [`Written`] for a file and a [`Rendered`] for planes,
+//! [`Bounced`], whose main output is a [`Written`] for a file and a [`Wave`] for planes,
 //! with no `Option` to unwrap. A cancelled bounce is [`BounceError::Cancelled`].
 
 use std::future::{Future, IntoFuture};
@@ -67,11 +67,11 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Sink};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Sink, Wave};
 use tutti_export::{
     BufferKey, BufferTarget, CancelToken, Control, Done, DoneError, EventLossPolicy, FileKey,
     FileTarget, GRAPH_MAX_BLOCK, Gain, Job, JobError, Normalize, Outcome, Output, Outputs,
-    Placement, Progress, Rendered, SinkTarget, TailPolicy, Written,
+    Placement, Progress, SinkTarget, TailPolicy, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
 use tutti_rt::Mutex;
@@ -321,7 +321,7 @@ pub(crate) type OutputOf<D, F> = <D as render_output::Sealed<F>>::Output;
 /// Where a bounce's output or a take goes: a [`tutti_codec::ToFile`], a [`ToMemory`] or a
 /// [`ToSink`] (sealed). `F` is the graph's float. Its `Output` is what the finished bounce or take
 /// holds for that output, so the caller who chose a file is handed a [`Written`], one who
-/// chose memory a [`Rendered`], and one who chose a sink of their own `()` (the sink has what
+/// chose memory a [`Wave`], and one who chose a sink of their own `()` (the sink has what
 /// it was given).
 ///
 /// A file is written beside its path and put in place when the bounce finishes, so a
@@ -501,7 +501,7 @@ impl<F: FftFloat> render_output::Sealed<F> for ToFile {
 }
 
 impl<F: FftFloat> render_output::Sealed<F> for ToMemory {
-    type Output = Rendered<F>;
+    type Output = Wave<F>;
     type Target = BufferTarget;
     type Key = BufferKey;
 
@@ -521,7 +521,7 @@ impl<F: FftFloat> render_output::Sealed<F> for ToMemory {
         None
     }
 
-    fn take(done: &mut Done<F>, key: &BufferKey) -> Result<Rendered<F>, DoneError> {
+    fn take(done: &mut Done<F>, key: &BufferKey) -> Result<Wave<F>, DoneError> {
         done.take_buffers(key)
     }
 
@@ -1114,7 +1114,7 @@ pub enum StemGain {
 pub enum StemKey {
     /// A file stem: read its [`Written`] with [`Done::file`].
     File(FileKey),
-    /// A stem in memory: read its [`Rendered`] with [`Done::buffers`].
+    /// A stem in memory: read its [`Wave`] with [`Done::buffers`].
     Buffers(BufferKey),
     /// A stem streamed into a caller's sink ([`ToSink`]): the sink has what it was given, and
     /// there is no result to read.
@@ -1123,7 +1123,7 @@ pub enum StemKey {
 
 /// What a finished bounce produced: the main output's result, which is what the
 /// bounce's main output destination says it is ([`Written`] for a [`ToFile`],
-/// [`Rendered`] for a [`ToMemory`]), and the stems' results, read from
+/// [`Wave`] for a [`ToMemory`]), and the stems' results, read from
 /// [`stem_results`](Self::stem_results) by the [`StemKey`] each stem has, in the
 /// order the bounce named them.
 #[derive(Debug)]
@@ -2435,7 +2435,7 @@ mod tests {
     use super::*;
     use crate::{InputPort, MainOutput, Phase, PhaseCx};
     use tutti_export::Stage;
-    use tutti_fixtures::block_on;
+    use tutti_fixtures::{WavePlanes, block_on};
     use tutti_graph::ForkByClone;
     use tutti_tempo::{TempoPoint, Transition};
     use tutti_units::{Bpm, SampleRate};
@@ -2470,7 +2470,7 @@ mod tests {
 
     /// The planes of a finished buffers bounce.
     fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<f32>> {
-        out.expect("renders").into_main_output().into_planes()
+        out.expect("renders").into_main_output().to_planes()
     }
 
     /// **A bounce renders what was edited, with no `update` between.** A node
@@ -2900,7 +2900,7 @@ mod tests {
             .unwrap();
         let bounced = bounced(&mut session, Bounce::new().main_output(ToMemory::new()))
             .expect("the loop is the range");
-        let frames = bounced.main_output().frames();
+        let frames = bounced.main_output().len();
         assert_eq!(frames.get(), 48_000, "two beats at 120 BPM and 48 kHz");
     }
 

@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use tutti_buffers::{
     ChannelLayout, ChannelSet, Float, Fold, Interleaved, InterleavedMut, Placement, Sink,
-    SinkFailed,
+    SinkFailed, Wave,
 };
 use tutti_codec::{Chain, EncodeError, Kept, ToFile};
 use tutti_dsp::FftFloat;
-use tutti_export::{Rendered, Written};
+use tutti_export::Written;
 use tutti_units::SampleRate;
 
 use crate::{TakeError, ToMemory};
@@ -98,12 +98,11 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
     }
 }
 
-/// Planes in memory: the frames, folded onto the planes' channels when they differ from the
-/// source's, are spread over one plane per channel.
+/// A [`Wave`] in memory: the frames, folded onto the wave's channels when they differ from the
+/// source's, are appended to it.
 #[derive(Debug)]
 pub struct MemoryWriter<F: Float> {
-    planes: Vec<Vec<F>>,
-    rate: SampleRate,
+    wave: Wave<F>,
     width: ChannelLayout,
     /// Built when the take was armed.
     fold: Option<Fold<F>>,
@@ -116,11 +115,10 @@ impl<F: Float> MemoryWriter<F> {
         layout: ChannelLayout,
         rate: SampleRate,
     ) -> Result<Self, TakeError> {
-        let (width, fold) = to.fold(&ChannelSet::default_for(layout))?;
+        let (set, fold) = to.fold(&ChannelSet::default_for(layout))?;
         Ok(Self {
-            planes: vec![Vec::new(); usize::from(width.count())],
-            rate,
-            width,
+            wave: Wave::with_placement(set, to.placement(), rate),
+            width: set.width(),
             fold,
             folded: Vec::new(),
         })
@@ -128,7 +126,7 @@ impl<F: Float> MemoryWriter<F> {
 }
 
 impl<F: Float> Writer<F> for MemoryWriter<F> {
-    type Output = Rendered<F>;
+    type Output = Wave<F>;
 
     fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
         let spread = match &self.fold {
@@ -143,19 +141,11 @@ impl<F: Float> Writer<F> for MemoryWriter<F> {
                 Interleaved::new(&self.folded, self.width).map_err(|_| SinkFailed)?
             }
         };
-        for frame in spread.iter() {
-            for (plane, sample) in self.planes.iter_mut().zip(frame) {
-                plane.push(*sample);
-            }
-        }
-        Ok(())
+        self.wave.append(spread).map_err(|_| SinkFailed)
     }
 
-    fn close(self) -> Result<Rendered<F>, TakeError> {
-        Rendered::new(self.planes, self.rate, 0).map_err(|e| TakeError::Sink {
-            source: Arc::new(e),
-            unfinished: None,
-        })
+    fn close(self) -> Result<Wave<F>, TakeError> {
+        Ok(self.wave)
     }
 }
 

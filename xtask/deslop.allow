@@ -184,7 +184,6 @@ field-leak tutti_engine::restart::StreamHost::stream
 field-leak tutti_engine::stream::OutputStream::spec
 field-leak tutti_export::control::Control::output
 field-leak tutti_export::render::driver::GraphSource::main_output
-field-leak tutti_export::rendered::Rendered::planes
 field-leak tutti_graph::compile::plan::NodePorts::borrows
 field-leak tutti_graph::compile::plan::NodePorts::event_assemble
 field-leak tutti_graph::compile::plan::NodePorts::event_borrows

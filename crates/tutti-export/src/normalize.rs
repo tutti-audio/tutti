@@ -10,10 +10,12 @@
 //! uses, with the gain. The graph is rendered once.
 //!
 //! A caller who holds planes and wants the reading for itself uses
-//! [`Normalize::gain_for_rendered`] and [`Rendered::apply_gain`](crate::Rendered::apply_gain).
+//! [`Normalize::gain_for_wave`] and [`Wave::apply_gain`].
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, convert, interleave};
+use tutti_buffers::{
+    Float, Interleaved, InterleavedMut, Planes, Sample, Wave, convert, interleave,
+};
 use tutti_dsp::{DitherShape, NoiseShaping};
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, StreamMeter as _, TruePeakConfig,
@@ -135,7 +137,7 @@ impl Normalize {
     /// `topology`: loudness is weighted by where each stands (BS.1770-5 Table 4)
     /// and the LFE adds no loudness (its peak still counts).
     ///
-    /// For a caller that already holds a [`Rendered`](crate::Rendered) and is
+    /// For a caller that already holds a [`Wave`] and is
     /// not writing it with a normalizing output — handing the PCM to
     /// another encoder, say. Returning the gain rather than applying it keeps
     /// the reading available to log or gate on, and is the same value a
@@ -168,9 +170,9 @@ impl Normalize {
     /// up from the floor (+47 dB for a LUFS target of -23, up to +99 dB for a
     /// peak one): writing a hiss at full scale, or the file un-normalized, and
     /// reporting success is silent — nothing in [`Written`] records it.
-    pub fn gain_for_rendered<F: Float>(
+    pub fn gain_for_wave<F: Float>(
         &self,
-        rendered: &crate::Rendered<F>,
+        rendered: &Wave<F>,
         topology: &ChannelTopology,
     ) -> Result<Db> {
         if topology.width() != rendered.layout() {
@@ -181,12 +183,12 @@ impl Normalize {
         }
         let mut control = Control::none();
         control.weigh(Weights::Normalized);
-        let total = rendered.frames();
+        let total = rendered.len();
         let outcome = self.measure(rendered, topology, Samples::new(0), total, &mut control)?;
         Ok(finished(outcome).gain())
     }
 
-    /// The reading [`gain_for_rendered`](Self::gain_for_rendered) takes its
+    /// The reading [`gain_for_wave`](Self::gain_for_wave) takes its
     /// gain from, refused when it is not a measurement of the programme.
     ///
     /// Measured by a [`Measurer`] a chunk at a time, so `control` is checked
@@ -196,10 +198,10 @@ impl Normalize {
     ///
     /// # Errors
     ///
-    /// As [`gain_for_rendered`](Self::gain_for_rendered).
+    /// As [`gain_for_wave`](Self::gain_for_wave).
     fn measure<F: Float>(
         &self,
-        rendered: &crate::Rendered<F>,
+        rendered: &Wave<F>,
         topology: &ChannelTopology,
         done: Samples,
         total: Samples,
@@ -214,7 +216,7 @@ impl Normalize {
         let mut measurer =
             Measurer::new(rendered.sample_rate(), topology, *self).map_err(unmeasurable)?;
         let planes = rendered.planes();
-        let frames = rendered.frames().get();
+        let frames = rendered.len().get();
         let chunk = chunk_frames(rendered.sample_rate()).get();
         let mut at = 0;
         while at < frames {
@@ -518,7 +520,7 @@ impl Measurer {
     /// Feeds the frames `span` of `planes`.
     fn feed<F: Float>(
         &mut self,
-        planes: &[Vec<F>],
+        planes: Planes<'_, F>,
         span: std::ops::Range<usize>,
     ) -> crate::Result<()> {
         let layout = self.layout();
@@ -529,7 +531,7 @@ impl Measurer {
         let fed = (|| -> crate::Result<()> {
             let mut chunk = InterleavedMut::new(&mut buf, layout)?;
             let span = Samples::new(span.start)..Samples::new(span.end);
-            interleave(Planes::from_vecs(planes)?.slice(span), chunk.reborrow())?;
+            interleave(planes.slice(span), chunk.reborrow())?;
             self.push(chunk.as_interleaved());
             Ok(())
         })();

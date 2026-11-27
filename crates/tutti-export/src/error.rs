@@ -50,7 +50,7 @@ pub enum RenderError {
     UnsupportedChannels,
 
     /// A topology of another width than the rendered audio: the one
-    /// [`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)
+    /// [`Normalize::gain_for_wave`](crate::Normalize::gain_for_wave)
     /// was given, or the one [`Setup::main_output`](crate::Setup::main_output)
     /// places the file from.
     #[error("the topology is {topology:?} wide and the rendered audio {rendered:?}")]
@@ -75,7 +75,7 @@ pub enum RenderError {
     Unmeasurable {
         /// The output whose audio it is, by its index in the list given to
         /// [`render`](crate::render()); `None` for planes measured on their own
-        /// ([`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)),
+        /// ([`Normalize::gain_for_wave`](crate::Normalize::gain_for_wave)),
         /// which belong to no output.
         output: Option<usize>,
         /// The channel layout of the audio.
@@ -234,7 +234,7 @@ pub enum Unmeasured {
     /// which an ambisonic set or speakers that are not a known bed do not have.
     /// A file output is refused before the render
     /// ([`TargetError::UnplacedLoudness`](crate::TargetError));
-    /// this is what [`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)
+    /// this is what [`Normalize::gain_for_wave`](crate::Normalize::gain_for_wave)
     /// reports for a topology it was given.
     Placement,
     /// [`Normalize::Lufs`](crate::Normalize::Lufs): no part of the audio

@@ -1,10 +1,13 @@
 //! [`Wave`]: a resident, planar, multichannel sample buffer.
 
-use crate::{BufferError, Interleaved, Mono, MonoMut, Planes, PlanesMut, Sample, deinterleave};
+use crate::{
+    BufferError, Float, Interleaved, Mono, MonoMut, Planes, PlanesMut, Sample, deinterleave,
+};
 use crate::{ChannelLayout, ChannelSet, ChannelTopology, Placement};
+use alloc::collections::TryReserveError;
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_units::{SampleRate, Samples, Seconds};
+use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 /// Multichannel audio held in memory, one `Vec<S>` per channel.
 ///
@@ -369,6 +372,21 @@ impl<S: Sample> Wave<S> {
         }
     }
 
+    /// Reserves room for `frames` more frames in every channel, or reports that
+    /// the allocator refused: the way to size a wave from a caller's duration,
+    /// where [`reserve`](Self::reserve) would abort the process.
+    ///
+    /// # Errors
+    ///
+    /// [`TryReserveError`] when a channel cannot hold them. The channels
+    /// reserved before the failing one keep their room.
+    pub fn try_reserve(&mut self, frames: Samples) -> Result<(), TryReserveError> {
+        for channel in &mut self.vec {
+            channel.try_reserve_exact(frames.get())?;
+        }
+        Ok(())
+    }
+
     fn check_width(&self, got: ChannelLayout) -> Result<(), BufferError> {
         if self.vec.len() == usize::from(got.count()) {
             return Ok(());
@@ -398,6 +416,17 @@ impl<S: Sample> Wave<S> {
     #[inline]
     pub fn duration(&self) -> Seconds {
         Seconds::new(self.len.get() as f64 / self.sample_rate.get())
+    }
+}
+
+impl<S: Float> Wave<S> {
+    /// Multiplies every sample by `gain`: the apply half of a measure-then-apply
+    /// normalization.
+    pub fn apply_gain(&mut self, gain: Db) {
+        let scale = S::from_f64(gain.to_amplitude().get());
+        for sample in self.vec.iter_mut().flatten() {
+            *sample *= scale;
+        }
     }
 }
 
