@@ -385,6 +385,36 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
 /// `Each` each stem is measured alone: the quieter one is given twice the
 /// loud one's gain (the same shape at half the level), and both land on the
 /// same peak. `None` writes them as rendered.
+/// **A quick stem follows the main output's resample and `replace`**: with a
+/// main output resampled to 44.1 kHz that replaces its path, `stem(node, path)`
+/// is written at 44.1 kHz and the same bounce runs twice over the same paths.
+#[test]
+fn a_quick_stem_follows_the_main_outputs_resample_and_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = session();
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
+    session.graph().connect(node, MainOutput).unwrap();
+    let main_output = dir.path().join("main_output.wav");
+    let stem = dir.path().join("stem.wav");
+    for _ in 0..2 {
+        bounced(
+            &mut session,
+            base(0.25)
+                .main_output(
+                    tutti_codec::ToFile::new(
+                        &main_output,
+                        Encoding::new(float_wav()).resample(Resample::to(SampleRate::SR_44K1)),
+                    )
+                    .replace(),
+                )
+                .stem(node.erase(), &stem),
+        )
+        .expect("a replacing bounce runs again over its own files");
+    }
+    let spec = hound::WavReader::open(&stem).unwrap().spec();
+    assert_eq!(spec.sample_rate, 44_100, "the main output's resample");
+}
+
 #[test]
 fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let mut session = session();
