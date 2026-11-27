@@ -1,8 +1,8 @@
 //! [`Chain`]: the streaming pipeline in front of a file's encoder.
 
 use crate::{
-    Converter, EncodeError, Encoder, EncoderOptions, Encoding, FileEncoder, FinalizedFile, Kept,
-    Result, Spec, ToFile,
+    Converter, EncodeError, Encoder, EncoderOptions, FileEncoder, FinalizedFile, Format, Kept,
+    Resample, Result, Spec, ToFile,
 };
 use std::io::{Seek, Write};
 use tutti_buffers::{
@@ -46,39 +46,39 @@ impl<W: Write + Seek> Encode for Encoder<W> {
     }
 }
 
-/// What a file of `encoding` is written as, from a source of `source` channels at
-/// `source_rate`.
-pub(crate) fn spec_of(encoding: &Encoding, source: &ChannelSet, source_rate: SampleRate) -> Spec {
-    let channels = encoding.channel_set().unwrap_or(*source);
-    Spec::of_channels(encoding.format(), channels, encoding.rate(source_rate))
+/// What a file of `format` is written as, with `channels` when stated and else the source's,
+/// at `rate`.
+pub(crate) fn spec_of(
+    format: Format,
+    channels: Option<ChannelSet>,
+    source: &ChannelSet,
+    rate: SampleRate,
+) -> Spec {
+    Spec::of_channels(format, channels.unwrap_or(*source), rate)
 }
 
 /// The options of an encoder of `spec` for `frames` source frames at `source_rate`: the
 /// length the file will hold is judged at the file's rate.
-pub(crate) fn options_of<'a>(
-    spec: &'a Spec,
-    encoding: &Encoding,
+pub(crate) fn options_of(
+    spec: &Spec,
     source_rate: SampleRate,
     frames: Samples,
-) -> EncoderOptions<'a> {
-    let options =
-        EncoderOptions::new(spec).planned(resampled_frames(source_rate, spec.rate(), frames));
-    match encoding.seed() {
-        Some(seed) => options.dither_seed(seed),
-        None => options,
-    }
+) -> EncoderOptions<'_> {
+    EncoderOptions::new(spec).planned(resampled_frames(source_rate, spec.rate(), frames))
 }
 
 impl<F: FftFloat> Stages<F> {
-    /// The stages for `encoding`, from `source` channels at `source_rate`.
+    /// The stages onto `channels` (the source's when not stated) and through `resample`,
+    /// from `source` channels at `source_rate`.
     pub(crate) fn new(
-        encoding: &Encoding,
+        channels: Option<ChannelSet>,
+        resample: Option<Resample>,
         source: &ChannelSet,
         source_rate: SampleRate,
     ) -> Result<Self> {
-        let dst = encoding.channel_set().unwrap_or(*source);
+        let dst = channels.unwrap_or(*source);
         let layout = dst.width();
-        let converter = match encoding.resampling() {
+        let converter = match resample {
             Some(resample) => resample.converter(layout, source_rate)?,
             None => None,
         };
@@ -252,10 +252,9 @@ impl<F: FftFloat> Chain<F> {
         source_rate: SampleRate,
         planned: Samples,
     ) -> Result<Self> {
-        let stages = to.through(|encoding| Stages::new(encoding, source, source_rate))?;
-        let spec = to.through(|encoding| spec_of(encoding, source, source_rate));
-        let options = to.through(|encoding| options_of(&spec, encoding, source_rate, planned));
-        let encoder = to.create(options)?;
+        let stages = Stages::new(to.channel_set(), to.resampling(), source, source_rate)?;
+        let spec = spec_of(to.format(), to.channel_set(), source, to.rate(source_rate));
+        let encoder = to.create(options_of(&spec, source_rate, planned))?;
         Ok(Self {
             stages,
             encoder,

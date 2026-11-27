@@ -78,26 +78,12 @@ impl ToFile {
         self.encoding.rate(source)
     }
 
-    /// What `f` makes of the pipeline in front of the encoder: the chain that writes the file
-    /// builds its stages, spec and options from it.
-    pub(crate) fn through<R>(&self, f: impl FnOnce(&Encoding) -> R) -> R {
-        f(&self.encoding)
-    }
-
-    /// The same file, written as `f` makes of its encoding.
-    pub fn map_encoding(mut self, f: impl FnOnce(Encoding) -> Encoding) -> Self {
-        self.encoding = f(self.encoding);
-        self
-    }
-
-    /// A file at `path` written in this one's format, with the channels and the rate of
-    /// whatever it is given, and the options of a new file.
-    pub fn alongside(&self, path: impl Into<PathBuf>) -> Self {
-        Self::new(path, Encoding::new(self.encoding.format()))
-    }
-
     /// The file, begun for `spec`, with `options`' length and seed.
     pub(crate) fn create(&self, options: EncoderOptions<'_>) -> Result<FileEncoder> {
+        let options = match self.encoding.seed() {
+            Some(seed) => options.dither_seed(seed),
+            None => options,
+        };
         let file = options.file(&self.path);
         let file = if self.replace { file.replace() } else { file };
         let file = if self.in_place { file.in_place() } else { file };
