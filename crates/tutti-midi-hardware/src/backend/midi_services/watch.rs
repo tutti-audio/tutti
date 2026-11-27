@@ -62,8 +62,8 @@ pub(super) fn replayed(
 
 /// Follows the service's changes into `sink`, after listing the endpoints present.
 ///
-/// The watcher starts first and its callback only buffers while the list is read, under the
-/// callback's lock. The list is seeded from that read, then the buffered changes are applied
+/// The watcher starts first and its callback only buffers while the list is read. Under the
+/// callback's lock the list is seeded from that read, then the buffered changes are applied
 /// in order and the callback goes live, so no change is lost to the gap and none is applied
 /// out of order: an endpoint removed after the list was read is gone, never resurrected. A
 /// change the watcher cannot read, or the watcher stopping, ends the watch with that cause:
@@ -88,8 +88,11 @@ pub(super) fn start(sink: ChangeSink) -> Result<Box<dyn Watch>> {
             }
         })
         .map_err(os)?;
+    // The list is read outside the lock, so the service's thread never waits on a call into
+    // the service. A change from now until the switch to live is buffered either way.
+    let listed = devices()?;
     let mut phase = phase.lock();
-    sink.seed(devices()?)?;
+    sink.seed(listed)?;
     if let Phase::Buffering(buffered) = std::mem::replace(&mut *phase, Phase::Live) {
         let (changes, error) = replayed(buffered);
         sink.send_all(changes);
