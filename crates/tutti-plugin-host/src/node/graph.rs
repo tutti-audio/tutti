@@ -450,10 +450,10 @@ where
         this.chords.changes.clear();
         this.scales.changes.clear();
         this.params.begin();
-        if processor.is_some() {
-            if let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, 0) {
-                this.drained = swept;
-            }
+        if processor.is_some()
+            && let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, 0)
+        {
+            this.drained = swept;
         }
         let midi = &mut this.midi;
         let intake = &mut this.intake;
