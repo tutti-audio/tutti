@@ -17,11 +17,13 @@
 //!   Chosen only when `build.rs` finds that version through `pkg-config`, so a
 //!   distro with an older alsa-lib still *builds* — it reports no endpoints and
 //!   says why, rather than failing to compile.
-//! - **Windows** — Windows Multimedia (winmm), MIDI 1.0 bytes. The OS has no
-//!   UMP in this API, so a port is listed as MIDI 1.0 and its bytes are carried
-//!   as MIDI 1.0 UMP, as a legacy ALSA port is: `legacy_port` holds that logic
-//!   (it runs on every platform, and its tests with it) and `winmm` the calls.
-//!   Windows MIDI Services, the UMP-native API, is not bound.
+//! - **Windows** — Windows MIDI Services, native UMP (`midi_services`), by default; a
+//!   PC without the service fails to open with a named error. The app that
+//!   wants Windows before 25H2 builds with the `winmm` feature instead, which
+//!   replaces it: Windows Multimedia (winmm), MIDI 1.0 bytes. winmm has no UMP
+//!   in its API, so a port is listed as MIDI 1.0 and its bytes are carried as
+//!   MIDI 1.0 UMP, as a legacy ALSA port is: `legacy_port` holds that logic (it
+//!   runs on every platform, and its tests with it) and `winmm` the calls.
 //! - **Everything else** — [`stub`]: it enumerates nothing and returns
 //!   [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported).
 
@@ -35,6 +37,9 @@ mod alsa;
 
 #[cfg(midi_backend = "winmm")]
 mod winmm;
+
+#[cfg(midi_backend = "midi_services")]
+mod midi_services;
 
 // What a backend with a thread of its own to start shares (where its start stands,
 // the futures waiting on it, the registered watches): always compiled so its tests
@@ -60,10 +65,18 @@ mod hub;
 )]
 mod legacy_port;
 
+// The digest the Windows backends name a device by: always compiled, as `legacy_port`
+// (which uses it) is.
+mod fnv1a;
+
 // The loop of a backend that sends one message at a time: always compiled so
-// its tests run everywhere; only `alsa` and `coremidi` use it.
+// its tests run everywhere; only `alsa`, `coremidi` and `midi_services` use it.
 #[cfg_attr(
-    not(any(midi_backend = "alsa", midi_backend = "coremidi")),
+    not(any(
+        midi_backend = "alsa",
+        midi_backend = "coremidi",
+        midi_backend = "midi_services"
+    )),
     allow(
         dead_code,
         reason = "the backend that sends message by message is not this platform's, so only the tests use it"
@@ -92,6 +105,10 @@ mod platform;
 
 #[cfg(midi_backend = "winmm")]
 #[path = "platform/winmm.rs"]
+mod platform;
+
+#[cfg(midi_backend = "midi_services")]
+#[path = "platform/midi_services.rs"]
 mod platform;
 
 #[cfg(midi_backend = "none")]

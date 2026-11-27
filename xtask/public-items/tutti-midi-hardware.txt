@@ -63,6 +63,7 @@ fn devices::OpenOutput::set_mpe11
 fn error::MidiThread::name
 fn peer::PeerRef::device
 fn peer::PeerRef::peer
+fn port::async_port::InputProducerHandle::count_lost
 fn port::async_port::InputProducerHandle::port
 fn port::async_port::InputProducerHandle::push
 fn port::manager::HardwareMidiInputs::inlets

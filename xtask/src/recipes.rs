@@ -1033,8 +1033,8 @@ const WINDOWS: &[&str] = &[
     "-p tutti-plugin-db --features serde --all-targets",
     "-p tutti-vst2-host --all-targets",
     "-p tutti-vst3-host -p tutti-plugin-server -p tutti-plugin-probe --lib --bins",
-    "-p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
-    "-p tutti-winmidi2-ffi --features services-tests --all-targets",
+    "-p tutti-winmm-ffi -p tutti-midi-hardware --no-default-features --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
+    "-p tutti-winmidi2-ffi -p tutti-midi-hardware --features tutti-winmidi2-ffi/services-tests,tutti-midi-hardware/services-tests --all-targets",
 ];
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.

@@ -41,6 +41,13 @@ impl Listener {
 
     /// As [`over`](Self::over), with the engine's input node between the
     /// inlets and the log: a MIDI 1.0 message arrives translated.
+    #[cfg_attr(
+        midi_backend = "midi_services",
+        allow(
+            dead_code,
+            reason = "only the suites of a backend with a virtual endpoint use it"
+        )
+    )]
     pub(crate) fn over_input(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }
@@ -107,6 +114,13 @@ impl Listener {
     /// for [`SETTLE`] more, so that an event beyond `count` is heard too, and
     /// returns what arrived. The wait is for the events, not a span guessed to
     /// be long enough for a loaded machine.
+    #[cfg_attr(
+        midi_backend = "midi_services",
+        allow(
+            dead_code,
+            reason = "only the suites of a backend with a virtual endpoint use it"
+        )
+    )]
     pub(crate) fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
         let end = Instant::now() + patience;
         while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {

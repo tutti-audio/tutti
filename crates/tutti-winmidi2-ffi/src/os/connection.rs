@@ -1,6 +1,5 @@
 //! A connection to one endpoint: sends and receives UMP words.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -8,7 +7,7 @@ use tutti_platform::Instant;
 use tutti_ump::Ump;
 use windows_core::{HSTRING, Ref};
 
-use super::call::{abi, call};
+use super::call::{abi, call, contained};
 use super::{Clock, Error};
 use crate::bindings::Windows::Devices::Midi2::IMidiEndpointConnectionSource;
 use crate::bindings::Windows::Devices::Midi2::{
@@ -44,7 +43,7 @@ impl Connection {
         on_message: F,
     ) -> Result<Self, Error>
     where
-        F: FnMut(Option<Instant>, Ump) + Send + 'static,
+        F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
     {
         let endpoint_id = HSTRING::from(endpoint_id);
         let connection = call!(
@@ -67,13 +66,14 @@ impl Connection {
             MidiMessageReceivedEventArgs,
         >::new(move |_, args: Ref<MidiMessageReceivedEventArgs>| {
             if let Some(args) = args.as_ref() {
-                // A panic must not unwind into the service; the payload is forgotten, since
-                // dropping it here would run arbitrary code on the service's thread.
-                if let Err(payload) =
-                    catch_unwind(AssertUnwindSafe(|| deliver(&handler, clock, args)))
-                {
-                    std::mem::forget(payload);
-                }
+                contained(|| deliver(&handler, clock, args));
+            } else {
+                contained(|| {
+                    let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
+                    (*handler)(Err(Error::Refused {
+                        call: "message arguments",
+                    }));
+                });
             }
             Ok(())
         });
@@ -174,29 +174,33 @@ impl Drop for Connection {
     }
 }
 
-/// Hands the handler one received message.
-fn deliver<F: FnMut(Option<Instant>, Ump)>(
+/// Hands the handler one received message, or why there is none: a failed read, or a word
+/// count that is not a whole message (the service sends whole messages).
+fn deliver<F: FnMut(Result<(Option<Instant>, Ump), Error>)>(
     handler: &Mutex<F>,
     clock: Clock,
     args: &MidiMessageReceivedEventArgs,
 ) {
+    let received = read(clock, args);
+    let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
+    (*handler)(received);
+}
+
+/// The message `args` carries, with its time.
+fn read(
+    clock: Clock,
+    args: &MidiMessageReceivedEventArgs,
+) -> Result<(Option<Instant>, Ump), Error> {
     let mut words = [0u32; 4];
-    // A failed read has no caller to report to: the message is dropped, as is a count that is
-    // not a whole message (the service sends whole messages).
-    let Ok(count) = call!(
+    let count = call!(
         "FillWordArray",
         *args,
         FillWordArray(0, 4, words.as_mut_ptr()) -> u8
-    ) else {
-        return;
-    };
-    let Some(ump) = words.get(..usize::from(count)).and_then(Ump::from_words) else {
-        return;
-    };
-    let Ok(ticks) = call!("Timestamp", *args, Timestamp() -> u64) else {
-        return;
-    };
-    let at = clock.instant(ticks);
-    let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
-    (*handler)(at, ump);
+    )?;
+    let ump = words
+        .get(..usize::from(count))
+        .and_then(Ump::from_words)
+        .ok_or(Error::NotAMessage { words: count })?;
+    let ticks = call!("Timestamp", *args, Timestamp() -> u64)?;
+    Ok((clock.instant(ticks), ump))
 }

@@ -2997,6 +2997,7 @@ dependencies = [
  "tutti-ump",
  "tutti-units",
  "tutti-voicing",
+ "tutti-winmidi2-ffi",
  "tutti-winmm-ffi",
 ]
 

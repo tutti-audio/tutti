@@ -48,14 +48,15 @@ std only. A rule the compiler already enforces is not a gate.
   `vendor/vst3-sdk/`; the gate asserts SHAs). Linux needs ALSA headers (`libasound2-dev
   pkg-config`).
 - **Windows:** `cargo xtask check-windows` lints for MSVC from Linux; CI's `clippy
-  (windows)` lints natively and also runs `tutti-winmm-ffi`'s and `tutti-midi-hardware`'s
-  tests there, `--features synth-tests` included, and `tutti-plugin-ipc-ffi`'s and
+  (windows)` lints natively (the default build lints the `midi-services` backend) and also
+  runs `tutti-winmm-ffi`'s and `tutti-midi-hardware`'s tests there with `--no-default-features
+  --features synth-tests` (the `winmm` backend), and `tutti-plugin-ipc-ffi`'s and
   `tutti-plugin-ipc`'s `transport::` tests (the contract's `contract (windows)` job is not
   required; no other job runs tests on Windows except `midi services (windows arm64)`).
   The synth suites open the GS Wavetable Synth, which needs an audio endpoint: the job
   installs a virtual audio driver first (`.github/scripts/install-virtual-audio.ps1`).
-  `tutti-winmidi2-ffi`'s `services-tests` run in the `midi services (windows arm64)` job,
-  the one hosted runner that has the MIDI service; it stages Microsoft's preview
+  `tutti-winmidi2-ffi`'s and `tutti-midi-hardware`'s `services-tests` run in the `midi
+  services (windows arm64)` job, the one hosted runner that has the MIDI service; it stages Microsoft's preview
   `Windows.Devices.Midi2.dll` beside the test binaries. `cargo xtask winmidi2-bindings`
   regenerates the checked-in `src/bindings.rs`.
   A vst3 SDK enum constant
@@ -436,5 +437,7 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
   feature pulls no encoder.
 - A MIDI OS backend is a cargo feature of `tutti-midi-hardware` (`alsa`, `coremidi`,
-  `winmm`), each a no-op off its OS and forwarded by `tutti-session` and `tutti`; the
-  defaults keep every platform's backend, and `default-features = false` is the stub.
+  `midi-services`, `winmm`), each a no-op off its OS and forwarded by `tutti-session` and
+  `tutti`; the defaults keep every platform's native backend (`winmm` is not one: with it on
+  the Windows backend is winmm and not `midi-services`, so only the app turns it on), and
+  `default-features = false` is the stub.

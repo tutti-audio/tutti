@@ -1,4 +1,4 @@
-//! Windows Multimedia has no virtual MIDI ports: opening an endpoint is refused by name.
+//! Neither Windows backend publishes virtual MIDI endpoints: opening one is refused by name.
 
 use std::task::Poll;
 use std::time::Duration;

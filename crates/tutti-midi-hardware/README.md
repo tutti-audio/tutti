@@ -1,6 +1,6 @@
 # tutti-midi-hardware
 
-This crate talks to MIDI devices through the operating system: it lists them, watches for plug and unplug, and sends and receives MIDI using CoreMIDI on macOS, ALSA on Linux and Windows Multimedia on Windows, in MIDI 2.0 packets where the device speaks them.
+This crate talks to MIDI devices through the operating system: it lists them, watches for plug and unplug, and sends and receives MIDI using CoreMIDI on macOS, ALSA on Linux and Windows MIDI Services on Windows, in MIDI 2.0 packets where the device speaks them.
 
 It builds on other tutti crates, so most people will use it through the `tutti` crate. On other platforms it finds no devices.
 
