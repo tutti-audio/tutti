@@ -5,23 +5,25 @@
 
 use std::any::Any;
 use std::error::Error as _;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::Mutex;
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, ChannelSet, FloatWidth};
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
-use tutti_codec::IntDepth;
-use tutti_codec::IntPcm;
+use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm, Resample, ToFile};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_nodes::MetronomeMode;
 use tutti_session::{
-    Armed, Input, InputConfig, InputOpener, LiveSession, MainOutput, OpenedInput, OutputPort,
-    Punch, Record, Recorded, Session, SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent,
-    TakeFile, TakeTarget, Trim,
+    Armed, Destination, Input, InputConfig, InputOpener, LiveSession, MainOutput, OpenedInput,
+    OutputPort, Punch, Record, Recorded, Rolling, Session, Start, Take, TakeEnd, TakeError,
+    ToMemory, ToSink, Trim,
 };
 use tutti_units::{Amplitude, At, Beat, Frame, SampleRate, Samples};
 
@@ -79,7 +81,6 @@ struct Rig {
     /// Frames pushed so far: the next sample's index, and, in lockstep, the
     /// graph frame it is played at.
     pushed: usize,
-    events: Vec<SessionEvent>,
     /// The playback delay each rendered block reports; `None`: none.
     delay: Option<Duration>,
     /// The value of frame `i` on both channels, to push instead of the ramp.
@@ -111,7 +112,6 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         capture,
         input,
         pushed: 0,
-        events: Vec::new(),
         delay: None,
         signal: None,
     }
@@ -120,7 +120,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
 impl Rig {
     /// Pushes `frames` frames of the ramp (the sample at index `i` is `i`,
     /// the right channel its negative), renders them as one block and
-    /// updates, collecting the events. Returns the block the session rendered.
+    /// updates. Returns the block the session rendered.
     fn step(&mut self, frames: usize) -> Vec<f32> {
         let ramp: Vec<f32> = (self.pushed..self.pushed + frames)
             .flat_map(|i| match self.signal {
@@ -135,7 +135,7 @@ impl Rig {
             .expect("opened")
             .push_interleaved(Interleaved::new(&ramp, ChannelLayout::STEREO).unwrap());
         self.pushed += frames;
-        self.events.extend(self.session.update());
+        let _ = self.session.update();
         // A callback's timestamp reports the playback delay each block.
         let rendered = match self.delay {
             Some(delay) => self
@@ -144,64 +144,52 @@ impl Rig {
             None => self.stream.render_block(Samples::new(frames)),
         }
         .expect("the stream is open");
-        self.events.extend(self.session.update());
+        let _ = self.session.update();
         rendered
     }
 
-    /// Steps blocks until `done` holds of the events so far, giving the pump
-    /// thread its time.
-    fn run_until(&mut self, done: impl Fn(&[SessionEvent]) -> bool) {
+    /// Steps blocks until `end` is answered, giving the pump thread its time, and returns
+    /// what it answered. The hang guard is generous: the pump's task is woken by the bells'
+    /// tick thread, which no count of updates orders against.
+    fn resolve<T, D>(&mut self, end: T) -> Result<Recorded<D>, TakeError>
+    where
+        T: IntoFuture<Output = Result<Recorded<D>, TakeError>>,
+        D: Destination<f32>,
+    {
+        let mut end = Box::pin(end.into_future());
+        let mut cx = Context::from_waker(Waker::noop());
         let deadline = Instant::now() + Duration::from_secs(20);
-        while !done(&self.events) {
-            assert!(
-                Instant::now() < deadline,
-                "never happened: {:?}",
-                self.events
-            );
-            self.step(BLOCK);
-            std::thread::yield_now();
-        }
-    }
-
-    /// Steps blocks until `done` holds of the events so far, for at most a count of
-    /// blocks that only guards a hang: the pump's task is woken by the bells' tick
-    /// thread, which no count of updates orders against. The pump runs inside the
-    /// updates, on this thread.
-    fn steps_until(&mut self, done: impl Fn(&[SessionEvent]) -> bool) {
-        for _ in 0..1_000_000 {
-            if done(&self.events) {
-                return;
+        loop {
+            if let Poll::Ready(answer) = Pin::new(&mut end).poll(&mut cx) {
+                return answer;
             }
+            assert!(Instant::now() < deadline, "the take never ended");
             self.step(BLOCK);
             std::thread::yield_now();
         }
-        panic!("never happened: {:?}", self.events);
     }
 
-    fn takes(&self) -> Vec<&TakeEvent> {
-        self.events
-            .iter()
-            .filter_map(|e| match e {
-                SessionEvent::Take(t) => Some(t),
-                _ => None,
-            })
-            .collect()
+    /// Steps blocks until `take`'s first frame has arrived.
+    fn rolling<D: Destination<f32>>(&mut self, mut take: Take<Armed, D>) -> Take<Rolling, D> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match take.rolling() {
+                Ok(rolling) => return rolling,
+                Err(armed) => take = armed,
+            }
+            assert!(Instant::now() < deadline, "the take never rolled");
+            self.step(BLOCK);
+            std::thread::yield_now();
+        }
     }
 }
 
-fn started(events: &[SessionEvent]) -> bool {
-    events
-        .iter()
-        .any(|e| matches!(e, SessionEvent::Take(TakeEvent::Started { .. })))
-}
-
-fn finished(events: &[SessionEvent]) -> bool {
-    events.iter().any(|e| {
-        matches!(
-            e,
-            SessionEvent::Take(TakeEvent::Finished { .. } | TakeEvent::Failed { .. })
-        )
-    })
+/// A WAV of 32-bit float at `path`, as wide as the input.
+fn to_wav(path: std::path::PathBuf) -> ToFile {
+    ToFile::new(
+        path,
+        Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32))),
+    )
 }
 
 fn wav(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
@@ -219,16 +207,6 @@ fn read(path: &std::path::Path) -> Vec<[f32; 2]> {
         "the header's data length matches the frames in the file"
     );
     samples.chunks(2).map(|f| [f[0], f[1]]).collect()
-}
-
-fn recorded(events: &[SessionEvent]) -> &Recorded {
-    events
-        .iter()
-        .find_map(|e| match e {
-            SessionEvent::Take(TakeEvent::Finished { recorded, .. }) => Some(recorded),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("no Finished in {events:?}"))
 }
 
 /// Rolls the transport and renders a couple of blocks, so the playhead is
@@ -254,19 +232,18 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
     let punch = Punch::new(Beat::new(0.5)).until(Beat::new(1.0)).unwrap();
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "a.wav"))).punch(punch))
+        .record(Record::new(&rig.input, to_wav(wav(&dir, "a.wav"))).punch(punch))
         .expect("armed");
     let window = take.window();
     let end = window.end.expect("a punch-out");
     assert_eq!(end.since(window.start), Some(Samples::new(12_000)));
 
-    rig.run_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(take).expect("recorded");
     let first = done.placement().first_frame();
     assert_eq!(first, window.start, "the punch-in was in the future");
     assert_eq!(done.frames(), Samples::new(12_000));
     assert_eq!(done.lost(), Samples::new(0));
-    let samples = read(done.path().expect("a file"));
+    let samples = read(&done.output().path);
     assert_eq!(samples.len(), 12_000, "exactly the frames of [F(a), F(b))");
     assert_eq!(
         samples[0][0],
@@ -279,7 +256,6 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
         (end.get() - 1) as f32,
         "up to F(b), not past"
     );
-    drop(take);
 }
 
 /// **A recording-only click sounds from the take's punch-in to its punch-out
@@ -320,7 +296,7 @@ fn a_recording_only_click_sounds_from_punch_in_to_punch_out() {
     let punch = Punch::new(Beat::new(1.0)).until(Beat::new(3.0)).unwrap();
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "click.wav"))).punch(punch))
+        .record(Record::new(&rig.input, to_wav(wav(&dir, "click.wav"))).punch(punch))
         .expect("armed");
     let window = take.window();
     assert_eq!(window.start, Frame::new(24_000));
@@ -401,7 +377,7 @@ fn a_plugin_is_told_the_host_records_during_a_take() {
     let punch = Punch::new(Beat::new(0.25)).until(Beat::new(0.5)).unwrap();
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "told.wav"))).punch(punch))
+        .record(Record::new(&rig.input, to_wav(wav(&dir, "told.wav"))).punch(punch))
         .expect("armed");
     while rig.pushed < 24_000 {
         rig.step(BLOCK);
@@ -437,22 +413,20 @@ fn a_punch_in_the_past_starts_at_once_and_reports_the_real_frame() {
     let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "past.wav")))
+            Record::new(&rig.input, to_wav(wav(&dir, "past.wav")))
                 .punch(Punch::new(Frame::new(10)).until(Frame::new(5_000)).unwrap()),
         )
         .expect("armed");
-    rig.run_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(take).expect("recorded");
     let first = done.placement().first_frame();
     assert!(first.get() >= 1024, "not frame 10: {first}");
-    let samples = read(done.path().unwrap());
+    let samples = read(&done.output().path);
     assert_eq!(samples[0][0], first.get() as f32);
     assert_eq!(
         done.frames().get(),
         5_000 - first.get() as usize,
         "up to the punch-out"
     );
-    drop(take);
 }
 
 /// **Placement is the formula, term by term.** With the capture reporting 5 ms
@@ -479,15 +453,14 @@ fn placement_is_the_formula_with_each_term_stated() {
     let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "p.wav"))).punch(
+            Record::new(&rig.input, to_wav(wav(&dir, "p.wav"))).punch(
                 Punch::new(Frame::new(10_000))
                     .until(Frame::new(10_100))
                     .unwrap(),
             ),
         )
         .expect("armed");
-    rig.run_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(take).expect("recorded");
     let latency = *done.latency();
     assert_eq!(latency.input, Some(Samples::new(240)));
     assert_eq!(latency.output, Some(Samples::new(480)));
@@ -496,7 +469,6 @@ fn placement_is_the_formula_with_each_term_stated() {
     assert!(latency.is_complete());
     assert_eq!(done.placement().first_frame(), Frame::new(10_000));
     assert_eq!(done.start(), Start::At(Frame::new(10_000 - 727 - 3)));
-    drop(take);
 }
 
 /// **A latency the device has not reported is unknown in the take, not zero.**
@@ -510,15 +482,14 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
     let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "u.wav"))).punch(
+            Record::new(&rig.input, to_wav(wav(&dir, "u.wav"))).punch(
                 Punch::new(Frame::new(2_000))
                     .until(Frame::new(2_050))
                     .unwrap(),
             ),
         )
         .expect("armed");
-    rig.run_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(take).expect("recorded");
     let latency = *done.latency();
     assert_eq!((latency.input, latency.output), (None, None));
     assert!(!latency.is_complete());
@@ -527,43 +498,36 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
         Start::At(Frame::new(2_000 - 7)),
         "only the lead is known"
     );
-    drop(take);
 }
 
-/// **Started lands in the update after the punch-in, then Finished once.** A
-/// take that ends by its punch-out reports exactly one Started and one
-/// Finished, in that order, carrying the same id the handle has.
+/// **`rolling()` turns before the future resolves, and the placement it shows is the one
+/// the take holds.** A take that ends by its punch-out: once its first frame has arrived the
+/// handle is `Rolling` with the placement, and its future resolves to a take that was placed
+/// there.
 #[test]
-fn started_then_finished_once() {
+fn rolling_turns_before_the_future_resolves_with_the_same_placement() {
     let dir = tempfile::tempdir().unwrap();
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "e.wav"))).punch(
+            Record::new(&rig.input, to_wav(wav(&dir, "e.wav"))).punch(
                 Punch::new(Frame::new(3_000))
                     .until(Frame::new(3_500))
                     .unwrap(),
             ),
         )
         .expect("armed");
-    let id = take.id();
-    rig.run_until(finished);
-    // `Finished` is the job's end: the pump has returned, and what it sent
-    // before landed first. More updates see nothing more of it.
-    for _ in 0..8 {
-        rig.step(BLOCK);
-    }
-    let takes = rig.takes();
-    assert_eq!(takes.len(), 2, "{takes:?}");
-    assert!(matches!(takes[0], TakeEvent::Started { id: got, .. } if *got == id));
-    assert!(matches!(takes[1], TakeEvent::Finished { id: got, .. } if *got == id));
-    drop(take);
+    let rolling = rig.rolling(take);
+    let placed = *rolling.placement();
+    let done = rig.resolve(rolling).expect("recorded");
+    assert_eq!(*done.placement(), placed);
+    assert_eq!(done.end(), TakeEnd::Completed);
 }
 
 /// An open-ended take is finished by its handle: it stops at once and
-/// returns without waiting, and an update reports its end with what the take holds.
+/// returns without waiting, and its future answers with what the take holds.
 #[test]
 fn an_open_ended_take_is_finished_by_its_handle() {
     let dir = tempfile::tempdir().unwrap();
@@ -571,39 +535,17 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     rig.step(256);
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "o.wav"))))
+        .record(Record::new(&rig.input, to_wav(wav(&dir, "o.wav"))))
         .expect("armed");
-    let mut armed: Option<Take<Armed>> = Some(take);
-    let mut rolling = None;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while rolling.is_none() {
-        assert!(Instant::now() < deadline);
-        rig.step(BLOCK);
-        std::thread::yield_now();
-        match armed.take().unwrap().rolling() {
-            Ok(r) => rolling = Some(r),
-            Err(still) => armed = Some(still),
-        }
-    }
-    let rolling = rolling.unwrap();
+    let rolling = rig.rolling(take);
     let first = rolling.placement().first_frame();
-    // `Started` lands once the pump has written the take's first frame.
-    rig.run_until(started);
-    rolling.finish();
-    // The end lands in an update, with what the take holds.
-    rig.run_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(rolling.finish()).expect("recorded");
     assert_eq!(done.placement().first_frame(), first);
     assert!(done.frames().get() > 0);
-    assert!(
-        rig.takes()
-            .iter()
-            .any(|e| matches!(e, TakeEvent::Finished { .. }))
-    );
 }
 
 /// **A take ends when its input is removed**, instead of recording silence to
-/// the end: it reports `Finished` once with what the input played before the
+/// the end: its future resolves once with what the input played before the
 /// removal and nothing after (the file holds no frame of the silence a removed
 /// node's tap reads).
 #[test]
@@ -612,21 +554,14 @@ fn a_take_ends_when_its_input_is_removed() {
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let path = wav(&dir, "r.wav");
-    let _take = rig
+    let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
+        .record(Record::new(&rig.input, to_wav(path.clone())))
         .expect("armed");
-    rig.run_until(started);
+    let rolling = rig.rolling(take);
     rig.step(BLOCK);
     rig.session.remove(rig.input.node()).unwrap();
-    rig.run_until(finished);
-    // `Finished` is the job's end: more updates see nothing more of it.
-    for _ in 0..8 {
-        rig.step(BLOCK);
-    }
-    let takes = rig.takes();
-    assert_eq!(takes.len(), 2, "started, then finished once: {takes:?}");
-    let done = recorded(&rig.events);
+    let done = rig.resolve(rolling).expect("recorded");
     assert_eq!(done.end(), TakeEnd::InputRemoved);
     let frames = read(&path);
     assert_eq!(frames.len(), done.frames().get());
@@ -665,20 +600,18 @@ impl Sink for Failing {
     }
 }
 
-/// **A sink that fails mid-take gives Failed with the sink's error as the
-/// source**, and no Finished.
+/// **A sink that fails mid-take answers the future with the sink's error as the
+/// source**, and no `Recorded`.
 #[test]
-fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
+fn a_sink_that_fails_mid_take_fails_the_future_with_its_error() {
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeTarget::sink(Failing { ok: 2 })))
+        .record(Record::new(&rig.input, ToSink::new(Failing { ok: 2 })))
         .expect("armed");
-    rig.run_until(finished);
-    let takes = rig.takes();
-    let TakeEvent::Failed { error, .. } = takes.last().unwrap() else {
-        panic!("not Failed: {takes:?}");
+    let Err(error) = rig.resolve(take) else {
+        panic!("the sink failed, yet the take recorded");
     };
     assert!(
         matches!(
@@ -697,12 +630,6 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
         "disk full"
     );
     assert_eq!(error.to_string(), "the take's sink failed");
-    assert!(
-        !takes
-            .iter()
-            .any(|e| matches!(e, TakeEvent::Finished { .. }))
-    );
-    drop(take);
 }
 
 /// Refusals are where they are made: a punch ending before it starts, a beat
@@ -723,8 +650,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     let stopped = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "s.wav")))
-                .punch(Punch::new(Beat::new(2.0))),
+            Record::new(&rig.input, to_wav(wav(&dir, "s.wav"))).punch(Punch::new(Beat::new(2.0))),
         )
         .unwrap_err();
     assert!(
@@ -736,7 +662,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     let backwards = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "b.wav"))).punch(
+            Record::new(&rig.input, to_wav(wav(&dir, "b.wav"))).punch(
                 Punch::new(Frame::new(500_000))
                     .until(Beat::new(1.0))
                     .unwrap(),
@@ -762,71 +688,31 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     }
     let wide = rig
         .session
-        .record(Record::new(&rig.input, TakeTarget::sink(Mono)))
+        .record(Record::new(&rig.input, ToSink::new(Mono)))
         .unwrap_err();
     assert!(matches!(wide, TakeError::Width { .. }), "{wide:?}");
 }
 
-/// A take written to a file makes a clip from it; one written to a sink of
-/// the caller's has no file to make one from, and says so by name.
+/// A take written to a file makes a clip from it. A take into memory or a sink has no file
+/// to make one from: `Recorded::clip` is not there (the doctests of `Recorded`).
 #[cfg(feature = "sampler")]
 #[test]
-fn a_take_makes_a_clip_only_from_a_file() {
+fn a_file_take_makes_a_clip() {
     let dir = tempfile::tempdir().unwrap();
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
-    let to_file = rig
+    let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "c.wav"))).punch(
+            Record::new(&rig.input, to_wav(wav(&dir, "c.wav"))).punch(
                 Punch::new(Frame::new(1_000))
                     .until(Frame::new(1_200))
                     .unwrap(),
             ),
         )
         .expect("armed");
-    rig.run_until(finished);
-    let from_file = recorded(&rig.events).clip::<f32>();
+    let from_file = rig.resolve(take).expect("recorded").clip::<f32>();
     assert!(from_file.is_ok(), "{:?}", from_file.err());
-
-    rig.events.clear();
-    struct Clean;
-    impl Sink for Clean {
-        type Sample = f32;
-        type Error = core::convert::Infallible;
-
-        fn layout(&self) -> ChannelLayout {
-            ChannelLayout::STEREO
-        }
-        fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
-            Ok(())
-        }
-        fn finalize(self) -> Result<(), Self::Error> {
-            Ok(())
-        }
-    }
-    let from = rig.pushed as u64;
-    let to_sink = rig
-        .session
-        .record(
-            Record::new(&rig.input, TakeTarget::sink(Clean)).punch(
-                Punch::new(Frame::new(from + 1_000))
-                    .until(Frame::new(from + 1_100))
-                    .unwrap(),
-            ),
-        )
-        .expect("armed");
-    rig.run_until(finished);
-    let from_sink = recorded(&rig.events).clip::<f32>();
-    assert!(
-        matches!(
-            from_sink,
-            Err(tutti_session::Error::Take(TakeError::NoFile))
-        ),
-        "{:?}",
-        from_sink.err()
-    );
-    drop((to_file, to_sink));
 }
 
 /// **A take records and finishes, and the file holds the frames the input played.** The
@@ -840,15 +726,13 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
     let path = wav(&dir, "ramp.wav");
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
+        .record(Record::new(&rig.input, to_wav(path.clone())))
         .expect("armed");
-    rig.steps_until(started);
+    let take = rig.rolling(take);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    take.finish();
-    rig.steps_until(finished);
-    let done = recorded(&rig.events);
+    let done = rig.resolve(take.finish()).expect("recorded");
     let first = done.placement().first_frame().get();
     let frames = read(&path);
     assert_eq!(frames.len(), done.frames().get());
@@ -861,43 +745,10 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
     }
 }
 
-/// **`finish` returns without waiting, and the completion lands in a later update.**
-/// The pump closes the sink on its own thread and the end lands only in an `update`, so
-/// `finish` returns at once, nothing has landed, and the updates that follow report the
-/// end once.
-#[test]
-fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples::new(0));
-    rig.step(256);
-    let take = rig
-        .session
-        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "f.wav"))))
-        .expect("armed");
-    rig.steps_until(started);
-    let before = rig.takes().len();
-    take.finish();
-    assert_eq!(
-        rig.takes().len(),
-        before,
-        "finish landed nothing: it only stops the pump"
-    );
-    rig.steps_until(finished);
-    for _ in 0..8 {
-        rig.step(BLOCK);
-    }
-    let ends = rig
-        .takes()
-        .iter()
-        .filter(|e| matches!(e, TakeEvent::Finished { .. } | TakeEvent::Failed { .. }))
-        .count();
-    assert_eq!(ends, 1, "the end is reported once: {:?}", rig.takes());
-}
-
 /// **A take that has nothing to record never stalls `update`.** Its
 /// punch-in is far ahead, so the pump has no frame to keep: it awaits its bell instead
 /// of waiting on the tap. A hundred updates return with it armed, and stopping it before
-/// its punch-in lands as a failure within the updates that follow.
+/// its punch-in answers its future with the failure.
 #[test]
 fn an_idle_take_never_stalls_update() {
     let dir = tempfile::tempdir().unwrap();
@@ -906,27 +757,18 @@ fn an_idle_take_never_stalls_update() {
     let take = rig
         .session
         .record(
-            Record::new(&rig.input, TakeFile::wav(wav(&dir, "idle.wav")))
+            Record::new(&rig.input, to_wav(wav(&dir, "idle.wav")))
                 .punch(Punch::new(At::Frame(Frame::new(1 << 30)))),
         )
         .expect("armed");
     for _ in 0..100 {
         rig.step(BLOCK);
     }
-    assert!(rig.takes().is_empty(), "nothing was punched in");
-    take.finish();
-    rig.steps_until(finished);
-    assert!(
-        matches!(
-            rig.takes().as_slice(),
-            [TakeEvent::Failed {
-                error: TakeError::NeverStarted,
-                ..
-            }]
-        ),
-        "{:?}",
-        rig.takes()
-    );
+    let Err(take) = take.rolling() else {
+        panic!("nothing was punched in");
+    };
+    let ended = rig.resolve(take.finish());
+    assert!(matches!(ended, Err(TakeError::NeverStarted)), "{ended:?}");
 }
 
 /// **Dropping a session commits every take before it returns.** The pump awaits its
@@ -942,9 +784,9 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     rig.step(256);
     let take = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
+        .record(Record::new(&rig.input, to_wav(path.clone())))
         .expect("armed");
-    rig.steps_until(started);
+    let take = rig.rolling(take);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
@@ -985,9 +827,9 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
                 rig.step(256);
                 let take = rig
                     .session
-                    .record(Record::new(&rig.input, TakeFile::wav(path)))
+                    .record(Record::new(&rig.input, to_wav(path)))
                     .expect("armed");
-                rig.steps_until(started);
+                let take = rig.rolling(take);
                 drop(rig);
                 drop(take);
             }
@@ -1000,22 +842,19 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
     );
 }
 
-/// Runs a take of the ramp into `target` to its end and returns the
-/// session's events.
-fn record_to_end(target: TakeFile) -> Vec<SessionEvent> {
+/// Runs a take of the ramp into `target` to its end and returns what it recorded.
+fn record_to_end(target: ToFile) -> Recorded<ToFile> {
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
         .record(Record::new(&rig.input, target))
         .expect("armed");
-    rig.steps_until(started);
+    let take = rig.rolling(take);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    take.finish();
-    rig.steps_until(finished);
-    rig.events
+    rig.resolve(take.finish()).expect("recorded")
 }
 
 /// The names in `dir`, sorted.
@@ -1039,7 +878,7 @@ fn a_take_onto_an_existing_file_is_refused_at_arming() {
     rig.step(256);
     let Err(error) = rig
         .session
-        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
+        .record(Record::new(&rig.input, to_wav(path.clone())))
     else {
         panic!("the path exists");
     };
@@ -1059,8 +898,7 @@ fn a_replacing_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_to_end(TakeFile::wav(path.clone()).replace());
-    let done = recorded(&events);
+    let done = record_to_end(to_wav(path.clone()).replace());
     assert_eq!(read(&path).len(), done.frames().get());
     assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);
 }
@@ -1081,7 +919,7 @@ fn tone(i: usize) -> f32 {
 /// first of them is.
 fn signal_take(
     signal: fn(usize) -> f32,
-    target: impl FnOnce(std::path::PathBuf) -> TakeFile,
+    target: impl FnOnce(std::path::PathBuf) -> ToFile,
 ) -> (Vec<i32>, usize) {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "signal.wav");
@@ -1092,13 +930,16 @@ fn signal_take(
         .session
         .record(Record::new(&rig.input, target(path.clone())))
         .expect("armed");
-    rig.steps_until(started);
+    let take = rig.rolling(take);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    take.finish();
-    rig.steps_until(finished);
-    let first = recorded(&rig.events).placement().first_frame().get() as usize;
+    let first = rig
+        .resolve(take.finish())
+        .expect("recorded")
+        .placement()
+        .first_frame()
+        .get() as usize;
     let samples = hound::WavReader::open(&path)
         .unwrap()
         .into_samples::<i32>()
@@ -1108,11 +949,11 @@ fn signal_take(
 }
 
 /// A take into a WAV of the integer type `pcm`.
-fn int_take(path: std::path::PathBuf, pcm: IntPcm) -> TakeFile {
-    TakeFile::new(path, tutti_codec::Format::Wav(tutti_codec::Pcm::Int(pcm)))
+fn int_take(path: std::path::PathBuf, pcm: IntPcm) -> ToFile {
+    ToFile::new(path, Encoding::new(Format::Wav(Pcm::Int(pcm))))
 }
 
-fn int16(path: std::path::PathBuf) -> TakeFile {
+fn int16(path: std::path::PathBuf) -> ToFile {
     int_take(path, IntPcm::new(IntDepth::Int16))
 }
 
@@ -1156,33 +997,23 @@ fn takes_armed_together_do_not_share_dither_noise() {
         .session
         .record(Record::new(&rig.input, int16(b.clone())))
         .expect("armed");
-    // Both pumps place their first frame before either is finished: one started is not the
+    // Both pumps place their first frame before either is finished: one rolling is not the
     // other, whose pump the tick thread wakes on its own.
-    rig.steps_until(|events| {
-        let started =
-            |e: &&SessionEvent| matches!(e, SessionEvent::Take(TakeEvent::Started { .. }));
-        events.iter().filter(started).count() == 2
-    });
+    let first = rig.rolling(first);
+    let second = rig.rolling(second);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    first.finish();
-    second.finish();
-    rig.steps_until(|events| {
-        let ended = |e: &&SessionEvent| matches!(e, SessionEvent::Take(TakeEvent::Finished { .. }));
-        events.iter().filter(ended).count() == 2
-    });
-    let starts: Vec<_> = rig
-        .events
-        .iter()
-        .filter_map(|e| match e {
-            SessionEvent::Take(TakeEvent::Finished { recorded, .. }) => {
-                Some(recorded.placement().first_frame())
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(starts[0], starts[1], "the takes start together");
+    let (first, second) = (first.finish(), second.finish());
+    let (first, second) = (
+        rig.resolve(first).expect("recorded"),
+        rig.resolve(second).expect("recorded"),
+    );
+    assert_eq!(
+        first.placement().first_frame(),
+        second.placement().first_frame(),
+        "the takes start together"
+    );
     let read16 = |path: &std::path::Path| -> Vec<i16> {
         hound::WavReader::open(path)
             .unwrap()
@@ -1232,4 +1063,114 @@ fn a_take_with_noise_shaping_feeds_the_rounding_error_back() {
         moved += usize::from(f64::from(s) != exact.round());
     }
     assert!(moved * 10 > shaped.len(), "{moved} of {}", shaped.len());
+}
+
+/// **A file take is written through its encoding: at its width and its rate.** A stereo input
+/// taken to a mono file resampled to half the rate reads back with one channel at 24 kHz, and
+/// the frames it holds are the resample's stated length of the frames recorded.
+#[test]
+fn a_file_take_reads_back_at_its_encodings_width_and_rate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "narrow.wav");
+    let half = SampleRate::of(RATE / 2.0);
+    let encoding = Encoding::new(Format::Wav(Pcm::Float(FloatWidth::F32)))
+        .width(ChannelLayout::MONO)
+        .resample(Resample::to(half));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.step(256);
+    let take = rig
+        .session
+        .record(
+            Record::new(&rig.input, ToFile::new(path.clone(), encoding)).punch(
+                Punch::new(Frame::new(3_000))
+                    .until(Frame::new(5_000))
+                    .unwrap(),
+            ),
+        )
+        .expect("armed");
+    let done = rig.resolve(take).expect("recorded");
+    assert_eq!(done.frames(), Samples::new(2_000));
+    let reader = hound::WavReader::open(&path).expect("a readable wav");
+    assert_eq!(reader.spec().channels, 1);
+    assert_eq!(f64::from(reader.spec().sample_rate), half.get());
+    let held = tutti_dsp::resampled_frames(SampleRate::of(RATE), half, done.frames());
+    assert_eq!(done.output().frames, held);
+    assert_eq!(reader.duration() as usize, held.get());
+}
+
+/// **A take into memory holds the input's frames, and folds onto the channels it is
+/// given.** Two takes over the same frames of the ramp (frame `i` is `[i, -i]`): one
+/// holds both planes bit for bit; the other, to mono, holds the stereo fold `(L + R) / 2`,
+/// which cancels the ramp to exactly zero at every frame.
+#[test]
+fn a_take_into_memory_holds_the_frames_and_folds_onto_its_channels() {
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.step(256);
+    let punch = Punch::new(Frame::new(3_000))
+        .until(Frame::new(3_300))
+        .unwrap();
+    let mono = ToMemory::new().channels(ChannelSet::default_for(ChannelLayout::MONO));
+    let whole = rig
+        .session
+        .record(Record::new(&rig.input, ToMemory::new()).punch(punch))
+        .expect("armed");
+    let folded = rig
+        .session
+        .record(Record::new(&rig.input, mono).punch(punch))
+        .expect("armed");
+    let whole = rig.resolve(whole).expect("recorded");
+    let folded = rig.resolve(folded).expect("recorded");
+
+    let planes = whole.output();
+    assert_eq!(planes.sample_rate(), SampleRate::of(RATE));
+    assert_eq!(planes.frames(), Samples::new(300));
+    let ramp: Vec<f32> = (3_000..3_300).map(|i| i as f32).collect();
+    let negated: Vec<f32> = ramp.iter().map(|x| -x).collect();
+    assert_eq!(planes.planes(), [ramp, negated]);
+
+    let planes = folded.output();
+    assert_eq!(planes.channels(), 1);
+    assert_eq!(planes.planes(), [vec![0.0f32; 300]]);
+}
+
+/// **A dither seed an encoding states is used as given.** Two takes of one input over the same
+/// frames, each stating the one seed, write equal files; a take that states none draws its
+/// own noise from its id (`takes_armed_together_do_not_share_dither_noise`).
+#[test]
+fn a_stated_dither_seed_is_used_as_given() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (wav(&dir, "a.wav"), wav(&dir, "b.wav"));
+    let seeded = |path| {
+        ToFile::new(
+            path,
+            Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int16)))).dither_seed(9),
+        )
+    };
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.signal = Some(constant);
+    rig.step(256);
+    let punch = Punch::new(Frame::new(3_000))
+        .until(Frame::new(3_500))
+        .unwrap();
+    let first = rig
+        .session
+        .record(Record::new(&rig.input, seeded(a.clone())).punch(punch))
+        .expect("armed");
+    let second = rig
+        .session
+        .record(Record::new(&rig.input, seeded(b.clone())).punch(punch))
+        .expect("armed");
+    rig.resolve(first).expect("recorded");
+    rig.resolve(second).expect("recorded");
+    let read16 = |path: &std::path::Path| -> Vec<i16> {
+        hound::WavReader::open(path)
+            .unwrap()
+            .into_samples::<i16>()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let (a, b) = (read16(&a), read16(&b));
+    assert_eq!(a.len(), 1_000);
+    assert!(a.iter().any(|&s| s != a[0]), "a flat file proves nothing");
+    assert_eq!(a, b);
 }

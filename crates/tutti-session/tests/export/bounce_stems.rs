@@ -69,7 +69,7 @@ fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Destination>(
+fn refused<M: Destination<f32>>(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, M>,
 ) -> BounceError {
@@ -501,7 +501,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    fn why<M: Destination>(
+    fn why<M: Destination<f32>>(
         session: &mut DetachedSession,
         b: Bounce<NodeKey, M>,
     ) -> BounceConfigError {

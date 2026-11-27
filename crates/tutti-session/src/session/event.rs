@@ -157,10 +157,6 @@ pub enum SessionEvent {
     /// restart wanted, done or failed ([`DeviceEvent`](crate::DeviceEvent)).
     #[cfg(feature = "device")]
     Device(crate::DeviceEvent),
-    /// A take of the session's: its first frame arrived, it ended, or it
-    /// failed ([`TakeEvent`](crate::TakeEvent)).
-    #[cfg(feature = "capture")]
-    Take(crate::TakeEvent),
     /// A modulation problem (design 015 §4.7), the one type
     /// [`ModState::problems`](crate::ModState::problems) lists. Reported
     /// once: a refusal when it starts or changes (the problems list holds it
