@@ -195,6 +195,55 @@ pub(crate) trait SenderBackend: Send + Sync {
     fn send(&self, ump: &Ump) -> Result<Delivery>;
 }
 
+/// The endpoint's liveness, shared with each of its senders.
+///
+/// A send holds the read side for its whole call ([`hold`](Self::hold)) and the
+/// endpoint's `Drop` takes the write side ([`end`](Self::end)), so the drop waits
+/// for a send in flight and every send after it is
+/// [`MidiHardwareError::EndpointGone`]. A clone shares the cell.
+#[derive(Clone, Debug)]
+#[cfg_attr(
+    any(midi_backend = "none", midi_backend = "winmm"),
+    allow(
+        dead_code,
+        reason = "only the ALSA and CoreMIDI virtual endpoints use it"
+    )
+)]
+pub(crate) struct Live(Arc<tutti_rt::RwLock<bool>>);
+
+#[cfg_attr(
+    any(midi_backend = "none", midi_backend = "winmm"),
+    allow(
+        dead_code,
+        reason = "only the ALSA and CoreMIDI virtual endpoints use it"
+    )
+)]
+impl Live {
+    /// A live endpoint.
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(tutti_rt::RwLock::new(true)))
+    }
+
+    /// Marks the endpoint gone, after any send in flight has finished.
+    pub(crate) fn end(&self) {
+        *self.0.write() = false;
+    }
+
+    /// Holds the endpoint live until the guard drops.
+    ///
+    /// # Errors
+    ///
+    /// [`MidiHardwareError::EndpointGone`] once [`end`](Self::end) has run.
+    pub(crate) fn hold(&self) -> Result<std::sync::RwLockReadGuard<'_, bool>> {
+        let live = self.0.read();
+        if *live {
+            Ok(live)
+        } else {
+            Err(MidiHardwareError::EndpointGone)
+        }
+    }
+}
+
 /// What a [`SenderBackend::send`] that did not fail did with the message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
@@ -650,6 +699,7 @@ mod tests {
 
     use super::*;
     use crate::error::MidiHardwareError;
+    use std::sync::mpsc;
 
     /// A backend that records what it sent and refuses its `fail_at`th send: with
     /// an error, or with `Full` when `full`.
@@ -776,5 +826,35 @@ mod tests {
         outbound.send(bend_range(12)).unwrap();
         outbound.send(bend_range(7)).unwrap();
         assert_eq!(controllers(&sent), [101, 100, 6, 38, 101, 100, 6, 38]);
+    }
+
+    #[test]
+    fn a_hold_after_end_is_endpoint_gone() {
+        let live = Live::new();
+        let shared = live.clone();
+        assert!(live.hold().is_ok());
+        shared.end();
+        assert!(matches!(live.hold(), Err(MidiHardwareError::EndpointGone)));
+    }
+
+    #[test]
+    fn end_waits_for_a_hold_in_flight() {
+        let live = Live::new();
+        let guard = live.hold().expect("live");
+        let (began, begin) = mpsc::channel();
+        let (finished, finish) = mpsc::channel();
+        let ender = live.clone();
+        let thread = std::thread::spawn(move || {
+            began.send(()).expect("receiver alive");
+            ender.end();
+            finished.send(()).expect("receiver alive");
+        });
+        begin.recv().expect("ender started");
+        // `end` cannot complete while the guard lives, so nothing is waiting here.
+        assert!(finish.try_recv().is_err(), "end finished under a hold");
+        drop(guard);
+        finish.recv().expect("end completes once the hold drops");
+        thread.join().expect("ender");
+        assert!(matches!(live.hold(), Err(MidiHardwareError::EndpointGone)));
     }
 }
