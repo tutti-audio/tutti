@@ -32,11 +32,11 @@ use crate::SlabHandle;
 use crate::SlabLayout;
 use crate::transport::control::Announced;
 use crate::{
-    Answered, ArmPluginMidiLearn, CloseEditor, ControlReply, GetCurrentPreset, GetParameter,
-    GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
-    GetParameterValueFromText, GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor,
-    PresetLoaded, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetSampleRate,
-    SetTrackInfo, SetupSharedMemory, StateLoaded, Unanswered,
+    Answered, ArmPluginMidiLearn, CloseEditor, GetCurrentPreset, GetParameter, GetParameterList,
+    GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
+    GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
+    SetAppMidiMap, SetAutomationState, SetEditorSize, SetSampleRate, SetTrackInfo,
+    SetupSharedMemory, StateLoaded, StateReady, Unanswered,
 };
 use dpi::Size;
 use tutti_platform::Executor;
@@ -813,7 +813,7 @@ impl AudioBridge {
             SaveState { state_use },
             Deadline::State,
             Object::State,
-            move |outcome| outcome.map(|received| saved(received, pending)),
+            move |outcome| outcome.and_then(|received| saved(received, pending)),
         )
         .map_err(state_lost)
     }
@@ -1090,7 +1090,7 @@ impl AudioBridge {
             move |outcome| {
                 Some(
                     outcome
-                        .map(|received| saved(received, pending))
+                        .and_then(|received| saved(received, pending))
                         .map_err(state_lost),
                 )
             },
@@ -1625,16 +1625,15 @@ fn unless_refused<R>(answer: std::result::Result<R, Lost>) -> Option<std::result
 /// The state a save answered with: its bytes, and the writes pending on both
 /// sides, the host's (`host`, read before the request) over the server's own
 /// control's.
-fn saved(received: Received, host: Vec<(ParamId, Normalized)>) -> tutti_plugin_types::PluginState {
-    let server = match received.reply {
-        ControlReply::StateReady { pending, .. } => pending,
-        // `read_state` takes only a `StateReady` for an `Object::State`.
-        _ => Vec::new(),
-    };
-    tutti_plugin_types::PluginState {
+fn saved(
+    received: Received,
+    host: Vec<(ParamId, Normalized)>,
+) -> std::result::Result<tutti_plugin_types::PluginState, Lost> {
+    let ready = StateReady::try_from(received.reply).map_err(Lost::of)?;
+    Ok(tutti_plugin_types::PluginState {
         bytes: received.object,
-        pending: tutti_plugin_types::overlay_writes(server, host),
-    }
+        pending: tutti_plugin_types::overlay_writes(ready.pending, host),
+    })
 }
 
 /// A state request's failure as the error its caller reads.

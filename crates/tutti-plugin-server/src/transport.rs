@@ -200,8 +200,9 @@ fn take_state(
 }
 
 /// Answers request `id` with `state`: a `StateReady` frame, carrying the writes
-/// it states pending, and the object that holds the bytes. An object the server cannot make is answered as an `Error`,
-/// as a plugin that cannot save is.
+/// it states pending, and the object that holds the bytes. An object the
+/// server cannot make is answered as an `Error`, as a plugin that cannot save
+/// is.
 ///
 /// # Errors
 ///

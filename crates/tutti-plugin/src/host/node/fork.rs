@@ -26,8 +26,9 @@
 //!    late reply.)
 //!
 //!    **The writes no block has applied** (what the save states as pending)
-//!    are written to the fork after the state loads, so its first block applies them: an undriven live graph forks the
-//!    same, and nothing waits for a block.
+//!    are written to the fork after the state loads, so its first block
+//!    applies them: an undriven live graph forks the same, and nothing waits
+//!    for a block.
 //!
 //!    **Whether a parameter set just before the fork is in the state depends
 //!    on the write reaching the plugin, not on the fork.** The save goes down
