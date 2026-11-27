@@ -451,8 +451,8 @@ impl RenderOutput for ToMemory {
 /// [`Session::bounce`].
 ///
 /// ```no_run
-/// # use tutti_session::{Bounce, Range, Session, ToFile};
-/// # use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm};
+/// # use tutti_session::{Bounce, Range, Session};
+/// # use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm, ToFile};
 /// # use tutti_graph::NodeKey;
 /// # use tutti_units::Beat;
 /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
@@ -460,8 +460,8 @@ impl RenderOutput for ToMemory {
 ///     Bounce::new()
 ///         .range(Range::Beats(Beat::new(0.0), Beat::new(16.0)))
 ///         .main_output(ToFile::new(
+///             "out/main_output.wav",
 ///             Encoding::new(Format::Wav(Pcm::Int(IntPcm::new(IntDepth::Int24)))),
-///             tutti_codec::ToFile::new("out/main_output.wav"),
 ///         ))
 ///         .stem(drums, "out/drums.wav"),
 /// )?;
