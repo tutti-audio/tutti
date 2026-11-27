@@ -67,7 +67,12 @@ pub fn write<S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
 }
 
 fn write_in<F: FftFloat, S: Sample>(wave: &Wave<S>, to: &ToFile) -> Result<Landed> {
-    let mut chain = Chain::<F>::new(to, &wave.channel_set(), wave.sample_rate(), wave.len())?;
+    let mut chain = Chain::<F>::new(
+        to,
+        &wave.channel_set(),
+        wave.sample_rate(),
+        Some(wave.len()),
+    )?;
     feed(wave, |block| chain.block(block))?;
     chain.finalize().map_err(Kept::discard)?.commit()
 }
@@ -114,7 +119,7 @@ fn encode_in<F: FftFloat, S: Sample>(wave: &Wave<S>, encoding: &Encoding) -> Res
         &source,
         encoding.rate(rate),
     );
-    let options = options_of(&spec, rate, wave.len());
+    let options = options_of(&spec, rate, Some(wave.len()));
     let options = match encoding.seed() {
         Some(seed) => options.dither_seed(seed),
         None => options,
