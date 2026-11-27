@@ -27,9 +27,9 @@ pub struct Connection {
     session: MidiSession,
     connection: MidiEndpointConnection,
     clock: Clock,
-    /// The token of the registered message handler.
     /// The connection's id, which the session disconnects it by.
     id: windows_core::GUID,
+    /// The token of the registered message handler.
     token: i64,
     closed: AtomicBool,
 }
@@ -55,7 +55,9 @@ impl Connection {
         .ok_or(Error::Refused {
             call: "CreateEndpointConnection",
         })?;
-        // The id is read once, so that closing never has a call to fail.
+        // The id is read once, so that closing never has a call to fail. A failure here leaves
+        // the connection the session made registered with it until the session closes: with no
+        // id there is nothing to disconnect it by.
         let source: IMidiEndpointConnectionSource = windows_core::Interface::cast(&connection)
             .map_err(super::error::call("QueryInterface"))?;
         let id = call!("ConnectionId", source, ConnectionId() -> windows_core::GUID)?;
@@ -118,9 +120,11 @@ impl Connection {
         }
         let timestamp = self.clock.timestamp(at)?;
         let words = ump.words();
-        // `Ump::words` is one to four words, so the count fits a `u8`; the saturation is the
-        // count the service refuses, never one that is sent short.
+        // `Ump::words` is one to four words, so both counts fit. Only the word count saturates,
+        // to a count the service refuses; the array length is the slice's own, so the service
+        // never reads past it (and a length that did not fit would send none).
         let count = u8::try_from(words.len()).unwrap_or(u8::MAX);
+        let len = u32::try_from(words.len()).unwrap_or(0);
         let result = call!(
             "SendSingleMessageWordArray",
             self.connection,
@@ -128,7 +132,7 @@ impl Connection {
                 timestamp,
                 0,
                 count,
-                u32::from(count),
+                len,
                 words.as_ptr()
             ) -> MidiSendMessageResults
         )?;

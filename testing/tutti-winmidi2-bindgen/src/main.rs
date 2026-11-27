@@ -20,25 +20,83 @@ const FILTER: &[&str] = &[
     "Windows.Foundation.TypedEventHandler",
 ];
 
+/// The vtable members the safe face calls (`os/`), by name. A member the generator leaves out
+/// because a type it needs is not in [`FILTER`] has no `pub` field, so a filter that lost a
+/// type fails here and not in the safe face's build.
+const NEEDED: &[&str] = &[
+    "EnsureServiceAvailable",
+    "TimestampFrequency",
+    "TimestampConstantSendImmediately",
+    "Create",
+    "CreateEndpointConnection",
+    "DisconnectEndpointConnection",
+    "Open",
+    "ConnectionId",
+    "SendSingleMessageWordArray",
+    "MessageReceived",
+    "RemoveMessageReceived",
+    "Timestamp",
+    "FillWordArray",
+    "EndpointDeviceId",
+    "Name",
+    "FindAll3",
+    "DiagnosticsLoopbackAEndpointDeviceId",
+    "DiagnosticsLoopbackBEndpointDeviceId",
+    "Close",
+];
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (Some(winmd), Some(out), None) = (args.next(), args.next(), args.next()) else {
         eprintln!("usage: tutti-winmidi2-bindgen <Windows.Devices.Midi2.winmd> <out.rs>");
         return ExitCode::from(2);
     };
+    // A stale file is not what a failed run leaves behind.
+    if let Err(e) = std::fs::remove_file(&out)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("{out}: {e}");
+        return ExitCode::FAILURE;
+    }
     let mut bindgen = vec!["--in".to_owned(), "default".to_owned(), winmd];
     bindgen.extend(["--out".to_owned(), out.clone(), "--filter".to_owned()]);
     bindgen.extend(FILTER.iter().map(|s| (*s).to_owned()));
+    // The generator panics on an error; what it returns is the methods it skipped for a type
+    // the filter lacks, which `check` holds to the members the safe face needs.
     eprintln!("{}", windows_bindgen::bindgen(bindgen));
     let written = std::fs::read_to_string(&out)
+        .map_err(|e| e.to_string())
         .map(|text| strip_no_throw_members(&text))
-        .and_then(|text| std::fs::write(&out, text));
+        .and_then(|text| check(&text).map(|()| text))
+        .and_then(|text| std::fs::write(&out, text).map_err(|e| e.to_string()));
     match written {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            // No output is better than output the safe face cannot use.
+            let _ = std::fs::remove_file(&out);
             eprintln!("{out}: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Holds the stripped output to what the safe face relies on: no member that discards its
+/// `HRESULT` is left, and every member of [`NEEDED`] has its vtable field.
+fn check(text: &str) -> Result<(), String> {
+    if text.contains("hresult__") {
+        return Err("a member that discards its HRESULT is left in the output".to_owned());
+    }
+    let missing: Vec<&str> = NEEDED
+        .iter()
+        .copied()
+        .filter(|name| !text.contains(&format!("pub {name}:")))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "no vtable member for {missing:?}: a type they need is not in the filter"
+        ))
     }
 }
 
@@ -85,7 +143,7 @@ fn strip_no_throw_members(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_no_throw_members;
+    use super::{check, strip_no_throw_members};
 
     const CLASS: &str = "\
 impl MidiApi {
@@ -138,5 +196,20 @@ impl MidiApi {
 }
 ";
         assert_eq!(out, expected);
+    }
+
+    /// **The output is refused when a member that discards its `HRESULT` is left, and when a
+    /// needed vtable member is not there**; it passes with neither.
+    #[test]
+    fn the_output_is_held_to_what_the_safe_face_needs() {
+        let all: String = super::NEEDED
+            .iter()
+            .map(|name| format!("pub {name}: unsafe extern \"system\" fn(),\n"))
+            .collect();
+        assert_eq!(check(&all), Ok(()));
+        let left = format!("{all}let hresult__ = f();\n");
+        assert!(check(&left).unwrap_err().contains("discards its HRESULT"));
+        let lost = all.replace("pub Open:", "Open: usize,\n//");
+        assert!(check(&lost).unwrap_err().contains("\"Open\""));
     }
 }

@@ -48,7 +48,7 @@ macro_rules! call {
         };
         code.ok()
             .map(|()| out)
-            .map_err(super::error::call($name))
+            .map_err($crate::os::error::call($name))
     }};
     ($name:literal, $interface:expr, $method:ident($($arg:expr),*)) => {{
         let interface = &$interface;
@@ -59,7 +59,7 @@ macro_rules! call {
                 $($arg),*
             )
         };
-        code.ok().map_err(super::error::call($name))
+        code.ok().map_err($crate::os::error::call($name))
     }};
 }
 

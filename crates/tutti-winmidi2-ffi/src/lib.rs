@@ -18,7 +18,6 @@
 //! | `endpoints`, `Endpoint`, `Loopback` | the endpoints the service lists now with their device id and name, and which of the two diagnostic loopback endpoints (A, B) one is |
 //! | `Session` | the app's session with the service, closed by `close` or by dropping it |
 //! | `Connection` | an open connection to an endpoint, made by `Session::connect`: `send` a `Ump` now or at an `Instant`, and a callback that receives each `Ump` with its `Instant` on the service's thread behind a panic guard; `close`, or dropping it, removes the handler and disconnects it, and a closed connection refuses a send with `Error::Closed` |
-//! | `Clock` | the service's clock (`MidiClock`): `now` as an `Instant` |
 //! | `Error` | the named causes: the API missing, the service unavailable, a call that failed or was refused, a closed connection, a full buffer, a time that is not a timestamp |
 //!
 //! The bindings in `bindings.rs` are generated from the API's metadata by
@@ -37,7 +36,7 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 #![allow(
     clippy::disallowed_types,
-    reason = "layer 0, below tutti-rt: the service calls a connection's handler on its own thread, and the lock is that handler's"
+    reason = "the service calls a connection's handler on its own thread, and the lock is that handler's"
 )]
 
 // The generated bindings of `Windows.Devices.Midi2`.

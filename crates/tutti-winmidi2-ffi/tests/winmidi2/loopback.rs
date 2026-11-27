@@ -7,7 +7,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_ump::Ump;
 use tutti_winmidi2_ffi::{
-    Clock, Connection, Endpoint, Error, Loopback, Session, endpoints, ensure_service_available,
+    Connection, Endpoint, Error, Loopback, Session, endpoints, ensure_service_available,
 };
 
 /// Only a hang guard: it bounds a wait for a message that never comes, and is not a speed.
@@ -171,16 +171,35 @@ fn the_service_lists_each_loopback_endpoint_once() {
     }
 }
 
-/// **The service's clock is the clock `Instant` reads**: a reading lies between two reads
-/// of `Instant::now`.
+/// **A handler that panics on its first message does not stop the connection**: the panic is
+/// caught, and the second message sent on the same connection still reaches the handler.
 #[test]
-fn the_services_clock_is_the_instant_clock() {
-    let clock = Clock::new().expect("the API's clock");
-    let before = Instant::now();
-    let now = clock.now().expect("a reading");
-    let after = Instant::now();
-    assert!(
-        before <= now && now <= after,
-        "{before:?} {now:?} {after:?}"
+fn a_panicking_handler_does_not_stop_later_messages() {
+    let (send_to, receive_on) = (loopback(Loopback::A), loopback(Loopback::B));
+    let session = Session::create("tutti-winmidi2-ffi panic guard").expect("a session");
+    let (tx, received) = channel();
+    let mut first = true;
+    let _receiver = session
+        .connect(&receive_on.id, move |_, ump| {
+            assert!(
+                !std::mem::take(&mut first),
+                "the handler's first message panics"
+            );
+            let _ = tx.send(ump);
+        })
+        .expect("a connection to the receiving loopback endpoint");
+    let sender = session
+        .connect(&send_to.id, |_, _| {})
+        .expect("a connection to the sending loopback endpoint");
+    let (one, two) = (
+        Ump([0x4090_3C00, 0x8000_0000, 0, 0]),
+        Ump([0x4090_3E00, 0x8000_0001, 0, 0]),
     );
+    sender
+        .send(None, &one)
+        .expect("the service takes the message");
+    sender
+        .send(None, &two)
+        .expect("the service takes the message");
+    assert_eq!(received.recv_timeout(HANG_GUARD), Ok(two));
 }

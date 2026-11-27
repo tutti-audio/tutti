@@ -263,11 +263,16 @@ jobs:
           Invoke-WebRequest -Uri $env:PACKAGE_URL -OutFile $package
           $actual = (Get-FileHash -Algorithm SHA256 -Path $package).Hash
           if ($actual -ne $env:PACKAGE_SHA256) { throw "the package hashes to $actual" }
-          $files = Join-Path $env:RUNNER_TEMP 'midi2'
+          # Only the arm64 DLL, out of the 103 MB package.
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          [System.IO.Compression.ZipFile]::ExtractToDirectory($package, $files)
-          # Nextest runs the test binaries from `target/debug/deps`; the loader looks beside the executable.
-          Copy-Item (Join-Path $files 'runtimes/win-arm64/native/Windows.Devices.Midi2.dll') target/debug/deps/
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($package)
+          try {
+            $entry = $zip.GetEntry('runtimes/win-arm64/native/Windows.Devices.Midi2.dll')
+            if (-not $entry) { throw 'the package has no arm64 DLL' }
+            # Nextest runs the test binaries from `target/debug/deps`; the loader looks beside the executable.
+            $dll = Join-Path (Get-Location) 'target/debug/deps/Windows.Devices.Midi2.dll'
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dll, $true)
+          } finally { $zip.Dispose() }
       - name: Tests
         run: cargo nextest run --locked -p tutti-winmidi2-ffi --features services-tests
 
@@ -644,7 +649,7 @@ jobs:
           else
             echo "deps=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$changed" | grep -qE '^(crates/tutti-winmidi2-ffi/|Cargo\.lock$|\.github/workflows/ci\.yml$)'; then
+          if echo "$changed" | grep -qE '^(crates/(tutti-winmidi2-ffi|tutti-ump|tutti-platform)/|Cargo\.lock$|\.github/workflows/ci\.yml$)'; then
             echo "midi_services=true" >> "$GITHUB_OUTPUT"
           else
             echo "midi_services=false" >> "$GITHUB_OUTPUT"

@@ -8,7 +8,7 @@ mod endpoint;
 mod error;
 mod session;
 
-pub use clock::Clock;
+use clock::Clock;
 pub use connection::Connection;
 pub use endpoint::{Endpoint, Loopback, endpoints, ensure_service_available};
 pub use error::Error;

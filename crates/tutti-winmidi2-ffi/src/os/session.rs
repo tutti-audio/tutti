@@ -47,7 +47,9 @@ impl Session {
     /// `on_message` receives each message the endpoint sends: its time on the service's
     /// clock as an `Instant`, `None` where the timestamp is not one, and the message. It
     /// runs on a thread of the service, one message at a time, and a panic in it is
-    /// caught and dropped.
+    /// caught and dropped. `on_message` is dropped on whichever thread releases the service's
+    /// handler last, which is a thread of the service when the connection closes while a
+    /// message is delivered.
     ///
     /// # Errors
     ///
