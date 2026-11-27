@@ -1864,7 +1864,7 @@ where
 
         let target = main_output.target(MainShape {
             channels: ChannelLayout::clamped(outputs),
-            normalize: normalize.clone().map(Gain::Own),
+            normalize: normalize.map(Gain::Own),
         });
         // The stems: what each taps and where it goes, refused by name before
         // anything is forked. The main output is output 0, which `Shared` reads.
