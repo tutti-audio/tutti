@@ -86,7 +86,7 @@ impl TempoWalk {
                 let cell = view.chord_cell(Frame::new(f), CELL_GRID);
                 (cell.tempo, Some(cell.beat))
             }
-            Err(_) => (view.map().points()[0].tempo, None),
+            Err(_) => (view.map().tempo_at(Beat::new(0.0)), None),
         };
         if tempo == clock.tempo() {
             return false;

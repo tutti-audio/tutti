@@ -158,7 +158,7 @@ impl MidiPart {
     ) -> Followed {
         let follow = FollowCx {
             settings: transport.settings(),
-            meter: transport.settings().project_meter(),
+            meter: transport.settings().project_meter().clone(),
             bases: &transport.bases,
             playhead,
         };

@@ -6,7 +6,7 @@
 
 use std::any::Any;
 use std::io::{Read, Seek, SeekFrom};
-use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
+use tutti_buffers::{BufferError, I24, Planes, Sample, SampleFormat, Wave};
 use tutti_platform::Asset;
 use tutti_rt::Exclusive;
 use tutti_units::{SampleRate, Samples};
@@ -141,7 +141,7 @@ impl<S: Sample> PacketDecoder<S> {
         self.primed = false;
     }
 
-    /// Decodes one packet into [`planes`](Self::planes), reusing the vectors
+    /// Decodes one packet into [`view`](Self::view), reusing the vectors
     /// across calls to avoid per-packet allocation. Returns the frame count,
     /// which every plane holds. This is the single decode-a-packet primitive
     /// shared by the whole-file load and [`FileIn`](crate::FileIn): given a
@@ -158,9 +158,18 @@ impl<S: Sample> PacketDecoder<S> {
         Ok(decoded.frames())
     }
 
-    /// The frames of the last packet, one `Vec` per channel.
-    pub(super) fn planes(&self) -> &[Vec<S>] {
-        &self.planes
+    /// The channel count of the last packet.
+    pub(super) fn width(&self) -> usize {
+        self.planes.len()
+    }
+
+    /// The frames of the last packet, one plane per channel.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError`] when the planes are not all one length.
+    pub(super) fn view(&self) -> Result<Planes<'_, S>, BufferError> {
+        Planes::from_vecs(&self.planes)
     }
 
     /// The format of the last decoded packet.
@@ -501,7 +510,8 @@ impl<S: Sample> WaveDecode<S> {
 
             // A primed-over packet holds no frames and so no planes.
             if buffer_len > 0 {
-                Planes::from_vecs(self.decoder.planes())
+                self.decoder
+                    .view()
                     .and_then(|planes| wave_output.append_planes(planes))
                     .map_err(|e| DecodeError::Malformed(e.to_string().into()))?;
             }

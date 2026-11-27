@@ -107,10 +107,10 @@ struct Open {
 }
 
 /// What a predicted change is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
-    /// The map point at this index of `TempoMap::points`.
-    Point(usize),
+    /// The map point at this beat.
+    Point(Beat),
     Wrap,
 }
 
@@ -140,13 +140,11 @@ impl Stretch {
             // onto the start was taken into it ([`Snapshot::settle`]).
             usize::try_from(view.frames_between(start, beat).max(1)).ok()
         };
-        let points = view.map().points();
-        let past = self.beat.get().max(self.told.get());
-        let next = points.partition_point(|p| p.beat.get() <= past);
-        let point = points
-            .get(next)
-            .and_then(|p| frames_to(p.beat, view))
-            .map(|f| (self.frame + f, Kind::Point(next)));
+        let past = Beat::new(self.beat.get().max(self.told.get()));
+        let point = view
+            .map()
+            .point_after(past)
+            .and_then(|beat| frames_to(beat, view).map(|f| (self.frame + f, Kind::Point(beat))));
         let wrap = self
             .looping
             .filter(|l| l.end().get() > self.beat.get())
@@ -312,10 +310,8 @@ impl TransportWalk {
             let mut s = Snapshot::at(call.cx, offset, call.steady.at(p), project, call.block_ns);
             let settled = s.settle(view);
             let mut next = Stretch::of(&s, settled, frame);
-            if let Source::Predicted(Kind::Point(i)) = source
-                && let Some(point) = view.map().points().get(i)
-            {
-                next.told = point.beat;
+            if let Source::Predicted(Kind::Point(beat)) = source {
+                next.told = beat;
             }
             if changes.is_full() {
                 dropped += 1;

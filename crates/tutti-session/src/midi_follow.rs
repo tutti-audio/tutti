@@ -398,7 +398,7 @@ pub(crate) fn ended(
 /// What a `Poll` phase reads besides the follower.
 pub(crate) struct FollowCx<'a> {
     pub(crate) settings: &'a TransportSettings,
-    pub(crate) meter: &'a ProjectMeter,
+    pub(crate) meter: ProjectMeter,
     /// The base the live steps are laid over.
     pub(crate) bases: &'a Bases,
     pub(crate) playhead: Playhead,
@@ -433,7 +433,7 @@ impl FollowCx<'_> {
         cause: UnfollowCause,
         out: &mut Vec<crate::SessionEvent>,
     ) {
-        out.push(ended(self.bases, self.settings, self.meter, follower, cause).into());
+        out.push(ended(self.bases, self.settings, &self.meter, follower, cause).into());
     }
 
     /// Places what was heard at the next block start and publishes the new

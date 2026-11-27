@@ -415,6 +415,22 @@ impl BarPosition {
     pub fn is_downbeat(&self) -> bool {
         self.beat == BeatsPerBar::of(1) && self.fraction.get().abs() < DOWNBEAT_EPSILON
     }
+
+    /// The timeline position of the onset of the notated beat this position
+    /// is in.
+    #[inline]
+    #[must_use]
+    pub fn beat_onset(&self) -> Beat {
+        self.bar_start + self.signature.beat_length() * (self.beat.get() - 1) as f64
+    }
+
+    /// The length of a notated beat under the signature in force here, in
+    /// quarter notes.
+    #[inline]
+    #[must_use]
+    pub fn beat_length(&self) -> BeatDuration {
+        self.signature.beat_length()
+    }
 }
 
 /// How close to a beat's onset counts as being *on* it.
@@ -771,6 +787,16 @@ impl MeterMap {
         }
         let kept = self.changes.iter().filter(|c| c.beat < at).copied();
         Some(Self::new(kept.chain([MeterChange::new(at, signature)])))
+    }
+
+    /// Returns the beat of the first change after `beat`, or `None` when the
+    /// signature in force at `beat` stays for good.
+    #[inline]
+    #[must_use]
+    pub fn change_after(&self, beat: Beat) -> Option<Beat> {
+        self.changes
+            .get(self.changes.partition_point(|c| c.beat <= beat))
+            .map(|c| c.beat)
     }
 
     /// Returns the changes in force, in timeline order. Never empty.

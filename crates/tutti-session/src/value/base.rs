@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tutti_music::MeterMap;
 use tutti_rt::Mutex;
-use tutti_tempo::{TempoMap, TempoPoint};
+use tutti_tempo::TempoMap;
 use tutti_timeline::TransportSettings;
 use tutti_units::{Beat, Bpm};
 
@@ -73,13 +73,9 @@ impl Steps for TempoMap {
         let cut = base
             .stepped(first)
             .map_or_else(|| Arc::clone(base), Arc::new);
-        let points = cut.points().iter().copied().chain(
-            rest.iter()
-                .map(|&(beat, tempo)| TempoPoint::step(beat, tempo)),
-        );
         // The builder refuses only a tempo whose segment duration overflows an
         // `f64`; a followed `Bpm` is far above that, so a refusal keeps the cut.
-        Self::new(points).map_or(cut, Arc::new)
+        cut.with_steps(rest.iter().copied()).map_or(cut, Arc::new)
     }
 
     fn stepped(&self, (beat, tempo): (Beat, Bpm)) -> Option<Self> {
@@ -255,7 +251,7 @@ impl Bases {
     pub(crate) fn of(settings: &TransportSettings) -> Self {
         Self {
             tempo: Base::new(settings.tempo_map()),
-            meter: Base::new(settings.project_meter().current()),
+            meter: Base::new(settings.meter_map()),
         }
     }
 
@@ -279,6 +275,7 @@ impl Bases {
 #[cfg(all(test, feature = "midi"))]
 mod tests {
     use super::*;
+    use tutti_tempo::TempoPoint;
     use tutti_units::Bpm;
 
     fn bpm(value: f64) -> Bpm {

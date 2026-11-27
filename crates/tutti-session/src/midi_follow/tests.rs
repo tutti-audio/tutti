@@ -176,7 +176,7 @@ fn a_tempo_step_lands_on_the_beat_at_its_placed_frame() {
     let bases = Bases::of(&settings);
     let cx = FollowCx {
         settings: &settings,
-        meter: &meter,
+        meter: meter.clone(),
         bases: &bases,
         playhead: Playhead::default(),
     };
