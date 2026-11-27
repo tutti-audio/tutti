@@ -71,7 +71,6 @@ fn edge::Pull::ready
 fn edge::Pull::stop
 fn fold::Fold::between
 fn fold::Fold::by_index
-fn fold::Fold::cast
 fn fold::Fold::contributions
 fn fold::Fold::dst_layout
 fn fold::Fold::fold
@@ -80,6 +79,7 @@ fn fold::Fold::fold_planar_channel
 fn fold::Fold::fold_planar_to_interleaved
 fn fold::Fold::frame
 fn fold::Fold::is_identity
+fn fold::Fold::narrowed
 fn fold::Fold::select
 fn fold::Fold::spec
 fn fold::Fold::src_layout

@@ -645,7 +645,7 @@ impl Fold<f64> {
     /// The same fold with its gains in the float `G`, each rounded once
     /// ([`from_design`](tutti_units::Real::from_design)); the routing is unchanged.
     #[must_use]
-    pub fn cast<G: Float>(&self) -> Fold<G> {
+    pub fn narrowed<G: Float>(&self) -> Fold<G> {
         let gain = G::from_design;
         let expr = |e: &Expr<f64>| match e {
             Expr::Zero => Expr::Zero,

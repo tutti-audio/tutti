@@ -238,7 +238,7 @@ enum Paths<S: Sample> {
     /// [`IrLayout::PerChannel`]: the width, or one shared response.
     PerChannel(Shared<ImpulseResponses<S>>),
     /// [`IrLayout::Folded`]: the responses and the fold of the input bus to mono, in `f64`
-    /// and cast to the graph's float when the node is built.
+    /// and narrowed to the graph's float when the node is built.
     Folded {
         irs: Shared<ImpulseResponses<S>>,
         fold: Fold<f64>,
@@ -427,7 +427,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let engine = match paths {
             Paths::PerChannel(irs) => Engine::PerChannel(per_channel(irs)),
             Paths::Folded { irs, fold } => Engine::Folded {
-                fold: fold.cast(),
+                fold: fold.narrowed(),
                 convolvers: per_channel(irs),
                 // Sized before `prepare` so an unprepared node renders in pieces rather than
                 // index an empty scratch; `prepare` resizes it to the graph's block.
