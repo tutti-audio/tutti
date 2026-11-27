@@ -83,10 +83,11 @@ pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
     .ok_or(Error::Refused { call: "FindAll" })?;
     // Device interface paths compare without regard to case.
     let is = |id: &str, loopback: &HSTRING| id.eq_ignore_ascii_case(&loopback.to_string());
-    Ok(list
-        .into_iter()
+    list.into_iter()
         .map(|endpoint| {
-            let id = endpoint.EndpointDeviceId().to_string();
+            let id =
+                call!("EndpointDeviceId", endpoint, EndpointDeviceId() -> HSTRING)?.to_string();
+            let name = call!("Name", endpoint, Name() -> HSTRING)?.to_string();
             let loopback = if is(&id, &loopback_a) {
                 Some(Loopback::A)
             } else if is(&id, &loopback_b) {
@@ -94,11 +95,7 @@ pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
             } else {
                 None
             };
-            Endpoint {
-                name: endpoint.Name().to_string(),
-                id,
-                loopback,
-            }
+            Ok(Endpoint { id, name, loopback })
         })
-        .collect())
+        .collect()
 }

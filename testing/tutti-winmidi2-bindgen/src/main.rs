@@ -31,7 +31,7 @@ fn main() -> ExitCode {
     bindgen.extend(FILTER.iter().map(|s| (*s).to_owned()));
     eprintln!("{}", windows_bindgen::bindgen(bindgen));
     let written = std::fs::read_to_string(&out)
-        .map(|text| strip_static_wrappers(&text))
+        .map(|text| strip_no_throw_members(&text))
         .and_then(|text| std::fs::write(&out, text));
     match written {
         Ok(()) => ExitCode::SUCCESS,
@@ -42,17 +42,19 @@ fn main() -> ExitCode {
     }
 }
 
-/// Removes the static members of a runtime class that the generator writes wrongly.
+/// Removes the members of the generated types that the generator writes for a member the
+/// winmd marks as not throwing, statics and instance members alike.
 ///
-/// A static the winmd marks as not throwing (`MidiApi::EnsureServiceAvailable`,
-/// `MidiSession::Create`) is written as a function that returns the bare value around a
-/// helper that returns a `Result`, which does not compile. The `I*Statics` interface each
-/// calls through has the right vtable, and the safe face calls the members through it.
-/// A static that returns a `Result` is written right and stays.
+/// Such a member discards its `HRESULT` behind a `debug_assert!` and returns a bare value: a
+/// failing call panics a debug build (inside a `Drop`, an abort) and reads zeroed output in a
+/// release build. A static is also written wrongly (its helper returns a `Result` around the
+/// bare value) and does not compile. The safe face calls every such member through its
+/// interface's vtable, which turns a failure into an error. A member that returns a `Result`
+/// is written right and stays.
 ///
 /// The output is rustfmt's: a member starts at a line `pub fn` and ends at the first
 /// later line that is a `}` at its indent.
-fn strip_static_wrappers(text: &str) -> String {
+fn strip_no_throw_members(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut kept = String::with_capacity(text.len());
     let mut i = 0;
@@ -66,18 +68,10 @@ fn strip_static_wrappers(text: &str) -> String {
             None
         };
         if let Some(end) = end {
-            let body = &lines[i..=end];
-            let signature_end = body
+            let discards_hresult = lines[i..=end]
                 .iter()
-                .position(|l| l.trim_end().ends_with('{'))
-                .unwrap_or(0);
-            let calls_statics = body.iter().any(|l| {
-                l.trim_start().strip_prefix("Self::I").is_some_and(|rest| {
-                    rest.contains("Statics") && rest.ends_with("(|this| unsafe {")
-                })
-            });
-            let returns_result = body[..=signature_end].iter().any(|l| l.contains("Result<"));
-            if calls_statics && !returns_result {
+                .any(|l| l.trim() == "debug_assert!(hresult__.0 == 0);");
+            if discards_hresult {
                 i = end + 1;
                 continue;
             }
@@ -91,13 +85,14 @@ fn strip_static_wrappers(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_static_wrappers;
+    use super::strip_no_throw_members;
 
     const CLASS: &str = "\
 impl MidiApi {
     pub fn EnsureServiceAvailable() -> bool {
         Self::IMidiApiStatics(|this| unsafe {
-            0
+            debug_assert!(hresult__.0 == 0);
+            result__
         })
     }
     pub fn Throws(
@@ -107,25 +102,41 @@ impl MidiApi {
             0
         })
     }
-    pub fn Instance(&self) -> bool {
+    pub fn Open(&self) -> bool {
         let this = self;
-        unsafe { 0 }
+        unsafe {
+            let hresult__ = f();
+            debug_assert!(hresult__.0 == 0);
+            result__
+        }
+    }
+    pub fn Close(&self) -> windows_core::Result<()> {
+        unsafe { f().ok() }
     }
 }
 ";
 
-    /// **A static that returns a bare value is dropped; a static that returns a `Result`, an
-    /// instance member and everything around them stay**, so the output is the input less
-    /// one member.
+    /// **A member that discards its `HRESULT`, static or instance, is dropped; a member that
+    /// returns a `Result` and everything around them stay**, so the output is the input less
+    /// the two members.
     #[test]
-    fn only_the_bare_value_statics_are_removed() {
-        let out = strip_static_wrappers(CLASS);
-        assert!(!out.contains("EnsureServiceAvailable"));
-        let expected = CLASS.replacen(
-            "    pub fn EnsureServiceAvailable() -> bool {\n        Self::IMidiApiStatics(|this| unsafe {\n            0\n        })\n    }\n",
-            "",
-            1,
-        );
+    fn only_the_members_that_discard_their_hresult_are_removed() {
+        let out = strip_no_throw_members(CLASS);
+        assert!(!out.contains("EnsureServiceAvailable") && !out.contains("fn Open"));
+        let expected = "\
+impl MidiApi {
+    pub fn Throws(
+        a: u32,
+    ) -> windows_core::Result<u32> {
+        Self::IMidiApiStatics(|this| unsafe {
+            0
+        })
+    }
+    pub fn Close(&self) -> windows_core::Result<()> {
+        unsafe { f().ok() }
+    }
+}
+";
         assert_eq!(out, expected);
     }
 }

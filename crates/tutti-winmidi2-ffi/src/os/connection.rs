@@ -8,7 +8,9 @@ use tutti_platform::Instant;
 use tutti_ump::Ump;
 use windows_core::{HSTRING, Ref};
 
+use super::call::{abi, call};
 use super::{Clock, Error};
+use crate::bindings::Windows::Devices::Midi2::IMidiEndpointConnectionSource;
 use crate::bindings::Windows::Devices::Midi2::{
     IMidiMessageReceivedEventSource, MidiEndpointConnection, MidiMessageReceivedEventArgs,
     MidiSendMessageResults, MidiSession,
@@ -26,6 +28,8 @@ pub struct Connection {
     connection: MidiEndpointConnection,
     clock: Clock,
     /// The token of the registered message handler.
+    /// The connection's id, which the session disconnects it by.
+    id: windows_core::GUID,
     token: i64,
     closed: AtomicBool,
 }
@@ -42,11 +46,19 @@ impl Connection {
     where
         F: FnMut(Option<Instant>, Ump) + Send + 'static,
     {
-        let connection = session
-            .CreateEndpointConnection(&HSTRING::from(endpoint_id))
-            .ok_or(Error::Refused {
-                call: "CreateEndpointConnection",
-            })?;
+        let endpoint_id = HSTRING::from(endpoint_id);
+        let connection = call!(
+            "CreateEndpointConnection",
+            *session,
+            CreateEndpointConnection(abi(&endpoint_id)) -> Option<MidiEndpointConnection>
+        )?
+        .ok_or(Error::Refused {
+            call: "CreateEndpointConnection",
+        })?;
+        // The id is read once, so that closing never has a call to fail.
+        let source: IMidiEndpointConnectionSource = windows_core::Interface::cast(&connection)
+            .map_err(super::error::call("QueryInterface"))?;
+        let id = call!("ConnectionId", source, ConnectionId() -> windows_core::GUID)?;
         let handler = Mutex::new(on_message);
         let received = TypedEventHandler::<
             IMidiMessageReceivedEventSource,
@@ -66,7 +78,12 @@ impl Connection {
         let token = match connection.MessageReceived(&received) {
             Ok(token) => token,
             Err(e) => {
-                session.DisconnectEndpointConnection(connection.ConnectionId());
+                // Best effort: the registration's error is the one to report.
+                let _ = call!(
+                    "DisconnectEndpointConnection",
+                    *session,
+                    DisconnectEndpointConnection(id)
+                );
                 return Err(super::error::call("MessageReceived")(e));
             }
         };
@@ -75,10 +92,12 @@ impl Connection {
             session: session.clone(),
             connection,
             clock,
+            id,
             token,
             closed: AtomicBool::new(false),
         };
-        if this.connection.Open() {
+        // A failure returns with `this` dropped, which undoes the registration.
+        if call!("Open", this.connection, Open() -> bool)? {
             Ok(this)
         } else {
             Err(Error::Refused { call: "Open" })
@@ -99,11 +118,20 @@ impl Connection {
         }
         let timestamp = self.clock.timestamp(at)?;
         let words = ump.words();
-        // A UMP holds one to four words; a count the service refuses answers as a refusal.
+        // `Ump::words` is one to four words, so the count fits a `u8`; the saturation is the
+        // count the service refuses, never one that is sent short.
         let count = u8::try_from(words.len()).unwrap_or(u8::MAX);
-        let result = self
-            .connection
-            .SendSingleMessageWordArray(timestamp, 0, count, words);
+        let result = call!(
+            "SendSingleMessageWordArray",
+            self.connection,
+            SendSingleMessageWordArray(
+                timestamp,
+                0,
+                count,
+                u32::from(count),
+                words.as_ptr()
+            ) -> MidiSendMessageResults
+        )?;
         if result.contains(MidiSendMessageResults::Succeeded) {
             Ok(())
         } else if result.contains(MidiSendMessageResults::EndpointConnectionClosedOrInvalid) {
@@ -123,11 +151,16 @@ impl Connection {
         if self.closed.swap(true, Ordering::AcqRel) {
             return;
         }
-        // A failed removal leaves the handler registered until the connection is released;
-        // it then still receives nothing once the session disconnects.
+        // Failures are dropped on purpose. `close` runs from `Drop`, possibly while unwinding and
+        // possibly after the session closed or the service went away, where there is nothing
+        // left to undo and a failure must neither panic nor be reported. A handler whose removal
+        // failed receives nothing once the session has disconnected the connection.
         let _ = self.connection.RemoveMessageReceived(self.token);
-        self.session
-            .DisconnectEndpointConnection(self.connection.ConnectionId());
+        let _ = call!(
+            "DisconnectEndpointConnection",
+            self.session,
+            DisconnectEndpointConnection(self.id)
+        );
     }
 }
 
@@ -144,12 +177,22 @@ fn deliver<F: FnMut(Option<Instant>, Ump)>(
     args: &MidiMessageReceivedEventArgs,
 ) {
     let mut words = [0u32; 4];
-    let count = usize::from(args.FillWordArray(0, &mut words));
-    // A count that is not a whole message is dropped: the service sends whole messages.
-    let Some(ump) = words.get(..count).and_then(Ump::from_words) else {
+    // A failed read has no caller to report to: the message is dropped, as is a count that is
+    // not a whole message (the service sends whole messages).
+    let Ok(count) = call!(
+        "FillWordArray",
+        *args,
+        FillWordArray(0, 4, words.as_mut_ptr()) -> u8
+    ) else {
         return;
     };
-    let at = clock.instant(args.Timestamp());
+    let Some(ump) = words.get(..usize::from(count)).and_then(Ump::from_words) else {
+        return;
+    };
+    let Ok(ticks) = call!("Timestamp", *args, Timestamp() -> u64) else {
+        return;
+    };
+    let at = clock.instant(ticks);
     let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
     (*handler)(at, ump);
 }
