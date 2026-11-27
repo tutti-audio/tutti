@@ -81,7 +81,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 
 /// The planes `bounce` renders, run on this thread.
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    bounced!(session, bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
         .into_planes()
@@ -93,7 +93,7 @@ fn render_stems(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, ToMemory>,
 ) -> Vec<Vec<Vec<f32>>> {
-    let (_, mut done, keys) = bounced!(session, bounce)
+    let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
     keys.iter()
@@ -113,7 +113,7 @@ fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Ve
 
 /// What the session refuses `bounce` with, started and run on this thread.
 fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> BounceError {
-    match bounced!(session, bounce) {
+    match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!(
             "expected a refusal, the bounce rendered {} stems",
@@ -437,7 +437,7 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
         other => panic!("expected the unpaired refusal, got {other:?}"),
     }
     assert!(
-        bounced!(&mut session, buffers(0.01)).is_ok(),
+        bounced(&mut session, buffers(0.01)).is_ok(),
         "the token is released"
     );
 }

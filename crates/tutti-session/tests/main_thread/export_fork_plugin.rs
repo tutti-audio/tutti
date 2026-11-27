@@ -66,7 +66,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 
 /// The planes `bounce` renders; panics with the refusal otherwise.
 fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    match bounced!(session, bounce) {
+    match bounced(session, bounce) {
         Ok(out) => out.into_main_output().into_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
     }
@@ -75,7 +75,7 @@ fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
 /// The planes of the one stem `bounce` names, in memory, rendered beside the
 /// main output; panics with the refusal otherwise.
 fn stem_planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    match bounced!(session, bounce) {
+    match bounced(session, bounce) {
         Ok(out) => {
             let (_, mut done, keys) = out.into_parts();
             match keys.as_slice() {
@@ -224,7 +224,7 @@ fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
     let (mut session, probe, _env) =
         session_with_probe_at(TAG_PASSTHROUGH, own.clone(), Hosting::OutOfProcess);
     std::fs::remove_file(&own).expect("remove the plugin's file");
-    match bounced!(&mut session, buffers(0.05)) {
+    match bounced(&mut session, buffers(0.05)) {
         Err(BounceError::Fork(tutti_graph::ForkError::Source { key, cause })) => {
             assert_eq!(key, probe, "a plugin file gone since it loaded");
             assert!(
@@ -340,7 +340,7 @@ fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
     let (mut session, probe, mut env) = session_with_probe(TAG_PASSTHROUGH);
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
     env.set("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
-    match bounced!(&mut session, buffers(2.0)) {
+    match bounced(&mut session, buffers(2.0)) {
         Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, .. })) => {
             assert_eq!(key, probe);
             assert_eq!(kind, tutti_graph::ForkFaultKind::Crashed);

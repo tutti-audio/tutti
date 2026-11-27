@@ -44,7 +44,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(tutti_session::BounceTail::None);
-        bounced!(&mut session, bounce).expect("the bounce renders");
+        bounced(&mut session, bounce).expect("the bounce renders");
     });
 
     let warn: Vec<_> = events

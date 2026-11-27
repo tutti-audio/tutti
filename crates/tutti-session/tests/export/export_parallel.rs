@@ -161,7 +161,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     for &stem in stems {
         bounce = bounce.stem_with(Stem::new(named[stem]));
     }
-    let (main_output, mut done, keys) = bounced!(&mut session, bounce).unwrap().into_parts();
+    let (main_output, mut done, keys) = bounced(&mut session, bounce).unwrap().into_parts();
     let targets = std::iter::once(main_output)
         .chain(keys.iter().map(|key| match key {
             StemKey::Buffers(key) => done.take_buffers(key).expect("its own key"),

@@ -231,7 +231,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         .clock(ExportClock::timeline(timeline))
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None);
-    let export = bounced!(&mut s, request)
+    let export = bounced(&mut s, request)
         .expect("the export runs")
         .into_main_output()
         .into_planes();

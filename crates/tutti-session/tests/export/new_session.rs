@@ -23,7 +23,7 @@ fn a_session_from_new_bounces_a_node_and_renders() {
         .graph()
         .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));
     session.graph().connect(node, MainOutput).unwrap().unfaded();
-    let planes = bounced!(
+    let planes = bounced(
         &mut session,
         Bounce::new()
             .main_output(ToMemory::new())

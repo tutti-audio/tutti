@@ -46,7 +46,7 @@ fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
         .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(RATE));
-    bounced!(session, bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
         .into_planes()[0]
@@ -107,7 +107,7 @@ fn a_free_running_voice_rings_out_its_wave() {
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::Graph { cap });
-    let len = bounced!(&mut session, bounce)
+    let len = bounced(&mut session, bounce)
         .expect("renders")
         .into_main_output()
         .into_planes()[0]
@@ -136,7 +136,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
-    let planes = bounced!(&mut session, bounce)
+    let planes = bounced(&mut session, bounce)
         .expect("renders")
         .into_main_output()
         .into_planes();
@@ -172,7 +172,7 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
-    match bounced!(&mut session, bounce) {
+    match bounced(&mut session, bounce) {
         Err(BounceError::Fork(ForkError::Source { key, .. })) => assert_eq!(key, pool.erase()),
         other => panic!(
             "expected the pool's refusal by key, got {:?}",

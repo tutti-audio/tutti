@@ -609,7 +609,7 @@ fn a_bounce_while_following_renders_the_base_tempo() {
     let bounce = Bounce::new()
         .main_output(ToMemory::new())
         .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)));
-    let planes = crate::bounced::bounced!(&mut s, bounce)
+    let planes = crate::bounced::bounced(&mut s, bounce)
         .expect("renders")
         .into_main_output()
         .into_planes();

@@ -199,8 +199,8 @@ pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
     Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency, BounceRendered,
-    BounceTail, Bounced, Bouncing, ExportClock, NoMainOutput, PrepareEdit, PreparedGraph, Range,
-    Stem, StemGain, StemKey,
+    BounceTail, Bounced, Bouncing, Destination, ExportClock, NoMainOutput, PrepareEdit,
+    PreparedGraph, Range, Stem, StemGain, StemKey,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
@@ -211,7 +211,7 @@ pub use clock::{
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "export")]
-pub use destination::{Destination, ToMemory};
+pub use destination::ToMemory;
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,

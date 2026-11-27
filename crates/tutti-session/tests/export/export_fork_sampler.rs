@@ -52,7 +52,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, ToM
 }
 
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
-    bounced!(session, bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
         .into_planes()
@@ -67,7 +67,7 @@ fn render_stem(
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
     session.graph().connect(node, MainOutput).unwrap();
-    let (_, mut done, keys) = bounced!(session, bounce.stem_with(Stem::new(node)))
+    let (_, mut done, keys) = bounced(session, bounce.stem_with(Stem::new(node)))
         .expect("the bounce renders")
         .into_parts();
     match keys.as_slice() {
@@ -524,7 +524,7 @@ fn a_disk_voice_whose_file_cannot_be_read_fails_the_export_by_name() {
         node
     };
     std::fs::remove_file(&path).expect("removes");
-    match bounced!(&mut session, on(0.2, &timeline(120.0))) {
+    match bounced(&mut session, on(0.2, &timeline(120.0))) {
         Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, cause })) => {
             assert_eq!(key, clip.erase());
             assert_eq!(kind, tutti_graph::ForkFaultKind::Failed);

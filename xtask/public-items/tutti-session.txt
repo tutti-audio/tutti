@@ -1104,6 +1104,7 @@ trait analyze::feed::sealed::Sealed
 trait analyze::feed::sealed_context::Sealed
 trait apply::Apply
 trait apply::sealed::Sealed
+trait bounce::Destination
 trait bounce::render_output::RenderOutput
 trait bounce::render_output::StemOutput
 trait clock::Clock
@@ -1112,8 +1113,6 @@ trait clock::SessionFloat
 trait clock::sealed::Running
 trait clock::sealed::Sealed
 trait clock::sealed::Streaming
-trait destination::Destination
-trait destination::sealed::Sealed
 trait format::Sealed
 trait handled::Handled
 trait handled::sealed::Sealed
