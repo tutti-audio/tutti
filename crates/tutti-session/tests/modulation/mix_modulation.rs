@@ -10,6 +10,7 @@
 //! `depth * macro * span`, clamped to the range; every figure is exact in
 //! `f32`).
 
+use crate::committed::committed;
 use crate::common::render;
 use crate::offline::offline;
 use tutti_buffers::ChannelLayout;
@@ -149,7 +150,6 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
 fn a_route_onto_the_mix_of_a_node_added_in_the_update_sends_one_plan() {
     let mut s = offline();
     settle(&mut s);
-    let plans = s.graph_ref().testing().commits_sent();
 
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
@@ -168,13 +168,9 @@ fn a_route_onto_the_mix_of_a_node_added_in_the_update_sends_one_plan() {
     m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
 
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "one plan for the node and its lane"
-    );
+    assert_eq!(committed(&events), 1, "one plan for the node and its lane");
     let got = render(&mut s, 1, BLOCK);
     assert_eq!(got[0].to_bits(), blend(0.5).to_bits(), "the first frame");
     assert_eq!(got[BLOCK - 1].to_bits(), blend(0.5).to_bits());

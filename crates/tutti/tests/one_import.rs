@@ -20,7 +20,7 @@ use tutti_timeline::Transport;
 #[test]
 fn one_import_renders_a_block() {
     use tutti::graph::ForkByClone;
-    use tutti::{Hz, InterleavedMut, MainOutput, Session};
+    use tutti::{Hz, InterleavedMut, MainOutput, Session, SessionEvent};
     use tutti_nodes::testing::Osc;
 
     let mut session = Session::builder()
@@ -33,7 +33,11 @@ fn one_import_renders_a_block() {
         .connect(tone, MainOutput)
         .expect("both ends exist")
         .unfaded();
-    assert!(session.update().is_empty(), "the commit raised no event");
+    let events = session.update();
+    assert!(
+        matches!(events.as_slice(), [SessionEvent::Committed]),
+        "one plan sent"
+    );
 
     let mut out = vec![0.0f32; 256 * 2];
     session.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());

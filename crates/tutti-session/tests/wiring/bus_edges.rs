@@ -5,6 +5,7 @@
 //! Every figure is analytic: constants of exactly representable values, so
 //! `0.5 L + 0.5 R` is exact in `f32`.
 
+use crate::committed::committed;
 use crate::offline::offline;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
@@ -438,6 +439,37 @@ fn a_refused_commit_is_an_event_of_its_update() {
         refused(s.update()),
         1,
         "a refusal after a sent commit is new"
+    );
+}
+
+/// **An update reports each plan it sent as `Committed`**: an edit reports
+/// one, a steady update none, and a refused commit reports `CommitRefused`
+/// and no `Committed`.
+#[test]
+fn an_update_reports_the_plan_it_sent() {
+    let mut s = offline();
+    s.declare_main_output_topology(smpte(2)).expect("stereo");
+    let src = s.graph().add(Unforkable(Src {
+        values: vec![0.25, 0.75],
+        out: named(2),
+    }));
+    s.graph()
+        .connect(BusOutputPort::Node(node_bus(src.erase())), MainOutput)
+        .unwrap()
+        .unfaded();
+    assert_eq!(committed(&s.update()), 1, "an edit sends one plan");
+    assert_eq!(committed(&s.update()), 0, "a steady update sends none");
+
+    // Named stereo has no place in one unassigned channel.
+    s.declare_main_output_topology(ChannelTopology::unassigned(layout(1)).unwrap())
+        .expect("an unassigned mono main output");
+    let events = s.update();
+    assert_eq!(committed(&events), 0, "a refused commit sends no plan");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::CommitRefused(_))),
+        "and is reported as refused: {events:?}"
     );
 }
 

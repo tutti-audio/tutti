@@ -1,10 +1,5 @@
 //! [`SamplerPart`] with the `sampler` feature: the disk streamer.
 
-#![cfg_attr(
-    not(feature = "device"),
-    expect(dead_code, reason = "a device restart (feature `device`) is the user")
-)]
-
 use std::sync::Weak;
 
 use tutti_platform::Executor;

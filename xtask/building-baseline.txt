@@ -213,12 +213,12 @@ tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
+tutti-session  setter  crates/tutti-session/src/session/transport.rs::Session::set_sample_rate
 
 # tutti-sf2
 

@@ -121,6 +121,11 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
 /// the host's output devices.
 pub trait RealTime: Clock<Running: sealed::Streaming> {}
 
+/// A clock with no device to take a rate from: [`Offline`] and `Detached`.
+/// Its session re-rates with [`Session::set_sample_rate`](crate::Session::set_sample_rate);
+/// a device's session re-rates with its restart. Sealed.
+pub trait Stepped: Clock {}
+
 /// The clock of a session the app steps: the host pulls each block with
 /// [`Session::render`](crate::Session::render), from a game's or a plugin's own
 /// real-time callback or from a loop faster than real time. `F` is the float
@@ -202,6 +207,10 @@ impl<F: SessionFloat> Default for DeviceClock<F> {
         Self(PhantomData)
     }
 }
+
+impl<F: SessionFloat> Stepped for Offline<F> {}
+#[cfg(feature = "testing")]
+impl<F: SessionFloat> Stepped for Detached<F> {}
 
 impl<F: SessionFloat> sealed::Sealed for Offline<F> {}
 impl<F: SessionFloat> sealed::Sealed for SystemClock<F> {}

@@ -6,6 +6,7 @@
 //! render at two block sizes, which a voice's frames do not depend on). No
 //! test pins a past render.
 
+use crate::committed::committed;
 use crate::offline::offline_48k;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
@@ -14,7 +15,6 @@ use tutti_graph::ForkByClone;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::Op;
 use tutti_graph::{TapAlign, TapOptions};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
@@ -511,16 +511,6 @@ fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
 /// the session) stays.
 #[test]
 fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
-    let meters = |s: &Session| {
-        s.graph_ref()
-            .testing()
-            .sent_plan()
-            .expect("a plan was sent")
-            .ops()
-            .iter()
-            .filter(|op| matches!(op, Op::Meter { .. }))
-            .count()
-    };
     let mut s = offline_48k();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s
@@ -528,17 +518,15 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
         .meters()
         .open(&[OutputPort::new(a, 0)], TapAlign::Raw)
         .expect("the sources exist");
-    let _ = s.update();
-    assert_eq!(meters(&s), 2, "the main output's and the track's");
+    assert_eq!(committed(&s.update()), 1, "the meter's plan");
     drop(track);
-    let _ = s.update();
     assert_eq!(
-        meters(&s),
-        2,
-        "the reclaim of this update closed it; the plan is the last commit's"
+        committed(&s.update()),
+        0,
+        "the reclaim of this update closed it; the plan is the next commit's"
     );
-    let _ = s.update();
-    assert_eq!(meters(&s), 1, "the main output's stays");
+    assert_eq!(committed(&s.update()), 1, "the meter's op left the plan");
+    assert_eq!(committed(&s.update()), 0, "and nothing more");
 }
 
 /// Closing a meter takes its op out of the next plan now, with the reader
@@ -547,16 +535,6 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
 /// is not open either.
 #[test]
 fn closing_a_meter_names_one_that_is_not_open() {
-    let meters = |s: &Session| {
-        s.graph_ref()
-            .testing()
-            .sent_plan()
-            .expect("a plan was sent")
-            .ops()
-            .iter()
-            .filter(|op| matches!(op, Op::Meter { .. }))
-            .count()
-    };
     let mut s = offline_48k();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s
@@ -565,7 +543,6 @@ fn closing_a_meter_names_one_that_is_not_open() {
         .open(&[OutputPort::new(a, 0)], TapAlign::Raw)
         .expect("the sources exist");
     let _ = s.update();
-    assert_eq!(meters(&s), 2, "the main output's and the track's");
 
     s.graph().meters().close(track.id()).unwrap();
     assert_eq!(
@@ -573,8 +550,11 @@ fn closing_a_meter_names_one_that_is_not_open() {
         Err(CloseError::Meter(track.id())),
         "closed already"
     );
-    let _ = s.update();
-    assert_eq!(meters(&s), 1, "the track's op left with the close");
+    assert_eq!(
+        committed(&s.update()),
+        1,
+        "the track's op left with the close"
+    );
 
     let dropped = s
         .graph()
@@ -692,33 +672,20 @@ fn an_output_tap_follows_a_rewired_output() {
 /// leaves the plan at the commit after it.
 #[test]
 fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
-    let taps = |s: &Session| {
-        s.graph_ref()
-            .testing()
-            .sent_plan()
-            .expect("a plan was sent")
-            .ops()
-            .iter()
-            .filter(|op| matches!(op, Op::Tap { .. }))
-            .count()
-    };
     let mut s = offline_48k();
     let tap = s
         .graph()
         .taps()
         .open_main_output(Samples::new(64))
         .expect("the sources exist");
-    let _ = s.update();
-    assert_eq!(taps(&s), 1, "one op a tap while it is open");
+    assert_eq!(committed(&s.update()), 1, "the tap's plan");
     drop(tap);
-    let _ = s.update();
     assert_eq!(
-        taps(&s),
-        1,
-        "the reclaim of this update closed it; the plan is the last commit's"
+        committed(&s.update()),
+        0,
+        "the reclaim of this update closed it; the plan is the next commit's"
     );
-    let _ = s.update();
-    assert_eq!(taps(&s), 0, "closed");
+    assert_eq!(committed(&s.update()), 1, "the tap's op left the plan");
 }
 
 /// A detached session renders by hand ([`Session::render_frame`]) and its
@@ -992,4 +959,33 @@ fn a_project_the_device_cannot_take_is_refused_at_build() {
     for (floor, device) in [(6, 6), (6, 2), (2, 5), (2, 3), (5, 7)] {
         assert!(build(floor, device).is_ok(), "{floor} on {device}");
     }
+}
+
+/// **A re-rate on an offline session moves the session with the graph.**
+/// `sample_rate()` reads the new rate, and a command stamped in frames
+/// after the call is in the new rate's frames: a stop at frame 22 050 lands
+/// 0.5 s in, which is beat 1.0 at 120 BPM, not where the engine's adoption
+/// of the rate would put a frame count taken to be 48 kHz.
+#[test]
+fn a_re_rate_moves_the_session_and_stamps_commands_in_the_new_frames() {
+    use tutti_units::{At, Frame};
+
+    let mut s = offline_48k();
+    s.set_sample_rate(SampleRate::SR_44K1).expect("re-rates");
+    assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
+    let motion = s.transport_handle();
+    motion.play().expect("room");
+    motion
+        .schedule(At::Frame(Frame::new(22_050)), MotionCommand::stop_unfaded())
+        .expect("room");
+    let mut block = vec![0.0f32; 441 * 2];
+    for _ in 0..100 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    }
+    assert!(!s.playhead().playing(), "the stop landed");
+    assert!(
+        (s.playhead().beat().get() - 1.0).abs() < 1e-9,
+        "the stop lands 0.5 s in, beat 1.0, not at beat {}",
+        s.playhead().beat().get()
+    );
 }

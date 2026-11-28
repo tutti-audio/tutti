@@ -9,6 +9,7 @@
 //! `j` (240 frames, `DECLICK` at 48 kHz), one frame per render call, so the
 //! position of every sample is exact.
 
+use crate::committed::committed;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
@@ -71,20 +72,9 @@ fn a_connect_fades_in_and_reaches_unity_at_declick() {
     );
 
     // The ended fade is reported: the next update commits the plain edge.
-    let sent = s.graph_ref().testing().commits_sent();
-    let _ = s.update();
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        sent + 1,
-        "the fade was settled"
-    );
+    assert_eq!(committed(&s.update()), 1, "the fade was settled");
     assert!(frames(&mut s, 8).iter().all(|&x| x == 1.0));
-    let _ = s.update();
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        sent + 1,
-        "and only once"
-    );
+    assert_eq!(committed(&s.update()), 0, "and only once");
 }
 
 /// **`.unfaded()` is the old step**: full weight from the first frame, no entry,
@@ -103,13 +93,7 @@ fn hard_connects_at_full_weight_at_once() {
             .iter()
             .all(|&x| x.to_bits() == 1.0f32.to_bits())
     );
-    let sent = s.graph_ref().testing().commits_sent();
-    let _ = s.update();
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        sent,
-        "nothing to settle"
-    );
+    assert_eq!(committed(&s.update()), 0, "nothing to settle");
 }
 
 /// **A disconnect fades out: its last nonzero frame is inside the span**, the
@@ -159,13 +143,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
         "the last nonzero frame {last} is inside the span"
     );
 
-    let sent = s.graph_ref().testing().commits_sent();
-    let _ = s.update();
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        sent + 1,
-        "the edge left the plan"
-    );
+    assert_eq!(committed(&s.update()), 1, "the edge left the plan");
     assert!(frames(&mut s, 4).iter().all(|&x| x == 0.0));
 }
 

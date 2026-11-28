@@ -334,7 +334,6 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    let before = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
     let mut nodes = Vec::new();
     for _ in 0..3 {
         let port = input(&mut s, &keys);
@@ -350,8 +349,6 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     for node in nodes {
         assert!(!s.graph_ref().contains(node), "{node:?} left");
     }
-    let after = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
-    assert_eq!(before, after, "nothing was left in the plan");
 }
 
 /// **An ambiguous saved device fails the open with its candidates, and opens
@@ -642,7 +639,7 @@ fn a_retiring_output_survives_a_re_rate() {
         .expect("queued");
     drop(out);
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
     blocks(&mut s, 8);

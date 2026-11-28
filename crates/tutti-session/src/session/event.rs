@@ -15,6 +15,15 @@ pub enum SessionEvent {
     /// playing. Each update tries again; a refusal is reported once, until a
     /// commit is sent or it fails another way.
     CommitRefused(CommitError),
+    /// The update sent a plan to the audio thread: the edits since the last
+    /// one are in force from the next block. Once for each plan an update
+    /// sends; an update with nothing to commit sends none, and an explicit
+    /// [`commit`](crate::Session::commit) reports its plan in its return value
+    /// and pushes nothing. [`compensation`](crate::Session::compensation) and
+    /// [`latency`](crate::Session::latency) read the plan it names, so a host
+    /// that shows plugin delay re-reads them on it. It is
+    /// [`CommitRefused`](Self::CommitRefused)'s success.
+    Committed,
     /// A [`replace`](crate::Graph::replace) that waited out a re-prepare
     /// swapped its node in: the key the call returned reaches the incoming
     /// node's values. Sent only for a swap that was deferred; one made at the

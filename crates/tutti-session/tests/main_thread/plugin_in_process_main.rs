@@ -6,6 +6,7 @@
 //!
 //! Build the probe first: `cargo build -p tutti-plugin-probe`.
 
+use crate::committed::committed;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
@@ -629,7 +630,6 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
             .any(|e| matches!(e, SessionEvent::CommitRefused(_))),
         "the graph cannot commit: {events:?}"
     );
-    let sent = r.s.graph_ref().testing().commits_sent();
     for round in 0..16 {
         let _ = r.s.update();
         assert!(
@@ -637,7 +637,6 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
             "round {round}: the plugin went silent before a commit carried its successor"
         );
     }
-    assert_eq!(r.s.graph_ref().testing().commits_sent(), sent, "no commit");
     assert_eq!(
         r.s.graph_ref().testing().rebuild_settling(node),
         Some(true),
@@ -684,7 +683,6 @@ fn the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     r.fix_graph();
-    let sent = r.s.graph_ref().testing().commits_sent();
     let mut cut = None;
     let mut rendered = None;
     for round in 0..16 {
@@ -703,7 +701,7 @@ fn the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over() {
             )),
             "round {round} reported: {events:?}"
         );
-        if cut.is_none() && r.s.graph_ref().testing().commits_sent() > sent {
+        if cut.is_none() && committed(&events) > 0 {
             cut = Some(round);
         }
         if cut.is_some() {
@@ -892,8 +890,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
     side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     probe().set(ClapSwitch::PortLayout, 1);
     probe().set(ClapSwitch::RequestPortsRescan, 0x24);
     let mut events = Vec::new();

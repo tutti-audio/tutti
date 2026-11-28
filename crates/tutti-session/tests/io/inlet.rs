@@ -158,7 +158,7 @@ fn a_re_prepare_to_another_rate_than_an_inlets_is_refused() {
     let (ring, _producer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(256), RATE);
     let _ = s.graph().add_inlet(ring).expect("the graph's rate");
     let _ = s.update();
-    let refused = s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let refused = s.set_sample_rate(SampleRate::SR_44K1);
     assert!(
         refused.is_err(),
         "the graph re-prepared to 44.1 kHz under a 48 kHz inlet"

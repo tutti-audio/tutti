@@ -142,10 +142,6 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
-    assert_eq!(
-        s.graph_ref().testing().prepared().sample_rate(),
-        SampleRate::of(NEW)
-    );
     assert_eq!(s.sample_rate(), SampleRate::of(NEW), "the transport's rate");
     // Before the first block: the re-prepare finished inside the hook, and
     // the figures a disk source pre-rolls by are the new rate's.

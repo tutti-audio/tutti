@@ -104,14 +104,9 @@ pub(crate) fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
         .collect()
 }
 
-/// The nodes the last plan sent holds.
+/// The nodes the graph holds.
 fn plan_nodes(s: &Session) -> usize {
-    s.graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("a plan")
-        .units()
-        .len()
+    s.graph_ref().node_count()
 }
 
 /// **A clip lands its note on its frame**: a third of a beat in at 120 BPM

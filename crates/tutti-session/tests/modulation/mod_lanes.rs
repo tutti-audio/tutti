@@ -13,6 +13,7 @@
 //! publishing its latency, a target added an update late) are not repeated
 //! here.
 
+use crate::committed::committed;
 use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
@@ -55,7 +56,7 @@ pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
-    s.graph().set_sample_rate(SampleRate::of(RATE)).unwrap();
+    s.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let side = s.graph().take_audio_side();
     (s, side)
 }
@@ -906,7 +907,6 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
 fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
     let (mut s, mut side) = rig(1);
     settle(&mut s);
-    let plans = s.graph_ref().testing().commits_sent();
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
@@ -920,13 +920,9 @@ fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
     m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
         .unwrap();
 
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "one plan for the node and its lane"
-    );
+    assert_eq!(committed(&events), 1, "one plan for the node and its lane");
     let out = render(&mut side, 128, 128);
     assert_eq!(out[0][0], 750.0, "the first frame");
     assert_eq!(out[0][127], 750.0);
@@ -954,7 +950,6 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
     settle(&mut s);
     let out = render(&mut side, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
-    let plans = s.graph_ref().testing().commits_sent();
 
     s.graph()
         .replace(
@@ -965,11 +960,11 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
         .expect("the swap is accepted");
     // The update's one commit sends the node and the rebound lane: the first
     // block it plays is modulated.
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
     assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
+        committed(&events),
+        1,
         "one plan for the swap and the rebound lane"
     );
     let out = render(&mut side, 1_024, 128);
@@ -1301,23 +1296,16 @@ fn an_added_synth_is_a_modulation_target() {
 
 // ----------------------------------------------- what an edit sends --
 
-/// The plan the graph sent last.
-fn sent(s: &DetachedSession) -> Arc<tutti_graph::Plan> {
-    s.graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("a plan was sent")
-}
-
 /// Nothing is staged: the last update's commit took every edit.
 fn idle(s: &DetachedSession) -> bool {
     !s.graph_ref().has_uncommitted_edits()
 }
 
 /// One update, then a block rendered, as a device would between updates.
-pub(crate) fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
-    let _ = s.update();
+pub(crate) fn frame(s: &mut DetachedSession, side: &mut AudioSide) -> usize {
+    let plans = committed(&s.update());
     render(side, 128, 128);
+    plans
 }
 
 /// A cutoff probe (knob 500, range `0..=1000`) on output 0, a sine at `rate`
@@ -1362,14 +1350,12 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     // A rate low enough that one block barely moves it: the render after an
     // edit is read against the edit, not the wave.
     let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, 0.5, 0.3);
-    let settled = sent(&s);
 
     // The depth: 0.3 → 0.0, the knob alone.
     s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.0)))
         .unwrap();
     for _ in 0..3 {
-        frame(&mut s, &mut side);
-        assert!(Arc::ptr_eq(&sent(&s), &settled), "a depth edit sent a plan");
+        assert_eq!(frame(&mut s, &mut side), 0, "a depth edit sent a plan");
         assert!(idle(&s), "a depth edit staged an edit");
     }
     let v = render(&mut side, 128, 128);
@@ -1382,8 +1368,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     s.set(cutoff.range().to(Hz::new(600.0)..Hz::new(700.0)))
         .unwrap();
     for _ in 0..3 {
-        frame(&mut s, &mut side);
-        assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
+        assert_eq!(frame(&mut s, &mut side), 0, "a range edit sent a plan");
         assert!(idle(&s), "a range edit staged an edit");
     }
     let v = render(&mut side, 128, 128);
@@ -1391,8 +1376,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     // And back to 0..=1000 (a route's depth is a fraction of the span).
     s.set(cutoff.range().to(Hz::new(0.0)..Hz::new(1_000.0)))
         .unwrap();
-    frame(&mut s, &mut side);
-    assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
+    assert_eq!(frame(&mut s, &mut side), 0, "a range edit sent a plan");
 
     // A follower on a pulse, routed in: the pulse node first, on its own.
     let pulse = s.graph().add(ForkByClone(Pulse {
@@ -1403,19 +1387,12 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     for _ in 0..3 {
         frame(&mut s, &mut side);
     }
-    let mut plans = vec![sent(&s)];
     let mut m = s.mods_mut();
     let kick = m.follower(Follower::default(), pulse);
     m.route(RouteSpec::new(kick, cutoff, Bipolar::of(0.15)))
         .unwrap();
-    for _ in 0..6 {
-        frame(&mut s, &mut side);
-        let now = sent(&s);
-        if !Arc::ptr_eq(plans.last().unwrap(), &now) {
-            plans.push(now);
-        }
-    }
-    assert_eq!(plans.len(), 2, "a follower route sends exactly one plan");
+    let plans: usize = (0..6).map(|_| frame(&mut s, &mut side)).sum();
+    assert_eq!(plans, 1, "a follower route sends exactly one plan");
     assert!(idle(&s));
     // And it modulates: the knob 500 plus the follower's 0.8 · 0.15 · 1000,
     // 620, inside 600..=700.
@@ -1437,7 +1414,6 @@ fn a_depth_slider_keeps_phase() {
     let (mut s, mut side) = rig(1);
     let rate = 4.0;
     let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, rate, 0.3);
-    let settled = sent(&s);
     // `lfo_scene` rendered its updates' blocks: the clock is past them.
     let start = 4 * 128;
     let before = render(&mut side, 2 * DECLICK, 128).swap_remove(0);
@@ -1457,8 +1433,8 @@ fn a_depth_slider_keeps_phase() {
 
     s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.1)))
         .unwrap();
-    let _ = s.update();
-    assert!(Arc::ptr_eq(&sent(&s), &settled), "a depth edit sent a plan");
+    let events = s.update();
+    assert_eq!(committed(&events), 0, "a depth edit sent a plan");
     let after = render(&mut side, 12_000, 128).swap_remove(0);
     let start = start + before.len();
     for (i, &v) in after.iter().enumerate().skip(STEP) {
@@ -1508,14 +1484,10 @@ fn scaled_scene() -> (
 #[test]
 fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
     let (mut s, mut side, cutoff, full, _) = scaled_scene();
-    let settled = sent(&s);
     s.set(DepthTarget::of(full, cutoff).to(Bipolar::of(0.6)))
         .unwrap();
-    let _ = s.update();
-    assert!(
-        Arc::ptr_eq(&sent(&s), &settled),
-        "a depth write sent a plan"
-    );
+    let events = s.update();
+    assert_eq!(committed(&events), 0, "a depth write sent a plan");
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 800.0);
 }
 
@@ -1528,14 +1500,10 @@ fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
 fn a_scales_own_depth_write_is_applied() {
     let (mut s, mut side, _, full, _) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
-    let settled = sent(&s);
     s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
         .unwrap();
-    let _ = s.update();
-    assert!(
-        Arc::ptr_eq(&sent(&s), &settled),
-        "a depth write sent a plan"
-    );
+    let events = s.update();
+    assert_eq!(committed(&events), 0, "a depth write sent a plan");
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 550.0);
 }
 
