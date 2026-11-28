@@ -366,6 +366,8 @@ macro_rules! slot_target {
         impl sealed::Store for $name {
             type Cell = SlotCell<$value>;
 
+            crate::value::no_host_gesture!();
+
             fn resolve(self, params: &Params) -> Option<(Self::Cell, $value)> {
                 let cell = params.slot::<$value>($id)?;
                 let base = cell.load();
@@ -521,6 +523,8 @@ macro_rules! keyed_slot_target {
         }
         impl sealed::Store for $name {
             type Cell = SlotCell<$value>;
+
+            crate::value::no_host_gesture!();
 
             fn resolve(self, params: &Params) -> Option<(Self::Cell, $value)> {
                 let cell = params.slot::<$value>(SlotId::$id(self.0))?;
@@ -856,6 +860,8 @@ impl<T: AtomicWord + PartialEq + Send + Sync + 'static> Target for SettingTarget
 }
 impl<T: AtomicWord + PartialEq + Send + Sync + 'static> sealed::Store for SettingTarget<T> {
     type Cell = SlotCell<SettingWord>;
+
+    crate::value::no_host_gesture!();
 
     /// A slot whose word is another enum's is no target of `T`'s.
     fn resolve(self, params: &Params) -> Option<(Self::Cell, T)> {

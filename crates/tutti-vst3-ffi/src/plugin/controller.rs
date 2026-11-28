@@ -78,6 +78,34 @@ impl Parts {
         true
     }
 
+    /// Whether the controller implements `IEditControllerHostEditing`.
+    #[must_use]
+    pub fn has_host_editing(&self) -> bool {
+        self.ext.host_editing.is_some()
+    }
+
+    /// `IEditControllerHostEditing::beginEditFromHost` for `id`; `false` when
+    /// the controller does not implement the interface or refuses the call.
+    pub fn begin_edit_from_host(&self, main: MainThreadMarker, id: ParamId) -> bool {
+        let _scope = self.scoped(main);
+        let Some(editing) = &self.ext.host_editing else {
+            return false;
+        };
+        // SAFETY: a plain call on a live interface, on the main thread.
+        check(unsafe { editing.beginEditFromHost(id.get()) }).is_ok()
+    }
+
+    /// `IEditControllerHostEditing::endEditFromHost` for `id`; `false` as for
+    /// [`begin_edit_from_host`](Self::begin_edit_from_host).
+    pub fn end_edit_from_host(&self, main: MainThreadMarker, id: ParamId) -> bool {
+        let _scope = self.scoped(main);
+        let Some(editing) = &self.ext.host_editing else {
+            return false;
+        };
+        // SAFETY: a plain call on a live interface, on the main thread.
+        check(unsafe { editing.endEditFromHost(id.get()) }).is_ok()
+    }
+
     /// The plugin's text for a normalized value.
     #[must_use]
     pub fn parameter_text(

@@ -35,6 +35,13 @@ struct FakeBackend {
 }
 
 impl tutti_plugin_types::AnyThread for FakeBackend {
+    fn edit(
+        &self,
+        _: tutti_plugin_types::ParamEdit,
+        _: tutti_plugin_types::ParamRole,
+    ) -> tutti_plugin_types::EditOutcome {
+        tutti_plugin_types::EditOutcome::NotDefined
+    }
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
         tutti_plugin_types::Answer::ready(None)
     }

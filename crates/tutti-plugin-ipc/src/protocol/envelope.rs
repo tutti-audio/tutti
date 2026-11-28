@@ -662,6 +662,14 @@ messages! {
         /// What the plugin did with the mode.
         outcome: ModeOutcome,
     };
+    /// One step of a host gesture toward the plugin
+    /// ([`AnyThread::edit`](tutti_plugin_types::AnyThread::edit)): the server
+    /// posts it to the plugin's list, which its main loop drains in order.
+    /// Fire-and-forget; a format with no host gesture drops it.
+    HostEdit {
+        /// The step: a begin, a value or an end.
+        edit: tutti_plugin_types::ParamEdit,
+    };
 }
 
 /// What a plugin did with the render mode it was told

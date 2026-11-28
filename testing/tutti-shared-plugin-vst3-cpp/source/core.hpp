@@ -21,9 +21,10 @@
 
 namespace shared {
 
-constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kMeter = 4, kBypass = 5, kProgram = 6, kParams = 5, kModes = 5;
+constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kMeter = 4, kBypass = 5, kProgram = 6, kHelper = 7, kParams = 5, kModes = 5;
 // kBypass is core.rs's BYPASS: listed by the VST3 shells after the meter, flagged as the bypass parameter. kProgram is core.rs's
-// PROGRAM: listed after it, the program-change parameter of the unit that owns the program list.
+// PROGRAM: listed after it, the program-change parameter of the unit that owns the program list. kHelper is core.rs's
+// HELPER: listed last, not automatable, not read-only, not hidden.
 // `tone`'s plain domain (core.rs, "Spec"): a decreasing exponential, 20000 * 1000^(-n).
 constexpr double kTonePlainMax = 20000.0, kTonePlainMin = 20.0;
 inline double tonePlain (double n)
@@ -64,7 +65,7 @@ struct Ev { int kind; uint32_t offset; uint32_t id; double value; };
 
 struct Core
 {
-	std::atomic<double> level {0.5}, aux {0.25}, tone {0.5}, bypass {0.0};
+	std::atomic<double> level {0.5}, aux {0.25}, tone {0.5}, bypass {0.0}, helper {0.0};
 	std::atomic<uint32_t> mode {0}, notice {0}, tailSel {0}, ringsSel {0}, faultSel {0};
 	std::thread::id creator = std::this_thread::get_id ();
 	// A scratch Core, which parses a state and is never a plugin, does not record (`records` false).
@@ -98,6 +99,11 @@ struct Core
 	std::array<Log, 32> log;
 	std::atomic<uint32_t> logN {0};
 	std::atomic<uint32_t> overflow {0};
+	// The host gestures the controller was told (core.rs, "State", kinds 13 to 15), as the controller recorded them;
+	// the component copies them in when it saves.
+	struct HostStep { uint32_t kind = 0, id = 0; double value = 0; };
+	std::array<HostStep, 32> host;
+	uint32_t hostN = 0;
 	struct Told { std::atomic<uint64_t> head {0}; std::atomic<uint32_t> flags {0}; std::atomic<double> tempo {0}, beat {0}; };
 	std::array<Told, kLogTransports> told;
 	std::atomic<uint32_t> toldN {0};
@@ -110,7 +116,7 @@ struct Core
 
 	bool param (uint32_t id, double& v) const
 	{
-		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone; else if (id == kBypass) v = bypass;
+		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone; else if (id == kBypass) v = bypass; else if (id == kHelper) v = helper;
 		else if (id == kMode) v = double (mode) / double (kModes - 1);
 		else if (id == kMeter) v = 0.0; else return false;
 		return true;
@@ -118,7 +124,7 @@ struct Core
 	void setParam (uint32_t id, double v)
 	{
 		v = std::min (1.0, std::max (0.0, v));
-		if (id == kLevel) level = v; else if (id == kAux) aux = v; else if (id == kTone) tone = v; else if (id == kBypass) bypass = v;
+		if (id == kLevel) level = v; else if (id == kAux) aux = v; else if (id == kTone) tone = v; else if (id == kBypass) bypass = v; else if (id == kHelper) helper = v;
 		else if (id == kMode) mode = std::min<uint32_t> (kModes - 1, uint32_t (std::lround (v * (kModes - 1))));
 	}
 	uint32_t latency () const { return mode == 1 ? kLatency : 0; }
@@ -260,8 +266,9 @@ struct Core
 		uint32_t nb = blocksN, kept = std::min<uint32_t> (nb, 16);
 		put<uint32_t> (b, kept);
 		for (uint32_t k = 0; k < kept; ++k) put<uint32_t> (b, blocks[(nb - kept + k) % 16]);
-		uint32_t ne = logN; put<uint32_t> (b, ne);
+		uint32_t ne = logN; put<uint32_t> (b, ne + hostN);
 		for (uint32_t k = 0; k < ne; ++k) { put<uint64_t> (b, log[k].head); put<uint64_t> (b, log[k].id); put<double> (b, log[k].value); }
+		for (uint32_t k = 0; k < hostN; ++k) { put<uint64_t> (b, uint64_t (host[k].kind) << 32); put<uint64_t> (b, host[k].id); put<double> (b, host[k].value); }
 		uint32_t nt = toldN; put<uint32_t> (b, nt);
 		for (uint32_t k = 0; k < std::min (nt, kLogTransports); ++k)
 		{

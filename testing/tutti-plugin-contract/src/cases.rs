@@ -302,7 +302,7 @@ pub fn parameters_listed<F: Format>() {
     // The bypass parameter some formats list is the bypass cases' witness.
     got.retain(|p| p.id() != spec::BYPASS_ID);
     if F::SURFACE.preset_ids == spec::PresetIds::Programs {
-        got.retain(|p| p.id() != spec::PROGRAM_ID);
+        got.retain(|p| p.id() != spec::PROGRAM_ID && p.id() != spec::HELPER_ID);
     }
     got.sort_by_key(|p| p.id().get());
     assert_eq!(got.len(), Param::ALL.len(), "the listed parameters");
@@ -521,7 +521,8 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
         .iter()
         .map(|p| p.id())
         .filter(|&id| {
-            !(F::SURFACE.preset_ids == spec::PresetIds::Programs && id == spec::PROGRAM_ID)
+            !(F::SURFACE.preset_ids == spec::PresetIds::Programs
+                && (id == spec::PROGRAM_ID || id == spec::HELPER_ID))
         })
         .map(|id| id.get())
         .collect();
@@ -540,7 +541,9 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
         let spec = F::SURFACE;
         for info in c.controls(main_thread()) {
             // The preset selector of the program list, not a parameter of the plugin's sound.
-            if F::SURFACE.preset_ids == spec::PresetIds::Programs && info.id() == spec::PROGRAM_ID {
+            if F::SURFACE.preset_ids == spec::PresetIds::Programs
+                && (info.id() == spec::PROGRAM_ID || info.id() == spec::HELPER_ID)
+            {
                 continue;
             }
             let (param, _) = *Param::ALL
@@ -1479,6 +1482,82 @@ pub fn a_gesture_is_reported_in_order<F: Format>() {
     let mut more = Vec::new();
     a.controller_mut().take_reported_edits(main, &mut more);
     assert_eq!(more, [], "the gesture is reported once");
+}
+
+/// A host's gesture toward a plugin parameter reaches the plugin as the format
+/// defines it: VST3 tells a helper parameter's controller `beginEditFromHost`,
+/// each value, `endEditFromHost`, in that order, and an automatable parameter
+/// nothing; CLAP and VST2 define no host gesture, so the plugin keeps no list
+/// to post to.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+///
+/// Spec: vst3.IEditControllerHostEditing.beginEditFromHost, vst3.IEditControllerHostEditing.endEditFromHost, vst3.IEditController.setParamNormalized, au.select.AUEventListenerNotify
+pub fn a_host_gesture_reaches_the_plugin_as_the_format_defines<F: Format>() {
+    use tutti_plugin_types::ParamEdit;
+    let mut a = active_in::<F>(Mode::Tag);
+    let main = main_thread();
+    let helper = spec::HELPER_ID;
+    let level = Param::Level.id();
+    match F::SURFACE.host_gesture {
+        spec::HostGesture::None => {
+            assert!(
+                a.controller().host_edits().is_none(),
+                "{}: the format defines no host gesture, so there is no list to post to",
+                F::NAME
+            );
+        }
+        spec::HostGesture::Helper => {
+            let list = a
+                .controller()
+                .host_edits()
+                .expect("the format defines a host gesture")
+                .clone();
+            for edit in [
+                ParamEdit::Begin(helper),
+                ParamEdit::change(helper, Normalized::of(0.25)),
+                ParamEdit::change(helper, Normalized::of(0.75)),
+                ParamEdit::End(helper),
+                // An automatable parameter: VST3 defines no host gesture for it.
+                ParamEdit::Begin(level),
+                ParamEdit::change(level, Normalized::of(0.5)),
+                ParamEdit::End(level),
+            ] {
+                list.post(edit);
+            }
+            a.controller_mut().flush_edits(main);
+            let t = transcript::<F, _>(a.controller_mut());
+            let heard: Vec<_> = t
+                .events
+                .iter()
+                .filter(|e| matches!(e.kind, Kind::HostBegin | Kind::HostValue | Kind::HostEnd))
+                .map(|e| (e.kind, e.id, e.value))
+                .collect();
+            let id = helper.get();
+            assert_eq!(
+                heard,
+                [
+                    (Kind::HostBegin, id, 0.0),
+                    (Kind::HostValue, id, 0.75),
+                    (Kind::HostEnd, id, 0.0),
+                ],
+                "{}: begin, the latest value, end on the helper, and nothing for `level`",
+                F::NAME
+            );
+        }
+        spec::HostGesture::Notified => {
+            // The notifications go to every listener of the unit, the plugin's own
+            // view among them; the plugin has no view here, so the case is that the
+            // format keeps the list its notifications are drained from.
+            assert!(
+                a.controller().host_edits().is_some(),
+                "{}: the format defines a host gesture, so the plugin keeps a list to post to",
+                F::NAME
+            );
+        }
+    }
 }
 
 /// State round-trips what the plugin persists.

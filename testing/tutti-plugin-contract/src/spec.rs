@@ -71,6 +71,25 @@ pub const BYPASS_ID: ParamId = ParamId::new(5);
 /// Only VST3 lists it.
 pub const PROGRAM_ID: ParamId = ParamId::new(6);
 
+/// The parameter VST3 lists last: not automatable, not read-only, not hidden, a
+/// helper parameter. A host's edit of it from outside the plugin is bracketed
+/// by `IEditControllerHostEditing`. Only VST3 lists it.
+pub const HELPER_ID: ParamId = ParamId::new(7);
+
+/// What a format defines of a host's gesture toward a plugin parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostGesture {
+    /// VST3: `beginEditFromHost`, the controller's values, `endEditFromHost`,
+    /// for a helper parameter ([`HELPER_ID`]) only.
+    Helper,
+    /// AU: begin and end gesture notifications to every listener, around
+    /// `AudioUnitSetParameter`, for every parameter.
+    Notified,
+    /// CLAP (`ext/params.h`, scenario II: the host sends a value event) and VST2
+    /// (`audioMasterBeginEdit` goes from plugin to host): none.
+    None,
+}
+
 /// The programs the plugin offers, in order: a list `Factory` (id 1) of `Init`,
 /// `Pad` and `Lead`. VST3 declares it as a program list, VST2 as programs and AU as
 /// factory presets, numbered from 0; CLAP declares none.
@@ -477,6 +496,8 @@ pub struct Surface {
     /// parameter not. Where `false` the format has no read-only parameter, and
     /// the cases about one do not apply.
     pub reports_access: bool,
+    /// What the format defines of a host's gesture toward a parameter.
+    pub host_gesture: HostGesture,
     /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
     /// An AUv2 unit advertises only `kAudioUnitParameterFlag_IsWritable`, and VST2 says nothing per
     /// parameter. Where `true`, the meter is not automatable and every other
@@ -587,6 +608,7 @@ pub const CLAP: Surface = Surface {
     short_names: false,
     reports_access: true,
     reports_automatable: true,
+    host_gesture: HostGesture::None,
     preset_ids: PresetIds::Numbered,
     plain_map: MapKind::Linear,
     mode_plain_map: MapKind::Stepped,
@@ -618,6 +640,7 @@ pub const VST2: Surface = Surface {
     short_names: true,
     reports_access: false,
     reports_automatable: false,
+    host_gesture: HostGesture::None,
     preset_ids: PresetIds::Numbered,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
@@ -650,6 +673,7 @@ pub const VST3: Surface = Surface {
     short_names: true,
     reports_access: true,
     reports_automatable: true,
+    host_gesture: HostGesture::Helper,
     preset_ids: PresetIds::Programs,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
@@ -682,6 +706,7 @@ pub const VST3_CPP: Surface = Surface {
     short_names: false,
     reports_access: true,
     reports_automatable: true,
+    host_gesture: HostGesture::Helper,
     preset_ids: PresetIds::Programs,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
@@ -717,6 +742,7 @@ pub const AU: Surface = Surface {
     short_names: true,
     reports_access: true,
     reports_automatable: false,
+    host_gesture: HostGesture::Notified,
     preset_ids: PresetIds::Numbered,
     plain_map: MapKind::Linear,
     mode_plain_map: MapKind::Linear,

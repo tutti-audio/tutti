@@ -50,6 +50,7 @@ fn event_list::EventList::with_capacity
 fn event_list::Wire::of_message_type
 fn event_list::Wire::raw
 fn event_list::event_list_available
+fn listener::AuParameterListener::emit_gesture
 fn listener::AuParameterListener::new
 fn listener::AuParameterListener::notify_parameter
 fn listener::AuParameterListener::set_parameter

@@ -110,6 +110,7 @@ impl Parts {
             self.ext.physical_ui_mapping = None;
             self.ext.xml_representation = None;
             self.ext.midi_learn = None;
+            self.ext.host_editing = None;
         }
     }
 
