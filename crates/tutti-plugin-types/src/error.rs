@@ -103,14 +103,15 @@ pub enum Delivered {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum PresetError {
-    /// This plugin cannot do that with presets: it has no preset route, or the
+    /// This plugin cannot do that with presets: it has no preset route, the
     /// format has no such operation (CLAP enumerates nothing; VST2, VST3 and AU
-    /// load no file).
+    /// load no file), or the format addresses this id shape but the host has no
+    /// route for it here (a VST3 list no parameter selects in).
     #[error("this plugin does not support that preset operation")]
     Unsupported,
     /// The id has the shape the format addresses, but no listed preset has it:
     /// a VST2 program index outside `[0, numPrograms)` (`effSetProgram`), a VST3
-    /// program past its list's `programCount` or in a list no parameter owns
+    /// program in a list the plugin does not have or past its `programCount`
     /// (`IUnitInfo::getProgramListInfo`), an AU number outside
     /// `kAudioUnitProperty_FactoryPresets`. The plugin was not asked.
     #[error("no listed preset has that id")]

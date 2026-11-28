@@ -196,11 +196,11 @@ impl Vst3Loaded {
     ///
     /// # Errors
     ///
-    /// [`PresetError::Unsupported`] when `id` is no `Program`;
-    /// [`PresetError::Unlisted`] when no list has that id or `index` is past the
-    /// list's last program; [`PresetError::Refused`] when the list is there but
-    /// no parameter selects in it, or it has fewer than two entries (nothing
-    /// to select between, and the normalization would divide by zero).
+    /// [`PresetError::Unsupported`] when `id` is no `Program`, or the list is
+    /// there but the host has no route to select in it (no parameter selects in
+    /// it, or it has fewer than two entries: nothing to select between, and the
+    /// normalization would divide by zero); [`PresetError::Unlisted`] when no
+    /// list has that id or `index` is past the list's last program.
     ///
     /// `IUnitInfo::setUnitProgramData` is *not* this call: it takes an
     /// `IBStream` of preset bytes and writes them into a slot, the inverse
@@ -219,7 +219,7 @@ impl Vst3Loaded {
                 .iter()
                 .any(|list| list.id == *list_id);
             return Err(if listed {
-                PresetError::Refused
+                PresetError::Unsupported
             } else {
                 PresetError::Unlisted
             });
@@ -233,7 +233,7 @@ impl Vst3Loaded {
             return Err(PresetError::Unlisted);
         }
         if step_count <= 0 {
-            return Err(PresetError::Refused);
+            return Err(PresetError::Unsupported);
         }
         Ok((
             param_id,
