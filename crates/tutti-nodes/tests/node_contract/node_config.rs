@@ -5,16 +5,17 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use tutti_buffers::{
-    AmbisonicOrder, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave,
+    AmbisonicFormat, AmbisonicOrder, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved,
+    Mono, Wave,
 };
 use tutti_dsp::{
     Algorithm, ButterworthOrder, ClipperDrive, CombDelay, CombForm, CompressorControls,
     CrossoverControls, CutAlignment, CutResponse, DynamicMode, FdnControls, FdnLayout, FmPatch,
     FreeverbControls, FreezeControls, GateControls, GraphicBands, HarmonicNormalization, HopSize,
     HrirSphere, HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType,
-    LimiterControls, LinearPhaseDesign, Lookahead, LowestPitch, MaxDecay, MaxGrains,
-    ModDelayControls, Mode, Modes, OperatorCount, OperatorFrequency, OperatorSpec, OscillatorWave,
-    OversamplingFactor, PanLaw, Partial, Partials, PeakDetection, PhaserControls,
+    LimiterControls, LinearPhaseDesign, Lookahead, LowestPitch, MatrixResponses, MaxDecay,
+    MaxGrains, ModDelayControls, Mode, Modes, OperatorCount, OperatorFrequency, OperatorSpec,
+    OscillatorWave, OversamplingFactor, PanLaw, Partial, Partials, PeakDetection, PhaserControls,
     ReferenceDistance, ShapeKind, ShimmerControls, ShimmerLayout, SpringLength, SpringStages,
     Stages, Tap, TapSet, Tilt, TubeDrive, VelvetDensity, Waveshape, Wavetable,
 };
@@ -28,12 +29,12 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FirConvolverConfig, FmConfig,
     FreeverbConfig, FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource,
     GraphicEqConfig, HrtfBinauralConfig, HysteresisConfig, ImpulseResponses, InterpolationMode,
-    IrLayout, KarplusStrongConfig, LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay,
-    MidSideConfig, ModDelayConfig, ModalBankConfig, MultibandBands, MultibandCompressorConfig,
-    MultibandControls, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
-    RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger, StereoWidthConfig, SvfFilterConfig,
-    SvfType, SweepRange, TiltFilterConfig, TransientShaperConfig, TremoloConfig, TubeStageConfig,
-    WaveguideStringConfig, WavetableConfig,
+    IrLayout, KarplusStrongConfig, LadderFilterConfig, LevellerConfig, LimiterConfig, MatrixLayout,
+    MaxDelay, MidSideConfig, ModDelayConfig, ModalBankConfig, MultibandBands,
+    MultibandCompressorConfig, MultibandControls, PhaserConfig, PitchShifterConfig,
+    PlateReverbConfig, PolarityConfig, RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger,
+    StereoWidthConfig, SvfFilterConfig, SvfType, SweepRange, TiltFilterConfig,
+    TransientShaperConfig, TremoloConfig, TubeStageConfig, WaveguideStringConfig, WavetableConfig,
 };
 use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, Bipolar, BitDepth, Cents, CompressionRatio, Db, Direction,
@@ -974,4 +975,52 @@ fn each_config_lists_its_values_and_compares_its_structure() {
             fir_config.clone().block_size(Samples::new(64)),
         ],
     );
+}
+
+/// A convolver config is its responses' handle: two configs built separately from one handle
+/// are the same structure, and one from another handle with equal content is a new node, for
+/// every layout (an app re-declares its config on every patch, and a rebuilt node loses its
+/// convolution tail).
+#[test]
+fn convolver_configs_follow_the_handle_of_their_responses_for_every_layout() {
+    let taps = [1.0_f64, 0.5];
+    let foa = MatrixLayout::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
+    let irs = |n: usize| vec![Mono::new(&taps[..]); n];
+    let direct = |layout: IrLayout, output: ChannelTopology, n: usize| {
+        let handle = Arc::new(ImpulseResponses::new(&irs(n)));
+        let make = move |h: &Arc<ImpulseResponses<f64>>| {
+            ConvolverConfig::new(output, layout, Arc::clone(h)).unwrap()
+        };
+        let other = Arc::new(ImpulseResponses::new(&irs(n)));
+        (make(&handle), make(&handle), make(&other))
+    };
+    let matrix = |layout: MatrixLayout, output: ChannelTopology, inputs: u16, outputs: u16| {
+        let n = usize::from(inputs * outputs);
+        let set =
+            || Arc::new(MatrixResponses::new(inputs.into(), outputs.into(), &irs(n)).unwrap());
+        let (handle, other) = (set(), set());
+        let make = move |h: &Arc<MatrixResponses<f64>>| {
+            ConvolverConfig::matrix(output, layout, Arc::clone(h)).unwrap()
+        };
+        (make(&handle), make(&handle), make(&other))
+    };
+    let cases = [
+        ("per-channel", direct(IrLayout::PerChannel, bus(2), 2)),
+        ("folded", direct(IrLayout::Folded, bus(2), 2)),
+        (
+            "true stereo",
+            matrix(MatrixLayout::TrueStereo, ChannelTopology::STEREO, 2, 2),
+        ),
+        ("ambisonic", matrix(foa, ChannelTopology::STEREO, 4, 2)),
+    ];
+    let same = |a: &ConvolverConfig<f64>, b: &ConvolverConfig<f64>| {
+        NodeConfig::<f64>::same_structure(a, b)
+    };
+    for (name, (a, b, other)) in &cases {
+        assert!(same(a, b) && same(b, a), "{name}: one handle");
+        assert!(
+            !same(a, other) && !same(other, a),
+            "{name}: another handle is a new node"
+        );
+    }
 }

@@ -299,6 +299,9 @@ fn convolver::matrix::MatrixConvolverConfig::block_size
 fn convolver::matrix::MatrixConvolverConfig::build
 fn convolver::matrix::MatrixConvolverConfig::new
 fn convolver::matrix::MatrixConvolverConfig::zero_latency
+fn convolver::matrix::MatrixResponses::inputs
+fn convolver::matrix::MatrixResponses::new
+fn convolver::matrix::MatrixResponses::outputs
 fn dc_block::DcBlocker::jump_to_target
 fn dc_block::DcBlocker::new
 fn dc_block::DcBlocker::pole
@@ -1104,6 +1107,7 @@ struct convolver::Convolver
 struct convolver::IrSpectra
 struct convolver::matrix::MatrixConvolver
 struct convolver::matrix::MatrixConvolverConfig
+struct convolver::matrix::MatrixResponses
 struct dc_block::DcBlocker
 struct dc_block::DcBlockerControls
 struct dct::Dct2
