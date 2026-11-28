@@ -36,7 +36,7 @@ use crate::{
     GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
     GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
     SetAppMidiMap, SetAutomationState, SetEditorSize, SetSampleRate, SetTrackInfo,
-    SetupSharedMemory, StateLoaded, Unanswered,
+    SetupSharedMemory, StateLoaded, StateReady, Unanswered,
 };
 use dpi::Size;
 use tutti_platform::Executor;
@@ -105,7 +105,8 @@ pub(crate) use channels::response_ring;
 pub(crate) use channels::{BATCH_OUTCOMES, BatchOutcome};
 use lifecycle::Lifecycle;
 use messages::{
-    AudioCommand, AudioResponse, Call, ControlCommand, Deadline, Lost, Object, Outcome, Setting,
+    AudioCommand, AudioResponse, Call, ControlCommand, Deadline, Lost, Object, Outcome, Received,
+    Setting,
 };
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use std::sync::Arc;
@@ -786,7 +787,8 @@ impl AudioBridge {
 
     // --- Main-thread sync request+response ---
 
-    /// The plugin's state for `state_use`, read through the server. Blocks while
+    /// The plugin's state for `state_use`, read through the server, with the
+    /// writes stated beside it. Blocks while
     /// the server saves it and sends it: up to [`Timeouts::state_wait`] for a
     /// request already owed, and again for the answer.
     ///
@@ -797,10 +799,13 @@ impl AudioBridge {
     /// # Errors
     ///
     /// The plugin is dead, refused, or the transfer stalled.
-    pub fn save_state(&self, state_use: StateUse) -> std::result::Result<Vec<u8>, StateError> {
-        // The writes no block has applied are not in the bytes: the caller
-        // states them beside it ([`pending_edits`](Self::pending_edits)), read
-        // before the request.
+    pub fn save_state(
+        &self,
+        state_use: StateUse,
+    ) -> std::result::Result<tutti_plugin_types::PluginState, StateError> {
+        // The writes no block has applied are not in the bytes: they are
+        // stated beside them, read before the request.
+        let pending = self.pending_edits();
         // A refusal to answer is not an empty state: collapsing it to `vec![]`
         // is what let an unsaved preset look like a plugin that had nothing to
         // save.
@@ -808,7 +813,7 @@ impl AudioBridge {
             SaveState { state_use },
             Deadline::State,
             Object::State,
-            |outcome| outcome.map(|received| received.object),
+            move |outcome| outcome.and_then(|received| saved(received, pending)),
         )
         .map_err(state_lost)
     }
@@ -1085,10 +1090,7 @@ impl AudioBridge {
             move |outcome| {
                 Some(
                     outcome
-                        .map(|received| tutti_plugin_types::PluginState {
-                            bytes: received.object,
-                            pending,
-                        })
+                        .and_then(|received| saved(received, pending))
                         .map_err(state_lost),
                 )
             },
@@ -1618,6 +1620,20 @@ fn unless_refused<R>(answer: std::result::Result<R, Lost>) -> Option<std::result
         Err(Lost::Busy) => None,
         other => Some(other),
     }
+}
+
+/// The state a save answered with: its bytes, and the writes pending on both
+/// sides, the host's (`host`, read before the request) over the server's own
+/// control's.
+fn saved(
+    received: Received,
+    host: Vec<(ParamId, Normalized)>,
+) -> std::result::Result<tutti_plugin_types::PluginState, Lost> {
+    let ready = StateReady::try_from(received.reply).map_err(Lost::of)?;
+    Ok(tutti_plugin_types::PluginState {
+        bytes: received.object,
+        pending: tutti_plugin_types::overlay_writes(ready.pending, host),
+    })
 }
 
 /// A state request's failure as the error its caller reads.

@@ -129,9 +129,6 @@ pub(crate) trait RenderEnd: Render + Send {
     fn reset(&mut self);
     /// What the plugin consumes, as it reports now.
     fn set_features(&mut self, features: Features);
-    /// Whether the Processor is here: a block rendered now reaches the plugin
-    /// (and drains the writes queued to it).
-    fn has_processor(&mut self) -> bool;
     /// Delivers parameter changes between blocks by the format's own route
     /// ([`Processor::flush_parameters`]), and says what became of them: a
     /// plugin whose Processor is not here has nothing to deliver them to
@@ -196,10 +193,6 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
         self.features = features;
     }
 
-    fn has_processor(&mut self) -> bool {
-        self.rt.held().is_some()
-    }
-
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome {
         match self.rt.held() {
             Some(processor) => match processor.flush_parameters(changes) {
@@ -237,11 +230,6 @@ pub(crate) enum ToRender {
     Config(RenderConfig),
     /// The plugin's end: its Processor arrives in it.
     Seat(Box<dyn RenderEnd>),
-    /// A write was queued to the Processor before this: the next block that
-    /// reaches the plugin applies it (the Processor drains its edit ring at the
-    /// head of a block, after this command was taken), and is answered with
-    /// [`Back::Ack`]. See [`RenderLink::barrier`].
-    Barrier(u64),
     /// Stop rendering with the seat and give it back. The Processor has been
     /// recalled by now.
     Unseat,
@@ -269,9 +257,6 @@ pub(crate) enum Back {
     Informs(EditWriter),
     /// Why the plugin failed a block, for the main thread to log.
     Failure(BlockFault),
-    /// A block that reached the plugin after the [`ToRender::Barrier`] of this
-    /// number was taken.
-    Ack(u64),
 }
 
 /// What the render thread lost, counted since the session began.
@@ -290,8 +275,8 @@ pub(crate) struct Losses {
     /// dropped them itself (an abandoned session).
     pub back_refused: u64,
     /// Commands the main thread could not queue for the render thread (it had
-    /// ended, or took none within its patience): an unseat, a mode, a rate or a
-    /// barrier that never reached it.
+    /// ended, or took none within its patience): an unseat, a mode or a rate that
+    /// never reached it.
     pub commands_refused: u64,
     /// One-way edits the plugin refused: an automation state, a track's info
     /// or a parameter write.
@@ -357,9 +342,6 @@ pub(crate) struct RenderLink {
     /// The parameter queues and the points each holds that the plugin's output
     /// was last built for.
     params: (usize, usize),
-    /// The number of the last barrier sent, and of the last one acknowledged.
-    barrier_sent: u64,
-    barrier_acked: u64,
     /// Counts the loads: what the render thread left for the edit controller
     /// before one is stale ([`Informs`]). One writer, the main thread.
     informs_loads: TallyWriter<u64>,
@@ -516,54 +498,12 @@ impl RenderLink {
         }
     }
 
-    /// Drops what the render thread handed back, noting the barriers it
-    /// acknowledged.
+    /// Drops what the render thread handed back, logging a block's failure.
     pub(crate) fn reap(&mut self) {
         while let Some(back) = self.back.pop() {
-            match back {
-                Back::Ack(id) => self.barrier_acked = self.barrier_acked.max(id),
-                Back::Failure(BlockFault(reason)) => {
-                    tracing::warn!("the plugin failed a block: {reason}");
-                }
-                _ => {}
+            if let Back::Failure(BlockFault(reason)) = back {
+                tracing::warn!("the plugin failed a block: {reason}");
             }
-        }
-    }
-
-    /// Asks to be told when a block that reached the plugin has run **after**
-    /// the writes queued to its Processor so far; the number to
-    /// [`wait_applied`](Self::wait_applied) for.
-    ///
-    /// The order is the queue's. The writes were pushed (release) before this
-    /// command was, the render thread takes the command (acquire) before it
-    /// serves the next block, and the Processor drains its edit ring at the head
-    /// of that block, so the block sees every write that preceded the barrier.
-    /// The acknowledgement comes back through [`Back`] after that block: no
-    /// block that began before the command was taken can answer it. No atomic
-    /// of its own: the two queues carry the order.
-    pub(crate) fn barrier(&mut self) -> u64 {
-        self.barrier_sent += 1;
-        let id = self.barrier_sent;
-        self.tell(ToRender::Barrier(id));
-        id
-    }
-
-    /// Whether the barrier `id` has been acknowledged, waiting up to `within`
-    /// for the next block to do it. `false` when no block reached the plugin
-    /// in that time (the host is quiet).
-    pub(crate) fn wait_applied(&mut self, id: u64, within: Duration) -> bool {
-        let patience = Patience::new(Instant::now(), within);
-        loop {
-            let seen = self.ties.settle.seen();
-            self.reap();
-            if self.barrier_acked >= id {
-                return true;
-            }
-            if patience.left(Instant::now()).is_none() {
-                return false;
-            }
-            // The acknowledgement is handed back by the render thread.
-            self.ties.settle.wait_past(seen, patience);
         }
     }
 }
@@ -628,8 +568,6 @@ pub(crate) struct RenderSide {
     pipeline: AudioPipeline,
     config: RenderConfig,
     seat: Option<Box<dyn RenderEnd>>,
-    /// The barrier the next block that reaches the plugin acknowledges.
-    barrier: Option<u64>,
     /// Where each block leaves the last value it carried for each parameter,
     /// for the edit controller.
     informs: Informs,
@@ -680,8 +618,6 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             format: config.clock.format,
             slab_layout: None,
             params: (0, 0),
-            barrier_sent: 0,
-            barrier_acked: 0,
             informs_loads: loads.writer(),
         },
         RenderSide {
@@ -691,7 +627,6 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             pipeline,
             config,
             seat: None,
-            barrier: None,
             informs: Informs::new(loads),
             wake: render_ties.wake,
             notify: render_ties.notify,
@@ -742,7 +677,6 @@ impl RenderSide {
                         self.give_back(Back::Seat(old));
                     }
                 }
-                ToRender::Barrier(id) => self.barrier = Some(id),
                 ToRender::Unseat => {
                     if let Some(old) = self.seat.take() {
                         self.give_back(Back::Seat(old));
@@ -950,7 +884,6 @@ impl RenderSide {
             slab,
             pipeline,
             seat,
-            barrier,
             back,
             losses,
             failures,
@@ -963,19 +896,12 @@ impl RenderSide {
             return Ok(silent());
         };
 
-        let reaches = seat.has_processor();
         let mut output = pipeline.process(seat.as_mut(), slab, block);
         if let Some(fault) = output.failure.take() {
             *failures += 1;
             // A plugin failing every block is logged on a doubling schedule,
             // not on every block; the others are counted only.
             if failures.is_power_of_two() && back.push(Back::Failure(fault)).is_err() {
-                losses.back_refused.add(1);
-            }
-        }
-        if reaches && let Some(id) = barrier.take() {
-            // This block ran the Processor after the barrier was taken.
-            if back.push(Back::Ack(id)).is_err() {
                 losses.back_refused.add(1);
             }
         }
@@ -1799,9 +1725,6 @@ mod tests {
         }
         fn reset(&mut self) {}
         fn set_features(&mut self, _: Features) {}
-        fn has_processor(&mut self) -> bool {
-            true
-        }
         fn flush_parameters(&mut self, _: &ParameterChanges) -> ApplyOutcome {
             match self.mode {
                 Mode::Fail => ApplyOutcome::Refused,
@@ -1901,7 +1824,7 @@ mod tests {
     /// returns what it refused doing so.
     fn fill_back_queue(side: &mut RenderSide, link: &RenderLink) -> u64 {
         for _ in 0..=COMMANDS {
-            side.give_back(Back::Ack(0));
+            side.give_back(Back::Seat(Box::new(Faulty::new(Mode::Fail))));
         }
         let refused = link.losses().back_refused;
         assert!(refused > 0, "the queue took more than it holds");
@@ -2163,7 +2086,7 @@ mod tests {
     /// a decode of points still allocates (see `PointBuf`'s `Deserialize`).
     #[test]
     fn a_step_with_extras_reads_decodes_renders_and_answers_without_allocating() {
-        let (mut link, mut side, _host) = seated(Faulty::new(Mode::Alternate));
+        let (link, mut side, _host) = seated(Faulty::new(Mode::Alternate));
         let mut block = ProcessAudioData {
             seq: 1,
             num_samples: FRAMES,
@@ -2193,19 +2116,14 @@ mod tests {
             sink: vec![0; AUDIO_REPLY_BYTES + 4].into_boxed_slice(),
             replies: 0,
         });
-        // Half the blocks fail and half flood, so the failure causes and the
-        // barrier's acknowledgement are pushed home inside the gate too.
+        // Half the blocks fail and half flood, so the failure causes are pushed
+        // home inside the gate too.
         const STEPS: usize = 16;
-        let barrier = link.barrier();
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..STEPS {
                 side.step(Some(&mut io), Duration::ZERO).unwrap();
             }
         });
-        assert!(
-            link.wait_applied(barrier, Duration::ZERO),
-            "the ack came home"
-        );
         let losses = link.losses();
         assert_eq!(losses.midi_dropped, 7 * (STEPS as u64 / 2));
         assert_eq!(losses.failed_blocks, STEPS as u64 / 2);
@@ -2220,8 +2138,8 @@ mod tests {
         let (mut link, side) = link().expect("bells");
         assert_eq!(link.losses().commands_refused, 0);
         drop(side);
-        link.tell(ToRender::Barrier(0));
-        link.tell(ToRender::Barrier(0));
+        link.tell(ToRender::Unseat);
+        link.tell(ToRender::Unseat);
         assert_eq!(link.losses().commands_refused, 2);
         assert_eq!(link.losses().edits_refused, 0, "another count");
     }

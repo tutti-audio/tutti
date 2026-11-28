@@ -25,10 +25,10 @@
 //!    save causes. (Blocks it misses meanwhile read as silence, as for any
 //!    late reply.)
 //!
-//!    **The host writes no block has applied** (what a save states as
-//!    pending) are read before the state and written to the fork after it
-//!    loads, so its first block applies them: an undriven live graph forks the
-//!    same, and nothing waits for a block.
+//!    **The writes no block has applied** (what the save states as pending)
+//!    are written to the fork after the state loads, so its first block
+//!    applies them: an undriven live graph forks the same, and nothing waits
+//!    for a block.
 //!
 //!    **Whether a parameter set just before the fork is in the state depends
 //!    on the write reaching the plugin, not on the fork.** The save goes down
@@ -272,10 +272,6 @@ impl ServedFork {
         // the fork once, harmlessly. Read after, a value delivered in between
         // would be recorded as the fork's though its state predates it.
         let delivered = self.controls.delivered();
-        // The host writes the server has not answered for, read before the
-        // state like the record above: what the state may not hold, which the
-        // fork is written after it loads.
-        let pending = live.audio().pending_edits();
         // A plugin with no presets has none to carry (and would refuse the
         // current one's id).
         let preset = if self.features.contains(Features::PRESET_LOAD) {
@@ -287,8 +283,12 @@ impl ServedFork {
             .audio()
             .save_state(StateUse::Duplicate)
             .map_err(PluginForkError::SaveState)?;
+        // The writes the state may not hold (the host's no block has applied and
+        // the server's own control's), stated beside it: the fork is written
+        // them after it loads.
+        let pending = state.pending;
         let live_mode = self.live.render_mode().ok_or(PluginForkError::LiveGone)?;
-        let snapshot = ForkState::new(preset, state, live_mode);
+        let snapshot = ForkState::new(preset, state.bytes, live_mode);
         drop(live);
         Ok(Capture {
             snapshot,

@@ -81,8 +81,8 @@
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock, Mono};
 use tutti_nodes::{
-    BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, LimiterConfig, LimiterControls,
-    LimiterNode,
+    BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout,
+    LimiterConfig, LimiterControls, LimiterNode,
 };
 
 /// How the sampler voices transpose, and whether the reverb is in the
@@ -343,13 +343,15 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut sums = tracks;
     if reverb {
         let (l, r) = (ir(1), ir(2));
-        let conv = s.graph().add(
-            ConvolverNode::try_from(
-                ConvolverConfig::new(ChannelTopology::STEREO, &[Mono::new(&l), Mono::new(&r)])
-                    .block_size(Samples::new(PARTITION)),
+        let conv = s.graph().add(ConvolverNode::from(
+            ConvolverConfig::new(
+                ChannelTopology::STEREO,
+                IrLayout::PerChannel,
+                Arc::new(ImpulseResponses::new(&[Mono::new(&l), Mono::new(&r)])),
             )
-            .unwrap(),
-        );
+            .unwrap()
+            .block_size(Samples::new(PARTITION)),
+        ));
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }
