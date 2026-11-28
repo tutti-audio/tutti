@@ -1279,7 +1279,7 @@ fn an_added_synth_is_a_modulation_target() {
     use tutti_polysynth::{PolySynth, SynthConfig};
 
     let (mut s, _side) = rig(2);
-    let node = PolySynth::new(SynthConfig::new());
+    let node = PolySynth::from(SynthConfig::new());
     let synth = s.graph().add(node);
     main_output(&mut s, &[synth.erase(), synth.erase()]);
     let volume = ParamRef::unit(synth, UnitParam::Volume);

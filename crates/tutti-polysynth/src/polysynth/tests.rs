@@ -117,7 +117,7 @@ impl Hand {
 
 /// Build a hand-driven synth from a config, unwrapping the result.
 fn synth(config: SynthConfig) -> Hand {
-    Hand::new(PolySynth::new(config))
+    Hand::new(PolySynth::from(config))
 }
 
 /// Four poly sine voices with a 1 ms attack, full sustain and a 100 ms release.
@@ -2266,7 +2266,7 @@ fn sounding(synth: &PolySynth) -> usize {
 }
 
 fn poly_synth() -> PolySynth {
-    PolySynth::new(
+    PolySynth::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(4).unwrap())
             .voice_mode(VoiceMode::Poly),
@@ -2445,7 +2445,7 @@ fn midi1_and_midi2_controllers_reach_the_same_state() {
 }
 
 fn mpe_synth() -> PolySynth {
-    PolySynth::new(
+    PolySynth::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(4).unwrap())
             .voice_mode(VoiceMode::Poly),
@@ -2691,7 +2691,7 @@ fn a_mono_synth_returns_to_the_held_key_and_sounds_it() {
             },
         ))
     };
-    let mut synth = PolySynth::new(
+    let mut synth = PolySynth::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(4).unwrap())
             .voice_mode(VoiceMode::Mono),
@@ -3601,7 +3601,7 @@ mod fork {
 
     /// A saw with an instant attack, so a note sounds from its own frame.
     fn saw() -> PolySynth {
-        PolySynth::new(
+        PolySynth::from(
             SynthConfig::new()
                 .oscillator(OscillatorType::Saw)
                 .envelope(Adsr {

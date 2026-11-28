@@ -79,7 +79,7 @@ fn config() -> SynthConfig {
 fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
     let cfg =
         cfg.polyphony(NonZeroUsize::new(n.max(SynthConfig::DEFAULT_POLYPHONY.get())).unwrap());
-    let mut synth = Direct::new(PolySynth::<f32>::new(cfg), SampleRate::of(SR), BLOCK);
+    let mut synth = Direct::new(PolySynth::<f32>::from(cfg), SampleRate::of(SR), BLOCK);
     let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = (0..n)
         .map(|i| {

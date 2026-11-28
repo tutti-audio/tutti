@@ -64,7 +64,7 @@ pub(crate) fn hand<V: InstrumentVoice<Float = f32>>(
     voice: V::Config,
     rules: VoiceConfig,
 ) -> Hand<NoteInstrument<V>> {
-    Hand::new(NoteInstrument::new(InstrumentConfig::new(voice, rules)))
+    Hand::new(NoteInstrument::from(InstrumentConfig::new(voice, rules)))
 }
 
 /// `VoiceConfig::poly` of `voices` voices.

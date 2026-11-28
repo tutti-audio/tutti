@@ -21,7 +21,7 @@ fn synth_row() -> Row {
     Row::new(
         "PolySynth",
         || {
-            Box::new(PolySynth::<f32>::new(
+            Box::new(PolySynth::<f32>::from(
                 SynthConfig::new()
                     .oscillator(OscillatorType::Square {
                         pulse_width: Normalized::of(0.5),

@@ -37,7 +37,7 @@
 //! use tutti_graph::{Editor, Prepare};
 //!
 //! // `Moog` takes `Resonance`; the `Svf` variant takes `Q` instead.
-//! let synth = PolySynth::new(
+//! let synth = PolySynth::from(
 //!     SynthConfig::new()
 //!         .oscillator(OscillatorType::Saw)
 //!         .polyphony(NonZeroUsize::new(8).unwrap())
