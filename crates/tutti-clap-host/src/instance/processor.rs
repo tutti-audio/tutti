@@ -387,7 +387,6 @@ impl Processor for ClapProcessor {
         changes: &tutti_plugin_types::ParameterChanges,
     ) -> PluginResult<Flushed> {
         ClapProcessor::flush_parameters(self, changes)
-            .ok_or(PluginError::Block("the plugin has no params.flush to call"))
     }
 
     fn reset(&mut self) {

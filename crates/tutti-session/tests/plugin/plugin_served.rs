@@ -1113,7 +1113,10 @@ fn a_served_requires_process_write_waits_for_a_block() {
         held.pending()
     );
 
-    s.graph().connect(node, tutti_session::MainOutput).unwrap();
+    s.graph()
+        .connect(node, tutti_session::MainOutput)
+        .unwrap()
+        .unfaded();
     pump_until(&mut s, "a block applies the write", |s| {
         let saved = save(s);
         (own(&saved, MANUAL) - 1.0).abs() < 1e-4 && saved.pending().is_empty()

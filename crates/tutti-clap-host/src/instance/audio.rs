@@ -20,6 +20,7 @@ use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::Flushed;
+use tutti_plugin_types::PluginError;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 use tutti_rt::Generation;
@@ -398,13 +399,20 @@ impl ClapProcessor {
     /// cover the values the plugin has and not the one it has not, so the
     /// block that takes the kept value publishes for all of them.
     ///
-    /// `None` when the plugin has no flush entry or is busy, or a value had no
-    /// room to be kept; otherwise [`Flushed::Held`] while anything is kept, an
-    /// empty flush included, and [`Flushed::Applied`] when nothing is.
+    /// [`Flushed::Held`] while anything is kept, an empty flush included, and
+    /// [`Flushed::Applied`] when nothing is.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Block`] when the plugin has no flush entry or is busy,
+    /// or when a value that waits for `process` had no room to be kept. The
+    /// room is one entry per parameter declared at activation, and CLAP lets
+    /// a plugin change its parameter list only while inactive, so only a
+    /// plugin that breaks that rule fills it.
     pub fn flush_parameters(
         &mut self,
         changes: &tutti_plugin_types::ParameterChanges,
-    ) -> Option<Flushed> {
+    ) -> tutti_plugin_types::PluginResult<Flushed> {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
         // Read first: a value is stamped with an epoch no later than the one
@@ -451,22 +459,28 @@ impl ClapProcessor {
             output_events,
             ..
         } = &mut *self.scratch;
-        let flushed = self.audio_side.params_flush(&*input_events, output_events);
-        if flushed {
-            if self.held.is_empty() {
-                self.drain.publish_applied(drained);
-            }
-            // What the plugin said while it took them (its own edits and
-            // gestures) goes where a block's goes: to the Controller's reports.
-            self.report_edits();
+        if !self.audio_side.params_flush(&*input_events, output_events) {
+            return Err(PluginError::Block("the plugin has no params.flush to call"));
         }
-        (flushed && kept).then(|| {
-            if self.held.any_current(self.drain.epoch()) {
-                Flushed::Held
-            } else {
-                Flushed::Applied
-            }
-        })
+        // One reading decides both the mark and the answer: a reset that
+        // landed during the flush has voided what it stamped before.
+        self.held.drop_stale(self.drain.epoch());
+        let answer = if self.held.is_empty() {
+            self.drain.publish_applied(drained);
+            Flushed::Applied
+        } else {
+            Flushed::Held
+        };
+        // What the plugin said while it took them (its own edits and
+        // gestures) goes where a block's goes: to the Controller's reports.
+        self.report_edits();
+        if kept {
+            Ok(answer)
+        } else {
+            Err(PluginError::Block(
+                "a parameter that waits for process had no room to be kept",
+            ))
+        }
     }
 
     /// Hands the block to the plugin through the FFI crate, which binds the

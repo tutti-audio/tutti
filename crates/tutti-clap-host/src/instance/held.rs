@@ -65,13 +65,6 @@ impl HeldWrites {
         }
     }
 
-    /// Whether an entry is still current at epoch `now`.
-    pub(crate) fn any_current(&self, now: u32) -> bool {
-        self.entries
-            .iter()
-            .any(|&(_, _, epoch)| !epoch_before(epoch, now))
-    }
-
     /// Whether nothing is held.
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()

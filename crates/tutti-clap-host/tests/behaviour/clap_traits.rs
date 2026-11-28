@@ -462,7 +462,7 @@ fn a_flushed_requires_process_write_waits_for_the_next_block() {
     let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
     // Keeping a value allocates nothing: the room is fixed at activation.
     assert_eq!(
-        assert_no_alloc(|| processor.flush_parameters(&none)),
+        assert_no_alloc(|| processor.flush_parameters(&none)).ok(),
         Some(Flushed::Held)
     );
     assert_eq!(
@@ -496,7 +496,7 @@ fn a_flushed_host_change_of_a_requires_process_parameter_waits_and_is_replaced()
     let mut changes = tutti_plugin_types::ParameterChanges::reserved(1, 1);
     assert!(changes.add_change(manual, at_frame(0), unit_value(1.0)));
     assert_eq!(
-        processor.flush_parameters(&changes),
+        processor.flush_parameters(&changes).ok(),
         Some(Flushed::Held),
         "kept"
     );
@@ -529,11 +529,11 @@ fn a_kept_write_from_before_a_reset_is_never_sent() {
         .set_parameter(main_thread(), manual, Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
-    assert_eq!(processor.flush_parameters(&none), Some(Flushed::Held));
+    assert_eq!(processor.flush_parameters(&none).ok(), Some(Flushed::Held));
 
     Wraps::before_restore(&mut controller, main_thread());
     assert_eq!(
-        processor.flush_parameters(&none),
+        processor.flush_parameters(&none).ok(),
         Some(Flushed::Applied),
         "a reset ended the epoch the kept write was checked against"
     );
@@ -559,7 +559,9 @@ fn a_kept_write_survives_a_rejoin() {
         )
         .expect("a declared, writable parameter");
     assert_eq!(
-        processor.flush_parameters(&tutti_plugin_types::ParameterChanges::reserved(0, 1)),
+        processor
+            .flush_parameters(&tutti_plugin_types::ParameterChanges::reserved(0, 1))
+            .ok(),
         Some(Flushed::Held)
     );
     let _loaded = ClapLoaded::deactivate(main_thread(), processor, controller)
