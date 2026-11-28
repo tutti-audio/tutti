@@ -11,8 +11,8 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, BlobWire,
-    ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, Lane, ReqId, Request, SlabHandle,
-    SlabLayout, read_frame, write_frame,
+    ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, Lane, ReqId, Request, SavedState,
+    SlabHandle, SlabLayout, read_frame, write_frame,
 };
 use tutti_plugin_ipc_ffi::{Blob, Lease};
 use tutti_plugin_types::{
@@ -199,9 +199,10 @@ fn take_state(
     Ok(object.read(len, MAX_STATE_BYTES))
 }
 
-/// Answers request `id` with `state`: a `StateReady` frame and the object that
-/// holds the bytes. An object the server cannot make is answered as an `Error`,
-/// as a plugin that cannot save is.
+/// Answers request `id` with `state`: a `StateReady` frame, carrying the writes
+/// it states pending, and the object that holds the bytes. An object the
+/// server cannot make is answered as an `Error`, as a plugin that cannot save
+/// is.
 ///
 /// # Errors
 ///
@@ -209,13 +210,14 @@ fn take_state(
 pub(crate) fn send_state(
     transport: &mut ControlTransport,
     id: ReqId,
-    state: &[u8],
+    state: SavedState,
 ) -> IpcResult<()> {
-    match Blob::create(state) {
+    match Blob::create(&state.bytes) {
         Ok(object) => {
             let reply = ControlReply::StateReady {
-                len: state.len() as u64,
+                len: state.bytes.len() as u64,
                 blob: object.wire(),
+                pending: state.pending,
             };
             transport.send_attached(&ControlFrame::Reply { id, reply }, object)
         }
@@ -699,21 +701,31 @@ mod state_object_tests {
     }
 
     /// **A state to the host is a `StateReady` frame and an object**: the host
-    /// reads the frame, takes the object and gets the bytes the server sent.
+    /// reads the frame, which carries the writes stated pending, takes the
+    /// object and gets the bytes the server sent.
     #[test]
     fn a_state_to_the_host_arrives_whole() {
         let (mut host, mut transport) = pair();
         let bytes = big();
-        send_state(&mut transport, ReqId::new(9), &bytes).expect("sent");
+        let stated = vec![(
+            tutti_units::ParamId::new(7),
+            tutti_units::Normalized::of(0.25),
+        )];
+        let state = SavedState {
+            bytes: bytes.clone(),
+            pending: stated.clone(),
+        };
+        send_state(&mut transport, ReqId::new(9), state).expect("sent");
         let frame: ControlFrame = read_frame(&mut host).expect("the frame");
         let ControlFrame::Reply {
             id,
-            reply: ControlReply::StateReady { len, blob },
+            reply: ControlReply::StateReady { len, blob, pending },
         } = frame
         else {
             panic!("expected StateReady, got {frame:?}");
         };
         assert_eq!((id, len), (ReqId::new(9), bytes.len() as u64));
+        assert_eq!(pending, stated, "the pending writes ride beside the bytes");
         let got = Blob::receive(host.as_fd(), blob)
             .expect("the object")
             .read(len, MAX_STATE_BYTES)
@@ -859,10 +871,14 @@ mod state_object_tests {
                 transport.recv().unwrap(),
                 Incoming::LoadState { .. }
             ));
-            send_state(&mut transport, ReqId::new(1), &[i; 1000]).unwrap();
+            let state = SavedState {
+                bytes: vec![i; 1000],
+                pending: Vec::new(),
+            };
+            send_state(&mut transport, ReqId::new(1), state).unwrap();
             let frame: ControlFrame = read_frame(&mut host).unwrap();
             let ControlFrame::Reply {
-                reply: ControlReply::StateReady { len, blob },
+                reply: ControlReply::StateReady { len, blob, .. },
                 ..
             } = frame
             else {

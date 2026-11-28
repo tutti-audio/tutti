@@ -375,7 +375,7 @@ impl PluginServer {
                     }
                 }
                 Reaction::State(state) => {
-                    if crate::transport::send_state(transport, id, &state).is_err() {
+                    if crate::transport::send_state(transport, id, state).is_err() {
                         return Ok(Handshake::Over);
                     }
                 }

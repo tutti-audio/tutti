@@ -68,25 +68,10 @@ pub(crate) struct Session {
     /// The editor was closed here on the server's own account (its plugin was
     /// unloaded or replaced): the host is told at the next tick.
     pub(crate) editor_closed_unasked: bool,
-    /// A parameter write was queued to the Processor and no block that reached
-    /// the plugin has been waited for since: a state saved now could miss it
-    /// ([`Handle<SaveState>`](tutti_plugin_ipc::Handle)).
-    write_pending: bool,
     /// The reader of the slots the render thread leaves each block's parameter
     /// values in: the edit controller is told of them on each tick.
     informs: Option<tutti_plugin_types::EditReader>,
 }
-
-/// How long a save waits for a block to apply a pending write before it
-/// takes the host to be quiet: a few block periods at the longest block the
-/// slab takes, and a little more.
-///
-/// Who pays it: only a save that follows a parameter write no block has
-/// applied yet, while the host sends no blocks (stopped). Such a save takes up
-/// to this much longer; a save with nothing pending, or during playback, does
-/// not wait on it. Shorter risks taking a playing host with long blocks for a
-/// quiet one, whose recall would silence a block.
-const BLOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(20);
 
 impl Session {
     /// An empty session: no plugin, no slab, and a default
@@ -113,7 +98,6 @@ impl Session {
             staged: None,
             editor_open: false,
             editor_closed_unasked: false,
-            write_pending: false,
             informs: None,
         };
         Ok((session, side))
@@ -553,7 +537,7 @@ mod tests {
         #[cfg(feature = "clap")]
         fn into_state(self) -> Vec<u8> {
             match self {
-                Reaction::State(data) => data,
+                Reaction::State(state) => state.bytes,
                 other => panic!("expected a state, got {other:?}"),
             }
         }
@@ -815,10 +799,8 @@ mod tests {
     }
 
     /// **A save during steady playback, with a write just before it, returns the
-    /// write and silences no block.** The write waits in the Processor's ring
-    /// for a block; the save waits for the next block to apply it (a barrier
-    /// through the render thread's queue) instead of recalling the Processor,
-    /// which would make one block silent.
+    /// write and silences no block.** The save never recalls the Processor,
+    /// which would make a block silent, and never waits for a block.
     #[test]
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_during_playback_sees_it_and_silences_no_block() {
@@ -849,8 +831,8 @@ mod tests {
         assert_eq!(silent, 0, "{silent} blocks were silent around the save");
     }
 
-    /// **With the host quiet, a save after a write still has the write**: no
-    /// block comes to apply it, so the Processor is brought home for the settle.
+    /// **With the host quiet, a save after a write still has the write**: the
+    /// write was applied by its own request, and the save waits for no block.
     #[test]
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_with_no_blocks_sees_it() {
@@ -896,7 +878,7 @@ mod tests {
             let r = s.handle(main_thread(), msg);
 
             if let Reaction::State(bytes) = r {
-                assert!(bytes.is_empty(), "{name}: got state bytes");
+                assert!(bytes.bytes.is_empty(), "{name}: got state bytes");
                 continue;
             }
             match r.into_reply() {

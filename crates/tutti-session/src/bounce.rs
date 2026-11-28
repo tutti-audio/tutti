@@ -861,11 +861,18 @@ impl<N, F: FftFloat> Bounce<N, ToFile, F> {
     /// main output (what a bus or the main output applies downstream is not in it), at
     /// the node's own width.
     ///
-    /// The stem's file takes only the main output's format: not its `replace`, its
-    /// resample or its seed. A re-bounce over an existing stem file needs
-    /// [`stem_with`](Self::stem_with) and a `ToFile` that states `replace`.
+    /// The stem's file takes the main output's format, resample and `replace`; its
+    /// channels are the node's, its noise is seeded per file, and it is staged
+    /// beside its path, a `ToFile`'s default.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
-        let to = ToFile::new(path, Encoding::new(self.main_output.format()));
+        let main = &self.main_output;
+        let encoding = Encoding::new(main.format());
+        let encoding = match main.resampling() {
+            Some(resample) => encoding.resample(resample),
+            None => encoding,
+        };
+        let to = ToFile::new(path, encoding);
+        let to = if main.replaces() { to.replace() } else { to };
         self.stem_with(Stem::new(node).to(to))
     }
 

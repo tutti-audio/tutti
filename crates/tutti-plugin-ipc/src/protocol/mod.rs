@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 70;
+pub const PROTOCOL_VERSION: u32 = 71;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -590,6 +590,7 @@ mod tests {
                 ControlReply::StateReady {
                     len: 0,
                     blob: Blob::create(&[]).unwrap().wire(),
+                    pending: vec![],
                 },
             ),
             ("LoadState", ControlReply::StateLoaded { error: None }),

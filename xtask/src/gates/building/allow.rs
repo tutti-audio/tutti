@@ -212,6 +212,18 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a stagger that names an offset for each channel is valid for the bus it names them for: no single value's type holds it",
     ),
     ty(
+        "crates/tutti-nodes/src/convolution/node.rs",
+        "ConvolverConfig::new",
+        CTOR,
+        "the responses, the layout and the bus are valid together (how many responses a layout takes follows from its bus, a true-stereo layout needs a pair, a folded one a fold to mono): no single value's type holds it",
+    ),
+    ty(
+        "crates/tutti-nodes/src/convolution/node.rs",
+        "FirConvolverConfig::new",
+        CTOR,
+        "a bus of no channels: a `ChannelTopology` holds an empty bus, which a node cannot have",
+    ),
+    ty(
         "crates/tutti-nodes/src/granular.rs",
         "GranularSource::new",
         CTOR,
