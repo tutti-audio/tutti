@@ -228,8 +228,8 @@ pub use tutti_session::{
     AppKey, BlockDates, Chain, ChannelEdge, Clock, ConnectError, Connected, Declarations, InputEnd,
     InputPort, IntoPatch, Key, KeyError, MainOutput, Mention, NoSuchNode, NodeDecl, Offline,
     OfflineSession, OutputEnd, OutputPort, PatchError, PatchTarget, Patched, Playhead, RealTime,
-    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, ToNode,
-    ToOutput, TransportHandle, WireEnd, WireEnds, WireStart, Workers,
+    Section, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    ToNode, ToOutput, TransportHandle, WireEnd, WireEnds, WireStart, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -288,9 +288,11 @@ pub use tutti_session::{ParamRef, RouteSpec};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
-///     .unwrap();
-/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// let latency = 512 + (fir.len().get() - 1) / 2;
+/// let node = ConvolverNode::<f32>::from(
+///     FirConvolverConfig::new(ChannelTopology::STEREO, std::sync::Arc::new(fir)).unwrap(),
+/// );
+/// assert_eq!(node.latency_samples().get(), latency);
 /// ```
 pub mod nodes {
     pub use tutti_nodes::automation::{
@@ -300,28 +302,28 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         AdditiveConfig, AdditiveNode, AmbisonicDecoderConfig, AmbisonicDecoderNode,
-        AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicError, AmbisonicRotatorConfig,
-        AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode, BAND_PARAMS,
-        BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, BrickwallLimiterConfig,
-        BrickwallLimiterNode, BusStripConfig, BusStripNode, ChannelOutOfRange, ChannelTimes,
-        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickNodeConfig,
-        ClickSettings, ClickState, CombFilterConfig, CombFilterNode, CompressorConfig,
-        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterNode,
-        DcBlockerConfig, DcBlockerNode, Decoding, DecorrelatorConfig, DecorrelatorNode,
-        DelayConfig, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode, DelaySync,
-        DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode, DistortionConfig,
-        DistortionNode, DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig,
-        EarlyReflectionsNode, EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig,
-        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode,
-        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
-        FmConfig, FmNode, FreeverbConfig, FreeverbNode, FrequencyShifterConfig,
-        FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
-        GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode,
-        HysteresisConfig, HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig,
+        AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
+        Antialiasing, AutoPanConfig, AutoPanNode, BAND_PARAMS, BellFilterConfig, BellFilterNode,
+        BitCrusherConfig, BitCrusherNode, BrickwallLimiterConfig, BrickwallLimiterNode,
+        BusStripConfig, BusStripNode, ChannelOutOfRange, ChannelTimes, ChannelTimesError,
+        ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickNodeConfig, ClickSettings,
+        ClickState, CombFilterConfig, CombFilterNode, CompressorConfig, CompressorNode,
+        ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig, CrossoverError,
+        CrossoverNode, CutAlignment, CutFilterConfig, CutFilterNode, DcBlockerConfig,
+        DcBlockerNode, Decoding, DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout,
+        DelayLayoutBuilder, DelayLayoutError, DelayNode, DelaySync, DiodeClipperConfig,
+        DiodeClipperNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode,
+        DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
+        EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
+        EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode, FeedbackRouting,
+        FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FmConfig, FmNode,
+        FreeverbConfig, FreeverbNode, FrequencyShifterConfig, FrequencyShifterNode, GateConfig,
+        GateNode, GranularConfig, GranularError, GranularNode, GranularSource, GraphicBands,
+        GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode, HysteresisConfig,
+        HysteresisNode, ImpulseResponses, InterpolationMode, IrLayout, KarplusStrongConfig,
         KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
         LevellerConfig, LevellerNode, LfoConfig, LfoNode, LfoSync, LimiterConfig, LimiterNode,
-        MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout,
+        MatrixLayout, MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout,
         ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands,
         MultibandCompressorConfig, MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode,
         NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes, NoteTimesError, OscillatorConfig,
@@ -333,7 +335,7 @@ pub mod nodes {
         Stages, StagesError, Stagger, StaggerError, StereoWidthConfig, StereoWidthNode,
         SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
         SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
-        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
+        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
         VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode, Waveshape,
         WavetableConfig, WavetableNode,
     };
@@ -385,39 +387,39 @@ pub mod dsp {
     pub use tutti_dsp::{
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
-        BandAbsorption, Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth,
-        ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, ClipperDrive,
-        ClipperDriveError, CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm,
-        Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator, Distance, DistanceControls,
-        DistanceSpec, EarlyReflections, EarlyReflectionsError, Elliptic, EllipticTolerances,
-        Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
-        EnvelopeStages, EnvelopeStep, Fdn, FillController, Fir, FirError, FirSummary, FmControls,
-        FmPatch, FmVoice, FrequencyShifterBank, FrequencyShifterControls, Full, Gains,
-        GainsLengthMismatch, GrainScheduler, GrainSettings, GrainStart, Granular,
-        HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinauralError,
-        HysteresisDrive, HysteresisDriveError, Inline, KarplusStrong, KarplusStrongBank,
-        KarplusStrongControls, LadderSaturation, Lerp, Line, LineModulation, LinearPhaseDesign,
-        LinkwitzRiley, Lookahead, LookaheadError, LoopBandwidth, LoopBandwidthError, LowestPitch,
-        LowestPitchError, Lti, MAX_GRID, MAX_MODES, MAX_OPERATORS, MAX_PARTIALS, MAX_TAP_DELAY,
-        MatchedBell, Matrix, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
-        MaxDecay, MaxDecayError, MaxDelay, MaxDelayError, MaxGrains, MaxGrainsError, ModalBank,
-        ModalControls, Mode, ModeCount, ModeCountError, Modes, ModulationRate, ModulationRateError,
-        Network, NetworkOutputMap, NetworkStage, Operator, OperatorCount, OperatorCountError,
-        OperatorError, OperatorFrequency, OperatorSpec, Oversampler, Oversampling,
-        OversamplingFactor, OversamplingPlan, Partial, PartialCount, PartialCountError, Partials,
-        Passband, PassbandError, PassbandRipple, PassbandRippleError, PeakDetection, PhaseVocoder,
-        PhaseVocoderControls, QUADRATURE_ERROR, ReferenceDistance, ReferenceDistanceError,
-        ReflectionOrder, ResampleError, Rotation, Route, ShoeboxConfig, ShoeboxError, ShoeboxRoom,
-        SimdLanes, Sos, SosError, SpeakerGeometryError, SpeakerLayout, SpringLength,
-        SpringLengthError, StopbandAttenuation, StopbandAttenuationError, StreamCounts, System,
-        TableSize, TableSizeError, Tap, TapSet, Tilt, TransientDetector, TransientThreshold,
-        TransientThresholdError, TransientTime, TransientTimeError, TransientTimes,
-        TransientTimesError, TubeDrive, TubeDriveError, VariableRate, VariableRateError,
-        VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
-        VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable, WavetableError,
-        WavetableOscillator, WavetableStep, quadrature_band, spectral_bandwidth, spectral_crest,
-        spectral_slope,
+        BandAbsorption, BedLayout, Biquad, BlockMismatch, BlockTooLong, BrickwallControls,
+        Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize,
+        ClipperDrive, ClipperDriveError, CombBank, CombControls, CombDelay, CombDelayError,
+        CombFilter, CombForm, Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator,
+        Distance, DistanceControls, DistanceSpec, EarlyReflections, EarlyReflectionsError,
+        Elliptic, EllipticTolerances, Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg,
+        EnvelopePace, EnvelopeStage, EnvelopeStages, EnvelopeStep, Fdn, FillController, Fir,
+        FirError, FirSummary, FmControls, FmPatch, FmVoice, FrequencyShifterBank,
+        FrequencyShifterControls, Full, Gains, GainsLengthMismatch, GrainScheduler, GrainSettings,
+        GrainStart, Granular, HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere,
+        HrtfBinauralError, HysteresisDrive, HysteresisDriveError, Inline, KarplusStrong,
+        KarplusStrongBank, KarplusStrongControls, LadderSaturation, Lerp, Line, LineModulation,
+        LinearPhaseDesign, LinkwitzRiley, Lookahead, LookaheadError, LoopBandwidth,
+        LoopBandwidthError, LowestPitch, LowestPitchError, Lti, MAX_GRID, MAX_MODES, MAX_OPERATORS,
+        MAX_PARTIALS, MAX_TAP_DELAY, MatchedBell, Matrix, MatrixConvolver, MatrixConvolverConfig,
+        MatrixConvolverError, MatrixResponses, MaxDecay, MaxDecayError, MaxDelay, MaxDelayError,
+        MaxGrains, MaxGrainsError, ModalBank, ModalControls, Mode, ModeCount, ModeCountError,
+        Modes, ModulationRate, ModulationRateError, Network, NetworkOutputMap, NetworkStage,
+        Operator, OperatorCount, OperatorCountError, OperatorError, OperatorFrequency,
+        OperatorSpec, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Partial,
+        PartialCount, PartialCountError, Partials, Passband, PassbandError, PassbandRipple,
+        PassbandRippleError, PeakDetection, PhaseVocoder, PhaseVocoderControls, QUADRATURE_ERROR,
+        ReferenceDistance, ReferenceDistanceError, ReflectionOrder, ResampleError, Rotation, Route,
+        ShoeboxConfig, ShoeboxError, ShoeboxRoom, SimdLanes, Sos, SosError, SpeakerGeometryError,
+        SpeakerLayout, SpringLength, SpringLengthError, StopbandAttenuation,
+        StopbandAttenuationError, StreamCounts, System, TableSize, TableSizeError, Tap, TapSet,
+        Tilt, TransientDetector, TransientThreshold, TransientThresholdError, TransientTime,
+        TransientTimeError, TransientTimes, TransientTimesError, TubeDrive, TubeDriveError,
+        VariableRate, VariableRateError, VariableResampler, VelvetDensity, VelvetDensityError,
+        VelvetLength, VelvetLengthError, VelvetNoise, VelvetNoiseError, VelvetPulse, Wall,
+        WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString, WaveshaperControls,
+        Wavetable, WavetableError, WavetableOscillator, WavetableStep, quadrature_band,
+        spectral_bandwidth, spectral_crest, spectral_slope,
     };
 }
 
@@ -499,7 +501,8 @@ pub mod graph {
         Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
         ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
         PublishedCell, PublishedInitial, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
+        SampleRates, Scalar, SettingCell, Shape, Shared, Status, Unforkable, declare_params,
+        param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -543,8 +546,7 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, DoneError, JobError, RenderError, Rendered, RenderedError, TargetError,
-        Unmeasured,
+        ConfigError, DoneError, JobError, RenderError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,

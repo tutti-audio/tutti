@@ -185,6 +185,6 @@ fn moderate_panners_pack_and_render_bit_identically() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
-        .expect("a bed with speakers to pan between")
+    let bed = tutti_dsp::BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }

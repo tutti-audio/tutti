@@ -88,11 +88,14 @@ impl EnvelopeFilterConfig {
 /// `EnvelopeFilterNode::from` panics past 16 channels: a filter is one bus.
 pub type EnvelopeFilterNode<F> = KernelNode<EnvelopeFilterKernel<F>>;
 
+kernel_config!(EnvelopeFilterConfig => EnvelopeFilterNode<F> where [F: Float + SimdLanes + Lerp],
+    set(_): EnvelopeFilterSet = EnvelopeFilterSet);
+
 impl<F: Float + SimdLanes + Lerp> From<EnvelopeFilterConfig> for EnvelopeFilterNode<F> {
     fn from(config: EnvelopeFilterConfig) -> Self {
         Self::with_kernel(
             EnvelopeFilterKernel::new(filter_bus(config.width), config.ty),
-            EnvelopeFilterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

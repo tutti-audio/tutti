@@ -265,3 +265,30 @@ fn equality_ignores_where_the_topology_came_from() {
         .unwrap();
     assert_ne!(a, other_rate, "the rate differs");
 }
+
+/// A gain of half an amplitude (in decibels) halves every sample of every channel and leaves
+/// the length, rate and topology alone.
+#[test]
+fn apply_gain_scales_every_sample_by_the_amplitude() {
+    let mut w = Wave::from_interleaved(
+        SampleRate::SR_48K,
+        Interleaved::new(&[1.0f64, -0.5, 0.25, 0.75], STEREO).unwrap(),
+    );
+    w.apply_gain(tutti_units::Db::from_amplitude(
+        tutti_units::Amplitude::new(0.5),
+    ));
+    assert_eq!(w.channel(0).samples(), &[0.5, 0.125]);
+    assert_eq!(w.channel(1).samples(), &[-0.25, 0.375]);
+    assert_eq!(w.len(), Samples::new(2));
+}
+
+/// A reservation the allocator cannot give is an error and leaves the wave as it was; one it
+/// can give is room for that many more frames.
+#[test]
+fn try_reserve_reports_what_no_allocator_can_give() {
+    let mut w = Wave::<f32>::new(2, SampleRate::SR_48K);
+    assert!(w.try_reserve(Samples::new(usize::MAX / 2)).is_err());
+    assert!(w.is_empty());
+    w.try_reserve(Samples::new(64)).unwrap();
+    assert!(w.is_empty());
+}

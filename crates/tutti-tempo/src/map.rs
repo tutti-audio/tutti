@@ -223,6 +223,35 @@ impl TempoMap {
         &self.pts
     }
 
+    /// The beat of the first point after `beat`, or `None` when no point
+    /// follows it.
+    #[must_use]
+    pub fn point_after(&self, beat: Beat) -> Option<Beat> {
+        self.pts
+            .get(self.pts.partition_point(|p| p.beat.get() <= beat.get()))
+            .map(|p| p.beat)
+    }
+
+    /// This map continued by a step to each of `steps`, in order: the points
+    /// as built, then one `step` per `(beat, tempo)`, built once. The steps'
+    /// beats follow the last point's and strictly increase.
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new), for the extended list.
+    pub fn with_steps(
+        &self,
+        steps: impl IntoIterator<Item = (Beat, Bpm)>,
+    ) -> Result<Self, TempoError> {
+        Self::new(
+            self.pts.iter().copied().chain(
+                steps
+                    .into_iter()
+                    .map(|(beat, tempo)| TempoPoint::step(beat, tempo)),
+            ),
+        )
+    }
+
     /// The tempo, when the whole map is one point (what
     /// [`constant`](Self::constant) builds): `Some` of that point's tempo to
     /// the bit, `None` for a map that changes. A reader that can follow only

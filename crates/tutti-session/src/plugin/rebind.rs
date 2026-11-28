@@ -157,7 +157,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
                         laid_out: now,
                         commit,
                         controls,
-                        commits: self.graph.commits(),
+                        sent: self.graph.sent_plan(),
                     }),
                     // Between a re-prepare's two commits: asked again next update.
                     Err(SwapRefused::Busy(_)) => state.idle(laid_out),
@@ -189,7 +189,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
         staged: Staged,
         main: Option<MainThreadMarker>,
     ) -> RebindState {
-        let Some(main) = main.filter(|_| self.graph.commits() != staged.commits) else {
+        let Some(main) = main.filter(|_| self.graph.sent_since(staged.sent.as_ref())) else {
             return RebindState::Staged(staged);
         };
         let Staged {

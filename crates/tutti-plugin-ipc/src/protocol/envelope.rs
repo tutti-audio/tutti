@@ -201,6 +201,12 @@ pub enum ApplyOutcome {
     /// No Processor was here to take them (recalled for a rate change, or
     /// refused at the seat): none was applied.
     Unseated,
+    /// The Processor kept writes for the next block (a CLAP parameter flagged
+    /// `REQUIRES_PROCESS`, which the format takes through `process` while the
+    /// plugin is active): it has them and the plugin does not yet. Answered to
+    /// every flush while it keeps any, an empty one included, so no answer
+    /// covers a write the plugin lacks. The next block's answer covers them.
+    Held,
 }
 
 /// A lane the broker connection opens to the server.
@@ -339,6 +345,10 @@ messages! {
         /// What the frame carries of the object, as for
         /// [`ControlRequest::LoadState`].
         blob: BlobWire,
+        /// The writes the server's own control made that no block has applied
+        /// (a preset load's, say), read before the state: what the bytes may
+        /// not hold, never waited for.
+        pending: Vec<(ParamId, Normalized)>,
     } => Result<SavedState, ServerError>;
     /// Restore a plugin state, which follows this frame as a memory object of its
     /// own (`send_attached` writes both, and the server's transport reads both

@@ -2,11 +2,10 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
-use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, MaxBlock,
-};
+use tutti_buffers::{AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
+use tutti_dsp::{BedLayout, HarmonicNormalization};
 use tutti_dsp::{
     FdnLayout, FreeverbControls, LadderType, SecondOrderShape, ShapeKind, Stages, SvfType,
     Waveshape,
@@ -327,23 +326,21 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "ambisonic encoder",
             Box::new(AmbisonicEncoderNode::<f32>::from(
-                AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+                AmbisonicEncoderConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
             )),
         ),
         (
             "ambisonic rotator",
             Box::new(AmbisonicRotatorNode::<f32>::from(
-                AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+                AmbisonicRotatorConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
             )),
         ),
         (
             "ambisonic decoder",
-            Box::new(
-                AmbisonicDecoderNode::<f32>::try_from(
-                    AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(AmbisonicOrder::MAX)),
-                )
-                .unwrap(),
-            ),
+            Box::new(AmbisonicDecoderNode::<f32>::from(
+                AmbisonicDecoderConfig::new(BedLayout::try_from(Bed::Surround51).unwrap())
+                    .input(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
+            )),
         ),
         (
             "ring mod",
@@ -643,9 +640,4 @@ mod logged {
         let records = records(node, f32::NAN, Some(1), 8);
         assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
     }
-}
-
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

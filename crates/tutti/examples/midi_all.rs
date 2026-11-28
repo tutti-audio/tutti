@@ -114,7 +114,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     s.set(s.mpe().to(MpeMode::Zones(zone)))?;
 
     // A synth as an instrument: its strip is wired to the main output.
-    let mut synth = s.add_instrument(PolySynth::new(SynthConfig::new()))?;
+    let mut synth = s.add_instrument(PolySynth::from(SynthConfig::new()))?;
 
     // A tap on what the instrument's handle plays, read with `drain`.
     let mut take = s.midi().tap(synth.node(), EventCapacity::of(256))?;

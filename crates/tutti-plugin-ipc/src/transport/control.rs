@@ -306,6 +306,7 @@ pub fn send_state_reply(stream: &ControlStream, id: ReqId, state: &[u8]) -> IpcR
     let reply = crate::ControlReply::StateReady {
         len: state.len() as u64,
         blob: object.wire(),
+        pending: Vec::new(),
     };
     write_frame(&mut &*stream, &crate::ControlFrame::Reply { id, reply })?;
     let _lease = object

@@ -34,8 +34,9 @@ fn unit_input(direct: &Direct<SoundFontUnit<f64>, f64>) -> InEvents {
 #[test]
 fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
     let rate = SampleRate::SR_48K;
-    let unit =
-        SoundFontUnit::<f64>::try_from(SoundFontConfig::new(font())).expect("the unit builds");
+    let unit = SoundFontUnit::<f64>::from(
+        SoundFontConfig::new(font()).expect("a font with a playable preset"),
+    );
     let Tail::Finite(tail) = unit.shape().tail else {
         panic!("the font's releases are finite");
     };

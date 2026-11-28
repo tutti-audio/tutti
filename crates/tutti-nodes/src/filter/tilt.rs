@@ -48,11 +48,14 @@ pub type TiltFilterNode<F> = KernelNode<TiltFilterKernel<F>>;
 /// The tilt as a [`Kernel`](crate::Kernel).
 pub type TiltFilterKernel<F> = EqKernel<TiltFilterControls, F>;
 
+kernel_config!(TiltFilterConfig => TiltFilterNode<F> where [F: Float + SimdLanes],
+    set(_): TiltFilterSet = TiltFilterSet);
+
 impl<F: Float + SimdLanes> From<TiltFilterConfig> for TiltFilterNode<F> {
     fn from(config: TiltFilterConfig) -> Self {
         Self::with_kernel(
             TiltFilterKernel::new(filter_bus(config.width)),
-            TiltFilterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

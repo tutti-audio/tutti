@@ -230,8 +230,10 @@ where
                 // The host's writes since the last piece, on this piece's
                 // first frame; a node with no Processor leaves them in their
                 // slots.
-                if processor.is_some() {
-                    take_edits(this.edits.as_ref(), &mut this.params, phase);
+                if processor.is_some()
+                    && let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, phase)
+                {
+                    this.drained = swept;
                 }
                 this.midi.clear();
                 this.chords.changes.clear();
@@ -378,7 +380,7 @@ where
                         // The plugin's call that took the chunk's writes has
                         // returned.
                         if handed && let Some(edits) = &this.edits {
-                            edits.publish_applied();
+                            edits.publish_applied(this.drained);
                         }
                     }
                     if sends {
@@ -448,8 +450,10 @@ where
         this.chords.changes.clear();
         this.scales.changes.clear();
         this.params.begin();
-        if processor.is_some() {
-            take_edits(this.edits.as_ref(), &mut this.params, 0);
+        if processor.is_some()
+            && let Some(swept) = take_edits(this.edits.as_ref(), &mut this.params, 0)
+        {
+            this.drained = swept;
         }
         let midi = &mut this.midi;
         let intake = &mut this.intake;
@@ -559,7 +563,7 @@ where
         this.params.handed_off(handed);
         // The plugin's call that took the block's writes has returned.
         if handed && let Some(edits) = &this.edits {
-            edits.publish_applied();
+            edits.publish_applied(this.drained);
         }
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,

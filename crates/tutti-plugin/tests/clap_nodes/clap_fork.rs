@@ -18,6 +18,7 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_fixtures::WavePlanes;
 use tutti_graph::testing::WireDeclared;
 
 use crate::clap_probe;
@@ -688,10 +689,19 @@ fn fork_graph(live: &Editor, rate: SampleRate) -> tutti_export::RenderGraph {
 /// `config`'s render of `graph` into memory (a job and the planes' width) under
 /// a control nobody cancels.
 fn render_to_buffers(
+    graph: tutti_export::RenderGraph,
+    config: &(tutti_export::Job, tutti_buffers::ChannelLayout),
+    clock: &dyn tutti_timeline::RenderClock,
+) -> tutti_export::Result<tutti_export::Outcome<tutti_buffers::Wave>> {
+    render_counting_losses(graph, config, clock).map(|outcome| outcome.map(|(wave, _)| wave))
+}
+
+/// [`render_to_buffers`], with the events the render lost beside the audio.
+fn render_counting_losses(
     mut graph: tutti_export::RenderGraph,
     config: &(tutti_export::Job, tutti_buffers::ChannelLayout),
     clock: &dyn tutti_timeline::RenderClock,
-) -> tutti_export::Result<tutti_export::Outcome<tutti_export::Rendered>> {
+) -> tutti_export::Result<tutti_export::Outcome<(tutti_buffers::Wave, u64)>> {
     let mut outputs = tutti_export::Outputs::new();
     let planes = outputs.buffers(tutti_export::Output::main_output(
         tutti_export::BufferTarget::new(config.1),
@@ -704,14 +714,17 @@ fn render_to_buffers(
         &mut tutti_export::Control::none(),
     )
     .map(|outcome| {
-        outcome.map(|mut done| done.take_buffers(&planes).expect("a key of these outputs"))
+        outcome.map(|mut done| {
+            let wave = done.take_buffers(&planes).expect("a key of these outputs");
+            (wave, done.dropped_events())
+        })
     })
 }
 
 /// Export the plugin through `tutti_export` exactly as an export does: fork
 /// the live graph offline (`fork_graph`), render half a second to
 /// buffers.
-fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Rendered> {
+fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_buffers::Wave> {
     let rate = SampleRate::of(SAMPLE_RATE);
     let graph = fork_graph(live, rate);
     let config = (
@@ -756,7 +769,10 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     let (live, _exec) = live_graph(bound(probe.client));
 
     let healthy = export_through_a_fork(&live).expect("a healthy fork exports");
-    assert!(healthy.planes()[0].iter().any(|&s| s != 0.0), "audible");
+    assert!(
+        healthy.channel(0).samples().iter().any(|&s| s != 0.0),
+        "audible"
+    );
 
     let failed = |kind: ForkFaultKind| match export_through_a_fork(&live) {
         Err(tutti_export::RenderError::ForkFailed {
@@ -818,7 +834,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
         .expect("the fork exports")
         .into_finished()
         .expect("nothing cancels a control with no token");
-    let onset = rendered.planes()[0].iter().position(|&s| s != 0.0);
+    let onset = rendered.channel(0).samples().iter().position(|&s| s != 0.0);
     assert_eq!(
         onset,
         Some(NOTE_FRAME + chunk.get()),
@@ -908,7 +924,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
             .event_loss(policy),
             tutti_buffers::ChannelLayout::MONO,
         );
-        render_to_buffers(graph, &config, timeline.as_ref()).map(|outcome| {
+        render_counting_losses(graph, &config, timeline.as_ref()).map(|outcome| {
             outcome
                 .into_finished()
                 .expect("nothing cancels a control with no token")
@@ -919,9 +935,9 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
         matches!(err, tutti_export::RenderError::EventsDropped { count: 144 }),
         "{err:?}"
     );
-    let rendered = render(tutti_export::EventLossPolicy::Allow).expect("allowed");
-    assert_eq!(rendered.dropped_events(), 144);
-    let gate = &rendered.planes()[0];
+    let (rendered, dropped) = render(tutti_export::EventLossPolicy::Allow).expect("allowed");
+    assert_eq!(dropped, 144);
+    let gate = rendered.channel(0).samples();
     let chunk = tutti_export::GRAPH_MAX_BLOCK.get();
     assert_eq!(gate.iter().position(|&s| s != 0.0), Some(5_200 + chunk));
     assert_eq!(
@@ -1318,7 +1334,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
         .expect("a fork whose latency settled exports without a fault")
         .into_finished()
         .expect("nothing cancels a control with no token");
-    let plane = &rendered.planes()[0];
+    let plane = rendered.channel(0).samples();
     assert!(!plane.is_empty());
     let wrong = plane
         .iter()
@@ -1535,7 +1551,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
             .expect("the fork exports")
             .into_finished()
             .expect("nothing cancels a control with no token");
-        (rendered.into_planes(), parallel)
+        (rendered.to_planes(), parallel)
     };
     let (serial, was_parallel) = export(false);
     assert!(!was_parallel);

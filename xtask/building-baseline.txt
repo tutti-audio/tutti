@@ -82,7 +82,6 @@ tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channe
 # tutti-export
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
-tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
 
 # tutti-graph
 tutti-graph  setter  crates/tutti-graph/src/edit/builder.rs::GraphBuilder::set_output

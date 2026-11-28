@@ -25,6 +25,7 @@ mod config;
 mod control;
 mod controller;
 mod editor_instance;
+mod held;
 mod hosting;
 mod lifecycle;
 mod load;

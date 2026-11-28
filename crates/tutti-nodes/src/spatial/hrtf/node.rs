@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use tutti_buffers::{ChannelTopology, MonoMut, StereoPlanes};
 use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrirSphere, HrtfBinaural};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Shared, Status};
 use tutti_units::Latency;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Direction, Elevation, Mix, SampleRate, Samples, Tail};
@@ -24,7 +24,7 @@ use crate::spatial::target::AngleSmoother;
 // [`prepare`](Node::prepare), held to at most
 // [`MAX_PREPARED_RATE`](tutti_dsp::MAX_PREPARED_RATE), and renders silence until then.
 tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, HrtfBinauralConfig, HrtfBinauralCells {
-    required { sphere: Arc<HrirSphere> }
+    required { sphere: Shared<HrirSphere> }
     params {
         Azimuth => azimuth: Azimuth { whole } = Azimuth::FRONT,
         Elevation => elevation: Elevation { whole } = Elevation::LEVEL,
@@ -101,7 +101,7 @@ impl<F: FftFloat> From<HrtfBinauralConfig> for HrtfBinauralNode<F> {
     fn from(config: HrtfBinauralConfig) -> Self {
         Self {
             cells: HrtfBinauralCells::from_config(&config),
-            sphere: config.sphere,
+            sphere: Arc::clone(config.sphere.arc()),
             panner: None,
             // The graph's rate arrives in `prepare`, which re-seats the smoother on it.
             aim: AngleSmoother::new(SampleRate::SR_48K, Samples::new(HRTF_STEP)),

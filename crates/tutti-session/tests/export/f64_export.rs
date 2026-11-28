@@ -6,6 +6,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_codec::Encoding;
 use tutti_codec::{Format, Pcm};
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
 use tutti_session::ToMemory;
@@ -56,7 +57,7 @@ fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
     )
     .expect("the f64 bounce runs")
     .into_main_output()
-    .into_planes();
+    .to_planes();
     assert!(!planes[0].is_empty());
     assert!(
         planes[0].iter().all(|&x| x == 0.75 * FINE),

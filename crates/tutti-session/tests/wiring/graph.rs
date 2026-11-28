@@ -936,10 +936,13 @@ fn every_param_write_path_reaches_a_fork() {
 /// **`move_feeds` moves every feeder's sources** from one sink to another:
 /// a host whose sink was re-bound to a new node keeps what each feeder fed
 /// it, and the old sink is fed by nothing. Each feeder keeps its own entry,
-/// and the graph's event edges are their union.
+/// and the graph's event edges are their union. A sink not in the graph is
+/// refused by name, and nothing moves.
 #[test]
 fn move_feeds_moves_every_feeders_sources() {
     let mut s = detached(1);
+    let gone = s.graph().add(ForkByClone(Events::<1, 0>));
+    assert!(s.remove(gone).is_ok());
     let g = s.graph();
     let old = g.add(ForkByClone(Events::<1, 0>));
     let new = g.add(ForkByClone(Events::<1, 0>));
@@ -963,7 +966,17 @@ fn move_feeds_moves_every_feeders_sources() {
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
 
-    g.move_feeds(old, new);
+    assert_eq!(
+        g.move_feeds(old, gone).map_err(|e| e.node()),
+        Err(gone.erase()),
+        "a sink not in the graph is refused by name"
+    );
+    assert_eq!(
+        g.feed(old, Feeder::Sequencer).unwrap(),
+        [clip.event_output(0)],
+        "and nothing moved"
+    );
+    g.move_feeds(old, new).unwrap();
     assert_eq!(
         g.feed(new, Feeder::Sequencer).unwrap(),
         [clip.event_output(0)]

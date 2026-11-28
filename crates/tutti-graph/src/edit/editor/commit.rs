@@ -167,16 +167,18 @@ impl<F: Float> Editor<F> {
             // An equal structure is the spec and shapes committed. A moved
             // one may have come back to them (a route dropped and added
             // again), which the contents say.
-            if c.structure == self.structure {
+            if c.structure == self.structure.moves {
                 // A write that skipped the guards would leave the structure
                 // equal and the spec changed.
                 debug_assert!(
                     c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes,
                     "a write bypassed the structural guards"
                 );
+                self.structure.edited = false;
                 return Ok(Vec::new());
             }
             if c.spec.same_plan(&self.spec) && *c.shapes == *self.shapes {
+                self.structure.edited = false;
                 return Ok(Vec::new());
             }
         }
@@ -232,7 +234,7 @@ impl<F: Float> Editor<F> {
         self.entries.clear_fades_and_cuts();
         let rewired = delta.take_rewired();
         let committed = Committed {
-            structure: self.structure,
+            structure: self.structure.moves,
             spec: Arc::clone(&self.spec),
             shapes: Arc::clone(&self.shapes),
         };
@@ -243,6 +245,7 @@ impl<F: Float> Editor<F> {
             &weights,
             Sending::Commit { committed, fading },
         );
+        self.structure.edited = false;
         self.entries.sync(&self.values);
         self.gains.sync(&self.spec, &self.values);
         // A lane the spec no longer has takes its base and range with it.

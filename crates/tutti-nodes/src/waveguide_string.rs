@@ -94,12 +94,15 @@ impl WaveguideStringConfig {
 /// is one bus.
 pub type WaveguideStringNode<F> = KernelNode<WaveguideStringKernel<F>>;
 
+kernel_config!(WaveguideStringConfig => WaveguideStringNode<F> where [F: Float],
+    set(_): WaveguideStringSet = WaveguideStringSet);
+
 impl<F: Float> From<WaveguideStringConfig> for WaveguideStringNode<F> {
     /// The line is sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it.
     fn from(config: WaveguideStringConfig) -> Self {
         Self::with_kernel(
             WaveguideStringKernel::new(config.width, config.lowest, config.positions),
-            WaveguideStringSet,
+            config.kernel_set(),
             config.controls,
         )
     }

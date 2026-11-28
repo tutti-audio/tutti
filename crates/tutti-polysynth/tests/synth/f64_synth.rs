@@ -14,7 +14,7 @@ const BLOCK: usize = 64;
 /// A sine synth of one voice with a flat envelope, so the output is the oscillator and the
 /// voice's gain alone.
 fn sine() -> PolySynth<f64> {
-    PolySynth::<f64>::new(
+    PolySynth::<f64>::from(
         SynthConfig::new()
             .oscillator(OscillatorType::Sine)
             .polyphony(NonZeroUsize::new(1).unwrap())

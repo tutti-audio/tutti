@@ -45,13 +45,17 @@ impl ModalBankConfig {
 /// one bus.
 pub type ModalBankNode<F> = KernelNode<ModalBankKernel<F>>;
 
+kernel_config!(ModalBankConfig => ModalBankNode<F> where [F: Float],
+    set(c): ModalBankSet = ModalBankSet { start: ModalControls::of_first(&c.modes) },
+    fixed: ModalControls::of_first(&c.modes));
+
 impl<F: Float> From<ModalBankConfig> for ModalBankNode<F> {
     fn from(config: ModalBankConfig) -> Self {
-        let start = ModalControls::of_first(&config.modes);
+        let (set, controls) = (config.kernel_set(), config.kernel_controls());
         Self::with_kernel(
             ModalBankKernel::new(config.width, config.modes),
-            ModalBankSet { start },
-            start,
+            set,
+            controls,
         )
     }
 }

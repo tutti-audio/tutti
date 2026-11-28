@@ -48,7 +48,7 @@ pub type BrickwallLimiterNode<F> = KernelNode<BrickwallKernel<F>>;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrickwallLimiterConfig {
     input: ChannelTopology,
-    ceiling: Db,
+    controls: BrickwallControls,
 }
 
 impl BrickwallLimiterConfig {
@@ -63,18 +63,22 @@ impl BrickwallLimiterConfig {
     /// an output, and for musical limiting use [`LimiterNode`](super::LimiterNode).
     #[must_use]
     pub fn new(input: ChannelTopology, ceiling: Db) -> Self {
-        Self { input, ceiling }
+        Self {
+            input,
+            controls: BrickwallControls { ceiling },
+        }
     }
 }
+
+kernel_config!(BrickwallLimiterConfig => BrickwallLimiterNode<F> where [F: Float],
+    set(_): BrickwallSet = BrickwallSet);
 
 impl<F: Float> From<BrickwallLimiterConfig> for BrickwallLimiterNode<F> {
     fn from(config: BrickwallLimiterConfig) -> Self {
         Self::with_kernel(
             BrickwallKernel::new(config.input),
-            BrickwallSet,
-            BrickwallControls {
-                ceiling: config.ceiling,
-            },
+            config.kernel_set(),
+            config.controls,
         )
     }
 }

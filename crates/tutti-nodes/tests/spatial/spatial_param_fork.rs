@@ -2,7 +2,7 @@
 //! last set through the node's `ParamSet` and shares no cell with the live
 //! node, in either direction (`assert_param_fork`).
 
-use super::hrir_sphere::synthetic_hrir_sphere;
+use tutti_fixtures::hrir::synthetic_hrir_sphere;
 use tutti_graph::contract::{SAMPLE_RATE, assert_param_fork};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::HrtfBinauralNode;
@@ -47,8 +47,8 @@ fn a_panner_declares_every_param_it_reads() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
-        .expect("a bed with speakers to pan between")
+    let bed = tutti_dsp::BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }
 
 /// A binaural node over the sphere in `bytes`, prepared at `rate`.

@@ -496,10 +496,13 @@ fn count_of(n: u64) -> usize {
 impl Processor for Vst2Processor {
     /// A direct `setParameter` of each parameter's last value, which the SDK
     /// allows between blocks.
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(
+        &mut self,
+        changes: &ParameterChanges,
+    ) -> PluginResult<tutti_plugin_types::Flushed> {
         let refused = self.write_automation(changes);
         if refused == 0 {
-            Ok(())
+            Ok(tutti_plugin_types::Flushed::Applied)
         } else {
             Err(PluginError::Block("the plugin refused a parameter write"))
         }

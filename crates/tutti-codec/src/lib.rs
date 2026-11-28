@@ -94,6 +94,8 @@ mod test_sink;
 mod to_file;
 #[cfg(feature = "encode-wav")]
 mod wav;
+#[cfg(feature = "encode-wav")]
+mod wav_size;
 #[cfg(any(feature = "encode-wav", decode))]
 mod wave_mask;
 #[cfg(encode)]

@@ -289,6 +289,7 @@ impl<F: Float> Editor<F> {
         changed |= self.main_output.finish(ended);
         if changed {
             self.touch();
+            self.structure.edited = true;
         }
         changed
     }

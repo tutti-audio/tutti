@@ -389,7 +389,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// offline engine's output folds, and the loop and direction cells of the streams it opened.
     pub(crate) fn reclaim(&mut self) -> usize {
         let mut pinned = self.graph.reclaim();
-        pinned += self.transport.settings().project_meter().reclaim();
+        pinned += self.transport.settings().reclaim_meter();
         pinned += self.transport.settings().reclaim_tempo();
         // The engine's output folds are swept by the graph (`Graph::reclaim`),
         // offline or on a device, through the `OutputControl` it kept.

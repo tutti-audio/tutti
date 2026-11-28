@@ -3,9 +3,10 @@
 //! pin what the panners do through that wiring.
 
 use tutti_buffers::{Bed, ChannelLayout, MaxBlock};
+use tutti_dsp::BedLayout;
 use tutti_graph::{GraphBuilder, Prepare};
 use tutti_nodes::testing::{Const, vbap_mix};
-use tutti_nodes::{VbapError, VbapPannerConfig, VbapPannerNode};
+use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 use tutti_units::{Azimuth, SampleRate, Samples};
 
 /// A panner per bearing (a DC `[1.0, 1.0]` source each), wired by
@@ -72,32 +73,12 @@ fn a_centre_source_lands_in_the_centre_and_never_in_the_lfe() {
     assert_eq!(surround[3], 0.0, "the LFE stays silent ({surround:?})");
 }
 
-/// Each bed with two or more speakers builds a panner of its width, up to the
-/// widest; the one-speaker mono bed has nothing to pan between and is refused
-/// by name rather than falling back.
+/// Each bed `BedLayout` accepts builds a panner of its width, up to the widest.
 #[test]
-fn every_bed_builds_a_panner_of_its_width_and_mono_is_refused() {
-    for bed in Bed::ALL {
-        match VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed.into())) {
-            Ok(panner) => assert_eq!(panner.channels(), bed.width(), "{bed:?}"),
-            Err(error) => {
-                assert_eq!(bed, Bed::Mono);
-                assert!(matches!(error, VbapError::Geometry(_)), "{error:?}");
-            }
-        }
-    }
-}
-
-/// A bus that places no bed (unassigned channels, or an ambisonic set) has no speakers to pan
-/// between and is refused by name, whatever its width.
-#[test]
-fn a_bus_that_is_not_a_bed_is_refused_by_name() {
-    let foa = tutti_buffers::AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
-    let unassigned =
-        tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::from(6u16))
-            .expect("six channels fit a bus");
-    for bus in [unassigned, tutti_buffers::ChannelTopology::Ambisonic(foa)] {
-        let error = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bus)).unwrap_err();
-        assert!(matches!(error, VbapError::NotABed), "{bus:?}: {error:?}");
+fn every_bed_builds_a_panner_of_its_width() {
+    for bed in Bed::ALL.into_iter().filter(|&bed| bed != Bed::Mono) {
+        let layout = BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+        let panner = VbapPannerNode::<f32>::from(VbapPannerConfig::new(layout));
+        assert_eq!(panner.channels(), bed.width(), "{bed:?}");
     }
 }

@@ -439,7 +439,7 @@ impl Channels {
         if let Some(slots) = self.claim_host_edits().as_mut()
             && slots.table == table
         {
-            slots.reader.publish_applied_through(through);
+            slots.reader.publish_applied(through);
         }
     }
 

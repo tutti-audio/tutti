@@ -50,7 +50,7 @@ fn note_off(channel: u8, note: u8) -> Ump {
 fn polysynth_process_idle_is_allocation_free() {
     // No active voices — process should still tick through allocator
     // bookkeeping and the MIDI inbox poll.
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw),
@@ -67,7 +67,7 @@ fn polysynth_process_idle_is_allocation_free() {
 
 #[test]
 fn polysynth_process_with_active_voices_is_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw)
@@ -99,7 +99,7 @@ fn polysynth_process_with_active_voices_is_allocation_free() {
 /// whole block, cut from the control grid at its edge.
 #[test]
 fn polysynth_one_frame_blocks_with_active_voices_are_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Triangle),
@@ -120,7 +120,7 @@ fn polysynth_one_frame_blocks_with_active_voices_are_allocation_free() {
 fn polysynth_process_with_midi_events_inside_block_is_allocation_free() {
     // Sub-buffer split path: events on the event input so the block walks
     // the event-driven boundaries.
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw),
@@ -161,7 +161,7 @@ fn polysynth_process_with_midi_events_inside_block_is_allocation_free() {
 /// `decode` refuses and a message the synth has no use for, inside the gate.
 #[test]
 fn polysynth_every_decoded_message_is_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new().polyphony(NonZeroUsize::new(8).unwrap()),
     ));
     let address = Address {
@@ -312,7 +312,7 @@ fn polysynth_all_voices_finishing_together_is_allocation_free() {
     // Large enough that the buffer under test is certainly on the heap.
     const MAX_VOICES: usize = 64;
 
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(MAX_VOICES).unwrap())
             .oscillator(OscillatorType::Saw),
@@ -359,7 +359,7 @@ fn polysynth_all_voices_finishing_together_is_allocation_free() {
 /// already warm.**
 ///
 /// This is the test that pins `Vec::with_capacity(max_voices)` in
-/// `PolySynth::new`. The neighbouring steady-state test cannot: it warms the
+/// `PolySynth::from`. The neighbouring steady-state test cannot: it warms the
 /// *instance* before opening the gate, so a bare `Vec::new()` simply grows to
 /// capacity during the warm-up and it passes.
 ///
@@ -372,7 +372,7 @@ fn polysynth_allocates_nothing_on_a_fresh_instance() {
     const MAX_VOICES: usize = 64;
 
     let build = || {
-        PolySynth::<f32>::new(
+        PolySynth::<f32>::from(
             SynthConfig::new()
                 .polyphony(NonZeroUsize::new(MAX_VOICES).unwrap())
                 .oscillator(OscillatorType::Saw),
@@ -426,7 +426,7 @@ fn polysynth_allocates_nothing_on_a_fresh_instance() {
 /// instance, and so the thread, before opening the gate.
 #[test]
 fn a_first_block_on_a_cold_thread_is_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw),
@@ -468,7 +468,7 @@ fn a_clip_into_a_synth_is_allocation_free() {
     ed.insert(
         NodeKey(2),
         "synth",
-        PolySynth::<f32>::new(
+        PolySynth::<f32>::from(
             SynthConfig::new()
                 .polyphony(NonZeroUsize::new(8).unwrap())
                 .oscillator(OscillatorType::Saw),
@@ -530,7 +530,7 @@ fn mono_and_legato_event_paths_are_allocation_free() {
         tutti_polysynth::VoiceMode::Mono,
         tutti_polysynth::VoiceMode::Legato,
     ] {
-        let mut synth = Hand::new(PolySynth::<f32>::new(
+        let mut synth = Hand::new(PolySynth::<f32>::from(
             SynthConfig::new()
                 .polyphony(NonZeroUsize::new(4).unwrap())
                 .voice_mode(mode)
@@ -582,7 +582,7 @@ fn mono_and_legato_event_paths_are_allocation_free() {
 /// gain ramp, a General MIDI reset that cuts every voice) with no allocation.
 #[test]
 fn polysynth_universal_sysex_is_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw),
@@ -623,7 +623,7 @@ fn polysynth_universal_sysex_is_allocation_free() {
 /// notes that are retuned (and a glide that moves) with no allocation.
 #[test]
 fn polysynth_mts_is_allocation_free() {
-    let mut synth = Hand::new(PolySynth::<f32>::new(
+    let mut synth = Hand::new(PolySynth::<f32>::from(
         SynthConfig::new()
             .polyphony(NonZeroUsize::new(8).unwrap())
             .oscillator(OscillatorType::Saw),

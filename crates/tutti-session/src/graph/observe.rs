@@ -139,7 +139,6 @@ impl<F: Float> Taps<'_, F> {
         let sources = self.graph.raw_sources(sources)?;
         let id = TapId::mint(&self.graph.ids);
         let reader = self.graph.editor.open_tap(id, sources, options)?;
-        self.graph.edited = true;
         Ok(reader)
     }
 
@@ -217,8 +216,7 @@ impl<F: Float> Taps<'_, F> {
         let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
         let reader = self.graph.editor.open_heard_tap(id, width, capacity)?;
-        self.graph.output_taps.insert(id, (capacity, width));
-        self.graph.edited = true;
+        self.graph.output_taps.insert(id, capacity);
         Ok(reader)
     }
 
@@ -235,7 +233,6 @@ impl<F: Float> Taps<'_, F> {
         self.graph.editor.close_tap(id)?;
         self.graph.output_taps.remove(&id);
         self.graph.reopened.remove(&MainOutputReader::Tap(id));
-        self.graph.edited = true;
         Ok(())
     }
 
@@ -291,7 +288,6 @@ impl<F: Float> Taps<'_, F> {
         let source = source.into();
         let reader = self.graph.editor.open_event_tap(id, source, options)?;
         self.graph.event_taps.insert(id, (source, options));
-        self.graph.edited = true;
         Ok(reader)
     }
 
@@ -307,7 +303,6 @@ impl<F: Float> Taps<'_, F> {
     pub fn close_event(&mut self, id: EventTapId) -> Result<(), CloseError> {
         self.graph.editor.close_event_tap(id)?;
         self.graph.event_taps.remove(&id);
-        self.graph.edited = true;
         Ok(())
     }
 
@@ -327,7 +322,6 @@ impl<F: Float> Taps<'_, F> {
     /// drains it, and the new one has to reach that thread.
     pub fn reopen_event(&mut self, id: EventTapId) -> Option<EventTapReader> {
         let &(port, options) = self.graph.event_taps.get(&id)?;
-        self.graph.edited = true;
         match self.graph.editor.open_event_tap(id, port, options) {
             Ok(reader) => Some(reader),
             Err(_) => {
@@ -383,7 +377,6 @@ impl<F: Float> Meters<'_, F> {
     fn declare_meter(&mut self, spec: MeterSpec) -> Result<MeterReader, MissingSource> {
         let id = MeterId::mint(&self.graph.ids);
         let reader = self.graph.editor.open_meter(id, spec)?;
-        self.graph.edited = true;
         Ok(reader)
     }
 
@@ -398,7 +391,6 @@ impl<F: Float> Meters<'_, F> {
     pub fn close(&mut self, id: MeterId) -> Result<(), CloseError> {
         self.graph.editor.close_meter(id)?;
         self.graph.reopened.remove(&MainOutputReader::Meter(id));
-        self.graph.edited = true;
         Ok(())
     }
 }
@@ -429,13 +421,15 @@ impl<F: Float> Graph<F> {
         let stale: Vec<(TapId, Samples)> = self
             .output_taps
             .iter()
-            .filter(|&(_, &(_, w))| w != width)
-            .map(|(&id, &(capacity, _))| (id, capacity))
+            .filter(|&(id, _)| {
+                self.editor.spec().topology.taps.get(id)
+                    != Some(&tutti_graph::TapSpec::Outputs { width })
+            })
+            .map(|(&id, &capacity)| (id, capacity))
             .collect();
         for (id, capacity) in stale {
             match self.editor.reopen_heard_tap(id, width, capacity) {
                 Ok(reader) => {
-                    self.output_taps.insert(id, (capacity, width));
                     self.hold(MainOutputReader::Tap(id), Reopened::Tap(reader), &topology);
                 }
                 // Closed since: no reader is left to end.

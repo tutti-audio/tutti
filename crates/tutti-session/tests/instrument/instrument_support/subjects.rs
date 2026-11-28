@@ -22,7 +22,7 @@ impl Subject for Poly {
     const CUT: usize = 1;
 
     fn rig() -> Rig {
-        let synth = PolySynth::new(
+        let synth = PolySynth::from(
             SynthConfig::new()
                 .polyphony(std::num::NonZeroUsize::new(8).unwrap())
                 .oscillator(OscillatorType::Saw)
@@ -60,7 +60,8 @@ impl Subject for Soundfont {
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
         let font =
             std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-        let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds");
+        let unit =
+            SoundFontUnit::from(SoundFontConfig::new(font).expect("a font with a playable preset"));
         let mut session = offline_session();
         let handle = session
             .add_instrument(unit)

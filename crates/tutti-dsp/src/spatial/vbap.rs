@@ -20,7 +20,7 @@ mod math;
 mod select;
 
 pub use error::{GainsLengthMismatch, SpeakerGeometryError};
-pub use layout::SpeakerLayout;
+pub use layout::{BedLayout, SpeakerLayout};
 
 /// A width below this folds the stereo pair to mono and pans one source.
 const MONO_WIDTH: StereoWidth = StereoWidth::new(0.001);

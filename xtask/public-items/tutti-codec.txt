@@ -108,6 +108,7 @@ fn to_file::ToFile::path
 fn to_file::ToFile::placement
 fn to_file::ToFile::rate
 fn to_file::ToFile::replace
+fn to_file::ToFile::replaces
 fn to_file::ToFile::resampling
 fn wave_write::encode
 fn wave_write::write

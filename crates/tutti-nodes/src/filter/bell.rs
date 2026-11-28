@@ -51,11 +51,14 @@ pub type BellFilterNode<F> = KernelNode<BellFilterKernel<F>>;
 /// The bell as a [`Kernel`](crate::Kernel).
 pub type BellFilterKernel<F> = EqKernel<BellFilterControls, F>;
 
+kernel_config!(BellFilterConfig => BellFilterNode<F> where [F: Float + SimdLanes],
+    set(_): BellFilterSet = BellFilterSet);
+
 impl<F: Float + SimdLanes> From<BellFilterConfig> for BellFilterNode<F> {
     fn from(config: BellFilterConfig) -> Self {
         Self::with_kernel(
             BellFilterKernel::new(filter_bus(config.width)),
-            BellFilterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

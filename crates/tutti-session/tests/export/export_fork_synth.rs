@@ -9,6 +9,7 @@
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
+use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
@@ -57,7 +58,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
-        .into_planes()
+        .to_planes()
 }
 
 /// The planes of the one stem `bounce` names, in memory: the main output is
@@ -67,14 +68,14 @@ fn render_stem(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>)
         .expect("the bounce renders")
         .into_parts();
     match keys.as_slice() {
-        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").into_planes(),
+        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").to_planes(),
         other => panic!("expected one stem held in memory, got {other:?}"),
     }
 }
 
 /// A saw with an instant attack, built at the live graph's rate.
 fn poly() -> PolySynth<f32> {
-    PolySynth::<f32>::new(
+    PolySynth::<f32>::from(
         SynthConfig::new()
             .oscillator(OscillatorType::Saw)
             .envelope(Adsr {
@@ -97,8 +98,9 @@ fn font() -> Arc<SoundFont> {
 
 /// A SoundFont unit on [`PRESET`].
 fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
-    let mut unit =
-        SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).expect("the unit builds");
+    let mut unit = SoundFontUnit::from(
+        SoundFontConfig::new(Arc::clone(font)).expect("a font with a playable preset"),
+    );
     unit.program_change(MidiChannel::FIRST, PRESET);
     unit
 }

@@ -12,14 +12,14 @@ fn the_shape_declares_volume_and_the_unison_params() {
     use tutti_graph::Node;
     use tutti_units::UnitParam;
 
-    let plain = PolySynth::new(
+    let plain = PolySynth::from(
         SynthConfig::new().volume(crate::MasterVolume::of(tutti_units::Amplitude::new(0.5))),
     );
     assert_eq!(plain.shape().params.as_slice(), &[UnitParam::Volume][..]);
     assert_eq!(plain.param_base(0), Some(0.5));
     assert_eq!(plain.param_base(1), None);
 
-    let unison = PolySynth::new(
+    let unison = PolySynth::from(
         SynthConfig::new().unison(
             UnisonConfig::new()
                 .voice_count(UnisonVoices::of(3))
@@ -49,7 +49,7 @@ fn the_release_tail_is_in_frames_at_the_prepared_rate() {
     use tutti_graph::{Node, Prepare};
     use tutti_units::{SampleRate, Samples, Tail};
 
-    let mut synth = PolySynth::new(SynthConfig::new().envelope(tutti_music::Adsr {
+    let mut synth = PolySynth::from(SynthConfig::new().envelope(tutti_music::Adsr {
         release: tutti_units::Seconds::new(0.5),
         ..Default::default()
     }));

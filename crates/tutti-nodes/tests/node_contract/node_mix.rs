@@ -459,9 +459,12 @@ fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     ir: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ir])),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// One response per channel, at as many unassigned channels as responses.
@@ -470,9 +473,12 @@ fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// Every input folded to mono, then one response per output, at the engine's placement of
@@ -483,11 +489,12 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
     let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(bus, irs)
-            .folded()
-            .block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        bus,
+        tutti_nodes::IrLayout::Folded,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// True stereo from `[LL, LR, RL, RR]`.
@@ -498,13 +505,20 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     rr: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::matrix(
             tutti_buffers::ChannelTopology::STEREO,
-            &[ll, lr, rl, rr],
+            tutti_nodes::MatrixLayout::TrueStereo,
+            std::sync::Arc::new(
+                tutti_dsp::MatrixResponses::new(
+                    tutti_buffers::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
+                    &[ll, lr, rl, rr],
+                )
+                .expect("four responses"),
+            ),
         )
-        .true_stereo()
+        .expect("four responses on a stereo pair")
         .block_size(block_size),
     )
-    .expect("four responses on a stereo pair")
 }
