@@ -31,12 +31,10 @@ pub(crate) struct OutputPart<F: Float> {
     pub(crate) main_output_refusal: Option<MainOutputError>,
     /// Where the mix lands, as set ([`Session::policy`](crate::Session::policy)).
     pub(crate) policy: Arc<Cell<OutputPolicy>>,
-    /// The engine's tap after the fader and the device width it was built
-    /// for; `None` detached.
-    pub(crate) taps: Option<(HeardTaps<F>, ChannelLayout)>,
-    /// The engine's load and block counts, offline or on a device; `None`
-    /// detached.
-    pub(crate) readings: Option<(Gauge<Load>, Counter<BlockCounts>)>,
+    /// The engine's tap after the fader and the device width it was built for.
+    pub(crate) taps: (HeardTaps<F>, ChannelLayout),
+    /// The engine's load and block counts.
+    pub(crate) readings: (Gauge<Load>, Counter<BlockCounts>),
     /// [`BlockCounts::silenced`] as the last update read it: the next update reports the rise
     /// ([`SessionEvent::BlocksSilenced`]).
     silenced_seen: u64,
@@ -46,13 +44,15 @@ impl<F: Float> OutputPart<F> {
     pub(crate) fn new(
         main_output_request: ChannelTopology,
         policy: Arc<Cell<OutputPolicy>>,
+        taps: (HeardTaps<F>, ChannelLayout),
+        readings: (Gauge<Load>, Counter<BlockCounts>),
     ) -> Self {
         Self {
             main_output_request,
             main_output_refusal: None,
             policy,
-            taps: None,
-            readings: None,
+            taps,
+            readings,
             silenced_seen: 0,
         }
     }
@@ -111,19 +111,14 @@ impl<F: Float> OutputPart<F> {
 
     /// The device width the heard tap opens at, after a device change.
     pub(crate) fn set_device_width(&mut self, width: ChannelLayout) {
-        if let Some((_, layout)) = &mut self.taps {
-            *layout = width;
-        }
+        self.taps.1 = width;
     }
 
     /// The blocks the engine silenced since the last update, as one
     /// [`SessionEvent::BlocksSilenced`]. The counter's tally is cumulative,
     /// so the rise is read against the last reading.
     pub(crate) fn report_silenced(&mut self, out: &mut Vec<SessionEvent>) {
-        let Some((_, blocks)) = &self.readings else {
-            return;
-        };
-        let now = blocks.get().silenced;
+        let now = self.readings.1.get().silenced;
         let rise = now.saturating_sub(self.silenced_seen);
         self.silenced_seen = now;
         if rise > 0 {
@@ -134,8 +129,6 @@ impl<F: Float> OutputPart<F> {
     /// Frees what the audio thread let go of in the heard tap, closes it if its
     /// reader was dropped, and pushes its pending install.
     pub(crate) fn reclaim(&mut self) {
-        if let Some((taps, _)) = &mut self.taps {
-            taps.reclaim();
-        }
+        self.taps.0.reclaim();
     }
 }

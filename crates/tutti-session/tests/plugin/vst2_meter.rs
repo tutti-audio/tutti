@@ -13,7 +13,7 @@ use tutti_session::MainOutput;
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_types::PluginRef;
 use tutti_session::Session;
-use tutti_units::{Beat, Bpm, SampleRate};
+use tutti_units::{Beat, SampleRate};
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -52,8 +52,10 @@ fn read_capture() -> ProcessCapture {
 fn an_in_process_vst2_plugin_is_given_the_project_meter() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds");
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     s.set(
         s.transport_handle()
             .meter()
@@ -83,11 +85,10 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
     );
 
     // One frame at beat 3.5: bar 2 of 7/8 starts there.
+    s.locate(Beat::new(3.5)).expect("room");
+    s.play().expect("room");
     let mut out = [0.0f32; 2];
-    s.render_frame_at(
-        &tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat::new(3.5), None),
-        InterleavedMut::one_frame(&mut out).unwrap(),
-    );
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     let cap = read_capture();
     assert!(cap.time_info_present, "the plugin was answered");
     assert_eq!(

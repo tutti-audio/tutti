@@ -14,15 +14,17 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{DetachedSession, InputPort, MainOutput, OutputPort, Session};
+use tutti_session::{InputPort, MainOutput, OutputPort, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn detached() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -39,7 +41,7 @@ fn limiter() -> LimiterNode<f32> {
 
 /// ch0 through a limiter, ch1 dry: ch1's source must pre-roll to match.
 /// Returns the limiter's node latency.
-fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
+fn skewed(s: &mut Session) -> (tutti_graph::NodeKey, Samples) {
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let eff = s.graph().add(limiter());
     let b = s.graph().add(ForkByClone(Const::mono(1.0)));
@@ -64,7 +66,7 @@ fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
 /// total is zero and the table has a zero per output.
 #[test]
 fn a_graph_with_no_latency_reports_none() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(a, 0)])
@@ -94,7 +96,7 @@ fn a_graph_with_no_latency_reports_none() {
 /// wired to.
 #[test]
 fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
-    let mut s = detached();
+    let mut s = session();
     let (_, lat) = skewed(&mut s);
     let authored = [
         s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
@@ -131,7 +133,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
 /// publishes its figures.
 #[test]
 fn a_re_prepare_republishes_the_figures_once_it_resumes() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let eff = s.graph().add(limiter());
     s.graph()
@@ -144,15 +146,14 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
         .set_sources(MainOutput::channel(1), [OutputPort::new(a, 0)])
         .unwrap();
     let at_44k = s.graph_ref().node_latency(eff).unwrap();
-    let mut side = s.graph().take_audio_side();
     let _ = s.update();
     assert_eq!(s.latency(), at_44k);
     let mut out = [0.0f32; 2];
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
 
     s.set_sample_rate(SampleRate::SR_48K).unwrap();
     for _ in 0..3 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         let _ = s.update();
     }
     let at_48k = s.graph_ref().node_latency(eff).unwrap();

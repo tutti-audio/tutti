@@ -14,19 +14,21 @@ use tutti_nodes::{
 };
 use tutti_rt::Param;
 use tutti_session::{
-    Assign, DetachedSession, ParamTarget, Replacement, Session, SetRefusal, TargetInfo,
-    ValueErrorKind, Values,
+    Assign, ParamTarget, Replacement, Session, SetRefusal, TargetInfo, ValueErrorKind, Values,
 };
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
-fn detached() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
-fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
+fn filter(s: &mut Session, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(cutoff))
@@ -34,7 +36,7 @@ fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterN
     ))
 }
 
-fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
+fn compressor(s: &mut Session) -> tutti_session::Key<CompressorNode<f32>> {
     s.graph().add(CompressorNode::from(
         CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
@@ -43,7 +45,7 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>
 }
 
 /// A node whose `Seconds` params are `f64` cells.
-fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
+fn multiband(s: &mut Session) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph().add(MultibandCompressorNode::from(
         MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(2)),
     ))
@@ -58,7 +60,7 @@ fn plus_one(h: &Hz) -> Hz {
 /// edit of the assigned value.
 #[test]
 fn a_batch_runs_in_argument_order_over_the_value_built_so_far() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let cutoff = lp.cutoff();
 
@@ -80,7 +82,7 @@ fn a_batch_runs_in_argument_order_over_the_value_built_so_far() {
 /// sees, for each target, what its last item built.
 #[test]
 fn a_batch_over_several_targets_lands_each_final_value() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     s.set((
         lp.cutoff().to(Hz::new(300.0)),
@@ -99,7 +101,7 @@ fn a_batch_over_several_targets_lands_each_final_value() {
 /// than the first one does not move `at`.
 #[test]
 fn a_failing_item_lands_nothing_and_at_counts_a_none() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let gone = filter(&mut s, 1_000.0);
     s.remove(gone).unwrap();
@@ -146,7 +148,7 @@ fn a_failing_item_lands_nothing_and_at_counts_a_none() {
 /// not a cutoff, and the item before it does not land either.
 #[test]
 fn a_non_finite_value_is_refused_and_lands_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let e = s
@@ -173,7 +175,7 @@ fn a_non_finite_value_is_refused_and_lands_nothing() {
 /// lands.
 #[test]
 fn a_value_call_inside_a_modify_is_reentrant() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
     let seen = Cell::new(0);
@@ -204,7 +206,7 @@ fn a_value_call_inside_a_modify_is_reentrant() {
 /// `Values`, takes the lock.
 #[test]
 fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
     let unwound = catch_unwind(AssertUnwindSafe(|| {
@@ -231,7 +233,7 @@ fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
 /// through the session and through a `Values`.
 #[test]
 fn a_removed_node_is_no_such_target_and_names_its_key() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
     s.remove(lp).unwrap();
@@ -252,7 +254,7 @@ fn a_removed_node_is_no_such_target_and_names_its_key() {
 /// is 0.
 #[test]
 fn values_are_closed_once_the_session_is_gone() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
     let other = values.clone();
@@ -273,7 +275,7 @@ fn values_are_closed_once_the_session_is_gone() {
 /// whole.
 #[test]
 fn a_seconds_param_keeps_its_full_width() {
-    let mut s = detached();
+    let mut s = session();
     let mb = multiband(&mut s);
     let attack = mb.attack_at(1);
     let wide = 0.1 + 1e-9;
@@ -292,7 +294,7 @@ fn a_seconds_param_keeps_its_full_width() {
 /// **A read answers what the last write left in the node's cell**, in the param's unit.
 #[test]
 fn a_read_answers_the_last_write_to_the_nodes_cell() {
-    let mut s = detached();
+    let mut s = session();
     let lp = s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
@@ -308,7 +310,7 @@ fn a_read_answers_the_last_write_to_the_nodes_cell() {
 /// too), an array an array, a `Vec` a `Vec`, an `Option` an `Option`.
 #[test]
 fn a_read_answers_in_the_shape_of_its_argument() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let comp = compressor(&mut s);
     s.set((lp.q().to(Q::new(2.0)), comp.threshold().to(Db::new(-12.0))))
@@ -338,7 +340,7 @@ fn a_read_answers_in_the_shape_of_its_argument() {
 /// run time of mixed types.
 #[test]
 fn an_erased_assignment_writes_like_a_typed_one() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let list = vec![
         lp.cutoff().to(Hz::new(700.0)).erase(),
@@ -357,7 +359,7 @@ fn an_erased_assignment_writes_like_a_typed_one() {
 /// **`info` reads the address and the value the node was added with.**
 #[test]
 fn info_reads_the_address_and_the_default() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     s.set(lp.cutoff().to(Hz::new(5.0))).unwrap();
     assert_eq!(
@@ -376,7 +378,7 @@ fn values_are_clone_and_send_and_write_across_threads() {
     assert_clone_send::<Values>();
     assert_clone_send::<Values<String>>();
 
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
     std::thread::spawn(move || values.set(lp.cutoff().to(Hz::new(123.0))).unwrap())
@@ -418,7 +420,7 @@ impl ParamNode for Slow {
 tutti_graph::declare_params!([] Slow, n { Cutoff => Seconds = &n.cutoff });
 
 fn swap<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static>(
-    s: &mut DetachedSession,
+    s: &mut Session,
     key: tutti_session::Key<SvfFilterNode<f32>>,
     incoming: N,
 ) {
@@ -427,7 +429,7 @@ fn swap<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static
             key,
             Replacement::new(incoming).fade(Fade::new(Samples::new(0)).law(FadeLaw::EqualPower)),
         )
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 }
 
 /// **A typed key outlives a swap to another node type as `NoSuchTarget`**: the old key's
@@ -435,7 +437,7 @@ fn swap<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static
 /// on a read, a write and an `info`, and in a batch the error is at the stale item.
 #[test]
 fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
-    let mut s = detached();
+    let mut s = session();
     let stale = filter(&mut s, 1_000.0);
     let kept = filter(&mut s, 1_000.0);
     let bare = filter(&mut s, 1_000.0);
@@ -489,8 +491,8 @@ fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
 /// each session has its own value lock.
 #[test]
 fn a_modify_may_call_another_session() {
-    let mut a = detached();
-    let mut b = detached();
+    let mut a = session();
+    let mut b = session();
     let fa = filter(&mut a, 100.0);
     let fb = filter(&mut b, 200.0);
     let seen = Cell::new(None);
@@ -507,7 +509,7 @@ fn a_modify_may_call_another_session() {
 /// figure passes through one whole.
 #[test]
 fn an_f32_control_round_trips_an_f32_figure_bit_for_bit() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     for bits in [0x3f80_0001u32, 0x0000_0001, 0x7f7f_ffff, 0x1234_5678] {
         let v = f64::from(f32::from_bits(bits));
@@ -519,7 +521,7 @@ fn an_f32_control_round_trips_an_f32_figure_bit_for_bit() {
 /// **An `f64` param reads back the bits it was given**, the last mantissa bit included.
 #[test]
 fn an_f64_param_round_trips_bit_for_bit() {
-    let mut s = detached();
+    let mut s = session();
     let mb = multiband(&mut s);
     for bits in [
         0x3ff0_0000_0000_0001u64,
@@ -536,7 +538,7 @@ fn an_f64_param_round_trips_bit_for_bit() {
 /// what an `f32` cannot hold**.
 #[test]
 fn a_non_finite_seconds_value_is_refused_and_a_huge_one_is_held() {
-    let mut s = detached();
+    let mut s = session();
     let mb = multiband(&mut s);
     let comp = compressor(&mut s);
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -562,7 +564,7 @@ fn a_non_finite_seconds_value_is_refused_and_a_huge_one_is_held() {
 /// refused at its position, and the item before it does not land.
 #[test]
 fn an_erased_non_finite_assignment_is_refused() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let e = s
         .set(vec![
@@ -580,7 +582,7 @@ fn an_erased_non_finite_assignment_is_refused() {
 /// **A read that fails inside a `Vec` is at its flattened position.**
 #[test]
 fn a_failing_read_inside_a_vec_is_at_its_position() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s, 1_000.0);
     let gone = filter(&mut s, 1_000.0);
     s.remove(gone).unwrap();

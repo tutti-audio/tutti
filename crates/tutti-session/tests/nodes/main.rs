@@ -40,3 +40,8 @@ mod tier_alignment;
 // A sampler voice's window written through the session's verbs.
 #[cfg(feature = "sampler")]
 mod sampler_values;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

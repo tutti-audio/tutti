@@ -11,7 +11,7 @@ use tutti_session::{Feeder, Key, LoadedTrack, Replacement, Session};
 use tutti_tempo::TempoMap;
 use tutti_timeline::ProjectMeter;
 use tutti_ump::Ump;
-use tutti_units::{Bpm, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// Frames in one block of `blocks`.
 const BLOCK: u64 = 512;
@@ -159,16 +159,17 @@ fn a_sink_replaced_at_its_key_while_the_clip_plays_gets_the_setup() {
 }
 
 /// **The clip is told once the executor has applied the commit, not when it
-/// is sent**: with the audio side held by the test, the commit that wires B is
-/// sent by `update` and lands at the next tick, and B hears nothing in that
-/// block; the update that collects it raises the flag, and B gets the header
+/// is sent**: the commit that wires B is sent by `update` and lands at the
+/// next block, and B hears nothing in that block; the update that collects it raises the flag, and B gets the header
 /// then the chase on the block after. Raised at the send, B would have heard
 /// the setup in the first tick. (A block already running when a commit is
-/// sent cannot be held back by this rig: it applies at the top of each tick.)
+/// sent cannot be held back by this rig: it applies at the top of each block.)
 #[test]
 fn the_setup_is_sent_after_the_executor_applied_the_wiring() {
     let mut s = Session::builder()
-        .build_detached(SampleRate::SR_48K)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let heard_b = Seen::new();
     let a = s.graph().add(crate::common::Tap(Seen::new())).erase();
@@ -179,21 +180,26 @@ fn the_setup_is_sent_after_the_executor_applied_the_wiring() {
         .set_feed(a, Feeder::Declared, vec![clip.event_output(0)])
         .expect("tap A is there");
     let _ = s.update();
-    let mut side = s.graph().take_audio_side();
-    tick(&mut side, 0);
-    tick(&mut side, 1);
+    s.locate(Beat::new(0.01)).expect("room");
+    play(&s);
+    tick(&mut s);
+    // The update that collects the first commit tells the clip of tap A, and
+    // the next block sends A its setup, so the wiring below is the only edit
+    // the clip is yet to be told of.
+    let _ = s.update();
+    tick(&mut s);
     s.graph()
         .connect(clip.event_output(0), EventInputPort::new(b, 0))
         .expect("both ends are there");
     let _ = s.update();
-    tick(&mut side, 2);
+    tick(&mut s);
     assert_eq!(
         heard(&heard_b),
         vec![],
         "applied, and the clip not yet told"
     );
     let _ = s.update();
-    tick(&mut side, 3);
+    tick(&mut s);
     let got: Vec<Ump> = heard(&heard_b).into_iter().map(|e| e.1).collect();
     assert_eq!(got, vec![program(1), volume(), program(5)]);
 }

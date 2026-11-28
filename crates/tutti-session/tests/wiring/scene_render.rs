@@ -3,8 +3,8 @@
 //!
 //! The wiring is each node's input 0 from the previous node, output
 //! channels 0 and 1 from the named nodes, and nothing else is spliced into
-//! it: the nodes are added in order, a detached session two outputs wide, the rate set to 48 kHz before
-//! the audio side is taken, and the audio side played in device-sized blocks.
+//! it: the nodes are added in order, an offline session two outputs wide, the rate 48 kHz,
+//! and the session rendered in device-sized blocks.
 //!
 //! # The oracles
 //!
@@ -22,8 +22,8 @@
 //!   law, and ends on the new filter as if it had run from the fade's start:
 //!   a hand-wired graph whose filter hears silence until then.
 
+use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
-use tutti_buffers::PlanesMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -32,9 +32,7 @@ use tutti_nodes::{
     DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
     SvfFilterConfig, SvfFilterNode, SvfType, Waveshape,
 };
-use tutti_session::{
-    AudioSide, DetachedSession, InputPort, Key, MainOutput, OutputPort, Replacement, Session,
-};
+use tutti_session::{InputPort, Key, MainOutput, OutputPort, Replacement, Session};
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -71,8 +69,7 @@ const DRIVE: f64 = 1.5;
 
 /// The nodes a scene declares, for the tests that edit it.
 struct Scene {
-    session: DetachedSession,
-    side: AudioSide,
+    session: Session,
     filter: NodeKey,
     drive: Key<DistortionNode<f32>>,
     /// The limiter on the right channel, when the scene has one.
@@ -91,10 +88,10 @@ fn scene(with_limiter: bool) -> Scene {
 fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
-    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
-    let side = session.graph().take_audio_side();
 
     let g = session.graph();
     let osc = g.add(saw());
@@ -123,17 +120,28 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let _ = session.update();
     Scene {
         session,
-        side,
         filter: filter.erase(),
         drive,
         limiter,
     }
 }
 
-/// `frames` stereo frames from `side`, in `block`-frame device blocks.
-fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![vec![0.0; frames]; 2];
-    side.render(block, PlanesMut::from_vecs(&mut out).unwrap());
+/// `frames` stereo frames from `session`, in `block`-frame device blocks.
+fn render(session: &mut Session, frames: usize, block: usize) -> Vec<Vec<f32>> {
+    let mut out = vec![Vec::new(); 2];
+    let mut interleaved = vec![0.0f32; block * 2];
+    let mut done = 0;
+    while done < frames {
+        let len = block.min(frames - done);
+        session.render(
+            &mut InterleavedMut::new(&mut interleaved[..len * 2], ChannelLayout::STEREO).unwrap(),
+        );
+        for frame in interleaved[..len * 2].as_chunks::<2>().0 {
+            out[0].push(frame[0]);
+            out[1].push(frame[1]);
+        }
+        done += len;
+    }
     out
 }
 
@@ -179,10 +187,10 @@ fn a_compensated_scene_delays_its_dry_channel_by_the_lookahead() {
     let lookahead = s.session.graph_ref().node_latency(lim).unwrap().get();
     // The limiter's default lookahead, in frames at `RATE`.
     assert!(lookahead > 0, "the limiter reports its lookahead");
-    let b = render(&mut s.side, 9_600, 256);
+    let b = render(&mut s.session, 9_600, 256);
     assert_sounds(&b, "compensated");
 
-    let dry = render(&mut scene(false).side, 9_600, 256);
+    let dry = render(&mut scene(false).session, 9_600, 256);
     let mut delayed = vec![0.0f32; lookahead];
     delayed.extend_from_slice(&dry[0][..9_600 - lookahead]);
     assert_eq!(
@@ -210,8 +218,8 @@ fn a_compensated_scene_delays_its_dry_channel_by_the_lookahead() {
 fn unaligned_blocks_render_per_sample_units_identically() {
     // 4 850 = 48 × 100 + 50; the reference covers it in whole 64-frame
     // blocks (76 × 64 = 4 864), so it has no partial block of its own.
-    let b = render(&mut scene(false).side, 4_850, 100);
-    let a: Vec<Vec<f32>> = render(&mut scene(false).side, 4_864, 64)
+    let b = render(&mut scene(false).session, 4_850, 100);
+    let a: Vec<Vec<f32>> = render(&mut scene(false).session, 4_864, 64)
         .into_iter()
         .map(|mut c| {
             c.truncate(4_850);
@@ -231,17 +239,17 @@ fn unaligned_blocks_render_per_sample_units_identically() {
 #[test]
 fn a_param_write_lands_on_the_next_blocks_first_frame() {
     let mut s = scene(false);
-    let before = render(&mut s.side, 2_048, 256);
+    let before = render(&mut s.session, 2_048, 256);
     s.session.set(s.drive.drive().to(Drive::new(6.0))).unwrap();
     let _ = s.session.update();
-    let after = render(&mut s.side, 2_048, 256);
+    let after = render(&mut s.session, 2_048, 256);
 
     let mut old = scene(false);
-    let old_before = render(&mut old.side, 2_048, 256);
-    let old_after = render(&mut old.side, 2_048, 256);
+    let old_before = render(&mut old.session, 2_048, 256);
+    let old_after = render(&mut old.session, 2_048, 256);
     let mut new = scene_driven(false, 6.0);
-    render(&mut new.side, 2_048, 256);
-    let new_after = render(&mut new.side, 2_048, 256);
+    render(&mut new.session, 2_048, 256);
+    let new_after = render(&mut new.session, 2_048, 256);
 
     assert_eq!(first_difference(&before, &old_before), None, "before");
     let settled = |planes: &[Vec<f32>]| -> Vec<Vec<f32>> {
@@ -307,17 +315,20 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
     const FADE_AT: usize = 1_024;
     const FADE: usize = 240;
     let mut s = scene(false);
-    let mut b = render(&mut s.side, FADE_AT, 256);
+    let mut b = render(&mut s.session, FADE_AT, 256);
     s.session
         .graph()
         .replace(s.filter, Replacement::new(low_pass(300.0)))
         .expect("the crossfade starts");
     let _ = s.session.update();
-    for (c, rest) in b.iter_mut().zip(render(&mut s.side, 3_072 - FADE_AT, 256)) {
+    for (c, rest) in b
+        .iter_mut()
+        .zip(render(&mut s.session, 3_072 - FADE_AT, 256))
+    {
         c.extend(rest);
     }
 
-    let old = render(&mut scene(false).side, 3_072, 256);
+    let old = render(&mut scene(false).session, 3_072, 256);
     // The shaper's input on both sides of the fade, and its output after it:
     // the old filter, the new one heard from the fade's start, and the new
     // one shaped.

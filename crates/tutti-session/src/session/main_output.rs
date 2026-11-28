@@ -73,8 +73,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// The device a declaration must place on is the one the session renders
     /// to (the offline `outputs`, or the open device's, and the new one on a
-    /// restart); a detached session has none, and the file is checked at the
-    /// export.
+    /// restart).
     ///
     /// # Errors
     ///
@@ -148,11 +147,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
     /// `DeviceRestart::topology`) or
     /// [`Default`](tutti_buffers::Placement::Default) from the device's width
-    /// alone ([`ChannelTopology::default_for`]). `None` for a session with no
-    /// engine (a detached one).
+    /// alone ([`ChannelTopology::default_for`]). `None` when the engine holds
+    /// no placement for the device's width.
     #[must_use]
     pub fn output_device(&self) -> Option<crate::OutputPlacement> {
-        let (_, layout) = self.output.taps.as_ref()?;
-        self.graph.output_placement(*layout)
+        self.graph.output_placement(self.output.taps.1)
     }
 }

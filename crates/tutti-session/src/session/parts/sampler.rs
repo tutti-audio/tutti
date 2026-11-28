@@ -26,15 +26,10 @@ pub(crate) struct SamplerPart<F: SessionFloat> {
 }
 
 impl<F: SessionFloat> SamplerPart<F> {
-    /// The part for a graph at `rate`, with a streamer when `streamer` is set.
-    pub(crate) fn new(
-        streamer: bool,
-        rate: SampleRate,
-        executor: &Executor,
-        bells: &Bells,
-    ) -> crate::Result<Self> {
+    /// The part for a graph at `rate`, with a streamer where the target starts threads.
+    pub(crate) fn new(rate: SampleRate, executor: &Executor, bells: &Bells) -> crate::Result<Self> {
         // A target with no thread has no streamer: `open_stream` says so by name.
-        let streamer = if streamer && crate::background::THREADS {
+        let streamer = if crate::background::THREADS {
             Some(DiskStreamer::start(
                 rate,
                 DiskStreamerConfig::default(),
@@ -98,7 +93,7 @@ mod tests {
         let executor = Executor::new();
         let bells = Bells::new(&executor).expect("the bells' tick task");
         let mut part =
-            SamplerPart::<f32>::new(false, SampleRate::SR_48K, &executor, &bells).expect("a part");
+            SamplerPart::<f32>::new(SampleRate::SR_48K, &executor, &bells).expect("a part");
         let cell = tutti_rt::Publisher::new(0u8);
         let (live, ended) = (
             Arc::new(cell.clone()) as Arc<dyn Reclaim + Send + Sync>,

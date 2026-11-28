@@ -29,8 +29,8 @@ use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InputPort,
-    OutputPort, Range, Session, Stem, StemKey,
+    Bounce, BounceError, BounceLatency, BounceTail, ExportClock, InputPort, OutputPort, Range,
+    Session, Stem, StemKey,
 };
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::MidiChannel;
@@ -66,7 +66,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 }
 
 /// The planes `bounce` renders; panics with the refusal otherwise.
-fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
+fn planes(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
         Ok(out) => out.into_main_output().to_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
@@ -75,7 +75,7 @@ fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
 
 /// The planes of the one stem `bounce` names, in memory, rendered beside the
 /// main output; panics with the refusal otherwise.
-fn stem_planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
+fn stem_planes(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
         Ok(out) => {
             let (_, mut done, keys) = out.into_parts();
@@ -88,7 +88,7 @@ fn stem_planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>)
     }
 }
 
-/// A detached stereo session at the export's rate, with the reference plugin
+/// An offline stereo session at the export's rate, with the reference plugin
 /// loaded from `path` in `mode` and routed to the outputs. The switches the
 /// probe's server reads are set until the returned guard drops, so a later case
 /// in the process probes with none set; a switch set through the guard after
@@ -97,7 +97,7 @@ fn session_with_probe_at(
     mode: u32,
     path: std::path::PathBuf,
     hosting: Hosting,
-) -> (DetachedSession, NodeKey, ScopedEnv) {
+) -> (Session, NodeKey, ScopedEnv) {
     // The plugin's file is probed before its variables are set.
     crate::loading::prime(&PluginRef::file(&path));
     let mut env = ScopedEnv::new();
@@ -118,8 +118,10 @@ fn session_with_probe_at(
     }
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let probe = session
         .load_plugin_blocking(
@@ -133,18 +135,18 @@ fn session_with_probe_at(
 }
 
 /// [`session_with_probe_at`] over the reference plugin.
-fn session_with_probe(mode: u32) -> (DetachedSession, NodeKey, ScopedEnv) {
+fn session_with_probe(mode: u32) -> (Session, NodeKey, ScopedEnv) {
     session_with_probe_hosted(mode, Hosting::OutOfProcess)
 }
 
 /// [`session_with_probe`], the plugin hosted as `hosting` says.
-fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (DetachedSession, NodeKey, ScopedEnv) {
+fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (Session, NodeKey, ScopedEnv) {
     session_with_probe_at(mode, clap_probe(), hosting)
 }
 
 /// Feed the probe's two main inputs `node`'s output.
 fn feed_with(
-    session: &mut DetachedSession,
+    session: &mut Session,
     probe: NodeKey,
     node: impl tutti_graph::IntoNode<f32, Controls = ()> + Send + 'static,
 ) {

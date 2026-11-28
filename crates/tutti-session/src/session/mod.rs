@@ -48,8 +48,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///
 /// Built with [`SessionBuilder`](crate::SessionBuilder): offline (the host
 /// pulls blocks with [`render`](Self::render)), on a device (with a
-/// `Device`, feature `device`), or detached (the executor stays on
-/// this side: `render_frame`).
+/// `Device`, feature `device`), or on the OS clock (`system_clock`).
 ///
 /// `Send`, not `Sync`: one control thread owns it, whichever thread that is.
 /// Nothing the session frees needs the main thread: a plugin a removal, a
@@ -187,34 +186,6 @@ impl<K: AppKey, C: RealTime> Session<K, C> {
     #[must_use]
     pub fn faults(&self) -> Arc<StreamFaults> {
         Streaming::output_stream(&self.running).faults()
-    }
-}
-
-/// A detached session: the executor stays on this side, and the caller renders.
-#[cfg(feature = "testing")]
-impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
-    /// Renders one frame on the calling thread under a stopped transport:
-    /// no inputs, `output` one sample per main output. Commits any edit
-    /// first.
-    ///
-    /// # Panics
-    ///
-    /// On a session whose audio side was taken (`Graph::take_audio_side`).
-    pub fn render_frame(&mut self, output: tutti_buffers::InterleavedMut<'_, F>) {
-        self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
-    }
-
-    /// `render_frame` with the transport at
-    /// `transport`: what plays a clip in a graph driven by hand.
-    pub fn render_frame_at(
-        &mut self,
-        transport: &tutti_graph::TransportPosition,
-        output: tutti_buffers::InterleavedMut<'_, F>,
-    ) {
-        if self.graph.has_uncommitted_edits() {
-            self.commit();
-        }
-        self.graph.render_local(transport, output);
     }
 }
 

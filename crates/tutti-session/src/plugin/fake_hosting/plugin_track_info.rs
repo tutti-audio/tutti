@@ -6,7 +6,7 @@
 use super::{Inert, host};
 use std::sync::Arc;
 
-use crate::{DetachedSession, Session};
+use crate::Session;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
@@ -15,8 +15,8 @@ use tutti_plugin_types::fake::FakePlugin;
 use tutti_plugin_types::{Delivered, TrackInfo, TrackKind};
 use tutti_units::SampleRate;
 
-/// A detached session with a fake plugin at a node.
-fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
+/// An offline session with a fake plugin at a node.
+fn hosting() -> (Session, NodeKey, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
     let handle = PluginHandle::from_backend(
@@ -27,8 +27,10 @@ fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
         Default::default(),
     );
     let mut s = Session::builder()
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
@@ -49,7 +51,7 @@ fn drums() -> TrackInfo {
     }
 }
 
-fn update(s: &mut DetachedSession) {
+fn update(s: &mut Session) {
     let _ = s.update_on(tutti_fixtures::main_thread());
 }
 
