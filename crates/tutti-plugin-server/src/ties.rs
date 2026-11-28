@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_rt::{Mutex, Parker, Tally, Unparker, parker, tally};
+use tutti_rt::{Mutex, Parker, Tally, TallyWriter, Unparker, parker, tally};
 
 use crate::main_loop::Bell;
 
@@ -115,6 +115,13 @@ pub(crate) struct Ties {
     /// One-way edits (an automation state, a track's info, a parameter write)
     /// the plugin refused: the wire has no reply to carry the refusal.
     pub(crate) edits_refused: Tally<u64>,
+    /// Tasks of the server's (the render lane, a load's beat) that did not stop
+    /// within their patience and were left running.
+    pub(crate) detached: Tally<u64>,
+    /// Render lanes that ended without handing their state back: they
+    /// panicked, or were dropped under the executor's shutdown. A lane is
+    /// counted when it is torn down, so this reads 0 while every lane runs.
+    pub(crate) lanes_lost: Tally<u64>,
 }
 
 /// The render thread's half of [`Ties`].
@@ -123,6 +130,8 @@ pub(crate) struct RenderTies {
     pub(crate) wake: Bell,
     /// How it tells the main thread.
     pub(crate) notify: Notify,
+    /// Adds to [`Ties::detached`], for the thread that stops the lane.
+    pub(crate) detached: TallyWriter<u64>,
 }
 
 /// A main thread's ties and the render thread's.
@@ -134,6 +143,7 @@ pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
     let (wake, bell) = (Bell::new()?, Bell::new()?);
     let progress = Arc::new(AtomicU64::new(0));
     let (unparker, parker) = parker();
+    let detached = tally();
     Ok((
         Ties {
             bell,
@@ -145,10 +155,13 @@ pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
             host_gone: Arc::default(),
             commands_refused: tally(),
             edits_refused: tally(),
+            lanes_lost: tally(),
+            detached: detached.clone(),
         },
         RenderTies {
             wake,
             notify: Notify { progress, unparker },
+            detached: detached.writer(),
         },
     ))
 }

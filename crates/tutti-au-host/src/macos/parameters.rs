@@ -798,10 +798,10 @@ mod tests {
         let main = tutti_fixtures::main_thread();
         let (work, handle) = tutti_plugin_types::MainWork::new();
         let unit = apple_effect_in(*b"dely", "AUDelay", &handle);
-        let before = tutti_plugin_types::MainWork::deferred_drops();
+        let before = work.deferred_drops();
         std::thread::spawn(move || drop(unit)).join().unwrap();
         assert_eq!(
-            tutti_plugin_types::MainWork::deferred_drops(),
+            work.deferred_drops(),
             before + 1,
             "the off-thread drop is counted"
         );

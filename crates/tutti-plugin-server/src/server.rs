@@ -20,6 +20,7 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{IpcError, IpcResult};
+use tutti_rt::TallyWriter;
 
 /// Ask the OS for the highest priority it grants this thread, now that it is
 /// about to do nothing but per-block audio work (a plugin's thread-pool helpers;
@@ -227,21 +228,21 @@ impl PluginServer {
         // Again: the paths that never reached the control phase.
         let _ = self.served.send(());
         self.release();
-        // The plugin and the session go with the server: what they leak, they
-        // leak here.
+        // What the session counts is read after the drop: the plugin and the
+        // session go with the server, and what they leave behind, they leave here.
+        let (lanes_lost, detached) = {
+            let ties = self.session.ties();
+            (ties.lanes_lost.clone(), ties.detached.clone())
+        };
         drop(self);
-        served.map(|()| {
-            match (
-                crate::leak::happened(),
-                crate::leak::lanes_lost(),
-                crate::leak::detached(),
-            ) {
+        served.map(
+            |()| match (crate::leak::happened(), lanes_lost.get(), detached.get()) {
                 (true, ..) => Ended::PluginLeaked,
                 (false, lost @ 1.., _) => Ended::RenderLaneLost(lost),
                 (false, 0, 0) => Ended::Clean,
                 (false, 0, detached) => Ended::TasksDetached(detached),
-            }
-        })
+            },
+        )
     }
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
@@ -303,7 +304,9 @@ impl PluginServer {
     fn take_home(&self, render: RenderThread) {
         match render.stop_within(RENDER_STOP_PATIENCE) {
             Ok(_side) => {}
-            Err(lost @ (NotHome::Panicked(_) | NotHome::Dropped)) => note_lane_lost(&lost),
+            Err(lost @ (NotHome::Panicked(_) | NotHome::Dropped)) => {
+                note_lane_lost(&lost, &self.session.ties().lanes_lost.writer());
+            }
             Err(NotHome::Driving) => tracing::error!(
                 "plugin-server: the render thread was stopped on a thread that drives an executor; \
                  its lane is asked to stop and detached"
@@ -403,6 +406,7 @@ impl PluginServer {
         });
         beat_while(
             &self.executor,
+            &self.session.ties().detached.writer(),
             pulse,
             WORKING_PERIOD,
             id,
@@ -435,6 +439,7 @@ impl PluginServer {
 /// beat.
 pub(crate) fn working<R>(
     executor: &Executor,
+    detached: &TallyWriter<u64>,
     transport: &ControlTransport,
     id: ReqId,
     restoring: bool,
@@ -443,6 +448,7 @@ pub(crate) fn working<R>(
     let restoring = Arc::new(AtomicBool::new(restoring));
     beat_while(
         executor,
+        detached,
         transport.pulser(),
         WORKING_PERIOD,
         id,
@@ -466,7 +472,8 @@ pub(crate) fn react(
     match incoming {
         Incoming::Request(Request { id, body }) => {
             let reaction = if matches!(body, ControlRequest::SaveState { .. }) {
-                working(executor, transport, id, false, || {
+                let detached = session.ties().detached.writer();
+                working(executor, &detached, transport, id, false, || {
                     session.handle(main, body)
                 })
             } else {
@@ -479,12 +486,15 @@ pub(crate) fn react(
             id,
             state_use,
             state,
-        } => (
-            id,
-            working(executor, transport, id, true, || {
-                session.load_state(main, &state, state_use)
-            }),
-        ),
+        } => {
+            let detached = session.ties().detached.writer();
+            (
+                id,
+                working(executor, &detached, transport, id, true, || {
+                    session.load_state(main, &state, state_use)
+                }),
+            )
+        }
         Incoming::StageState { id, state } => (id, session.stage_state(state)),
         Incoming::StateRefused { id, staging, error } => (id, session.refuse_state(staging, error)),
         Incoming::OpenAudio { id, .. } => (id, session.refuse_second_lane()),
@@ -503,6 +513,8 @@ struct Beat {
     /// Dropped to stop the task: its wait for the next period ends at once.
     stop: Option<mpsc::Sender<()>>,
     task: Option<Task<()>>,
+    /// Counts the task when it is left running.
+    detached: TallyWriter<u64>,
 }
 
 impl Beat {
@@ -512,6 +524,7 @@ impl Beat {
     /// restarts on nothing, and is logged.
     fn start(
         executor: &Executor,
+        detached: &TallyWriter<u64>,
         pulse: Pulser<ControlFrame>,
         period: Duration,
         id: ReqId,
@@ -523,6 +536,7 @@ impl Beat {
             Ok(task) => Some(Self {
                 stop: Some(stop),
                 task: Some(task),
+                detached: detached.clone(),
             }),
             Err(error) => {
                 tracing::warn!(
@@ -545,7 +559,7 @@ impl Drop for Beat {
                 Ok(_) => {}
                 Err(Unjoined::TimedOut(task)) => {
                     tracing::warn!("plugin-server: the plugin-beat task did not stop; leaving it");
-                    crate::leak::note_detached();
+                    self.detached.add(1);
                     task.detach();
                 }
                 Err(Unjoined::Driving(task)) => task.detach(),
@@ -591,13 +605,15 @@ async fn beat(
 /// alive.
 fn beat_while<R>(
     executor: &Executor,
+    detached: &TallyWriter<u64>,
     pulse: Option<Pulser<ControlFrame>>,
     period: Duration,
     id: ReqId,
     restoring: &Arc<AtomicBool>,
     work: impl FnOnce() -> R,
 ) -> R {
-    let _beat = pulse.and_then(|pulse| Beat::start(executor, pulse, period, id, restoring));
+    let _beat =
+        pulse.and_then(|pulse| Beat::start(executor, detached, pulse, period, id, restoring));
     work()
 }
 
@@ -616,11 +632,11 @@ pub(crate) const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.
 const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Logs and counts ([`leak::lanes_lost`](crate::leak::lanes_lost)) a render
-/// lane that ended without its state: the count is what the exit status says
-/// ([`EXIT_RENDER_LANE_LOST`]). A lane still running is not one: it ends the
-/// process.
-fn note_lane_lost(lost: &NotHome) {
+/// Logs and counts in `lanes_lost` ([`Ties::lanes_lost`](crate::ties::Ties)) a
+/// render lane that ended without its state: the count is what the exit status
+/// says ([`EXIT_RENDER_LANE_LOST`]). A lane still running is not one: it ends
+/// the process.
+fn note_lane_lost(lost: &NotHome, lanes_lost: &TallyWriter<u64>) {
     match lost {
         NotHome::Panicked(panicked) => tracing::error!("plugin-server: {panicked}"),
         NotHome::Dropped => {
@@ -628,7 +644,7 @@ fn note_lane_lost(lost: &NotHome) {
         }
         NotHome::Stuck | NotHome::Driving => return,
     }
-    crate::leak::note_lane_lost();
+    lanes_lost.add(1);
 }
 
 /// Starts the watch on the host. When the host ends, `host_gone` is set and
@@ -686,6 +702,10 @@ mod beat_tests {
         }
     }
 
+    fn detached() -> TallyWriter<u64> {
+        tutti_rt::tally().writer()
+    }
+
     fn restoring(on: bool) -> Arc<AtomicBool> {
         Arc::new(AtomicBool::new(on))
     }
@@ -704,18 +724,26 @@ mod beat_tests {
             Ok(())
         });
         let restoring = restoring(false);
-        let seen = beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
-            let mut seen = Vec::new();
-            for _ in 0..3 {
-                seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
-            }
-            restoring.store(true, Ordering::Release);
-            // Beats already in flight when the stage flipped may still be Opening.
-            while seen.iter().filter(|s| **s == Working::Restoring).count() < 3 {
-                seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
-            }
-            seen
-        });
+        let seen = beat_while(
+            &executor,
+            &detached(),
+            Some(pulse),
+            PACE,
+            ID,
+            &restoring,
+            || {
+                let mut seen = Vec::new();
+                for _ in 0..3 {
+                    seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
+                }
+                restoring.store(true, Ordering::Release);
+                // Beats already in flight when the stage flipped may still be Opening.
+                while seen.iter().filter(|s| **s == Working::Restoring).count() < 3 {
+                    seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
+                }
+                seen
+            },
+        );
         assert_eq!(seen[..3], [Working::Opening; 3]);
         assert!(seen.iter().filter(|s| **s == Working::Restoring).count() >= 3);
     }
@@ -746,10 +774,18 @@ mod beat_tests {
         let finished = std::thread::spawn({
             let (sent, restoring) = (Arc::clone(&sent), restoring(false));
             move || {
-                beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
-                    in_flight.recv_timeout(HANG_GUARD).expect("a beat begins");
-                    let _ = work_done.send(());
-                });
+                beat_while(
+                    &executor,
+                    &detached(),
+                    Some(pulse),
+                    PACE,
+                    ID,
+                    &restoring,
+                    || {
+                        in_flight.recv_timeout(HANG_GUARD).expect("a beat begins");
+                        let _ = work_done.send(());
+                    },
+                );
                 // The send that was in flight has finished, and no other began.
                 sent.load(Ordering::SeqCst)
             }
@@ -783,12 +819,20 @@ mod beat_tests {
             };
             let restoring = restoring(false);
             let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
-                    while beats.load(Ordering::SeqCst) < 2 {
-                        std::thread::yield_now();
-                    }
-                    panic!("the load fails");
-                })
+                beat_while(
+                    &executor,
+                    &detached(),
+                    Some(pulse),
+                    PACE,
+                    ID,
+                    &restoring,
+                    || {
+                        while beats.load(Ordering::SeqCst) < 2 {
+                            std::thread::yield_now();
+                        }
+                        panic!("the load fails");
+                    },
+                )
             }));
             let _ = done_tx.send(caught.is_err());
         });
@@ -812,11 +856,19 @@ mod beat_tests {
                 Err(IpcError::ProcessCrashed)
             })
         };
-        beat_while(&executor, Some(pulse), PACE, ID, &restoring(false), || {
-            while beats.load(Ordering::SeqCst) < 1 {
-                std::thread::yield_now();
-            }
-        });
+        beat_while(
+            &executor,
+            &detached(),
+            Some(pulse),
+            PACE,
+            ID,
+            &restoring(false),
+            || {
+                while beats.load(Ordering::SeqCst) < 1 {
+                    std::thread::yield_now();
+                }
+            },
+        );
         assert_eq!(beats.load(Ordering::SeqCst), 1, "a beat after the failure");
     }
 
@@ -825,7 +877,15 @@ mod beat_tests {
     fn without_a_pulse_the_work_runs_alone() {
         let executor = Executor::new();
         assert_eq!(
-            beat_while(&executor, None, PACE, ID, &restoring(false), || 7),
+            beat_while(
+                &executor,
+                &detached(),
+                None,
+                PACE,
+                ID,
+                &restoring(false),
+                || 7
+            ),
             7
         );
     }
@@ -864,17 +924,22 @@ mod exit_tests {
     /// status reads.
     #[test]
     fn a_render_lane_that_panicked_or_was_dropped_is_counted() {
-        assert_eq!(crate::leak::lanes_lost(), 0);
-        note_lane_lost(&NotHome::Dropped);
-        note_lane_lost(&NotHome::Panicked(tutti_platform::Panicked {
-            name: "plugin-render".to_owned(),
-            message: "boom".to_owned(),
-        }));
-        assert_eq!(crate::leak::lanes_lost(), 2);
-        note_lane_lost(&NotHome::Stuck);
-        note_lane_lost(&NotHome::Driving);
+        let lost = tutti_rt::tally::<u64>();
+        let lanes_lost = lost.writer();
+        assert_eq!(lost.get(), 0);
+        note_lane_lost(&NotHome::Dropped, &lanes_lost);
+        note_lane_lost(
+            &NotHome::Panicked(tutti_platform::Panicked {
+                name: "plugin-render".to_owned(),
+                message: "boom".to_owned(),
+            }),
+            &lanes_lost,
+        );
+        assert_eq!(lost.get(), 2);
+        note_lane_lost(&NotHome::Stuck, &lanes_lost);
+        note_lane_lost(&NotHome::Driving, &lanes_lost);
         assert_eq!(
-            crate::leak::lanes_lost(),
+            lost.get(),
             2,
             "a stuck lane ends the process and a detached one is not lost"
         );

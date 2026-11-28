@@ -671,6 +671,7 @@ fn recovery::Recovery::step
 fn sampler::Session::open_stream
 fn session::Session::builder
 fn session::Session::close
+fn session::Session::deferred_plugin_drops
 fn session::Session::faults
 fn session::Session::graph
 fn session::Session::graph_ref

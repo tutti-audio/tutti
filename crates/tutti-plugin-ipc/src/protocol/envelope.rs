@@ -788,6 +788,11 @@ pub enum News {
         /// `[main-thread]` callbacks the plugin made from another thread, which
         /// the server refused.
         refused_off_thread_calls: tutti_units::Calls,
+        /// Tasks of the server's that did not stop within their patience and
+        /// were left running.
+        detached_tasks: u64,
+        /// Render lanes that ended without handing their state back.
+        lanes_lost: u64,
     },
     /// Plugin re-declared its controller table (VST3 `kMidiCCAssignmentChanged`).
     /// The host asks for the wiring again ([`ControlRequest::GetWiring`]).

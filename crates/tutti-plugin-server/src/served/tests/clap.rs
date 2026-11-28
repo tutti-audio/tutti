@@ -2753,3 +2753,31 @@ fn the_refused_off_thread_calls_are_told_to_the_host_when_they_change() {
     );
     assert!(told(&instance.poll(main_thread())).is_empty(), "told once");
 }
+
+/// **The tasks the session left running and the render lanes it lost are told
+/// to the host with their cumulative totals**, once per change, beside the
+/// other loss counts.
+#[test]
+fn the_detached_tasks_and_lost_lanes_are_told_to_the_host_when_they_change() {
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+    let path = Path::new(clap_plugin());
+    let mut instance =
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
+    let told = |news: &[News]| {
+        news.iter()
+            .filter_map(|news| match news {
+                News::ServerLosses {
+                    detached_tasks,
+                    lanes_lost,
+                    ..
+                } => Some((*detached_tasks, *lanes_lost)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(told(&instance.poll(main_thread())).is_empty(), "none yet");
+    instance.ties.detached.writer().add(2);
+    instance.ties.lanes_lost.writer().add(1);
+    assert_eq!(told(&instance.poll(main_thread())), [(2, 1)]);
+    assert!(told(&instance.poll(main_thread())).is_empty(), "told once");
+}
