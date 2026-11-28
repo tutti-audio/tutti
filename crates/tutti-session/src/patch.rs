@@ -145,6 +145,28 @@ impl<K, C> InstrumentDecl<K, C> {
         &self.key
     }
 
+    /// The declaration this makes: the node's config held with the strip's
+    /// volume and `build`, the target's way to build the node with its main
+    /// pair.
+    pub(crate) fn declaration<G>(self, build: fn(&C, &HostValues) -> Built) -> (K, Declaration<G>)
+    where
+        G: Place<C>,
+        C: Send + 'static,
+    {
+        let held = Held {
+            config: self.config,
+            played: Some(Played {
+                gain: self.gain,
+                build,
+            }),
+        };
+        let declaration = Declaration {
+            config: Box::new(held),
+            fading: self.fading,
+        };
+        (self.key, declaration)
+    }
+
     /// Swaps and removes the instrument at the next block boundary with no
     /// fade, as [`NodeDecl::unfaded`] does.
     pub fn unfaded(mut self) -> Self {
@@ -287,14 +309,6 @@ pub(crate) trait Place<C>: PatchTarget {
     /// target's default declick).
     fn swap(&mut self, key: NodeKey, built: Built, fade: Option<Fade>)
     -> Result<(), Self::Refused>;
-}
-
-/// That a [`PatchTarget`] places the instruments built from the config `C`: its
-/// nodes name a main pair.
-#[cfg(feature = "midi")]
-pub(crate) trait PlaceInstrument<C>: Place<C> {
-    /// [`Place::build`], with the node's main pair in the result.
-    fn build_instrument(config: &C, host: &HostValues) -> Built;
 }
 
 /// A config held erased: what a reconcile asks of it, over its target.
@@ -498,29 +512,6 @@ where
                 config: Box::new(Held {
                     config: self.config,
                     played: None,
-                }),
-                fading: self.fading,
-            },
-        ));
-    }
-}
-
-#[cfg(feature = "midi")]
-impl<K, G, C> IntoPatch<K, G> for InstrumentDecl<K, C>
-where
-    G: PlaceInstrument<C>,
-    C: Send + 'static,
-{
-    fn add_to(self, patch: &mut Declarations<K, G>, _: Sealed) {
-        patch.nodes.push((
-            self.key,
-            Declaration {
-                config: Box::new(Held {
-                    config: self.config,
-                    played: Some(Played {
-                        gain: self.gain,
-                        build: G::build_instrument,
-                    }),
                 }),
                 fading: self.fading,
             },

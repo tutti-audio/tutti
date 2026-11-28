@@ -15,8 +15,6 @@ use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Sh
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
-#[cfg(feature = "midi")]
-use crate::patch::PlaceInstrument;
 use crate::patch::{
     Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireDecl,
     WireEnds, WireId,
@@ -87,22 +85,33 @@ where
     }
 }
 
+/// The node `config` builds, with the main pair it names.
 #[cfg(feature = "midi")]
-impl<F: Float, C> PlaceInstrument<C> for Graph<F>
+fn build_instrument<F: Float, C>(config: &C, host: &HostValues) -> Built
 where
     C: NodeConfig<F>,
     C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
 {
-    fn build_instrument(config: &C, host: &HostValues) -> Built {
-        let node = config.build(host);
-        let main = node.main_outputs();
-        let split = Split::<C::Node, F>::of(node);
-        let shape: Shape = split.shape();
-        Built {
-            node: Box::new(split),
-            shape,
-            main: Some(main),
-        }
+    let node = config.build(host);
+    let main = node.main_outputs();
+    let split = Split::<C::Node, F>::of(node);
+    let shape: Shape = split.shape();
+    Built {
+        node: Box::new(split),
+        shape,
+        main: Some(main),
+    }
+}
+
+/// A declared instrument is part of a patch over the session's graph.
+#[cfg(feature = "midi")]
+impl<K, F: Float, C> IntoPatch<K, Graph<F>> for crate::InstrumentDecl<K, C>
+where
+    C: NodeConfig<F>,
+    C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
+{
+    fn add_to(self, patch: &mut Declarations<K, Graph<F>>, _: crate::patch::Sealed) {
+        patch.nodes.push(self.declaration(build_instrument::<F, C>));
     }
 }
 
