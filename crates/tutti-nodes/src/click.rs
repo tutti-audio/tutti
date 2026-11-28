@@ -37,8 +37,8 @@ use tutti_buffers::ChannelTopology;
 use tutti_buffers::Float;
 use tutti_dsp::Metronome;
 use tutti_graph::{
-    Cx, Env, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, RenderMode,
-    Shape, Status, declare_params,
+    Cx, Env, ForkCause, ForkSource, Forked, HostValues, Initials, IntoNode, Io, Node, NodeConfig,
+    NodeParts, Prepare, RenderMode, Shape, Shared, Status, declare_params,
 };
 use tutti_music::MeterMap;
 use tutti_rt::{AtomicCell, atomic_word};
@@ -199,19 +199,21 @@ impl<F: Float> std::fmt::Debug for ClickNode<F> {
 }
 
 /// What a [`ClickNode`] is made from: the [`ClickSettings`] its controls are.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClickNodeConfig {
-    settings: Arc<ClickSettings>,
+    settings: Shared<ClickSettings>,
 }
 
 impl ClickNodeConfig {
     /// A click node over `settings`.
     ///
-    /// `settings` is taken as an `Arc` so a later write to it reaches the running node: they
-    /// are its controls.
+    /// `settings` is shared (an `Arc`, or a [`Shared`] made from one) so a later write to it
+    /// reaches the running node: they are its controls.
     #[must_use]
-    pub fn new(settings: Arc<ClickSettings>) -> Self {
-        Self { settings }
+    pub fn new(settings: impl Into<Shared<ClickSettings>>) -> Self {
+        Self {
+            settings: settings.into(),
+        }
     }
 }
 
@@ -219,7 +221,25 @@ impl ClickNodeConfig {
 /// graph's rate.
 impl<F: Float> From<ClickNodeConfig> for ClickNode<F> {
     fn from(config: ClickNodeConfig) -> Self {
-        Self::over(config.settings)
+        Self::over(Arc::clone(config.settings.arc()))
+    }
+}
+
+/// A click node has no param and no kinded setting: the settings it shares are its
+/// structure, so a config over other settings is a new node.
+impl<F: Float> NodeConfig<F> for ClickNodeConfig {
+    type Node = ClickNode<F>;
+
+    fn build(&self, _: &HostValues) -> ClickNode<F> {
+        ClickNode::from(self.clone())
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }
 

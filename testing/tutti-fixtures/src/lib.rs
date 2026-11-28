@@ -66,6 +66,7 @@ mod event_rig;
 // A loom build leaves the executor out (see `tutti-platform`).
 #[cfg(not(loom))]
 mod executor;
+pub mod hrir;
 mod links;
 mod machine_lock;
 mod macos;

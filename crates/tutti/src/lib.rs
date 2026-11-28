@@ -228,8 +228,8 @@ pub use tutti_session::{
     AppKey, BlockDates, Chain, ChannelEdge, Clock, ConnectError, Connected, Declarations, InputEnd,
     InputPort, IntoPatch, Key, KeyError, MainOutput, Mention, NoSuchNode, NodeDecl, Offline,
     OfflineSession, OutputEnd, OutputPort, PatchError, PatchTarget, Patched, Playhead, RealTime,
-    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, ToNode,
-    ToOutput, TransportHandle, WireEnd, WireEnds, WireStart, Workers,
+    Section, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    ToNode, ToOutput, TransportHandle, WireEnd, WireEnds, WireStart, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -288,9 +288,11 @@ pub use tutti_session::{ParamRef, RouteSpec};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
-///     .unwrap();
-/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// let latency = 512 + (fir.len().get() - 1) / 2;
+/// let node = ConvolverNode::<f32>::from(
+///     FirConvolverConfig::new(ChannelTopology::STEREO, std::sync::Arc::new(fir)).unwrap(),
+/// );
+/// assert_eq!(node.latency_samples().get(), latency);
 /// ```
 pub mod nodes {
     pub use tutti_nodes::automation::{
@@ -304,7 +306,7 @@ pub mod nodes {
         AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode, BAND_PARAMS,
         BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, BrickwallLimiterConfig,
         BrickwallLimiterNode, BusStripConfig, BusStripNode, ChannelOutOfRange, ChannelTimes,
-        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickNodeConfig,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickNodeConfig,
         ClickSettings, ClickState, CombFilterConfig, CombFilterNode, CompressorConfig,
         CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
         CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterNode,
@@ -317,22 +319,22 @@ pub mod nodes {
         FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
         FmConfig, FmNode, FreeverbConfig, FreeverbNode, FrequencyShifterConfig,
         FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
-        GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode,
-        HysteresisConfig, HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig,
-        KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
-        LevellerConfig, LevellerNode, LfoConfig, LfoNode, LfoSync, LimiterConfig, LimiterNode,
-        MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout,
-        ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands,
-        MultibandCompressorConfig, MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode,
-        NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes, NoteTimesError, OscillatorConfig,
-        OscillatorNode, OscillatorWave, PanLaw, PhaserConfig, PhaserNode, PitchShifterConfig,
-        PitchShifterNode, PlateReverbConfig, PlateReverbNode, PolarityConfig, PolarityError,
-        PolarityNode, RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY, SecondOrderShape,
-        ShapeKind, ShimmerConfig, ShimmerLayout, ShimmerNode, SourceNode, SourcePorts,
-        SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError,
-        Stages, StagesError, Stagger, StaggerError, StereoWidthConfig, StereoWidthNode,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
+        GranularSource, GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig,
+        HrtfBinauralNode, HysteresisConfig, HysteresisNode, ImpulseResponses, InterpolationMode,
+        IrLayout, KarplusStrongConfig, KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig,
+        LadderFilterNode, LadderType, LevellerConfig, LevellerNode, LfoConfig, LfoNode, LfoSync,
+        LimiterConfig, LimiterNode, MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig,
+        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig, ModalBankNode,
+        MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, NoiseColour,
+        NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes, NoteTimesError,
+        OscillatorConfig, OscillatorNode, OscillatorWave, PanLaw, PhaserConfig, PhaserNode,
+        PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode, PolarityConfig,
+        PolarityError, PolarityNode, RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY,
+        SecondOrderShape, ShapeKind, ShimmerConfig, ShimmerLayout, ShimmerNode, SourceNode,
+        SourcePorts, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
+        SpringStagesError, Stages, StagesError, Stagger, StaggerError, StereoWidthConfig,
+        StereoWidthNode, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
+        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
         TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
         VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode, Waveshape,
         WavetableConfig, WavetableNode,
@@ -499,7 +501,8 @@ pub mod graph {
         Initials, Inputs, IntoNode, Io, Node, NodeConfig, OutBus, OutEvents, Outputs, ParamFork,
         ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, Published,
         PublishedCell, PublishedInitial, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, SettingCell, Shape, Status, Unforkable, declare_params, param_parts,
+        SampleRates, Scalar, SettingCell, Shape, Shared, Status, Unforkable, declare_params,
+        param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

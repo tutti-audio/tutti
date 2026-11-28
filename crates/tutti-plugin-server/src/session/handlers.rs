@@ -1,7 +1,7 @@
 //! The handlers of the control messages: one [`Handle`] per row of the table,
 //! which `serve` picks by the request.
 
-use super::{BLOCK_WAIT, Session, editor_wire_error, load_failure};
+use super::{Session, editor_wire_error, load_failure};
 use crate::audio_pipeline::Clock;
 use crate::render::ToRender;
 use crate::served::AnyServer;
@@ -121,34 +121,18 @@ impl Handle<SaveState> for Session {
     /// answer, so answering nothing would hang it rather than tell it there is
     /// no state.
     ///
-    /// **A save never silences a block that is playing.** A parameter write
-    /// waits in the Processor's ring until a block drains it, so a state saved
-    /// right after one could miss it.
-    /// - Nothing pending: the state is saved at once.
-    /// - A write pending and blocks flowing: a barrier is queued to the render
-    ///   thread and the save waits for the next block that reaches the plugin
-    ///   to run after it ([`RenderLink::barrier`](crate::render::RenderLink::barrier)), then saves. The Processor
-    ///   never leaves the render thread.
-    /// - A write pending and no block within [`BLOCK_WAIT`]: the host is quiet,
-    ///   so the Processor is brought home for the settle, which is silent
-    ///   because nothing is playing.
+    /// **A save never silences a block and never waits for one.** The writes
+    /// the plugin's control holds that no block has applied (a preset load's,
+    /// say) are stated beside the bytes, read before them; the host's own
+    /// writes are the client's to state.
     fn handle(
         &mut self,
         cx: &mut Handling<'_>,
         SaveState { state_use }: SaveState,
     ) -> Result<SavedState, ServerError> {
-        let settle = self.write_pending && {
-            let id = self.render.barrier();
-            !self.render.wait_applied(id, BLOCK_WAIT)
-        };
-        self.write_pending = false;
-        let data = match self.plugin.as_mut() {
-            Some(p) => match if settle {
-                p.plugin_mut().save_state(cx.main, state_use)
-            } else {
-                p.plugin_mut().save_state_live(cx.main, state_use)
-            } {
-                Ok(data) => data,
+        let (bytes, pending) = match self.plugin.as_mut() {
+            Some(p) => match p.plugin_mut().save_state(cx.main, state_use) {
+                Ok(state) => (state.bytes, state.pending),
                 // A plugin that fails to serialise is not a transport problem:
                 // one `Error` frame, and the host reports it as a rejection.
                 Err(e) => {
@@ -157,23 +141,22 @@ impl Handle<SaveState> for Session {
                     });
                 }
             },
-            None => Vec::new(),
+            None => (Vec::new(), Vec::new()),
         };
         // Refuse an over-limit state here rather than sending a gigabyte the
         // host is only going to reject.
-        if data.len() > MAX_STATE_BYTES {
+        if bytes.len() > MAX_STATE_BYTES {
             return Err(ServerError::StateTooLarge {
-                bytes: data.len() as u64,
+                bytes: bytes.len() as u64,
                 limit: MAX_STATE_BYTES as u64,
             });
         }
-        Ok(SavedState(data))
+        Ok(SavedState { bytes, pending })
     }
 }
 
 impl Handle<SetAutomationState> for Session {
     fn handle(&mut self, cx: &mut Handling<'_>, SetAutomationState { mode }: SetAutomationState) {
-        self.write_pending = true;
         if let Some(plugin) = self.plugin.as_mut() {
             plugin.plugin_mut().set_automation_state(cx.main, mode);
         }
@@ -287,7 +270,6 @@ impl Handle<LoadPreset> for Session {
         cx: &mut Handling<'_>,
         LoadPreset { id }: LoadPreset,
     ) -> Result<PresetLoaded, ServerError> {
-        self.write_pending = true;
         self.forget_informs();
         let ok = self
             .plugin

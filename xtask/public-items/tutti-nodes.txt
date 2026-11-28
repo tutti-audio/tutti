@@ -86,11 +86,8 @@ fn comb::CombFilterConfig::gain
 fn comb::CombFilterConfig::new
 fn convolution::layout::IrLayout::input
 fn convolution::layout::IrLayout::ir_count
-fn convolution::node::ConvolverConfig::ambisonic
 fn convolution::node::ConvolverConfig::block_size
-fn convolution::node::ConvolverConfig::folded
 fn convolution::node::ConvolverConfig::new
-fn convolution::node::ConvolverConfig::true_stereo
 fn convolution::node::ConvolverConfig::zero_latency
 fn convolution::node::ConvolverNode::gain
 fn convolution::node::ConvolverNode::inputs
@@ -98,6 +95,7 @@ fn convolution::node::ConvolverNode::latency_samples
 fn convolution::node::ConvolverNode::outputs
 fn convolution::node::FirConvolverConfig::block_size
 fn convolution::node::FirConvolverConfig::new
+fn convolution::responses::ImpulseResponses::new
 fn dc_blocker::DcBlockerConfig::corner
 fn dc_blocker::DcBlockerConfig::new
 fn decorrelator::DecorrelatorConfig::density
@@ -191,6 +189,7 @@ fn fm::FmConfig::new
 fn fm::FmConfig::oversampling
 fn frequency_shifter::FrequencyShifterConfig::new
 fn frequency_shifter::FrequencyShifterConfig::shift
+fn granular::GranularSource::new
 fn hysteresis::HysteresisConfig::coercivity
 fn hysteresis::HysteresisConfig::drive
 fn hysteresis::HysteresisConfig::new
@@ -223,7 +222,7 @@ fn params::Params::new
 fn pitch_shifter::PitchShifterConfig::hop
 fn pitch_shifter::PitchShifterConfig::new
 fn pitch_shifter::PitchShifterConfig::pitch
-fn polarity::PolarityConfig::new
+fn polarity::PolarityConfig::all
 fn polarity::PolarityConfig::only
 fn reverb_fdn::FdnConfig::controls
 fn reverb_fdn::FdnConfig::layout
@@ -336,6 +335,7 @@ struct comb::CombFilterSet
 struct convolution::node::ConvolverConfig
 struct convolution::node::ConvolverNode
 struct convolution::node::FirConvolverConfig
+struct convolution::responses::ImpulseResponses
 struct dc_blocker::DcBlockerConfig
 struct dc_blocker::DcBlockerKernel
 struct dc_blocker::DcBlockerSet
@@ -411,6 +411,7 @@ struct frequency_shifter::FrequencyShifterConfig
 struct frequency_shifter::FrequencyShifterKernel
 struct frequency_shifter::FrequencyShifterSet
 struct granular::GranularNode
+struct granular::GranularSource
 struct hysteresis::HysteresisConfig
 struct hysteresis::HysteresisKernel
 struct hysteresis::HysteresisSet

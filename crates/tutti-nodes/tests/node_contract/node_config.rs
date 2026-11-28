@@ -2,37 +2,64 @@
 //! at, a change of values keeps the structure, and a change of structure does not.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-use tutti_buffers::{AmbisonicOrder, ChannelLayout, ChannelTopology};
+use tutti_buffers::{
+    AmbisonicOrder, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave,
+};
 use tutti_dsp::{
     Algorithm, ButterworthOrder, ClipperDrive, CombDelay, CombForm, CompressorControls,
     CrossoverControls, CutAlignment, CutResponse, DynamicMode, FdnControls, FdnLayout, FmPatch,
     FreeverbControls, FreezeControls, GateControls, GraphicBands, HarmonicNormalization, HopSize,
-    HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType, LimiterControls,
-    Lookahead, LowestPitch, MaxDecay, ModDelayControls, Mode, Modes, OperatorCount,
-    OperatorFrequency, OperatorSpec, OscillatorWave, OversamplingFactor, PanLaw, Partial, Partials,
-    PeakDetection, PhaserControls, ReferenceDistance, ShapeKind, ShimmerControls, ShimmerLayout,
-    SpringLength, SpringStages, Stages, Tap, TapSet, TubeDrive, VelvetDensity, Waveshape,
+    HrirSphere, HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType,
+    LimiterControls, LinearPhaseDesign, Lookahead, LowestPitch, MaxDecay, MaxGrains,
+    ModDelayControls, Mode, Modes, OperatorCount, OperatorFrequency, OperatorSpec, OscillatorWave,
+    OversamplingFactor, PanLaw, Partial, Partials, PeakDetection, PhaserControls,
+    ReferenceDistance, ShapeKind, ShimmerControls, ShimmerLayout, SpringLength, SpringStages,
+    Stages, Tap, TapSet, Tilt, TubeDrive, VelvetDensity, Waveshape, Wavetable,
 };
 use tutti_graph::{HostValues, IntoNode, NodeConfig, ParamSet};
 use tutti_nodes::{
     AdditiveConfig, AmbisonicEncoderConfig, AmbisonicRotatorConfig, AutoPanConfig,
-    BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, CombFilterConfig, CompressorConfig,
-    CrossoverConfig, CutFilterConfig, DcBlockerConfig, DecorrelatorConfig, DelayConfig,
-    DelayControls, DelayLayout, DelaySync, DiodeClipperConfig, DistanceConfig, DistortionConfig,
-    DynamicEqConfig, EarlyReflectionsConfig, EnvelopeFilterConfig, FdnConfig, FdnNodeControls,
-    FmConfig, FreeverbConfig, FrequencyShifterConfig, GateConfig, GraphicEqConfig,
-    HysteresisConfig, InterpolationMode, KarplusStrongConfig, LadderFilterConfig, LevellerConfig,
-    LimiterConfig, MaxDelay, ModDelayConfig, ModalBankConfig, PhaserConfig, PitchShifterConfig,
-    PlateReverbConfig, RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger,
-    StereoWidthConfig, SvfFilterConfig, SvfType, SweepRange, TiltFilterConfig,
-    TransientShaperConfig, TremoloConfig, TubeStageConfig, WaveguideStringConfig,
+    BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, ClickNodeConfig, ClickSettings,
+    CombFilterConfig, CompressorConfig, ConvolverConfig, CrossoverConfig, CutFilterConfig,
+    DcBlockerConfig, DecorrelatorConfig, DelayConfig, DelayControls, DelayLayout, DelaySync,
+    DiodeClipperConfig, DistanceConfig, DistortionConfig, DynamicEqConfig, EarlyReflectionsConfig,
+    EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FirConvolverConfig, FmConfig,
+    FreeverbConfig, FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource,
+    GraphicEqConfig, HrtfBinauralConfig, HysteresisConfig, ImpulseResponses, InterpolationMode,
+    IrLayout, KarplusStrongConfig, LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay,
+    MidSideConfig, ModDelayConfig, ModalBankConfig, MultibandBands, MultibandCompressorConfig,
+    MultibandControls, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
+    RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger, StereoWidthConfig, SvfFilterConfig,
+    SvfType, SweepRange, TiltFilterConfig, TransientShaperConfig, TremoloConfig, TubeStageConfig,
+    WaveguideStringConfig, WavetableConfig,
 };
 use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, Bipolar, BitDepth, Cents, CompressionRatio, Db, Direction,
     Drive, Elevation, Feedback, FrequencyRatio, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex,
-    Normalized, Q, Resonance, SampleSpan, Samples, Seconds, Semitones, Speed, StereoWidth,
+    Normalized, Q, Resonance, SampleRate, SampleSpan, Samples, Seconds, Semitones, Speed,
+    StereoWidth,
 };
+
+use tutti_fixtures::hrir::synthetic_hrir_sphere;
+
+/// The params a built node's controls address.
+trait Params {
+    fn params(&self) -> &ParamSet;
+}
+
+impl Params for ParamSet {
+    fn params(&self) -> &ParamSet {
+        self
+    }
+}
+
+impl Params for MultibandControls {
+    fn params(&self) -> &ParamSet {
+        MultibandControls::params(self)
+    }
+}
 
 /// One config's row: `base`, a variant `values` that moves every value it has (each
 /// param and each kinded setting; `None` for a config that holds none), and variants that
@@ -46,11 +73,13 @@ use tutti_units::{
 fn check<C>(name: &str, base: &C, values: Option<&C>, structures: &[C])
 where
     C: NodeConfig<f64> + Debug,
-    C::Node: IntoNode<f64, Controls = ParamSet>,
+    C::Node: IntoNode<f64>,
+    <C::Node as IntoNode<f64>>::Controls: Params,
 {
     for config in std::iter::once(base).chain(values) {
         let initials = config.initials();
         let (_, controls) = config.build(&HostValues::new()).into_node();
+        let controls = controls.params();
         assert_eq!(
             controls.params().count(),
             initials.params().len(),
@@ -113,6 +142,31 @@ where
         assert!(
             !other.same_structure(base),
             "{name}: structure variant {k} (reversed)"
+        );
+    }
+}
+
+/// A node with no param and no kinded setting: its config lists no initial value, is its own
+/// structure, and each variant is a new node.
+fn check_plain<C>(name: &str, base: &C, structures: &[C])
+where
+    C: NodeConfig<f64> + Debug,
+{
+    let initials = base.initials();
+    assert!(
+        initials.params().is_empty() && initials.settings().is_empty(),
+        "{name}: lists no initial value"
+    );
+    let parts = base.build(&HostValues::new()).into_parts();
+    assert!(parts.settings.is_empty(), "{name}: the node has no setting");
+    assert!(
+        base.same_structure(&base.clone()),
+        "{name}: a config is its own structure"
+    );
+    for (k, other) in structures.iter().enumerate() {
+        assert!(
+            !base.same_structure(other) && !other.same_structure(base),
+            "{name}: structure variant {k} is a new node"
         );
     }
 }
@@ -781,6 +835,143 @@ fn each_config_lists_its_values_and_compares_its_structure() {
             AmbisonicRotatorConfig::new(AmbisonicOrder::of(2), HarmonicNormalization::Sn3d),
             // The roll is fixed for the life of the node, not a param: structure.
             rotator.roll(ArcDegrees::new(45.0)),
+        ],
+    );
+
+    // Hand configs: no params, so the whole config is structure.
+    check_plain(
+        "mid/side",
+        &MidSideConfig::encode(),
+        &[MidSideConfig::decode()],
+    );
+    check_plain(
+        "polarity",
+        &PolarityConfig::only(stereo(), [ChannelIndex::of(1)]).unwrap(),
+        &[
+            PolarityConfig::all(stereo()).unwrap(),
+            PolarityConfig::only(stereo(), [ChannelIndex::of(0)]).unwrap(),
+            PolarityConfig::only(4u16, [ChannelIndex::of(1)]).unwrap(),
+        ],
+    );
+    check_plain(
+        "click",
+        &ClickNodeConfig::new(Arc::new(ClickSettings::new())),
+        &[ClickNodeConfig::new(Arc::new(ClickSettings::new()))],
+    );
+    let band = EqBandConfig::new(SvfType::Bell);
+    check(
+        "eq band",
+        &band,
+        Some(&band.freq(Hz::new(440.0)).q(Q::new(2.0)).gain(Db::new(-3.0))),
+        &[EqBandConfig::new(SvfType::LowShelf)],
+    );
+
+    // Assets: equal by identity, so a loaded again resource is a new node.
+    let wave = |frames: usize| {
+        let mut wave = Wave::<f64>::new(1, SampleRate::SR_48K);
+        wave.append(Interleaved::new(&vec![0.5; frames], ChannelLayout::MONO).unwrap())
+            .unwrap();
+        Arc::new(wave)
+    };
+    let source = wave(64);
+    let granular = GranularConfig::new(GranularSource::new(mono(), Arc::clone(&source)).unwrap());
+    check(
+        "granular",
+        &granular,
+        Some(
+            &granular
+                .clone()
+                .density(Hz::new(20.0))
+                .rate(Cents::new(100.0))
+                .length(Seconds::new(0.05))
+                .jitter([Normalized::of(0.25), Normalized::of(0.5)])
+                .position(Normalized::of(0.5)),
+        ),
+        &[
+            GranularConfig::new(GranularSource::new(mono(), wave(64)).unwrap()),
+            GranularConfig::new(GranularSource::new(stereo(), Arc::clone(&source)).unwrap()),
+            granular.clone().max_grains(MaxGrains::of(8)),
+            granular.clone().seed(1),
+        ],
+    );
+    let frame = [0.25_f64; 16];
+    let table = Wavetable::new(&[Mono::new(&frame)]).unwrap();
+    let wavetable = WavetableConfig::new(mono(), Arc::clone(&table));
+    check(
+        "wavetable",
+        &wavetable,
+        Some(
+            &wavetable
+                .clone()
+                .frequency(Hz::new(220.0))
+                .level(Amplitude::new(0.5))
+                .position(Normalized::of(0.5)),
+        ),
+        &[
+            WavetableConfig::new(mono(), Wavetable::new(&[Mono::new(&frame)]).unwrap()),
+            WavetableConfig::new(stereo(), table),
+        ],
+    );
+    let sphere = |rate| Arc::new(HrirSphere::from_bytes(&synthetic_hrir_sphere(rate, 64)).unwrap());
+    let first = sphere(48_000);
+    let hrtf = HrtfBinauralConfig::new(Arc::clone(&first));
+    check(
+        "hrtf",
+        &hrtf,
+        Some(
+            &hrtf
+                .clone()
+                .azimuth(Azimuth::new(45.0))
+                .elevation(Elevation::new(10.0))
+                .blend(Mix::new(0.5)),
+        ),
+        &[HrtfBinauralConfig::new(sphere(48_000))],
+    );
+
+    // Rows form and owned assets: all structure, with the declared params at their starts.
+    let multiband = |input, bands| MultibandCompressorConfig::new(input, MultibandBands::of(bands));
+    check(
+        "multiband",
+        &multiband(bus(2), 3),
+        None,
+        &[multiband(bus(1), 3), multiband(bus(2), 2)],
+    );
+    let responses = Arc::new(ImpulseResponses::new(&[Mono::new(&[1.0_f64, 0.5])]));
+    let convolver = |output, layout, responses: &Arc<ImpulseResponses<f64>>| {
+        ConvolverConfig::new(output, layout, Arc::clone(responses)).unwrap()
+    };
+    let base = convolver(ChannelTopology::MONO, IrLayout::PerChannel, &responses);
+    check(
+        "convolver",
+        &base,
+        None,
+        &[
+            convolver(ChannelTopology::STEREO, IrLayout::PerChannel, &responses),
+            convolver(
+                ChannelTopology::MONO,
+                IrLayout::PerChannel,
+                &Arc::new(ImpulseResponses::new(&[Mono::new(&[1.0_f64, 0.5])])),
+            ),
+            base.clone().block_size(Samples::new(64)),
+            base.clone().zero_latency(),
+        ],
+    );
+    let tilt = Tilt::new(Db::new(6.0))
+        .design(Hz::new(2_000.0), SampleRate::SR_48K)
+        .unwrap();
+    let fir = Arc::new(
+        LinearPhaseDesign::new(Hz::new(200.0))
+            .design(SampleRate::SR_48K, &[tilt])
+            .unwrap(),
+    );
+    let fir_config = FirConvolverConfig::new(ChannelTopology::MONO, Arc::clone(&fir)).unwrap();
+    check(
+        "fir convolver",
+        &fir_config,
+        None,
+        &[
+            FirConvolverConfig::new(ChannelTopology::STEREO, fir).unwrap(),
+            fir_config.clone().block_size(Samples::new(64)),
         ],
     );
 }

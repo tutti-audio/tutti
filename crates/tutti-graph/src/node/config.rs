@@ -1,4 +1,4 @@
-//! What a node is made from: [`NodeConfig`], and [`Asset`], the handle a config
+//! What a node is made from: [`NodeConfig`], and [`Shared`], the handle a config
 //! holds a shared resource by.
 
 use std::any::{Any, TypeId, type_name};
@@ -225,20 +225,20 @@ impl fmt::Debug for HostValues {
     }
 }
 
-/// A shared resource a config holds (a wavetable, a wave, an impulse response),
-/// equal to another only when it is the same one.
+/// A value shared by `Arc`, equal only to itself: the handle a config holds a resource
+/// by (a wavetable, a wave, an impulse response).
 ///
-/// Two assets are equal when they share one allocation (`Arc::ptr_eq`), and a
-/// clone is the same asset. Content equality would cost a compare of the whole
-/// resource on every patch, and a resource loaded again is a new asset whose
-/// equal content is no reason to keep the node built from the old one.
+/// Two are equal when they share one allocation (`Arc::ptr_eq`), and a clone is the
+/// same one. Content equality would cost a compare of the whole resource on every
+/// patch, and a resource loaded again is a new one whose equal content is no reason to
+/// keep the node built from the old one.
 ///
 /// It dereferences to the resource. It is made from an `Arc` (`From`), which keeps
-/// that allocation's identity, or by [`Asset::new`], which is a new identity.
-pub struct Asset<T>(Arc<T>);
+/// that allocation's identity, or by [`Shared::new`], which is a new identity.
+pub struct Shared<T>(Arc<T>);
 
-impl<T> Asset<T> {
-    /// `value` as a new asset, equal to no other: two assets made from equal values
+impl<T> Shared<T> {
+    /// `value` as a new `Shared`, equal to no other: two of them made from equal values
     /// are two identities, so a config given each makes a new node.
     #[must_use]
     pub fn new(value: T) -> Self {
@@ -252,27 +252,27 @@ impl<T> Asset<T> {
     }
 }
 
-impl<T> Clone for Asset<T> {
+impl<T> Clone for Shared<T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
 }
 
-impl<T> PartialEq for Asset<T> {
+impl<T> PartialEq for Shared<T> {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<T> Eq for Asset<T> {}
+impl<T> Eq for Shared<T> {}
 
-impl<T: fmt::Debug> fmt::Debug for Asset<T> {
+impl<T: fmt::Debug> fmt::Debug for Shared<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Asset").field(&self.0).finish()
+        f.debug_tuple("Shared").field(&self.0).finish()
     }
 }
 
-impl<T> Deref for Asset<T> {
+impl<T> Deref for Shared<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -280,7 +280,7 @@ impl<T> Deref for Asset<T> {
     }
 }
 
-impl<T> From<Arc<T>> for Asset<T> {
+impl<T> From<Arc<T>> for Shared<T> {
     fn from(arc: Arc<T>) -> Self {
         Self(arc)
     }

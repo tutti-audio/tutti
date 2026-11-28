@@ -402,6 +402,7 @@ fn mock_featuring(
                             &ControlReply::StateReady {
                                 len: bytes.len() as u64,
                                 blob: object.wire(),
+                                pending: Vec::new(),
                             },
                         );
                         let _lease = object.send(crate::transport::connection(&served)).unwrap();

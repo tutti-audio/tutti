@@ -848,9 +848,12 @@ fn a_forked_clip_reader_renders_the_tone_at_the_graph_block() {
 
 /// A one-channel convolver over `ir`, with the default head partition.
 fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
-    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
-        tutti_buffers::ChannelTopology::MONO,
-        &[Mono::new(ir)],
-    ))
-    .expect("one response on a mono bus")
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::MONO,
+            tutti_nodes::IrLayout::PerChannel,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[Mono::new(ir)])),
+        )
+        .expect("one response on a mono bus"),
+    )
 }

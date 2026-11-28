@@ -330,7 +330,7 @@ pub use additive::{AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet};
 pub use fm::{FmConfig, FmKernel, FmNode, FmSet};
 
 mod granular;
-pub use granular::{GranularConfig, GranularError, GranularNode};
+pub use granular::{GranularConfig, GranularError, GranularNode, GranularSource};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
 
@@ -570,7 +570,7 @@ pub use signal::{
 
 mod convolution;
 pub use convolution::{
-    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,
+    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, ImpulseResponses, IrLayout,
 };
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a

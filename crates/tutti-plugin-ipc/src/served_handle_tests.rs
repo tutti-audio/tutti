@@ -286,6 +286,7 @@ fn handle_with_multi_reply_server(
                         let reply = ControlReply::StateReady {
                             len: bytes.len() as u64,
                             blob: object.wire(),
+                            pending: Vec::new(),
                         };
                         (ControlFrame::Reply { id: msg.id, reply }, Some(object))
                     }
