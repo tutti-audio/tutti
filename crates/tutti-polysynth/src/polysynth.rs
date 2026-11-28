@@ -114,12 +114,6 @@ pub struct PolySynth<F: SynthFloat> {
     finished_indices: Vec<usize>,
 }
 
-impl<F: SynthFloat> PolySynth<F> {
-    /// The rate a synth renders at until its graph prepares it: 44.1 kHz. The
-    /// rate is the graph's, not the config's (`Node::prepare`).
-    pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
-}
-
 impl<F: SynthFloat> From<SynthConfig> for PolySynth<F> {
     /// A synth from a [`SynthConfig`], usually written as `SynthConfig::new()` plus the
     /// options that differ: `SynthConfig::new().oscillator(OscillatorType::Saw)`.
@@ -176,6 +170,10 @@ impl<F: SynthFloat> From<SynthConfig> for PolySynth<F> {
 }
 
 impl<F: SynthFloat> PolySynth<F> {
+    /// The rate a synth renders at until its graph prepares it: 44.1 kHz. The
+    /// rate is the graph's, not the config's (`Node::prepare`).
+    pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
+
     fn build_bank(
         config: &SynthConfig,
         sample_rate: SampleRate,
